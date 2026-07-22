@@ -1,0 +1,39 @@
+[package]
+name = "sz-rust-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 命令行框架
+clap.workspace = true
+# 序列化
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+# 时间
+chrono.workspace = true
+# 错误
+thiserror.workspace = true
+anyhow.workspace = true
+# 日志
+tracing.workspace = true
+# SZ-ORM 迁移系统（schema migration）
+sz-orm-core.workspace = true
+# SZ-Rust 核心（调度器封装）
+sz-rust-core.workspace = true
+# SZ-ORM 调度器（实际调度实现）
+sz-orm-scheduler.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lib]
+name = "sz_rust_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sz-rust"
+path = "src/main.rs"

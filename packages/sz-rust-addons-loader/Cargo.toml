@@ -1,0 +1,23 @@
+[package]
+name = "sz-rust-addons-loader"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+regex.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+
+[lib]
+name = "sz_rust_addons_loader"
+path = "src/lib.rs"

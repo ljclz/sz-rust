@@ -1,0 +1,33 @@
+[package]
+name = "sz-rust-pdf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 内部依赖
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+# Excel 导出（替代 PHP phpspreadsheet 写入）— 对齐 PHP `new Spreadsheet()` / `setCellValue` / `setTitle` / `getColumnDimension->setWidth` / `IOFactory::createWriter` / `save`
+rust_xlsxwriter.workspace = true
+
+# Excel 导入（替代 PHP phpspreadsheet 读取）— 对齐 PHP `IOFactory::identify` / `createReader` / `load` / `getSheet(0)` / `toArray`
+calamine.workspace = true
+
+# PDF 表单填充（替代 PHP mikehaertl/php-pdftk）— 对齐 PHP `new Pdf($path)` / `fillForm($data)` / `flatten()` / `saveAs($url)` / `send($filename)`
+lopdf.workspace = true
+
+# HTTP 客户端（替代 PHP cURL）— 对齐 PHP `http_java_post` 全局函数（Phase 7.9）
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true }
+
+[lib]
+name = "sz_rust_pdf"
+path = "src/lib.rs"
