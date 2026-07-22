@@ -1,0 +1,299 @@
+//! 中间件顺序定义 — 对齐 PHP `app/middleware.php`
+//!
+//! PHP 端 `app/middleware.php` 全局中间件顺序：
+//!
+//! ```php
+//! return [
+//!     \think\middleware\SessionInit::class,
+//!     \think\middleware\AllowCrossDomain::class,
+//! ];
+//! ```
+//!
+//! 业务层中间件（如 `app\oapc\middleware\Auth`）通过应用级 `app/<app>/middleware.php`
+//! 追加，执行顺序在全局中间件之后。
+//!
+//! ## Rust 端映射
+//!
+//! | PHP 中间件 | Rust 中间件 | 实现阶段 |
+//! |------------|-------------|---------|
+//! | `SessionInit` | `Trace`（生成 request_id，复用 sz-orm-tracing） | Phase 3.6 |
+//! | `AllowCrossDomain` | `Cors`（已实现于 `cors.rs`） | Phase 1.6 ✅ |
+//! | `app\oapc\middleware\Auth` | `Auth`（JWT 校验，复用 sz-orm-auth） | Phase 3.3 |
+//! | （PHP 端无） | `Log`（请求/响应日志） | Phase 3.4 |
+//! | （PHP 端无） | `RateLimit`（限流，复用 sz-orm-limit） | Phase 3.5 |
+//!
+//! ## 执行顺序约定
+//!
+//! Rust 端使用 `tower::ServiceBuilder`，layer 是「后注册先执行」（stack 反向）。
+//! 本模块定义的 `DEFAULT_ORDER` 表示「业务期望的执行顺序」——数组首元素最先执行。
+//! `MiddlewareChain` 内部会按需反转以适配 `ServiceBuilder::layer` 语义。
+
+use std::fmt;
+
+/// 中间件类型枚举
+///
+/// 对齐 PHP 中间件 + sz-rust 自定义中间件。每个变体对应一个具体的 Layer 实现，
+/// 由后续 Phase（3.3 ~ 3.6）逐个实现。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MiddlewareKind {
+    /// 追踪 span（生成 request_id，对齐 PHP `SessionInit` 的「请求初始化」语义）
+    ///
+    /// **最先执行**：包裹所有后续中间件，确保 request_id 在所有日志/追踪中可用。
+    Trace,
+    /// CORS 跨域预处理（对齐 PHP `AllowCrossDomain`）
+    ///
+    /// **第二执行**：OPTIONS 预检请求直接返回，不进入业务逻辑。
+    Cors,
+    /// 请求/响应日志（对齐 PHP `think-logger`）
+    ///
+    /// **第三执行**：在限流/鉴权之前记录所有请求（包括被拒绝的）。
+    Log,
+    /// 限流（复用 sz-orm-limit）
+    ///
+    /// **第四执行**：在鉴权之前限流，避免无效请求消耗鉴权开销。
+    RateLimit,
+    /// JWT 鉴权（对齐 PHP `app\<app>\middleware\Auth`，复用 sz-orm-auth）
+    ///
+    /// **第五执行**：通过限流后进行鉴权，未登录返回 NotLogin(-1)。
+    Auth,
+}
+
+impl MiddlewareKind {
+    /// 返回中间件的人类可读名称（用于日志和测试）
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MiddlewareKind::Trace => "trace",
+            MiddlewareKind::Cors => "cors",
+            MiddlewareKind::Log => "log",
+            MiddlewareKind::RateLimit => "rate_limit",
+            MiddlewareKind::Auth => "auth",
+        }
+    }
+
+    /// 返回中间件在 PHP 端的对应物（用于文档对齐验证）
+    pub fn php_counterpart(self) -> &'static str {
+        match self {
+            MiddlewareKind::Trace => "\\think\\middleware\\SessionInit",
+            MiddlewareKind::Cors => "\\think\\middleware\\AllowCrossDomain",
+            MiddlewareKind::Log => "(none, sz-rust 自研，对齐 think-logger)",
+            MiddlewareKind::RateLimit => "(none, sz-rust 自研)",
+            MiddlewareKind::Auth => "app\\<app>\\middleware\\Auth",
+        }
+    }
+}
+
+impl fmt::Display for MiddlewareKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// 默认中间件顺序（业务期望的执行顺序，数组首元素最先执行）
+///
+/// 对齐 PHP `app/middleware.php` 全局中间件 + sz-rust 业务中间件约定：
+///
+/// 1. `Trace` — 生成 request_id（对齐 PHP `SessionInit` 请求初始化语义）
+/// 2. `Cors` — 跨域预处理（对齐 PHP `AllowCrossDomain`）
+/// 3. `Log` — 请求日志（sz-rust 自研，PHP 端无全局日志中间件）
+/// 4. `RateLimit` — 限流（sz-rust 自研，PHP 端无全局限流中间件）
+/// 5. `Auth` — JWT 鉴权（对齐 PHP `app\<app>\middleware\Auth`）
+///
+/// ## 顺序设计理由
+///
+/// - `Trace` 最先：确保 request_id 在所有后续中间件的日志中可用
+/// - `Cors` 第二：OPTIONS 预检请求直接返回，不消耗后续中间件资源
+/// - `Log` 第三：记录所有请求（包括被限流/鉴权拒绝的），用于审计
+/// - `RateLimit` 第四：在鉴权之前限流，避免无效请求消耗鉴权开销
+/// - `Auth` 第五：通过限流后进行鉴权，未登录返回 NotLogin(-1)
+pub const DEFAULT_ORDER: &[MiddlewareKind] = &[
+    MiddlewareKind::Trace,
+    MiddlewareKind::Cors,
+    MiddlewareKind::Log,
+    MiddlewareKind::RateLimit,
+    MiddlewareKind::Auth,
+];
+
+/// PHP 全局中间件顺序（对齐 `app/middleware.php`）
+///
+/// PHP 端 `app/middleware.php` 返回的数组顺序：
+/// 1. `SessionInit` → Rust `Trace`
+/// 2. `AllowCrossDomain` → Rust `Cors`
+///
+/// 业务层中间件（如 `Auth`）通过应用级 `app/<app>/middleware.php` 追加，
+/// 执行顺序在全局中间件之后。
+pub const PHP_GLOBAL_ORDER: &[MiddlewareKind] = &[MiddlewareKind::Trace, MiddlewareKind::Cors];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ====================================================================
+    // MiddlewareKind 枚举
+    // ====================================================================
+
+    #[test]
+    fn test_middleware_kind_as_str() {
+        assert_eq!(MiddlewareKind::Trace.as_str(), "trace");
+        assert_eq!(MiddlewareKind::Cors.as_str(), "cors");
+        assert_eq!(MiddlewareKind::Log.as_str(), "log");
+        assert_eq!(MiddlewareKind::RateLimit.as_str(), "rate_limit");
+        assert_eq!(MiddlewareKind::Auth.as_str(), "auth");
+    }
+
+    #[test]
+    fn test_middleware_kind_display() {
+        assert_eq!(MiddlewareKind::Trace.to_string(), "trace");
+        assert_eq!(MiddlewareKind::Cors.to_string(), "cors");
+        assert_eq!(MiddlewareKind::Log.to_string(), "log");
+        assert_eq!(MiddlewareKind::RateLimit.to_string(), "rate_limit");
+        assert_eq!(MiddlewareKind::Auth.to_string(), "auth");
+    }
+
+    #[test]
+    fn test_middleware_kind_php_counterpart() {
+        // 对齐 PHP 全局中间件
+        assert_eq!(
+            MiddlewareKind::Trace.php_counterpart(),
+            "\\think\\middleware\\SessionInit"
+        );
+        assert_eq!(
+            MiddlewareKind::Cors.php_counterpart(),
+            "\\think\\middleware\\AllowCrossDomain"
+        );
+        assert_eq!(
+            MiddlewareKind::Auth.php_counterpart(),
+            "app\\<app>\\middleware\\Auth"
+        );
+    }
+
+    #[test]
+    fn test_middleware_kind_eq_hash() {
+        // PartialEq + Eq + Hash 支持用作 HashMap key
+        use std::collections::HashSet;
+        let set: HashSet<MiddlewareKind> = [
+            MiddlewareKind::Trace,
+            MiddlewareKind::Cors,
+            MiddlewareKind::Trace,
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&MiddlewareKind::Trace));
+        assert!(set.contains(&MiddlewareKind::Cors));
+        assert!(!set.contains(&MiddlewareKind::Auth));
+    }
+
+    #[test]
+    fn test_middleware_kind_clone_copy() {
+        let kind = MiddlewareKind::Cors;
+        let cloned = kind; // Copy 语义
+        assert_eq!(kind, cloned);
+    }
+
+    // ====================================================================
+    // DEFAULT_ORDER 默认顺序
+    // ====================================================================
+
+    #[test]
+    fn test_default_order_length() {
+        assert_eq!(DEFAULT_ORDER.len(), 5);
+    }
+
+    #[test]
+    fn test_default_order_trace_first() {
+        // Trace 必须最先执行（包裹所有后续中间件）
+        assert_eq!(DEFAULT_ORDER.first(), Some(&MiddlewareKind::Trace));
+    }
+
+    #[test]
+    fn test_default_order_auth_last() {
+        // Auth 必须最后执行（在限流之后，避免无效请求消耗鉴权）
+        assert_eq!(DEFAULT_ORDER.last(), Some(&MiddlewareKind::Auth));
+    }
+
+    #[test]
+    fn test_default_order_cors_before_log() {
+        // CORS 必须在 Log 之前（OPTIONS 预检直接返回，不记录日志）
+        let cors_idx = DEFAULT_ORDER
+            .iter()
+            .position(|k| *k == MiddlewareKind::Cors)
+            .expect("Cors must be in DEFAULT_ORDER");
+        let log_idx = DEFAULT_ORDER
+            .iter()
+            .position(|k| *k == MiddlewareKind::Log)
+            .expect("Log must be in DEFAULT_ORDER");
+        assert!(cors_idx < log_idx, "Cors must execute before Log");
+    }
+
+    #[test]
+    fn test_default_order_rate_limit_before_auth() {
+        // RateLimit 必须在 Auth 之前（避免无效请求消耗鉴权开销）
+        let rate_limit_idx = DEFAULT_ORDER
+            .iter()
+            .position(|k| *k == MiddlewareKind::RateLimit)
+            .expect("RateLimit must be in DEFAULT_ORDER");
+        let auth_idx = DEFAULT_ORDER
+            .iter()
+            .position(|k| *k == MiddlewareKind::Auth)
+            .expect("Auth must be in DEFAULT_ORDER");
+        assert!(
+            rate_limit_idx < auth_idx,
+            "RateLimit must execute before Auth"
+        );
+    }
+
+    #[test]
+    fn test_default_order_no_duplicates() {
+        // 默认顺序中不应有重复中间件
+        use std::collections::HashSet;
+        let set: HashSet<MiddlewareKind> = DEFAULT_ORDER.iter().copied().collect();
+        assert_eq!(
+            set.len(),
+            DEFAULT_ORDER.len(),
+            "DEFAULT_ORDER has duplicates"
+        );
+    }
+
+    #[test]
+    fn test_default_order_contains_all_kinds() {
+        // 默认顺序应包含所有中间件类型
+        for kind in [
+            MiddlewareKind::Trace,
+            MiddlewareKind::Cors,
+            MiddlewareKind::Log,
+            MiddlewareKind::RateLimit,
+            MiddlewareKind::Auth,
+        ] {
+            assert!(
+                DEFAULT_ORDER.contains(&kind),
+                "DEFAULT_ORDER missing {kind}"
+            );
+        }
+    }
+
+    // ====================================================================
+    // PHP_GLOBAL_ORDER PHP 全局顺序对齐
+    // ====================================================================
+
+    #[test]
+    fn test_php_global_order_length() {
+        // PHP app/middleware.php 返回 2 个全局中间件
+        assert_eq!(PHP_GLOBAL_ORDER.len(), 2);
+    }
+
+    #[test]
+    fn test_php_global_order_matches_php_app_middleware() {
+        // 对齐 PHP `app/middleware.php`：
+        //   \think\middleware\SessionInit::class,
+        //   \think\middleware\AllowCrossDomain::class,
+        assert_eq!(PHP_GLOBAL_ORDER[0], MiddlewareKind::Trace); // SessionInit → Trace
+        assert_eq!(PHP_GLOBAL_ORDER[1], MiddlewareKind::Cors); // AllowCrossDomain → Cors
+    }
+
+    #[test]
+    fn test_php_global_order_is_prefix_of_default() {
+        // PHP 全局中间件顺序必须是 DEFAULT_ORDER 的前缀
+        // （业务中间件 Log/RateLimit/Auth 在全局之后追加）
+        assert!(DEFAULT_ORDER.starts_with(PHP_GLOBAL_ORDER));
+    }
+}

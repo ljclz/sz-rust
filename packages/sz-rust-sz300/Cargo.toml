@@ -1,0 +1,36 @@
+[package]
+name = "sz-rust-sz300"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+sz-rust-core.workspace = true
+sz-orm-core.workspace = true
+sz-orm-auth.workspace = true
+sz-orm-mqtt.workspace = true
+sz-orm-scheduler.workspace = true
+sz-orm-config.workspace = true
+sz-orm-macros.workspace = true
+sz-orm-sqlx.workspace = true
+sz-orm-logger.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+tracing-subscriber.workspace = true
+base64 = "0.22"
+bcrypt = "0.16"
+
+[features]
+default = []
+real-broker = ["sz-orm-mqtt/real-broker"]
+
+[[bin]]
+name = "sz300-server"
+path = "src/main.rs"

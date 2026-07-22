@@ -1,0 +1,78 @@
+# 数据库配置 — 对齐 PHP config/database.php
+# 5 个连接：mysql(shop) / njszjt / ljclz / food / oceanbase
+# 密码通过环境变量注入（SZ_DATABASE__CONNECTIONS__MYSQL__PASSWORD 等）
+
+default: mysql
+auto_timestamp: true
+datetime_format: "Y-m-d H:i:s"
+
+connections:
+  mysql:
+    type: mysql
+    hostname: "172.17.16.14"
+    database: "shop"
+    username: "shop"
+    password: ""  # 通过环境变量 SZ_DB_MYSQL_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8mb4"
+    prefix: "sz_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  njszjt:
+    type: mysql
+    hostname: "172.17.16.14"
+    database: "njszjt"
+    username: "njszjt"
+    password: ""  # 通过环境变量 SZ_DB_NJSZJT_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8mb4"
+    prefix: "soci_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  ljclz:
+    type: mysql
+    hostname: "172.17.16.14"
+    database: "ljclz"
+    username: "ljclz"
+    password: ""  # 通过环境变量 SZ_DB_LJCLZ_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8"
+    prefix: "ims_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  food:
+    type: mysql
+    hostname: "172.17.16.14"
+    database: "food"
+    username: "food"
+    password: ""  # 通过环境变量 SZ_DB_FOOD_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8"
+    prefix: "sz_food_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  oceanbase:
+    type: mysql
+    hostname: "172.17.16.3"
+    database: "shop"
+    username: "shop@root"
+    password: ""  # 通过环境变量 SZ_DB_OCEANBASE_PASSWORD 注入
+    hostport: 2881
+    charset: "utf8mb4"
+    prefix: "sz_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true

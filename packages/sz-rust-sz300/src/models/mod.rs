@@ -1,0 +1,13 @@
+pub mod ai_category;
+pub mod category;
+pub mod device;
+pub mod market;
+pub mod merchant;
+pub mod merchant_user;
+pub mod operate_log;
+pub mod order;
+pub mod order_item;
+pub mod ota_version;
+pub mod product;
+pub mod settlement;
+pub mod system_config;

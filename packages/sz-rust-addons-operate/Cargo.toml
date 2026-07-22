@@ -1,0 +1,21 @@
+[package]
+name = "sz-rust-addons-operate"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+axum.workspace = true
+sz-orm-core.workspace = true
+sz-rust-core.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lib]
+name = "sz_rust_addons_operate"
+path = "src/lib.rs"

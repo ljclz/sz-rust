@@ -1,0 +1,72 @@
+[package]
+name = "sz-rust-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+chrono.workspace = true
+indexmap.workspace = true
+sz-orm-logger.workspace = true
+sz-orm-macros.workspace = true
+sz-orm-sql-validator.workspace = true
+sz-orm-core.workspace = true
+sz-orm-auth.workspace = true
+sz-orm-limit.workspace = true
+sz-orm-tracing.workspace = true
+tracing.workspace = true
+# Phase 1: HTTP 服务器 + 路由 + 请求/响应
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+hyper.workspace = true
+tokio.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+# Phase 1.10: HTTP/2 + TLS
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pemfile.workspace = true
+# Phase 5.5: 文件上传
+sha1.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+hex.workspace = true
+mime_guess.workspace = true
+infer.workspace = true
+tempfile.workspace = true
+# Phase 5.7: 存储对接（复用 sz-orm-storage 7 种驱动）
+sz-orm-storage.workspace = true
+async-trait.workspace = true
+rand.workspace = true
+# Phase 5.8: 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
+image = { workspace = true }
+imageproc = { workspace = true }
+ab_glyph = { workspace = true }
+# Phase 9: Swoole/Worker 适配（tokio 替代）
+sz-orm-queue.workspace = true
+sz-orm-mqtt.workspace = true
+sz-orm-websocket = { workspace = true, features = ["server"] }
+sz-orm-scheduler.workspace = true
+tokio-util.workspace = true
+num_cpus.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true, features = ["util"] }
+http-body-util.workspace = true
+rcgen = "0.13"
+sz-rust-macros.workspace = true
+
+[lib]
+name = "sz_rust_core"
+path = "src/lib.rs"
