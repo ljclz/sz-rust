@@ -1,11 +1,11 @@
 # SZ-Rust 性能回归基线 v0.1.0
 
 > **建立时间**：2026-07-22
-> **工具**：criterion 0.5（计划使用）
+> **工具**：criterion 0.5（已配置 + html_reports）
 > **参数**：`--warm-up-time 1 --measurement-time 3 --sample-size 30`
 > **环境**：Windows + Rust stable（本地开发机）
 > **用途**：后续版本性能回归对比基线
-> **状态**：⏳ 待建立（criterion 尚未配置）
+> **状态**：✅ criterion 已配置（2026-07-22），⏳ 首次基线数据待 CI 运行生成
 
 ---
 
@@ -23,25 +23,30 @@ cargo bench --package sz-rust-core --bench core_bench -- `
 
 ### 1.2 当前状态
 
-- **criterion 依赖**：❌ 未在 sz-rust-core 的 `[dev-dependencies]` 中声明
-- **bench 文件**：❌ 未创建 `sz-rust-core/benches/core_bench.rs`
-- **基线数据**：❌ 未生成
-- **计划完成时间**：v0.1.0 正式发布前
+- **criterion 依赖**：✅ 已在 sz-rust-core 的 `[dev-dependencies]` 中声明（`criterion = { version = "0.5", features = ["html_reports"] }`）
+- **bench 文件**：✅ 已创建 `sz-rust-core/benches/core_bench.rs`（4 组基准测试：route_matching / handler_ref_parse / route_config / json_serialization）
+- **编译验证**：✅ `cargo check --package sz-rust-core --benches` 通过
+- **基线数据**：⏳ 未生成（首次运行 `--save-baseline v0.1.0` 后保存到 `target/criterion/<bench>/v0.1.0/`）
+- **CI benchmark workflow**：✅ 已创建 `.github/workflows/benchmark.yml`（PR 用 `--baseline` / push 用 `--save-baseline`）
+- **计划完成时间**：首次 CI 运行即生成基线
 
-### 1.3 计划覆盖的基准测试组
+### 1.3 基准测试组覆盖情况
 
-| 编号 | 基准测试组 | 说明 | 优先级 |
-|------|-----------|------|--------|
-| 1 | `route_matching` | 路由匹配性能（前缀树查找、参数提取、通配符匹配） | P0 |
-| 2 | `middleware_chain` | 中间件链执行性能（洋葱模型层数 1/5/10/20） | P0 |
-| 3 | `json_serialization` | JSON 响应序列化（小/中/大响应体） | P0 |
-| 4 | `json_deserialization` | JSON 请求体解析（小/中/大请求体） | P0 |
-| 5 | `controller_dispatch` | 控制器分发性能（trait 方法调用 + 参数提取） | P1 |
-| 6 | `model_hook_dispatch` | Model 钩子分发表查找性能 | P1 |
-| 7 | `template_rendering` | 模板渲染性能（Askama / Tera） | P1 |
-| 8 | `cache_get_set` | 缓存 Service 读写性能 | P2 |
-| 9 | `auth_jwt_verify` | JWT 验证性能（含常量时间比较） | P2 |
-| 10 | `full_request_lifecycle` | 完整请求生命周期（路由→中间件→控制器→响应） | P2 |
+| 编号 | 基准测试组 | 说明 | 优先级 | v0.1.0 状态 |
+|------|-----------|------|--------|------------|
+| 1 | `route_matching` | 路由匹配性能（静态路径解析、根路径、长路径） | P0 | ✅ 已实现 |
+| 2 | `middleware_chain` | 中间件链执行性能（洋葱模型层数 1/5/10/20） | P0 | ⏳ v0.2.0 |
+| 3 | `json_serialization` | JSON 响应序列化（小/中响应体） | P0 | ✅ 已实现 |
+| 4 | `json_deserialization` | JSON 请求体解析（小/中请求体） | P0 | ✅ 已实现（含 serialize 组内） |
+| 5 | `controller_dispatch` | 控制器分发性能（trait 方法调用 + 参数提取） | P1 | ✅ 已实现（`handler_ref_parse`） |
+| 6 | `model_hook_dispatch` | Model 钩子分发表查找性能 | P1 | ⏳ v0.2.0 |
+| 7 | `template_rendering` | 模板渲染性能（Askama / Tera） | P1 | ⏳ v0.2.0 |
+| 8 | `cache_get_set` | 缓存 Service 读写性能 | P2 | ⏳ v0.2.0 |
+| 9 | `auth_jwt_verify` | JWT 验证性能（含常量时间比较） | P2 | ⏳ v0.2.0 |
+| 10 | `full_request_lifecycle` | 完整请求生命周期（路由→中间件→控制器→响应） | P2 | ⏳ v0.2.0 |
+| 11 | `route_config` | 路由配置加载与冲突检测（YAML 小/中规模） | P0 | ✅ 已实现 |
+
+> **v0.1.0 已实现 5 组基准测试**（route_matching / handler_ref_parse / route_config / json_serialization / json_deserialization），覆盖 P0 路由 + JSON 核心路径。剩余 6 组将在 v0.2.0 阶段补充。
 
 ---
 
@@ -64,9 +69,9 @@ criterion 会自动对比并标注性能变化：
 
 ## 3. 基线值（v0.1.0）
 
-> ⚠️ **当前状态：待建立**
+> ⚠️ **当前状态：criterion 已配置，基线数据待首次 CI 运行生成**
 >
-> criterion 尚未配置，以下表格为计划采集的指标结构，实际数值将在配置后填充。
+> criterion 框架已就绪（`core_bench.rs` 编译通过），以下表格为计划采集的指标结构，实际数值将在首次运行 `--save-baseline v0.1.0` 后填充。
 
 ### 3.1 route_matching — 路由匹配
 
@@ -192,14 +197,14 @@ criterion 会自动对比并标注性能变化：
 
 ## 5. CI 集成计划
 
-### 5.1 计划 CI Job
+### 5.1 CI Job 配置
 
 | Job | 触发条件 | 说明 | 状态 |
 |-----|---------|------|------|
-| `benchmark` | push 到 main | 运行 criterion 基准测试，上传 `target/criterion/` 作为 artifact（保留 30 天） | ⏳ 待配置 |
-| `benchmark-regression` | PR 到 main | 运行基准测试并对比 v0.1.0 基线，在 PR 评论中展示回归报告 | ⏳ 待配置 |
+| `benchmark` | push 到 main | 运行 criterion 基准测试，`--save-baseline v0.1.0`，上传 `target/criterion/` 作为 artifact | ✅ 已配置 |
+| `benchmark-regression` | PR 到 main | 运行基准测试并 `--baseline v0.1.0` 对比，在 PR 评论中展示回归报告 | ✅ 已配置（同 workflow，按 event_name 切换参数） |
 
-### 5.2 计划 CI 配置
+### 5.2 已配置 CI 文件
 
 ```yaml
 # .github/workflows/benchmark.yml（计划）
@@ -231,9 +236,9 @@ jobs:
 
 ### 5.3 当前状态
 
-- **GitHub 仓库**：❌ 未建立
-- **CI 配置文件**：❌ 未创建 `.github/workflows/benchmark.yml`
-- **计划完成时间**：建立 GitHub 仓库后立即配置
+- **GitHub 仓库**：✅ 已建立（https://github.com/ljclz/sz-rust）
+- **CI 配置文件**：✅ 已创建 `.github/workflows/benchmark.yml`（含 Rust toolchain 安装、cargo 缓存、sz-orm path 依赖检查、基准测试运行、criterion 结果上传、gh-pages-bench 分支保存）
+- **计划完成时间**：✅ 已完成
 
 ---
 
