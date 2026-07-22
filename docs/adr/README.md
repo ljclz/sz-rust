@@ -8,12 +8,21 @@
 
 ## 1. ADR 目录
 
-> 当前 ADR 数量：**0**（项目处于初始审计阶段，尚未记录任何 ADR）
-> ADR 密度目标：≥ 0.15（参见《ADR 与生产 Bug 定位规范》第 4 节）
+> 当前 ADR 数量：**10**（P0×4 + P1×4 + P2×2，覆盖 10 项关键架构决策）
+> ADR 密度：10 / 28 模块 = **0.357**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
 
 | 编号 | 标题 | 状态 | 日期 | 决策者 | 文件 |
 |------|------|------|------|--------|------|
-| —    | —    | —    | —    | —      | —    |
+| ADR-001 | 三层路由机制（属性宏 / 配置式 / 约定式） | 已接受 | 2026-07-22 | SZ-Rust Team | [0001-三层路由机制.md](0001-三层路由机制.md) |
+| ADR-002 | 中间件模型（Tower Service + 洋葱模型） | 已接受 | 2026-07-22 | SZ-Rust Team | [0002-中间件模型-Tower-Service-洋葱模型.md](0002-中间件模型-Tower-Service-洋葱模型.md) |
+| ADR-003 | 控制器抽象（SzController trait + 默认方法 + 组合） | 已接受 | 2026-07-22 | SZ-Rust Team | [0003-控制器抽象-trait-默认方法-组合.md](0003-控制器抽象-trait-默认方法-组合.md) |
+| ADR-004 | Model 钩子实现（re-export sz-orm-core + 16 事件） | 已接受 | 2026-07-22 | SZ-Rust Team | [0004-Model钩子实现-re-export-sz-orm-core.md](0004-Model钩子实现-re-export-sz-orm-core.md) |
+| ADR-005 | 事务管理策略（委托 sz-orm-core + 显式 begin/commit/rollback） | 已接受 | 2026-07-22 | SZ-Rust Team | [0005-事务管理策略-委托sz-orm-core.md](0005-事务管理策略-委托sz-orm-core.md) |
+| ADR-006 | 认证授权机制（JWT + Middleware + Guard 三层分离） | 已接受 | 2026-07-22 | SZ-Rust Team | [0006-认证授权机制-JWT-Middleware-Guard三层分离.md](0006-认证授权机制-JWT-Middleware-Guard三层分离.md) |
+| ADR-007 | addon 插件化机制（编译期注册 + Cargo feature） | 已接受 | 2026-07-22 | SZ-Rust Team | [0007-addon插件化机制-编译期注册-Cargo-feature.md](0007-addon插件化机制-编译期注册-Cargo-feature.md) |
+| ADR-008 | 错误处理策略（AppError 枚举 + ErrorCode 映射 + BaseException 对齐） | 已接受 | 2026-07-22 | SZ-Rust Team | [0008-错误处理策略-AppError枚举-ErrorCode映射.md](0008-错误处理策略-AppError枚举-ErrorCode映射.md) |
+| ADR-009 | 缓存策略（Cache facade + 全局实例 + 多驱动 + PHP 源码 bug 复刻） | 已接受 | 2026-07-22 | SZ-Rust Team | [0009-缓存策略-Cache-facade-全局实例-多驱动.md](0009-缓存策略-Cache-facade-全局实例-多驱动.md) |
+| ADR-010 | 配置加载方式（serde + YAML + 环境变量覆盖 + 默认值） | 已接受 | 2026-07-22 | SZ-Rust Team | [0010-配置加载方式-serde-YAML-环境变量覆盖.md](0010-配置加载方式-serde-YAML-环境变量覆盖.md) |
 
 **状态说明**：
 - `提议`（Proposed）：已提交但尚未评审
