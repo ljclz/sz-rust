@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "SZ-Rust addons-operate 模块：CRUD 操作，对齐 ThinkPHP addons/operate"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde.workspace = true

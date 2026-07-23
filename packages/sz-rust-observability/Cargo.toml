@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust 可观测性模块：Prometheus exporter + SLO 燃烧率 + Grafana 仪表盘模板"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 default = []
