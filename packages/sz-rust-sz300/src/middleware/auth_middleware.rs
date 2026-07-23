@@ -1,11 +1,11 @@
+use crate::services::auth_service;
 use axum::{
     body::Body,
     http::Request,
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
-    http::StatusCode,
 };
-use crate::services::auth_service;
 
 pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let auth_header = req

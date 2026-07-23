@@ -29,7 +29,8 @@ fn create_test_token(auth: &JwtAuthenticator) -> String {
         .with_permissions(vec!["*".into()]);
     // 直接从 encoder 编码
     let encoder = sz_orm_auth::jwt::JwtEncoder::new("bench-test-secret-key-00000000000000000000");
-    encoder.encode(&sz_orm_auth::jwt::JwtClaims::new("bench-user", 9999999999))
+    encoder
+        .encode(&sz_orm_auth::jwt::JwtClaims::new("bench-user", 9999999999))
         .expect("token 生成失败")
 }
 
@@ -111,7 +112,7 @@ fn bench_file_extension_check(c: &mut Criterion) {
         "screenshot.png",
         "animation.gif",
         "bitmap.bmp",
-        "document.pdf",  // 不合法，测试快速失败路径
+        "document.pdf", // 不合法，测试快速失败路径
     ];
 
     c.bench_function("file/extension_check", |b| {

@@ -34,6 +34,10 @@
 //! | `event` | `think\Event` 事件系统（Listener/Subscriber/Observer） | Phase 6.6 |
 
 #![forbid(unsafe_code)]
+// v0.2.0：启用 missing_docs 警告，要求所有公开项必须有文档注释
+#![warn(missing_docs)]
+// 文档构建时将 missing_docs 作为错误（CI 中 RUSTDOCFLAGS="-D warnings" 会强制）
+#![cfg_attr(doctest, warn(missing_docs))]
 
 pub mod addons;
 pub mod cache;

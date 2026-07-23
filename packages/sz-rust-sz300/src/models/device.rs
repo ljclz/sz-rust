@@ -9,7 +9,7 @@ pub struct Device {
     pub device_sn: String,
     pub device_model: String,
     pub fw_version: String,
-    pub status: i8,           // 0离线 1在线
+    pub status: i8, // 0离线 1在线
     pub signal_strength: i32,
     pub bind_at: Option<String>,
     pub last_online_at: Option<String>,
@@ -85,7 +85,10 @@ impl ModelExt for Device {
             "status" => Some(Value::I32(self.status as i32)),
             "signal_strength" => Some(Value::I32(self.signal_strength)),
             "bind_at" => self.bind_at.as_ref().map(|s| Value::String(s.clone())),
-            "last_online_at" => self.last_online_at.as_ref().map(|s| Value::String(s.clone())),
+            "last_online_at" => self
+                .last_online_at
+                .as_ref()
+                .map(|s| Value::String(s.clone())),
             "created_at" => self.created_at.as_ref().map(|s| Value::String(s.clone())),
             "updated_at" => self.updated_at.as_ref().map(|s| Value::String(s.clone())),
             _ => None,

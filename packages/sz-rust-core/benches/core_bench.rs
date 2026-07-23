@@ -31,9 +31,7 @@ fn bench_parse_path(c: &mut Criterion) {
         b.iter(|| parse_path("/oapc/customer/index"))
     });
 
-    group.bench_function("parse_path_root", |b| {
-        b.iter(|| parse_path("/"))
-    });
+    group.bench_function("parse_path_root", |b| b.iter(|| parse_path("/")));
 
     group.bench_function("parse_path_long", |b| {
         b.iter(|| parse_path("/oapc/customer/getListById?id=1&page=2"))

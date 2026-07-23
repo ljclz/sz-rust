@@ -23,54 +23,77 @@ use thiserror::Error;
 /// 配置错误
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    /// 配置文件读取失败
     #[error("配置文件读取失败: {path} — {source}")]
     FileRead {
+        /// 配置文件路径
         path: String,
+        /// 底层 IO 错误
         #[source]
         source: std::io::Error,
     },
+    /// 配置文件解析失败
     #[error("配置文件解析失败: {path} — {source}")]
     Parse {
+        /// 配置文件路径
         path: String,
+        /// 底层解析错误
         #[source]
         source: serde_yaml::Error,
     },
 }
 
-/// 顶层应用配置（含 5 个 section）
+/// 顶层应用配置（含 6 个 section）
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
+    /// 应用配置段
     #[serde(default)]
     pub app: AppSection,
+    /// 数据库配置段
     #[serde(default)]
     pub database: DatabaseSection,
+    /// 缓存配置段
     #[serde(default)]
     pub cache: CacheSection,
+    /// 插件配置段
     #[serde(default)]
     pub addons: AddonsSection,
+    /// 日志配置段
     #[serde(default)]
     pub log: LogSection,
+    /// 服务器配置段（HTTP 监听地址与端口）
+    #[serde(default)]
+    pub server: ServerSection,
 }
 
 /// 应用配置段 — 对齐 PHP `config/app.php`
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppSection {
+    /// 应用主机地址
     #[serde(default)]
     pub app_host: String,
+    /// 应用命名空间
     #[serde(default)]
     pub app_namespace: String,
+    /// 是否启用路由
     #[serde(default = "default_true")]
     pub with_route: bool,
+    /// 是否启用事件系统
     #[serde(default = "default_true")]
     pub with_event: bool,
+    /// 默认应用名
     #[serde(default = "default_default_app")]
     pub default_app: String,
+    /// 默认时区
     #[serde(default = "default_timezone")]
     pub default_timezone: String,
+    /// 是否启用多应用模式
     #[serde(default = "default_true")]
     pub auto_multi_app: bool,
+    /// 应用映射表（域名/路径 → 应用名）
     #[serde(default = "default_app_map")]
     pub app_map: HashMap<String, String>,
+    /// 禁止访问的应用列表
     #[serde(default = "default_deny_app_list")]
     pub deny_app_list: Vec<String>,
 }
@@ -94,12 +117,16 @@ impl Default for AppSection {
 /// 数据库配置段 — 对齐 PHP `config/database.php`
 #[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseSection {
+    /// 默认连接名
     #[serde(default = "default_mysql")]
     pub default: String,
+    /// 是否自动时间戳
     #[serde(default = "default_true")]
     pub auto_timestamp: bool,
+    /// 时间戳格式
     #[serde(default = "default_datetime_format")]
     pub datetime_format: String,
+    /// 数据库连接配置表（连接名 → 连接配置）
     #[serde(default)]
     pub connections: HashMap<String, DatabaseConnection>,
 }
@@ -118,28 +145,40 @@ impl Default for DatabaseSection {
 /// 单个数据库连接配置
 #[derive(Debug, Clone, Deserialize)]
 pub struct DatabaseConnection {
+    /// 数据库类型（如 mysql）
     #[serde(default = "default_mysql")]
     pub r#type: String,
+    /// 主机名
     #[serde(default)]
     pub hostname: String,
+    /// 数据库名
     #[serde(default)]
     pub database: String,
+    /// 用户名
     #[serde(default)]
     pub username: String,
+    /// 密码
     #[serde(default)]
     pub password: String,
+    /// 主机端口
     #[serde(default = "default_port_8802")]
     pub hostport: u16,
+    /// 字符集
     #[serde(default = "default_charset_utf8mb4")]
     pub charset: String,
+    /// 表前缀
     #[serde(default)]
     pub prefix: String,
+    /// 部署模式（0=集中式 1=分布式）
     #[serde(default)]
     pub deploy: u8,
+    /// 是否读写分离
     #[serde(default)]
     pub rw_separate: bool,
+    /// 是否严格字段校验
     #[serde(default = "default_true")]
     pub fields_strict: bool,
+    /// 是否断线重连
     #[serde(default = "default_true")]
     pub break_reconnect: bool,
 }
@@ -147,8 +186,10 @@ pub struct DatabaseConnection {
 /// 缓存配置段 — 对齐 PHP `think-cache`
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct CacheSection {
+    /// 默认缓存存储名
     #[serde(default = "default_cache_memory")]
     pub default: String,
+    /// 缓存存储配置表（存储名 → 存储配置）
     #[serde(default)]
     pub stores: HashMap<String, CacheStore>,
 }
@@ -156,10 +197,13 @@ pub struct CacheSection {
 /// 单个缓存存储配置
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct CacheStore {
+    /// 存储类型（如 memory）
     #[serde(default)]
     pub r#type: String,
+    /// 容量上限
     #[serde(default)]
     pub capacity: usize,
+    /// 分层级别列表
     #[serde(default)]
     pub levels: Vec<String>,
 }
@@ -167,8 +211,10 @@ pub struct CacheStore {
 /// 插件配置段 — 对齐 PHP `addons/`
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AddonsSection {
+    /// 插件目录路径
     #[serde(default = "default_addons_path")]
     pub addons_path: String,
+    /// 插件优先级配置
     #[serde(default)]
     pub priority: AddonsPriority,
 }
@@ -176,10 +222,13 @@ pub struct AddonsSection {
 /// 插件优先级配置
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AddonsPriority {
+    /// 优先级 P0 插件列表（最高）
     #[serde(default)]
     pub p0: Vec<String>,
+    /// 优先级 P1 插件列表
     #[serde(default)]
     pub p1: Vec<String>,
+    /// 优先级 P2 插件列表（最低）
     #[serde(default)]
     pub p2: Vec<String>,
 }
@@ -187,8 +236,10 @@ pub struct AddonsPriority {
 /// 日志配置段 — 对齐 PHP `think-logger`
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LogSection {
+    /// 默认日志通道名
     #[serde(default = "default_log_file")]
     pub default: String,
+    /// 日志通道配置表（通道名 → 通道配置）
     #[serde(default)]
     pub channels: HashMap<String, LogChannel>,
 }
@@ -196,14 +247,19 @@ pub struct LogSection {
 /// 单个日志通道配置
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LogChannel {
+    /// 通道类型（如 file）
     #[serde(default)]
     pub r#type: String,
+    /// 日志文件路径
     #[serde(default)]
     pub path: String,
+    /// 日志级别
     #[serde(default = "default_log_level")]
     pub level: String,
+    /// 最大保留文件数
     #[serde(default)]
     pub max_files: u32,
+    /// 日志格式
     #[serde(default)]
     pub format: String,
 }
@@ -238,6 +294,37 @@ fn default_app_map() -> HashMap<String, String> {
 
 fn default_deny_app_list() -> Vec<String> {
     vec!["common".to_string()]
+}
+
+/// 服务器配置段 — HTTP 监听地址与端口
+///
+/// 对齐 PHP `think-swoole` 的 `config/swoole.php` 中 server.host / server.port 配置。
+/// 默认监听 `0.0.0.0:8080`，可通过 `config/server.yml` 或环境变量 `SZ_SERVER__PORT` 覆盖。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerSection {
+    /// 监听地址（默认 `0.0.0.0`，对所有网卡开放）
+    #[serde(default = "default_server_host")]
+    pub host: String,
+    /// 监听端口（默认 `8080`）
+    #[serde(default = "default_server_port")]
+    pub port: u16,
+}
+
+impl Default for ServerSection {
+    fn default() -> Self {
+        Self {
+            host: default_server_host(),
+            port: default_server_port(),
+        }
+    }
+}
+
+fn default_server_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_server_port() -> u16 {
+    8080
 }
 
 fn default_mysql() -> String {
@@ -286,7 +373,8 @@ impl AppConfig {
     /// ├── database.yml
     /// ├── cache.yml
     /// ├── addons.yml
-    /// └── log.yml
+    /// ├── log.yml
+    /// └── server.yml
     /// ```
     pub fn load_from_dir(config_dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = config_dir.as_ref();
@@ -298,6 +386,7 @@ impl AppConfig {
             cache: load_section(&dir.join("cache.yml"), CacheSection::default())?,
             addons: load_section(&dir.join("addons.yml"), AddonsSection::default())?,
             log: load_section(&dir.join("log.yml"), LogSection::default())?,
+            server: load_section(&dir.join("server.yml"), ServerSection::default())?,
         };
 
         // 应用环境变量覆盖
@@ -371,6 +460,10 @@ mod tests {
         assert_eq!(config.database.default, "mysql");
         assert!(config.database.auto_timestamp);
         assert_eq!(config.database.datetime_format, "Y-m-d H:i:s");
+
+        // 验证 server 默认值
+        assert_eq!(config.server.host, "0.0.0.0");
+        assert_eq!(config.server.port, 8080);
     }
 
     /// 测试从 YAML 字符串加载
@@ -457,6 +550,10 @@ app_map:
             // 验证 log.yml 加载
             assert_eq!(config.log.default, "file");
             assert!(config.log.channels.contains_key("file"));
+
+            // 验证 server.yml 加载
+            assert_eq!(config.server.host, "0.0.0.0");
+            assert_eq!(config.server.port, 8080);
         }
     }
 

@@ -181,18 +181,22 @@ impl<'a> ChannelRef<'a> {
         }
     }
 
+    /// 记录 debug 级别日志
     pub fn debug(&self, msg: &str) {
         self.log(LogLevel::Debug, msg);
     }
 
+    /// 记录 info 级别日志
     pub fn info(&self, msg: &str) {
         self.log(LogLevel::Info, msg);
     }
 
+    /// 记录 warn 级别日志
     pub fn warn(&self, msg: &str) {
         self.log(LogLevel::Warn, msg);
     }
 
+    /// 记录 error 级别日志
     pub fn error(&self, msg: &str) {
         self.log(LogLevel::Error, msg);
     }

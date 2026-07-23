@@ -51,13 +51,7 @@ impl ModelExt for OperateLog {
     }
 
     fn fillable() -> Vec<&'static str> {
-        vec![
-            "merchant_id",
-            "operator",
-            "action",
-            "detail",
-            "ip",
-        ]
+        vec!["merchant_id", "operator", "action", "detail", "ip"]
     }
 
     fn guarded() -> Vec<&'static str> {

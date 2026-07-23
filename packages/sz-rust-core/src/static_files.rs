@@ -619,6 +619,7 @@ pub struct CacheControlConfig {
     pub visibility: Option<CacheVisibility>,
     /// no-cache（必须重新验证）/ no-store（完全不缓存）
     pub no_cache: bool,
+    /// 完全不缓存
     pub no_store: bool,
     /// must-revalidate（过期后必须重新验证）
     pub must_revalidate: bool,

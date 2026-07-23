@@ -53,13 +53,7 @@ impl ModelExt for Market {
     }
 
     fn fillable() -> Vec<&'static str> {
-        vec![
-            "name",
-            "address",
-            "contact",
-            "phone",
-            "status",
-        ]
+        vec!["name", "address", "contact", "phone", "status"]
     }
 
     fn guarded() -> Vec<&'static str> {

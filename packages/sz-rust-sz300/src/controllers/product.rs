@@ -1,13 +1,13 @@
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
-use sz_orm_core::{Value, value_to_json};
-use crate::state::AppState;
+use tracing::{info, warn};
 
 struct ProductController;
 impl SzController for ProductController {}
@@ -30,8 +30,16 @@ impl ProductController {
         let ctrl = ProductController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let page = data.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let page_size = data.get("page_size").and_then(|v| v.as_i64()).unwrap_or(15).clamp(1, 100);
+                let page = data
+                    .get("page")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1)
+                    .max(1);
+                let page_size = data
+                    .get("page_size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(15)
+                    .clamp(1, 100);
                 let merchant_id = data.get("merchant_id").and_then(|v| v.as_i64());
                 let cat_id = data.get("cat_id").and_then(|v| v.as_i64());
                 let keyword = data.get("keyword").and_then(|v| v.as_str());
@@ -60,7 +68,9 @@ impl ProductController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 总数查询
@@ -69,7 +79,8 @@ impl ProductController {
                     Ok(rows) => rows,
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
-                let total: i64 = count_result.first()
+                let total: i64 = count_result
+                    .first()
                     .and_then(|row| row.get("total"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
@@ -84,15 +95,19 @@ impl ProductController {
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
 
-                let list: Vec<serde_json::Value> = rows.iter().map(|row| row_to_json(row)).collect();
+                let list: Vec<serde_json::Value> =
+                    rows.iter().map(|row| row_to_json(row)).collect();
 
                 info!("商品列表查询成功: total={}", total);
-                ctrl.render_success("success", json!({
-                    "list": list,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "list": list,
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size
+                    }),
+                )
             }
             Err(e) => {
                 warn!("商品列表查询参数解析失败: {}", e);
@@ -115,7 +130,9 @@ impl ProductController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!("SELECT * FROM good WHERE good_id = {}", good_id);
@@ -130,9 +147,12 @@ impl ProductController {
 
                 let product = row_to_json(&rows[0]);
                 info!("商品查询完成: good_id={}", good_id);
-                ctrl.render_success("success", json!({
-                    "product": product
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "product": product
+                    }),
+                )
             }
             Err(e) => {
                 warn!("商品信息查询参数解析失败: {}", e);
@@ -146,25 +166,49 @@ impl ProductController {
         let ctrl = ProductController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if name.trim().is_empty() {
                     return ctrl.render_error("商品名称不能为空", json!({}), 0);
                 }
 
-                let merchant_id = data.get("merchant_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let merchant_id = data
+                    .get("merchant_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 let cat_id = data.get("cat_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let barcode = data.get("barcode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let barcode = data
+                    .get("barcode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let price = data.get("price").and_then(|v| v.as_i64()).unwrap_or(0);
-                let unit = data.get("unit").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let ai_class_id = data.get("ai_class_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let image = data.get("image").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let unit = data
+                    .get("unit")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ai_class_id = data
+                    .get("ai_class_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let image = data
+                    .get("image")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let status = data.get("status").and_then(|v| v.as_i64()).unwrap_or(1);
 
                 info!("创建商品: name={}, merchant_id={}", name, merchant_id);
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(
@@ -208,7 +252,9 @@ impl ProductController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 构建动态 SET 子句
@@ -281,7 +327,9 @@ impl ProductController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(

@@ -1,18 +1,19 @@
+use crate::state::AppState;
 use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::path::PathBuf;
 use tokio::fs;
-use crate::state::AppState;
 
-pub async fn serve_file(State(_state): State<AppState>, path: axum::extract::Path<String>) -> Response {
+pub async fn serve_file(
+    State(_state): State<AppState>,
+    path: axum::extract::Path<String>,
+) -> Response {
     let file_path = PathBuf::from("./uploads").join(path.0);
 
     match fs::read(&file_path).await {
         Ok(data) => {
-            let ext = file_path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let content_type = match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" => "image/jpeg",
                 "png" => "image/png",

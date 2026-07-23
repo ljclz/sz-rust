@@ -1,14 +1,14 @@
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::{info, warn, error};
+use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
 use sz_rust_core::sql_string;
-use sz_orm_core::{Value, value_to_json};
-use crate::state::AppState;
+use tracing::{error, info, warn};
 
 struct DeviceController;
 impl SzController for DeviceController {}
@@ -33,16 +33,29 @@ impl DeviceController {
         let ctrl = DeviceController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let page = data.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let page_size = data.get("page_size").and_then(|v| v.as_i64()).unwrap_or(20).clamp(1, 100);
+                let page = data
+                    .get("page")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1)
+                    .max(1);
+                let page_size = data
+                    .get("page_size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(20)
+                    .clamp(1, 100);
                 let merchant_id = data.get("merchant_id").and_then(|v| v.as_i64());
                 let offset = (page - 1) * page_size;
 
-                info!("查询设备列表: page={}, page_size={}, merchant_id={:?}", page, page_size, merchant_id);
+                info!(
+                    "查询设备列表: page={}, page_size={}, merchant_id={:?}",
+                    page, page_size, merchant_id
+                );
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 构建 WHERE 条件
@@ -62,7 +75,8 @@ impl DeviceController {
                     Ok(rows) => rows,
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
-                let total: i64 = count_result.first()
+                let total: i64 = count_result
+                    .first()
                     .and_then(|row| row.get("total"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
@@ -77,15 +91,22 @@ impl DeviceController {
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
 
-                let list: Vec<serde_json::Value> = rows.iter().map(|row| row_to_json(row)).collect();
+                let list: Vec<serde_json::Value> =
+                    rows.iter().map(|row| row_to_json(row)).collect();
 
-                info!("设备列表查询成功: page={}, page_size={}, total={}", page, page_size, total);
-                ctrl.render_success("success", json!({
-                    "list": list,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size
-                }))
+                info!(
+                    "设备列表查询成功: page={}, page_size={}, total={}",
+                    page, page_size, total
+                );
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "list": list,
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size
+                    }),
+                )
             }
             Err(e) => {
                 warn!("设备列表查询参数解析失败: {}", e);
@@ -108,7 +129,9 @@ impl DeviceController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!("SELECT * FROM device WHERE device_id = {}", device_id);
@@ -124,9 +147,12 @@ impl DeviceController {
 
                 let device = row_to_json(&rows[0]);
                 info!("设备查询完成: device_id={}", device_id);
-                ctrl.render_success("success", json!({
-                    "device": device
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "device": device
+                    }),
+                )
             }
             Err(e) => {
                 warn!("设备详情查询参数解析失败: {}", e);
@@ -149,25 +175,38 @@ impl DeviceController {
                     _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
                 };
 
-                info!("设备绑定请求: device_sn={}, merchant_id={}", device_sn, merchant_id);
+                info!(
+                    "设备绑定请求: device_sn={}, merchant_id={}",
+                    device_sn, merchant_id
+                );
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 验证设备 SN 存在
-                let check_sql = format!("SELECT * FROM device WHERE device_sn = '{}'", sql_escape(&device_sn));
+                let check_sql = format!(
+                    "SELECT * FROM device WHERE device_sn = '{}'",
+                    sql_escape(&device_sn)
+                );
                 let rows = match conn.query(&check_sql).await {
                     Ok(rows) => rows,
-                    Err(e) => return ctrl.render_error(&format!("查询设备失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("查询设备失败: {}", e), json!({}), 0)
+                    }
                 };
                 if rows.is_empty() {
                     return ctrl.render_error("设备不存在", json!({}), 0);
                 }
 
                 // 检查是否已绑定
-                let existing_merchant = rows[0].get("merchant_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let existing_merchant = rows[0]
+                    .get("merchant_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 if existing_merchant != 0 {
                     return ctrl.render_error("设备已绑定", json!({}), 0);
                 }
@@ -193,11 +232,17 @@ impl DeviceController {
                     warn!("记录操作日志失败: {}", e);
                 }
 
-                info!("设备绑定成功: device_sn={}, merchant_id={}", device_sn, merchant_id);
-                ctrl.render_success("绑定成功", json!({
-                    "device_sn": device_sn,
-                    "merchant_id": merchant_id
-                }))
+                info!(
+                    "设备绑定成功: device_sn={}, merchant_id={}",
+                    device_sn, merchant_id
+                );
+                ctrl.render_success(
+                    "绑定成功",
+                    json!({
+                        "device_sn": device_sn,
+                        "merchant_id": merchant_id
+                    }),
+                )
             }
             Err(e) => {
                 warn!("设备绑定参数解析失败: {}", e);
@@ -220,7 +265,9 @@ impl DeviceController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(
@@ -232,9 +279,12 @@ impl DeviceController {
                 }
 
                 info!("设备解绑成功: device_id={}", device_id);
-                ctrl.render_success("解绑成功", json!({
-                    "device_id": device_id
-                }))
+                ctrl.render_success(
+                    "解绑成功",
+                    json!({
+                        "device_id": device_id
+                    }),
+                )
             }
             Err(e) => {
                 warn!("设备解绑参数解析失败: {}", e);
@@ -257,18 +307,25 @@ impl DeviceController {
                     _ => return ctrl.render_error("缺少有效的 ota_version 参数", json!({}), 0),
                 };
 
-                info!("OTA 触发请求: device_id={}, ota_version={}", device_id, ota_version);
+                info!(
+                    "OTA 触发请求: device_id={}, ota_version={}",
+                    device_id, ota_version
+                );
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 验证设备存在
                 let dev_sql = format!("SELECT * FROM device WHERE device_id = {}", device_id);
                 let dev_rows = match conn.query(&dev_sql).await {
                     Ok(rows) => rows,
-                    Err(e) => return ctrl.render_error(&format!("查询设备失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("查询设备失败: {}", e), json!({}), 0)
+                    }
                 };
                 if dev_rows.is_empty() {
                     return ctrl.render_error("设备不存在", json!({}), 0);
@@ -281,7 +338,13 @@ impl DeviceController {
                 );
                 let ota_rows = match conn.query(&ota_sql).await {
                     Ok(rows) => rows,
-                    Err(e) => return ctrl.render_error(&format!("查询 OTA 版本失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(
+                            &format!("查询 OTA 版本失败: {}", e),
+                            json!({}),
+                            0,
+                        )
+                    }
                 };
                 if ota_rows.is_empty() {
                     return ctrl.render_error("OTA 版本不存在或未启用", json!({}), 0);
@@ -289,12 +352,18 @@ impl DeviceController {
 
                 let ota_info = row_to_json(&ota_rows[0]);
 
-                info!("OTA 指令已推送: device_id={}, ota_version={}", device_id, ota_version);
-                ctrl.render_success("OTA 已触发", json!({
-                    "device_id": device_id,
-                    "ota_version": ota_version,
-                    "ota_info": ota_info
-                }))
+                info!(
+                    "OTA 指令已推送: device_id={}, ota_version={}",
+                    device_id, ota_version
+                );
+                ctrl.render_success(
+                    "OTA 已触发",
+                    json!({
+                        "device_id": device_id,
+                        "ota_version": ota_version,
+                        "ota_info": ota_info
+                    }),
+                )
             }
             Err(e) => {
                 warn!("OTA 触发参数解析失败: {}", e);
@@ -314,8 +383,15 @@ impl DeviceController {
                 };
 
                 let status = data.get("status").and_then(|v| v.as_i64()).unwrap_or(1);
-                let signal_strength = data.get("signal_strength").and_then(|v| v.as_i64()).unwrap_or(0);
-                let fw_version = data.get("fw_version").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let signal_strength = data
+                    .get("signal_strength")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let fw_version = data
+                    .get("fw_version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 info!(
                     "设备状态上报: device_id={}, status={}, signal_strength={}, fw_version={}",
@@ -324,7 +400,9 @@ impl DeviceController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(
@@ -339,11 +417,14 @@ impl DeviceController {
                 }
 
                 info!("设备状态更新成功: device_id={}", device_id);
-                ctrl.render_success("状态更新成功", json!({
-                    "device_id": device_id,
-                    "status": status,
-                    "signal_strength": signal_strength
-                }))
+                ctrl.render_success(
+                    "状态更新成功",
+                    json!({
+                        "device_id": device_id,
+                        "status": status,
+                        "signal_strength": signal_strength
+                    }),
+                )
             }
             Err(e) => {
                 error!("设备状态上报参数解析失败: {}", e);

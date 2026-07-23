@@ -112,7 +112,13 @@ impl UserController {
     async fn detail(store: &SharedStore, id: i64) -> Response {
         let ctrl = UserController;
         // clone 后立即释放锁
-        let user = store.lock().unwrap().users.iter().find(|u| u.id == id).cloned();
+        let user = store
+            .lock()
+            .unwrap()
+            .users
+            .iter()
+            .find(|u| u.id == id)
+            .cloned();
         match user {
             Some(user) => {
                 let data = serde_json::to_value(&user).unwrap();
@@ -269,9 +275,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化内存存储，预置 3 条种子数据
     let store: SharedStore = Arc::new(Mutex::new(Store {
         users: vec![
-            User { id: 1, name: "张三".to_string(), age: 28 },
-            User { id: 2, name: "李四".to_string(), age: 35 },
-            User { id: 3, name: "王五".to_string(), age: 42 },
+            User {
+                id: 1,
+                name: "张三".to_string(),
+                age: 28,
+            },
+            User {
+                id: 2,
+                name: "李四".to_string(),
+                age: 35,
+            },
+            User {
+                id: 3,
+                name: "王五".to_string(),
+                age: 42,
+            },
         ],
         next_id: 4,
     }));

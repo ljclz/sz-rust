@@ -36,19 +36,11 @@ impl Model for SystemConfig {
 
 impl ModelExt for SystemConfig {
     fn columns() -> Vec<&'static str> {
-        vec![
-            "key_name",
-            "value",
-            "created_at",
-            "updated_at",
-        ]
+        vec!["key_name", "value", "created_at", "updated_at"]
     }
 
     fn fillable() -> Vec<&'static str> {
-        vec![
-            "key_name",
-            "value",
-        ]
+        vec!["key_name", "value"]
     }
 
     fn guarded() -> Vec<&'static str> {

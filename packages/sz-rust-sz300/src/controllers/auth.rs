@@ -1,14 +1,14 @@
+use crate::services::auth_service;
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
+use std::collections::HashMap;
+use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
 use sz_rust_core::request::fetch_post_data;
-use sz_orm_core::{Value, value_to_json};
-use crate::services::auth_service;
-use crate::state::AppState;
-use std::collections::HashMap;
 
 struct AuthController;
 impl SzController for AuthController {}
@@ -29,14 +29,8 @@ impl AuthController {
     pub async fn login(state: &AppState, req: Request<Body>) -> Response {
         match fetch_post_data(req).await {
             Ok(data) => {
-                let username = data
-                    .get("username")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let password = data
-                    .get("password")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let username = data.get("username").and_then(|v| v.as_str()).unwrap_or("");
+                let password = data.get("password").and_then(|v| v.as_str()).unwrap_or("");
 
                 if username.is_empty() || password.is_empty() {
                     let ctrl = AuthController;
@@ -50,11 +44,16 @@ impl AuthController {
                         // 查询用户完整信息
                         let mut conn = match state.db_pool.acquire().await {
                             Ok(c) => c,
-                            Err(_) => return ctrl.render_success("登录成功", json!({
-                                "token": token,
-                                "username": username,
-                                "user_id": 0
-                            })),
+                            Err(_) => {
+                                return ctrl.render_success(
+                                    "登录成功",
+                                    json!({
+                                        "token": token,
+                                        "username": username,
+                                        "user_id": 0
+                                    }),
+                                )
+                            }
                         };
 
                         let sql = format!(
@@ -67,29 +66,40 @@ impl AuthController {
                         );
                         let rows = match conn.query(&sql).await {
                             Ok(rows) => rows,
-                            Err(_) => return ctrl.render_success("登录成功", json!({
-                                "token": token,
-                                "username": username,
-                                "user_id": 0
-                            })),
+                            Err(_) => {
+                                return ctrl.render_success(
+                                    "登录成功",
+                                    json!({
+                                        "token": token,
+                                        "username": username,
+                                        "user_id": 0
+                                    }),
+                                )
+                            }
                         };
 
                         if let Some(row) = rows.first() {
                             let info = row_to_json(row);
-                            ctrl.render_success("登录成功", json!({
-                                "token": token,
-                                "username": username,
-                                "user_id": info.get("user_id"),
-                                "merchant_id": info.get("merchant_id"),
-                                "merchant_name": info.get("merchant_name"),
-                                "phone": info.get("phone"),
-                                "role": info.get("role")
-                            }))
+                            ctrl.render_success(
+                                "登录成功",
+                                json!({
+                                    "token": token,
+                                    "username": username,
+                                    "user_id": info.get("user_id"),
+                                    "merchant_id": info.get("merchant_id"),
+                                    "merchant_name": info.get("merchant_name"),
+                                    "phone": info.get("phone"),
+                                    "role": info.get("role")
+                                }),
+                            )
                         } else {
-                            ctrl.render_success("登录成功", json!({
-                                "token": token,
-                                "username": username
-                            }))
+                            ctrl.render_success(
+                                "登录成功",
+                                json!({
+                                    "token": token,
+                                    "username": username
+                                }),
+                            )
                         }
                     }
                     Err(msg) => {
@@ -152,11 +162,14 @@ impl AuthController {
             let info = row_to_json(row);
             ctrl.render_success("ok", info)
         } else {
-            ctrl.render_success("ok", json!({
-                "user_id": user.id,
-                "username": user.username,
-                "roles": user.roles
-            }))
+            ctrl.render_success(
+                "ok",
+                json!({
+                    "user_id": user.id,
+                    "username": user.username,
+                    "roles": user.roles
+                }),
+            )
         }
     }
 }

@@ -1,13 +1,13 @@
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
-use sz_orm_core::{Value, value_to_json};
-use crate::state::AppState;
+use tracing::{info, warn};
 
 struct MerchantController;
 impl SzController for MerchantController {}
@@ -30,13 +30,23 @@ impl MerchantController {
         let ctrl = MerchantController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let page = data.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let page_size = data.get("page_size").and_then(|v| v.as_i64()).unwrap_or(15).clamp(1, 100);
+                let page = data
+                    .get("page")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1)
+                    .max(1);
+                let page_size = data
+                    .get("page_size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(15)
+                    .clamp(1, 100);
                 let offset = (page - 1) * page_size;
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let count_sql = "SELECT COUNT(*) as total FROM merchant".to_string();
@@ -44,7 +54,8 @@ impl MerchantController {
                     Ok(rows) => rows,
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
-                let total: i64 = count_result.first()
+                let total: i64 = count_result
+                    .first()
                     .and_then(|row| row.get("total"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
@@ -58,14 +69,18 @@ impl MerchantController {
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
 
-                let list: Vec<serde_json::Value> = rows.iter().map(|row| row_to_json(row)).collect();
+                let list: Vec<serde_json::Value> =
+                    rows.iter().map(|row| row_to_json(row)).collect();
 
-                ctrl.render_success("success", json!({
-                    "list": list,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "list": list,
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size
+                    }),
+                )
             }
             Err(e) => {
                 warn!("商户列表查询参数解析失败: {}", e);
@@ -88,7 +103,9 @@ impl MerchantController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!("SELECT * FROM merchant WHERE merchant_id = {}", merchant_id);
@@ -103,9 +120,12 @@ impl MerchantController {
 
                 let merchant = row_to_json(&rows[0]);
                 info!("商户查询完成: merchant_id={}", merchant_id);
-                ctrl.render_success("success", json!({
-                    "merchant": merchant
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "merchant": merchant
+                    }),
+                )
             }
             Err(e) => {
                 warn!("商户信息查询参数解析失败: {}", e);
@@ -119,24 +139,50 @@ impl MerchantController {
         let ctrl = MerchantController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if name.trim().is_empty() {
                     return ctrl.render_error("商户名称不能为空", json!({}), 0);
                 }
 
                 let market_id = data.get("market_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let stall_no = data.get("stall_no").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let contact_phone = data.get("contact_phone").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let category = data.get("category").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let stall_no = data
+                    .get("stall_no")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let contact_phone = data
+                    .get("contact_phone")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let category = data
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let status = data.get("status").and_then(|v| v.as_i64()).unwrap_or(1);
-                let bank_account = data.get("bank_account").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let bank_name = data.get("bank_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let bank_account = data
+                    .get("bank_account")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let bank_name = data
+                    .get("bank_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 info!("创建商户: name={}", name);
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(
@@ -179,7 +225,9 @@ impl MerchantController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 构建动态 SET 子句
@@ -249,7 +297,9 @@ impl MerchantController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 let sql = format!(

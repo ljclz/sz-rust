@@ -27,42 +27,77 @@ pub struct MqttMessageHandler;
 
 impl MqttMessageHandler {
     /// 处理设备状态上报
-    pub async fn handle_device_status(state: &AppState, device_sn: &str, payload: &Value) -> Result<(), String> {
+    pub async fn handle_device_status(
+        state: &AppState,
+        device_sn: &str,
+        payload: &Value,
+    ) -> Result<(), String> {
         tracing::info!("设备状态上报: sn={}", device_sn);
         let status = payload.get("status").and_then(|v| v.as_i64()).unwrap_or(0);
-        let signal = payload.get("signal_strength").and_then(|v| v.as_i64()).unwrap_or(0);
-        let fw_ver = payload.get("fw_version").and_then(|v| v.as_str()).unwrap_or("");
+        let signal = payload
+            .get("signal_strength")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let fw_ver = payload
+            .get("fw_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| format!("DB: {}", e))?;
+        let mut conn = state
+            .db_pool
+            .acquire()
+            .await
+            .map_err(|e| format!("DB: {}", e))?;
         let sql = format!(
             "UPDATE device SET status={}, signal_strength={}, fw_version='{}', last_online_at=NOW() WHERE device_sn='{}'",
             status, signal, sql_escape(fw_ver), sql_escape(device_sn)
         );
-        conn.execute(&sql).await.map_err(|e| format!("SQL: {}", e))?;
+        conn.execute(&sql)
+            .await
+            .map_err(|e| format!("SQL: {}", e))?;
         Ok(())
     }
 
     /// 处理设备订单同步
-    pub async fn handle_device_order(state: &AppState, device_sn: &str, payload: &Value) -> Result<(), String> {
+    pub async fn handle_device_order(
+        state: &AppState,
+        device_sn: &str,
+        payload: &Value,
+    ) -> Result<(), String> {
         tracing::info!("设备订单上报: sn={}", device_sn);
 
-        let offline_seq = payload.get("offline_seq").and_then(|v| v.as_str()).unwrap_or("");
-        let total_fen = payload.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0);
+        let offline_seq = payload
+            .get("offline_seq")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let total_fen = payload
+            .get("total_fen")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let items = payload.get("items").and_then(|v| v.as_array());
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| format!("DB: {}", e))?;
+        let mut conn = state
+            .db_pool
+            .acquire()
+            .await
+            .map_err(|e| format!("DB: {}", e))?;
 
         // 查询设备关联的 merchant_id 和 device_id
-        let dev_rows = conn.query(&format!(
-            "SELECT merchant_id, device_id FROM device WHERE device_sn='{}'",
-            sql_escape(device_sn)
-        )).await.map_err(|e| format!("SQL: {}", e))?;
+        let dev_rows = conn
+            .query(&format!(
+                "SELECT merchant_id, device_id FROM device WHERE device_sn='{}'",
+                sql_escape(device_sn)
+            ))
+            .await
+            .map_err(|e| format!("SQL: {}", e))?;
 
-        let merchant_id = dev_rows.first()
+        let merchant_id = dev_rows
+            .first()
             .and_then(|r| r.get("merchant_id"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let device_id = dev_rows.first()
+        let device_id = dev_rows
+            .first()
             .and_then(|r| r.get("device_id"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
@@ -72,26 +107,46 @@ impl MqttMessageHandler {
             "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, offline_seq, item_count, status) VALUES (CONCAT('O',UNIX_TIMESTAMP()),{}, {}, {}, '{}', {}, 1)",
             merchant_id, device_id, total_fen, sql_escape(offline_seq), items.map(|a| a.len() as i64).unwrap_or(0)
         );
-        conn.execute(&order_sql).await.map_err(|e| format!("SQL: {}", e))?;
+        conn.execute(&order_sql)
+            .await
+            .map_err(|e| format!("SQL: {}", e))?;
 
         Ok(())
     }
 
     /// 处理设备日志
-    pub async fn handle_device_log(state: &AppState, device_sn: &str, payload: &Value) -> Result<(), String> {
+    pub async fn handle_device_log(
+        state: &AppState,
+        device_sn: &str,
+        payload: &Value,
+    ) -> Result<(), String> {
         tracing::info!("设备日志上报: sn={}", device_sn);
-        let level = payload.get("level").and_then(|v| v.as_str()).unwrap_or("info");
-        let message = payload.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        let level = payload
+            .get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("info");
+        let message = payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| format!("DB: {}", e))?;
+        let mut conn = state
+            .db_pool
+            .acquire()
+            .await
+            .map_err(|e| format!("DB: {}", e))?;
 
         // 查询 device_id
-        let dev_rows = conn.query(&format!(
-            "SELECT device_id FROM device WHERE device_sn='{}'",
-            sql_escape(device_sn)
-        )).await.map_err(|e| format!("SQL: {}", e))?;
+        let dev_rows = conn
+            .query(&format!(
+                "SELECT device_id FROM device WHERE device_sn='{}'",
+                sql_escape(device_sn)
+            ))
+            .await
+            .map_err(|e| format!("SQL: {}", e))?;
 
-        let device_id = dev_rows.first()
+        let device_id = dev_rows
+            .first()
             .and_then(|r| r.get("device_id"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
@@ -123,8 +178,17 @@ impl MockMqttPlugin {
     }
 
     /// 发布消息
-    pub async fn publish(topic: &str, payload: &[u8], qos: u8) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!("MockMQTT publish: topic={}, qos={}, payload={} bytes", topic, qos, payload.len());
+    pub async fn publish(
+        topic: &str,
+        payload: &[u8],
+        qos: u8,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::info!(
+            "MockMQTT publish: topic={}, qos={}, payload={} bytes",
+            topic,
+            qos,
+            payload.len()
+        );
         Ok(())
     }
 }
@@ -138,7 +202,11 @@ fn sql_escape(s: &str) -> String {
 pub fn get_mqtt_config() -> MqttConfig {
     let client_id = format!(
         "sz300-server-{}",
-        uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("0000")
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0000")
     );
     MqttConfig::new("mqtts://iot.鲜视达.cn:8883")
         .with_client_id(client_id)

@@ -1,13 +1,13 @@
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::{info, warn};
+use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
-use sz_orm_core::{Value, value_to_json};
-use crate::state::AppState;
+use tracing::{info, warn};
 
 struct OrderController;
 impl SzController for OrderController {}
@@ -30,8 +30,16 @@ impl OrderController {
         let ctrl = OrderController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let page = data.get("page").and_then(|v| v.as_i64()).unwrap_or(1).max(1);
-                let page_size = data.get("page_size").and_then(|v| v.as_i64()).unwrap_or(15).clamp(1, 100);
+                let page = data
+                    .get("page")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1)
+                    .max(1);
+                let page_size = data
+                    .get("page_size")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(15)
+                    .clamp(1, 100);
                 let merchant_id = data.get("merchant_id").and_then(|v| v.as_i64());
                 let device_id = data.get("device_id").and_then(|v| v.as_i64());
                 let status = data.get("status").and_then(|v| v.as_i64());
@@ -70,7 +78,9 @@ impl OrderController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 总数查询
@@ -79,7 +89,8 @@ impl OrderController {
                     Ok(rows) => rows,
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
-                let total: i64 = count_result.first()
+                let total: i64 = count_result
+                    .first()
                     .and_then(|row| row.get("total"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
@@ -94,15 +105,19 @@ impl OrderController {
                     Err(e) => return ctrl.render_error(&format!("查询失败: {}", e), json!({}), 0),
                 };
 
-                let list: Vec<serde_json::Value> = rows.iter().map(|row| row_to_json(row)).collect();
+                let list: Vec<serde_json::Value> =
+                    rows.iter().map(|row| row_to_json(row)).collect();
 
                 info!("订单列表查询成功: total={}", total);
-                ctrl.render_success("success", json!({
-                    "list": list,
-                    "total": total,
-                    "page": page,
-                    "page_size": page_size
-                }))
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "list": list,
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size
+                    }),
+                )
             }
             Err(e) => {
                 warn!("订单列表查询参数解析失败: {}", e);
@@ -125,7 +140,9 @@ impl OrderController {
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 查询订单主表
@@ -145,16 +162,26 @@ impl OrderController {
                 let items_sql = format!("SELECT * FROM order_item WHERE order_id = {}", order_id);
                 let items_rows = match conn.query(&items_sql).await {
                     Ok(rows) => rows,
-                    Err(e) => return ctrl.render_error(&format!("查询订单项失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("查询订单项失败: {}", e), json!({}), 0)
+                    }
                 };
 
-                let items: Vec<serde_json::Value> = items_rows.iter().map(|row| row_to_json(row)).collect();
+                let items: Vec<serde_json::Value> =
+                    items_rows.iter().map(|row| row_to_json(row)).collect();
 
-                info!("订单详情查询完成: order_id={}, items={}", order_id, items.len());
-                ctrl.render_success("success", json!({
-                    "order": order,
-                    "items": items
-                }))
+                info!(
+                    "订单详情查询完成: order_id={}, items={}",
+                    order_id,
+                    items.len()
+                );
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "order": order,
+                        "items": items
+                    }),
+                )
             }
             Err(e) => {
                 warn!("订单详情查询参数解析失败: {}", e);
@@ -168,24 +195,44 @@ impl OrderController {
         let ctrl = OrderController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let order_no = data.get("order_no").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let order_no = data
+                    .get("order_no")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if order_no.trim().is_empty() {
                     return ctrl.render_error("订单号不能为空", json!({}), 0);
                 }
 
-                let merchant_id = data.get("merchant_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let merchant_id = data
+                    .get("merchant_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 let device_id = data.get("device_id").and_then(|v| v.as_i64()).unwrap_or(0);
                 let total_fen = data.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0);
-                let total_weight_g = data.get("total_weight_g").and_then(|v| v.as_i64()).unwrap_or(0);
-                let item_count = data.get("item_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                let total_weight_g = data
+                    .get("total_weight_g")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let item_count =
+                    data.get("item_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                 let pay_method = data.get("pay_method").and_then(|v| v.as_i64()).unwrap_or(0) as i8;
-                let offline_seq = data.get("offline_seq").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let offline_seq = data
+                    .get("offline_seq")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
-                info!("创建订单: order_no={}, merchant_id={}", order_no, merchant_id);
+                info!(
+                    "创建订单: order_no={}, merchant_id={}",
+                    order_no, merchant_id
+                );
 
                 let mut conn = match state.db_pool.acquire().await {
                     Ok(c) => c,
-                    Err(e) => return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("数据库连接失败: {}", e), json!({}), 0)
+                    }
                 };
 
                 // 插入订单主表
@@ -208,9 +255,12 @@ impl OrderController {
                 let last_id_sql = "SELECT LAST_INSERT_ID() as order_id".to_string();
                 let id_rows = match conn.query(&last_id_sql).await {
                     Ok(rows) => rows,
-                    Err(e) => return ctrl.render_error(&format!("获取订单 ID 失败: {}", e), json!({}), 0),
+                    Err(e) => {
+                        return ctrl.render_error(&format!("获取订单 ID 失败: {}", e), json!({}), 0)
+                    }
                 };
-                let new_order_id = id_rows.first()
+                let new_order_id = id_rows
+                    .first()
                     .and_then(|row| row.get("order_id"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0);
@@ -219,11 +269,17 @@ impl OrderController {
                 if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
                     for item in items {
                         let good_id = item.get("good_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let good_name = item.get("good_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let good_name = item
+                            .get("good_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let price_fen = item.get("price_fen").and_then(|v| v.as_i64()).unwrap_or(0);
                         let weight_g = item.get("weight_g").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let total_item_fen = item.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0);
-                        let quantity = item.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
+                        let total_item_fen =
+                            item.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let quantity =
+                            item.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
 
                         let item_sql = format!(
                             "INSERT INTO order_item (order_id, good_id, good_name, price_fen, weight_g, total_fen, quantity) VALUES ({}, {}, '{}', {}, {}, {}, {})",
@@ -242,11 +298,17 @@ impl OrderController {
                     }
                 }
 
-                info!("订单创建成功: order_id={}, order_no={}", new_order_id, order_no);
-                ctrl.render_success("下单成功", json!({
-                    "order_id": new_order_id,
-                    "order_no": order_no
-                }))
+                info!(
+                    "订单创建成功: order_id={}, order_no={}",
+                    new_order_id, order_no
+                );
+                ctrl.render_success(
+                    "下单成功",
+                    json!({
+                        "order_id": new_order_id,
+                        "order_no": order_no
+                    }),
+                )
             }
             Err(e) => {
                 warn!("创建订单参数解析失败: {}", e);

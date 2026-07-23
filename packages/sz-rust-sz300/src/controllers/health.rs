@@ -1,7 +1,7 @@
+use crate::state::AppState;
 use axum::extract::State;
 use axum::response::Json;
 use serde_json::{json, Value};
-use crate::state::AppState;
 
 pub async fn check(State(_state): State<AppState>) -> Json<Value> {
     Json(json!({

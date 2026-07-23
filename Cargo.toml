@@ -9,10 +9,12 @@ members = [
     "packages/sz-rust-pdf",
     "packages/sz-rust-cli",
     "packages/sz-rust-sz300",
+    "packages/sz-rust-tracing",
+    "packages/sz-rust-observability",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["SZ-Rust Team"]
 license = "MIT"
@@ -119,10 +121,10 @@ sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator" }
 sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx" }
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "0.1.0", path = "packages/sz-rust-core" }
-sz-rust-macros = { version = "0.1.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-operate = { version = "0.1.0", path = "packages/sz-rust-addons-operate" }
-sz-rust-cli = { version = "0.1.0", path = "packages/sz-rust-cli" }
+sz-rust-core = { version = "0.2.0", path = "packages/sz-rust-core" }
+sz-rust-macros = { version = "0.2.0", path = "packages/sz-rust-macros" }
+sz-rust-addons-operate = { version = "0.2.0", path = "packages/sz-rust-addons-operate" }
+sz-rust-cli = { version = "0.2.0", path = "packages/sz-rust-cli" }
 
 # Phase 8: 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }

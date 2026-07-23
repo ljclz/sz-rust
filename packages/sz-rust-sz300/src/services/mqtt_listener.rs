@@ -1,8 +1,8 @@
 use serde_json::Value;
 use tracing;
 
-use crate::state::AppState;
 use crate::services::mqtt_service::MqttMessageHandler;
+use crate::state::AppState;
 
 /// MQTT 消息分发器
 pub struct MqttDispatcher;
@@ -32,13 +32,16 @@ impl MqttDispatcher {
 
         match action {
             "status" => {
-                let _ = MqttMessageHandler::handle_device_status(state, device_sn, &payload_value).await;
+                let _ = MqttMessageHandler::handle_device_status(state, device_sn, &payload_value)
+                    .await;
             }
             "order" => {
-                let _ = MqttMessageHandler::handle_device_order(state, device_sn, &payload_value).await;
+                let _ =
+                    MqttMessageHandler::handle_device_order(state, device_sn, &payload_value).await;
             }
             "log" => {
-                let _ = MqttMessageHandler::handle_device_log(state, device_sn, &payload_value).await;
+                let _ =
+                    MqttMessageHandler::handle_device_log(state, device_sn, &payload_value).await;
             }
             _ => {
                 tracing::warn!("MQTT: 未知 action={} from device={}", action, device_sn);

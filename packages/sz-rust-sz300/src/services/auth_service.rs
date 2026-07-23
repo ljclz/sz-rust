@@ -1,9 +1,9 @@
-use sz_orm_auth::{Authorizer, JwtAuthenticator, RbacAuthorizer};
-use sz_orm_auth::auth::{User, PasswordVerifier, Credentials};
+use std::sync::{Arc, OnceLock};
+use sz_orm_auth::auth::{Credentials, PasswordVerifier, User};
 use sz_orm_auth::AuthError;
+use sz_orm_auth::{Authorizer, JwtAuthenticator, RbacAuthorizer};
 use sz_orm_core::Pool;
 use sz_orm_core::Value;
-use std::sync::{Arc, OnceLock};
 
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
@@ -66,8 +66,7 @@ fn sql_escape(s: &str) -> String {
 
 pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
     let verifier = Arc::new(DbPasswordVerifier { pool });
-    let auth = JwtAuthenticator::new(secret, issuer, expiry)
-        .with_password_verifier(verifier);
+    let auth = JwtAuthenticator::new(secret, issuer, expiry).with_password_verifier(verifier);
     let _ = AUTH.set(auth);
     let _ = RBAC.set(RbacAuthorizer::new());
 }

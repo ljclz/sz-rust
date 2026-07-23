@@ -49,11 +49,7 @@ impl ModelExt for AiCategory {
     }
 
     fn fillable() -> Vec<&'static str> {
-        vec![
-            "name",
-            "cat_id",
-            "model_version",
-        ]
+        vec!["name", "cat_id", "model_version"]
     }
 
     fn guarded() -> Vec<&'static str> {

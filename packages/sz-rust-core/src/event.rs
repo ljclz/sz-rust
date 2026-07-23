@@ -92,6 +92,7 @@ impl<F> ClosureListener<F>
 where
     F: Fn(&Value) -> Result<Value, EventError> + Send + Sync + 'static,
 {
+    /// 创建一个闭包监听器
     pub fn new(closure: F) -> Self {
         Self { closure }
     }

@@ -1,5 +1,5 @@
-use sz_orm_core::Pool;
 use std::sync::Arc;
+use sz_orm_core::Pool;
 
 #[derive(Clone)]
 pub struct AppState {

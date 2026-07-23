@@ -276,6 +276,7 @@ pub fn base_exception_to_response(exc: BaseException) -> Response {
 /// 已认证用户信息（插入 request extensions，供后续 handler 使用）
 #[derive(Debug, Clone, Copy)]
 pub struct AuthenticatedUser {
+    /// 用户 ID
     pub user_id: i64,
 }
 

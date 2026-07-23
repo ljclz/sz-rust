@@ -270,7 +270,12 @@ pub enum RouteConfigError {
 
     /// 路由冲突（同 method+path 重复）
     #[error("route conflict: {method} {path} already registered")]
-    Conflict { method: String, path: String },
+    Conflict {
+        /// 冲突的 HTTP 方法
+        method: String,
+        /// 冲突的路径
+        path: String,
+    },
 
     /// 文件读取失败
     #[error("failed to read route config file: {0}")]

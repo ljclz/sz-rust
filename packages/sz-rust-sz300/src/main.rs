@@ -1,11 +1,11 @@
 mod config;
-mod db;
-mod state;
-mod router;
-mod middleware;
 mod controllers;
+mod db;
+mod middleware;
 mod models;
+mod router;
 mod services;
+mod state;
 
 use state::AppState;
 use std::sync::Arc;
@@ -41,7 +41,12 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 初始化 JWT 认证（传入数据库连接池用于密码验证）
-    services::auth_service::init_auth("sz300-jwt-secret", "sz300", 86400, app_state.db_pool.clone());
+    services::auth_service::init_auth(
+        "sz300-jwt-secret",
+        "sz300",
+        86400,
+        app_state.db_pool.clone(),
+    );
 
     // 初始化 MQTT 消费者
     let app_state_clone = app_state.clone();

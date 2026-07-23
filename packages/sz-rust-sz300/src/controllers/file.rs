@@ -1,3 +1,5 @@
+use crate::services::file_service;
+use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::Multipart;
 use axum::extract::State;
@@ -5,8 +7,6 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use crate::services::file_service;
-use crate::state::AppState;
 
 struct FileController;
 impl SzController for FileController {}
@@ -17,12 +17,11 @@ impl FileController {
         match ctrl.post_data(req).await {
             Ok(data) => {
                 // 从 JSON body 获取文件数据（base64 方式上传）
-                let filename = data.get("filename")
+                let filename = data
+                    .get("filename")
                     .and_then(|v| v.as_str())
                     .unwrap_or("unnamed");
-                let file_data = data.get("file")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let file_data = data.get("file").and_then(|v| v.as_str()).unwrap_or("");
 
                 if file_data.is_empty() {
                     return ctrl.render_error("文件数据不能为空", json!({}), 0);
@@ -48,9 +47,7 @@ impl FileController {
 
         let mut uploaded = Vec::new();
         while let Ok(Some(field)) = multipart.next_field().await {
-            let filename = field.file_name()
-                .unwrap_or("unnamed")
-                .to_string();
+            let filename = field.file_name().unwrap_or("unnamed").to_string();
             let data = match field.bytes().await {
                 Ok(d) => d.to_vec(),
                 Err(e) => return ctrl.render_error(&format!("读取文件失败: {}", e), json!({}), 0),

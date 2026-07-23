@@ -34,3 +34,10 @@ real-broker = ["sz-orm-mqtt/real-broker"]
 [[bin]]
 name = "sz300-server"
 path = "src/main.rs"
+
+[[bench]]
+name = "api_bench"
+harness = false
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }

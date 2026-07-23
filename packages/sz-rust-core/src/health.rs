@@ -207,12 +207,14 @@ pub struct StaticCheck {
 }
 
 impl StaticCheck {
+    /// 创建一个总是通过的静态检查
     pub fn ok(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             ok: true,
         }
     }
+    /// 创建一个总是失败的静态检查
     pub fn fail(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),

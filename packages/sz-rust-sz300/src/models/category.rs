@@ -36,20 +36,11 @@ impl Model for Category {
 
 impl ModelExt for Category {
     fn columns() -> Vec<&'static str> {
-        vec![
-            "cat_id",
-            "name",
-            "parent_id",
-            "sort_order",
-        ]
+        vec!["cat_id", "name", "parent_id", "sort_order"]
     }
 
     fn fillable() -> Vec<&'static str> {
-        vec![
-            "name",
-            "parent_id",
-            "sort_order",
-        ]
+        vec!["name", "parent_id", "sort_order"]
     }
 
     fn guarded() -> Vec<&'static str> {

@@ -5,7 +5,7 @@
 > **参数**：`--warm-up-time 1 --measurement-time 3 --sample-size 30`
 > **环境**：Windows + Rust stable（本地开发机）
 > **用途**：后续版本性能回归对比基线
-> **状态**：✅ criterion 已配置（2026-07-22），⏳ 首次基线数据待 CI 运行生成
+> **状态**：✅ v0.1.0 基线数据已生成（2026-07-22 本地运行 `--save-baseline v0.1.0`），5 组基准测试已填充实际中位数
 
 ---
 
@@ -26,7 +26,7 @@ cargo bench --package sz-rust-core --bench core_bench -- `
 - **criterion 依赖**：✅ 已在 sz-rust-core 的 `[dev-dependencies]` 中声明（`criterion = { version = "0.5", features = ["html_reports"] }`）
 - **bench 文件**：✅ 已创建 `sz-rust-core/benches/core_bench.rs`（4 组基准测试：route_matching / handler_ref_parse / route_config / json_serialization）
 - **编译验证**：✅ `cargo check --package sz-rust-core --benches` 通过
-- **基线数据**：⏳ 未生成（首次运行 `--save-baseline v0.1.0` 后保存到 `target/criterion/<bench>/v0.1.0/`）
+- **基线数据**：✅ 已生成（2026-07-22 本地运行，保存到 `target/criterion/<bench>/v0.1.0/`）
 - **CI benchmark workflow**：✅ 已创建 `.github/workflows/benchmark.yml`（PR 用 `--baseline` / push 用 `--save-baseline`）
 - **计划完成时间**：首次 CI 运行即生成基线
 
@@ -69,24 +69,37 @@ criterion 会自动对比并标注性能变化：
 
 ## 3. 基线值（v0.1.0）
 
-> ⚠️ **当前状态：criterion 已配置，基线数据待首次 CI 运行生成**
+> ✅ **当前状态：v0.1.0 基线数据已生成（2026-07-22 本地运行）**
 >
-> criterion 框架已就绪（`core_bench.rs` 编译通过），以下表格为计划采集的指标结构，实际数值将在首次运行 `--save-baseline v0.1.0` 后填充。
+> 基线已通过 `cargo bench --save-baseline v0.1.0` 保存到 `target/criterion/<bench>/v0.1.0/`。
+> 以下表格包含 5 组已实现基准测试的实际中位数数据，其余 6 组计划在 v0.2.0 补充。
+>
+> **运行环境**：Windows + Rust stable（本地开发机），`--warm-up-time 1 --measurement-time 3 --sample-size 30`
 
-### 3.1 route_matching — 路由匹配
+### 3.1 route_matching — 路由匹配 ✅
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
-| static_route | 待建立 | 静态路由 `/users/list` |
-| param_route_1p | 待建立 | 单参数路由 `/users/:id` |
-| param_route_3p | 待建立 | 三参数路由 `/users/:id/posts/:pid/comments/:cid` |
-| wildcard_route | 待建立 | 通配符路由 `/files/*path` |
-| nested_route_depth_5 | 待建立 | 嵌套深度 5 层路由 |
-| route_table_100 | 待建立 | 路由表 100 条路由 |
-| route_table_1000 | 待建立 | 路由表 1000 条路由 |
-| route_table_10000 | 待建立 | 路由表 10000 条路由 |
+| parse_path_static | 187.56 ns | 静态路径 `/oapc/customer/index` |
+| parse_path_root | 97.13 ns | 根路径 `/` |
+| parse_path_long | 211.63 ns | 长路径 `/oapc/customer/getListById?id=1&page=2` |
 
-### 3.2 middleware_chain — 中间件链执行
+### 3.2 handler_ref_parse — Handler 引用解析 ✅
+
+| 子基准 | 时间（中位数） | 说明 |
+|--------|---------------|------|
+| parse_simple | 82.30 ns | `HandlerRef::parse("User@list")` |
+| parse_with_slash | 95.77 ns | `HandlerRef::parse("User/list")` |
+
+### 3.3 route_config — 路由配置加载与冲突检测 ✅
+
+| 子基准 | 时间（中位数） | 说明 |
+|--------|---------------|------|
+| load_yaml_small | 5.97 µs | 加载 2 条路由的 YAML |
+| load_yaml_medium | 26.46 µs | 加载含 groups 的中等 YAML |
+| find_conflicts | 24.43 µs | 50 条路由的冲突检测 |
+
+### 3.4 middleware_chain — 中间件链执行
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -95,25 +108,21 @@ criterion 会自动对比并标注性能变化：
 | middleware_depth_10 | 待建立 | 10 层中间件 |
 | middleware_depth_20 | 待建立 | 20 层中间件 |
 
-### 3.3 json_serialization — JSON 响应序列化
+### 3.5 json_serialization — JSON 响应序列化 ✅
 
-| 子基准 | 时间（中位数） | 吞吐量 | 说明 |
-|--------|---------------|--------|------|
-| json_small_60b | 待建立 | 待建立 | 60 字节响应体 |
-| json_medium_200b | 待建立 | 待建立 | 200 字节响应体 |
-| json_large_3kb | 待建立 | 待建立 | 3KB 响应体 |
-| json_xlarge_100kb | 待建立 | 待建立 | 100KB 响应体 |
+| 子基准 | 时间（中位数） | 说明 |
+|--------|---------------|------|
+| serialize_small | 99.41 ns | 序列化小响应体 |
+| serialize_medium | 4.42 µs | 序列化中等响应体 |
 
-### 3.4 json_deserialization — JSON 请求体解析
+### 3.6 json_deserialization — JSON 请求体解析 ✅
 
-| 子基准 | 时间（中位数） | 吞吐量 | 说明 |
-|--------|---------------|--------|------|
-| json_parse_small_60b | 待建立 | 待建立 | 60 字节请求体 |
-| json_parse_medium_200b | 待建立 | 待建立 | 200 字节请求体 |
-| json_parse_large_3kb | 待建立 | 待建立 | 3KB 请求体 |
-| json_parse_xlarge_100kb | 待建立 | 待建立 | 100KB 请求体 |
+| 子基准 | 时间（中位数） | 说明 |
+|--------|---------------|------|
+| deserialize_small | 730.89 ns | 反序列化小请求体 |
+| deserialize_medium | 41.76 µs | 反序列化中等请求体 |
 
-### 3.5 controller_dispatch — 控制器分发
+### 3.7 controller_dispatch — 控制器分发
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -123,7 +132,7 @@ criterion 会自动对比并标注性能变化：
 | controller_with_body | 待建立 | 含请求体解析 |
 | controller_with_auth | 待建立 | 含认证提取器 |
 
-### 3.6 model_hook_dispatch — Model 钩子分发表
+### 3.8 model_hook_dispatch — Model 钩子分发表
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -132,7 +141,7 @@ criterion 会自动对比并标注性能变化：
 | hook_dispatch_single | 待建立 | 单钩子分发 |
 | hook_dispatch_chain_5 | 待建立 | 5 个钩子链式触发 |
 
-### 3.7 template_rendering — 模板渲染
+### 3.9 template_rendering — 模板渲染
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -141,7 +150,7 @@ criterion 会自动对比并标注性能变化：
 | tera_simple | 待建立 | Tera 简单模板 |
 | tera_with_inheritance | 待建立 | Tera 含继承 |
 
-### 3.8 cache_get_set — 缓存读写
+### 3.10 cache_get_set — 缓存读写
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -150,7 +159,7 @@ criterion 会自动对比并标注性能变化：
 | cache_set_small | 待建立 | 写入小值（60B） |
 | cache_set_large | 待建立 | 写入大值（3KB） |
 
-### 3.9 auth_jwt_verify — JWT 验证
+### 3.11 auth_jwt_verify — JWT 验证
 
 | 子基准 | 时间（中位数） | 说明 |
 |--------|---------------|------|
@@ -159,7 +168,7 @@ criterion 会自动对比并标注性能变化：
 | jwt_decode_no_verify | 待建立 | 仅解码不验证 |
 | jwt_constant_time_compare | 待建立 | 常量时间比较 |
 
-### 3.10 full_request_lifecycle — 完整请求生命周期
+### 3.12 full_request_lifecycle — 完整请求生命周期
 
 | 子基准 | 时间（中位数） | 吞吐量 (req/s) | 说明 |
 |--------|---------------|----------------|------|

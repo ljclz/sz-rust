@@ -23,7 +23,10 @@ impl FileService {
     pub async fn save(filename: &str, data: &[u8]) -> Result<String, String> {
         // 检查文件大小
         if data.len() as u64 > MAX_FILE_SIZE {
-            return Err(format!("文件大小超过限制 ({}MB)", MAX_FILE_SIZE / 1024 / 1024));
+            return Err(format!(
+                "文件大小超过限制 ({}MB)",
+                MAX_FILE_SIZE / 1024 / 1024
+            ));
         }
 
         // 检查文件扩展名
@@ -37,7 +40,8 @@ impl FileService {
         }
 
         // 生成唯一文件名
-        let new_filename = format!("{}_{}.{}",
+        let new_filename = format!(
+            "{}_{}.{}",
             chrono::Local::now().format("%Y%m%d_%H%M%S"),
             &Uuid::new_v4().to_string()[..8],
             ext
@@ -47,13 +51,15 @@ impl FileService {
         let date_dir = chrono::Local::now().format("%Y/%m/%d").to_string();
         let dir_path = PathBuf::from(UPLOAD_DIR).join(&date_dir);
         if !dir_path.exists() {
-            fs::create_dir_all(&dir_path).await
+            fs::create_dir_all(&dir_path)
+                .await
                 .map_err(|e| format!("创建目录失败: {}", e))?;
         }
 
         // 写入文件
         let file_path = dir_path.join(&new_filename);
-        fs::write(&file_path, data).await
+        fs::write(&file_path, data)
+            .await
             .map_err(|e| format!("文件写入失败: {}", e))?;
 
         tracing::info!("文件已保存: {:?}", file_path);
@@ -68,7 +74,8 @@ impl FileService {
         let file_path = PathBuf::from(UPLOAD_DIR).join(relative_path);
 
         if file_path.exists() {
-            fs::remove_file(&file_path).await
+            fs::remove_file(&file_path)
+                .await
                 .map_err(|e| format!("删除文件失败: {}", e))?;
         }
         Ok(())

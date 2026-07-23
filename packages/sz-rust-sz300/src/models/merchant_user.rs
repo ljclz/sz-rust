@@ -77,7 +77,10 @@ impl ModelExt for MerchantUser {
             "password" => Some(Value::String(self.password.clone())),
             "phone" => Some(Value::String(self.phone.clone())),
             "role" => Some(Value::I32(self.role as i32)),
-            "last_login_at" => self.last_login_at.as_ref().map(|s| Value::String(s.clone())),
+            "last_login_at" => self
+                .last_login_at
+                .as_ref()
+                .map(|s| Value::String(s.clone())),
             "created_at" => self.created_at.as_ref().map(|s| Value::String(s.clone())),
             "updated_at" => self.updated_at.as_ref().map(|s| Value::String(s.clone())),
             _ => None,
