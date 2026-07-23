@@ -99,26 +99,26 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 
-# 内部依赖（SZ-ORM 全家桶，通过 path 引用）
-sz-orm-core = { path = "../sz-orm/packages/sz-orm-core" }
-sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth" }
-sz-orm-crypto = { path = "../sz-orm/packages/sz-orm-crypto" }
-sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage" }
-sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue" }
-sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt" }
-sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket" }
-sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler" }
-sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing" }
-sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger" }
+# 内部依赖（SZ-ORM 全家桶，path + version 双重指定：本地开发用 path，crates.io 发布用 version）
+sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.0.0" }
+sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.0.0" }
+sz-orm-crypto = { path = "../sz-orm/packages/sz-orm-crypto", version = "1.0.0" }
+sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage", version = "1.0.0" }
+sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue", version = "1.0.0" }
+sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt", version = "1.0.0" }
+sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket", version = "1.0.0" }
+sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler", version = "1.0.0" }
+sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing", version = "1.0.0" }
+sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger", version = "1.0.0" }
 sz-orm-audit = { path = "../sz-orm/packages/sz-orm-audit" }
 sz-orm-health = { path = "../sz-orm/packages/sz-orm-health" }
 sz-orm-masking = { path = "../sz-orm/packages/sz-orm-masking" }
 sz-orm-swagger = { path = "../sz-orm/packages/sz-orm-swagger" }
-sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit" }
+sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit", version = "1.0.0" }
 sz-orm-config = { path = "../sz-orm/packages/sz-orm-config" }
-sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros" }
-sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator" }
-sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx" }
+sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.0.0" }
+sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator", version = "1.0.0" }
+sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx", version = "1.0.0" }
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "0.2.0", path = "packages/sz-rust-core" }
