@@ -31,6 +31,8 @@
 //! | `validate` | `think\Validate` 数据验证器 | Phase 5 |
 //! | `upload` | `think\File` + `think\file\UploadedFile` 文件上传 | Phase 5.5 |
 //! | `cache` | `think\facade\Cache` 缓存 facade | Phase 6 |
+//! | `session` | `think\facade\Session` 会话管理（SessionStore trait + MemorySessionStore） | Phase P2-10 |
+//! | `cookie` | `think\Cookie` Cookie 管理（CookieJar + CookieOptions） | Phase P2-11 |
 //! | `event` | `think\Event` 事件系统（Listener/Subscriber/Observer） | Phase 6.6 |
 
 #![forbid(unsafe_code)]
@@ -44,6 +46,7 @@ pub mod cache;
 pub mod config;
 pub mod container;
 pub mod controller;
+pub mod cookie;
 pub mod error;
 pub mod error_handler;
 pub mod event;
@@ -63,6 +66,7 @@ pub mod router;
 pub mod routing;
 pub mod runtime;
 pub mod server;
+pub mod session;
 pub mod static_files;
 pub mod upload;
 pub mod validate;

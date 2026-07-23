@@ -31,6 +31,8 @@
 use axum::body::Body;
 use axum::http::Request;
 use axum::response::{IntoResponse, Response};
+use indexmap::IndexMap;
+use once_cell::sync::Lazy;
 use serde_json::{Map, Value};
 use std::future::Future;
 
@@ -38,6 +40,130 @@ use crate::request::{
     fetch_post_data, fetch_post_data_by_key, fetch_query_data, fetch_query_data_by_key,
 };
 use crate::response::ApiResponse;
+use crate::validate::Validate;
+
+// ============================================================================
+// JWT 配置（运行时从环境变量读取，对齐 PHP Token 类私有 $_config）
+// ============================================================================
+//
+// PHP `app\common\service\jwt\Token::$_config` 包含 issuer/audience/id/sign/expire，
+// 这些敏感信息不应硬编码到框架中。Rust 实现通过环境变量注入：
+//
+// - `SZ_JWT_SECRET`：签名密钥（PHP 实际使用 `id` 字段作为 HMAC 密钥，而非 `sign`）
+// - `SZ_JWT_ISSUER`：签发人（对应 PHP `issuer`，如 `https://mall.ljclz.shop`）
+//
+// 注：sz-orm-auth 的 JwtClaims 暂不包含 `aud` 字段，因此 audience 验证由
+// 业务层在解码后自行实现（PHP `PermittedFor` 约束等价）。
+
+/// JWT 配置（运行时从环境变量读取）
+#[derive(Debug, Clone)]
+struct JwtConfig {
+    /// 签名密钥（对应 PHP `$_config['id']`，Lcobucci 用作 HMAC 密钥）
+    secret: String,
+    /// 签发人（对应 PHP `$_config['issuer']`）
+    issuer: String,
+}
+
+impl Default for JwtConfig {
+    fn default() -> Self {
+        Self {
+            secret: String::new(),
+            issuer: String::new(),
+        }
+    }
+}
+
+/// 全局 JWT 配置实例（启动时从环境变量读取一次）
+///
+/// - `SZ_JWT_SECRET`：签名密钥（必填，空字符串表示禁用 JWT 验证）
+/// - `SZ_JWT_ISSUER`：签发人（可选，空字符串表示跳过 iss 验证）
+static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| JwtConfig {
+    secret: std::env::var("SZ_JWT_SECRET").unwrap_or_default(),
+    issuer: std::env::var("SZ_JWT_ISSUER").unwrap_or_default(),
+});
+
+/// 去除 Authorization header 中的 Bearer 前缀
+///
+/// 对齐 PHP `str_ireplace('bearer', '', $header)`：大小写不敏感地移除 `bearer` 标识。
+/// 支持以下格式（与 PHP 兼容）：
+/// - `Bearer xxx.yyy.zzz` → `xxx.yyy.zzz`
+/// - `bearer xxx.yyy.zzz` → `xxx.yyy.zzz`
+/// - `BEARER xxx.yyy.zzz` → `xxx.yyy.zzz`
+/// - `xxx.yyy.zzz`（无前缀）→ `xxx.yyy.zzz`（保持原样）
+fn strip_bearer_prefix(header: &str) -> &str {
+    let trimmed = header.trim();
+    // 大小写不敏感匹配 "bearer"
+    if trimmed.len() >= 6 {
+        let prefix = &trimmed[..6];
+        if prefix.eq_ignore_ascii_case("bearer") {
+            // 跳过 "bearer" 后可能存在的空格
+            return trimmed[6..].trim_start();
+        }
+    }
+    trimmed
+}
+
+/// 使用指定配置验证 JWT token 并提取用户信息
+///
+/// 这是 [`AddonsBaseController::get_token`] 的核心逻辑，抽取为独立函数便于单元测试
+/// 注入不同配置（避免依赖全局 `JWT_CONFIG` 一次性初始化的副作用）。
+///
+/// # 参数
+///
+/// - `authorization`：Authorization header 原始值（可能含 `Bearer ` 前缀）
+/// - `config`：JWT 配置（密钥 + 签发人）
+///
+/// # 返回
+///
+/// - `Ok(Some(UserInfo))`：验证成功
+/// - `Ok(None)`：无 token、密钥未配置、签名/过期/iss 验证失败、缺少 user_id
+fn verify_token_with_config(
+    authorization: Option<&str>,
+    config: &JwtConfig,
+) -> Result<Option<UserInfo>, String> {
+    // 1. 提取 Authorization header 值
+    let header_value = match authorization {
+        Some(v) if !v.is_empty() => v,
+        _ => return Ok(None),
+    };
+
+    // 2. 去除 Bearer 前缀
+    let token = strip_bearer_prefix(header_value).trim();
+    if token.is_empty() {
+        return Ok(None);
+    }
+
+    // 3. 密钥未配置则禁用 JWT 验证
+    if config.secret.is_empty() {
+        return Ok(None);
+    }
+
+    // 4. JwtEncoder 解码并验证签名 + 过期
+    let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+    let claims = match encoder.decode(token) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+
+    // 5. 验证 iss 字段（仅当配置了 issuer 时）
+    if !config.issuer.is_empty() {
+        match &claims.iss {
+            Some(iss) if iss == &config.issuer => { /* 通过 */ }
+            _ => return Ok(None),
+        }
+    }
+
+    // 6. 提取 user_id
+    let user_id = match claims.user_id {
+        Some(id) => id,
+        None => return Ok(None),
+    };
+
+    Ok(Some(UserInfo {
+        user_id,
+        is_login: true,
+    }))
+}
 
 /// 控制器基础 trait（对齐 PHP `app\SzController`）
 ///
@@ -230,11 +356,11 @@ pub trait BaseController: SzController {
     /// }
     /// ```
     ///
-    /// # 当前实现状态
+    /// # 实现说明
     ///
-    /// **占位实现**：返回 `Ok(())`，不执行任何验证。
-    /// 完整的验证器系统（含 require/email/integer/regex 等规则、场景、批量验证）
-    /// 在 **Phase 5（验证器 + 文件上传）** 中实现。
+    /// 将 `rules` 与 `messages` 转换为内部 [`Validate`] 构建器调用，
+    /// 批量模式由 [`BaseController::batch_validate`] 决定（对齐 PHP `$batch`
+    /// 参数默认值 `false`，但 Rust 通过 trait 方法覆盖以适配无状态控制器）。
     ///
     /// # 参数
     ///
@@ -247,16 +373,36 @@ pub trait BaseController: SzController {
     /// # 返回
     ///
     /// - `Ok(())`：验证通过
-    /// - `Err(String)`：验证失败，包含错误消息（批量模式下以换行分隔）
+    /// - `Err(String)`：验证失败，包含错误消息（批量模式下以 `; ` 分隔多条错误）
     fn validate(
         &self,
-        _data: &Value,
-        _rules: &[(&str, &str)],
-        _messages: &[(&str, &str)],
+        data: &Value,
+        rules: &[(&str, &str)],
+        messages: &[(&str, &str)],
     ) -> Result<(), String> {
-        // TODO(Phase 5): 实现完整的验证器系统
-        // 当前为占位实现，所有验证均通过
-        Ok(())
+        // 构建 Validate 实例，将 (字段名, 规则) 元组列表逐条注册
+        let mut validator = Validate::new();
+        for (name, rule) in rules {
+            validator = validator.rule(name, rule);
+        }
+
+        // 将 (规则键, 消息) 元组列表合并到 IndexMap 后注入
+        let mut msg_map = IndexMap::new();
+        for (key, msg) in messages {
+            msg_map.insert(key.to_string(), msg.to_string());
+        }
+        validator = validator.message(msg_map);
+
+        // 批量模式由控制器配置决定（对齐 PHP $batch 参数）
+        if self.batch_validate() {
+            validator = validator.batch(true);
+        }
+
+        // 执行验证并转换错误类型（Display 实现已处理 Single/Batch 两种格式）
+        match validator.check(data) {
+            Ok(()) => Ok(()),
+            Err(err) => Err(err.to_string()),
+        }
     }
 }
 
@@ -423,10 +569,17 @@ pub trait AddonsBaseController: BaseController {
 
     /// 获取 token 用户信息（对齐 PHP `public function getToken()`）
     ///
-    /// # 当前实现状态
+    /// # 实现说明
     ///
-    /// **占位实现**：始终返回 `Ok(None)`。
-    /// 完整的 JWT 验证在 **Phase 3（中间件 + 钩子）** 中实现。
+    /// 使用 sz-orm-auth 的 [`JwtEncoder`] 进行 HS256 签名验证与过期检查，
+    /// 配置项（`SZ_JWT_SECRET` / `SZ_JWT_ISSUER`）在启动时从环境变量读取。
+    /// 核心验证逻辑见 [`verify_token_with_config`]，便于单元测试注入配置。
+    ///
+    /// 验证流程（对齐 PHP `Token::getUserId`）：
+    /// 1. 提取 Authorization header 中的 Bearer token
+    /// 2. 通过 `JwtEncoder::decode` 验证签名 + 过期时间
+    /// 3. 验证 `iss` 字段匹配配置的签发人
+    /// 4. 提取 `user_id` claim 返回 [`UserInfo`]
     ///
     /// # PHP 对齐
     ///
@@ -450,12 +603,13 @@ pub trait AddonsBaseController: BaseController {
     /// # 返回
     ///
     /// - `Ok(Some(UserInfo))`：JWT 验证成功，返回用户信息
-    /// - `Ok(None)`：无 token 或 token 无效（调用方根据 route_uri 决定是否抛错）
-    /// - `Err(String)`：JWT 解析失败
-    fn get_token(&self, _authorization: Option<&str>) -> Result<Option<UserInfo>, String> {
-        // TODO(Phase 3): 实现 JWT HS256 验证
-        // 当前为占位实现，始终返回 Ok(None)
-        Ok(None)
+    /// - `Ok(None)`：无 token、token 为空、签名密钥未配置或验证失败
+    ///   （调用方根据 route_uri 决定是否抛错，对齐 PHP `if (!$token)` 分支）
+    /// - `Err(String)`：JWT 解析过程中出现异常（如格式错误）
+    fn get_token(&self, authorization: Option<&str>) -> Result<Option<UserInfo>, String> {
+        // 委托给 verify_token_with_config，使用全局 JWT_CONFIG
+        // 抽取独立函数便于单元测试注入不同配置（避免 once_cell 一次性初始化限制）
+        verify_token_with_config(authorization, &JWT_CONFIG)
     }
 }
 
@@ -898,13 +1052,136 @@ mod tests {
 
     #[test]
     fn test_base_controller_default_validate_returns_ok() {
-        // 占位实现应返回 Ok(())
+        // require 规则 + 字段存在 → 应通过
         let ctrl = MockBaseController;
         let data = json!({"name": "alice"});
         let rules = [("name", "require")];
         let messages: [(&str, &str); 0] = [];
         let result = ctrl.validate(&data, &rules, &messages);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_require_pass_with_value() {
+        // require 规则：字段存在且非空 → 通过
+        let ctrl = MockBaseController;
+        let data = json!({"name": "alice", "age": 30});
+        let rules = [("name", "require"), ("age", "require|integer")];
+        let messages: [(&str, &str); 0] = [];
+        assert!(ctrl.validate(&data, &rules, &messages).is_ok());
+    }
+
+    #[test]
+    fn test_validate_require_fail_when_missing() {
+        // require 规则：字段缺失 → 失败（Single 模式，返回第一条错误）
+        let ctrl = MockBaseController;
+        let data = json!({"name": "alice"});
+        let rules = [("name", "require"), ("age", "require|integer")];
+        let messages: [(&str, &str); 0] = [];
+        let result = ctrl.validate(&data, &rules, &messages);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // 错误信息应包含 age 字段（require 验证失败）
+        assert!(err.contains("age"), "error: {err}");
+    }
+
+    #[test]
+    fn test_validate_integer_fail_on_string() {
+        // integer 规则：字段非整数 → 失败
+        let ctrl = MockBaseController;
+        let data = json!({"age": "not-a-number"});
+        let rules = [("age", "require|integer")];
+        let messages: [(&str, &str); 0] = [];
+        let result = ctrl.validate(&data, &rules, &messages);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_custom_message_applied() {
+        // 自定义消息应被使用（对齐 PHP message[field.type]）
+        let ctrl = MockBaseController;
+        let data = json!({}); // name 缺失
+        let rules = [("name", "require")];
+        let messages = [("name.require", "名称必填")];
+        let result = ctrl.validate(&data, &rules, &messages);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "名称必填");
+    }
+
+    #[test]
+    fn test_validate_batch_mode_returns_multiple_errors() {
+        // 批量模式：收集所有错误，以 "; " 分隔
+        struct BatchController;
+        impl SzController for BatchController {}
+        impl BaseController for BatchController {
+            fn batch_validate(&self) -> bool {
+                true
+            }
+        }
+
+        let ctrl = BatchController;
+        let data = json!({}); // name 和 age 都缺失
+        let rules = [("name", "require"), ("age", "require")];
+        let messages = [
+            ("name.require", "名称必填"),
+            ("age.require", "年龄必填"),
+        ];
+        let result = ctrl.validate(&data, &rules, &messages);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // 两条错误都应出现（顺序按字段注册顺序）
+        assert!(err.contains("名称必填"), "err: {err}");
+        assert!(err.contains("年龄必填"), "err: {err}");
+        // 应以 "; " 分隔（ValidateError::Batch 的 Display 格式）
+        assert!(err.contains("; "), "err: {err}");
+    }
+
+    #[test]
+    fn test_validate_single_mode_returns_first_error_only() {
+        // 非批量模式：仅返回第一条错误
+        let ctrl = MockBaseController;
+        let data = json!({}); // name 和 age 都缺失
+        let rules = [("name", "require"), ("age", "require")];
+        let messages = [
+            ("name.require", "名称必填"),
+            ("age.require", "年龄必填"),
+        ];
+        let result = ctrl.validate(&data, &rules, &messages);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // 仅包含第一条错误，不包含第二条
+        assert!(err.contains("名称必填"), "err: {err}");
+        assert!(!err.contains("年龄必填"), "err: {err}");
+    }
+
+    #[test]
+    fn test_validate_in_rule_pass() {
+        // in 规则：值在列表中 → 通过
+        let ctrl = MockBaseController;
+        let data = json!({"status": "active"});
+        let rules = [("status", "require|in:active,inactive")];
+        let messages: [(&str, &str); 0] = [];
+        assert!(ctrl.validate(&data, &rules, &messages).is_ok());
+    }
+
+    #[test]
+    fn test_validate_in_rule_fail() {
+        // in 规则：值不在列表中 → 失败
+        let ctrl = MockBaseController;
+        let data = json!({"status": "deleted"});
+        let rules = [("status", "require|in:active,inactive")];
+        let messages: [(&str, &str); 0] = [];
+        assert!(ctrl.validate(&data, &rules, &messages).is_err());
+    }
+
+    #[test]
+    fn test_validate_empty_rules_always_pass() {
+        // 空规则列表：无验证规则，总应通过
+        let ctrl = MockBaseController;
+        let data = json!({"anything": "value"});
+        let rules: [(&str, &str); 0] = [];
+        let messages: [(&str, &str); 0] = [];
+        assert!(ctrl.validate(&data, &rules, &messages).is_ok());
     }
 
     #[test]
@@ -1205,7 +1482,8 @@ mod tests {
 
     #[test]
     fn test_addons_get_token_default_returns_none() {
-        // 占位实现应返回 Ok(None)
+        // 未配置 SZ_JWT_SECRET 环境变量时，验证失败应返回 Ok(None)
+        // 注：测试运行时不应假定环境变量已设置
         let ctrl = MockAddonsController;
         let result = ctrl.get_token(Some("Bearer xxx.yyy.zzz"));
         assert!(result.is_ok());
@@ -1218,6 +1496,240 @@ mod tests {
         let result = ctrl.get_token(None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_addons_get_token_empty_authorization() {
+        let ctrl = MockAddonsController;
+        let result = ctrl.get_token(Some(""));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_addons_get_token_invalid_format_returns_none() {
+        // 非法 JWT 格式（非三段式）应返回 Ok(None) 而非 Err
+        // 注：仅在 SZ_JWT_SECRET 已设置时才会进入格式校验
+        let ctrl = MockAddonsController;
+        let result = ctrl.get_token(Some("Bearer not.a.valid.jwt.token"));
+        assert!(result.is_ok());
+        // 无论是否配置密钥，无效 token 都应返回 None
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_uppercase() {
+        assert_eq!(strip_bearer_prefix("Bearer abc.def.ghi"), "abc.def.ghi");
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_lowercase() {
+        assert_eq!(strip_bearer_prefix("bearer abc.def.ghi"), "abc.def.ghi");
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_mixed_case() {
+        assert_eq!(strip_bearer_prefix("BEARER abc.def.ghi"), "abc.def.ghi");
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_no_prefix() {
+        // 无 Bearer 前缀时，应保持原样（去除首尾空格）
+        assert_eq!(strip_bearer_prefix("abc.def.ghi"), "abc.def.ghi");
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_empty() {
+        assert_eq!(strip_bearer_prefix(""), "");
+    }
+
+    #[test]
+    fn test_strip_bearer_prefix_with_extra_spaces() {
+        assert_eq!(strip_bearer_prefix("  Bearer   abc.def.ghi  "), "abc.def.ghi");
+    }
+
+    /// JWT 端到端验证测试：使用真实 JwtEncoder 签发 token，再通过 verify_token_with_config 验证
+    ///
+    /// 通过 verify_token_with_config 注入测试配置，避免依赖全局环境变量，
+    /// 确保 CI 环境也能完整执行 JWT 验证流程测试。
+    #[test]
+    fn test_get_token_valid_jwt_returns_user_info() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(), // 不验证 iss
+        };
+
+        // 签发一个有效 token
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600; // 1 小时后过期
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp).with_user_id(12345);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        let user = result.unwrap();
+        assert!(user.is_some());
+        let user = user.unwrap();
+        assert_eq!(user.user_id, 12345);
+        assert!(user.is_login);
+    }
+
+    /// 测试 JWT 签名密钥错误时返回 None
+    #[test]
+    fn test_get_token_wrong_secret_returns_none() {
+        let config = JwtConfig {
+            secret: "correct-secret".to_string(),
+            issuer: String::new(),
+        };
+
+        // 用错误密钥签发 token
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new("wrong-secret");
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp).with_user_id(12345);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None); // 签名验证失败
+    }
+
+    /// 测试 JWT 过期时返回 None
+    #[test]
+    fn test_get_token_expired_returns_none() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        // 过期时间为 1 小时前
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            - 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp).with_user_id(12345);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None); // 已过期
+    }
+
+    /// 测试 JWT 缺少 user_id claim 时返回 None（兼容旧版 token）
+    #[test]
+    fn test_get_token_no_user_id_claim_returns_none() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        // 不调用 with_user_id，user_id 为 None
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None); // 缺少 user_id
+    }
+
+    /// 测试 iss 验证：iss 不匹配时返回 None
+    #[test]
+    fn test_get_token_iss_mismatch_returns_none() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: "https://expected-issuer.com".to_string(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        // 使用错误的 issuer 签发
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp)
+            .with_issuer("https://wrong-issuer.com")
+            .with_user_id(12345);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None); // iss 不匹配
+    }
+
+    /// 测试 iss 验证：iss 匹配时返回 UserInfo
+    #[test]
+    fn test_get_token_iss_match_returns_user_info() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: "https://mall.ljclz.shop".to_string(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp)
+            .with_issuer(&config.issuer)
+            .with_user_id(67890);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&format!("Bearer {token}")), &config);
+        assert!(result.is_ok());
+        let user = result.unwrap().unwrap();
+        assert_eq!(user.user_id, 67890);
+        assert!(user.is_login);
+    }
+
+    /// 测试密钥未配置时返回 None（禁用 JWT 验证）
+    #[test]
+    fn test_get_token_empty_secret_returns_none() {
+        let config = JwtConfig::default(); // secret 为空
+
+        let result = verify_token_with_config(Some("Bearer any.token.here"), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None); // 密钥未配置
+    }
+
+    /// 测试无 Bearer 前缀的 token 也能正常解析
+    #[test]
+    fn test_get_token_without_bearer_prefix() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp).with_user_id(99999);
+        let token = encoder.encode(&claims).unwrap();
+
+        // 不带 Bearer 前缀，应仍能解析（对齐 PHP str_ireplace 兼容行为）
+        let result = verify_token_with_config(Some(&token), &config);
+        assert!(result.is_ok());
+        let user = result.unwrap().unwrap();
+        assert_eq!(user.user_id, 99999);
     }
 
     /// 覆盖白名单的子类控制器
