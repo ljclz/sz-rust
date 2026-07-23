@@ -169,12 +169,16 @@ pub fn error_response_with_code(status: StatusCode, code: i32, msg: &str) -> Res
 /// 自定义错误类型，可转换为标准 JSON 响应
 #[derive(Debug, Clone)]
 pub struct HandleError {
+    /// HTTP 状态码
     pub status: StatusCode,
+    /// 业务错误码
     pub code: i32,
+    /// 错误信息
     pub msg: String,
 }
 
 impl HandleError {
+    /// 创建一个新的错误实例
     pub fn new(status: StatusCode, code: i32, msg: impl Into<String>) -> Self {
         Self {
             status,
@@ -183,22 +187,27 @@ impl HandleError {
         }
     }
 
+    /// 创建 404 未找到错误
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, 0, msg)
     }
 
+    /// 创建 500 服务器内部错误
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, 0, msg)
     }
 
+    /// 创建 400 错误请求错误
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, 0, msg)
     }
 
+    /// 创建 401 未授权错误
     pub fn unauthorized(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, -1, msg)
     }
 
+    /// 创建 403 禁止访问错误
     pub fn forbidden(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::FORBIDDEN, 0, msg)
     }

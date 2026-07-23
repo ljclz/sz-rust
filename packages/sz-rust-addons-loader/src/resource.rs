@@ -130,8 +130,7 @@ impl std::str::FromStr for ResourceAction {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse_name(s)
-            .ok_or_else(|| format!("unknown ResourceAction: {}", s))
+        Self::parse_name(s).ok_or_else(|| format!("unknown ResourceAction: {}", s))
     }
 }
 
@@ -436,9 +435,18 @@ mod tests {
             ResourceAction::parse_name("create"),
             Some(ResourceAction::Create)
         );
-        assert_eq!(ResourceAction::parse_name("edit"), Some(ResourceAction::Edit));
-        assert_eq!(ResourceAction::parse_name("read"), Some(ResourceAction::Read));
-        assert_eq!(ResourceAction::parse_name("save"), Some(ResourceAction::Save));
+        assert_eq!(
+            ResourceAction::parse_name("edit"),
+            Some(ResourceAction::Edit)
+        );
+        assert_eq!(
+            ResourceAction::parse_name("read"),
+            Some(ResourceAction::Read)
+        );
+        assert_eq!(
+            ResourceAction::parse_name("save"),
+            Some(ResourceAction::Save)
+        );
         assert_eq!(
             ResourceAction::parse_name("update"),
             Some(ResourceAction::Update)
@@ -461,7 +469,10 @@ mod tests {
         // 验证 std::str::FromStr trait 实现
         use std::str::FromStr;
         assert_eq!(ResourceAction::from_str("index"), Ok(ResourceAction::Index));
-        assert_eq!(ResourceAction::from_str("delete"), Ok(ResourceAction::Delete));
+        assert_eq!(
+            ResourceAction::from_str("delete"),
+            Ok(ResourceAction::Delete)
+        );
         assert!(ResourceAction::from_str("unknown").is_err());
         assert!(ResourceAction::from_str("").is_err());
     }

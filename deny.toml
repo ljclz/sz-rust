@@ -1,0 +1,67 @@
+# cargo-deny 配置 — 依赖许可证与安全审计
+#
+# 对齐 sz-orm/deny.toml 结构，确保依赖链安全合规
+
+[graph]
+all-features = true
+
+[advisories]
+# 已知安全漏洞 advisory 检查
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# 忽略的 advisory（需注明理由和到期时间）
+ignore = []
+
+[licenses]
+# 许可证白名单（兼容 MIT）
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    "Unlicense",
+]
+# 禁止的许可证
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-3.0",
+    "EUPL-1.1",
+    "EUPL-1.2",
+]
+# 置信度阈值（文件扫描置信度）
+confidence-threshold = 0.8
+
+[licenses.private]
+# 忽略私有 crate（path 依赖）
+ignore = true
+ignore-sources = []
+
+[bans]
+# 禁止重复依赖（同 crate 多版本）
+multiple-versions = "warn"
+# 禁止通配符依赖
+wildcards = "deny"
+# 允许的通配符
+allow-wildcard-paths = false
+# 高亮重复依赖
+highlight = "all"
+
+[bans.deny]
+# 禁止的 crate（已知问题或不安全）
+deny = []
+
+[sources]
+# 允许的 crate 源
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+# 禁止未知源
+unknown-registry = "deny"
+unknown-git = "deny"

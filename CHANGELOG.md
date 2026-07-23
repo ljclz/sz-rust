@@ -8,14 +8,37 @@
 ## [Unreleased]
 
 ### 新增
-- ADR-001 ~ ADR-010 架构决策记录
-- criterion 性能基准测试框架（sz-rust-core/benches/core_bench.rs）
-- GitHub Actions benchmark workflow
-- 初始审计报告（P0 全通过 / P1 需改进 2 项）
-- 性能回归基线文档（baseline-v0.1.0.md）
+- 无
 
 ### 变更
-- workspace.package 补全 description/repository/homepage/keywords/categories 元数据
+- 无
+
+### 修复
+- 无
+
+## [0.2.0] - 2026-07-23
+
+### 新增
+- **可观测性模块**（`sz-rust-observability` 包）：`MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）
+- **分布式追踪模块**（`sz-rust-tracing` 包）：`Span` / `Tracer` / `SzTracer`，W3C TraceContext 格式（`traceparent: 00-<trace_id>-<span_id>-<flags>`），legacy header 兼容，OTLP exporter 占位
+- **ADR-011 可观测性架构决策**：MetricsRegistry 设计、SLO 多窗口燃烧率、四层可观测性模型（L1 决策层 / L2 运行时层 / L3 指标层 / L4 代码层）
+- **ADR-012 分布式追踪架构决策**：W3C TraceContext 标准、OTLP exporter 路径、legacy header 兼容策略
+- **missing_docs 严格检查**：CI doc job 启用 `RUSTDOCFLAGS: "-D warnings -D missing_docs"`，所有公开 API 必须有文档注释
+- **首次性能基线数据**：`docs/benchmarks/baseline-v0.1.0.md` 记录 criterion 基线，后续版本以此为回归参照
+- **24 小时 soak test**：`soak.yml` workflow，每周日 00:00 UTC 自动执行，60 秒指标采样，1500 分钟超时
+- **cargo-tarpaulin 覆盖率**：`coverage.yml` workflow，统计代码覆盖率并上传 Codecov
+- **模糊测试套件**：`sz-rust-core/tests/fuzz.rs`，7 个 fuzz 用例 × 1000 次迭代（parse_path / HandlerRef / route_config / ApiResponse / ErrorCode / AppConfig / Validate），使用自定义 xorshift64 PRNG，不依赖 cargo-fuzz
+- **fuzz CI workflow**：`fuzz.yml`，push/PR + 每周六 00:00 UTC + workflow_dispatch 触发，支持 `FUZZ_ITERATIONS` 环境变量自定义迭代次数
+- **cargo-deny 依赖审计**：`deny.toml` 配置（许可证白名单 MIT/Apache-2.0/BSD/ISC/Zlib，黑名单 GPL/AGPL/EUPL；RUSTSEC 漏洞检查；重复依赖警告；来源限制仅 crates.io）
+- **PHP 迁移指南补充 5 章节**：第 11 章缓存系统迁移（Phase 6）/ 第 12 章文件上传迁移（Phase 5）/ 第 13 章视图模板迁移（Phase 7）/ 第 14 章可观测性迁移（v0.2.0 新增）/ 第 15 章分布式追踪迁移（v0.2.0 新增）
+
+### 变更
+- **workspace.package.version**：`0.1.0` → `0.2.0`
+- **CI 门禁增强**：移除 test/doc/audit/feature-matrix/unused-deps 5 个 job 的 `continue-on-error: true`，门禁严格生效
+- **CI doc job**：添加 sz-orm path 依赖检查 + missing_docs 检查
+- **CI test job**：添加 sz-orm path 依赖检查
+- **CI 新增 deny job**：cargo-deny 检查 advisories（RUSTSEC）/ licenses / bans（重复依赖）/ sources
+- **ADR README 索引**：将"待编写 ADR 清单"改为"ADR 完成状态"，12 个 ADR 全部标记为 ✅ 已接受；关键路径覆盖表 13 项全部标记为已覆盖
 
 ### 修复
 - 无
@@ -56,5 +79,6 @@
 
 ## 版本对比链接
 
-[Unreleased]: https://github.com/ljclz/sz-rust/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ljclz/sz-rust/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ljclz/sz-rust/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ljclz/sz-rust/releases/tag/v0.1.0

@@ -101,8 +101,11 @@ pub enum UploadError {
     /// 文件移动失败（对齐 PHP 第 112 行：`Could not move the file "%s" to "%s" (%s)`）
     #[error("Could not move the file \"{from}\" to \"{to}\" ({error})")]
     MoveFailed {
+        /// 源文件路径
         from: String,
+        /// 目标文件路径
         to: String,
+        /// 错误信息
         error: String,
     },
 

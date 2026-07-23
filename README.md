@@ -2,6 +2,8 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
+**当前版本：v0.2.0**（2026-07-23）— 新增可观测性、分布式追踪、模糊测试、覆盖率、soak test、CI 门禁增强
+
 ---
 
 ## 核心特性
@@ -24,6 +26,8 @@
 - **CLI 命令行工具**：`sz-rust-cli` 提供 make / migrate / route / cache / scheduler 等命令。
 - **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。
 - **基于 SZ-ORM**：L4 金融级 ORM（Data Mapper + Repository 模式），编译时 SQL 校验（`sql_string!` / `query!` 宏）。
+- **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。
+- **分布式追踪（v0.2.0 新增）**：`sz-rust-tracing` 包实现 W3C TraceContext 标准（`traceparent: 00-<trace_id>-<span_id>-<flags>`），legacy header 兼容，OTLP exporter 占位。
 
 ---
 
@@ -121,6 +125,7 @@ cargo run -p sz-rust-examples --bin crud_demo
 ```
 sz-rust/                          # workspace 根目录
 ├── Cargo.toml                    # workspace 配置（axum 0.8 / SZ-ORM 全家桶）
+├── deny.toml                     # cargo-deny 配置（许可证/RUSTSEC/重复依赖/来源审计）
 ├── config/                       # 默认配置（app/database/cache/log/addons YAML）
 └── packages/
     ├── sz-rust-core/             # 核心框架包（controller/model/middleware/validate/...）
@@ -130,6 +135,8 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-addons-loader/    # 插件加载器
     ├── sz-rust-addons-operate/   # 插件操作库
     ├── sz-rust-pdf/              # PDF/Excel 导入导出
+    ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率，v0.2.0）
+    ├── sz-rust-tracing/          # 分布式追踪模块（W3C TraceContext + OTLP，v0.2.0）
     └── sz-rust-sz300/            # SZ300 业务应用（端到端集成示例）
 ```
 
@@ -137,20 +144,40 @@ sz-rust/                          # workspace 根目录
 
 ## 文档索引
 
-详细文档位于 `docs/sz-rust/` 目录：
+详细文档位于 `docs/` 目录：
 
-- [架构总览](docs/sz-rust/architecture.md) — 模块划分、Phase 路线图、PHP 对齐策略
-- [快速入门](docs/sz-rust/getting-started.md) — 安装、配置、Hello World
-- [控制器](docs/sz-rust/controller.md) — SzController / BaseController / AddonsBaseController
-- [模型层](docs/sz-rust/model.md) — BaseModel / Accessor / Mutator / Appendable
-- [验证器](docs/sz-rust/validate.md) — 规则列表、场景、批量验证
-- [中间件](docs/sz-rust/middleware.md) — CORS / Auth / Log / RateLimit / Trace
-- [事件与钩子](docs/sz-rust/event-hooks.md) — Event 系统 + 16 事件 HookDispatcher
-- [文件上传](docs/sz-rust/upload.md) — File / UploadedFile / 5 种存储引擎
-- [CRUD 示例](docs/sz-rust/crud-example.md) — 完整增删改查演示
-- [PHP 迁移指南](docs/sz-rust/migration.md) — PHP → Rust 概念映射与行为对齐（R5 硬约束）
+- [ADR 索引](docs/adr/README.md) — 12 个架构决策记录（ADR-001 ~ ADR-012），全部已接受
+- [ADR-011 可观测性模块](docs/adr/0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) — MetricsRegistry 设计、SLO 多窗口燃烧率、四层可观测性模型（v0.2.0）
+- [ADR-012 分布式追踪](docs/adr/0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) — W3C TraceContext 标准、OTLP exporter 路径（v0.2.0）
+- [PHP 迁移指南](docs/php-migration-guide.md) — PHP → Rust 概念映射与行为对齐（R5 硬约束），含 15 章节
+- [工程化实践规范](docs/sz-rust-engineering-practices.md) — 10 道门禁、CI/CD、代码风格
+- [软件项目审计清单](docs/软件项目审计清单.md) — P0/P1/P2 审计维度
+- [ADR 与生产 Bug 定位规范](docs/ADR与生产Bug定位规范.md) — 可复用规范（v1.0）
+- [初始审计报告](docs/audit/2026-07-22-初始审计.md) — P0 全通过 / P1 需改进 2 项
+- [性能基线 v0.1.0](docs/benchmarks/baseline-v0.1.0.md) — criterion 基线数据，回归参照
 
-> 注：模块级文档注释（`cargo doc -p sz-rust-core --open`）包含完整的 PHP 源码行号对照与 bug 复刻说明。
+> 注：模块级文档注释（`cargo doc -p sz-rust-core --open`）包含完整的 PHP 源码行号对照与 bug 复刻说明。CI doc job 启用 `-D missing_docs` 严格检查，所有公开 API 必须有文档注释。
+
+---
+
+## CI 门禁与质量保障（v0.2.0 增强）
+
+项目通过 GitHub Actions 实施 10+ 道门禁，所有门禁严格生效（无 `continue-on-error`）：
+
+| Workflow | 触发条件 | 职责 |
+|----------|---------|------|
+| `ci.yml` | push/PR | fmt / check / clippy / test / doc(missing_docs) / audit / feature-matrix / unused-deps / **deny(cargo-deny)** |
+| `soak.yml` | 每周日 00:00 UTC + workflow_dispatch | 24 小时 soak test，60 秒指标采样，1500 分钟超时 |
+| `coverage.yml` | push/PR | cargo-tarpaulin 覆盖率统计 + Codecov 上传 |
+| `benchmark.yml` | push main / PR | criterion 性能基准测试 + gh-pages-bench 分支保存 |
+| `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 7 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
+
+**cargo-deny 审计维度**（`deny.toml`）：
+- 许可证白名单：MIT / Apache-2.0 / BSD / ISC / Zlib
+- 许可证黑名单：GPL / AGPL / EUPL
+- RUSTSEC 安全漏洞检查
+- 重复依赖警告 + 通配符禁止
+- 来源限制：仅允许 crates.io
 
 ---
 

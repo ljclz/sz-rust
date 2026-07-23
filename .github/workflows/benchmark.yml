@@ -27,13 +27,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-bench-
 
-      - name: Check sz-orm dependency
-        run: |
-          if [ ! -d "../sz-orm" ]; then
-            echo "Warning: sz-orm directory not found at ../sz-orm"
-            echo "Benchmark requires sz-orm as path dependency"
-            exit 1
-          fi
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
 
       - name: Run benchmarks
         run: |
