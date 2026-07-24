@@ -2,6 +2,7 @@
 name = "sz-rust-pdf"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust PDF/Excel 处理模块：对齐 PHP phpspreadsheet + php-pdftk"

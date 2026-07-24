@@ -128,6 +128,10 @@ pub enum UploadError {
     /// 临时文件持久化错误（对齐 `tempfile::PersistError`）
     #[error(transparent)]
     Persist(#[from] tempfile::PersistError),
+
+    /// 文件名非法（路径遍历攻击防护）
+    #[error("Invalid file name \"{0}\" — potential path traversal attack")]
+    InvalidFileName(String),
 }
 
 // ============================================================================

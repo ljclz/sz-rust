@@ -2,6 +2,7 @@
 name = "sz-rust-macros"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust 过程宏：派生宏和属性宏，用于控制器路由注册和依赖注入"

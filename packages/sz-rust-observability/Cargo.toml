@@ -2,6 +2,7 @@
 name = "sz-rust-observability"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust 可观测性模块：Prometheus exporter + SLO 燃烧率 + Grafana 仪表盘模板"

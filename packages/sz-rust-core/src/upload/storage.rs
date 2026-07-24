@@ -613,7 +613,25 @@ impl StorageEngine for LocalStorageEngine {
         // 对齐 PHP 第 59-64 行：
         // `$filePath = WEB_PATH . "uploads/{$fileName}";`
         // `return !file_exists($filePath) ?: unlink($filePath);`
+
+        // 安全：防止路径遍历攻击（PHP 原始代码未做此检查）
+        // 拒绝包含 `..` 或绝对路径的 file_name
+        if file_name.contains("..") || std::path::Path::new(file_name).is_absolute() {
+            return Err(UploadError::InvalidFileName(file_name.to_string()));
+        }
+
         let file_path = self.upload_dir().join(file_name);
+
+        // 安全：验证最终路径仍在 upload_dir 内（canonicalize 后比较）
+        if let (Ok(upload_canon), Ok(file_canon)) = (
+            std::fs::canonicalize(self.upload_dir()),
+            std::fs::canonicalize(&file_path),
+        ) {
+            if !file_canon.starts_with(&upload_canon) {
+                return Err(UploadError::InvalidFileName(file_name.to_string()));
+            }
+        }
+
         if !file_path.exists() {
             // 对齐 PHP `!file_exists($filePath)` 为 true 时短路返回 true
             return Ok(true);
