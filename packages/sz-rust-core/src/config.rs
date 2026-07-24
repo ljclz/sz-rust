@@ -376,6 +376,7 @@ impl AppConfig {
     /// ├── log.yml
     /// └── server.yml
     /// ```
+    #[tracing::instrument(skip_all)]
     pub fn load_from_dir(config_dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = config_dir.as_ref();
 
@@ -402,6 +403,7 @@ impl AppConfig {
     /// 2. `SZ_DB_{CONN}_HOSTNAME` → `database.connections.{conn}.hostname`
     /// 3. `SZ_DB_{CONN}_HOSTPORT` → `database.connections.{conn}.hostport`
     /// 4. `SZ_APP__{KEY}` → `app.{key}`（标准格式，未来扩展）
+    #[tracing::instrument(skip(self))]
     pub fn apply_env_overrides(&mut self) {
         // 数据库连接环境变量覆盖：SZ_DB_{CONN}_{FIELD}
         for (conn_name, conn) in &mut self.database.connections {

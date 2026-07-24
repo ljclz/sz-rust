@@ -4344,6 +4344,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4357,6 +4358,7 @@ dependencies = [
  "sz-orm-core",
  "sz-rust-core",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4510,6 +4512,7 @@ dependencies = [
  "sz-orm-scheduler",
  "sz-orm-sqlx",
  "sz-rust-core",
+ "sz-rust-observability",
  "tokio",
  "tracing",
  "tracing-subscriber",

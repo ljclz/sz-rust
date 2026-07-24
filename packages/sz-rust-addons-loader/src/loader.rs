@@ -123,6 +123,7 @@ impl AddonLoader {
     /// - 单个插件解析失败不会中断整体扫描
     /// - 返回的 `Vec<AddonLoaderError>` 包含所有失败的插件错误
     /// - 目录读取失败返回 `ScanDir` 错误
+    #[tracing::instrument(skip(self))]
     pub fn register(&self) -> AddonLoaderResult<Vec<AddonLoaderError>> {
         self.registry.load_from_directory(&self.addons_path)
     }
@@ -135,6 +136,7 @@ impl AddonLoader {
     /// - `AddonNotFound`：插件不存在
     /// - `AddonDisabled`：插件已禁用
     /// - `ControllerNotFound`：控制器不存在
+    #[tracing::instrument(skip(self))]
     pub fn parse_route(&self, url: &str) -> AddonLoaderResult<crate::route::AddonRoute> {
         crate::route::parse_route(url, &self.registry, &self.autoload)
     }

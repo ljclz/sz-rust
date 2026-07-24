@@ -8,13 +8,37 @@
 ## [Unreleased]
 
 ### 新增
-- 无
+- sz300 集成可观测性模块（sz-rust-observability）：Prometheus /metrics 端点 + MetricsRegistry 注入 AppState
+- sz300 readiness 探针（/health/ready 端点 + DB 健康检查 + 503 状态码）
+- sz300 优雅关闭（with_graceful_shutdown 支持 Ctrl+C + SIGTERM）
+- sz300 MQTT 消费者优雅退出（CancellationToken 协调器）
+- sz300 tracing 初始化改为 EnvFilter + JSON 格式
+- sz300 集成框架统一 AppConfig（sz_rust_core::config::AppConfig）
+- 全代码库关键路径添加 #[tracing::instrument] 自动 span 注入
+- sz-rust-addons-operate 和 sz-rust-sz300 加入 workspace.members（CI 覆盖 10/10 包）
+- 生产就绪度审计报告（docs/audit/2026-07-24-生产就绪度审计报告.md）
 
 ### 变更
-- 无
+- 所有 10 个包添加 rust-version.workspace = true
+- sz-rust-tracing 依赖改为 workspace 继承
+- CI 缓存策略统一为 Swatinem/rust-cache@v2
+- CI audit job 从 rustsec/audit-check@v2.0.0 替换为 taiki-e/install-action + cargo audit
+- CI mcdc continue-on-error 改为 false（分支覆盖率硬门禁）
+- CI outdated continue-on-error 改为 false
+- CI 添加 paths-ignore（文档变更不触发 CI）
+- CI fmt/no-placeholder job 移除不必要的 sz-orm clone
+- docs/audit/ 历史文档归档至 archive/ 目录
 
 ### 修复
-- 无
+- P0: middleware/auth.rs JWT 密钥从硬编码改为环境变量 SZ_JWT_SECRET
+- P0: sz300/main.rs JWT 密钥改为环境变量 SZ300_JWT_SECRET
+- P0: sz300/config.rs 数据库密码改为环境变量 SZ300_DB_PASSWORD
+- P0: deny.toml allow-build 非法字段修复为 reason
+- P1: upload/storage.rs 路径遍历漏洞修复（.. 检查 + canonicalize 验证）
+- P1: sz300 + addons-operate 补齐 #![forbid(unsafe_code)] + #![warn(missing_docs)]
+- P1: sz300 missing_docs 226 个警告清零
+- P1: addons-operate missing_docs 48 个警告清零
+- P1: sz300 unused imports 清理
 
 ## [0.2.0] - 2026-07-23
 

@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "SZ-Rust 框架示例代码 — 快速入门与 CRUD 演示"
 
 [dependencies]
 sz-rust-core = { workspace = true }

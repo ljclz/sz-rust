@@ -881,6 +881,7 @@ impl Cache {
     /// - `key`：缓存键
     /// - `value`：缓存值（实现 `Serialize`）
     /// - `ttl`：过期时间（`None` 永不过期，对齐 PHP `$expire = null`）
+    #[tracing::instrument(skip(self, value))]
     pub fn set<T: Serialize>(
         &self,
         key: &str,
@@ -929,6 +930,7 @@ impl Cache {
     ///
     /// - `Ok(Some(value))`：缓存命中
     /// - `Ok(None)`：缓存未命中或已过期
+    #[tracing::instrument(skip(self))]
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, CacheError> {
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
@@ -985,6 +987,7 @@ impl Cache {
     }
 
     /// 删除缓存（对齐 PHP `Cache::delete($name)`）
+    #[tracing::instrument(skip(self))]
     pub fn delete(&self, key: &str) -> Result<(), CacheError> {
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
@@ -1139,6 +1142,7 @@ impl Cache {
     /// - `key`：缓存键
     /// - `ttl`：缓存过期时间
     /// - `callback`：未命中时的回调函数
+    #[tracing::instrument(skip(self, callback))]
     pub fn remember<T, F>(
         &self,
         key: &str,
@@ -1189,6 +1193,7 @@ impl Cache {
     }
 
     /// 清空所有缓存（对齐 PHP `Cache::clear()`）
+    #[tracing::instrument(skip(self))]
     pub fn clear(&self) -> Result<(), CacheError> {
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
@@ -1380,6 +1385,7 @@ impl Cache {
     ///     Ok("expensive_value".to_string())
     /// })?;
     /// ```
+    #[tracing::instrument(skip(self, fetcher))]
     pub fn fetch_singleflight<T, F>(
         &self,
         key: &str,
@@ -1478,6 +1484,7 @@ impl Cache {
     ///     || Ok("expensive_value".to_string()),
     /// )?;
     /// ```
+    #[tracing::instrument(skip(self, fetcher))]
     pub fn fetch_with_protection<T, F>(
         &self,
         key: &str,

@@ -151,6 +151,7 @@ impl IntoResponse for ApiResponse {
 /// 直接构建标准 JSON 响应（无需创建 ApiResponse 实例）
 ///
 /// 对齐 PHP `renderJson($code, $msg, $data)`。
+#[tracing::instrument(skip(msg, data))]
 pub fn render_json(code: i32, msg: impl Into<String>, data: Value) -> Response {
     ApiResponse::new(code, msg, data).into_response()
 }
@@ -158,6 +159,7 @@ pub fn render_json(code: i32, msg: impl Into<String>, data: Value) -> Response {
 /// 构建成功响应
 ///
 /// 对齐 PHP `renderSuccess($data, $msg)`。
+#[tracing::instrument(skip(data, msg))]
 pub fn render_success(data: Value, msg: impl Into<String>) -> Response {
     ApiResponse::success(data, msg).into_response()
 }
@@ -165,6 +167,7 @@ pub fn render_success(data: Value, msg: impl Into<String>) -> Response {
 /// 构建错误响应
 ///
 /// 对齐 PHP `renderError($msg, $data)`。
+#[tracing::instrument(skip(msg))]
 pub fn render_error(msg: impl Into<String>) -> Response {
     ApiResponse::error(msg).into_response()
 }
@@ -172,6 +175,7 @@ pub fn render_error(msg: impl Into<String>) -> Response {
 /// 构建带自定义错误码的错误响应
 ///
 /// 对齐 PHP `renderError($code, $msg, $data)`。
+#[tracing::instrument(skip(msg, data))]
 pub fn render_error_with_code(code: i32, msg: impl Into<String>, data: Value) -> Response {
     ApiResponse::error_with_code(code, msg, data).into_response()
 }
@@ -327,6 +331,7 @@ pub fn is_json_request(headers: &HeaderMap) -> bool {
 /// # 返回
 ///
 /// `Response`，HTTP 200，Content-Type: application/json; charset=utf-8
+#[tracing::instrument(skip(data))]
 pub fn respond(data: &Value) -> Response {
     let body = data.to_string();
     (
@@ -348,6 +353,7 @@ pub fn respond(data: &Value) -> Response {
 /// # 返回
 ///
 /// `Response`，HTTP 200，Content-Type: text/html; charset=utf-8
+#[tracing::instrument(skip(content))]
 pub fn respond_html(content: impl Into<String>) -> Response {
     (
         StatusCode::OK,
@@ -368,6 +374,7 @@ pub fn respond_html(content: impl Into<String>) -> Response {
 /// # 返回
 ///
 /// `Response`，HTTP 200，Content-Type: text/plain; charset=utf-8
+#[tracing::instrument(skip(content))]
 pub fn respond_text(content: impl Into<String>) -> Response {
     (
         StatusCode::OK,
@@ -410,6 +417,7 @@ pub fn respond_text(content: impl Into<String>) -> Response {
 ///
 /// - JSON 请求 → JSON 响应
 /// - 非 JSON 请求 → HTML 响应（数组输出字面量 `"Array"`）
+#[tracing::instrument(skip(data, headers))]
 pub fn auto_respond(data: &Value, headers: &HeaderMap) -> Response {
     if is_json_request(headers) {
         // 对齐 PHP: $type = 'json'

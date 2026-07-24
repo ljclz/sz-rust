@@ -287,6 +287,7 @@ impl ResourceRoute {
 /// ## 错误
 ///
 /// - `RouteParse`：addon 或 controller 为空
+#[tracing::instrument]
 pub fn build_resource_routes(
     addon: &str,
     controller: &str,

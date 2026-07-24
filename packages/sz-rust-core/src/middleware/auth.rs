@@ -230,6 +230,7 @@ impl AuthConfig {
 ///     .route("/", axum::routing::get(|| async { "ok" }))
 ///     .layer(axum::middleware::from_fn_with_state(config, auth_middleware));
 /// ```
+#[tracing::instrument(skip_all)]
 pub async fn auth_middleware(
     axum::extract::State(config): axum::extract::State<AuthConfig>,
     req: Request,
@@ -441,6 +442,7 @@ fn simple_wildcard_match(pattern: &str, text: &str) -> bool {
 /// ```
 ///
 /// Rust 端 `JwtEncoder::decode` 不校验签发人，需在本模块补充。
+#[tracing::instrument(skip(claims))]
 pub fn verify_issuer(claims: &JwtClaims, expected_issuer: &str) -> bool {
     match &claims.iss {
         Some(iss) => iss == expected_issuer,

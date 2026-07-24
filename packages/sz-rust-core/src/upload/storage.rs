@@ -522,6 +522,7 @@ impl LocalStorageEngine {
     ///     return true;
     /// }
     /// ```
+    #[tracing::instrument(skip(self))]
     async fn upload_by_internal(&mut self) -> Result<bool, UploadError> {
         let target = self.upload_dir().join(
             self.file_name
@@ -570,6 +571,7 @@ impl LocalStorageEngine {
     /// ```
     ///
     /// Rust 端：使用 `tokio::fs::copy` 模拟 `putFile`，返回保存路径。
+    #[tracing::instrument(skip(self))]
     async fn upload_by_external(&mut self) -> Result<String, UploadError> {
         let file_name = self
             .file_name
@@ -596,6 +598,7 @@ impl LocalStorageEngine {
 
 #[async_trait]
 impl StorageEngine for LocalStorageEngine {
+    #[tracing::instrument(skip(self))]
     async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         // 对齐 PHP 第 20-23 行：`return $this->isInternal ? $this->uploadByInternal() : $this->uploadByExternal();`
         if self.is_internal {
@@ -609,6 +612,7 @@ impl StorageEngine for LocalStorageEngine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         // 对齐 PHP 第 59-64 行：
         // `$filePath = WEB_PATH . "uploads/{$fileName}";`
@@ -741,6 +745,7 @@ impl AliyunStorageEngine {
 
 #[async_trait]
 impl StorageEngine for AliyunStorageEngine {
+    #[tracing::instrument(skip(self))]
     async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         // 对齐 PHP `Aliyun::upload` 第 27-46 行
         let file_name = self
@@ -774,6 +779,7 @@ impl StorageEngine for AliyunStorageEngine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         // 对齐 PHP `Aliyun::delete` 第 51-66 行
         let storage = self.create_storage();
@@ -873,6 +879,7 @@ impl QcloudStorageEngine {
 
 #[async_trait]
 impl StorageEngine for QcloudStorageEngine {
+    #[tracing::instrument(skip(self))]
     async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         // 对齐 PHP `Qcloud::upload` 第 44-59 行
         let file_name = self
@@ -902,6 +909,7 @@ impl StorageEngine for QcloudStorageEngine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         let storage = self.create_storage();
         match storage.delete(file_name).await {
@@ -997,6 +1005,7 @@ impl QiniuStorageEngine {
 
 #[async_trait]
 impl StorageEngine for QiniuStorageEngine {
+    #[tracing::instrument(skip(self))]
     async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         // 对齐 PHP `Qiniu::upload` 第 28-50 行
         let file_name = self
@@ -1026,6 +1035,7 @@ impl StorageEngine for QiniuStorageEngine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         let storage = self.create_storage();
         match storage.delete(file_name).await {
@@ -1117,6 +1127,7 @@ impl S3StorageEngine {
 
 #[async_trait]
 impl StorageEngine for S3StorageEngine {
+    #[tracing::instrument(skip(self))]
     async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         let file_name = self
             .file_name
@@ -1145,6 +1156,7 @@ impl StorageEngine for S3StorageEngine {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         let storage = self.create_storage();
         match storage.delete(file_name).await {
@@ -1240,6 +1252,7 @@ impl StorageDriver {
     }
 
     /// 执行上传 — 对齐 PHP `Driver::upload()`
+    #[tracing::instrument(skip(self))]
     pub async fn upload(&mut self) -> Result<Option<String>, UploadError> {
         match self {
             Self::Local(e) => e.upload().await,
@@ -1251,6 +1264,7 @@ impl StorageDriver {
     }
 
     /// 执行删除 — 对齐 PHP `Driver::delete($fileName)`
+    #[tracing::instrument(skip(self))]
     pub async fn delete(&mut self, file_name: &str) -> Result<bool, UploadError> {
         match self {
             Self::Local(e) => e.delete(file_name).await,
