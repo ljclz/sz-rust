@@ -101,6 +101,7 @@ impl AddonAutoload {
     /// - `Ok(Some(path))`：类映射到文件且文件存在
     /// - `Ok(None)`：类名不属于 `addons\` 命名空间，或文件不存在（让其他 autoloader 处理）
     /// - `Err(_)`：路径解析失败
+    #[tracing::instrument(skip(self))]
     pub fn resolve(&self, class: &str) -> AddonLoaderResult<Option<PathBuf>> {
         let class = class.trim_start_matches('\\');
 
@@ -161,6 +162,7 @@ impl AddonAutoload {
     /// - `resolve_controller("operate", "Order")` → `addons/operate/controller/Order.php`
     /// - `resolve_controller("operate", "admin.Order")` → `addons/operate/controller/admin/Order.php`
     /// - `resolve_controller("operate", "admin.sub.Order")` → `addons/operate/controller/admin/sub/Order.php`
+    #[tracing::instrument(skip(self))]
     pub fn resolve_controller(
         &self,
         addon: &str,
@@ -176,6 +178,7 @@ impl AddonAutoload {
     /// ## 示例
     ///
     /// - `resolve_plugin("operate")` → `addons/operate/Plugin.php`
+    #[tracing::instrument(skip(self))]
     pub fn resolve_plugin(&self, addon: &str) -> AddonLoaderResult<Option<PathBuf>> {
         let full_class = format!("addons\\{}\\Plugin", addon);
         self.resolve(&full_class)
@@ -184,6 +187,7 @@ impl AddonAutoload {
     /// 强制解析类名（对齐 PHP `get_addons_class` 返回字符串而非 bool）
     ///
     /// 与 `resolve` 的区别：不检查文件是否存在，直接返回路径
+    #[tracing::instrument(skip(self))]
     pub fn resolve_strict(&self, class: &str) -> AddonLoaderResult<PathBuf> {
         let class = class.trim_start_matches('\\');
 

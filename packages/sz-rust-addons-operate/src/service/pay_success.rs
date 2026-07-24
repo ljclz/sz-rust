@@ -79,6 +79,7 @@ pub trait PaySuccessService: Send + Sync {
 pub struct MockPaySuccessService;
 
 impl PaySuccessService for MockPaySuccessService {
+    #[tracing::instrument(skip(self))]
     fn on_pay_success(&self, _order_no: &str, _data: &Value) -> Result<bool, String> {
         Ok(true)
     }

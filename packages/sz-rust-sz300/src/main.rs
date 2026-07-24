@@ -3,13 +3,18 @@
 #![forbid(unsafe_code)]
 
 use sz_rust_sz300::{config, db, router, services, state::AppState};
+use sz_rust_observability::MetricsRegistry;
 use std::sync::Arc;
 use tokio::signal;
+use tokio::sync::watch;
+use tracing_subscriber::{fmt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 初始化日志
-    tracing_subscriber::fmt::init();
+    // 初始化日志 — EnvFilter + JSON 格式（生产环境友好）
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,sz_rust_sz300=debug"));
+    fmt().with_env_filter(filter).json().init();
 
     tracing::info!("鲜视达 SZ-300 后端服务启动");
 
@@ -18,6 +23,36 @@ async fn main() -> anyhow::Result<()> {
 
     // 加载配置（从环境变量读取，密钥不硬编码）
     let config = config::load_config()?;
+
+    // 尝试加载框架统一 AppConfig（YAML 配置文件，可选）
+    // 对齐 sz-rust-core 的 AppConfig::load_from_dir()，实现框架级配置统一
+    match sz_rust_core::config::AppConfig::load_from_dir("config") {
+        Ok(framework_config) => {
+            tracing::info!("框架统一 AppConfig 加载成功（config/ 目录）");
+            // 框架配置可用于后续框架级功能（缓存、插件、日志等）
+            let _ = framework_config;
+        }
+        Err(e) => {
+            tracing::warn!("框架统一 AppConfig 加载失败（非致命，使用环境变量配置）: {}", e);
+        }
+    }
+
+    // 初始化可观测性 — Prometheus 指标注册中心
+    let metrics_registry = Arc::new(MetricsRegistry::new());
+    metrics_registry.register_counter(
+        "sz300_requests_total",
+        "Total HTTP requests received",
+    );
+    metrics_registry.register_gauge(
+        "sz300_active_connections",
+        "Active database connections",
+    );
+    metrics_registry.register_histogram(
+        "sz300_request_duration_seconds",
+        "HTTP request duration in seconds",
+        vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+    );
+    tracing::info!("可观测性模块初始化完成（Prometheus /metrics 端点已启用）");
 
     // 初始化数据库连接池
     let pool = db::init_pool(&config).await?;
@@ -40,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         db_pool: Arc::new(pool),
         pg_pool,
+        metrics_registry: metrics_registry.clone(),
     };
 
     // 初始化 JWT 认证（传入数据库连接池用于密码验证）
@@ -53,10 +89,11 @@ async fn main() -> anyhow::Result<()> {
         app_state.db_pool.clone(),
     );
 
-    // 初始化 MQTT 消费者
+    // 初始化 MQTT 消费者 — 带优雅退出信号
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let app_state_clone = app_state.clone();
-    tokio::spawn(async move {
-        services::mqtt_listener::MqttDispatcher::start_consumer(app_state_clone).await;
+    let mqtt_handle = tokio::spawn(async move {
+        services::mqtt_listener::MqttDispatcher::start_consumer(app_state_clone, shutdown_rx).await;
     });
 
     // 注册路由
@@ -69,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("监听地址: {}", addr);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(async {
+        .with_graceful_shutdown(async move {
             let ctrl_c = async {
                 signal::ctrl_c()
                     .await
@@ -93,6 +130,14 @@ async fn main() -> anyhow::Result<()> {
             }
 
             tracing::info!("收到关闭信号，正在优雅关闭...");
+            // 通知 MQTT 消费者退出
+            let _ = shutdown_tx.send(true);
+            // 等待 MQTT 任务完成（最多 5 秒）
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                mqtt_handle,
+            ).await;
+            tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
         })
         .await?;
 

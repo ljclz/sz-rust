@@ -36,6 +36,7 @@ impl AddonsBaseController for LevelController {}
 
 impl LevelController {
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -50,6 +51,7 @@ impl LevelController {
     }
 
     /// 添加等级 — 对齐 PHP `add()`
+    #[tracing::instrument(skip_all)]
     pub async fn add(
         &self,
         req: Request<Body>,
@@ -71,6 +73,7 @@ impl LevelController {
     }
 
     /// 编辑等级 — 对齐 PHP `edit()`
+    #[tracing::instrument(skip_all)]
     pub async fn edit(
         &self,
         req: Request<Body>,
@@ -98,6 +101,7 @@ impl LevelController {
     /// 软删除等级 — 对齐 PHP `delete()`
     ///
     /// **注意**：PHP Level 控制器方法名为 `delete`（不是 `del`）。
+    #[tracing::instrument(skip_all)]
     pub async fn delete(
         &self,
         req: Request<Body>,

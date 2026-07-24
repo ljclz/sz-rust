@@ -6,9 +6,10 @@ use axum::{middleware, routing::get, routing::post, Router};
 /// 创建应用路由表，注册所有业务路由并叠加 JWT 鉴权中间件
 pub fn create_router(state: AppState) -> Router {
     Router::new()
-        // 健康检查
+        // 健康检查 + 可观测性
         .route("/health", get(health::check))
         .route("/health/ready", get(health::readiness))
+        .route("/metrics", get(health::metrics))
         // 认证（公开接口）
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/refresh", post(auth::refresh))

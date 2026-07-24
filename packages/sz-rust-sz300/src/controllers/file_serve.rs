@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use std::path::PathBuf;
 use tokio::fs;
 
+#[tracing::instrument(skip_all)]
 pub async fn serve_file(
     State(_state): State<AppState>,
     path: axum::extract::Path<String>,

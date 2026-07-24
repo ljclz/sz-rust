@@ -322,22 +322,27 @@ impl MerchantController {
     }
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::list(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::info(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::create(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::update(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::delete(&state, req).await
 }

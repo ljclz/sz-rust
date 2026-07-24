@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 sz-rust-core.workspace = true
+sz-rust-observability.workspace = true
 sz-orm-core.workspace = true
 sz-orm-auth.workspace = true
 sz-orm-mqtt.workspace = true

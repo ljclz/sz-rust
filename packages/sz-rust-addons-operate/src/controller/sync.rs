@@ -78,6 +78,7 @@ impl SyncController {
     ///     // 返回 "已更新:X条,删除:Y条,未更新:Z条"
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn sync_rentarea(
         &self,
         req: Request<Body>,
@@ -139,6 +140,7 @@ impl SyncController {
     ///     //   - 不在 incoming_map 中且 is_delete==1：未更新
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn sync_customer(
         &self,
         req: Request<Body>,
@@ -209,6 +211,7 @@ impl SyncController {
     ///     return $this->renderSuccess('操作成功'.$num.'条,失败:'.($total - $num));
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn add_contract(
         &self,
         req: Request<Body>,
@@ -250,6 +253,7 @@ impl SyncController {
     ///     }
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn add_rentarea(
         &self,
         req: Request<Body>,
@@ -295,6 +299,7 @@ impl SyncController {
     /// # PHP 硬编码 bug 复刻
     ///
     /// PHP `addCustomer` 跳过前 2 条（`if($key >= 2)`），Rust 端严格对齐此行为。
+    #[tracing::instrument(skip_all)]
     pub async fn add_customer(
         &self,
         req: Request<Body>,
@@ -339,6 +344,7 @@ impl SyncController {
     ///     return $this->renderSuccess('操作成功');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn sync11(
         &self,
         req: Request<Body>,
@@ -372,6 +378,7 @@ impl SyncController {
     /// 5. 多客户冲突时按当前 customer_id 匹配
     ///
     /// 返回 `{'result': [...], 'headers': [...]}`
+    #[tracing::instrument(skip_all)]
     pub async fn check(
         &self,
         req: Request<Body>,
@@ -412,6 +419,7 @@ impl SyncController {
     /// 6. 事务更新 rentarea.customer_id 和 customer.rentarea_ids
     ///
     /// 返回 `{'conflicts': [...]}`
+    #[tracing::instrument(skip_all)]
     pub async fn sync(
         &self,
         req: Request<Body>,

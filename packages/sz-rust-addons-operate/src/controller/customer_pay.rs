@@ -79,6 +79,7 @@ impl CustomerPayController {
     ///     return $this->renderSuccess('', compact('result'));
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn base(&self, req: Request<Body>) -> Response {
         let _param = match self.post_data(req).await {
             Ok(p) => p,
@@ -97,6 +98,7 @@ impl CustomerPayController {
     }
 
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -111,6 +113,7 @@ impl CustomerPayController {
     }
 
     /// 导出列表 — 对齐 PHP `export()`
+    #[tracing::instrument(skip_all)]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -140,6 +143,7 @@ impl CustomerPayController {
     ///     return $this->renderSuccess('收款成功', ['order_id'=>$orderDetail['order_id'],'pay_res'=>$orderDetail['pay_res']]);
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn pay(&self, req: Request<Body>, svc: &dyn SettledService) -> Response {
         let param = match self.post_data(req).await {
             Ok(p) => p,
@@ -194,6 +198,7 @@ impl CustomerPayController {
     ///     }
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn pay_buy(
         &self,
         req: Request<Body>,
@@ -250,6 +255,7 @@ impl CustomerPayController {
     ///     return $this->renderSuccess('', compact('detail'));
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn pay_success(
         &self,
         req: Request<Body>,
@@ -281,6 +287,7 @@ impl CustomerPayController {
     /// - `ccb`：`RESULT == 'Y'` → `settle()`，`RESULT == 'N'` → `order_status=20`
     /// - `icbc`：`pay_status == 1` → `settle()`，其他 → `order_status=20`
     /// - `fuiou`：`result_code == '000000' && trans_stat == 'SUCCESS'` → `settle()`，否则 → `order_status=20`
+    #[tracing::instrument(skip_all)]
     pub async fn check(
         &self,
         req: Request<Body>,
@@ -333,6 +340,7 @@ impl CustomerPayController {
     ///     return $this->renderError($model->getError() ?: '退款失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn refund(
         &self,
         req: Request<Body>,
@@ -389,6 +397,7 @@ impl CustomerPayController {
     ///     return $this->renderError('数据不存在');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn detail(
         &self,
         req: Request<Body>,

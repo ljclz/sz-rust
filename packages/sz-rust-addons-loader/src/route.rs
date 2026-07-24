@@ -115,6 +115,7 @@ impl AddonRoute {
 /// - `AddonNotFound`：插件不存在（对齐 PHP 404）
 /// - `AddonDisabled`：插件已禁用（对齐 PHP 500）
 /// - `ControllerNotFound`：控制器类或文件不存在（对齐 PHP 404）
+#[tracing::instrument(skip(registry, autoload))]
 pub fn parse_route(
     url: &str,
     registry: &AddonRegistry,

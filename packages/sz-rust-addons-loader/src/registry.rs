@@ -64,6 +64,7 @@ impl AddonRegistry {
     /// ## 错误
     ///
     /// - `AddonNotFound`：插件名已存在（不覆盖）
+    #[tracing::instrument(skip(self, manifest))]
     pub fn register(&self, manifest: AddonManifest) -> AddonLoaderResult<()> {
         let mut manifests = self.manifests.write();
         if manifests.contains_key(&manifest.name) {
@@ -77,6 +78,7 @@ impl AddonRegistry {
     }
 
     /// 强制注册或更新插件（对齐 PHP `array_merge` 覆盖行为）
+    #[tracing::instrument(skip(self, manifest))]
     pub fn upsert(&self, manifest: AddonManifest) {
         let mut manifests = self.manifests.write();
         manifests.insert(manifest.name.clone(), manifest);
@@ -88,6 +90,7 @@ impl AddonRegistry {
     ///
     /// - `Ok(Some(manifest))`：插件已存在并已移除
     /// - `Ok(None)`：插件不存在
+    #[tracing::instrument(skip(self))]
     pub fn unregister(&self, name: &str) -> AddonLoaderResult<Option<AddonManifest>> {
         let mut manifests = self.manifests.write();
         Ok(manifests.remove(name))
@@ -139,6 +142,7 @@ impl AddonRegistry {
     ///
     /// - `name`：插件名
     /// - `enabled`：true=1（启用），false=0（禁用）
+    #[tracing::instrument(skip(self))]
     pub fn set_enabled(&self, name: &str, enabled: bool) -> AddonLoaderResult<()> {
         let mut manifests = self.manifests.write();
         let manifest = manifests
@@ -195,6 +199,7 @@ impl AddonRegistry {
     }
 
     /// 清空注册中心
+    #[tracing::instrument(skip(self))]
     pub fn clear(&self) {
         let mut manifests = self.manifests.write();
         manifests.clear();
@@ -216,6 +221,7 @@ impl AddonRegistry {
     ///
     /// - 单个插件解析失败不会中断整体扫描，但会记录到返回的错误列表
     /// - 目录读取失败返回 `ScanDir` 错误
+    #[tracing::instrument(skip(self))]
     pub fn load_from_directory(
         &self,
         addons_path: &Path,

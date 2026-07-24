@@ -130,6 +130,7 @@ pub trait CcbService: Send + Sync {
 pub struct MockCcbService;
 
 impl CcbService for MockCcbService {
+    #[tracing::instrument(skip(self))]
     fn ccb_pay(&self, order: &Value) -> Result<Value, String> {
         let trade_no = order
             .get("trade_no")
@@ -148,6 +149,7 @@ impl CcbService for MockCcbService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn ccb_check(&self, order: &Value) -> Result<Value, String> {
         let trade_no = order
             .get("trade_no")
@@ -165,6 +167,7 @@ impl CcbService for MockCcbService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn reject(&self, _data: &Value) -> Result<Value, String> {
         Ok(serde_json::json!({
             "return_CODE": "000000",
@@ -172,6 +175,7 @@ impl CcbService for MockCcbService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn add_bill(&self, _resp_obj: &Value) -> Result<bool, String> {
         Ok(true)
     }

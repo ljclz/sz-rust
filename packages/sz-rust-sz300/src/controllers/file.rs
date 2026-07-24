@@ -68,11 +68,13 @@ impl FileController {
 }
 
 /// 文件上传（对齐 PHP FileController::upload）
+#[tracing::instrument(skip(_state, req))]
 pub async fn upload(State(_state): State<AppState>, req: Request<Body>) -> Response {
     FileController::upload(req).await
 }
 
 /// 多部分文件上传（对齐 PHP FileController::uploadMultipart）
+#[tracing::instrument(skip(_state, multipart))]
 pub async fn upload_multipart(State(_state): State<AppState>, multipart: Multipart) -> Response {
     FileController::upload_multipart(multipart).await
 }

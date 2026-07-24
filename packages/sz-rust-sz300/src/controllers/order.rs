@@ -318,14 +318,17 @@ impl OrderController {
     }
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::list(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::info(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::create(&state, req).await
 }

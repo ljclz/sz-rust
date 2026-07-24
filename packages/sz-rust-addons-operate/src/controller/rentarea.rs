@@ -38,6 +38,7 @@ impl AddonsBaseController for RentareaController {}
 
 impl RentareaController {
     /// 基础数据 — 对齐 PHP `base()`
+    #[tracing::instrument(skip_all)]
     pub async fn base(&self, req: Request<Body>) -> Response {
         let _param = match self.post_data(req).await {
             Ok(p) => p,
@@ -52,6 +53,7 @@ impl RentareaController {
     }
 
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -66,6 +68,7 @@ impl RentareaController {
     }
 
     /// 导出列表 — 对齐 PHP `export()`
+    #[tracing::instrument(skip_all)]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -95,6 +98,7 @@ impl RentareaController {
     ///     return $this->renderError($model->getError() ?: '添加失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn add(
         &self,
         req: Request<Body>,
@@ -122,6 +126,7 @@ impl RentareaController {
     }
 
     /// 编辑铺位 — 对齐 PHP `edit()`
+    #[tracing::instrument(skip_all)]
     pub async fn edit(
         &self,
         req: Request<Body>,
@@ -147,6 +152,7 @@ impl RentareaController {
     }
 
     /// 软删除铺位 — 对齐 PHP `del()`
+    #[tracing::instrument(skip_all)]
     pub async fn del(
         &self,
         req: Request<Body>,
@@ -168,6 +174,7 @@ impl RentareaController {
     }
 
     /// 绑定商户 — 对齐 PHP `bind()`
+    #[tracing::instrument(skip_all)]
     pub async fn bind(
         &self,
         req: Request<Body>,
@@ -210,6 +217,7 @@ impl RentareaController {
     ///     return $this->renderSuccess("一键空置成功");
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn cancel(
         &self,
         req: Request<Body>,
@@ -240,6 +248,7 @@ impl RentareaController {
     }
 
     /// 修改状态 — 对齐 PHP `status()`
+    #[tracing::instrument(skip_all)]
     pub async fn status(
         &self,
         req: Request<Body>,
@@ -271,6 +280,7 @@ impl RentareaController {
     ///     return $this->renderSuccess('', ['result'=>$result]);
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn select_level_list(
         &self,
         req: Request<Body>,
@@ -300,6 +310,7 @@ impl RentareaController {
     ///
     /// - 事务：NOTE(Phase 6)
     /// - 关联更新（customer.rentarea_ids）：已实现
+    #[tracing::instrument(skip_all)]
     pub async fn sync(
         &self,
         req: Request<Body>,

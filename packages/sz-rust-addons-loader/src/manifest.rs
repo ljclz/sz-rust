@@ -145,6 +145,7 @@ impl AddonManifest {
 ///
 /// - `ManifestParse`：Plugin.php 不存在或 `$info` 数组格式错误
 /// - `ReadFile`：文件读取失败
+#[tracing::instrument]
 pub fn parse_manifest(addon_path: &Path) -> AddonLoaderResult<AddonManifest> {
     let plugin_file = addon_path.join("Plugin.php");
     if !plugin_file.exists() {

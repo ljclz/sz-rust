@@ -68,6 +68,7 @@ impl CustomerController {
     ///     return $this->renderSuccess('', compact('result'));
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn base(&self, req: Request<Body>) -> Response {
         let _param = match self.post_data(req).await {
             Ok(p) => p,
@@ -101,6 +102,7 @@ impl CustomerController {
     }
 
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -115,6 +117,7 @@ impl CustomerController {
     }
 
     /// 导出列表 — 对齐 PHP `export()`
+    #[tracing::instrument(skip_all)]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -140,6 +143,7 @@ impl CustomerController {
     ///     return $this->renderSuccess('', ['result'=>$result]);
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn select_dept_list(
         &self,
         req: Request<Body>,
@@ -170,6 +174,7 @@ impl CustomerController {
     ///     return $this->renderSuccess('', ['result'=>$result]);
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn select_cat_list(
         &self,
         req: Request<Body>,
@@ -205,6 +210,7 @@ impl CustomerController {
     ///     return $this->renderError($model->getError() ?: '添加失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn add(
         &self,
         req: Request<Body>,
@@ -232,6 +238,7 @@ impl CustomerController {
     }
 
     /// 编辑客户 — 对齐 PHP `edit()`
+    #[tracing::instrument(skip_all)]
     pub async fn edit(
         &self,
         req: Request<Body>,
@@ -257,6 +264,7 @@ impl CustomerController {
     }
 
     /// 软删除客户 — 对齐 PHP `del()`
+    #[tracing::instrument(skip_all)]
     pub async fn del(
         &self,
         req: Request<Body>,
@@ -292,6 +300,7 @@ impl CustomerController {
     ///     return $this->renderError($model->getError() ?:'绑定铺位失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn bind(
         &self,
         req: Request<Body>,
@@ -317,6 +326,7 @@ impl CustomerController {
     }
 
     /// 撤场 — 对齐 PHP `cancel()`
+    #[tracing::instrument(skip_all)]
     pub async fn cancel(
         &self,
         req: Request<Body>,
@@ -338,6 +348,7 @@ impl CustomerController {
     }
 
     /// 修改状态 — 对齐 PHP `status()`
+    #[tracing::instrument(skip_all)]
     pub async fn status(
         &self,
         req: Request<Body>,
@@ -387,6 +398,7 @@ impl CustomerController {
     ///     return $this->renderSuccess('操作成功'.$num.'条,失败:'.($total - $num));
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn sync(
         &self,
         req: Request<Body>,

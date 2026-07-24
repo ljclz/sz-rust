@@ -198,6 +198,7 @@ fn sql_escape(s: &str) -> String {
 }
 
 /// 获取 MQTT 配置
+#[tracing::instrument]
 pub fn get_mqtt_config() -> MqttConfig {
     let client_id = format!(
         "sz300-server-{}",
@@ -213,6 +214,7 @@ pub fn get_mqtt_config() -> MqttConfig {
 }
 
 /// 获取服务器订阅的主题列表
+#[tracing::instrument]
 pub fn get_subscribe_topics() -> Vec<MqttTopic> {
     vec![
         MqttTopic::new("/sz/device/+/status"),
@@ -222,6 +224,7 @@ pub fn get_subscribe_topics() -> Vec<MqttTopic> {
 }
 
 /// 发送 OTA 指令到设备
+#[tracing::instrument(skip_all)]
 pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> Result<(), String> {
     let topic = format!("/sz/server/{}/ota", device_sn);
     let payload = serde_json::json!({

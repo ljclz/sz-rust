@@ -352,22 +352,27 @@ impl ProductController {
     }
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::list(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::info(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::create(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::update(&state, req).await
 }
 
+#[tracing::instrument(skip(state, req))]
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::delete(&state, req).await
 }

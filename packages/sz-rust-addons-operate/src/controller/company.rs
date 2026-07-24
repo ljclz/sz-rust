@@ -58,6 +58,7 @@ impl CompanyController {
     ///     return $this->renderSuccess('', compact('result'));
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -83,6 +84,7 @@ impl CompanyController {
     ///     return $this->renderSuccess('', compact('result'));
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -111,6 +113,7 @@ impl CompanyController {
     ///     return $this->renderError($model->getError() ?: '添加失败');
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn add(
         &self,
         req: Request<Body>,
@@ -146,6 +149,7 @@ impl CompanyController {
     ///     return $this->renderError($model->getError() ?:'更新失败');
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn edit(
         &self,
         req: Request<Body>,
@@ -184,6 +188,7 @@ impl CompanyController {
     ///     return $this->renderSuccess("删除成功");
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn del(
         &self,
         req: Request<Body>,
@@ -218,6 +223,7 @@ impl CompanyController {
     ///     return $this->renderError('数据不存在');
     /// }
     /// ```
+    #[tracing::instrument(skip(self, req, repo))]
     pub async fn detail(
         &self,
         req: Request<Body>,

@@ -41,6 +41,7 @@ impl AddonsBaseController for ContractLogController {}
 
 impl ContractLogController {
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -55,6 +56,7 @@ impl ContractLogController {
     }
 
     /// 导出列表 — 对齐 PHP `export()`
+    #[tracing::instrument(skip_all)]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -83,6 +85,7 @@ impl ContractLogController {
     ///     return $this->renderError($model->getError() ?: '添加失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn add(
         &self,
         req: Request<Body>,

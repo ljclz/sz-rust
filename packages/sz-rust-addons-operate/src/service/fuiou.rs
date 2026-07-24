@@ -130,6 +130,7 @@ pub trait FuiouService: Send + Sync {
 pub struct MockFuiouService;
 
 impl FuiouService for MockFuiouService {
+    #[tracing::instrument(skip(self))]
     fn fuiou_pay(&self, param: &Value) -> Result<Value, String> {
         let trade_no = param
             .get("trade_no")
@@ -147,6 +148,7 @@ impl FuiouService for MockFuiouService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn fuiou_check(&self, param: &Value) -> Result<Value, String> {
         let trade_no = param
             .get("trade_no")
@@ -164,6 +166,7 @@ impl FuiouService for MockFuiouService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn reject(&self, _param: &Value) -> Result<Value, String> {
         Ok(serde_json::json!({
             "result_code": "000000",
@@ -172,10 +175,12 @@ impl FuiouService for MockFuiouService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn add_bill(&self, _resp_obj: &Value) -> Result<bool, String> {
         Ok(true)
     }
 
+    #[tracing::instrument(skip(self))]
     fn edit_bill(&self, _resp_obj: &Value) -> Result<bool, String> {
         Ok(true)
     }

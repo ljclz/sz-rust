@@ -115,6 +115,7 @@ pub trait IcbcService: Send + Sync {
 pub struct MockIcbcService;
 
 impl IcbcService for MockIcbcService {
+    #[tracing::instrument(skip(self))]
     fn icbc_pay(&self, order: &Value) -> Result<Value, String> {
         let trade_no = order
             .get("trade_no")
@@ -132,6 +133,7 @@ impl IcbcService for MockIcbcService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn icbc_check(&self, order: &Value) -> Result<Value, String> {
         let trade_no = order
             .get("trade_no")
@@ -148,6 +150,7 @@ impl IcbcService for MockIcbcService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn reject(&self, _order: &Value) -> Result<Value, String> {
         Ok(serde_json::json!({
             "return_code": 0,
@@ -158,6 +161,7 @@ impl IcbcService for MockIcbcService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     fn add_bill(&self, _data: &Value) -> Result<bool, String> {
         Ok(true)
     }

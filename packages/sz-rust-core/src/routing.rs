@@ -476,18 +476,21 @@ fn join_path(prefix: &str, path: &str) -> String {
 ///         path: /items
 ///         handler: Item@list
 /// ```
+#[tracing::instrument]
 pub fn load_routes_from_yaml_str(yaml: &str) -> Result<RouteConfig, RouteConfigError> {
     let config: RouteConfig = serde_yaml::from_str(yaml)?;
     Ok(config)
 }
 
 /// 从 JSON 字符串加载路由配置
+#[tracing::instrument]
 pub fn load_routes_from_json_str(json: &str) -> Result<RouteConfig, RouteConfigError> {
     let config: RouteConfig = serde_json::from_str(json)?;
     Ok(config)
 }
 
 /// 从 YAML 文件加载路由配置
+#[tracing::instrument(skip(path))]
 pub async fn load_routes_from_yaml_file(
     path: impl AsRef<std::path::Path>,
 ) -> Result<RouteConfig, RouteConfigError> {
@@ -498,6 +501,7 @@ pub async fn load_routes_from_yaml_file(
 }
 
 /// 从 JSON 文件加载路由配置
+#[tracing::instrument(skip(path))]
 pub async fn load_routes_from_json_file(
     path: impl AsRef<std::path::Path>,
 ) -> Result<RouteConfig, RouteConfigError> {
@@ -674,6 +678,7 @@ impl RouteRegistry {
     /// 转换约定式路由为 RouteRule 列表
     ///
     /// 约定式路由的 handler 字段为 `Controller@action` 格式。
+    #[tracing::instrument(skip(self))]
     pub fn convention_as_rules(&self) -> Vec<RouteRule> {
         self.convention_routes
             .iter()
@@ -693,6 +698,7 @@ impl RouteRegistry {
     /// 合并所有三层的路由规则（按优先级：attribute > config > convention）
     ///
     /// 冲突时优先级高的覆盖低的，返回最终路由列表。
+    #[tracing::instrument(skip(self))]
     pub fn merged_rules(&self) -> Vec<RouteRule> {
         let mut seen: HashMap<(String, String), RouteRule> = HashMap::new();
 

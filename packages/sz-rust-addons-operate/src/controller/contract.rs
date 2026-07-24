@@ -39,6 +39,7 @@ impl AddonsBaseController for ContractController {}
 
 impl ContractController {
     /// 基础数据 — 对齐 PHP `base()`
+    #[tracing::instrument(skip_all)]
     pub async fn base(&self, req: Request<Body>) -> Response {
         let _param = match self.post_data(req).await {
             Ok(p) => p,
@@ -63,6 +64,7 @@ impl ContractController {
     }
 
     /// 分页列表 — 对齐 PHP `index()`
+    #[tracing::instrument(skip_all)]
     pub async fn index(
         &self,
         req: Request<Body>,
@@ -77,6 +79,7 @@ impl ContractController {
     }
 
     /// 导出列表 — 对齐 PHP `export()`
+    #[tracing::instrument(skip_all)]
     pub async fn export(
         &self,
         req: Request<Body>,
@@ -91,6 +94,7 @@ impl ContractController {
     }
 
     /// 添加合同 — 对齐 PHP `add()`
+    #[tracing::instrument(skip_all)]
     pub async fn add(
         &self,
         req: Request<Body>,
@@ -128,6 +132,7 @@ impl ContractController {
     ///     return $this->renderError($model->getError() ?: '添加失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn copy(
         &self,
         req: Request<Body>,
@@ -159,6 +164,7 @@ impl ContractController {
     }
 
     /// 编辑合同 — 对齐 PHP `edit()`
+    #[tracing::instrument(skip_all)]
     pub async fn edit(
         &self,
         req: Request<Body>,
@@ -201,6 +207,7 @@ impl ContractController {
     ///     return $this->renderError($model->getError() ?:'绑定商户失败');
     /// }
     /// ```
+    #[tracing::instrument(skip_all)]
     pub async fn bind(
         &self,
         req: Request<Body>,
@@ -222,6 +229,7 @@ impl ContractController {
     }
 
     /// 软删除合同 — 对齐 PHP `del()`
+    #[tracing::instrument(skip_all)]
     pub async fn del(
         &self,
         req: Request<Body>,
@@ -243,6 +251,7 @@ impl ContractController {
     }
 
     /// 解绑 — 对齐 PHP `cancel()`
+    #[tracing::instrument(skip_all)]
     pub async fn cancel(
         &self,
         req: Request<Body>,
@@ -268,6 +277,7 @@ impl ContractController {
     /// # PHP 对齐
     ///
     /// PHP `status()` 实际调用 `$model->cancel($customer_id)`（与 `cancel` 相同）
+    #[tracing::instrument(skip_all)]
     pub async fn status(
         &self,
         req: Request<Body>,
@@ -289,6 +299,7 @@ impl ContractController {
     }
 
     /// 合同详情 — 对齐 PHP `detail()`
+    #[tracing::instrument(skip_all)]
     pub async fn detail(
         &self,
         req: Request<Body>,
@@ -310,6 +321,7 @@ impl ContractController {
     }
 
     /// 按客户列表 — 对齐 PHP `customer()`
+    #[tracing::instrument(skip_all)]
     pub async fn customer(
         &self,
         req: Request<Body>,

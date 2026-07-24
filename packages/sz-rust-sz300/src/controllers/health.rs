@@ -4,6 +4,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use serde_json::{json, Value};
 
+/// 存活检查（liveness probe）
+#[tracing::instrument(skip(_state))]
 pub async fn check(State(_state): State<AppState>) -> Json<Value> {
     Json(json!({
         "code": 1,
@@ -18,6 +20,7 @@ pub async fn check(State(_state): State<AppState>) -> Json<Value> {
 }
 
 /// 就绪检查（readiness probe）：通过执行 SELECT 1 验证数据库连接是否正常
+#[tracing::instrument(skip(state))]
 pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
     let db_ok = match state.db_pool.acquire().await {
         Ok(mut conn) => conn.query("SELECT 1").await.is_ok(),
@@ -43,4 +46,15 @@ pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
             })),
         )
     }
+}
+
+/// Prometheus 指标端点 — 输出 Prometheus 文本格式指标
+#[tracing::instrument(skip(state))]
+pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let body = state.metrics_registry.render();
+    (
+        StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4")],
+        body,
+    )
 }

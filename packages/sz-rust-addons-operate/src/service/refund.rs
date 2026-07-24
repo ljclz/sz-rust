@@ -121,14 +121,17 @@ pub trait RefundService: Send + Sync {
 pub struct MockRefundService;
 
 impl RefundService for MockRefundService {
+    #[tracing::instrument(skip(self))]
     fn execute(&self, _param: &Value) -> Result<bool, String> {
         Ok(true)
     }
 
+    #[tracing::instrument(skip(self))]
     fn refund(&self, _order_id: i64, _refund_price: f64) -> Result<bool, String> {
         Ok(true)
     }
 
+    #[tracing::instrument(skip(self))]
     fn reject(&self, _order_id: i64, _refund_price: f64) -> Result<bool, String> {
         Ok(true)
     }

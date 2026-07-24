@@ -434,31 +434,37 @@ impl DeviceController {
 }
 
 /// 设备列表查询（对齐 PHP DeviceController::list）
+#[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::list(&state, req).await
 }
 
 /// 设备详情查询（对齐 PHP DeviceController::info）
+#[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::info(&state, req).await
 }
 
 /// 设备绑定（对齐 PHP DeviceController::bind）
+#[tracing::instrument(skip(state, req))]
 pub async fn bind(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::bind(&state, req).await
 }
 
 /// 设备解绑（对齐 PHP DeviceController::unbind）
+#[tracing::instrument(skip(state, req))]
 pub async fn unbind(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::unbind(&state, req).await
 }
 
 /// 触发设备 OTA 升级（对齐 PHP DeviceController::triggerOta）
+#[tracing::instrument(skip(state, req))]
 pub async fn trigger_ota(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::trigger_ota(&state, req).await
 }
 
 /// 设备状态上报（对齐 PHP DeviceController::statusReport）
+#[tracing::instrument(skip(state, req))]
 pub async fn status_report(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::status_report(&state, req).await
 }
