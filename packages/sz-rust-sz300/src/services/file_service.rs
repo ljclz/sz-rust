@@ -7,6 +7,7 @@ const UPLOAD_DIR: &str = "./uploads";
 const ALLOWED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp"];
 const MAX_FILE_SIZE: u64 = 5 * 1024 * 1024; // 5MB
 
+/// 文件服务（对齐 PHP FileService） — 负责上传文件的保存、校验与删除
 pub struct FileService;
 
 impl FileService {

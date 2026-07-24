@@ -2,13 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// AI 分类模型实体（对齐 PHP AiCategory 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiCategory {
+    /// AI 分类主键 ID
     pub ai_class_id: Option<i64>,
+    /// AI 分类名称
     pub name: String,
+    /// 关联的商品类目 ID
     pub cat_id: i64,
+    /// 模型版本号
     pub model_version: String,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

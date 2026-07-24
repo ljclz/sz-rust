@@ -234,7 +234,7 @@ impl std::fmt::Display for HandlerRef {
 pub enum RouteConfigError {
     /// YAML 解析失败
     #[error("YAML parse error: {0}")]
-    YamlParse(#[from] serde_yaml::Error),
+    YamlParse(#[from] serde_yml::Error),
 
     /// JSON 解析失败
     #[error("JSON parse error: {0}")]
@@ -478,7 +478,7 @@ fn join_path(prefix: &str, path: &str) -> String {
 /// ```
 #[tracing::instrument]
 pub fn load_routes_from_yaml_str(yaml: &str) -> Result<RouteConfig, RouteConfigError> {
-    let config: RouteConfig = serde_yaml::from_str(yaml)?;
+    let config: RouteConfig = serde_yml::from_str(yaml)?;
     Ok(config)
 }
 
@@ -1261,7 +1261,7 @@ routes:
     handler: User@list
 "#;
         let result = load_routes_from_yaml_str(yaml);
-        // serde_yaml 会因为 INVALID 无法反序列化为 HttpMethod 而失败
+        // serde_yml 会因为 INVALID 无法反序列化为 HttpMethod 而失败
         assert!(result.is_err());
     }
 

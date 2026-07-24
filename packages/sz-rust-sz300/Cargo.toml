@@ -32,6 +32,8 @@ bcrypt = "0.16"
 [features]
 default = []
 real-broker = ["sz-orm-mqtt/real-broker"]
+# 启用 OTLP 分布式追踪导出（需要 OpenTelemetry Collector）
+otlp = ["sz-rust-observability/otlp"]
 
 [[bin]]
 name = "sz300-server"

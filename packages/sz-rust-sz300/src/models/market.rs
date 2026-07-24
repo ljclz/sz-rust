@@ -2,15 +2,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 市场模型实体（对齐 PHP Market 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Market {
+    /// 市场主键 ID
     pub market_id: Option<i64>,
+    /// 市场名称
     pub name: String,
+    /// 市场地址
     pub address: String,
+    /// 联系人
     pub contact: String,
+    /// 联系电话
     pub phone: String,
+    /// 状态（0=禁用，1=启用）
     pub status: i8,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

@@ -8,16 +8,23 @@ pub struct SzMqttTopics;
 
 impl SzMqttTopics {
     // 设备 -> 服务器
+    /// 设备状态上报主题（设备 -> 服务器）
     pub const DEVICE_STATUS: &'static str = "/sz/device/{device_sn}/status";
+    /// 设备订单上报主题（设备 -> 服务器）
     pub const DEVICE_ORDER: &'static str = "/sz/device/{device_sn}/order";
+    /// 设备日志上报主题（设备 -> 服务器）
     pub const DEVICE_LOG: &'static str = "/sz/device/{device_sn}/log";
 
     // 服务器 -> 设备
+    /// OTA 升级指令主题（服务器 -> 设备）
     pub const SERVER_OTA: &'static str = "/sz/server/{device_sn}/ota";
+    /// 配置下发主题（服务器 -> 设备）
     pub const SERVER_CONFIG: &'static str = "/sz/server/{device_sn}/config";
+    /// 通用指令主题（服务器 -> 设备）
     pub const SERVER_COMMAND: &'static str = "/sz/server/{device_sn}/cmd";
 
     // 广播
+    /// 全广播主题（服务器 -> 所有设备）
     pub const SERVER_BROADCAST: &'static str = "/sz/server/broadcast";
 }
 

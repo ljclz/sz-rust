@@ -2,20 +2,34 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 订单模型实体（对齐 PHP Order 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
+    /// 订单主键 ID
     pub order_id: Option<i64>,
+    /// 订单号
     pub order_no: String,
+    /// 商户 ID
     pub merchant_id: i64,
+    /// 设备 ID
     pub device_id: i64,
+    /// 订单总金额（单位：分）
     pub total_fen: i64,
+    /// 订单总重量（单位：克）
     pub total_weight_g: i64,
+    /// 订单项数量
     pub item_count: i32,
+    /// 订单状态（0=已取消，1=待支付，2=已支付，3=已退款）
     pub status: i8,
+    /// 支付方式（0=未支付，1=微信，2=支付宝，3=现金）
     pub pay_method: i8,
+    /// 支付时间
     pub pay_at: Option<String>,
+    /// 离线序列号（用于离线订单去重）
     pub offline_seq: String,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

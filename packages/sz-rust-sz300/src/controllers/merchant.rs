@@ -322,26 +322,31 @@ impl MerchantController {
     }
 }
 
+/// 商户列表查询（对齐 PHP MerchantController::list）
 #[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::list(&state, req).await
 }
 
+/// 商户详情查询（对齐 PHP MerchantController::info）
 #[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::info(&state, req).await
 }
 
+/// 创建商户（对齐 PHP MerchantController::create）
 #[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::create(&state, req).await
 }
 
+/// 更新商户信息（对齐 PHP MerchantController::update）
 #[tracing::instrument(skip(state, req))]
 pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::update(&state, req).await
 }
 
+/// 删除商户（软删除，对齐 PHP MerchantController::delete）
 #[tracing::instrument(skip(state, req))]
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::delete(&state, req).await

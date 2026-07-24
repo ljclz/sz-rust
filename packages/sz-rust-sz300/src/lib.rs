@@ -20,22 +20,16 @@
 
 /// 环境变量驱动的配置加载
 pub mod config;
-// TODO: 逐步补齐模块文档
-#[allow(missing_docs)]
 /// HTTP 路由处理器（对齐 PHP controller）
 pub mod controllers;
 /// 数据库连接池初始化（MySQL + PostgreSQL）
 pub mod db;
 /// 应用中间件（JWT 认证、日志等）
 pub mod middleware;
-// TODO: 逐步补齐模块文档
-#[allow(missing_docs)]
 /// 数据模型（对齐 PHP model）
 pub mod models;
 /// 路由注册
 pub mod router;
-// TODO: 逐步补齐模块文档
-#[allow(missing_docs)]
 /// 业务服务层（MQTT、认证、文件等）
 pub mod services;
 /// 应用共享状态

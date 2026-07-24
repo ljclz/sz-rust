@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sz300-server
+  template:
+    metadata:
+      labels:
+        app: sz300-server
+    spec:
+      containers:
+      - name: sz300-server
+        image: sz300-server:latest
+        ports:
+        - containerPort: 8300
+        env:
+        - name: SZ300_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: jwt-secret
+        - name: SZ300_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: db-password
+        - name: SZ300_DB_HOST
+          value: "mysql-service"
+        - name: RUST_LOG
+          value: "info,sz_rust_sz300=debug"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8300
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8300
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sz300-service
+spec:
+  selector:
+    app: sz300-server
+  ports:
+  - port: 80
+    targetPort: 8300
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sz300-secrets
+type: Opaque
+stringData:
+  jwt-secret: "CHANGE_ME"
+  db-password: "CHANGE_ME"

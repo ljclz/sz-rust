@@ -2,16 +2,26 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 结算模型实体（对齐 PHP Settlement 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settlement {
+    /// 结算主键 ID
     pub settle_id: Option<i64>,
+    /// 商户 ID
     pub merchant_id: i64,
+    /// 结算日期（格式：YYYY-MM-DD）
     pub settle_date: String,
+    /// 结算总金额（单位：分）
     pub total_fen: i64,
+    /// 订单数量
     pub order_count: i32,
+    /// 手续费（单位：分）
     pub fee_fen: i64,
+    /// 状态（0=待结算，1=已结算，2=已失败）
     pub status: i8,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

@@ -352,26 +352,31 @@ impl ProductController {
     }
 }
 
+/// 商品列表查询（对齐 PHP ProductController::list）
 #[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::list(&state, req).await
 }
 
+/// 商品详情查询（对齐 PHP ProductController::info）
 #[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::info(&state, req).await
 }
 
+/// 创建商品（对齐 PHP ProductController::create）
 #[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::create(&state, req).await
 }
 
+/// 更新商品信息（对齐 PHP ProductController::update）
 #[tracing::instrument(skip(state, req))]
 pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::update(&state, req).await
 }
 
+/// 删除商品（软删除，对齐 PHP ProductController::delete）
 #[tracing::instrument(skip(state, req))]
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::delete(&state, req).await

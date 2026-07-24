@@ -64,6 +64,7 @@ fn sql_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
+/// 初始化认证模块 — 配置 JWT 密钥、签发者、过期时间与数据库连接池
 #[tracing::instrument(skip(secret, pool))]
 pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
     let verifier = Arc::new(DbPasswordVerifier { pool });
@@ -72,16 +73,19 @@ pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
     let _ = RBAC.set(RbacAuthorizer::new());
 }
 
+/// 获取已初始化的 JWT 认证器（调用前必须先调用 [`init_auth`]）
 #[tracing::instrument(skip_all)]
 pub fn get_auth() -> &'static JwtAuthenticator {
     AUTH.get().expect("auth not initialized")
 }
 
+/// 获取已初始化的 RBAC 授权器（调用前必须先调用 [`init_auth`]）
 #[tracing::instrument(skip_all)]
 pub fn get_rbac() -> &'static RbacAuthorizer {
     RBAC.get().expect("rbac not initialized")
 }
 
+/// 用户名密码认证 — 成功返回 JWT access_token，失败返回错误描述
 #[tracing::instrument(skip(password))]
 pub fn authenticate(username: &str, password: &str) -> Result<String, String> {
     let creds = Credentials::new(username, password);
@@ -91,6 +95,7 @@ pub fn authenticate(username: &str, password: &str) -> Result<String, String> {
     Ok(token.access_token)
 }
 
+/// 校验 JWT 令牌 — 成功返回用户信息，失败返回错误描述
 #[tracing::instrument(skip(token))]
 pub fn verify_token(token: &str) -> Result<User, String> {
     let user = get_auth()
@@ -99,6 +104,7 @@ pub fn verify_token(token: &str) -> Result<User, String> {
     Ok(user)
 }
 
+/// 检查用户是否拥有对指定资源的权限
 #[tracing::instrument(skip(user))]
 pub fn check_permission(user: &User, permission: &str, resource: &str) -> bool {
     get_rbac().can(user, permission, resource).unwrap_or(false)

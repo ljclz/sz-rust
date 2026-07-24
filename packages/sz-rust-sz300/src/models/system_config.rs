@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 系统配置模型实体（对齐 PHP SystemConfig 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
+    /// 配置键名（主键）
     pub key_name: String,
+    /// 配置值
     pub value: String,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

@@ -2,14 +2,22 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 操作日志模型实体（对齐 PHP OperateLog 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperateLog {
+    /// 日志主键 ID
     pub log_id: Option<i64>,
+    /// 商户 ID
     pub merchant_id: i64,
+    /// 操作人
     pub operator: String,
+    /// 操作动作
     pub action: String,
+    /// 操作详情
     pub detail: String,
+    /// 操作 IP 地址
     pub ip: String,
+    /// 创建时间
     pub created_at: Option<String>,
 }
 

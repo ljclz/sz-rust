@@ -228,7 +228,7 @@ fn parse_dotted_controller(controller: &str) -> String {
         return controller.to_string();
     }
 
-    let last = parts.pop().unwrap();
+    let last = parts.pop().expect("已通过 contains('.') 与 len 检查保证 parts 非空");
     let last_studly = studly_case(last);
     parts.push(&last_studly);
     parts.join("\\")

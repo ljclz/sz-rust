@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use std::path::PathBuf;
 use tokio::fs;
 
+/// 静态文件服务 — 根据路径返回上传目录中的文件，并按扩展名设置 Content-Type
 #[tracing::instrument(skip_all)]
 pub async fn serve_file(
     State(_state): State<AppState>,

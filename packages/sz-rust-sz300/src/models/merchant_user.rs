@@ -2,16 +2,26 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 商户用户模型实体（对齐 PHP MerchantUser 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MerchantUser {
+    /// 用户主键 ID
     pub user_id: Option<i64>,
+    /// 所属商户 ID
     pub merchant_id: i64,
+    /// 登录用户名
     pub username: String,
+    /// 密码哈希值
     pub password: String,
+    /// 联系电话
     pub phone: String,
+    /// 角色（0=普通用户，1=管理员）
     pub role: i8,
+    /// 最后登录时间
     pub last_login_at: Option<String>,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

@@ -2,18 +2,30 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 设备模型实体（对齐 PHP Device 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
+    /// 设备主键 ID
     pub device_id: Option<i64>,
+    /// 绑定的商户 ID（0 表示未绑定）
     pub merchant_id: i64,
+    /// 设备序列号
     pub device_sn: String,
+    /// 设备型号
     pub device_model: String,
+    /// 固件版本号
     pub fw_version: String,
+    /// 在线状态（0=离线，1=在线）
     pub status: i8, // 0离线 1在线
+    /// 信号强度
     pub signal_strength: i32,
+    /// 绑定时间
     pub bind_at: Option<String>,
+    /// 最后在线时间
     pub last_online_at: Option<String>,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

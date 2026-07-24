@@ -2,15 +2,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 订单明细模型实体（对齐 PHP OrderItem 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderItem {
+    /// 订单项主键 ID
     pub item_id: Option<i64>,
+    /// 所属订单 ID
     pub order_id: i64,
+    /// 商品 ID
     pub good_id: i64,
+    /// 商品名称（下单时快照）
     pub good_name: String,
+    /// 单价（单位：分）
     pub price_fen: i64,
+    /// 重量（单位：克）
     pub weight_g: i64,
+    /// 小计金额（单位：分）
     pub total_fen: i64,
+    /// 购买数量
     pub quantity: i32,
 }
 

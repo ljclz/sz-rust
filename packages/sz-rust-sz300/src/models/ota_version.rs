@@ -2,18 +2,30 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// OTA 版本模型实体（对齐 PHP OtaVersion 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OtaVersion {
+    /// OTA 版本主键 ID
     pub ota_id: Option<i64>,
+    /// 版本号
     pub version: String,
+    /// 适用的设备型号
     pub model: String,
+    /// 固件下载地址
     pub url: String,
+    /// 固件 MD5 校验值
     pub md5: String,
+    /// 更新日志
     pub changelog: String,
+    /// 固件大小（单位：字节）
     pub size: i64,
+    /// 是否强制更新（0=否，1=是）
     pub force_update: i8,
+    /// 状态（0=禁用，1=启用）
     pub status: i8,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

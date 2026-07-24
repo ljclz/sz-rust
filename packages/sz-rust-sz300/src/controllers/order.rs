@@ -318,16 +318,19 @@ impl OrderController {
     }
 }
 
+/// 订单列表查询（对齐 PHP OrderController::list）
 #[tracing::instrument(skip(state, req))]
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::list(&state, req).await
 }
 
+/// 订单详情查询（对齐 PHP OrderController::info）
 #[tracing::instrument(skip(state, req))]
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::info(&state, req).await
 }
 
+/// 创建订单（对齐 PHP OrderController::create）
 #[tracing::instrument(skip(state, req))]
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::create(&state, req).await

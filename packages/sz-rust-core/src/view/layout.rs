@@ -131,7 +131,7 @@ fn parse_layout_tag(content: &str, config: &ViewConfig) -> Result<String, ViewEr
     let re = Regex::new(&pattern).map_err(|e| ViewError::SyntaxError(e.to_string()))?;
 
     if let Some(caps) = re.captures(content) {
-        let full_match = caps.get(0).unwrap();
+        let full_match = caps.get(0).expect("正则捕获组 0 必定存在");
         let tag_name = parse_attr(full_match.as_str(), "name");
 
         // 如果 name 属性缺失或为空，视为无 {layout} 标签

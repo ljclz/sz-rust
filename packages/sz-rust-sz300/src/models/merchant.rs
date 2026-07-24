@@ -2,18 +2,30 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 商户模型实体（对齐 PHP Merchant 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Merchant {
+    /// 商户主键 ID
     pub merchant_id: Option<i64>,
+    /// 所属市场 ID
     pub market_id: i64,
+    /// 商户名称
     pub name: String,
+    /// 摊位号
     pub stall_no: String,
+    /// 联系电话
     pub contact_phone: String,
+    /// 经营品类
     pub category: String,
+    /// 状态（0=禁用，1=启用）
     pub status: i8,
+    /// 银行账号
     pub bank_account: String,
+    /// 开户行名称
     pub bank_name: String,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 

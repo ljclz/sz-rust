@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 商品类目模型实体（对齐 PHP Category 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Category {
+    /// 类目主键 ID
     pub cat_id: Option<i64>,
+    /// 类目名称
     pub name: String,
+    /// 父类目 ID（0 表示顶级类目）
     pub parent_id: i64,
+    /// 排序权重（数值越小越靠前）
     pub sort_order: i32,
 }
 

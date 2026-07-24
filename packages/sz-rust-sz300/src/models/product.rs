@@ -2,19 +2,32 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
+/// 商品模型实体（对齐 PHP Product 模型，对应数据表 good）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Product {
+    /// 商品主键 ID
     pub good_id: Option<i64>,
+    /// 商户 ID
     pub merchant_id: i64,
+    /// 类目 ID
     pub cat_id: i64,
+    /// 商品名称
     pub name: String,
+    /// 条形码
     pub barcode: String,
+    /// 单价（单位：分）
     pub price: i64,
+    /// 计价单位（如：个、斤、千克）
     pub unit: String,
+    /// AI 分类 ID
     pub ai_class_id: i64,
+    /// 商品图片 URL
     pub image: String,
+    /// 状态（0=下架，1=上架）
     pub status: i8,
+    /// 创建时间
     pub created_at: Option<String>,
+    /// 更新时间
     pub updated_at: Option<String>,
 }
 
