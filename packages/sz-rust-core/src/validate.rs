@@ -17,13 +17,13 @@
 //! | `$defaultRegex` | [`DEFAULT_REGEX`] | 内置正则 |
 //! | `$regex` | [`Validate::regex`] | 自定义正则 |
 //! | `$scene` | [`Validate::scene`] | 验证场景定义 |
-//! | `$currentScene` | [`Validate::current_scene`] | 当前验证场景 |
+//! | `$currentScene` | `Validate::current_scene` | 当前验证场景 |
 //! | `$batch` | [`Validate::batch`] | 是否批量验证 |
 //! | `$only` | [`Validate::only`] | 场景需要验证的字段 |
 //! | `$remove` | [`Validate::remove`] | 场景移除的规则 |
 //! | `$append` | [`Validate::append`] | 场景追加的规则 |
-//! | `$error` | [`Validate::error`] | 验证失败错误信息 |
-//! | `$type` | [`Validate::type_callbacks`] | 自定义验证类型 |
+//! | `$error` | `Validate::error` | 验证失败错误信息 |
+//! | `$type` | `Validate::type_callbacks` | 自定义验证类型 |
 //!
 //! ### 核心方法映射
 //!
@@ -1070,7 +1070,7 @@ impl Validate {
     ///
     /// ## 无 Lang 实例时的行为
     ///
-    /// 当 [`Validate::lang`] 为 `None` 时跳过翻译，直接执行占位符替换。
+    /// 当 `Validate::lang` 为 `None` 时跳过翻译，直接执行占位符替换。
     /// 对齐 PHP 未注入 Lang 时的行为（PHP 中 `$this->lang` 必须存在，否则
     /// `parseErrorMsg` 会致命错误；Rust 使用 `Option` 提供更安全的降级）。
     pub fn parse_error_msg_with_lang(&self, msg: &str, rule: &str, title: &str) -> String {
@@ -1413,7 +1413,7 @@ fn regex_match_default(value: &Value, regex_name: &str) -> bool {
 /// - PHP `/...$/u` Unicode 标志 → Rust 默认 Unicode
 fn php_regex_to_rust(pattern: &str) -> String {
     let mut result = pattern.to_string();
-    // 替换 \x{XXXX} 为 \u{XXXX}
+    // 替换 \x{HEX} 为 \u{HEX}
     while let Some(start) = result.find("\\x{") {
         if let Some(end) = result[start..].find('}') {
             let hex = &result[start + 3..start + end];

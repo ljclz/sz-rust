@@ -137,10 +137,15 @@ impl std::str::FromStr for ResourceAction {
 /// HTTP 方法
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
+    /// HTTP GET
     Get,
+    /// HTTP POST
     Post,
+    /// HTTP PUT
     Put,
+    /// HTTP DELETE
     Delete,
+    /// HTTP PATCH
     Patch,
 }
 

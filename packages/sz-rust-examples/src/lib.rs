@@ -2,6 +2,9 @@
 //!
 //! 提供 Hello World 端点的 router 构建函数，便于集成测试。
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 use axum::{routing::get, Json, Router};
 use serde_json::{json, Value};
 use sz_rust_core::error::ErrorCode;

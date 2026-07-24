@@ -129,7 +129,7 @@ pub fn default_foreign_key(parent_class: &str) -> String {
 ///
 /// 对齐 PHP `think\Model::hasMany($model, $foreignKey = '', $localKey = '')`：
 ///
-/// - `foreignKey` 默认：[`default_foreign_key(parent_class)`]
+/// - `foreignKey` 默认：`default_foreign_key(parent_class)`
 /// - `child_pk` 默认：`"id"`（对齐 PHP `$this->pk` 通常为 `id`）
 ///
 /// ## 参数

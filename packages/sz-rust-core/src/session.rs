@@ -170,7 +170,7 @@ impl Session {
         }
     }
 
-    /// 从 Arc<dyn SessionStore> 创建会话（共享后端实例）
+    /// 从 `Arc<dyn SessionStore>` 创建会话（共享后端实例）
     pub fn with_shared_store(
         session_id: impl Into<String>,
         store: Arc<dyn SessionStore>,

@@ -15,7 +15,6 @@ jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
-    continue-on-error: true  # 覆盖率失败不阻塞 PR
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +39,7 @@ jobs:
         run: cargo install cargo-tarpaulin --locked
 
       - name: Run coverage
-        run: cargo tarpaulin --workspace --out Xml --output-dir coverage/ -- --test-threads=1
+        run: cargo tarpaulin --workspace --out Xml --output-dir coverage/ --fail-under 80 -- --test-threads=1
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

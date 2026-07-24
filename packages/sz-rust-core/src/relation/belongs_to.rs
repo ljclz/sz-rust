@@ -96,7 +96,7 @@ pub fn default_belongs_to_foreign_key(related_class: &str) -> String {
 ///
 /// 对齐 PHP `think\Model::belongsTo($model, $foreignKey = '', $localKey = '')`：
 ///
-/// - `foreignKey` 默认：[`default_belongs_to_foreign_key(related_class)`]
+/// - `foreignKey` 默认：`default_belongs_to_foreign_key(related_class)`
 /// - `parent_pk` 默认：`"id"`（对齐 PHP `$related->getPk()` 通常为 `id`）
 ///
 /// ## 参数

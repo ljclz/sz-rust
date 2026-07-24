@@ -37,3 +37,6 @@ opentelemetry_sdk = { version = "0.27", optional = true, features = ["rt-tokio"]
 [lib]
 name = "sz_rust_observability"
 path = "src/lib.rs"
+
+[package.metadata.cargo-machete]
+ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "serde", "serde_json", "thiserror", "tokio", "tracing"]

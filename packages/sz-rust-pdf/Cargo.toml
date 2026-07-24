@@ -36,3 +36,6 @@ tokio = { workspace = true }
 [lib]
 name = "sz_rust_pdf"
 path = "src/lib.rs"
+
+[package.metadata.cargo-machete]
+ignored = ["serde"]

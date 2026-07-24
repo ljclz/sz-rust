@@ -176,8 +176,8 @@ pub fn default_morph_id_column(morph: &str) -> String {
 ///
 /// 对齐 PHP `think\Model::morphMany($model, $morph = null, $type = '')`：
 ///
-/// - `morph_type_column` 默认：[`default_morph_type_column(morph)`]
-/// - `morph_id_column` 默认：[`default_morph_id_column(morph)`]
+/// - `morph_type_column` 默认：`default_morph_type_column(morph)`
+/// - `morph_id_column` 默认：`default_morph_id_column(morph)`
 /// - `morph_type_value` 默认：`parent_class`（对齐 PHP `get_class($this)`）
 ///
 /// ## 参数
@@ -243,8 +243,8 @@ pub fn php_morph_many(
 ///
 /// 对齐 PHP `think\Model::morphTo($morph = null, array $alias = [])`：
 ///
-/// - `morph_type_column` 默认：[`default_morph_type_column(morph)`]
-/// - `morph_id_column` 默认：[`default_morph_id_column(morph)`]
+/// - `morph_type_column` 默认：`default_morph_type_column(morph)`
+/// - `morph_id_column` 默认：`default_morph_id_column(morph)`
 ///
 /// ## 参数
 ///

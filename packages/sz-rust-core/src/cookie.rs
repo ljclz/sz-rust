@@ -145,7 +145,7 @@ impl CookieEntry {
         // Expires 头（仅当 expire > 0 时添加，对齐 PHP 仅在 expire 非零时发送）
         if self.expire > 0 {
             let expire_dt = DateTime::<Utc>::from_timestamp(self.expire, 0)
-                .unwrap_or_else(|| Utc::now());
+                .unwrap_or_else(Utc::now);
             // 格式：Wed, 21 Oct 2026 07:28:00 GMT（RFC 7231 IMF-fixdate）
             parts.push(format!(
                 "Expires={}",
@@ -216,7 +216,7 @@ impl CookieEntry {
 /// let mut resp = Response::new(Body::empty());
 /// jar.apply_to_response(&mut resp);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CookieJar {
     /// 请求 Cookie（从 Request 解析，只读）
     request_cookies: HashMap<String, String>,
@@ -224,16 +224,6 @@ pub struct CookieJar {
     response_cookies: Vec<CookieEntry>,
     /// 默认配置（对齐 PHP `think\Cookie::$config`）
     config: CookieOptions,
-}
-
-impl Default for CookieJar {
-    fn default() -> Self {
-        Self {
-            request_cookies: HashMap::new(),
-            response_cookies: Vec::new(),
-            config: CookieOptions::default(),
-        }
-    }
 }
 
 impl CookieJar {
@@ -825,14 +815,14 @@ mod tests {
     fn test_parse_skips_no_equals() {
         let cookies = parse_cookie_header("a=1; invalid; b=2");
         assert_eq!(cookies.len(), 2);
-        assert!(cookies.get("invalid").is_none());
+        assert!(!cookies.contains_key("invalid"));
     }
 
     #[test]
     fn test_parse_skips_empty_name() {
         let cookies = parse_cookie_header("a=1; =empty; b=2");
         assert_eq!(cookies.len(), 2);
-        assert!(cookies.get("").is_none());
+        assert!(!cookies.contains_key(""));
     }
 
     // ------------------------------------------------------------------------

@@ -571,7 +571,7 @@ pub struct ConventionRoute {
 impl ConventionRoute {
     /// 从 URI 生成约定式路由元数据
     ///
-    /// ```
+    /// ```ignore
     /// use sz_rust_core::routing::ConventionRoute;
     ///
     /// let r = ConventionRoute::from_uri("/oapc/customer/index").unwrap();

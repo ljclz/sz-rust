@@ -792,8 +792,8 @@ pub fn fingerprint_bytes(content: &[u8]) -> String {
 ///     Some(("style.css".to_string(), "abc123def456".to_string()))
 /// );
 /// assert_eq!(
-///     extract_version_hash("js/app.abc123.js"),
-///     Some(("js/app.js".to_string(), "abc123".to_string()))
+///     extract_version_hash("js/app.abc12345.js"),
+///     Some(("js/app.js".to_string(), "abc12345".to_string()))
 /// );
 /// assert_eq!(extract_version_hash("style.css"), None);
 /// ```

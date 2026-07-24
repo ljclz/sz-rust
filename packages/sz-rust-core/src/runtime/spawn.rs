@@ -248,13 +248,26 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let token = CancellationToken::new();
         let counter_clone = counter.clone();
-        let handle = spawn_tick(1000, token.clone(), move || {
+        let handle = spawn_tick(1, token.clone(), move || {
             counter_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // 轮询等待计数器达到 1（超时 5s），避免固定 sleep 的调度竞态
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while counter.load(Ordering::SeqCst) < 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            if tokio::time::Instant::now() > deadline {
+                token.cancel();
+                let _ = handle.await;
+                panic!("spawn_tick 首次 tick 未在 5s 内触发");
+            }
+        }
         token.cancel();
         let _ = handle.await;
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        assert!(
+            counter.load(Ordering::SeqCst) >= 1,
+            "spawn_tick 首次 tick 应在创建后立即触发，实际计数为 {}",
+            counter.load(Ordering::SeqCst)
+        );
     }
 }

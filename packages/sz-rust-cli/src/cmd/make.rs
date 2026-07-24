@@ -183,7 +183,7 @@ fn execute_make_guard(name: &str) -> Result<(), CliError> {
     check_file_exists(&file_path)?;
 
     let content = format!(
-        "//! Guard: {class_name}\n//!\n//! 由 `sz-rust make:guard` 生成。\n//!\n//! 对齐 NestJS Guard + Spring Security 模式。\n\nuse sz_rust_core::guard::Guard;\nuse sz_rust_core::request::Request;\n\n/// {class_name} Guard\npub struct {class_name};\n\nimpl Guard for {class_name} {{\n    async fn can_activate(&self, _req: &Request) -> bool {{\n        // TODO: 实现鉴权逻辑\n        true\n    }}\n}}\n"
+        "//! Guard: {class_name}\n//!\n//! 由 `sz-rust make:guard` 生成。\n//!\n//! 对齐 NestJS Guard + Spring Security 模式。\n\nuse sz_rust_core::guard::Guard;\nuse sz_rust_core::request::Request;\n\n/// {class_name} Guard\npub struct {class_name};\n\nimpl Guard for {class_name} {{\n    async fn can_activate(&self, _req: &Request) -> bool {{\n        // 在此实现鉴权逻辑\n        true\n    }}\n}}\n"
     );
 
     write_file(&file_path, &content)?;

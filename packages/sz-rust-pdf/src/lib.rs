@@ -102,6 +102,9 @@
 //!   `http_java_post` 第 1871 行 / `moneyToArray` 第 1814 行 / `data_path` 第 38 行）
 //! - `e:\vue\test\鲜视达\server\app\job\controller\Pdf.php`（PDF 生成队列任务，7 种业务类型）
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 pub mod csv_export;
 pub mod excel_export;
 pub mod excel_import;

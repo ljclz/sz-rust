@@ -14,16 +14,11 @@ categories.workspace = true
 # 命令行框架
 clap.workspace = true
 # 序列化
-serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 # 时间
 chrono.workspace = true
 # 错误
 thiserror.workspace = true
-anyhow.workspace = true
-# 日志
-tracing.workspace = true
 # SZ-ORM 迁移系统（schema migration）
 sz-orm-core.workspace = true
 # SZ-Rust 核心（调度器封装）

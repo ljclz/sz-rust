@@ -19,6 +19,7 @@
 //! | 模块 | 功能 |
 //! |------|------|
 //! | `cli` | clap 命令定义（Cli / Commands / Options） |
+//! | `console` | 自定义命令注册与分发（对齐 PHP `think\console\Console`） |
 //! | `cmd::make` | make:* 代码生成命令 |
 //! | `cmd::migrate` | migrate / migrate:status 迁移命令 |
 //! | `cmd::route` | route:list 路由列表命令 |
@@ -34,12 +35,17 @@
 //! - R5-50：`migrate:status` 显示迁移进度对齐 PHP `think migrate:status`
 //! - R5-51：`cache:clear` 清空缓存对齐 PHP `think cache:clear`
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 pub mod cli;
 pub mod cmd;
+pub mod console;
 pub mod error;
 pub mod stubs;
 
-pub use cli::{Cli, Command};
+pub use cli::{Cli, Command as CliCommand};
+pub use console::{Command, CommandSignature, Console};
 pub use error::CliError;
 
 /// 运行 CLI（入口函数）
