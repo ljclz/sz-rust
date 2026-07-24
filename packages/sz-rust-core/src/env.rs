@@ -212,8 +212,8 @@ impl Env {
 
                 // 去除引号包裹
                 if value.len() >= 2 {
-                    let first = value.chars().next().unwrap();
-                    let last = value.chars().last().unwrap();
+                    let first = value.chars().next().expect("已检查 value.len() >= 2");
+                    let last = value.chars().last().expect("已检查 value.len() >= 2");
                     if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
                         value = value[1..value.len() - 1].to_string();
                     }

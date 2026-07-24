@@ -87,7 +87,7 @@ impl UserController {
 
     async fn list(store: &SharedStore, page: i64, size: i64) -> Response {
         let ctrl = UserController;
-        let users = store.lock().unwrap().users.clone();
+        let users = store.lock().expect("锁被毒化").users.clone();
         let total = users.len() as i64;
 
         // 分页计算（边界安全：start 不超过 users.len()）
@@ -95,7 +95,7 @@ impl UserController {
         let end = (start + size as usize).min(users.len());
         let page_list: Vec<Value> = users[start..end]
             .iter()
-            .map(|u| serde_json::to_value(u).unwrap())
+            .map(|u| serde_json::to_value(u).expect("序列化用户数据失败"))
             .collect();
 
         let data = json!({
@@ -114,14 +114,14 @@ impl UserController {
         // clone 后立即释放锁
         let user = store
             .lock()
-            .unwrap()
+            .expect("锁被毒化")
             .users
             .iter()
             .find(|u| u.id == id)
             .cloned();
         match user {
             Some(user) => {
-                let data = serde_json::to_value(&user).unwrap();
+                let data = serde_json::to_value(&user).expect("序列化用户数据失败");
                 ctrl.render_success("success", data)
             }
             None => ctrl.render_error("用户不存在", json!({"id": id}), 0),
@@ -152,7 +152,7 @@ impl UserController {
             return ctrl.render_error("年龄必须在 1-200 之间", json!({"field": "age"}), 0);
         }
 
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().expect("锁被毒化");
         let user = User {
             id: store.next_id,
             name,
@@ -162,7 +162,7 @@ impl UserController {
         store.users.push(user.clone());
         drop(store); // 提前释放锁
 
-        let data = serde_json::to_value(&user).unwrap();
+        let data = serde_json::to_value(&user).expect("序列化用户数据失败");
         ctrl.render_success("创建成功", data)
     }
 
@@ -177,7 +177,7 @@ impl UserController {
             Err(e) => return ctrl.render_error("参数解析失败", json!({"error": e}), 0),
         };
 
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().expect("锁被毒化");
         match store.users.iter_mut().find(|u| u.id == id) {
             Some(user) => {
                 if let Some(name) = data.get("name").and_then(|v| v.as_str()) {
@@ -189,7 +189,7 @@ impl UserController {
                 let user = user.clone();
                 drop(store); // 提前释放锁
 
-                let data = serde_json::to_value(&user).unwrap();
+                let data = serde_json::to_value(&user).expect("序列化用户数据失败");
                 ctrl.render_success("更新成功", data)
             }
             None => ctrl.render_error("用户不存在", json!({"id": id}), 0),
@@ -200,13 +200,13 @@ impl UserController {
 
     async fn delete(store: &SharedStore, id: i64) -> Response {
         let ctrl = UserController;
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().expect("锁被毒化");
         match store.users.iter().position(|u| u.id == id) {
             Some(idx) => {
                 let user = store.users.remove(idx);
                 drop(store); // 提前释放锁
 
-                let data = serde_json::to_value(&user).unwrap();
+                let data = serde_json::to_value(&user).expect("序列化用户数据失败");
                 ctrl.render_success("删除成功", data)
             }
             None => ctrl.render_error("用户不存在", json!({"id": id}), 0),

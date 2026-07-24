@@ -527,7 +527,7 @@ impl File {
             None => self.extension(),
         };
 
-        let hash_name = self.hash_name.as_ref().unwrap().clone();
+        let hash_name = self.hash_name.as_ref().expect("hash_name 已在上方初始化").clone();
         if extension.is_empty() {
             Ok(hash_name)
         } else {

@@ -1342,7 +1342,7 @@ fn is_valid_email(value: &Value) -> bool {
     };
     // 简化版邮箱正则（PHP filter_var 更宽松）
     let email_re =
-        Lazy::new(|| Regex::new(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$").unwrap());
+        Lazy::new(|| Regex::new(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$").expect("内置正则表达式编译失败"));
     email_re.is_match(s)
 }
 
@@ -1383,7 +1383,7 @@ fn is_valid_mac(value: &Value) -> bool {
         Value::String(s) => s,
         _ => return false,
     };
-    let mac_re = Lazy::new(|| Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").unwrap());
+    let mac_re = Lazy::new(|| Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").expect("内置正则表达式编译失败"));
     mac_re.is_match(s)
 }
 

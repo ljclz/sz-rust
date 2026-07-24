@@ -370,8 +370,8 @@ impl SimpleTemplateEngine {
         let mut last_end = 0;
 
         for caps in re.captures_iter(content) {
-            let full_match = caps.get(0).unwrap();
-            let tag_content = caps.get(1).unwrap().as_str();
+            let full_match = caps.get(0).expect("正则捕获组 0 必定存在");
+            let tag_content = caps.get(1).expect("正则捕获组 1 必定存在").as_str();
 
             result.push_str(&content[last_end..full_match.start()]);
 
@@ -394,7 +394,7 @@ impl SimpleTemplateEngine {
         }
 
         // 按首字符分支（对齐 PHP parseTag）
-        let first_char = tag.chars().next().unwrap();
+        let first_char = tag.chars().next().expect("已检查 tag 非空");
 
         match first_char {
             '$' => self.render_var_tag(tag, data),

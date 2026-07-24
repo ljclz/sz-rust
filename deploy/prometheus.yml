@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'sz300-server'
+    static_configs:
+      - targets: ['sz300-server:8300']
+    metrics_path: '/metrics'

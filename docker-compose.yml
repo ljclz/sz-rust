@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  sz300-server:
+    build:
+      context: ..
+      dockerfile: sz-rust/Dockerfile
+    ports:
+      - "8300:8300"
+    environment:
+      - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:-change-me-in-production}
+      - SZ300_DB_HOST=${SZ300_DB_HOST:-mysql}
+      - SZ300_DB_PORT=${SZ300_DB_PORT:-3306}
+      - SZ300_DB_NAME=${SZ300_DB_NAME:-sz300}
+      - SZ300_DB_USER=${SZ300_DB_USER:-root}
+      - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD}
+      - RUST_LOG=info,sz_rust_sz300=debug
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${SZ300_DB_PASSWORD:-test123}
+      - MYSQL_DATABASE=${SZ300_DB_NAME:-sz300}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_PASSWORD=${SZ300_PG_PASSWORD:-test123}
+      - POSTGRES_DB=${SZ300_PG_NAME:-sz300}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  pg_data:

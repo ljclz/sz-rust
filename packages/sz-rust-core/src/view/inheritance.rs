@@ -248,7 +248,7 @@ fn parse_blocks(content: &str, sort: bool, config: &ViewConfig) -> IndexMap<Stri
     let block_close_prefix = format!("{}/block", config.taglib_begin);
 
     for caps in re.captures_iter(content) {
-        let full_match = caps.get(0).unwrap();
+        let full_match = caps.get(0).expect("正则捕获组 0 必定存在");
         let full_str = full_match.as_str();
 
         if full_str.starts_with(&block_close_prefix) {
@@ -285,7 +285,7 @@ fn parse_blocks(content: &str, sort: bool, config: &ViewConfig) -> IndexMap<Stri
         let mut pairs: Vec<(String, BlockInfo, usize)> = keys
             .into_iter()
             .map(|(name, pos)| {
-                let info = result.get(&name).cloned().unwrap();
+                let info = result.get(&name).cloned().expect("keys 与 result 同源，name 必定存在");
                 (name, info, pos)
             })
             .collect();

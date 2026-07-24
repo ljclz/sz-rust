@@ -198,12 +198,12 @@ impl SzTracer {
 
     /// 返回已累积的 Span 快照（拷贝）。
     pub fn get_spans(&self) -> Vec<Span> {
-        self.spans.read().unwrap().clone()
+        self.spans.read().expect("锁被毒化").clone()
     }
 
     /// 清空已累积的 Span。
     pub fn clear(&self) {
-        self.spans.write().unwrap().clear();
+        self.spans.write().expect("锁被毒化").clear();
     }
 }
 
