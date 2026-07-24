@@ -72,7 +72,7 @@ highlight = "all"
 # 禁止的 crate（已知问题或不安全）
 # openssl — 强制走 rustls 路线，避免 OpenSSL 许可证和链接问题
 deny = [
-    { name = "openssl", allow-build = false },
+    { name = "openssl", reason = "强制走 rustls 路线，避免 OpenSSL 许可证和链接问题" },
 ]
 
 # 跳过重复版本检查的 crate（传递依赖无法控制）

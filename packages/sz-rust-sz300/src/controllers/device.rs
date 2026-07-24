@@ -7,7 +7,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use sz_orm_core::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
-use sz_rust_core::sql_string;
 use tracing::{error, info, warn};
 
 struct DeviceController;
@@ -434,26 +433,32 @@ impl DeviceController {
     }
 }
 
+/// 设备列表查询（对齐 PHP DeviceController::list）
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::list(&state, req).await
 }
 
+/// 设备详情查询（对齐 PHP DeviceController::info）
 pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::info(&state, req).await
 }
 
+/// 设备绑定（对齐 PHP DeviceController::bind）
 pub async fn bind(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::bind(&state, req).await
 }
 
+/// 设备解绑（对齐 PHP DeviceController::unbind）
 pub async fn unbind(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::unbind(&state, req).await
 }
 
+/// 触发设备 OTA 升级（对齐 PHP DeviceController::triggerOta）
 pub async fn trigger_ota(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::trigger_ota(&state, req).await
 }
 
+/// 设备状态上报（对齐 PHP DeviceController::statusReport）
 pub async fn status_report(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::status_report(&state, req).await
 }

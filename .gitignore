@@ -28,3 +28,4 @@ errors*.log
 
 # 测试覆盖率输出（开发临时文件）
 coverage/
+

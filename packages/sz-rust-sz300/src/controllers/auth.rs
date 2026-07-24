@@ -174,20 +174,24 @@ impl AuthController {
     }
 }
 
+/// 用户登录（对齐 PHP AuthController::login）
 pub async fn login(State(state): State<AppState>, req: Request<Body>) -> Response {
     AuthController::login(&state, req).await
 }
 
+/// 获取当前登录用户信息（对齐 PHP AuthController::me）
 pub async fn me(State(state): State<AppState>, req: Request<Body>) -> Response {
     AuthController::me(&state, req).await
 }
 
+/// 刷新登录令牌（对齐 PHP AuthController::refresh）
 pub async fn refresh(State(_state): State<AppState>, req: Request<Body>) -> Response {
     let _data = req;
     let ctrl = AuthController;
     ctrl.render_success("ok", json!({}))
 }
 
+/// 退出登录（对齐 PHP AuthController::logout）
 pub async fn logout(State(_state): State<AppState>, req: Request<Body>) -> Response {
     let _data = req;
     let ctrl = AuthController;

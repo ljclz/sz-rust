@@ -2,6 +2,7 @@
 name = "sz-rust-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust 命令行工具：项目脚手架、数据库迁移、调度器管理"

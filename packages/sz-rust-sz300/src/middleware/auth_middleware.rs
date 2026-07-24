@@ -7,6 +7,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+/// JWT 鉴权中间件：校验 Authorization 头中的 Bearer 令牌，
+/// 公开路径（/health、/api/v1/auth/*）自动跳过鉴权
 pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let auth_header = req
         .headers()
@@ -16,9 +18,9 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
 
     let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
 
-    // /health, /api/v1/auth/* 等公开路径跳过鉴权
+    // /health, /health/*, /api/v1/auth/* 等公开路径跳过鉴权
     let path = req.uri().path();
-    if path == "/health" || path.starts_with("/api/v1/auth/") {
+    if path.starts_with("/health") || path.starts_with("/api/v1/auth/") {
         return next.run(req).await;
     }
 

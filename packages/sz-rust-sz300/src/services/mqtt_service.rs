@@ -1,5 +1,4 @@
 use serde_json::Value;
-use sz_orm_core::Value as SzValue;
 use sz_orm_mqtt::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
 use crate::state::AppState;

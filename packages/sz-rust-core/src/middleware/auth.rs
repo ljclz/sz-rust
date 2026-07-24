@@ -105,10 +105,22 @@ use crate::error::{BaseException, ErrorCode};
 pub const DEFAULT_ALLOW_ALL_ACTION: &[&str] = &["/passport/login", "/task/task/userClerk"];
 
 /// PHP JWT 默认签发人（对齐 `app\common\service\jwt\Token::$_config['issuer']`）
+///
+/// **注意**：仅用于测试与文档对照。生产环境必须通过 `SZ_JWT_ISSUER` 环境变量覆盖。
 pub const DEFAULT_ISSUER: &str = "https://mall.ljclz.shop";
 
-/// PHP JWT 默认密钥（对齐 `app\common\service\jwt\Token::$_config['sign']`）
+/// PHP JWT 默认密钥（对齐 `app\common\service\jwt\Token::$_config['sign']`）。
+///
+/// **安全警告**：此常量保留 PHP 原始值仅供**测试与文档对照**使用。
+/// 生产环境必须通过 `SZ_JWT_SECRET` 环境变量提供密钥。
+/// `AuthConfig::default()` 会优先从 `SZ_JWT_SECRET` 环境变量读取；
+/// 仅在 `cfg(test)` 下回退到此常量以保持测试兼容性。
+#[cfg(test)]
 pub const DEFAULT_SECRET: &str = "shengzhuang";
+
+/// 生产环境占位符（非测试构建下 `DEFAULT_SECRET` 不可用）
+#[cfg(not(test))]
+pub const DEFAULT_SECRET: &str = "<must-set-SZ_JWT_SECRET-env>";
 
 /// PHP JWT 默认有效期（秒）（对齐 `app\common\service\jwt\Token::$_config['expire'] = 3600 * 24 * 30`）
 pub const DEFAULT_EXPIRATION: u64 = 3600 * 24 * 30;
@@ -132,9 +144,20 @@ pub struct AuthConfig {
 
 impl Default for AuthConfig {
     fn default() -> Self {
+        // 生产环境：优先从环境变量读取 JWT 密钥
+        // 测试环境：回退到 DEFAULT_SECRET 常量（PHP 原始值）以保持测试兼容
+        let secret = std::env::var("SZ_JWT_SECRET").unwrap_or_else(|_| {
+            #[cfg(test)]
+            { DEFAULT_SECRET.to_string() }
+            #[cfg(not(test))]
+            {
+                panic!("SZ_JWT_SECRET 环境变量未设置 — 生产环境必须通过环境变量提供 JWT 密钥");
+            }
+        });
+        let issuer = std::env::var("SZ_JWT_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
         Self {
-            secret: DEFAULT_SECRET.to_string(),
-            issuer: DEFAULT_ISSUER.to_string(),
+            secret,
+            issuer,
             expiration: DEFAULT_EXPIRATION,
             allow_all_action: DEFAULT_ALLOW_ALL_ACTION
                 .iter()
@@ -145,6 +168,23 @@ impl Default for AuthConfig {
 }
 
 impl AuthConfig {
+    /// 从环境变量构造配置（生产环境推荐用法）
+    ///
+    /// # Errors
+    /// 当 `SZ_JWT_SECRET` 环境变量未设置时返回错误
+    pub fn from_env() -> Result<Self, std::env::VarError> {
+        Ok(Self {
+            secret: std::env::var("SZ_JWT_SECRET")?,
+            issuer: std::env::var("SZ_JWT_ISSUER")
+                .unwrap_or_else(|_| DEFAULT_ISSUER.to_string()),
+            expiration: DEFAULT_EXPIRATION,
+            allow_all_action: DEFAULT_ALLOW_ALL_ACTION
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        })
+    }
+
     /// 创建带自定义白名单的配置
     pub fn with_allow_all_action(mut self, allow: Vec<String>) -> Self {
         self.allow_all_action = allow;

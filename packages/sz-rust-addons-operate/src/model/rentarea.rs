@@ -29,6 +29,7 @@ pub struct Rentarea {
 }
 
 impl Rentarea {
+    /// 创建空模型实例（对齐 PHP `new Rentarea()`）
     pub fn new() -> Self {
         Self {
             data: HashMap::new(),
@@ -37,6 +38,7 @@ impl Rentarea {
         }
     }
 
+    /// 链式写入字段（对齐 PHP `data` 属性赋值）
     pub fn with_data(mut self, key: &str, value: Value) -> Self {
         self.data.insert(key.to_string(), value);
         self

@@ -2,6 +2,7 @@
 name = "sz-rust-tracing"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust Tracing Extension - Distributed tracing with OpenTelemetry support"
@@ -22,8 +23,8 @@ otlp = [
 ]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde.workspace = true
+serde_json.workspace = true
 # OTLP exporter 依赖（可选）
 opentelemetry = { version = "0.27", optional = true }
 opentelemetry-otlp = { version = "0.27", optional = true, features = ["tokio"] }

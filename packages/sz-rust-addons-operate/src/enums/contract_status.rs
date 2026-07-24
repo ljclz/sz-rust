@@ -21,8 +21,11 @@
 /// | 3 | 未签约 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomerStatus {
+    /// 在租
     InRent = 1,
+    /// 撤场
     Withdrawn = 2,
+    /// 未签约
     NotSigned = 3,
 }
 
@@ -61,12 +64,16 @@ impl CustomerStatus {
 /// | 3 | 已失效 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContractStatus {
+    /// 待生效
     Pending = 1,
+    /// 有效期
     Active = 2,
+    /// 已失效
     Expired = 3,
 }
 
 impl ContractStatus {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             1 => Some(Self::Pending),
@@ -76,6 +83,7 @@ impl ContractStatus {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::Pending => "待生效",
@@ -84,6 +92,7 @@ impl ContractStatus {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `contractStatusName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }
@@ -98,12 +107,16 @@ impl ContractStatus {
 /// | 3 | 已解约 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SigningStatus {
+    /// 待签约
     Pending = 1,
+    /// 已签约
     Signed = 2,
+    /// 已解约
     Terminated = 3,
 }
 
 impl SigningStatus {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             1 => Some(Self::Pending),
@@ -113,6 +126,7 @@ impl SigningStatus {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::Pending => "待签约",
@@ -121,6 +135,7 @@ impl SigningStatus {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `signingName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }
@@ -135,12 +150,16 @@ impl SigningStatus {
 /// | 3 | 缴费中 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayStatus {
+    /// 待缴费
     Pending = 1,
+    /// 已缴费
     Paid = 2,
+    /// 缴费中
     Paying = 3,
 }
 
 impl PayStatus {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             1 => Some(Self::Pending),
@@ -150,6 +169,7 @@ impl PayStatus {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::Pending => "待缴费",
@@ -158,6 +178,7 @@ impl PayStatus {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `payStatusName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }
@@ -172,12 +193,16 @@ impl PayStatus {
 /// | 3 | 转账+现金 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayType {
+    /// 扫码转账
     QrTransfer = 1,
+    /// 现金支付
     Cash = 2,
+    /// 转账+现金
     Mixed = 3,
 }
 
 impl PayType {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             1 => Some(Self::QrTransfer),
@@ -187,6 +212,7 @@ impl PayType {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::QrTransfer => "扫码转账",
@@ -195,6 +221,7 @@ impl PayType {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `payTypeName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }

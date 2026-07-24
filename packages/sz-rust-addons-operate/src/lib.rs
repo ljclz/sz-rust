@@ -32,6 +32,7 @@
 //! 若需与 PHP 数据库现存量兼容，需在 Phase 6 数据迁移层做格式转换。
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod controller;
 pub mod enums;
@@ -43,3 +44,4 @@ pub use model::{
     crmlog::Crmlog, customer::Customer, customer_pay::CustomerPay, dept::Dept, level::Level,
     rentarea::Rentarea, store::Store,
 };
+

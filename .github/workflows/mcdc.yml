@@ -1,4 +1,4 @@
-﻿# MC/DC 分支覆盖率 — nightly 工具链
+# MC/DC 分支覆盖率 — nightly 工具链
 #
 # 使用 nightly Rust 的 -Z instrument-coverage=branch 采集分支覆盖率
 # LLVM source-based coverage 在 stable 下不采集 branch，需 nightly
@@ -17,7 +17,7 @@ jobs:
   mcdc:
     name: Branch Coverage (nightly)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: false
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency

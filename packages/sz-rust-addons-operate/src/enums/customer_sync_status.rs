@@ -23,8 +23,11 @@
 /// | 30 | 已同步 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStatus {
+    /// 待同步
     Pending = 10,
+    /// 无需同步
     NotNeeded = 20,
+    /// 已同步
     Synced = 30,
 }
 
@@ -63,12 +66,16 @@ impl SyncStatus {
 /// | 30 | 已退款 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomerPayStatus {
+    /// 未付款
     Unpaid = 10,
+    /// 已付款
     Paid = 20,
+    /// 已退款
     Refunded = 30,
 }
 
 impl CustomerPayStatus {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             10 => Some(Self::Unpaid),
@@ -78,6 +85,7 @@ impl CustomerPayStatus {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::Unpaid => "未付款",
@@ -86,6 +94,7 @@ impl CustomerPayStatus {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `payStatusName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }
@@ -100,12 +109,16 @@ impl CustomerPayStatus {
 /// | 30 | 已完成 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderStatus {
+    /// 进行中
     InProgress = 10,
+    /// 已经取消
     Cancelled = 20,
+    /// 已完成
     Completed = 30,
 }
 
 impl OrderStatus {
+    /// 从数值构造，无效值返回 `None`（对齐 PHP `isset($data[$value])`）
     pub fn from_value(value: i64) -> Option<Self> {
         match value {
             10 => Some(Self::InProgress),
@@ -115,6 +128,7 @@ impl OrderStatus {
         }
     }
 
+    /// 返回中文名（对齐 PHP `$data[$value]['name']`）
     pub fn name(&self) -> &'static str {
         match self {
             Self::InProgress => "进行中",
@@ -123,6 +137,7 @@ impl OrderStatus {
         }
     }
 
+    /// 取中文名或"未知"（对齐 PHP `orderStatusName` 在 value 不存在时返回 `'未知'`）
     pub fn name_or_unknown(value: i64) -> &'static str {
         Self::from_value(value).map(|v| v.name()).unwrap_or("未知")
     }
@@ -140,9 +155,13 @@ impl OrderStatus {
 /// | `"cash"` | 现金支付 | orange |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaySource {
+    /// 工商银行
     Icbc,
+    /// 建设银行
     Ccb,
+    /// 富友支付
     Fuiou,
+    /// 现金支付
     Cash,
 }
 
