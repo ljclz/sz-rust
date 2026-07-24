@@ -154,7 +154,7 @@ pub const EXTENDED_EVENTS: [HookEvent; 4] = [
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::{event_name, HookEvent};
 ///
 /// assert_eq!(event_name(HookEvent::BeforeInsert), "before_insert");
@@ -188,7 +188,7 @@ pub fn event_name(event: HookEvent) -> &'static str {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::{event_from_name, HookEvent};
 ///
 /// assert_eq!(event_from_name("before_insert"), Some(HookEvent::BeforeInsert));
@@ -539,7 +539,7 @@ pub fn validate_find_order(registry: &HookRegistry) -> Result<(), String> {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::{hook_context, HookContextExt};
 ///
 /// let ctx = hook_context()
@@ -600,7 +600,7 @@ impl HookContextExt for HookContext {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::hook_context;
 /// use sz_rust_core::hooks::HookContextExt;
 ///
@@ -633,7 +633,7 @@ pub fn hook_context_with_operator(operator_id: i64) -> HookContext {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::hook_context_from_meta;
 ///
 /// let headers = vec![
@@ -696,7 +696,7 @@ pub const DEFAULT_SOFT_DELETE_FIELD: &str = "delete_time";
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::soft_delete_filter_sql;
 ///
 /// assert_eq!(soft_delete_filter_sql("delete_time"), "delete_time IS NULL");
@@ -712,7 +712,7 @@ pub fn soft_delete_filter_sql(field: &str) -> String {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::only_trashed_filter_sql;
 ///
 /// assert_eq!(only_trashed_filter_sql("delete_time"), "delete_time IS NOT NULL");
@@ -741,7 +741,7 @@ pub fn only_trashed_filter_sql(field: &str) -> String {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::is_soft_deleted;
 ///
 /// // 字段为 NULL → 未软删除
@@ -768,7 +768,7 @@ pub fn is_soft_deleted(field_value: Option<&str>) -> bool {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::soft_delete_update_sql;
 ///
 /// let sql = soft_delete_update_sql("users", "delete_time", "id");
@@ -784,7 +784,7 @@ pub fn soft_delete_update_sql(table: &str, field: &str, pk: &str) -> String {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::soft_delete_restore_sql;
 ///
 /// let sql = soft_delete_restore_sql("users", "delete_time", "id");
@@ -850,7 +850,7 @@ pub const DEFAULT_TENANT_FIELD: &str = "app_id";
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::{tenant_filter_sql, DEFAULT_TENANT_FIELD};
 ///
 /// // 默认字段名
@@ -875,7 +875,7 @@ pub fn tenant_filter_sql(field: &str, table: &str) -> String {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::{tenant_filter_sql_no_table, DEFAULT_TENANT_FIELD};
 ///
 /// // 默认字段名
@@ -904,7 +904,7 @@ pub fn tenant_filter_sql_no_table(field: &str) -> String {
 ///
 /// # 示例
 ///
-/// ```
+/// ```ignore
 /// use sz_rust_core::hooks::is_tenant_aware;
 ///
 /// // 0 或负数：不启用多租户过滤

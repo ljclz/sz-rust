@@ -32,12 +32,10 @@ tracing.workspace = true
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
-hyper.workspace = true
 tokio.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 # Phase 1.10: HTTP/2 + TLS
-rustls.workspace = true
 tokio-rustls.workspace = true
 rustls-pemfile.workspace = true
 # Phase 5.5: 文件上传
@@ -63,7 +61,6 @@ sz-orm-websocket = { workspace = true, features = ["server"] }
 sz-orm-scheduler.workspace = true
 tokio-util.workspace = true
 num_cpus.workspace = true
-futures.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -89,3 +86,6 @@ path = "tests/fuzz.rs"
 [[bench]]
 name = "core_bench"
 harness = false
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]

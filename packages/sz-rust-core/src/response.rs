@@ -7,7 +7,7 @@
 //!
 //! | PHP 方法 | 行为 | Rust 等价 |
 //! |---------|------|-----------|
-//! | `renderJson($code, $msg, $data)` | 标准 JSON 响应 | [`ApiResponse::new`] + [`ApiResponse::to_response`] |
+//! | `renderJson($code, $msg, $data)` | 标准 JSON 响应 | [`ApiResponse::new`] + `ApiResponse::into_response` |
 //! | `renderSuccess($msg, $data)` | `code=1` 成功响应 | [`ApiResponse::success`]（Rust 参数顺序：data, msg） |
 //! | `renderError($msg, $data)` | `code=0` 失败响应 | [`ApiResponse::error`] |
 //! | `renderError($msg, $data, $code)` | 自定义错误码 | [`ApiResponse::error_with_code`]（Rust 参数顺序：code, msg, data） |

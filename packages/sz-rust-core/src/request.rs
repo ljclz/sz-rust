@@ -48,7 +48,7 @@ use serde_json::{Map, Value};
 ///
 /// ## 参数
 ///
-/// - `req`：axum::http::Request<Body>
+/// - `req`：`axum::http::Request<Body>`
 ///
 /// ## 返回
 ///

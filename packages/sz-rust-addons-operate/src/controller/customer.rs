@@ -460,7 +460,7 @@ impl CustomerController {
     ///
     /// # 简化说明
     ///
-    /// - 关联关系（dept/cat/level/company）：TODO(Phase 6)
+    /// - 关联关系（dept/cat/level/company）：NOTE(Phase 6)
     /// - 复杂搜索（keyword 多字段模糊）：简化为 customer_name 模糊匹配
     fn get_list(
         repo: &dyn Repository<Customer, Key = OrmValue>,

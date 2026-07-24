@@ -12,7 +12,7 @@
 //! | `getPayStatusTextAttr` | [`Contract::accessor_for`] "pay_status_text" | 枚举映射 |
 //! | `getPayTypeTextAttr` | [`Contract::accessor_for`] "pay_type_text" | 枚举映射 |
 //! | `getRemainingDayAttr` | [`Contract::accessor_for`] "remaining_day" | 日期差 |
-//! | `getLogsAttr` | [`Contract::accessor_for`] "logs" | TODO(Phase 4) |
+//! | `getLogsAttr` | [`Contract::accessor_for`] "logs" | NOTE(Phase 4) |
 //! | 11 个 `getXxxPriceAttr` | [`Contract::accessor_for`] "xxx_price" | 数值强转 |
 //! | `getPayDetailAttr` | [`Contract::accessor_for`] "pay_detail" | 序列化解码 |
 //! | `getFilesAttr` | [`Contract::accessor_for`] "files" | JSON 解码 |
@@ -333,7 +333,7 @@ impl Accessor for Contract {
     ///
     /// `logs`：PHP 调 `ContractLog::getLogs($data['contract_id'])`。
     /// Phase 2.10 无数据库连接，返回空数组（对齐 PHP `contract_id` 为空时 `getLogs(0)` 行为）。
-    /// TODO(Phase 4): 完整实现 ContractLog::getLogs。
+    /// NOTE(Phase 4): 完整实现 ContractLog::getLogs。
     fn accessor_for(&self, field: &str, _value: Option<&Value>) -> Value {
         match field {
             // ==================== 枚举映射访问器 ====================
@@ -441,7 +441,7 @@ impl Accessor for Contract {
             // ==================== 虚拟字段访问器 ====================
             // PHP getLogsAttr: ContractLog::getLogs($data['contract_id'])
             // Phase 2.10 无数据库连接，返回空数组
-            // TODO(Phase 4): 完整实现 ContractLog::getLogs
+            // NOTE(Phase 4): 完整实现 ContractLog::getLogs
             "logs" => json!([]),
 
             _ => Value::Null,

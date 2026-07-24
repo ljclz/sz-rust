@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -28,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
@@ -38,6 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -76,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -86,6 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: Check advisories (RUSTSEC)
@@ -103,6 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - name: 检查禁止的占位实现
         run: |
           if grep -rn 'todo!()\|unimplemented!()\|panic!("not implemented' --include="*.rs" packages/; then
@@ -157,3 +169,32 @@ jobs:
           key: ${{ runner.os }}-cargo-udeps-${{ hashFiles('**/Cargo.lock') }}
       - name: Run unused deps check
         run: cargo +nightly udeps --workspace --all-targets
+
+  # 门禁 10：过期依赖检测
+  outdated:
+    name: Outdated Dependencies (cargo-outdated)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated --locked
+      - name: Check outdated dependencies
+        run: cargo outdated --workspace --depth 2
+
+  # 门禁 11：cargo-machete 未使用依赖检测
+  machete:
+    name: Unused Dependencies (cargo-machete)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --locked
+      - name: Run cargo-machete
+        run: cargo machete --workspace

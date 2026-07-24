@@ -11,7 +11,7 @@
 //! |---------|-----------|------|
 //! | `Lang::has($name)` | [`Lang::has`] | 判断语言定义是否存在（不区分大小写） |
 //! | `Lang::get($name)` | [`Lang::get`] | 获取语言定义（找不到返回 name 本身） |
-//! | `Validate::setLang($lang)` | [`Validate::set_lang`] | 注入 Lang 实例 |
+//! | `Validate::setLang($lang)` | `Validate::set_lang` | 注入 Lang 实例 |
 //! | `parseErrorMsg` 第 1598-1602 行 | [`translate_msg`] | 消息翻译（`{%var}` + `has` 检查） |
 //!
 //! ### PHP `parseErrorMsg` 翻译逻辑（R5-7）

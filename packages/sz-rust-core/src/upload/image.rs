@@ -217,10 +217,10 @@ pub struct Color {
     pub g: u8,
     /// 蓝色（0-255）
     pub b: u8,
-    /// Alpha（0-255，0=透明，255=不透明；对齐 Rust Rgba<u8> 语义）
+    /// Alpha（0-255，0=透明，255=不透明；对齐 Rust `Rgba<u8>` 语义）
     ///
     /// 注意：PHP GD alpha 是 0（不透明）~127（透明），Grafika 内部用 `gdAlpha()` 转换。
-    /// Rust 端直接用 0-255（0=透明，255=不透明），与 Rgba<u8> 一致。
+    /// Rust 端直接用 0-255（0=透明，255=不透明），与 `Rgba<u8>` 一致。
     pub a: u8,
 }
 
@@ -519,7 +519,7 @@ fn guess_image_type(path: &Path) -> Result<ImageType, ImageError> {
 /// Rust 端保持同样的架构分离。
 ///
 /// 使用方式（对齐 PHP `$editor = Grafika::createEditor(['Gd'])`）：
-/// ```
+/// ```ignore
 /// use sz_rust_core::upload::image::{Editor, Image, Color};
 /// let mut editor = Editor::new();
 /// let mut img = Image::open("test.png")?;
@@ -2074,5 +2074,541 @@ mod tests {
         };
         assert_eq!(m.width, 100);
         assert_eq!(m.height, 30);
+    }
+
+    // ---- 组 12：Color 补充 ----
+
+    #[test]
+    fn test_color_from_hex_rgba_short() {
+        let c = Color::from_hex("#f80f").unwrap();
+        assert_eq!(c.r, 255);
+        assert_eq!(c.g, 136);
+        assert_eq!(c.b, 0);
+        assert_eq!(c.a, 255);
+    }
+
+    #[test]
+    fn test_color_from_hex_with_whitespace() {
+        let c = Color::from_hex("  #ff8000  ").unwrap();
+        assert_eq!(c.r, 255);
+        assert_eq!(c.g, 128);
+        assert_eq!(c.b, 0);
+    }
+
+    #[test]
+    fn test_color_from_hex_empty() {
+        assert!(Color::from_hex("#").is_err());
+        assert!(Color::from_hex("").is_err());
+    }
+
+    #[test]
+    fn test_color_from_hex_invalid_chars() {
+        assert!(Color::from_hex("#gggggg").is_err());
+        assert!(Color::from_hex("#zz").is_err());
+    }
+
+    #[test]
+    fn test_color_copy_and_eq() {
+        let c1 = Color::rgb(1, 2, 3);
+        let c2 = c1;
+        assert_eq!(c1, c2);
+    }
+
+    // ---- 组 13：ImageType 补充 ----
+
+    #[test]
+    fn test_image_type_from_image_format_other() {
+        use image::ImageFormat;
+        assert_eq!(
+            ImageType::from_image_format(ImageFormat::Bmp),
+            ImageType::Unknown
+        );
+        assert_eq!(
+            ImageType::from_image_format(ImageFormat::Tiff),
+            ImageType::Unknown
+        );
+    }
+
+    #[test]
+    fn test_image_type_from_extension_empty() {
+        assert_eq!(ImageType::from_extension(""), ImageType::Unknown);
+    }
+
+    // ---- 组 14：Position 补充 ----
+
+    #[test]
+    fn test_position_parse_all_nine() {
+        assert_eq!(Position::parse("top-left").unwrap(), Position::TopLeft);
+        assert_eq!(Position::parse("top-center").unwrap(), Position::TopCenter);
+        assert_eq!(Position::parse("top-right").unwrap(), Position::TopRight);
+        assert_eq!(Position::parse("center-left").unwrap(), Position::CenterLeft);
+        assert_eq!(Position::parse("center").unwrap(), Position::Center);
+        assert_eq!(Position::parse("center-right").unwrap(), Position::CenterRight);
+        assert_eq!(Position::parse("bottom-left").unwrap(), Position::BottomLeft);
+        assert_eq!(Position::parse("bottom-center").unwrap(), Position::BottomCenter);
+        assert_eq!(Position::parse("bottom-right").unwrap(), Position::BottomRight);
+    }
+
+    #[test]
+    fn test_position_as_str_all_nine() {
+        assert_eq!(Position::TopLeft.as_str(), "top-left");
+        assert_eq!(Position::TopCenter.as_str(), "top-center");
+        assert_eq!(Position::TopRight.as_str(), "top-right");
+        assert_eq!(Position::CenterLeft.as_str(), "center-left");
+        assert_eq!(Position::Center.as_str(), "center");
+        assert_eq!(Position::CenterRight.as_str(), "center-right");
+        assert_eq!(Position::BottomLeft.as_str(), "bottom-left");
+        assert_eq!(Position::BottomCenter.as_str(), "bottom-center");
+        assert_eq!(Position::BottomRight.as_str(), "bottom-right");
+    }
+
+    #[test]
+    fn test_position_get_xy_unequal_dimensions() {
+        let (x, y) = Position::Center.get_xy(200, 100, 40, 30);
+        assert_eq!(x, 80);
+        assert_eq!(y, 35);
+    }
+
+    // ---- 组 15：Image 补充 ----
+
+    #[test]
+    fn test_image_from_rgba8() {
+        let buf: RgbaImage = ImageBuffer::from_pixel(40, 30, Rgba([10, 20, 30, 255]));
+        let img = Image::from_rgba8(buf, ImageType::Png);
+        assert_eq!(img.width(), 40);
+        assert_eq!(img.height(), 30);
+        assert_eq!(img.image_type(), ImageType::Png);
+        assert!(img.file_path().is_none());
+    }
+
+    #[test]
+    fn test_image_as_dynamic() {
+        let img = Image::create_blank(50, 50);
+        let dyn_ref = img.as_dynamic();
+        assert_eq!(dyn_ref.width(), 50);
+        assert_eq!(dyn_ref.height(), 50);
+    }
+
+    #[test]
+    fn test_image_as_dynamic_mut() {
+        let mut img = Image::create_blank(50, 50);
+        let dyn_mut = img.as_dynamic_mut();
+        assert_eq!(dyn_mut.width(), 50);
+        assert_eq!(dyn_mut.height(), 50);
+    }
+
+    #[test]
+    fn test_image_open_nonexistent() {
+        let result = Image::open(Path::new("/nonexistent/file.png"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_image_open_unknown_extension_fails() {
+        // image crate uses extension for format detection; .bin is not recognized.
+        // Create PNG with proper extension first, then rename to .bin.
+        let tmp_png = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_png.path(), 60, 40, Rgba([255, 0, 0, 255]));
+        let bin_path = tmp_png.path().with_extension("bin");
+        std::fs::rename(tmp_png.path(), &bin_path).unwrap();
+        let result = Image::open(&bin_path);
+        assert!(result.is_err());
+    }
+
+    // ---- 组 16：Editor 补充 ----
+
+    #[test]
+    fn test_editor_default() {
+        let _editor = Editor;
+    }
+
+    #[test]
+    fn test_editor_rotate_0() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor.rotate(&mut img, 0.0).unwrap();
+        assert_eq!(img.width(), 80);
+        assert_eq!(img.height(), 60);
+    }
+
+    #[test]
+    fn test_editor_rotate_270() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor.rotate(&mut img, 270.0).unwrap();
+        assert_eq!(img.width(), 60);
+        assert_eq!(img.height(), 80);
+    }
+
+    #[test]
+    fn test_editor_rotate_negative_90() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor.rotate(&mut img, -90.0).unwrap();
+        assert_eq!(img.width(), 60);
+        assert_eq!(img.height(), 80);
+    }
+
+    #[test]
+    fn test_editor_rotate_negative_180() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor.rotate(&mut img, -180.0).unwrap();
+        assert_eq!(img.width(), 80);
+        assert_eq!(img.height(), 60);
+    }
+
+    #[test]
+    fn test_editor_rotate_360_normalized_to_0() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor.rotate(&mut img, 360.0).unwrap();
+        assert_eq!(img.width(), 80);
+        assert_eq!(img.height(), 60);
+    }
+
+    #[test]
+    fn test_editor_crop_with_positive_offset() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor
+            .crop(&mut img, 50, 50, Position::Center, 10, 10)
+            .unwrap();
+        assert_eq!(img.width(), 50);
+        assert_eq!(img.height(), 50);
+    }
+
+    #[test]
+    fn test_editor_crop_with_negative_offset_clamped() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor
+            .crop(&mut img, 50, 50, Position::TopLeft, -100, -100)
+            .unwrap();
+        assert_eq!(img.width(), 50);
+        assert_eq!(img.height(), 50);
+    }
+
+    #[test]
+    fn test_editor_crop_top_left() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor
+            .crop(&mut img, 30, 30, Position::TopLeft, 0, 0)
+            .unwrap();
+        assert_eq!(img.width(), 30);
+        assert_eq!(img.height(), 30);
+    }
+
+    #[test]
+    fn test_editor_crop_bottom_right() {
+        let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
+        let editor = Editor::new();
+        let mut img = editor.open(tmp.path()).unwrap();
+        editor
+            .crop(&mut img, 30, 30, Position::BottomRight, 0, 0)
+            .unwrap();
+        assert_eq!(img.width(), 30);
+        assert_eq!(img.height(), 30);
+    }
+
+    // ---- 组 17：Editor blend 补充 ----
+
+    #[test]
+    fn test_editor_blend_multiply() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([128, 128, 128, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([128, 128, 128, 255]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Multiply, 1.0, Position::TopLeft, 0, 0)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        let pixel = rgba.get_pixel(0, 0);
+        assert!((60..=68).contains(&pixel[0]), "expected ~64, got {}", pixel[0]);
+    }
+
+    #[test]
+    fn test_editor_blend_overlay_dark() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([64, 64, 64, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([128, 128, 128, 255]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Overlay, 1.0, Position::TopLeft, 0, 0)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        let pixel = rgba.get_pixel(0, 0);
+        assert!((60..=68).contains(&pixel[0]), "expected ~64, got {}", pixel[0]);
+    }
+
+    #[test]
+    fn test_editor_blend_overlay_light() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([200, 200, 200, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([200, 200, 200, 255]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Overlay, 1.0, Position::TopLeft, 0, 0)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        let pixel = rgba.get_pixel(0, 0);
+        assert!((225..=235).contains(&pixel[0]), "expected ~231, got {}", pixel[0]);
+    }
+
+    #[test]
+    fn test_editor_blend_screen() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([0, 0, 0, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([0, 0, 0, 255]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Screen, 1.0, Position::TopLeft, 0, 0)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        let pixel = rgba.get_pixel(0, 0);
+        assert_eq!(pixel[0], 0);
+    }
+
+    #[test]
+    fn test_editor_blend_with_negative_offset() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([0, 0, 0, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([255, 255, 255, 255]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Normal, 1.0, Position::TopLeft, -25, -25)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        assert_eq!(rgba.get_pixel(0, 0)[0], 255);
+        assert_eq!(rgba.get_pixel(24, 24)[0], 255);
+        assert_eq!(rgba.get_pixel(25, 25)[0], 0);
+    }
+
+    #[test]
+    fn test_editor_blend_transparent_overlay() {
+        let base = ImageBuffer::from_pixel(50, 50, Rgba([100, 100, 100, 255]));
+        let mut img1 = Image::from_rgba8(base, ImageType::Png);
+        let overlay = ImageBuffer::from_pixel(50, 50, Rgba([255, 0, 0, 0]));
+        let img2 = Image::from_rgba8(overlay, ImageType::Png);
+        let editor = Editor::new();
+        editor
+            .blend(&mut img1, &img2, BlendType::Normal, 1.0, Position::TopLeft, 0, 0)
+            .unwrap();
+        let rgba = img1.to_rgba8();
+        let pixel = rgba.get_pixel(0, 0);
+        assert_eq!(pixel[0], 100);
+    }
+
+    // ---- 组 18：Editor save 补充 ----
+
+    #[test]
+    fn test_editor_save_gif() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".gif").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, tmp_out.path(), None, None, false, 0o755)
+            .unwrap();
+        assert!(tmp_out.path().exists());
+        let reopened = image::open(tmp_out.path()).unwrap();
+        assert_eq!(reopened.width(), 30);
+    }
+
+    #[test]
+    fn test_editor_save_wbmp_error() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".wbmp").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        let result = editor.save(&img, tmp_out.path(), None, None, false, 0o755);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_editor_save_unknown_type_error() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".bin").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        let result = editor.save(&img, tmp_out.path(), None, None, false, 0o755);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_editor_save_with_explicit_png_type() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, tmp_out.path(), Some(ImageType::Png), None, false, 0o755)
+            .unwrap();
+        assert!(tmp_out.path().exists());
+    }
+
+    #[test]
+    fn test_editor_save_jpeg_explicit_type() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, tmp_out.path(), Some(ImageType::Jpeg), Some(80), false, 0o755)
+            .unwrap();
+        assert!(tmp_out.path().exists());
+    }
+
+    #[test]
+    fn test_editor_save_quality_clamping_high() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, tmp_out.path(), None, Some(200), false, 0o755)
+            .unwrap();
+        assert!(tmp_out.path().exists());
+    }
+
+    #[test]
+    fn test_editor_save_quality_clamping_zero() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
+        let tmp_out = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, tmp_out.path(), None, Some(0), false, 0o755)
+            .unwrap();
+        assert!(tmp_out.path().exists());
+    }
+
+    #[test]
+    fn test_editor_save_creates_parent_dir() {
+        let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+        create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let output_path = tmp_dir.path().join("subdir").join("output.png");
+        assert!(!output_path.parent().unwrap().exists());
+        let editor = Editor::new();
+        let img = editor.open(tmp_in.path()).unwrap();
+        editor
+            .save(&img, &output_path, None, None, false, 0o755)
+            .unwrap();
+        assert!(output_path.exists());
+    }
+
+    // ---- 组 19：load_font / measure_text / wrap_text 补充 ----
+
+    #[test]
+    fn test_load_font_invalid_data() {
+        let tmp = tempfile::Builder::new().suffix(".ttf").tempfile().unwrap();
+        std::fs::write(tmp.path(), b"this is not a font").unwrap();
+        let mut img = Image::create_blank(100, 50);
+        let editor = Editor::new();
+        let result = editor.text(
+            &mut img,
+            "test",
+            20,
+            10,
+            30,
+            Color::rgb(0, 0, 0),
+            Some(tmp.path()),
+        );
+        assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
+    }
+
+    #[test]
+    fn test_measure_text_invalid_font() {
+        let tmp = tempfile::Builder::new().suffix(".ttf").tempfile().unwrap();
+        std::fs::write(tmp.path(), b"invalid font data").unwrap();
+        let result = measure_text(tmp.path(), 30, "hello");
+        assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
+    }
+
+    #[test]
+    fn test_wrap_text_nonexistent_font() {
+        let result = wrap_text(Path::new("/nonexistent.ttf"), 30, "hello", 680, None);
+        assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
+    }
+
+    #[test]
+    fn test_editor_text_with_font() {
+        let font_path = Path::new("C:/Windows/Fonts/arial.ttf");
+        if !font_path.exists() {
+            eprintln!("Skipping test_editor_text_with_font: font not found");
+            return;
+        }
+        let mut img = Image::create_blank(200, 100);
+        let editor = Editor::new();
+        let result = editor.text(
+            &mut img,
+            "hello",
+            30,
+            10,
+            50,
+            Color::rgb(255, 0, 0),
+            Some(font_path),
+        );
+        assert!(result.is_ok());
+        assert_eq!(img.width(), 200);
+        assert_eq!(img.height(), 100);
+    }
+
+    #[test]
+    fn test_measure_text_with_font() {
+        let font_path = Path::new("C:/Windows/Fonts/arial.ttf");
+        if !font_path.exists() {
+            eprintln!("Skipping test_measure_text_with_font: font not found");
+            return;
+        }
+        let result = measure_text(font_path, 30, "hello").unwrap();
+        assert!(result.width > 0);
+        assert!(result.height > 0);
+    }
+
+    #[test]
+    fn test_wrap_text_with_font_no_max_line() {
+        let font_path = Path::new("C:/Windows/Fonts/arial.ttf");
+        if !font_path.exists() {
+            eprintln!("Skipping test_wrap_text_with_font_no_max_line: font not found");
+            return;
+        }
+        let data = std::fs::read(font_path).unwrap();
+        let font = FontVec::try_from_vec(data).unwrap();
+        let long_text = "this is a very long text that should wrap";
+        let result = wrap_text_with_font(&font, 30, long_text, 100, None);
+        assert!(result.contains('\n'), "should contain newline: {result}");
+        assert!(!result.ends_with("..."), "should not end with ... when no max_line");
     }
 }

@@ -1,0 +1,39 @@
+﻿# MC/DC 分支覆盖率 — nightly 工具链
+#
+# 使用 nightly Rust 的 -Z instrument-coverage=branch 采集分支覆盖率
+# LLVM source-based coverage 在 stable 下不采集 branch，需 nightly
+
+name: MC/DC Branch Coverage
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"  # 每周一 04:00 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mcdc:
+    name: Branch Coverage (nightly)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Run branch coverage
+        run: |
+          RUSTFLAGS="-Z instrument-coverage=branch" \
+          cargo +nightly llvm-cov --workspace --summary-only --branch
+      - name: Upload branch coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcdc-coverage-${{ github.sha }}
+          path: target/llvm-cov/
+          retention-days: 14

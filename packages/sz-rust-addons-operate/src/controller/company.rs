@@ -297,7 +297,7 @@ impl CompanyController {
     ///
     /// # 简化说明
     ///
-    /// - 事务、缓存、关联关系：TODO(Phase 6)
+    /// - 事务、缓存、关联关系：NOTE(Phase 6)
     /// - LIKE 搜索：使用简单的 `contains` 匹配（对齐 PHP `LIKE '%keyword%'`）
     /// - 分页：内存分页（对齐 PHP `paginate`）
     fn get_list(
@@ -388,7 +388,7 @@ impl CompanyController {
     ///
     /// # 简化说明
     ///
-    /// - 事务：TODO(Phase 6)（InMemoryRepository 不支持事务）
+    /// - 事务：NOTE(Phase 6)（InMemoryRepository 不支持事务）
     /// - `save($data)`：调用 `set_attrs` 批量赋值后 `repo.save`
     fn add_company(
         repo: &dyn Repository<Company, Key = OrmValue>,

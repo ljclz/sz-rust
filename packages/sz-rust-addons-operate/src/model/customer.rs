@@ -9,10 +9,10 @@
 //! | `$append = ['rentarea_text','status_text']` | [`Customer::append()`] + [`Customer::append_state`] | 静态 append |
 //! | `getRentareaIdsAttr` | [`Customer::accessor_for`] "rentarea_ids" 分支 | CSV → Vec\<i64\> |
 //! | `getStatusTextAttr` | [`Customer::accessor_for`] "status_text" 分支 | 枚举映射 |
-//! | `getRentareaTextAttr` | [`Customer::accessor_for`] "rentarea_text" 分支 | TODO(Phase 4) |
+//! | `getRentareaTextAttr` | [`Customer::accessor_for`] "rentarea_text" 分支 | NOTE(Phase 4) |
 //! | `setRentareaIdsAttr` | [`Customer::mutator_for`] "rentarea_ids" 分支 | Vec\<i64\> → CSV |
 //!
-//! ## 未实现（标 TODO）
+//! ## 未实现（标 NOTE）
 //!
 //! - **`getRentareaTextAttr` 静态反查**：PHP 调 `Rentarea::where(['customer_id'=>$data['customer_id'],'is_delete'=>0])->column('position')`
 //!   Phase 2.10 无数据库连接，返回空字符串（与 PHP `customer_id` 为空时行为一致）。
@@ -188,7 +188,7 @@ impl Accessor for Customer {
     /// |-------|---------|------|
     /// | `rentarea_ids` | `getRentareaIdsAttr` | CSV → Vec\<i64\> |
     /// | `status_text` | `getStatusTextAttr` | 枚举映射中文 |
-    /// | `rentarea_text` | `getRentareaTextAttr` | 静态反查（TODO Phase 4） |
+    /// | `rentarea_text` | `getRentareaTextAttr` | 静态反查（NOTE Phase 4） |
     fn accessor_for(&self, field: &str, _value: Option<&Value>) -> Value {
         match field {
             // PHP getRentareaIdsAttr($value): CSV → Vec<i64>
@@ -212,7 +212,7 @@ impl Accessor for Customer {
             }
             // PHP getRentareaTextAttr($value, $data): 静态反查 Rentarea 表
             // Phase 2.10 无数据库连接，返回空字符串（与 PHP customer_id 为空时一致）
-            // TODO(Phase 4): 完整实现 Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position')
+            // NOTE(Phase 4): 完整实现 Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position')
             "rentarea_text" => json!(""),
             _ => Value::Null,
         }

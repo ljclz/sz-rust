@@ -206,4 +206,86 @@ mod tests {
             response
         }
     }
+
+    // ---- 补充测试：覆盖 serve() 和 serve_with_graceful_shutdown() ----
+
+    #[tokio::test]
+    async fn test_serve_responds_to_request() {
+        // 获取空闲端口（bind 后 drop 释放端口，serve 内部重新 bind）
+        let addr = {
+            let (_, addr) = build_tcp_listener("127.0.0.1:0").await.unwrap();
+            addr
+        };
+        let addr_str = addr.to_string();
+
+        let router = Router::new().route("/", axum::routing::get(|| async { "serve ok" }));
+        tokio::spawn(async move {
+            let _ = serve(router, &addr_str).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let host = addr.to_string();
+        let body = http_get_body(&host, "/").await;
+        assert!(body.contains("serve ok"));
+    }
+
+    #[tokio::test]
+    async fn test_serve_with_graceful_shutdown_responds_to_request() {
+        let addr = {
+            let (_, addr) = build_tcp_listener("127.0.0.1:0").await.unwrap();
+            addr
+        };
+        let addr_str = addr.to_string();
+
+        let router =
+            Router::new().route("/", axum::routing::get(|| async { "graceful ok" }));
+        tokio::spawn(async move {
+            let _ = serve_with_graceful_shutdown(router, &addr_str).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let host = addr.to_string();
+        let body = http_get_body(&host, "/").await;
+        assert!(body.contains("graceful ok"));
+    }
+
+    #[tokio::test]
+    async fn test_build_tcp_listener_wildcard_addr() {
+        let (listener, addr) = build_tcp_listener("0.0.0.0:0").await.unwrap();
+        assert!(addr.port() > 0);
+        let _ = listener.local_addr().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_build_tcp_listener_invalid_ip() {
+        let result = build_tcp_listener("invalid_addr:8080").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_build_tcp_listener_empty_addr() {
+        let result = build_tcp_listener("").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_serve_with_listener_multiple_routes() {
+        let router = Router::new()
+            .route("/", axum::routing::get(|| async { "home" }))
+            .route("/api", axum::routing::get(|| async { "api" }));
+        let (listener, addr) = build_tcp_listener("127.0.0.1:0").await.unwrap();
+
+        tokio::spawn(async move {
+            let _ = serve_with_listener(router, listener).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let host = addr.to_string();
+        let body1 = http_get_body(&host, "/").await;
+        assert!(body1.contains("home"));
+
+        let body2 = http_get_body(&host, "/api").await;
+        assert!(body2.contains("api"));
+    }
 }

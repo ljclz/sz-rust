@@ -9,10 +9,21 @@ all-features = true
 # 已知安全漏洞 advisory 检查
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # 忽略的 advisory（需注明理由和到期时间）
-ignore = []
+ignore = [
+    # ttf-parser 已声明 unmaintained（RUSTSEC-2026-0192），
+    # 但作为 ab_glyph -> imageproc 的传递依赖，无直接安全影响。
+    # 备选方案 skrifa 引入需评估 fontations 系列 crate 的额外依赖开销。
+    "RUSTSEC-2026-0192",
+    # rustls-pemfile 已存档/停止维护（RUSTSEC-2025-0134），建议迁移到 rustls-pki-types 内建 PEM 解析。
+    # 作为 hyper-rustls -> reqwest -> sz-rust-pdf 的传递依赖，当前版本无安全漏洞，仅停止维护。
+    "RUSTSEC-2025-0134",
+    # paste 已存档/停止维护（RUSTSEC-2024-0436），但作为大量 crate 的传递依赖
+    # （通过很多宏 crate 间接引用），无已知安全漏洞，仅停止维护。
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
-# 许可证白名单（兼容 MIT）
+# 许可证白名单
 allow = [
     "MIT",
     "MIT-0",
@@ -27,14 +38,8 @@ allow = [
     "CC0-1.0",
     "0BSD",
     "Unlicense",
-]
-# 禁止的许可证
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "EUPL-1.1",
-    "EUPL-1.2",
+    "NCSA",
+    "CDLA-Permissive-2.0",
 ]
 # 置信度阈值（文件扫描置信度）
 confidence-threshold = 0.8
@@ -44,9 +49,19 @@ confidence-threshold = 0.8
 ignore = true
 ignore-sources = []
 
+# webpki-roots 使用 CDLA-Permissive-2.0（OSI 批准），
+# cargo-deny 新版本要求 expression 字段 + license-files hash，
+# 但 webpki-roots 的 CDLA-Permissive-2.0 已在 allow 列表中，
+# 此处仅跳过其文件扫描（许可证本身已是白名单许可，无风险）。
+[[licenses.clarify]]
+name = "webpki-roots"
+version = "*"
+expression = "CDLA-Permissive-2.0"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
 [bans]
 # 禁止重复依赖（同 crate 多版本）
-multiple-versions = "warn"
+multiple-versions = "deny"
 # 禁止通配符依赖
 wildcards = "deny"
 # 允许的通配符
@@ -54,9 +69,17 @@ allow-wildcard-paths = false
 # 高亮重复依赖
 highlight = "all"
 
-[bans.deny]
 # 禁止的 crate（已知问题或不安全）
-deny = []
+# openssl — 强制走 rustls 路线，避免 OpenSSL 许可证和链接问题
+deny = [
+    { name = "openssl", allow-build = false },
+]
+
+# 跳过重复版本检查的 crate（传递依赖无法控制）
+# zip: rust_xlsxwriter 0.79 使用 zip 2.x，calamine 0.36 使用 zip 8.x（实际为同一系列不同主版本）
+skip = [
+    { name = "zip", version = "2.4.2" },
+]
 
 [sources]
 # 允许的 crate 源

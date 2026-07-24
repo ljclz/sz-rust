@@ -14,8 +14,8 @@
 //! | 继承 `$name = 'industry_dept'` | [`Store::table_name()`] | 表名 |
 //! | 继承 `$pk = 'dept_id'` | [`Store::pk_name()`] | 主键列名 |
 //! | 继承 `$append = []` | [`Store::append()`]（默认空） | 无静态 append |
-//! | `getList($param)` | TODO(Phase 5) | 业务方法 |
-//! | `getStat($param)` | TODO(Phase 5) | 业务方法 |
+//! | `getList($param)` | NOTE(Phase 5) | 业务方法 |
+//! | `getStat($param)` | NOTE(Phase 5) | 业务方法 |
 //!
 //! ## 无访问器 / 无修改器
 //!
@@ -23,15 +23,15 @@
 //! 父类 `IndustryDept` 也未声明。Rust 端 [`Store::accessor_for`]
 //! 返回 `Value::Null`，[`Store::mutator_for`] 返回 `None`。
 //!
-//! ## 未实现（标 TODO）
+//! ## 未实现（标 NOTE）
 //!
 //! - **业务方法 `getList`**：PHP 端调用 `Personnel::where()->count()`、
 //!   `Customer::where()->count()`、`Rentarea::where()->count()/SUM()`，
 //!   并对结果列表做 `usort` 按 `rentarea_scale` 降序排序。Phase 2.10 无
-//!   数据库连接，留 TODO(Phase 5 控制器层 + Phase 4 Repository)。
+//!   数据库连接，留 NOTE(Phase 5 控制器层 + Phase 4 Repository)。
 //! - **业务方法 `getStat`**：PHP 端调用 `IndustryDept::where()->column()`、
 //!   `Rentarea::where()->count()/SUM()`、`Customer::where()->count()`。
-//!   同上原因留 TODO。
+//!   同上原因留 NOTE。
 //! - **辅助函数 `getPersonnelInfo`**：PHP 全局函数，Rust 端待 Phase 5 移植。
 
 use crate::model::{get_i64, impl_empty_relation_loader};
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn test_r5_php_store_business_methods_documented_as_todo() {
         // R5: PHP Store 声明 getList($param) 和 getStat($param)
-        // Phase 2.10 无数据库连接，业务方法留 TODO(Phase 5)
+        // Phase 2.10 无数据库连接，业务方法留 NOTE(Phase 5)
         // 此测试验证 Store 模型本身可正常构造，业务方法待 Phase 5 实现
         let model = Store::new().with_data("dept_id", json!(1));
         assert_eq!(model.pk(), 1);

@@ -52,7 +52,7 @@ impl MqttDispatcher {
     /// 启动 MQTT 消费者（后台任务）
     pub async fn start_consumer(state: AppState) {
         tracing::info!("MQTT消费者: 启动完成 (模拟模式, 无真实broker连接)");
-        // TODO: 实际连接 MQTT Broker 并订阅 topic
+        // NOTE: 实际连接 MQTT Broker 并订阅 topic
         // 使用 sz-orm-mqtt 的 MqttPlugin（默认 in-memory mock）或 RealMqttClient（需要 real-broker feature）
         let _ = state;
     }

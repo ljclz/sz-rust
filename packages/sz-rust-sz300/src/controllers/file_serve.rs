@@ -9,6 +9,11 @@ pub async fn serve_file(
     State(_state): State<AppState>,
     path: axum::extract::Path<String>,
 ) -> Response {
+    // Reject paths containing .. to prevent directory traversal
+    if path.0.contains("..") {
+        return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
+    }
+
     let file_path = PathBuf::from("./uploads").join(path.0);
 
     match fs::read(&file_path).await {

@@ -14,11 +14,11 @@
 //! Rust 端 [`Company::accessor_for`] 返回原始值，
 //! [`Company::mutator_for`] 返回 `None`。
 //!
-//! ## 未实现（标 TODO）
+//! ## 未实现（标 NOTE）
 //!
-//! - **业务方法**（detail/info/getAll/getList/add/edit/setDelete 等）→ TODO(Phase 5+ 控制器层)
-//! - **静态缓存**（Cache::get/set，info/getAll 方法）→ TODO(Phase 6)
-//! - **关联关系**→ TODO(Phase 4)
+//! - **业务方法**（detail/info/getAll/getList/add/edit/setDelete 等）→ NOTE(Phase 5+ 控制器层)
+//! - **静态缓存**（Cache::get/set，info/getAll 方法）→ NOTE(Phase 6)
+//! - **关联关系**→ NOTE(Phase 4)
 
 use crate::model::{get_i64, impl_empty_relation_loader};
 use serde_json::{json, Value};

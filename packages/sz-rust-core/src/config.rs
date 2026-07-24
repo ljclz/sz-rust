@@ -397,16 +397,39 @@ impl AppConfig {
 
     /// 应用环境变量覆盖
     ///
-    /// 支持两种格式：
+    /// 支持以下环境变量格式：
     /// 1. `SZ_DB_{CONN}_PASSWORD` → `database.connections.{conn}.password`
-    /// 2. `SZ_APP__{KEY}` → `app.{key}`（标准格式，未来扩展）
+    /// 2. `SZ_DB_{CONN}_HOSTNAME` → `database.connections.{conn}.hostname`
+    /// 3. `SZ_DB_{CONN}_HOSTPORT` → `database.connections.{conn}.hostport`
+    /// 4. `SZ_APP__{KEY}` → `app.{key}`（标准格式，未来扩展）
     pub fn apply_env_overrides(&mut self) {
-        // 数据库密码简写格式：SZ_DB_{CONN}_PASSWORD
+        // 数据库连接环境变量覆盖：SZ_DB_{CONN}_{FIELD}
         for (conn_name, conn) in &mut self.database.connections {
-            let env_key = format!("SZ_DB_{}_PASSWORD", conn_name.to_uppercase());
+            let prefix = format!("SZ_DB_{}", conn_name.to_uppercase());
+
+            // 密码
+            let env_key = format!("{}_PASSWORD", prefix);
             if let Ok(password) = std::env::var(&env_key) {
                 if !password.is_empty() {
                     conn.password = password;
+                }
+            }
+
+            // 主机名（支持通过环境变量覆盖内网 IP，避免硬编码）
+            let env_key = format!("{}_HOSTNAME", prefix);
+            if let Ok(hostname) = std::env::var(&env_key) {
+                if !hostname.is_empty() {
+                    conn.hostname = hostname;
+                }
+            }
+
+            // 端口
+            let env_key = format!("{}_HOSTPORT", prefix);
+            if let Ok(hostport_str) = std::env::var(&env_key) {
+                if !hostport_str.is_empty() {
+                    if let Ok(hostport) = hostport_str.parse() {
+                        conn.hostport = hostport;
+                    }
                 }
             }
         }
@@ -522,9 +545,9 @@ app_map:
             assert!(config.database.connections.contains_key("food"));
             assert!(config.database.connections.contains_key("oceanbase"));
 
-            // 验证 mysql 连接
+            // 验证 mysql 连接（hostname 已改用 localhost，实际地址通过环境变量注入）
             let mysql = config.database.connections.get("mysql").unwrap();
-            assert_eq!(mysql.hostname, "172.17.16.14");
+            assert_eq!(mysql.hostname, "localhost");
             assert_eq!(mysql.hostport, 8802);
             assert_eq!(mysql.charset, "utf8mb4");
             assert_eq!(mysql.prefix, "sz_");
@@ -534,10 +557,10 @@ app_map:
             assert_eq!(ljclz.charset, "utf8");
             assert_eq!(ljclz.prefix, "ims_");
 
-            // 验证 oceanbase 连接（hostport=2881）
+            // 验证 oceanbase 连接（hostport=2881，hostname 同样改用 localhost）
             let oceanbase = config.database.connections.get("oceanbase").unwrap();
             assert_eq!(oceanbase.hostport, 2881);
-            assert_eq!(oceanbase.hostname, "172.17.16.3");
+            assert_eq!(oceanbase.hostname, "localhost");
 
             // 验证 cache.yml 加载
             assert_eq!(config.cache.default, "memory");
@@ -680,6 +703,109 @@ app_map:
     fn test_default_connection_missing() {
         let config = AppConfig::default();
         assert!(config.default_connection().is_none());
+    }
+
+    /// 测试环境变量覆盖 hostname（P3-18：清理内网 IP 硬编码）
+    ///
+    /// 场景：YAML 默认 hostname=localhost，生产环境通过
+    /// `SZ_DB_{CONN}_HOSTNAME` 注入实际内网地址。
+    #[test]
+    fn test_env_override_hostname() {
+        let _env_guard = ENV_TEST_LOCK.lock().unwrap();
+        std::env::remove_var("SZ_DB_MYSQL_HOSTNAME");
+
+        let mut config = AppConfig::default();
+        config.database.connections.insert(
+            "mysql".to_string(),
+            DatabaseConnection {
+                r#type: "mysql".to_string(),
+                hostname: "localhost".to_string(),
+                database: "test".to_string(),
+                username: "root".to_string(),
+                password: String::new(),
+                hostport: 3306,
+                charset: "utf8mb4".to_string(),
+                prefix: "sz_".to_string(),
+                deploy: 0,
+                rw_separate: false,
+                fields_strict: true,
+                break_reconnect: true,
+            },
+        );
+
+        std::env::set_var("SZ_DB_MYSQL_HOSTNAME", "10.0.0.5");
+        config.apply_env_overrides();
+
+        assert_eq!(config.database.connections["mysql"].hostname, "10.0.0.5");
+
+        std::env::remove_var("SZ_DB_MYSQL_HOSTNAME");
+    }
+
+    /// 测试环境变量覆盖 hostport（P3-18：端口可注入）
+    #[test]
+    fn test_env_override_hostport() {
+        let _env_guard = ENV_TEST_LOCK.lock().unwrap();
+        std::env::remove_var("SZ_DB_MYSQL_HOSTPORT");
+
+        let mut config = AppConfig::default();
+        config.database.connections.insert(
+            "mysql".to_string(),
+            DatabaseConnection {
+                r#type: "mysql".to_string(),
+                hostname: "localhost".to_string(),
+                database: "test".to_string(),
+                username: "root".to_string(),
+                password: String::new(),
+                hostport: 3306,
+                charset: "utf8mb4".to_string(),
+                prefix: "sz_".to_string(),
+                deploy: 0,
+                rw_separate: false,
+                fields_strict: true,
+                break_reconnect: true,
+            },
+        );
+
+        std::env::set_var("SZ_DB_MYSQL_HOSTPORT", "8802");
+        config.apply_env_overrides();
+
+        assert_eq!(config.database.connections["mysql"].hostport, 8802);
+
+        std::env::remove_var("SZ_DB_MYSQL_HOSTPORT");
+    }
+
+    /// 测试 hostport 环境变量为非数字时保持原值（防御性）
+    #[test]
+    fn test_env_override_hostport_invalid_ignored() {
+        let _env_guard = ENV_TEST_LOCK.lock().unwrap();
+        std::env::remove_var("SZ_DB_MYSQL_HOSTPORT");
+
+        let mut config = AppConfig::default();
+        config.database.connections.insert(
+            "mysql".to_string(),
+            DatabaseConnection {
+                r#type: "mysql".to_string(),
+                hostname: "localhost".to_string(),
+                database: "test".to_string(),
+                username: "root".to_string(),
+                password: String::new(),
+                hostport: 3306,
+                charset: "utf8mb4".to_string(),
+                prefix: "sz_".to_string(),
+                deploy: 0,
+                rw_separate: false,
+                fields_strict: true,
+                break_reconnect: true,
+            },
+        );
+
+        std::env::set_var("SZ_DB_MYSQL_HOSTPORT", "not-a-number");
+        config.apply_env_overrides();
+
+        // 非数字解析失败，保持原值 3306
+        assert_eq!(config.database.connections["mysql"].hostport, 3306);
+
+        std::env::remove_var("SZ_DB_MYSQL_HOSTPORT");
     }
 
     /// 测试 YAML 解析错误

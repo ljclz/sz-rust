@@ -155,7 +155,7 @@ pub trait Subscriber: Send + Sync {
 /// ```
 ///
 /// Rust 端用 `Observer` trait 模拟（Rust 无反射，需手动声明事件映射）：
-/// ```ignore
+/// ```text
 /// struct UserObserver;
 ///
 /// impl Observer for UserObserver {

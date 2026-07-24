@@ -20,3 +20,6 @@ serde_json.workspace = true
 proc-macro = true
 name = "sz_rust_macros"
 path = "src/lib.rs"
+
+[package.metadata.cargo-machete]
+ignored = ["proc-macro2"]

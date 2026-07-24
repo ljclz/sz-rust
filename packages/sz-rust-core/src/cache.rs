@@ -220,7 +220,7 @@ static GLOBAL_CACHE: OnceLock<Cache> = OnceLock::new();
 /// ## 注意
 ///
 /// 首次调用会创建一个空的 `Cache`（未注册任何驱动）。调用方需先调用
-/// [`Cache::init_default`] 注册默认驱动后再使用。
+/// `Cache::init_default` 注册默认驱动后再使用。
 ///
 /// ## 示例
 ///

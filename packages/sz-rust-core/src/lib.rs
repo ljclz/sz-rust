@@ -34,6 +34,9 @@
 //! | `session` | `think\facade\Session` 会话管理（SessionStore trait + MemorySessionStore） | Phase P2-10 |
 //! | `cookie` | `think\Cookie` Cookie 管理（CookieJar + CookieOptions） | Phase P2-11 |
 //! | `event` | `think\Event` 事件系统（Listener/Subscriber/Observer） | Phase 6.6 |
+//! | `env` | `think\facade\Env` 环境变量管理 | Phase P3-17 |
+//! | `i18n` | `think\facade\Lang` 多语言国际化 | Phase P3-15 |
+//! | `mail` | `think\facade\Mail` 邮件抽象（Mailer trait + MemoryMailer） | Phase P3-16 |
 
 #![forbid(unsafe_code)]
 // v0.2.0：启用 missing_docs 警告，要求所有公开项必须有文档注释
@@ -47,14 +50,17 @@ pub mod config;
 pub mod container;
 pub mod controller;
 pub mod cookie;
+pub mod env;
 pub mod error;
 pub mod error_handler;
 pub mod event;
 pub mod guard;
 pub mod h2;
 pub mod health;
+pub mod i18n;
 pub mod hooks;
 pub mod log;
+pub mod mail;
 pub mod macros;
 pub mod middleware;
 pub mod model;

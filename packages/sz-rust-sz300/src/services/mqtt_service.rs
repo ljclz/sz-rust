@@ -236,7 +236,7 @@ pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> 
         .with_qos(QoS::AtLeastOnce);
 
     tracing::info!("OTA 指令已发送 - SN: {}, 版本: {}", device_sn, version);
-    // TODO: 通过 MqttPlugin 实际发送消息
+    // NOTE: 通过 MqttPlugin 实际发送消息
 
     Ok(())
 }

@@ -173,9 +173,9 @@ pub fn default_related_fk(related_class: &str) -> String {
 ///
 /// 对齐 PHP `think\Model::belongsToMany($model, $middle = '', $foreignKey = '', $localKey = '')`：
 ///
-/// - `junction_table` 默认：[`default_junction_table(current_class, related_class)`]
-/// - `foreign_key`（当前模型 FK）默认：[`default_current_fk(current_class)`]
-/// - `other_key`（关联模型 FK）默认：[`default_related_fk(related_class)`]
+/// - `junction_table` 默认：`default_junction_table(current_class, related_class)`
+/// - `foreign_key`（当前模型 FK）默认：`default_current_fk(current_class)`
+/// - `other_key`（关联模型 FK）默认：`default_related_fk(related_class)`
 /// - `target_pk` 默认：`"id"`（对齐 PHP `(new $model)->getPk()` 通常为 `id`）
 ///
 /// ## 参数（sz-orm-core 字段名，便于与 `BelongsToMany` 结构体对应）

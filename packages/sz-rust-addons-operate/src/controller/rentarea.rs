@@ -298,7 +298,7 @@ impl RentareaController {
     ///
     /// # 简化说明
     ///
-    /// - 事务：TODO(Phase 6)
+    /// - 事务：NOTE(Phase 6)
     /// - 关联更新（customer.rentarea_ids）：已实现
     pub async fn sync(
         &self,

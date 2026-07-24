@@ -56,21 +56,12 @@ use crate::validate::Validate;
 // 业务层在解码后自行实现（PHP `PermittedFor` 约束等价）。
 
 /// JWT 配置（运行时从环境变量读取）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct JwtConfig {
     /// 签名密钥（对应 PHP `$_config['id']`，Lcobucci 用作 HMAC 密钥）
     secret: String,
     /// 签发人（对应 PHP `$_config['issuer']`）
     issuer: String,
-}
-
-impl Default for JwtConfig {
-    fn default() -> Self {
-        Self {
-            secret: String::new(),
-            issuer: String::new(),
-        }
-    }
 }
 
 /// 全局 JWT 配置实例（启动时从环境变量读取一次）
@@ -571,9 +562,9 @@ pub trait AddonsBaseController: BaseController {
     ///
     /// # 实现说明
     ///
-    /// 使用 sz-orm-auth 的 [`JwtEncoder`] 进行 HS256 签名验证与过期检查，
+    /// 使用 sz-orm-auth 的 `JwtEncoder` 进行 HS256 签名验证与过期检查，
     /// 配置项（`SZ_JWT_SECRET` / `SZ_JWT_ISSUER`）在启动时从环境变量读取。
-    /// 核心验证逻辑见 [`verify_token_with_config`]，便于单元测试注入配置。
+    /// 核心验证逻辑见 `verify_token_with_config`，便于单元测试注入配置。
     ///
     /// 验证流程（对齐 PHP `Token::getUserId`）：
     /// 1. 提取 Authorization header 中的 Bearer token

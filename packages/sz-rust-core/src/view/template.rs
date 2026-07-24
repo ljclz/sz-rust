@@ -1221,7 +1221,7 @@ fn split_top_level<'a>(expr: &'a str, sep: &str) -> Vec<&'a str> {
 /// 解析操作数为 Value（对齐 PHP `autoBuildVar`）
 ///
 /// PHP 规则：
-/// - `:` 开头 → 函数调用（TODO: Phase 7.3 支持）
+/// - `:` 开头 → 函数调用（NOTE: Phase 7.3 支持）
 /// - `$` 开头 → 变量引用
 /// - 字母/下划线开头 → 自动补 `$` 前缀（视为变量名）
 /// - 数字 → 数字字面量
@@ -1240,7 +1240,7 @@ fn parse_operand_value(expr: &str, data: &ViewData) -> Value {
 
     // 函数调用 (:func())
     if expr.starts_with(':') {
-        // TODO: Phase 7.3 支持条件中的函数调用
+        // NOTE: Phase 7.3 支持条件中的函数调用
         return Value::Null;
     }
 
@@ -1414,7 +1414,7 @@ fn replace_condition_shorthands(condition: &str) -> String {
 
 /// 解析变量名（对齐 PHP `autoBuildVar`）
 ///
-/// - `:` 开头 → 函数调用（TODO: 暂不支持）
+/// - `:` 开头 → 函数调用（NOTE: 暂不支持）
 /// - `$` 开头 → 去掉 `$` 后解析变量
 /// - 其他 → 直接作为变量名解析
 fn resolve_name(name: &str, data: &ViewData) -> Value {
@@ -1425,7 +1425,7 @@ fn resolve_name(name: &str, data: &ViewData) -> Value {
 
     // 函数调用
     if name.starts_with(':') {
-        // TODO: Phase 7.3 支持函数调用
+        // NOTE: Phase 7.3 支持函数调用
         return Value::Null;
     }
 
@@ -1437,7 +1437,7 @@ fn resolve_name(name: &str, data: &ViewData) -> Value {
 /// 解析 case value（对齐 PHP `tagCase` 的 value 解析）
 ///
 /// - `$` 开头 → 变量引用
-/// - `:` 开头 → 函数调用（TODO）
+/// - `:` 开头 → 函数调用（NOTE）
 /// - 其他 → 字面量
 fn resolve_case_value(value: &str, data: &ViewData) -> Value {
     let value = value.trim();
@@ -1450,7 +1450,7 @@ fn resolve_case_value(value: &str, data: &ViewData) -> Value {
     }
 
     if value.starts_with(':') {
-        // TODO: Phase 7.3
+        // NOTE: Phase 7.3
         return Value::Null;
     }
 

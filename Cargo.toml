@@ -14,6 +14,7 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.75"
 authors = ["SZ-Rust Team"]
 license = "MIT"
 description = "对标 ThinkPHP 8 的 Rust Web 框架，基于 axum 0.8 + SZ-ORM"
@@ -85,7 +86,7 @@ ab_glyph = "0.2"
 # Excel/PDF 处理（Phase 5.9：对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
 rust_xlsxwriter = "0.79"
 calamine = { version = "0.36", features = ["dates"] }
-lopdf = "0.36"
+lopdf = "0.42"
 
 # 加密
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
@@ -100,7 +101,6 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 内部依赖（SZ-ORM 全家桶，path + version 双重指定：本地开发用 path，crates.io 发布用 version）
 sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.0.0" }
 sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.0.0" }
-sz-orm-crypto = { path = "../sz-orm/packages/sz-orm-crypto", version = "1.0.0" }
 sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage", version = "1.0.0" }
 sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue", version = "1.0.0" }
 sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt", version = "1.0.0" }
@@ -108,10 +108,6 @@ sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket", version = "1.
 sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler", version = "1.0.0" }
 sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing", version = "1.0.0" }
 sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger", version = "1.0.0" }
-sz-orm-audit = { path = "../sz-orm/packages/sz-orm-audit", version = "1.0.0" }
-sz-orm-health = { path = "../sz-orm/packages/sz-orm-health", version = "1.0.0" }
-sz-orm-masking = { path = "../sz-orm/packages/sz-orm-masking", version = "1.0.0" }
-sz-orm-swagger = { path = "../sz-orm/packages/sz-orm-swagger", version = "1.0.0" }
 sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit", version = "1.0.0" }
 sz-orm-config = { path = "../sz-orm/packages/sz-orm-config", version = "1.0.0" }
 sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.0.0" }
@@ -129,4 +125,3 @@ sz-rust-cli = { version = "0.2.0", path = "packages/sz-rust-cli" }
 
 # Phase 8: 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }
-sz-orm-mig = { path = "../sz-orm/packages/sz-orm-mig", version = "1.0.0" }

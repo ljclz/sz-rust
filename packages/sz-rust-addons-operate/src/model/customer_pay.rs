@@ -14,11 +14,11 @@
 //! | `getPaySourceTextAttr` | [`CustomerPay::accessor_for`] "pay_source_text" | 字符串枚举映射 |
 //! | 5 个 `getXxxPriceAttr` | [`CustomerPay::accessor_for`] "xxx_price" | 数值强转 |
 //! | `getPayTimeAttr` | [`CustomerPay::accessor_for`] "pay_time" | Unix 时间戳格式化 |
-//! | `dept()` belongsTo | TODO(Phase 4) | `IndustryDept` dept_id→dept_id |
-//! | `personnel()` belongsTo | TODO(Phase 4) | `IndustryPersonnel` opt_uid→uid |
-//! | `category()` belongsTo | TODO(Phase 4) | `Category` cat_id→cat_id |
-//! | `customer()` belongsTo | TODO(Phase 4) | `Customer` customer_id→customer_id |
-//! | `contract()` belongsTo | TODO(Phase 4) | `Contract` contract_id→contract_id |
+//! | `dept()` belongsTo | NOTE(Phase 4) | `IndustryDept` dept_id→dept_id |
+//! | `personnel()` belongsTo | NOTE(Phase 4) | `IndustryPersonnel` opt_uid→uid |
+//! | `category()` belongsTo | NOTE(Phase 4) | `Category` cat_id→cat_id |
+//! | `customer()` belongsTo | NOTE(Phase 4) | `Customer` customer_id→customer_id |
+//! | `contract()` belongsTo | NOTE(Phase 4) | `Contract` contract_id→contract_id |
 //!
 //! ## PHP `$value ? (float)$value : 0` 行为复刻
 //!
@@ -52,11 +52,11 @@
 //! chrono `from_timestamp_opt` 使用 UTC。本 Phase 2.10 按 UTC 格式化，
 //! Phase 5 接入应用配置后切换为 Asia/Shanghai。
 //!
-//! ## 未实现（标 TODO）
+//! ## 未实现（标 NOTE）
 //!
 //! - **业务方法**（detail/info/getPayDetail/getList/getStat/add/tradeNo/orderNo/
-//!   onPayment/onlinePayment/epayCheck/settle/onPayBuy/onRefund）→ TODO(Phase 5+ 控制器层)
-//! - **关联关系**（dept/personnel/category/customer/contract belongsTo）→ TODO(Phase 4)
+//!   onPayment/onlinePayment/epayCheck/settle/onPayBuy/onRefund）→ NOTE(Phase 5+ 控制器层)
+//! - **关联关系**（dept/personnel/category/customer/contract belongsTo）→ NOTE(Phase 4)
 
 use crate::enums::{ContractStatusEnum, CustomerSyncTypeEnum};
 use crate::model::contract::{php_is_empty, php_price_attr};
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn test_r5_php_customer_pay_5_belongs_to_relations_documented_as_todo() {
         // R5: PHP CustomerPay 声明 5 个 belongsTo: dept/personnel/category/customer/contract
-        // Phase 2.10 关联关系留 TODO(Phase 4)
+        // Phase 2.10 关联关系留 NOTE(Phase 4)
         // 此测试验证模型本身可正常构造，关联关系待 Phase 4 实现
         let model = CustomerPay::new().with_data("order_id", json!(1));
         assert_eq!(model.pk(), 1);

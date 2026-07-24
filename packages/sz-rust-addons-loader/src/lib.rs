@@ -52,6 +52,7 @@
 //! - **不实现 `_empty` 兜底方法**：对齐 PHP `is_callable([$instance, '_empty'])`，但需调用方实现
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod autoload;
 pub mod error;

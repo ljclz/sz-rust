@@ -12,14 +12,14 @@
 //! | Dept | `app/common/model/szoa/industry/IndustryDept.php` | ✅ | ❌ | ❌ | ❌ | ⬜ Phase 4 |
 //! | Category | `addons/operate/model/Category.php` | ✅ | ❌ | ❌ | ❌ | ⬜ Phase 4 |
 //!
-//! ## 未实现特性（标 TODO 等待对应 Phase）
+//! ## 未实现特性（标 NOTE 等待对应 Phase）
 //!
-//! - **关联关系**（belongsTo/hasMany + bind/with/where/withoutField）→ TODO(Phase 4)
-//! - **全局范围 `scopeApp_id`**（`$globalScope = ['app_id']`）→ TODO(Phase 3 TenantModel)
-//! - **静态缓存**（`Cache::get/set`）→ TODO(Phase 6)
+//! - **关联关系**（belongsTo/hasMany + bind/with/where/withoutField）→ NOTE(Phase 4)
+//! - **全局范围 `scopeApp_id`**（`$globalScope = ['app_id']`）→ NOTE(Phase 3 TenantModel)
+//! - **静态缓存**（`Cache::get/set`）→ NOTE(Phase 6)
 //! - **静态反查访问器**（`Customer::getRentareaTextAttr` 调 `Rentarea::where`、
-//!   `Contract::getLogsAttr` 调 `ContractLog::getLogs`）→ TODO(Phase 4 Repository)
-//! - **业务方法**（detail/getList/add/edit/setDelete 等）→ TODO(Phase 5+ 控制器层)
+//!   `Contract::getLogsAttr` 调 `ContractLog::getLogs`）→ NOTE(Phase 4 Repository)
+//! - **业务方法**（detail/getList/add/edit/setDelete 等）→ NOTE(Phase 5+ 控制器层)
 //!
 //! ## 序列化策略
 //!

@@ -342,10 +342,10 @@ mod tests {
         assert!(config.database.connections.contains_key("food"));
         assert!(config.database.connections.contains_key("oceanbase"));
 
-        // 验证默认连接
+        // 验证默认连接（hostname 已改用 localhost，实际地址通过环境变量注入）
         assert_eq!(config.database.default, "mysql");
         let default_conn = config.database.connections.get("mysql").unwrap();
-        assert_eq!(default_conn.hostname, "172.17.16.14");
+        assert_eq!(default_conn.hostname, "localhost");
         assert_eq!(default_conn.hostport, 8802);
         assert_eq!(default_conn.prefix, "sz_");
     }

@@ -12,6 +12,7 @@
 //! Phase 2.6：`compact!` 完整实现，对齐 PHP `compact()`。
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 use proc_macro::TokenStream;
 use quote::quote;

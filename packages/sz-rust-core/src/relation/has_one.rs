@@ -62,7 +62,7 @@ use crate::relation::has_many::default_foreign_key;
 ///
 /// 对齐 PHP `think\Model::hasOne($model, $foreignKey = '', $localKey = '')`：
 ///
-/// - `foreignKey` 默认：[`default_foreign_key(parent_class)`]（与 `hasMany` 相同，基于当前模型名）
+/// - `foreignKey` 默认：`default_foreign_key(parent_class)`（与 `hasMany` 相同，基于当前模型名）
 /// - `child_pk` 默认：`"id"`（对齐 PHP `$this->pk` 通常为 `id`）
 ///
 /// ## 参数
@@ -74,7 +74,7 @@ use crate::relation::has_many::default_foreign_key;
 ///
 /// ## HasOne vs HasMany
 ///
-/// `php_has_one` 与 [`php_has_many`] 在默认值推导和 SQL 模式上**完全相同**，
+/// `php_has_one` 与 `php_has_many` 在默认值推导和 SQL 模式上**完全相同**，
 /// 唯一区别是返回类型（`HasOne` vs `HasMany`），由调用方根据业务语义选择。
 ///
 /// ## 示例

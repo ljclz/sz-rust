@@ -25,3 +25,6 @@ Thumbs.db
 # 临时编译错误日志
 errors*.txt
 errors*.log
+
+# 测试覆盖率输出（开发临时文件）
+coverage/

@@ -166,7 +166,7 @@ pub const MIGRATION_UP_STUB: &str = r#"-- Migration: {%name%}
 -- Direction: UP
 -- Created: {%timestamp%}
 
--- TODO: 在此编写 up SQL
+-- 在此编写 up SQL
 -- CREATE TABLE IF NOT EXISTS {%table_name%} (
 --     id BIGINT PRIMARY KEY AUTO_INCREMENT,
 --     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -179,7 +179,7 @@ pub const MIGRATION_DOWN_STUB: &str = r#"-- Migration: {%name%}
 -- Direction: DOWN
 -- Created: {%timestamp%}
 
--- TODO: 在此编写 down SQL
+-- 在此编写 down SQL
 -- DROP TABLE IF EXISTS {%table_name%};
 "#;
 
