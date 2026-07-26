@@ -220,7 +220,7 @@ impl TestService {
 #[test]
 fn test_container_bind_transient() {
     let container = Container::new();
-    container.bind(|| TestService::new());
+    container.bind(TestService::new);
 
     let s1 = container.make::<TestService>().expect("应能解析服务");
     let s2 = container.make::<TestService>().expect("应能解析服务");
@@ -235,7 +235,7 @@ fn test_container_bind_transient() {
 #[test]
 fn test_container_singleton() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
 
     let s1 = container.make::<TestService>().expect("应能解析服务");
     let s2 = container.make::<TestService>().expect("应能解析服务");
@@ -258,7 +258,7 @@ fn test_container_has() {
     let container = Container::new();
     assert!(!container.has::<TestService>());
 
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     assert!(container.has::<TestService>());
 }
 
@@ -266,7 +266,7 @@ fn test_container_has() {
 #[test]
 fn test_container_forget() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
 
     // 先解析一次（触发单例缓存）
     let _ = container.make::<TestService>();
@@ -281,7 +281,7 @@ fn test_container_forget() {
 #[test]
 fn test_container_clear() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.bind(|| 99i32);
     assert_eq!(container.count(), 2);
 
@@ -296,7 +296,7 @@ fn test_app_di_proxy() {
     let app = App::new(config);
 
     // 注册单例
-    app.singleton(|| TestService::new());
+    app.singleton(TestService::new);
     assert!(app.has_service::<TestService>());
 
     // 解析
@@ -309,7 +309,7 @@ fn test_app_di_proxy() {
 #[test]
 fn test_container_multiple_types() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.singleton(|| String::from("logger"));
     container.bind(|| vec![1, 2, 3]);
 
@@ -324,7 +324,7 @@ fn test_container_count() {
     let container = Container::new();
     assert_eq!(container.count(), 0);
 
-    container.bind(|| TestService::new());
+    container.bind(TestService::new);
     assert_eq!(container.count(), 1);
 
     container.singleton(|| String::from("x"));
@@ -464,7 +464,7 @@ fn test_container_forget_clears_scoped() {
 #[test]
 fn test_container_clear_all() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.scoped(|| ScopedCounter::new(500));
     container.alias::<TestService>("svc");
 
@@ -576,7 +576,7 @@ fn test_app_instance_scoped_alias_proxy() {
 #[test]
 fn test_container_alias_register_and_resolve() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.alias::<TestService>("test_service");
 
     assert!(container.is_alias("test_service"));
@@ -599,7 +599,7 @@ fn test_container_alias_resolve_unregistered() {
 #[test]
 fn test_container_multiple_aliases() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.singleton(|| String::from("logger"));
 
     container.alias::<TestService>("svc1");
@@ -625,7 +625,7 @@ fn test_container_multiple_aliases() {
 #[test]
 fn test_container_alias_does_not_affect_make() {
     let container = Container::new();
-    container.singleton(|| TestService::new());
+    container.singleton(TestService::new);
     container.alias::<TestService>("my_svc");
 
     // make 仍正常工作

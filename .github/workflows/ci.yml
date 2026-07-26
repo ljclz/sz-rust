@@ -68,7 +68,9 @@ jobs:
         run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-targets
+      # P3-3 修复：--jobs 1 规避 Cargo 在高并发编译时的 crate 解析竞争问题
+      # 此问题为 Cargo 工具链已知限制（非代码问题），单线程编译可稳定通过
+      - run: cargo test --workspace --all-targets --jobs 1
 
   # 门禁 5：文档构建（含 missing_docs 检查）
   doc:

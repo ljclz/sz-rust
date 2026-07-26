@@ -1,6 +1,6 @@
-# SZ-Rust 工程化实践规范
+﻿# SZ-Rust 工程化实践规范
 
-> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，10 workspace 包，3815 测试）
+> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，10 workspace 包，4206 测试）
 > **项目版本**：v0.2.0
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
@@ -309,14 +309,14 @@ SZ-Rust 当前测试数据：
 | **T4 — 属性测试** | 部分建立 | Property-Based Testing（proptest）覆盖路由参数/请求体/钩子不变量 |
 | **T5 — Fuzz 测试** | 已建立 | 模糊测试（路由解析、JSON 解析、multipart 解析、路径遍历抵抗），已配置 fuzz.yml |
 | **T6 — Soak 测试** | 已建立 | 长时稳定性测试（10s 冒烟 + 24h 完整，每周日 00:00 UTC，timeout 1500 分钟，检测内存泄漏/句柄泄漏/性能退化） |
-| **合计** | **3815+** | 覆盖全部 10 个 workspace 包 |
+| **合计** | **4206+** | 覆盖全部 10 个 workspace 包（v4 复评 2026-07-26） |
 
 ### 4.1 T1：单元测试
 
 - 每个模块的独立功能测试，不依赖外部服务
 - 使用 `#[cfg(test)] mod tests` 内联在源码中
 - 覆盖率要求：核心模块 >= 90%
-- 当前状态：sz-rust-core 2934 个单元测试通过（v1.1：新增 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热 共 +152 测试）
+- 当前状态：sz-rust-core 2934 个单元测试通过（v1.1：新增 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热 共 +152 测试）；v4 复评全 workspace 4206 测试通过（2026-07-26）
 
 ### 4.2 T2：契约测试
 
@@ -507,7 +507,7 @@ flowchart LR
 >
 > **v1.1 变更摘要**（2026-07-26）：
 > - workspace 包数量 8 → 10（新增 sz-rust-tracing、sz-rust-observability）
-> - 测试数量 2938 → 3815（sz-rust-core 2563 → 2934，新增 +152 测试覆盖 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热）
+> - 测试数量 2938 → 4206（sz-rust-core 2563 → 2934，新增 +152 测试覆盖 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热；v4 复评全 workspace 4206 passed, 0 failed）
 > - 项目版本 v0.1.0 → v0.2.0
 > - benchmark/soak/coverage CI Job 已配置（原"待配置"标注作废）
 > - 新增 fuzz.yml / mcdc.yml CI workflow
