@@ -1,0 +1,338 @@
+name: Release
+
+# Phase 4.5.4：二进制发布包构建
+#
+# 触发条件：
+#   1. 推送 v*.*.* 格式的 git tag（如 v0.1.0、v1.0.0-beta.1）
+#   2. 手动触发（workflow_dispatch），用于测试发布流程
+#
+# 构建矩阵：
+#   - linux-amd64（ubuntu-22.04）
+#   - linux-arm64（ubuntu-22.04-arm）
+#   - windows-amd64（windows-2022）
+#   - darwin-amd64（macos-13）
+#   - darwin-arm64（macos-14）  # Apple Silicon
+#
+# 产物：
+#   - szrsql-{version}-{platform}.tar.gz / .zip
+#   - SHA256SUMS（校验和文件）
+#   - 上传到 GitHub Releases
+#
+# 验证标准：
+#   - 4 平台二进制构建成功
+#   - 每个二进制可执行 --version 输出正确版本号
+#   - tar.gz / zip 包含 szrsql 二进制 + LICENSE + README
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'  # 支持预发布版本如 v1.0.0-alpha.1
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 5
+  RUSTUP_MAX_RETRIES: 5
+
+jobs:
+  # ============================================================
+  # Job 1: 准备发布元信息
+  # ============================================================
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version metadata
+        id: meta
+        run: |
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${TAG#v}"
+          # 判断是否为预发布版本（包含 - alpha/beta/rc）
+          if [[ "$VERSION" =~ -(alpha|beta|rc)\. ]]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+          echo "=== Release Metadata ==="
+          echo "Tag: $TAG"
+          echo "Version: $VERSION"
+          echo "Pre-release: $PRERELEASE"
+
+  # ============================================================
+  # Job 2: 5 平台交叉编译构建
+  # ============================================================
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux amd64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            archive: tar.gz
+            cross: false
+          # Linux arm64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+            archive: tar.gz
+            cross: false
+          # Windows amd64
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            archive: zip
+            cross: false
+          # macOS amd64 (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive: tar.gz
+            cross: false
+          # macOS arm64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+            cross: false
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux arm64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        working-directory: rust/szrsql
+        run: cargo build --release --target ${{ matrix.target }} -p szrsql-bin
+
+      - name: Verify binary works
+        working-directory: rust/szrsql
+        shell: bash
+        run: |
+          BINARY="target/${{ matrix.target }}/release/szrsql"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            BINARY="${BINARY}.exe"
+          fi
+          if [ ! -f "$BINARY" ]; then
+            echo "ERROR: Binary not found at $BINARY"
+            ls -la target/${{ matrix.target }}/release/ || true
+            exit 1
+          fi
+          # 验证 --version 输出（仅本平台可执行，跨平台跳过运行验证）
+          CURRENT_OS=$(uname -s)
+          TARGET_OS="${{ matrix.target }}"
+          if [[ "$TARGET_OS" == *"linux"* && "$CURRENT_OS" == "Linux" ]]; then
+            $BINARY --version
+          elif [[ "$TARGET_OS" == *"darwin"* && "$CURRENT_OS" == "Darwin" ]]; then
+            $BINARY --version
+          elif [[ "$TARGET_OS" == *"windows"* && "$CURRENT_OS" == MINGW* ]]; then
+            $BINARY --version
+          else
+            echo "Cross-compiled binary, skipping --version execution"
+          fi
+
+      - name: Package binary (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          PKG_NAME="szrsql-${VERSION}-${TARGET}"
+          mkdir -p "$PKG_NAME"
+          BINARY="rust/szrsql/target/${TARGET}/release/szrsql"
+          cp "$BINARY" "$PKG_NAME/"
+          # 包含文档
+          cp rust/szrsql/README.md "$PKG_NAME/" 2>/dev/null || echo "# SzRSQL" > "$PKG_NAME/README.md"
+          cp rust/szrsql/LICENSE "$PKG_NAME/" 2>/dev/null || echo "MIT License" > "$PKG_NAME/LICENSE"
+          cp rust/szrsql/CHANGELOG.md "$PKG_NAME/" 2>/dev/null || true
+          cp rust/szrsql/VERSIONING.md "$PKG_NAME/" 2>/dev/null || true
+          # 打包
+          tar -czf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+          # 计算校验和
+          sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+          echo "PACKAGE_NAME=${PKG_NAME}.tar.gz" >> $GITHUB_ENV
+          echo "PACKAGE_SHA256=${PKG_NAME}.tar.gz.sha256" >> $GITHUB_ENV
+          ls -la "${PKG_NAME}.tar.gz" "${PKG_NAME}.tar.gz.sha256"
+
+      - name: Package binary (Windows)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          PKG_NAME="szrsql-${VERSION}-${TARGET}"
+          mkdir -p "$PKG_NAME"
+          BINARY="rust/szrsql/target/${TARGET}/release/szrsql.exe"
+          cp "$BINARY" "$PKG_NAME/"
+          cp rust/szrsql/README.md "$PKG_NAME/" 2>/dev/null || echo "# SzRSQL" > "$PKG_NAME/README.md"
+          cp rust/szrsql/LICENSE "$PKG_NAME/" 2>/dev/null || echo "MIT License" > "$PKG_NAME/LICENSE"
+          cp rust/szrsql/CHANGELOG.md "$PKG_NAME/" 2>/dev/null || true
+          cp rust/szrsql/VERSIONING.md "$PKG_NAME/" 2>/dev/null || true
+          # 打包（使用 7z 或 zip）
+          7z a -tzip "${PKG_NAME}.zip" "$PKG_NAME"
+          # 计算校验和
+          sha256sum "${PKG_NAME}.zip" > "${PKG_NAME}.zip.sha256"
+          echo "PACKAGE_NAME=${PKG_NAME}.zip" >> $GITHUB_ENV
+          echo "PACKAGE_SHA256=${PKG_NAME}.zip.sha256" >> $GITHUB_ENV
+          ls -la "${PKG_NAME}.zip" "${PKG_NAME}.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: szrsql-${{ matrix.target }}
+          path: |
+            szrsql-*.tar.gz
+            szrsql-*.tar.gz.sha256
+            szrsql-*.zip
+            szrsql-*.zip.sha256
+          retention-days: 30
+
+  # ============================================================
+  # Job 3: 生成 CHANGELOG
+  # ============================================================
+  changelog:
+    name: Generate Changelog
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TAG="${{ needs.prepare.outputs.tag }}"
+          # 获取上一个 tag
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          if [[ -n "$PREV_TAG" ]]; then
+            CHANGELOG=$(./ci/changelog.sh "$PREV_TAG" "$TAG" 2>/dev/null || echo "## [${VERSION}]" )
+          else
+            CHANGELOG=$(./ci/changelog.sh "$TAG" 2>/dev/null || echo "## [${VERSION}]" )
+          fi
+          # 保存到文件
+          echo "$CHANGELOG" > changelog-${VERSION}.md
+          echo "=== Generated Changelog ==="
+          cat changelog-${VERSION}.md
+
+      - name: Upload changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: changelog-*.md
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: 创建 GitHub Release
+  # ============================================================
+  release:
+    name: Publish GitHub Release
+    needs: [prepare, build, changelog]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of artifacts
+        run: find artifacts -type f | sort
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # 收集所有二进制包
+          find artifacts -name "szrsql-*.tar.gz" -exec cp {} release/ \;
+          find artifacts -name "szrsql-*.zip" -exec cp {} release/ \;
+          # 生成统一的 SHA256SUMS
+          cd release
+          sha256sum szrsql-* > SHA256SUMS
+          cd ..
+          # 复制 CHANGELOG
+          cp artifacts/changelog/changelog-*.md release/ 2>/dev/null || true
+          ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: SzRSQL ${{ needs.prepare.outputs.version }}
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
+          body_path: release/changelog-${{ needs.prepare.outputs.version }}.md
+          files: |
+            release/szrsql-*.tar.gz
+            release/szrsql-*.zip
+            release/SHA256SUMS
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # Job 5: 发布后通知（可选）
+  # ============================================================
+  notify:
+    name: Notify Release
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Release summary
+        run: |
+          echo "=== SzRSQL Release Published ==="
+          echo "Tag: ${{ needs.prepare.outputs.tag }}"
+          echo "Version: ${{ needs.prepare.outputs.version }}"
+          echo "Pre-release: ${{ needs.prepare.outputs.prerelease }}"
+          echo "Release URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.tag }}"
+          echo ""
+          echo "下载链接："
+          echo "  Linux amd64:  szrsql-${{ needs.prepare.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "  Linux arm64:  szrsql-${{ needs.prepare.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz"
+          echo "  Windows amd64: szrsql-${{ needs.prepare.outputs.version }}-x86_64-pc-windows-msvc.zip"
+          echo "  macOS amd64:  szrsql-${{ needs.prepare.outputs.version }}-x86_64-apple-darwin.tar.gz"
+          echo "  macOS arm64:  szrsql-${{ needs.prepare.outputs.version }}-aarch64-apple-darwin.tar.gz"

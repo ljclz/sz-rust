@@ -1,0 +1,274 @@
+name: Upgrade Test
+
+# Phase 7e.7：升级测试 CI
+#
+# 验证 SzRSQL 跨版本升级路径的正确性。
+#
+# 触发条件：
+#   1. push 到 main/master（仅当升级相关文件变更时）
+#   2. PR 到 main/master
+#   3. 手动触发（workflow_dispatch）
+#   4. 每周日 00:00 UTC 定时运行
+#
+# 测试矩阵：
+#   - v0.1.0 → v0.2.0（MINOR 升级）
+#   - v0.2.0 → v0.5.0（MINOR 升级）
+#   - v0.5.0 → v1.0.0（MAJOR 升级）
+#   - v0.1.0 → v1.0.0（跨 3 个版本的 MAJOR 升级）
+#
+# 验证标准：
+#   - 4 次升级全部成功
+#   - 每次升级后数据完整（verify_rows_equal）
+#   - PATCH/MINOR 升级不丢失数据
+#   - MAJOR 升级数据迁移完整
+#   - 升级失败自动回滚零数据丢失
+#   - 灰度升级零停机
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'rust/szrsql/crates/szrsql-storage/src/upgrade.rs'
+      - 'rust/szrsql/crates/szrsql-storage/src/format_version.rs'
+      - 'rust/szrsql/crates/szrsql-replication/src/rolling.rs'
+      - 'rust/szrsql/crates/szrsql-storage/tests/upgrade_matrix.rs'
+      - 'rust/szrsql/.github/workflows/upgrade_test.yml'
+      - 'rust/szrsql/docs/downgrade_plan.md'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'rust/szrsql/crates/szrsql-storage/src/upgrade.rs'
+      - 'rust/szrsql/crates/szrsql-storage/src/format_version.rs'
+      - 'rust/szrsql/crates/szrsql-replication/src/rolling.rs'
+      - 'rust/szrsql/crates/szrsql-storage/tests/upgrade_matrix.rs'
+      - 'rust/szrsql/.github/workflows/upgrade_test.yml'
+      - 'rust/szrsql/docs/downgrade_plan.md'
+  schedule:
+    # 每周日 00:00 UTC（北京时间 08:00）
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 5
+  RUSTUP_MAX_RETRIES: 5
+
+jobs:
+  # ============================================================
+  # Job 1: 升级模块单元测试（Phase 7e.1-7e.4）
+  # ============================================================
+  upgrade-unit-tests:
+    name: Upgrade Unit Tests (7e.1-7e.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+          key: upgrade-unit
+      - name: Run upgrade module tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-storage --lib upgrade -- --nocapture
+      - name: Run format_version module tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-storage --lib format_version -- --nocapture
+      - name: Verify test count (≥115 tests)
+        working-directory: rust/szrsql
+        run: |
+          OUTPUT=$(cargo test -p szrsql-storage --lib upgrade 2>&1)
+          echo "$OUTPUT"
+          PASSED=$(echo "$OUTPUT" | grep -oP 'test result: ok. \K\d+(?= passed)' || echo "0")
+          echo "Passed tests: $PASSED"
+          if [ "$PASSED" -lt 115 ]; then
+            echo "ERROR: Expected at least 115 tests, got $PASSED"
+            exit 1
+          fi
+          echo "✅ Upgrade unit tests passed ($PASSED ≥ 115)"
+
+  # ============================================================
+  # Job 2: 灰度升级测试（Phase 7e.5）
+  # ============================================================
+  rolling-upgrade-tests:
+    name: Rolling Upgrade Tests (7e.5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+          key: rolling-upgrade
+      - name: Run rolling upgrade tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-replication --lib rolling -- --nocapture
+      - name: Verify test count (≥44 tests)
+        working-directory: rust/szrsql
+        run: |
+          OUTPUT=$(cargo test -p szrsql-replication --lib rolling 2>&1)
+          echo "$OUTPUT"
+          PASSED=$(echo "$OUTPUT" | grep -oP 'test result: ok. \K\d+(?= passed)' || echo "0")
+          echo "Passed tests: $PASSED"
+          if [ "$PASSED" -lt 44 ]; then
+            echo "ERROR: Expected at least 44 tests, got $PASSED"
+            exit 1
+          fi
+          echo "✅ Rolling upgrade tests passed ($PASSED ≥ 44)"
+
+  # ============================================================
+  # Job 3: 版本矩阵集成测试（v0.1.0 → v0.2.0 → v0.5.0 → v1.0.0）
+  # ============================================================
+  version-matrix-test:
+    name: Version Matrix Test (v0.1.0 → v1.0.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+          key: version-matrix
+      - name: Run version matrix integration tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-storage --test upgrade_matrix -- --nocapture
+      - name: Verify 4 upgrade paths
+        working-directory: rust/szrsql
+        run: |
+          OUTPUT=$(cargo test -p szrsql-storage --test upgrade_matrix 2>&1)
+          echo "$OUTPUT"
+          PASSED=$(echo "$OUTPUT" | grep -oP 'test result: ok. \K\d+(?= passed)' || echo "0")
+          echo "Passed tests: $PASSED"
+          if [ "$PASSED" -lt 12 ]; then
+            echo "ERROR: Expected at least 12 matrix tests, got $PASSED"
+            exit 1
+          fi
+          echo "✅ Version matrix tests passed ($PASSED ≥ 12)"
+      - name: Upload matrix test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-matrix-report
+          path: rust/szrsql/target/upgrade-matrix-report.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: 降级计划文档验证（Phase 7e.6）
+  # ============================================================
+  downgrade-plan-validation:
+    name: Downgrade Plan Validation (7e.6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify downgrade_plan.md exists
+        run: |
+          if [ ! -f "rust/szrsql/docs/downgrade_plan.md" ]; then
+            echo "ERROR: docs/downgrade_plan.md not found"
+            exit 1
+          fi
+          echo "✅ downgrade_plan.md exists"
+      - name: Verify document completeness
+        run: |
+          FILE="rust/szrsql/docs/downgrade_plan.md"
+          # 检查必要章节
+          SECTIONS=(
+            "## 1. 概述"
+            "## 2. 降级分类"
+            "## 3. 降级前置条件"
+            "## 4. 降级流程"
+            "## 5. 不兼容数据识别与清理"
+            "## 6. 降级验证"
+            "## 7. 降级失败回滚"
+            "## 8. 测试矩阵"
+            "## 9. 风险与限制"
+            "## 10. 降级执行器接口"
+            "## 13. 验证标准"
+          )
+          for SECTION in "${SECTIONS[@]}"; do
+            if ! grep -qF "$SECTION" "$FILE"; then
+              echo "ERROR: Missing section '$SECTION'"
+              exit 1
+            fi
+          done
+          # 检查行数（≥500 行）
+          LINES=$(wc -l < "$FILE")
+          if [ "$LINES" -lt 500 ]; then
+            echo "ERROR: Document too short ($LINES < 500 lines)"
+            exit 1
+          fi
+          echo "✅ Downgrade plan document complete ($LINES lines, 12 sections)"
+
+  # ============================================================
+  # Job 5: Clippy + Fmt 检查（升级相关代码）
+  # ============================================================
+  lint-check:
+    name: Lint Check (Upgrade Code)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+          key: upgrade-lint
+      - name: Cargo fmt check
+        working-directory: rust/szrsql
+        run: cargo fmt -p szrsql-storage -p szrsql-replication -- --check
+      - name: Cargo clippy
+        working-directory: rust/szrsql
+        run: cargo clippy -p szrsql-storage -p szrsql-replication --all-targets -- -D warnings
+
+  # ============================================================
+  # Job 6: 升级路径汇总报告
+  # ============================================================
+  upgrade-summary:
+    name: Upgrade Test Summary
+    needs: [upgrade-unit-tests, rolling-upgrade-tests, version-matrix-test, downgrade-plan-validation, lint-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs status
+        run: |
+          echo "=== SzRSQL Upgrade Test Summary ==="
+          echo ""
+          echo "Job Status:"
+          echo "  1. Upgrade Unit Tests (7e.1-7e.4):   ${{ needs.upgrade-unit-tests.result }}"
+          echo "  2. Rolling Upgrade Tests (7e.5):     ${{ needs.rolling-upgrade-tests.result }}"
+          echo "  3. Version Matrix Test (v0.1→v1.0):  ${{ needs.version-matrix-test.result }}"
+          echo "  4. Downgrade Plan Validation (7e.6): ${{ needs.downgrade-plan-validation.result }}"
+          echo "  5. Lint Check:                       ${{ needs.lint-check.result }}"
+          echo ""
+          # 判断总体结果
+          if [[ "${{ needs.upgrade-unit-tests.result }}" != "success" || \
+                "${{ needs.rolling-upgrade-tests.result }}" != "success" || \
+                "${{ needs.version-matrix-test.result }}" != "success" || \
+                "${{ needs.downgrade-plan-validation.result }}" != "success" || \
+                "${{ needs.lint-check.result }}" != "success" ]]; then
+            echo "❌ Upgrade test FAILED"
+            exit 1
+          fi
+          echo "✅ All upgrade tests passed"
+          echo ""
+          echo "验证覆盖："
+          echo "  - Phase 7e.1 存储格式版本号定义 ✅"
+          echo "  - Phase 7e.2 PATCH/MINOR 原地升级 ✅"
+          echo "  - Phase 7e.3 MAJOR 跨版本升级 ✅"
+          echo "  - Phase 7e.4 升级前自动全量备份 ✅"
+          echo "  - Phase 7e.5 灰度升级（Rolling Upgrade）✅"
+          echo "  - Phase 7e.6 降级计划文档 ✅"
+          echo "  - Phase 7e.7 升级测试 CI ✅"
+          echo ""
+          echo "升级路径验证："
+          echo "  - v0.1.0 → v0.2.0 (MINOR) ✅"
+          echo "  - v0.2.0 → v0.5.0 (MINOR) ✅"
+          echo "  - v0.5.0 → v1.0.0 (MAJOR) ✅"
+          echo "  - v0.1.0 → v1.0.0 (MAJOR) ✅"

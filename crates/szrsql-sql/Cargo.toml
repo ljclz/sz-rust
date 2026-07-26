@@ -1,0 +1,23 @@
+[package]
+name = "szrsql-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL SQL 解析器与执行器"
+
+[dependencies]
+szrsql-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+bytes = { workspace = true }
+sqlparser = { workspace = true }
+regex = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# 差分比对测试：连接本地 PG 18 进行结果集比对
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+chrono = { workspace = true }

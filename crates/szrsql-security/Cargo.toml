@@ -1,0 +1,20 @@
+[package]
+name = "szrsql-security"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 安全模块：TDE/审计/RLS/密码策略"
+
+[dependencies]
+szrsql-types = { workspace = true }
+szrsql-tx = { workspace = true }
+sha2 = { workspace = true }
+aes = { workspace = true }
+cipher = { workspace = true }
+aes-gcm = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }

@@ -1,0 +1,89 @@
+name: CI
+
+# Phase 0.2 验证标准：3 分钟以内完成 cargo fmt --check + cargo clippy + cargo test
+# 触发条件：push 到 main/master、PR 到 main/master
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # 阻止 Cargo 在 CI 上自动 fetch 增量数据，提速并确保可复现
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 5
+  RUSTUP_MAX_RETRIES: 5
+
+jobs:
+  # Job 1: 代码格式检查（最快，先失败先反馈）
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  # Job 2: Clippy 静态检查（-D warnings 把警告当错误）
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+      - name: Cargo clippy
+        working-directory: rust/szrsql
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Job 3: 单元测试 + 集成测试
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+      - name: Cargo test
+        working-directory: rust/szrsql
+        run: cargo test --workspace --locked
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-test-output
+          path: rust/szrsql/target/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Job 4: 文档构建（确认 doc-comment 不破坏 cargo doc）
+  doc:
+    name: Doc build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+      - name: Cargo doc
+        working-directory: rust/szrsql
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps --document-private-items

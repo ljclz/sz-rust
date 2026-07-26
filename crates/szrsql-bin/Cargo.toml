@@ -1,0 +1,38 @@
+[package]
+name = "szrsql-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 数据库服务二进制入口"
+
+[[bin]]
+name = "szrsql"
+path = "src/main.rs"
+
+# Phase 7d.18：Docker HEALTHCHECK 健康检查二进制
+[[bin]]
+name = "szrsql-health"
+path = "src/health_main.rs"
+
+[dependencies]
+szrsql-types = { workspace = true }
+szrsql-storage = { workspace = true }
+szrsql-tx = { workspace = true }
+szrsql-cdc = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-protocol = { workspace = true }
+szrsql-optimizer = { workspace = true }
+szrsql-ai = { workspace = true }
+szrsql-security = { workspace = true }
+szrsql-scheduler = { workspace = true }
+szrsql-replication = { workspace = true }
+szrsql-dist = { workspace = true }
+szrsql-pgcompat = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

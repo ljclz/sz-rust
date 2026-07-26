@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "szrsql.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "szrsql.labels" . | nindent 4 }}
+data:
+  # SzRSQL 通过 CLI args 配置，ConfigMap 仅作为环境变量来源
+  # RUST_LOG 控制 tracing 日志级别（可被 extraEnv 覆盖）
+  RUST_LOG: {{ .Values.logging.rust_log | quote }}
+  RUST_BACKTRACE: {{ .Values.logging.rust_backtrace | quote }}

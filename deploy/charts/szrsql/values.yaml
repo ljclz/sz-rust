@@ -1,0 +1,196 @@
+# =============================================================================
+# Phase 4.5.7 — SzRSQL Helm Chart values.yaml
+# 默认配置可通过 `helm install --set key=value` 或 `-f values.yaml` 覆盖
+# =============================================================================
+
+# 镜像配置
+image:
+  # 镜像仓库（默认本地构建；生产环境应使用私有仓库）
+  repository: szrsql
+  # 镜像标签（与 Chart appVersion 一致）
+  tag: "0.1.0"
+  # 镜像拉取策略（IfNotPresent / Always / Never）
+  pullPolicy: IfNotPresent
+  # 私有仓库凭证（可选）
+  pullSecrets: []
+  # - name: my-registry-secret
+
+# 副本数（StatefulSet 模式下，>1 时需要外部存储支持 ReadWriteMany）
+# SzRSQL 当前为单节点设计，replicaCount > 1 需配合 replication 功能（Phase 6）
+replicaCount: 1
+
+# pgwire 服务配置
+service:
+  # Service 类型：ClusterIP（集群内访问）/ NodePort / LoadBalancer
+  type: ClusterIP
+  # pgwire 端口
+  port: 5432
+  # NodePort 端口（type=NodePort 时生效，留空自动分配）
+  nodePort: ""
+  # 集群内 DNS 名称：szrsql.<namespace>.svc.cluster.local
+  # 客户端连接：psql -h szrsql -p 5432 -U szrsql
+
+# HTTP 管理端点配置
+http:
+  # 是否启用 HTTP 管理端点
+  enabled: true
+  # HTTP 端口
+  port: 8080
+  # Service 类型（与 pgwire 分开，便于独立暴露给 Prometheus 抓取）
+  type: ClusterIP
+  # Bearer token 鉴权（None = 不鉴权，生产环境必须设置）
+  auth_token: ""
+  # Prometheus 抓取注解（ServiceMonitor 风格）
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+
+# SzRSQL 服务器参数（覆盖镜像默认 CMD）
+args:
+  host: "0.0.0.0"
+  port: 5432
+  server_version: "15.0-szrsql"
+  shutdown_timeout: 30
+  crash_log_dir: "/var/log/szrsql"
+  pid_file: "/var/run/szrsql/szrsql.pid"
+  # 启用 HTTP 管理端点（http.enabled=true 时追加 --http-port/--http-host）
+  http_host: "0.0.0.0"
+  # 是否禁用 panic backtrace（生产环境可设为 true 减少 hook 开销）
+  no_backtrace: false
+  # 是否以守护进程模式运行（K8s 环境下应为 false，容器本身就是 daemon）
+  daemon: false
+
+# 持久化存储配置
+persistence:
+  # 是否启用持久化（false → emptyDir，重启数据丢失）
+  enabled: true
+  # StorageClass 名称（留空使用集群默认 StorageClass）
+  storageClass: ""
+  # 访问模式（单节点 ReadWriteOnce；多节点 ReadWriteMany 需 NFS 等共享存储）
+  accessMode: ReadWriteOnce
+  # 存储容量
+  size: 10Gi
+  # 保留策略（retain / delete）
+  # retain：PVC 删除后 PV 保留数据；delete：PVC 删除时自动删除 PV
+  reclaimPolicy: Retain
+
+# 资源限制（与 docker-compose 对齐）
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+# Pod 安全上下文
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
+# 容器安全上下文
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # SzRSQL 需要写 PID 文件、日志
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# 探针配置
+# liveness：失败重启容器；readiness：失败从 Service endpoints 摘除
+# startup：启动期间禁用 liveness/readiness，给慢启动服务足够时间
+probes:
+  liveness:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30  # 30 × 5s = 150s 启动窗口
+
+# Pod 调度策略
+# nodeSelector: {}
+  # kubernetes.io/os: linux
+# tolerations: []
+# affinity: {}
+
+# Pod Disruption Budget（保证自愿驱逐时最少可用副本数）
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 0  # 与 minAvailable 互斥
+
+# ServiceAccount
+serviceAccount:
+  # 是否创建 ServiceAccount
+  create: true
+  # ServiceAccount 名称（留空使用 chart 全名）
+  name: ""
+  # 自动挂载 API 凭证（SzRSQL 不需要访问 K8s API）
+  automount: false
+  # 自定义 annotations
+  annotations: {}
+
+# 更新策略
+updateStrategy:
+  # RollingUpdate / OnDelete
+  type: RollingUpdate
+  rollingUpdate:
+    partition: 0
+    maxUnavailable: 1
+
+# Pod 生命周期
+lifecycle:
+  # 优雅关闭：发送 SIGTERM 后等待 30s 排空连接
+  terminationGracePeriodSeconds: 30
+
+# 额外 Pod annotations（用于服务网格、监控等）
+podAnnotations: {}
+
+# 额外 Pod labels
+podLabels: {}
+
+# 日志配置（通过 ConfigMap 注入为环境变量）
+logging:
+  # tracing 日志级别（error/warn/info/debug/trace）
+  rust_log: "info"
+  # panic 时是否输出 backtrace（0/1）
+  rust_backtrace: "1"
+
+# 额外环境变量（覆盖 ConfigMap 中的值，附加在 env 末尾）
+extraEnv: []
+  # - name: MY_SECRET
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: my-secret
+  #       key: secret-key
+
+# 额外 volume / volumeMounts（用于挂载 TLS 证书等）
+extraVolumes: []
+extraVolumeMounts: []

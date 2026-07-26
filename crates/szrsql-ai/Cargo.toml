@@ -1,0 +1,15 @@
+[package]
+name = "szrsql-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL AI 引擎：NL2SQL/HNSW 向量索引"
+
+[dependencies]
+szrsql-types = { workspace = true }
+szrsql-storage = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

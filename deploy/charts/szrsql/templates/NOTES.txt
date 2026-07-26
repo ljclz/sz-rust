@@ -1,0 +1,62 @@
+{{/*
+NOTES.txt — helm install 后打印的部署说明
+*/}}
+SzRSQL has been deployed!
+
+{{- if .Values.persistence.enabled }}
+1. Persistent Volume Claims are being provisioned:
+   - Data: {{ .Values.persistence.size }} ({{ .Values.persistence.accessMode }})
+   - Logs: 1Gi ({{ .Values.persistence.accessMode }})
+{{- end }}
+
+2. Wait for the pod to become ready:
+   kubectl --namespace {{ .Release.Namespace }} wait --for=condition=ready pod -l app.kubernetes.io/instance={{ .Release.Name }} --timeout=300s
+
+3. Get the service name:
+   {{- if eq .Values.service.type "ClusterIP" }}
+   kubectl --namespace {{ .Release.Namespace }} get svc {{ include "szrsql.fullname" . }}
+   {{- else if eq .Values.service.type "NodePort" }}
+   export NODE_IP=$(kubectl --namespace {{ .Release.Namespace }} get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+   export NODE_PORT=$(kubectl --namespace {{ .Release.Namespace }} get svc {{ include "szrsql.fullname" . }} -o jsonpath='{.spec.ports[0].nodePort}')
+   {{- else if eq .Values.service.type "LoadBalancer" }}
+   export SERVICE_IP=$(kubectl --namespace {{ .Release.Namespace }} get svc {{ include "szrsql.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   {{- end }}
+
+4. Connect via psql:
+{{- if eq .Values.service.type "ClusterIP" }}
+   # 在集群内运行：
+   kubectl --namespace {{ .Release.Namespace }} run psql --rm -it --image=postgres:15 --restart=Never -- psql -h {{ include "szrsql.fullname" . }} -p {{ .Values.service.port }} -U szrsql
+{{- else if eq .Values.service.type "NodePort" }}
+   psql -h $NODE_IP -p $NODE_PORT -U szrsql
+{{- else if eq .Values.service.type "LoadBalancer" }}
+   psql -h $SERVICE_IP -p {{ .Values.service.port }} -U szrsql
+{{- end }}
+
+{{- if .Values.http.enabled }}
+
+5. HTTP Management Endpoints (port {{ .Values.http.port }}):
+{{- if eq .Values.http.type "ClusterIP" }}
+   # 通过 port-forward 访问：
+   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "szrsql.fullname" . }}-http {{ .Values.http.port }}:{{ .Values.http.port }}
+   curl http://127.0.0.1:{{ .Values.http.port }}/healthz
+   curl http://127.0.0.1:{{ .Values.http.port }}/metrics
+{{- end}}
+
+6. Prometheus 抓取配置（ServiceMonitor 风格）：
+   - job_name: 'szrsql'
+     scrape_interval: 15s
+     static_configs:
+       - targets: ['{{ include "szrsql.fullname" . }}-http.{{ .Release.Namespace }}.svc:{{ .Values.http.port }}']
+{{- end }}
+
+7. View logs:
+   kubectl --namespace {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }} -f
+
+8. Uninstall:
+   helm uninstall {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+{{- if .Values.persistence.enabled }}
+   # 注意：PVC 不会被自动删除，需手动清理：
+   kubectl --namespace {{ .Release.Namespace }} delete pvc -l app.kubernetes.io/instance={{ .Release.Name }}
+{{- end }}
+
+Version: {{ .Chart.AppVersion }}

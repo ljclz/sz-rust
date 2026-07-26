@@ -1,0 +1,17 @@
+[package]
+name = "szrsql-optimizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 查询优化器：CBO/RBO/Morsel-Driven"
+
+[dependencies]
+szrsql-types = { workspace = true }
+szrsql-sql = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }

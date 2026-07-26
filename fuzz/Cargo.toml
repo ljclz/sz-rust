@@ -1,0 +1,38 @@
+[package]
+name = "szrsql-fuzz"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["SzRSQL Team"]
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+szrsql-storage = { path = "../crates/szrsql-storage" }
+szrsql-sql = { path = "../crates/szrsql-sql" }
+szrsql-types = { path = "../crates/szrsql-types" }
+libfuzzer-sys = "0.4"
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+
+# fuzz/ 自身不加入 workspace，避免 sanitizer 标志污染普通构建
+[workspace]
+
+[[bin]]
+name = "btree_fuzz"
+path = "fuzz_targets/btree_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "btree_encode_decode_fuzz"
+path = "fuzz_targets/btree_encode_decode_fuzz.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sql_compare"
+path = "fuzz_targets/sql_compare.rs"
+test = false
+doc = false

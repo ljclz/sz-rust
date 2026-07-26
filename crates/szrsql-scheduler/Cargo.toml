@@ -1,0 +1,15 @@
+[package]
+name = "szrsql-scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 定时任务调度器"
+
+[dependencies]
+szrsql-types = { workspace = true }
+szrsql-tx = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }

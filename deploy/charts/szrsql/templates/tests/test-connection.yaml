@@ -1,0 +1,78 @@
+{{/*
+Helm 测试 Pod — helm test 时运行，验证 SzRSQL 可连接
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "szrsql.fullname" . }}-test-connection
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "szrsql.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": "before-hook-creation,hook-succeeded"
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+  containers:
+    - name: pg-isready
+      image: postgres:15-bookworm
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Testing pgwire connectivity to {{ include "szrsql.fullname" . }}:{{ .Values.service.port }}..."
+          pg_isready \
+            --host={{ include "szrsql.fullname" . }} \
+            --port={{ .Values.service.port }} \
+            --timeout=30 \
+            --interval=2
+          echo "✓ pgwire is ready"
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+        requests:
+          cpu: 50m
+          memory: 32Mi
+  {{- if .Values.http.enabled }}
+    - name: curl-health
+      image: curlimages/curl:8.5.0
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "Testing HTTP /healthz endpoint..."
+          curl \
+            --silent \
+            --fail \
+            --max-time 10 \
+            http://{{ include "szrsql.fullname" . }}-http:{{ .Values.http.port }}/healthz
+          echo ""
+          echo "✓ HTTP /healthz returned 200"
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+        requests:
+          cpu: 50m
+          memory: 32Mi
+  {{- end }}

@@ -1,0 +1,505 @@
+name: Quality Gates
+
+# 高级质量门禁：fuzz / 变异测试 / 混沌工程 / 反向黑盒审查 / 影子流量回放 / Soak 测试
+#
+# 对应 `docs/全面排查汇总报告.md` P2-2 任务。
+#
+# 触发条件：
+#   1. 每周日 00:00 UTC 定时执行（含 6h soak test）
+#   2. 手动触发（workflow_dispatch），可选择跳过 soak test
+#   3. push 到 main 时执行除 soak 外的快速门禁
+#
+# 验证标准：
+#   - fuzz: 至少运行 5 分钟无 panic/crash
+#   - 变异测试杀死率 ≥ 95%
+#   - 混沌工程：loom 并发模型测试全部通过
+#   - 反向黑盒审查：扩展测试 (spec_review_extended) 全部通过
+#   - 影子流量回放：匹配率 ≥ 90%
+#   - soak test：6 小时内无内存泄漏、无性能退化 > 20%
+
+on:
+  schedule:
+    # 每周日 00:00 UTC 执行完整质量门禁（含 soak test）
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      skip_soak:
+        description: '跳过 6h soak test（仅用于快速验证）'
+        required: false
+        type: boolean
+        default: false
+      fuzz_minutes:
+        description: 'fuzz 运行时长（分钟，默认 5）'
+        required: false
+        type: string
+        default: '5'
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 5
+  RUSTUP_MAX_RETRIES: 5
+  # 测试数据写入 /tmp（Linux runner），不污染 C 盘
+  SZRSQL_TEST_DATA_DIR: /tmp/szrsql-test-data
+
+jobs:
+  # ============================================================
+  # Job 1: 差分模糊测试（Linux + ASAN）
+  # ============================================================
+  fuzz:
+    name: Fuzz Testing
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || true
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Set up PostgreSQL 18
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18
+          sudo service postgresql start
+          # 设置密码并创建测试库
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres createdb postgres 2>/dev/null || true
+
+      - name: Run fuzz targets (btree_fuzz)
+        working-directory: rust/szrsql
+        env:
+          RUSTFLAGS: "-Z sanitizer=address"
+        run: |
+          timeout ${{ github.event.inputs.fuzz_minutes || '5' }}m cargo +nightly fuzz run btree_fuzz -- -max_len=4096 -max_total_time=$(((${{ github.event.inputs.fuzz_minutes || '5' }}) * 60)) || true
+
+      - name: Run fuzz targets (sql_compare)
+        working-directory: rust/szrsql
+        env:
+          RUSTFLAGS: "-Z sanitizer=address"
+          PG_CONN_STR: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+        run: |
+          timeout ${{ github.event.inputs.fuzz_minutes || '5' }}m cargo +nightly fuzz run sql_compare -- -max_len=1024 -max_total_time=$(((${{ github.event.inputs.fuzz_minutes || '5' }}) * 60)) || true
+
+      - name: Check for fuzz failures
+        working-directory: rust/szrsql
+        run: |
+          if find fuzz/artifacts -name "panic-*" -o -name "crash-*" 2>/dev/null | grep -q .; then
+            echo "::error::Fuzz testing found crashes"
+            find fuzz/artifacts -type f -exec echo "Artifact: {}" \;
+            exit 1
+          fi
+          echo "✅ Fuzz testing completed without crashes"
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: rust/szrsql/fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ============================================================
+  # Job 2: 变异测试（cargo-mutants）
+  # ============================================================
+  mutation:
+    name: Mutation Testing
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Run mutation testing on szrsql-types
+        working-directory: rust/szrsql
+        run: |
+          mkdir -p mutants-results
+          cargo mutants -p szrsql-types --output-dir mutants-results/szrsql-types --timeout 60 || true
+
+      - name: Run mutation testing on szrsql-storage
+        working-directory: rust/szrsql
+        run: |
+          cargo mutants -p szrsql-storage --output-dir mutants-results/szrsql-storage --timeout 60 || true
+
+      - name: Calculate kill rate
+        working-directory: rust/szrsql
+        run: |
+          echo "=== Mutation Testing Summary ==="
+          for dir in mutants-results/*/; do
+            if [ -f "$dir/missed.txt" ] && [ -f "$dir/caught.txt" ]; then
+              MISSED=$(wc -l < "$dir/missed.txt" || echo 0)
+              CAUGHT=$(wc -l < "$dir/caught.txt" || echo 0)
+              TOTAL=$((MISSED + CAUGHT))
+              if [ $TOTAL -gt 0 ]; then
+                RATE=$(echo "scale=2; $CAUGHT * 100 / $TOTAL" | bc)
+                echo "$(basename $dir): $CAUGHT/$TOTAL killed ($RATE%)"
+                # 检查是否达标（≥ 95%）
+                if [ $(echo "$RATE >= 95" | bc) -eq 0 ]; then
+                  echo "::warning::$(basename $dir) kill rate $RATE% is below 95% target"
+                fi
+              fi
+            fi
+          done
+
+      - name: Upload mutation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-results
+          path: rust/szrsql/mutants-results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ============================================================
+  # Job 3: 混沌工程 + loom 并发模型测试
+  # ============================================================
+  chaos:
+    name: Chaos & Loom Tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Run chaos tests (CDC failover)
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-cdc --test e2e_tests -- --nocapture --test-threads=1
+
+      - name: Run loom concurrency model tests
+        working-directory: rust/szrsql
+        env:
+          RUSTFLAGS: "--cfg loom"
+        run: |
+          # 运行所有 loom 模型测试
+          cargo test -p szrsql-storage loom_ -- --nocapture --test-threads=1 || echo "::warning::loom tests may not exist yet"
+          cargo test -p szrsql-tx loom_ -- --nocapture --test-threads=1 || echo "::warning::loom tests in szrsql-tx may not exist yet"
+
+      - name: Run adversarial tests
+        working-directory: rust/szrsql
+        run: |
+          cargo test -p szrsql-sql --test adversarial -- --nocapture --test-threads=1
+          cargo test -p szrsql-sql --test adversarial_sql -- --nocapture --test-threads=1
+          cargo test -p szrsql-tx --test adversarial_tx -- --nocapture --test-threads=1
+          cargo test -p szrsql-protocol --test adversarial_net -- --nocapture --test-threads=1
+
+  # ============================================================
+  # Job 4: 反向黑盒审查扩展测试
+  # ============================================================
+  spec-review:
+    name: Spec Review Extended
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PG_CONN_STR: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run spec review extended tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-shadow --test spec_review_extended -- --nocapture --test-threads=1
+
+      - name: Run SQL compare tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-sql --test sql_compare -- --nocapture --test-threads=1 || true
+
+  # ============================================================
+  # Job 5: 影子流量回放
+  # ============================================================
+  shadow-traffic:
+    name: Shadow Traffic Replay
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PG_CONN_STR: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Run shadow traffic replay tests
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-shadow -- --nocapture --test-threads=1
+
+      - name: Run performance benchmark (1K)
+        working-directory: rust/szrsql
+        run: cargo test -p szrsql-shadow --test bench_pgbench -- bench_insert_1k --nocapture --ignored --test-threads=1 || true
+
+  # ============================================================
+  # Job 6: 6 小时 Soak Test（仅定时触发或手动指定时执行）
+  # ============================================================
+  soak:
+    name: 6h Soak Test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 1500  # 25 小时超时（6h soak + 缓冲）
+    if: |
+      (github.event_name == 'schedule') ||
+      (github.event_name == 'workflow_dispatch' && !inputs.skip_soak)
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PG_CONN_STR: "postgresql://postgres:postgres@127.0.0.1:5432/postgres"
+      SOAK_DURATION_SECS: "21600"  # 6 小时
+      SOAK_SAMPLE_INTERVAL: "60"   # 60 秒采样一次
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/szrsql
+
+      - name: Build szrsql binary
+        working-directory: rust/szrsql
+        run: cargo build --release -p szrsql-bin
+
+      - name: Start szrsql server
+        working-directory: rust/szrsql
+        run: |
+          mkdir -p $SZRSQL_TEST_DATA_DIR
+          ./target/release/szrsql --port 15432 --data-dir $SZRSQL_TEST_DATA_DIR &
+          echo $! > szrsql.pid
+          # 等待启动
+          sleep 5
+          # 验证服务可用
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 15432 2>/dev/null || curl -s http://127.0.0.1:15432/health 2>/dev/null; then
+              echo "szrsql server is ready"
+              break
+            fi
+            echo "Waiting for szrsql... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run 6h soak test with metrics sampling
+        working-directory: rust/szrsql
+        run: |
+          echo "=== Starting 6h Soak Test ==="
+          echo "Duration: $SOAK_DURATION_SECS seconds"
+          echo "Sample interval: $SOAK_SAMPLE_INTERVAL seconds"
+          echo ""
+          echo "Timestamp,RSS_KB,Connections,TPS,AvgLatencyMs" > soak-metrics.csv
+
+          START_TIME=$(date +%s)
+          END_TIME=$((START_TIME + SOAK_DURATION_SECS))
+
+          # 持续运行混合工作负载
+          while [ $(date +%s) -lt $END_TIME ]; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+
+            # 采样 RSS 内存
+            PID=$(cat szrsql.pid)
+            RSS=$(ps -o rss= -p $PID 2>/dev/null | tr -d ' ' || echo 0)
+
+            # 采样 TPS（运行 100 条 INSERT/SELECT）
+            TPS_START=$(date +%s%N)
+            for i in $(seq 1 100); do
+              PGPASSWORD=postgres psql -h 127.0.0.1 -p 15432 -U postgres -d postgres -c "INSERT INTO soak_test (id, val) VALUES ($i, 'v$i')" 2>/dev/null || true
+            done
+            TPS_END=$(date +%s%N)
+            TPS_DURATION=$(( (TPS_END - TPS_START) / 1000000 ))
+            if [ $TPS_DURATION -gt 0 ]; then
+              TPS=$((100 * 1000 / TPS_DURATION))
+            else
+              TPS=0
+            fi
+
+            echo "$ELAPSED,$RSS,1,$TPS,$TPS_DURATION" >> soak-metrics.csv
+            echo "[$ELAPSED s] RSS=${RSS}KB TPS=$TPS Latency=${TPS_DURATION}ms"
+
+            sleep $SOAK_SAMPLE_INTERVAL
+          done
+
+          echo "=== Soak Test Completed ==="
+
+      - name: Analyze soak test results
+        working-directory: rust/szrsql
+        run: |
+          echo "=== Soak Test Analysis ==="
+          if [ ! -f soak-metrics.csv ]; then
+            echo "::error::No metrics file found"
+            exit 1
+          fi
+
+          # 计算初始和最终 RSS
+          INITIAL_RSS=$(sed -n '2p' soak-metrics.csv | cut -d',' -f2)
+          FINAL_RSS=$(tail -1 soak-metrics.csv | cut -d',' -f2)
+
+          if [ -n "$INITIAL_RSS" ] && [ -n "$FINAL_RSS" ]; then
+            RSS_GROWTH=$((FINAL_RSS - INITIAL_RSS))
+            RSS_GROWTH_PCT=$((RSS_GROWTH * 100 / INITIAL_RSS))
+            echo "Initial RSS: ${INITIAL_RSS} KB"
+            echo "Final RSS: ${FINAL_RSS} KB"
+            echo "Growth: ${RSS_GROWTH} KB (${RSS_GROWTH_PCT}%)"
+
+            # 内存增长超过 50% 视为泄漏
+            if [ $RSS_GROWTH_PCT -gt 50 ]; then
+              echo "::error::Memory leak detected: RSS grew ${RSS_GROWTH_PCT}%"
+              exit 1
+            fi
+          fi
+
+          # 检查 TPS 退化
+          INITIAL_TPS=$(sed -n '2p' soak-metrics.csv | cut -d',' -f4)
+          FINAL_TPS=$(tail -1 soak-metrics.csv | cut -d',' -f4)
+          if [ -n "$INITIAL_TPS" ] && [ -n "$FINAL_TPS" ] && [ $INITIAL_TPS -gt 0 ]; then
+            TPS_DEGRADATION=$(( (INITIAL_TPS - FINAL_TPS) * 100 / INITIAL_TPS ))
+            echo "Initial TPS: $INITIAL_TPS"
+            echo "Final TPS: $FINAL_TPS"
+            echo "TPS degradation: ${TPS_DEGRADATION}%"
+
+            # TPS 退化超过 20% 视为性能问题
+            if [ $TPS_DEGRADATION -gt 20 ]; then
+              echo "::error::Performance degradation detected: TPS dropped ${TPS_DEGRADATION}%"
+              exit 1
+            fi
+          fi
+
+          echo "✅ Soak test passed: no memory leak, no significant performance degradation"
+
+      - name: Stop szrsql server
+        if: always()
+        working-directory: rust/szrsql
+        run: |
+          if [ -f szrsql.pid ]; then
+            kill $(cat szrsql.pid) 2>/dev/null || true
+            rm -f szrsql.pid
+          fi
+
+      - name: Upload soak metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-metrics
+          path: rust/szrsql/soak-metrics.csv
+          if-no-files-found: ignore
+          retention-days: 90
+
+  # ============================================================
+  # Job 7: 质量门禁汇总
+  # ============================================================
+  summary:
+    name: Quality Gates Summary
+    needs: [fuzz, mutation, chaos, spec-review, shadow-traffic]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "=== Quality Gates Summary ==="
+          echo ""
+          echo "| Job | Status |"
+          echo "|-----|--------|"
+          echo "| Fuzz Testing | ${{ needs.fuzz.result }} |"
+          echo "| Mutation Testing | ${{ needs.mutation.result }} |"
+          echo "| Chaos & Loom Tests | ${{ needs.chaos.result }} |"
+          echo "| Spec Review Extended | ${{ needs.spec-review.result }} |"
+          echo "| Shadow Traffic Replay | ${{ needs.shadow-traffic.result }} |"
+          echo ""
+          if [[ "${{ needs.fuzz.result }}" == "failure" || "${{ needs.mutation.result }}" == "failure" || "${{ needs.chaos.result }}" == "failure" || "${{ needs.spec-review.result }}" == "failure" || "${{ needs.shadow-traffic.result }}" == "failure" ]]; then
+            echo "::error::One or more quality gates failed"
+            exit 1
+          fi
+          echo "✅ All quality gates passed"

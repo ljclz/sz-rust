@@ -1,0 +1,18 @@
+[package]
+name = "szrsql-pgcompat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL PostgreSQL 兼容性测试套件：SQL 语法 / SQLSTATE / 数据类型 / 协议消息合规性验证"
+
+[dependencies]
+szrsql-protocol = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

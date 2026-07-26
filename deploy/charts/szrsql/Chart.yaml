@@ -1,0 +1,26 @@
+apiVersion: v2
+# =============================================================================
+# Phase 4.5.7 — SzRSQL Helm Chart
+# Kubernetes 部署：StatefulSet + Service（暴露 5432）+ ConfigMap + 探针
+# =============================================================================
+name: szrsql
+description: SzRSQL 是一个从零开始的 PostgreSQL 协议兼容数据库，使用 Rust 实现
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/szrsql/szrsql
+sources:
+  - https://github.com/szrsql/szrsql
+maintainers:
+  - name: SzRSQL Team
+    url: https://github.com/szrsql
+keywords:
+  - database
+  - postgresql
+  - postgres
+  - sql
+  - rust
+icon: https://raw.githubusercontent.com/szrsql/szrsql/main/docs/logo.png
+annotations:
+  "artifacthub.io/category": "database"
+  "artifacthub.io/license": "MIT"

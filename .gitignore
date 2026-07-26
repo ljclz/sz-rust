@@ -1,0 +1,92 @@
+# SzRSQL .gitignore — 根据 9.30 节"Cargo.lock 纳入版本控制"，不忽略 Cargo.lock
+
+# === Rust 构建产物 ===
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# === IDE / 编辑器 ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === 性能 / 基准测试临时文件 ===
+*.perf
+*.flamegraph.svg
+perf.data*
+flamegraph.svg
+
+# === Coverage 报告 ===
+*.lcov
+/coverage/
+**/coverage/
+tarpaulin-report.html
+
+# === Valgrind / Miri 输出 ===
+miri_log.*
+valgrind-out.xml
+
+# === 运行时数据目录（开发 / 测试用）===
+/data/
+/tmp/
+*.szdb
+*.szdb-shm
+*.szdb-wal
+*.szdb-backup
+
+# === Cargo-timing HTML 报告（本地构建性能诊断，不进版本库）===
+target/cargo-timing/
+
+# === 环境配置（含密钥不应入库）===
+.env
+.env.local
+.env.*.local
+config/local.toml
+
+# === 不忽略 Cargo.lock（应用项目锁定版本以保证可复现构建）===
+!Cargo.lock
+# Added by code-review-graph
+.code-review-graph/
+
+# === AI 工具 / 助手配置目录（本地配置，不入库）===
+.claude/
+.codebuddy/
+.gemini/
+.kiro/
+.qoder/
+.trae/
+.opencode/
+
+# === IDE 规则文件（本地配置，不入库）===
+.cursorrules
+.windsurfrules
+opencode.jsonc
+
+# === MCP / 元数据配置（本地配置，不入库）===
+.mcp.json
+.meta.json
+
+# === 临时日志 / 测试输出文件 ===
+err.txt
+err_full.txt
+err_stderr.txt
+err_stdout.txt
+test-1.log
+test_out.log
+test_results.txt
+test_one.txt
+mutants-run.log
+gate-baseline-report.txt
+mutants.out.old/
+
+# === 变异测试输出目录 ===
+mutants.out/
+
+# === 临时测试文件 ===
+README_test.md
+x.md

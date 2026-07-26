@@ -1,0 +1,188 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "szrsql.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "szrsql.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "szrsql.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: {{ .Values.updateStrategy.type }}
+    {{- if .Values.updateStrategy.rollingUpdate }}
+    rollingUpdate:
+      partition: {{ .Values.updateStrategy.rollingUpdate.partition | default 0 }}
+      {{- if .Values.updateStrategy.rollingUpdate.maxUnavailable }}
+      maxUnavailable: {{ .Values.updateStrategy.rollingUpdate.maxUnavailable }}
+      {{- end }}
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "szrsql.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "szrsql.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # 强制 Deployment 滚动更新（ConfigMap 变化时）
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "szrsql.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: szrsql
+          image: {{ include "szrsql.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            {{- include "szrsql.args" . | nindent 12 }}
+          ports:
+            - name: pgwire
+              containerPort: 5432
+              protocol: TCP
+            {{- if .Values.http.enabled }}
+            - name: http
+              containerPort: {{ .Values.http.port }}
+              protocol: TCP
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "szrsql.fullname" . }}-config
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # 资源限制
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # 容器安全上下文
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # 卷挂载
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/szrsql
+            - name: run
+              mountPath: /var/run/szrsql
+            - name: log
+              mountPath: /var/log/szrsql
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # 探针（仅 HTTP 启用时使用 HTTP 探针，否则使用 TCP 探针）
+          {{- if .Values.probes.startup.enabled }}
+          startupProbe:
+            {{- if .Values.http.enabled }}
+            httpGet:
+              path: {{ .Values.probes.startup.httpGet.path }}
+              port: http
+            {{- else }}
+            tcpSocket:
+              port: pgwire
+            {{- end }}
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.liveness.enabled }}
+          livenessProbe:
+            {{- if .Values.http.enabled }}
+            httpGet:
+              path: {{ .Values.probes.liveness.httpGet.path }}
+              port: http
+            {{- else }}
+            tcpSocket:
+              port: pgwire
+            {{- end }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- end }}
+          {{- if .Values.probes.readiness.enabled }}
+          readinessProbe:
+            {{- if .Values.http.enabled }}
+            httpGet:
+              path: {{ .Values.probes.readiness.httpGet.path }}
+              port: http
+            {{- else }}
+            tcpSocket:
+              port: pgwire
+            {{- end }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          {{- end }}
+      volumes:
+        # run 目录：PID 文件，emptyDir 即可（Pod 内共享）
+        - name: run
+          emptyDir: {}
+        {{- if not .Values.persistence.enabled }}
+        # 持久化禁用时：data 与 log 都使用 emptyDir（重启丢失）
+        - name: data
+          emptyDir: {}
+        - name: log
+          emptyDir: {}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
+  # volumeClaimTemplates：StatefulSet 自动为每个副本创建独立 PVC
+  # PVC 名称格式：<volumeClaimTemplate-name>-<statefulset-name>-<ordinal>
+  # 例如：data-szrsql-0
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "szrsql.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.accessMode | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+    - metadata:
+        name: log
+        labels:
+          {{- include "szrsql.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.accessMode | quote }}
+        resources:
+          requests:
+            storage: 1Gi
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+  {{- end }}

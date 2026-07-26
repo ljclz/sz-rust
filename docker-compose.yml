@@ -1,0 +1,151 @@
+# =============================================================================
+# Phase 4.5.6 — SzRSQL docker-compose.yml
+# 一键启动单节点 SzRSQL 数据库服务，使用 TCP 探针健康检查
+# =============================================================================
+#
+# 启动（默认启用 HTTP 管理端点）：
+#   docker compose up -d
+#
+# 查看日志：
+#   docker compose logs -f szrsql
+#
+# 查看健康状态：
+#   docker compose ps
+#   docker inspect --format='{{.State.Health.Status}}' szrsql
+#
+# HTTP 管理端点（已启用）：
+#   curl http://127.0.0.1:8080/healthz
+#   curl http://127.0.0.1:8080/metrics
+#
+# 连接（psql）：
+#   psql -h 127.0.0.1 -p 5432 -U szrsql
+#
+# 停止并清理：
+#   docker compose down              # 保留数据卷
+#   docker compose down -v           # 同时删除数据卷（慎用）
+#
+# 自定义版本构建：
+#   SZRSQL_IMAGE_TAG=0.1.0 docker compose build
+#   SZRSQL_IMAGE_TAG=0.1.0 docker compose up -d
+#
+# 覆盖监听端口（避免宿主机端口冲突）：
+#   SZRSQL_HOST_PORT=15432 SZRSQL_HTTP_PORT=18080 docker compose up -d
+# =============================================================================
+
+services:
+  szrsql:
+    # 镜像标签可通过环境变量覆盖（默认 szrsql:0.1.0）
+    image: szrsql:${SZRSQL_IMAGE_TAG:-0.1.0}
+    # 若镜像不存在则从 Dockerfile 构建
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: szrsql
+    hostname: szrsql
+    restart: unless-stopped
+
+    # 端口映射：宿主机:容器
+    # 5432：pgwire 协议端口（psql / pg_isready 连接）
+    # 8080：HTTP 管理端口（/healthz、/readyz、/metrics）
+    ports:
+      - "${SZRSQL_HOST_PORT:-5432}:5432"
+      - "${SZRSQL_HTTP_PORT:-8080}:8080"
+
+    # 数据卷：持久化数据库文件、PID 文件、崩溃日志
+    volumes:
+      - szrsql-data:/var/lib/szrsql
+      - szrsql-run:/var/run/szrsql
+      - szrsql-log:/var/log/szrsql
+
+    # 环境变量（覆盖 Dockerfile 中的 ENV）
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: "1"
+
+    # 命令行参数（覆盖 Dockerfile 中的 CMD）
+    # 启用 pgwire (5432) + HTTP 管理端点 (8080)
+    # --shutdown-timeout 30：SIGTERM 后给活跃连接最多 30s 完成
+    # --crash-log-dir：panic 崩溃日志写入数据卷
+    # --pid-file：PID 文件写入数据卷（防重复启动）
+    # --http-host 0.0.0.0：HTTP 管理端点允许外部访问（生产环境建议改回 127.0.0.1 + 仅端口映射 127.0.0.1:8080:8080）
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "5432"
+      - "--shutdown-timeout"
+      - "30"
+      - "--crash-log-dir"
+      - "/var/log/szrsql"
+      - "--pid-file"
+      - "/var/run/szrsql/szrsql.pid"
+      - "--http-port"
+      - "8080"
+      - "--http-host"
+      - "0.0.0.0"
+
+    # 健康检查：使用 bash 内置 /dev/tcp 探针验证 5432 端口可连
+    # debian:bookworm-slim 默认包含 bash，无需额外安装 postgresql-client
+    # 间隔 10s（比 Dockerfile 默认 30s 更密，便于 docker compose 快速感知故障）
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "bash -c 'exec 3<>/dev/tcp/127.0.0.1/5432 && echo -e \"\" >&3 && cat <&3' || exit 1"
+      interval: 10s
+      timeout: 5s
+      start_period: 3s
+      retries: 5
+
+    # 资源限制（防止单节点 OOM 影响宿主机）
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 64M
+          cpus: "0.1"
+
+    # 日志驱动配置：json-file 滚动（避免日志撑爆磁盘）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 安全加固
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    # SzRSQL 不需要任何 Linux capability
+
+    # 停止超时：给 SIGTERM 30s 优雅关闭时间（与 --shutdown-timeout 对齐）
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+    # 加入自定义网络
+    networks:
+      - szrsql-net
+
+# =============================================================================
+# 命名数据卷（由 Docker 管理，持久化跨容器重建）
+# =============================================================================
+volumes:
+  szrsql-data:
+    driver: local
+    name: szrsql-data
+  szrsql-run:
+    driver: local
+    name: szrsql-run
+  szrsql-log:
+    driver: local
+    name: szrsql-log
+
+# =============================================================================
+# 自定义网络（隔离 SzRSQL 与其他容器）
+# =============================================================================
+networks:
+  szrsql-net:
+    driver: bridge
+    name: szrsql-net

@@ -1,0 +1,22 @@
+[package]
+name = "szrsql-shadow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 影子流量回放：录制 PG 流量 → 在 szrsql 上回放 → 比对结果与延迟"
+
+[dependencies]
+szrsql-sql = { workspace = true }
+szrsql-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+# 影子回放需要连接 PG 18 进行差分比对
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+
+[dev-dependencies]
+postgres = { version = "0.19", features = ["with-chrono-0_4"] }
+tempfile = { workspace = true }

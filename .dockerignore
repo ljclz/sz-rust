@@ -1,0 +1,79 @@
+# =============================================================================
+# Phase 4.5.5 — SzRSQL .dockerignore
+# 排除不必要文件以减小构建上下文、加速构建、避免缓存污染
+# =============================================================================
+
+# === Rust 构建产物（容器内重新编译，宿主机 target/ 不应进入构建上下文）===
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# === Docker 自身文件 ===
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# === CI / 仓库元数据（构建产物不需要）===
+/.github/
+/.git/
+/.gitignore
+/.meta.json
+
+# === IDE / 编辑器 ===
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === 文档（运行时镜像不需要）===
+/docs/
+/CHANGELOG.md
+/VERSIONING.md
+/README.md
+*.md
+!Cargo.toml
+
+# === 性能 / 基准测试临时文件 ===
+*.perf
+*.flamegraph.svg
+perf.data*
+flamegraph.svg
+
+# === Coverage 报告 ===
+*.lcov
+/coverage/
+**/coverage/
+tarpaulin-report.html
+
+# === Valgrind / Miri 输出 ===
+miri_log.*
+valgrind-out.xml
+
+# === 运行时数据目录 ===
+/data/
+/tmp/
+*.szdb
+*.szdb-shm
+*.szdb-wal
+*.szdb-backup
+
+# === Cargo-timing HTML 报告 ===
+target/cargo-timing/
+
+# === 环境配置（含密钥不应入镜像）===
+.env
+.env.local
+.env.*.local
+config/local.toml
+
+# === 构建错误日志 / 临时报告 ===
+build_errors*.txt
+gate-baseline-report.txt
+
+# === 脚本（仅本地使用）===
+/scripts/
+/ci/

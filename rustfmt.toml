@@ -1,0 +1,26 @@
+# SzRSQL Rust 代码风格配置（仅使用 stable channel 选项）
+# 文档：https://rust-lang.github.io/rustfmt/
+#
+# 说明：brace_style / control_brace_style / wrap_comments 等是 nightly-only 选项，
+# CI 默认使用 stable channel，这些选项会被忽略并产生大量警告。
+# 如需启用，请在本地安装 nightly 并运行 `cargo +nightly fmt`。
+
+# 行宽：100（数据库代码常有长类型签名，120 过宽不利于 side-by-side diff）
+max_width = 100
+
+# 缩进：4 空格（硬约束，与团队其他项目保持一致）
+hard_tabs = false
+tab_spaces = 4
+
+# 导入排序：按字母序 + 模块分组
+reorder_imports = true
+reorder_modules = true
+
+# 链式调用：每方法一行（提高 diff 友好度）
+chain_width = 60
+
+# 文件结尾：统一 Unix LF
+newline_style = "Unix"
+
+# 单行 if/else 最大宽度：0 表示禁止单行 if/else（强制 {} 包裹）
+single_line_if_else_max_width = 0

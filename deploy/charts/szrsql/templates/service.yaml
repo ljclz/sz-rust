@@ -1,0 +1,49 @@
+{{/*
+pgwire Service — 暴露 5432 端口供客户端连接
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "szrsql.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "szrsql.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: pgwire
+      port: {{ .Values.service.port }}
+      targetPort: pgwire
+      protocol: TCP
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "szrsql.selectorLabels" . | nindent 4 }}
+---
+{{/*
+HTTP Service — 暴露 8080 端口供 Prometheus 抓取与管理端点访问
+独立 Service 便于独立暴露给监控栈
+*/}}
+{{- if .Values.http.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "szrsql.fullname" . }}-http
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "szrsql.labels" . | nindent 4 }}
+  annotations:
+    {{- range $key, $value := .Values.http.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  type: {{ .Values.http.type }}
+  ports:
+    - name: http
+      port: {{ .Values.http.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "szrsql.selectorLabels" . | nindent 4 }}
+{{- end }}

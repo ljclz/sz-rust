@@ -1,0 +1,13 @@
+[package]
+name = "szrsql-ops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 运维监控：ASH 采样 / AWR 报告 / 告警 / 慢查询 / OpenTelemetry / Grafana"
+
+[dependencies]
+szrsql-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
