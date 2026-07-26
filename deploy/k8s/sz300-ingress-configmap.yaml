@@ -1,0 +1,83 @@
+# K8s Ingress + ConfigMap — 对外暴露服务 + 框架配置挂载
+#
+# 修复 P2-8 / P2-9：
+# - Ingress：通过 nginx ingress controller 对外暴露 sz300-server 服务
+# - ConfigMap：挂载框架 AppConfig 期望的 config/ 目录
+
+---
+# ========== Ingress：对外暴露 sz300-server ==========
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sz300-server-ingress
+  namespace: sz300
+  labels:
+    app: sz300-server
+  annotations:
+    # nginx ingress controller 注解
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # 限流：每秒 20 请求，突发 50
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst: "50"
+    # 跨域：允许的 Origin（生产环境按实际域名调整）
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://admin.shengzhuang.cn"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    # cert-manager 自动签发 TLS 证书
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.shengzhuang.cn
+      secretName: sz300-server-tls
+  rules:
+    - host: api.shengzhuang.cn
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sz300-server
+                port:
+                  number: 80
+
+---
+# ========== ConfigMap：框架 AppConfig 配置文件 ==========
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sz300-server-config
+  namespace: sz300
+  labels:
+    app: sz300-server
+data:
+  app.yaml: |
+    # 框架统一配置（sz-rust-core::config::AppConfig）
+    app:
+      app_host: "https://api.shengzhuang.cn"
+      default_app: "api"
+      auto_multi_app: false
+
+    database:
+      default: "mysql"
+      auto_timestamp: true
+
+    # 缓存配置（sz-rust-core::cache）
+    cache:
+      default: "memory"
+      ttl: 3600
+
+    # 日志配置
+    log:
+      level: "info"
+      format: "json"
+
+    # 会话配置
+    session:
+      prefix: "sz300_"
+      expire: 86400

@@ -1,4 +1,4 @@
-# sz300-server Kubernetes 部署清单（v2 - 不可变部署）
+﻿# sz300-server Kubernetes 部署清单（v2 - 不可变部署）
 # 改进点（v1 -> v2）：
 # 1. 镜像 tag 从 latest 改为不可变 v0.2.0（防止镜像漂移）
 # 2. 新增 HPA：CPU>70% 扩容，3-10 副本
@@ -134,6 +134,12 @@ spec:
       - name: logs
         persistentVolumeClaim:
           claimName: sz300-logs
+      - name: config
+        configMap:
+          name: sz300-server-config
+          items:
+          - key: app.yaml
+            path: app.yaml
 ---
 apiVersion: v1
 kind: Service

@@ -1,23 +1,19 @@
-# Prometheus 配置 - sz300-server 监控
+﻿# Prometheus 配置 - sz300-server 监控
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     cluster: sz300-prod
     environment: production
-
 # 告警规则文件
 rule_files:
   - "alerting_rules.yml"
-  - "alerting_rules.additional.yml"
-
 # Alertmanager 连接
 alerting:
   alertmanagers:
   - static_configs:
     - targets: ["alertmanager:9093"]
     timeout: 10s
-
 scrape_configs:
   # ========== sz300-server 应用指标 ==========
   - job_name: 'sz300-server'
@@ -27,7 +23,6 @@ scrape_configs:
     scrape_interval: 15s
     scrape_timeout: 10s
     honor_labels: true
-
   # ========== Pod 健康检查（blackbox exporter） ==========
   - job_name: 'sz300-health'
     static_configs:
@@ -42,7 +37,6 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
-
   # ========== Kubernetes 节点指标 ==========
   - job_name: 'kubernetes-nodes'
     kubernetes_sd_configs:
@@ -54,7 +48,6 @@ scrape_configs:
     relabel_configs:
       - action: labelmap
         regex: __meta_kubernetes_node_label_(.+)
-
   # ========== Kubernetes Pod 指标 ==========
   - job_name: 'kubernetes-pods'
     kubernetes_sd_configs:
@@ -72,12 +65,10 @@ scrape_configs:
         regex: (.+);(.+)
         replacement: $2:$1
         target_label: __address__
-
   # ========== kube-state-metrics ==========
   - job_name: 'kube-state-metrics'
     static_configs:
       - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
-
   # ========== node-exporter ==========
   - job_name: 'node-exporter'
     static_configs:

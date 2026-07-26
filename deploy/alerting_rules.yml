@@ -1,4 +1,4 @@
-# sz300-server Prometheus 告警规则
+﻿# sz300-server Prometheus 告警规则
 # 覆盖：可用性、资源、性能、错误率、K8s 状态
 groups:
 # ========== 可用性告警 ==========
@@ -93,7 +93,7 @@ groups:
   - alert: Sz300HighLatencyP99
     expr: |
       histogram_quantile(0.99, 
-        sum(rate(http_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+        sum(rate(sz300_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
       ) > 1
     for: 5m
     labels:
@@ -108,7 +108,7 @@ groups:
   - alert: Sz300HighLatencyP95
     expr: |
       histogram_quantile(0.95, 
-        sum(rate(http_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+        sum(rate(sz300_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
       ) > 0.5
     for: 10m
     labels:
@@ -125,8 +125,8 @@ groups:
   # HTTP 5xx 错误率过高
   - alert: Sz300HighErrorRate
     expr: |
-      sum(rate(http_requests_total{job="sz300-server", status=~"5.."}[5m])) 
-        / sum(rate(http_requests_total{job="sz300-server"}[5m])) * 100 > 5
+      sum(rate(sz300_requests_total{job="sz300-server", status=~"5.."}[5m])) 
+        / sum(rate(sz300_requests_total{job="sz300-server"}[5m])) * 100 > 5
     for: 5m
     labels:
       severity: critical
@@ -139,8 +139,8 @@ groups:
   # HTTP 4xx 错误率过高
   - alert: Sz300High4xxRate
     expr: |
-      sum(rate(http_requests_total{job="sz300-server", status=~"4.."}[5m])) 
-        / sum(rate(http_requests_total{job="sz300-server"}[5m])) * 100 > 20
+      sum(rate(sz300_requests_total{job="sz300-server", status=~"4.."}[5m])) 
+        / sum(rate(sz300_requests_total{job="sz300-server"}[5m])) * 100 > 20
     for: 15m
     labels:
       severity: info
