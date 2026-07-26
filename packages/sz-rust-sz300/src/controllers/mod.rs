@@ -1,5 +1,7 @@
 /// 认证相关控制器（对齐 PHP AuthController）
 pub mod auth;
+/// 控制器公共辅助函数（分页解析等）
+pub mod common;
 /// 设备相关控制器（对齐 PHP DeviceController）
 pub mod device;
 /// 文件上传控制器（对齐 PHP FileController）

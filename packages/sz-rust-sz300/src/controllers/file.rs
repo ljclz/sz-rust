@@ -50,7 +50,7 @@ impl FileController {
             let filename = field.file_name().unwrap_or("unnamed").to_string();
             let data = match field.bytes().await {
                 Ok(d) => d.to_vec(),
-                Err(e) => return ctrl.render_error(&format!("读取文件失败: {}", e), json!({}), 0),
+                Err(e) => return ctrl.render_error(format!("读取文件失败: {}", e), json!({}), 0),
             };
 
             match file_service::FileService::save(&filename, &data).await {

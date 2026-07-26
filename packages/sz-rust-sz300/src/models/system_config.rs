@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
+use sz_rust_core::orm::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
 /// 系统配置模型实体（对齐 PHP SystemConfig 模型）
 #[derive(Debug, Clone, Serialize, Deserialize)]

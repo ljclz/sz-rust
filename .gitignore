@@ -29,3 +29,8 @@ errors*.log
 # 测试覆盖率输出（开发临时文件）
 coverage/
 
+
+# cargo-mutants 输出（变异测试产物）
+mutants.out/
+# 临时测试脚本
+_*.py

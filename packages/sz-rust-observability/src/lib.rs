@@ -61,6 +61,9 @@ use std::sync::Arc;
 
 pub mod slo;
 
+#[cfg(feature = "otlp")]
+pub mod otlp;
+
 pub use slo::{SloBurnRate, SloConfig, SloMonitor};
 
 /// 指标类型

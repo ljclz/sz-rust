@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use sz_orm_core::{Pool, PoolConfigBuilder};
+use sz_rust_core::orm::{Pool, PoolConfigBuilder};
 use sz_orm_sqlx::{
     MySqlPoolHandle, PgPoolHandle, SqlxMySqlConnectionFactory, SqlxPgConnectionFactory,
 };

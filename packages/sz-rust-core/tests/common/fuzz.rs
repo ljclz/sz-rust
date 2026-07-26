@@ -80,7 +80,7 @@ impl Rng {
 
     /// 生成 `bool` 随机数（基于最低位）
     pub fn next_bool(&mut self) -> bool {
-        self.next_u64().is_multiple_of(2)
+        self.next_u64() % 2 == 0
     }
 
     /// 生成 `[0.0, 1.0)` 范围内的 `f64` 随机数

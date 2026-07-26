@@ -20,11 +20,19 @@ pub async fn check(State(_state): State<AppState>) -> Json<Value> {
 }
 
 /// 就绪检查（readiness probe）：通过执行 SELECT 1 验证数据库连接是否正常
+///
+/// 响应体包含 DB 检查细节，便于运维诊断：
+/// ```json
+/// { "code": 1, "msg": "success", "data": { "status": "ready", "checks": { "db": "ok" } } }
+/// ```
 #[tracing::instrument(skip(state))]
 pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
-    let db_ok = match state.db_pool.acquire().await {
-        Ok(mut conn) => conn.query("SELECT 1").await.is_ok(),
-        Err(_) => false,
+    let (db_ok, db_error) = match state.db_pool.acquire().await {
+        Ok(mut conn) => match conn.query("SELECT 1").await {
+            Ok(_) => (true, None),
+            Err(e) => (false, Some(format!("{}", e))),
+        },
+        Err(e) => (false, Some(format!("pool acquire failed: {}", e))),
     };
 
     if db_ok {
@@ -33,7 +41,10 @@ pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
             Json(json!({
                 "code": 1,
                 "msg": "success",
-                "data": { "status": "ready" }
+                "data": {
+                    "status": "ready",
+                    "checks": { "db": "ok" }
+                }
             })),
         )
     } else {
@@ -42,7 +53,11 @@ pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
             Json(json!({
                 "code": 0,
                 "msg": "not ready",
-                "data": { "status": "unavailable" }
+                "data": {
+                    "status": "unavailable",
+                    "checks": { "db": "fail" },
+                    "error": db_error
+                }
             })),
         )
     }

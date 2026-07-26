@@ -114,13 +114,21 @@ where
         let mut last_end = 0;
 
         for caps in re.captures_iter(content) {
-            let m = caps.get(0).unwrap();
+            let m = caps
+                .get(0)
+                .ok_or_else(|| ViewError::SyntaxError("正则捕获组 0（整体匹配）缺失".into()))?;
             // 跳过已处理区域内的匹配（嵌套标签已由 render_inner 递归处理）
             if m.start() < last_end {
                 continue;
             }
-            let tag_type = caps.get(1).unwrap().as_str();
-            let separator = caps.get(2).unwrap().as_str(); // 空格或 `(`
+            let tag_type = caps
+                .get(1)
+                .ok_or_else(|| ViewError::SyntaxError("正则捕获组 1（标签类型）缺失".into()))?
+                .as_str();
+            let separator = caps
+                .get(2)
+                .ok_or_else(|| ViewError::SyntaxError("正则捕获组 2（分隔符）缺失".into()))?
+                .as_str(); // 空格或 `(`
 
             // 找到开标签的闭合 `}`
             let after_name = m.start() + m.len() - separator.len();
@@ -341,9 +349,9 @@ where
                 if m.start() == 0 {
                     let attrs_str = elseif_re
                         .captures(remaining)
-                        .unwrap()
+                        .expect("elseif_re 已通过 find 匹配且 start==0，captures 必成功")
                         .get(1)
-                        .unwrap()
+                        .expect("elseif 正则含捕获组 1，匹配成功时必存在")
                         .as_str();
                     let attrs = parse_attributes(attrs_str);
                     let cond = attrs
@@ -833,8 +841,13 @@ where
                     pos = body_end;
                 }
             } else {
-                let caps = case_re.captures(tag_str).unwrap();
-                let attrs_str = caps.get(1).unwrap().as_str();
+                let caps = case_re
+                    .captures(tag_str)
+                    .expect("else 分支仅处理 case 标签，case_re 必匹配");
+                let attrs_str = caps
+                    .get(1)
+                    .expect("case 正则含捕获组 1，匹配成功时必存在")
+                    .as_str();
                 let attrs = parse_attributes(attrs_str);
                 let value = attrs.get("value").cloned().unwrap_or_default();
                 let break_attr = attrs.get("break").cloned();
@@ -1270,9 +1283,13 @@ fn parse_operand_value(expr: &str, data: &ViewData) -> Value {
     }
 
     // autoBuildVar：字母/下划线开头 → 视为变量名
-    let first = expr.chars().next().unwrap();
-    if first.is_alphabetic() || first == '_' {
-        return resolve_var_expr(expr, data);
+    // 注：expr 已在 1245 行确认非空，next() 必返回 Some；
+    // 使用 match 而非 unwrap() 以保持防御性（避免未来重构破坏不变量时 panic）
+    match expr.chars().next() {
+        Some(first) if first.is_alphabetic() || first == '_' => {
+            return resolve_var_expr(expr, data);
+        }
+        _ => {}
     }
 
     Value::Null

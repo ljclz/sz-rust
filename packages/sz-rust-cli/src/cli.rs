@@ -69,6 +69,14 @@ pub enum Command {
         /// 迁移目录（默认 `migrations`）
         #[arg(short = 'p', long, default_value = "migrations")]
         path: String,
+
+        /// 数据库类型（默认 `postgres`，对齐 sz-orm `DbType`）
+        #[arg(long, default_value = "postgres")]
+        db_type: String,
+
+        /// 打印每个迁移的 SQL 内容
+        #[arg(long)]
+        show_sql: bool,
     },
 
     /// 路由列表（对齐 PHP `php think route:list`）
@@ -115,7 +123,11 @@ impl Cli {
             }
             Some(Command::Make { make_command }) => cmd::make::execute(make_command).map(|_| 0),
             Some(Command::Migrate { args }) => cmd::migrate::execute_migrate(args).map(|_| 0),
-            Some(Command::MigrateStatus { path }) => cmd::migrate::execute_status(path).map(|_| 0),
+            Some(Command::MigrateStatus {
+                path,
+                db_type,
+                show_sql,
+            }) => cmd::migrate::execute_status_with(path, db_type, *show_sql).map(|_| 0),
             Some(Command::RouteList { format }) => {
                 cmd::route::execute_route_list(format).map(|_| 0)
             }

@@ -1192,6 +1192,88 @@ impl Cache {
         Ok(result)
     }
 
+    /// 缓存击穿防护读取（异步版本，对齐 PHP `Cache::remember` 的 async 实现）
+    ///
+    /// 与 [`Cache::remember`] 行为一致，但使用 `tokio::time::sleep` 替代
+    /// `std::thread::sleep`，避免在异步上下文中阻塞 tokio worker 线程。
+    /// 同时支持异步 callback，避免在 callback 中执行阻塞 IO 时阻塞 worker。
+    ///
+    /// ## 与同步版本的差异
+    ///
+    /// | 维度 | `remember` | `remember_async` |
+    /// |------|-----------|------------------|
+    /// | 等待锁释放 | `std::thread::sleep`（阻塞 worker） | `tokio::time::sleep`（让出 worker） |
+    /// | callback 类型 | `FnOnce() -> T` | `async fn -> T` |
+    /// | 适用场景 | 同步上下文 / 短时计算 | 异步上下文 / IO 密集型回源 |
+    ///
+    /// ## 参数
+    ///
+    /// - `key`：缓存键
+    /// - `ttl`：缓存过期时间
+    /// - `callback`：未命中时的异步回调函数
+    ///
+    /// ## 用法
+    ///
+    /// ```ignore
+    /// # async fn example(cache: &sz_rust_core::cache::Cache) {
+    /// let user: User = cache.remember_async("user_1", Some(Duration::from_secs(60)), || async {
+    ///     // 异步回源逻辑（如 DB 查询）
+    ///     User::find_async(1).await
+    /// }).await?;
+    /// # }
+    /// ```
+    pub async fn remember_async<T, F, Fut>(
+        &self,
+        key: &str,
+        ttl: Option<Duration>,
+        callback: F,
+    ) -> Result<T, CacheError>
+    where
+        T: Serialize + DeserializeOwned + Clone,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        // 1. 先尝试读取缓存（弱类型读取，对齐 PHP 弱类型强转）
+        if let Some(cached) = self.get_weak::<T>(key)? {
+            return Ok(cached);
+        }
+
+        // 2. 抢锁
+        let lock_key = format!("{}_lock", key);
+
+        // PHP 源码 bug 复刻：先 has() 后 get() 双查
+        if self.has(&lock_key)? {
+            // 等待锁释放，200ms 轮询，5s 超时（异步等待，不阻塞 worker）
+            let start = Instant::now();
+            while self.has(&lock_key)? {
+                if start.elapsed() >= self.remember_lock_timeout {
+                    // 超时仍未释放，直接调用 callback（防止永久阻塞）
+                    let result = callback().await;
+                    let _ = self.set(key, &result, ttl);
+                    return Ok(result);
+                }
+                tokio::time::sleep(self.remember_lock_poll_interval).await;
+            }
+
+            // 锁释放后再次读取（弱类型读取）
+            if let Some(cached) = self.get_weak::<T>(key)? {
+                return Ok(cached);
+            }
+        }
+
+        // 抢到锁（无 TTL，PHP 源码 bug）
+        self.set(&lock_key, 1i64, None)?;
+
+        // 调用异步 callback 并写入缓存
+        let result = callback().await;
+        let _ = self.set(key, &result, ttl);
+
+        // 释放锁
+        let _ = self.delete(&lock_key);
+
+        Ok(result)
+    }
+
     /// 清空所有缓存（对齐 PHP `Cache::clear()`）
     #[tracing::instrument(skip(self))]
     pub fn clear(&self) -> Result<(), CacheError> {
@@ -3219,6 +3301,90 @@ mod tests {
         let cache = make_cache();
         cache.remember("key", None, || 42i64).unwrap();
         assert!(!cache.has("key_lock").unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_cache_remember_async_cache_miss() {
+        // 未命中：调用 async callback 并写入缓存
+        let cache = make_cache();
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter_clone = counter.clone();
+
+        let val: i64 = cache
+            .remember_async("expensive_async", None, || {
+                let counter_clone = counter_clone.clone();
+                async move {
+                    counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64 + 100
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(val, 100);
+
+        // 第二次调用应命中缓存，callback 不被调用
+        let val: i64 = cache
+            .remember_async("expensive_async", None, || {
+                let counter_clone = counter_clone.clone();
+                async move {
+                    counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64 + 200
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(val, 100);
+
+        assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_remember_async_cache_hit_returns_cached() {
+        let cache = make_cache();
+        cache.set("predefined_async", 42i64, None).unwrap();
+
+        let val: i64 = cache
+            .remember_async("predefined_async", None, || async {
+                panic!("callback should not be called on cache hit");
+            })
+            .await
+            .unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[tokio::test]
+    async fn test_cache_remember_async_writes_with_ttl() {
+        let cache = make_cache();
+        cache
+            .remember_async("key_async", Some(Duration::from_millis(50)), || async { 42i64 })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            cache.get::<String>("key_async").unwrap(),
+            Some("42".to_string())
+        );
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(cache.get::<String>("key_async").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cache_remember_async_releases_lock_on_success() {
+        let cache = make_cache();
+        cache
+            .remember_async("key_async", None, || async { 42i64 })
+            .await
+            .unwrap();
+        assert!(!cache.has("key_async_lock").unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_cache_remember_async_lock_has_no_ttl_php_bug() {
+        let cache = make_cache();
+        cache
+            .remember_async("key_async", None, || async { 42i64 })
+            .await
+            .unwrap();
+        assert!(!cache.has("key_async_lock").unwrap());
     }
 
     // ========================================================================

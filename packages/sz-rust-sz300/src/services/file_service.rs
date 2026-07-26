@@ -63,19 +63,32 @@ impl FileService {
             .await
             .map_err(|e| format!("文件写入失败: {}", e))?;
 
-        tracing::info!("文件已保存: {:?}", file_path);
+        tracing::info!("文件已保存: /uploads/{}/{}", date_dir, new_filename);
 
         // 返回访问路径
         Ok(format!("/uploads/{}/{}", date_dir, new_filename))
     }
 
-    /// 删除文件
+    /// 删除文件 — 含路径遍历防护
     pub async fn delete(url: &str) -> Result<(), String> {
         let relative_path = url.strip_prefix("/uploads/").unwrap_or(url);
-        let file_path = PathBuf::from(UPLOAD_DIR).join(relative_path);
 
-        if file_path.exists() {
-            fs::remove_file(&file_path)
+        // 路径遍历防护：canonicalize 后校验前缀
+        let root = PathBuf::from(UPLOAD_DIR)
+            .canonicalize()
+            .map_err(|e| format!("上传目录不存在: {}", e))?;
+        let file_path = root.join(relative_path);
+
+        // 校验解析后的路径仍在上传目录内
+        let canonical = file_path
+            .canonicalize()
+            .map_err(|_| "文件不存在".to_string())?;
+        if !canonical.starts_with(&root) {
+            return Err("非法路径: 不允许访问上传目录外的文件".to_string());
+        }
+
+        if canonical.exists() {
+            fs::remove_file(&canonical)
                 .await
                 .map_err(|e| format!("删除文件失败: {}", e))?;
         }

@@ -1,6 +1,6 @@
 //! Session 模块 — 对齐 PHP `think\facade\Session`
 //!
-//! Phase P2-10 交付物。本模块实现会话管理，对齐 PHP `think-session` 包的核心 API。
+//! 本模块实现会话管理，对齐 PHP `think-session` 包的核心 API。
 //!
 //! ## PHP 对齐
 //!

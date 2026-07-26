@@ -10,7 +10,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use serde_json::{json, Value};
-use sz_orm_auth::{Credentials, JwtAuthenticator};
+use sz_rust_core::orm::{Credentials, JwtAuthenticator};
 
 // ─── 辅助函数 ───────────────────────────────────────────────────────────────
 
@@ -20,17 +20,15 @@ fn build_auth() -> JwtAuthenticator {
 }
 
 /// 生成一个有效的 JWT token 供 verify 基准测试使用
-fn create_test_token(auth: &JwtAuthenticator) -> String {
-    let creds = Credentials::new("bench-user", "bench-pass");
-    //  authenticate 在无 PasswordVerifier 时会返回 AuthError，
-    //  所以直接调用底层 encoder 生成 token
-    let claims = sz_orm_auth::auth::Claims::new("bench-user")
-        .with_roles(vec!["admin".into()])
-        .with_permissions(vec!["*".into()]);
+///
+/// 注：JwtAuthenticator 在无 PasswordVerifier 时 authenticate 会返回 AuthError，
+/// 因此直接调用底层 JwtEncoder 生成 token。_auth 参数保留以维持调用签名稳定，
+/// 便于未来切换到 auth.encode(...) 路径。
+fn create_test_token(_auth: &JwtAuthenticator) -> String {
     // 直接从 encoder 编码
-    let encoder = sz_orm_auth::jwt::JwtEncoder::new("bench-test-secret-key-00000000000000000000");
+    let encoder = sz_rust_core::orm::jwt::JwtEncoder::new("bench-test-secret-key-00000000000000000000");
     encoder
-        .encode(&sz_orm_auth::jwt::JwtClaims::new("bench-user", 9999999999))
+        .encode(&sz_rust_core::orm::jwt::JwtClaims::new("bench-user", 9999999999))
         .expect("token 生成失败")
 }
 
@@ -86,7 +84,7 @@ fn bench_jwt_authenticate(c: &mut Criterion) {
 // ─── 基准测试: 文件服务 URL 生成 ──────────────────────────────────────────
 
 fn bench_file_url_generation(c: &mut Criterion) {
-    let filename = "product_photo.jpg";
+    let _filename = "product_photo.jpg";  // 保留作为基准输入标识，不参与 URL 生成逻辑
     let ext = "jpg";
 
     c.bench_function("file/generate_url", |b| {

@@ -8,8 +8,8 @@
 //! | `#[model]` | 属性宏 | 模型声明 | Phase 2 |
 //! | `compact!` | 函数式宏 | `compact()` | Phase 2.6 ✅ |
 //!
-//! Phase 0.3：骨架实现，属性宏原样透传 TokenStream，`compact!` 生成空 `serde_json::Map`。
-//! Phase 2.6：`compact!` 完整实现，对齐 PHP `compact()`。
+//! 骨架实现，属性宏原样透传 TokenStream，`compact!` 生成空 `serde_json::Map`。
+//! `compact!` 完整实现，对齐 PHP `compact()`。
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -21,8 +21,8 @@ use syn::{Ident, Token};
 
 /// `#[controller]` 属性宏骨架
 ///
-/// Phase 0.3：原样透传 TokenStream（合法的属性宏最小实现）。
-/// Phase 2 将实现：自动实现 `SzController` trait、注册路由、生成 `postData`/`renderJson` 方法。
+/// 原样透传 TokenStream（合法的属性宏最小实现）。
+/// TODO: 自动实现 `SzController` trait、注册路由、生成 `postData`/`renderJson` 方法。
 ///
 /// # 示例
 ///
@@ -37,8 +37,8 @@ pub fn controller(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// `#[model]` 属性宏骨架
 ///
-/// Phase 0.3：原样透传 TokenStream（合法的属性宏最小实现）。
-/// Phase 2 将实现：自动实现 `BaseModel` trait、生成 `name`/`pk`/`append`/`fillable`/`guarded`/`hidden`。
+/// 原样透传 TokenStream（合法的属性宏最小实现）。
+/// TODO: 自动实现 `BaseModel` trait、生成 `name`/`pk`/`append`/`fillable`/`guarded`/`hidden`。
 ///
 /// # 示例
 ///

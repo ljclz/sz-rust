@@ -34,16 +34,19 @@ impl MqttDispatcher {
 
         match action {
             "status" => {
-                let _ = MqttMessageHandler::handle_device_status(state, device_sn, &payload_value)
-                    .await;
+                if let Err(e) = MqttMessageHandler::handle_device_status(state, device_sn, &payload_value).await {
+                    tracing::warn!(device_sn, error = %e, "MQTT: 处理设备状态失败");
+                }
             }
             "order" => {
-                let _ =
-                    MqttMessageHandler::handle_device_order(state, device_sn, &payload_value).await;
+                if let Err(e) = MqttMessageHandler::handle_device_order(state, device_sn, &payload_value).await {
+                    tracing::warn!(device_sn, error = %e, "MQTT: 处理设备订单失败");
+                }
             }
             "log" => {
-                let _ =
-                    MqttMessageHandler::handle_device_log(state, device_sn, &payload_value).await;
+                if let Err(e) = MqttMessageHandler::handle_device_log(state, device_sn, &payload_value).await {
+                    tracing::warn!(device_sn, error = %e, "MQTT: 处理设备日志失败");
+                }
             }
             _ => {
                 tracing::warn!(action, device_sn, "MQTT: 未知 action");

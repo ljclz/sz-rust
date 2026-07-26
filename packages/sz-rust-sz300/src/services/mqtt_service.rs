@@ -1,5 +1,6 @@
 use serde_json::Value;
-use sz_orm_mqtt::{MqttConfig, MqttMessage, MqttTopic, QoS};
+use sz_rust_core::orm::Value as OrmValue;
+use sz_rust_core::orm::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
 use crate::state::AppState;
 
@@ -54,11 +55,15 @@ impl MqttMessageHandler {
             .acquire()
             .await
             .map_err(|e| format!("DB: {}", e))?;
-        let sql = format!(
-            "UPDATE device SET status={}, signal_strength={}, fw_version='{}', last_online_at=NOW() WHERE device_sn='{}'",
-            status, signal, sql_escape(fw_ver), sql_escape(device_sn)
-        );
-        conn.execute(&sql)
+        // 参数化查询 — 使用 ? 占位符，杜绝 SQL 注入
+        let sql = "UPDATE device SET status = ?, signal_strength = ?, fw_version = ?, last_online_at = NOW() WHERE device_sn = ?";
+        let params = [
+            OrmValue::I64(status),
+            OrmValue::I64(signal),
+            OrmValue::String(fw_ver.to_string()),
+            OrmValue::String(device_sn.to_string()),
+        ];
+        conn.execute_with_params(sql, &params)
             .await
             .map_err(|e| format!("SQL: {}", e))?;
         Ok(())
@@ -88,12 +93,11 @@ impl MqttMessageHandler {
             .await
             .map_err(|e| format!("DB: {}", e))?;
 
-        // 查询设备关联的 merchant_id 和 device_id
+        // 查询设备关联的 merchant_id 和 device_id — 参数化，避免注入
+        let dev_sql = "SELECT merchant_id, device_id FROM device WHERE device_sn = ?";
+        let dev_params = [OrmValue::String(device_sn.to_string())];
         let dev_rows = conn
-            .query(&format!(
-                "SELECT merchant_id, device_id FROM device WHERE device_sn='{}'",
-                sql_escape(device_sn)
-            ))
+            .query_with_params(dev_sql, &dev_params)
             .await
             .map_err(|e| format!("SQL: {}", e))?;
 
@@ -108,12 +112,16 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        // 插入订单
-        let order_sql = format!(
-            "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, offline_seq, item_count, status) VALUES (CONCAT('O',UNIX_TIMESTAMP()),{}, {}, {}, '{}', {}, 1)",
-            merchant_id, device_id, total_fen, sql_escape(offline_seq), items.map(|a| a.len() as i64).unwrap_or(0)
-        );
-        conn.execute(&order_sql)
+        // 插入订单 — CONCAT('O',UNIX_TIMESTAMP()) 为 SQL 函数无需参数化，其余字段参数化
+        let order_sql = "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, offline_seq, item_count, status) VALUES (CONCAT('O',UNIX_TIMESTAMP()), ?, ?, ?, ?, ?, 1)";
+        let order_params = [
+            OrmValue::I64(merchant_id),
+            OrmValue::I64(device_id),
+            OrmValue::I64(total_fen),
+            OrmValue::String(offline_seq.to_string()),
+            OrmValue::I64(items.map(|a| a.len() as i64).unwrap_or(0)),
+        ];
+        conn.execute_with_params(order_sql, &order_params)
             .await
             .map_err(|e| format!("SQL: {}", e))?;
 
@@ -142,12 +150,11 @@ impl MqttMessageHandler {
             .await
             .map_err(|e| format!("DB: {}", e))?;
 
-        // 查询 device_id
+        // 查询 device_id — 参数化，避免注入
+        let dev_sql = "SELECT device_id FROM device WHERE device_sn = ?";
+        let dev_params = [OrmValue::String(device_sn.to_string())];
         let dev_rows = conn
-            .query(&format!(
-                "SELECT device_id FROM device WHERE device_sn='{}'",
-                sql_escape(device_sn)
-            ))
+            .query_with_params(dev_sql, &dev_params)
             .await
             .map_err(|e| format!("SQL: {}", e))?;
 
@@ -157,12 +164,16 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        conn.execute(
-            &format!(
-                "INSERT INTO operate_log (operator, action, detail) VALUES ('device:{}', '[{}] {}', '{}')",
-                device_sn, level, device_id, sql_escape(message)
-            )
-        ).await.map_err(|e| format!("SQL: {}", e))?;
+        // 插入操作日志 — operator/action/detail 均参数化
+        let log_sql = "INSERT INTO operate_log (operator, action, detail) VALUES (?, ?, ?)";
+        let log_params = [
+            OrmValue::String(format!("device:{}", device_sn)),
+            OrmValue::String(format!("[{}] {}", level, device_id)),
+            OrmValue::String(message.to_string()),
+        ];
+        conn.execute_with_params(log_sql, &log_params)
+            .await
+            .map_err(|e| format!("SQL: {}", e))?;
 
         Ok(())
     }
@@ -197,11 +208,6 @@ impl MockMqttPlugin {
         );
         Ok(())
     }
-}
-
-/// SQL 字符串转义（防止注入）
-fn sql_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 /// 获取 MQTT 配置

@@ -2,8 +2,18 @@ use crate::controllers::{auth, device, file, file_serve, health, merchant, order
 use crate::middleware::auth_middleware;
 use crate::state::AppState;
 use axum::{middleware, routing::get, routing::post, Router};
+use sz_rust_core::middleware::csrf::csrf_middleware;
 
-/// 创建应用路由表，注册所有业务路由并叠加 JWT 鉴权中间件
+/// 创建应用路由表，注册所有业务路由并叠加 CSRF + JWT 鉴权中间件
+///
+/// ## 中间件执行顺序（外层→内层）
+///
+/// 1. `csrf_middleware`：CSRF 双提交 Cookie 校验（公开路径自动放行）
+/// 2. `auth_middleware`：JWT 校验（公开路径自动放行）
+/// 3. 业务 handler
+///
+/// 在 axum/tower 中，`.layer(A).layer(B)` 的执行顺序为 B → A → handler。
+/// 因此此处注册顺序为 auth_middleware 在前（内层），csrf_middleware 在后（外层）。
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         // 健康检查 + 可观测性
@@ -46,8 +56,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         // 静态文件服务
         .route("/uploads/{*path}", get(file_serve::serve_file))
-        // JWT 鉴权中间件（公开路径自动跳过）
+        // JWT 鉴权中间件（公开路径自动跳过）— 内层
         .layer(middleware::from_fn(auth_middleware::auth_middleware))
+        // CSRF 防护中间件（双提交 Cookie 模式）— 外层
+        // 公开路径（/health、/metrics、/api/v1/auth/login、/api/v1/auth/refresh）自动放行
+        .layer(middleware::from_fn(csrf_middleware))
         // 注入共享状态
         .with_state(state)
 }

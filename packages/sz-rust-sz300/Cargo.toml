@@ -1,22 +1,22 @@
 [package]
 name = "sz-rust-sz300"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [dependencies]
+# sz-orm 穿透依赖已迁移至 sz-rust-core::orm facade（v0.2.0+）
+# 保留的直接依赖：
+#   - sz-orm-sqlx：SQLx 后端实现（sz-rust-core 不提供）
+#   - sz-orm-config：配置管理（sz-rust-core 不提供）
+#   - sz-orm-macros：过程宏（需直接依赖）
 sz-rust-core.workspace = true
 sz-rust-observability.workspace = true
-sz-orm-core.workspace = true
-sz-orm-auth.workspace = true
-sz-orm-mqtt.workspace = true
-sz-orm-scheduler.workspace = true
 sz-orm-config.workspace = true
 sz-orm-macros.workspace = true
 sz-orm-sqlx.workspace = true
-sz-orm-logger.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -26,14 +26,16 @@ uuid.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 tracing-subscriber.workspace = true
-base64 = "0.22"
+base64.workspace = true
 bcrypt = "0.16"
 
 [features]
 default = []
-real-broker = ["sz-orm-mqtt/real-broker"]
-# 启用 OTLP 分布式追踪导出（需要 OpenTelemetry Collector）
+real-broker = ["sz-rust-core/real-broker"]
+# 启用 OTLP gRPC 分布式追踪导出（需要 OpenTelemetry Collector，端口 4317）
 otlp = ["sz-rust-observability/otlp"]
+# 启用 OTLP HTTP/protobuf 分布式追踪导出（端口 4318）
+otlp-http = ["sz-rust-observability/otlp-http"]
 
 [[bin]]
 name = "sz300-server"

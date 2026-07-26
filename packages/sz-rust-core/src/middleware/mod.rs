@@ -10,6 +10,7 @@
 //! | [`chain`] | `MiddlewareChain` 构建器（顺序定义 + 验证） | Phase 3.1 ✅ |
 //! | [`handler_as_middleware`] | Handler=Middleware 双向转换器（对齐 Salvo 设计） | Phase 3.2 ✅ |
 //! | [`cors`] | CORS 中间件（基于 `tower-http::cors`，对齐 PHP `app\CrossDomain`） | Phase 1.6 ✅ |
+//! | [`csrf`] | CSRF 中间件（双提交 Cookie 模式，2026-07-25 新增） | 安全修复 ✅ |
 //! | [`auth`] | Auth 中间件（JWT 校验，复用 sz-orm-auth） | Phase 3.3 ✅ |
 //! | [`log`] | Log 中间件（请求/响应日志，对齐 PHP `think-logger`） | Phase 3.4 ✅ |
 //! | [`rate_limit`] | RateLimit 中间件（复用 sz-orm-limit） | Phase 3.5 ✅ |
@@ -44,6 +45,7 @@ pub mod auth;
 pub mod builder;
 pub mod chain;
 pub mod cors;
+pub mod csrf;
 pub mod handler_as_middleware;
 pub mod log;
 pub mod order;

@@ -16,7 +16,7 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.81"
 authors = ["SZ-Rust Team"]
 license = "MIT"
 description = "对标 ThinkPHP 8 的 Rust Web 框架，基于 axum 0.8 + SZ-ORM"
@@ -30,7 +30,7 @@ categories = ["web-programming", "web-programming::http-server"]
 tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
 futures = "0.3"
-# Phase 9: tokio 工具集 + CPU 核数探测
+# tokio 工具集 + CPU 核数探测
 tokio-util = { version = "0.7", features = ["rt"] }
 num_cpus = "1"
 
@@ -68,11 +68,12 @@ reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"] }
 # 校验
 validator = { version = "0.20", features = ["derive"] }
 
-# 文件上传（Phase 5.5）
+# 文件上传
 sha1 = "0.10"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+base64 = "0.22"
 mime_guess = "2"
 infer = "0.16"
 tempfile = "3"
@@ -100,6 +101,9 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 
+# 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
+proptest = "1"
+
 # 内部依赖（SZ-ORM 全家桶，path + version 双重指定：本地开发用 path，crates.io 发布用 version）
 sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.0.0" }
 sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.0.0" }
@@ -125,5 +129,18 @@ sz-rust-tracing = { version = "0.2.0", path = "packages/sz-rust-tracing" }
 sz-rust-observability = { version = "0.2.0", path = "packages/sz-rust-observability" }
 sz-rust-cli = { version = "0.2.0", path = "packages/sz-rust-cli" }
 
-# Phase 8: 命令行 + 调度器
+# 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }
+
+# ── 构建优化配置 ──
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

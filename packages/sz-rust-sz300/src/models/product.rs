@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields, Value};
+use sz_rust_core::orm::{Model, ModelExt, RelationLoader, TimestampFields, Value};
 
 /// 商品模型实体（对齐 PHP Product 模型，对应数据表 good）
 #[derive(Debug, Clone, Serialize, Deserialize)]

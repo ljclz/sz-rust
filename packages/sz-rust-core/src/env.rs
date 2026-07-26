@@ -1,6 +1,6 @@
 //! Env 模块 — 对齐 PHP `think\facade\Env`
 //!
-//! Phase P3-17 交付物。本模块实现环境变量管理，对齐 PHP `think\facade\Env` 的核心 API。
+//! 本模块实现环境变量管理，对齐 PHP `think\facade\Env` 的核心 API。
 //!
 //! ## PHP 对齐
 //!
