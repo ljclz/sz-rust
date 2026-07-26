@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+﻿use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing;
 use uuid::Uuid;
@@ -54,14 +54,14 @@ impl FileService {
         if !dir_path.exists() {
             fs::create_dir_all(&dir_path)
                 .await
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+                .map_err(|e| { tracing::error!(error = %e, "文件保存：创建目录失败"); "文件保存失败".to_string() })?;
         }
 
         // 写入文件
         let file_path = dir_path.join(&new_filename);
         fs::write(&file_path, data)
             .await
-            .map_err(|e| format!("文件写入失败: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "文件保存：写入文件失败"); "文件保存失败".to_string() })?;
 
         tracing::info!("文件已保存: /uploads/{}/{}", date_dir, new_filename);
 
@@ -76,7 +76,7 @@ impl FileService {
         // 路径遍历防护：canonicalize 后校验前缀
         let root = PathBuf::from(UPLOAD_DIR)
             .canonicalize()
-            .map_err(|e| format!("上传目录不存在: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "文件删除：上传目录不存在"); "文件删除失败".to_string() })?;
         let file_path = root.join(relative_path);
 
         // 校验解析后的路径仍在上传目录内
@@ -90,7 +90,7 @@ impl FileService {
         if canonical.exists() {
             fs::remove_file(&canonical)
                 .await
-                .map_err(|e| format!("删除文件失败: {}", e))?;
+                .map_err(|e| { tracing::error!(error = %e, "文件删除：删除文件失败"); "文件删除失败".to_string() })?;
         }
         Ok(())
     }

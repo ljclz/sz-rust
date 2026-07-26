@@ -1,4 +1,4 @@
-use crate::controllers::{auth, device, file, file_serve, health, merchant, order, product};
+﻿use crate::controllers::{auth, device, file, file_serve, health, merchant, order, product};
 use crate::middleware::auth_middleware;
 use crate::state::AppState;
 use axum::{middleware, routing::get, routing::post, Router};
@@ -19,6 +19,7 @@ pub fn create_router(state: AppState) -> Router {
         // 健康检查 + 可观测性
         .route("/health", get(health::check))
         .route("/health/ready", get(health::readiness))
+        .route("/health/startup", get(health::startup))
         .route("/metrics", get(health::metrics))
         // 认证（公开接口）
         .route("/api/v1/auth/login", post(auth::login))

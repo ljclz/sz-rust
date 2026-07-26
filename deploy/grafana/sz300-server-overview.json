@@ -1,4 +1,4 @@
-{
+﻿{
   "annotations": {"list": []},
   "description": "sz300-server 综合监控面板",
   "editable": true,
@@ -15,7 +15,7 @@
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}},
       "title": "请求 QPS",
       "type": "timeseries",
-      "targets": [{"expr": "sum(rate(http_requests_total{job=\"sz300-server\"}[1m]))", "legendFormat": "QPS", "refId": "A"}]
+      "targets": [{"expr": "sum(rate(sz300_requests_total{job=\"sz300-server\"}[1m]))", "legendFormat": "QPS", "refId": "A"}]
     },
     {
       "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
@@ -26,9 +26,9 @@
       "title": "请求延迟（P50/P95/P99）",
       "type": "timeseries",
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P50", "refId": "A"},
-        {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P95", "refId": "B"},
-        {"expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P99", "refId": "C"}
+        {"expr": "histogram_quantile(0.50, sum(rate(sz300_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum(rate(sz300_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum(rate(sz300_request_duration_seconds_bucket{job=\"sz300-server\"}[5m])) by (le))", "legendFormat": "P99", "refId": "C"}
       ]
     },
     {
@@ -40,8 +40,8 @@
       "title": "错误率（5xx / 4xx）",
       "type": "timeseries",
       "targets": [
-        {"expr": "sum(rate(http_requests_total{job=\"sz300-server\", status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"sz300-server\"}[5m])) * 100", "legendFormat": "5xx %", "refId": "A"},
-        {"expr": "sum(rate(http_requests_total{job=\"sz300-server\", status=~\"4..\"}[5m])) / sum(rate(http_requests_total{job=\"sz300-server\"}[5m])) * 100", "legendFormat": "4xx %", "refId": "B"}
+        {"expr": "sum(rate(sz300_requests_total{job=\"sz300-server\", status=~\"5..\"}[5m])) / sum(rate(sz300_requests_total{job=\"sz300-server\"}[5m])) * 100", "legendFormat": "5xx %", "refId": "A"},
+        {"expr": "sum(rate(sz300_requests_total{job=\"sz300-server\", status=~\"4..\"}[5m])) / sum(rate(sz300_requests_total{job=\"sz300-server\"}[5m])) * 100", "legendFormat": "4xx %", "refId": "B"}
       ]
     },
     {

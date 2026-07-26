@@ -1,4 +1,4 @@
-//! 鲜视达 SZ-300 后端服务入口
+﻿//! 鲜视达 SZ-300 后端服务入口
 
 #![forbid(unsafe_code)]
 
@@ -35,6 +35,21 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => {
             tracing::warn!("框架统一 AppConfig 加载失败（非致命，使用环境变量配置）: {}", e);
         }
+    }
+
+    // 初始化 OTLP 分布式追踪（条件编译：启用 otlp / otlp-http feature 时生效）
+    // 配置通过 OTEL_* 环境变量传入（对齐 OpenTelemetry 规范）
+    #[cfg(feature = "otlp")]
+    {
+        let otlp_config = sz_rust_observability::otlp::OtlpConfig::from_env();
+        match sz_rust_observability::otlp::init_otlp_tracer(&otlp_config) {
+            Ok(()) => tracing::info!("OTLP 分布式追踪已启用（gRPC，端口 4317）"),
+            Err(e) => tracing::warn!("OTLP 初始化失败（非致命，继续运行）: {}", e),
+        }
+    }
+    #[cfg(not(feature = "otlp"))]
+    {
+        tracing::info!("OTLP 未启用（如需分布式追踪，启用 otlp feature）");
     }
 
     // 初始化可观测性 — Prometheus 指标注册中心

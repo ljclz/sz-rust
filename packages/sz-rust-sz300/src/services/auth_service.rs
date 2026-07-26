@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use sz_rust_core::orm::{Credentials, User};
 use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
@@ -120,12 +121,89 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
     Ok(token.access_token)
 }
 
+/// 根据用户名查询用户完整信息（登录后回查场景）
+///
+/// 返回字段：user_id / username / merchant_id / phone / role / merchant_name
+///
+/// # 安全
+///
+/// - SQL 参数化（`?` 占位符 + `Value::String`），杜绝 SQL 注入
+/// - DB 错误信息不返回客户端，仅记录日志
+///
+/// # 返回
+///
+/// - `Ok(Some(row))`：用户存在
+/// - `Ok(None)`：用户不存在（或 DB 错误，已记录日志）
+#[tracing::instrument]
+pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String, Value>> {
+    let pool = get_pool();
+    let mut conn = pool.acquire().await.map_err(|e| {
+        tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败");
+        e
+    }).ok()?;
+
+    let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone, u.role, \
+               m.name as merchant_name \
+               FROM merchant_user u \
+               LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
+               WHERE u.username = ?";
+    let params = [Value::String(username.to_string())];
+    let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        tracing::error!(error = %e, "查询用户信息失败");
+        e
+    }).ok()?;
+
+    rows.into_iter().next()
+}
+
+/// 根据 user_id 查询用户完整信息（me 接口场景）
+///
+/// 返回字段：user_id / username / merchant_id / phone / role / status /
+/// last_login_at / created_at / merchant_name
+///
+/// # 安全
+///
+/// - SQL 参数化（`?` 占位符 + `Value::I64`），杜绝 SQL 注入
+/// - DB 错误信息不返回客户端，仅记录日志
+///
+/// # 返回
+///
+/// - `Ok(Some(row))`：用户存在
+/// - `Ok(None)`：用户不存在（或 DB 错误，已记录日志）
+#[tracing::instrument]
+pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
+    let pool = get_pool();
+    let mut conn = pool.acquire().await.map_err(|e| {
+        tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败: user_id={}", user_id);
+        e
+    }).ok()?;
+
+    let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone as contact_phone, u.role, u.status, \
+               u.last_login_at, u.created_at, \
+               m.name as merchant_name \
+               FROM merchant_user u \
+               LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
+               WHERE u.user_id = ?";
+    let params = [Value::I64(user_id)];
+    let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        tracing::error!(error = %e, "查询用户信息失败: user_id={}", user_id);
+        e
+    }).ok()?;
+
+    rows.into_iter().next()
+}
+
 /// 校验 JWT 令牌 — 成功返回用户信息，失败返回错误描述
+///
+/// 错误信息不泄露 JWT 内部解析细节，统一返回 "token 验证失败"。
 #[tracing::instrument(skip(token))]
 pub fn verify_token(token: &str) -> Result<User, String> {
     let user = get_auth()
         .verify_token(token)
-        .map_err(|e| format!("token验证失败: {}", e))?;
+        .map_err(|e| {
+            tracing::error!(error = ?e, "JWT token 验证失败");
+            "token 验证失败".to_string()
+        })?;
     Ok(user)
 }
 

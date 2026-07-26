@@ -1,4 +1,4 @@
-use serde_json::Value;
+﻿use serde_json::Value;
 use sz_rust_core::orm::Value as OrmValue;
 use sz_rust_core::orm::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
@@ -54,7 +54,7 @@ impl MqttMessageHandler {
             .db_pool
             .acquire()
             .await
-            .map_err(|e| format!("DB: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败"); "服务暂时不可用".to_string() })?;
         // 参数化查询 — 使用 ? 占位符，杜绝 SQL 注入
         let sql = "UPDATE device SET status = ?, signal_strength = ?, fw_version = ?, last_online_at = NOW() WHERE device_sn = ?";
         let params = [
@@ -65,7 +65,7 @@ impl MqttMessageHandler {
         ];
         conn.execute_with_params(sql, &params)
             .await
-            .map_err(|e| format!("SQL: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：SQL 执行失败"); "服务暂时不可用".to_string() })?;
         Ok(())
     }
 
@@ -91,7 +91,7 @@ impl MqttMessageHandler {
             .db_pool
             .acquire()
             .await
-            .map_err(|e| format!("DB: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败"); "服务暂时不可用".to_string() })?;
 
         // 查询设备关联的 merchant_id 和 device_id — 参数化，避免注入
         let dev_sql = "SELECT merchant_id, device_id FROM device WHERE device_sn = ?";
@@ -99,7 +99,7 @@ impl MqttMessageHandler {
         let dev_rows = conn
             .query_with_params(dev_sql, &dev_params)
             .await
-            .map_err(|e| format!("SQL: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：SQL 执行失败"); "服务暂时不可用".to_string() })?;
 
         let merchant_id = dev_rows
             .first()
@@ -123,7 +123,7 @@ impl MqttMessageHandler {
         ];
         conn.execute_with_params(order_sql, &order_params)
             .await
-            .map_err(|e| format!("SQL: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：SQL 执行失败"); "服务暂时不可用".to_string() })?;
 
         Ok(())
     }
@@ -148,7 +148,7 @@ impl MqttMessageHandler {
             .db_pool
             .acquire()
             .await
-            .map_err(|e| format!("DB: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败"); "服务暂时不可用".to_string() })?;
 
         // 查询 device_id — 参数化，避免注入
         let dev_sql = "SELECT device_id FROM device WHERE device_sn = ?";
@@ -156,7 +156,7 @@ impl MqttMessageHandler {
         let dev_rows = conn
             .query_with_params(dev_sql, &dev_params)
             .await
-            .map_err(|e| format!("SQL: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：SQL 执行失败"); "服务暂时不可用".to_string() })?;
 
         let device_id = dev_rows
             .first()
@@ -173,7 +173,7 @@ impl MqttMessageHandler {
         ];
         conn.execute_with_params(log_sql, &log_params)
             .await
-            .map_err(|e| format!("SQL: {}", e))?;
+            .map_err(|e| { tracing::error!(error = %e, "MQTT 处理：SQL 执行失败"); "服务暂时不可用".to_string() })?;
 
         Ok(())
     }
@@ -247,7 +247,7 @@ pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> 
     });
 
     let _msg = MqttMessage::json_message(&topic, &payload)
-        .map_err(|e| format!("构建消息失败: {}", e))?
+        .map_err(|e| { tracing::error!(error = %e, "MQTT 消息构建失败"); "消息发送失败".to_string() })?
         .with_qos(QoS::AtLeastOnce);
 
     tracing::info!("OTA 指令已发送 - SN: {}, 版本: {}", device_sn, version);

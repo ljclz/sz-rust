@@ -1,4 +1,4 @@
-use crate::services::auth_service;
+﻿use crate::services::auth_service;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
@@ -14,6 +14,7 @@ use sz_rust_core::request::fetch_post_data;
 struct AuthController;
 impl SzController for AuthController {}
 
+/// 将 DB 行转换为 JSON（仅控制器层使用，service 层返回原始 HashMap）
 fn row_to_json(row: &HashMap<String, Value>) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     for (k, v) in row {
@@ -52,110 +53,75 @@ fn clear_csrf_cookie(response: &mut Response) {
 }
 
 impl AuthController {
-    /// 用户登录 — 调用异步认证服务，成功后回查用户信息（参数化查询）
+    /// 用户登录 — 仅负责解析请求、调用 service、格式化响应
     ///
-    /// 安全修复：
-    /// 1. 使用 `auth_service::authenticate_async` 替代同步 `authenticate`，避免 block_in_place。
-    /// 2. 用户信息查询使用 `query_with_params` + `?` 占位符，杜绝 SQL 注入。
-    /// 3. DB 错误信息不返回客户端，仅记录日志。
-    pub async fn login(state: &AppState, req: Request<Body>) -> Response {
-        match fetch_post_data(req).await {
-            Ok(data) => {
-                let username = data.get("username").and_then(|v| v.as_str()).unwrap_or("");
-                let password = data.get("password").and_then(|v| v.as_str()).unwrap_or("");
+    /// 重构说明（2026-07-26 P1-5）：
+    /// - 移除控制器内嵌 SQL，下沉到 `auth_service::get_user_info_by_username`
+    /// - 控制器不再直接 `state.db_pool.acquire()`，符合分层架构
+    /// - 参数解析错误不返回内部细节，统一返回 "参数解析失败"
+    pub async fn login(_state: &AppState, req: Request<Body>) -> Response {
+        let ctrl = AuthController;
 
-                if username.is_empty() || password.is_empty() {
-                    let ctrl = AuthController;
-                    return ctrl.render_error("用户名和密码不能为空", json!({}), 0);
-                }
-
-                // 异步认证 — 不再阻塞 tokio worker
-                match auth_service::authenticate_async(username, password).await {
-                    Ok(token) => {
-                        let ctrl = AuthController;
-
-                        // 参数化查询用户完整信息 — 杜绝 SQL 注入
-                        let mut conn = match state.db_pool.acquire().await {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::error!(error = %e, "登录后获取 DB 连接失败");
-                                let mut resp = ctrl.render_success(
-                                    "登录成功",
-                                    json!({
-                                        "token": token,
-                                        "username": username,
-                                        "user_id": 0
-                                    }),
-                                );
-                                attach_csrf_cookie(&mut resp);
-                                return resp;
-                            }
-                        };
-
-                        let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone, u.role, \
-                                   m.name as merchant_name \
-                                   FROM merchant_user u \
-                                   LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
-                                   WHERE u.username = ?";
-                        let params = [Value::String(username.to_string())];
-                        let rows = match conn.query_with_params(sql, &params).await {
-                            Ok(rows) => rows,
-                            Err(e) => {
-                                tracing::error!(error = %e, "登录后查询用户信息失败");
-                                let mut resp = ctrl.render_success(
-                                    "登录成功",
-                                    json!({
-                                        "token": token,
-                                        "username": username,
-                                        "user_id": 0
-                                    }),
-                                );
-                                attach_csrf_cookie(&mut resp);
-                                return resp;
-                            }
-                        };
-
-                        let mut resp = if let Some(row) = rows.first() {
-                            let info = row_to_json(row);
-                            ctrl.render_success(
-                                "登录成功",
-                                json!({
-                                    "token": token,
-                                    "username": username,
-                                    "user_id": info.get("user_id"),
-                                    "merchant_id": info.get("merchant_id"),
-                                    "merchant_name": info.get("merchant_name"),
-                                    "phone": info.get("phone"),
-                                    "role": info.get("role")
-                                }),
-                            )
-                        } else {
-                            ctrl.render_success(
-                                "登录成功",
-                                json!({
-                                    "token": token,
-                                    "username": username
-                                }),
-                            )
-                        };
-                        attach_csrf_cookie(&mut resp);
-                        resp
-                    }
-                    Err(msg) => {
-                        let ctrl = AuthController;
-                        ctrl.render_error(&msg, json!({}), 0)
-                    }
-                }
-            }
+        let data = match fetch_post_data(req).await {
+            Ok(d) => d,
             Err(e) => {
-                let ctrl = AuthController;
-                ctrl.render_error("参数解析失败", json!({"error": e}), 0)
+                tracing::error!(error = %e, "登录参数解析失败");
+                return ctrl.render_error("参数解析失败", json!({}), 0);
             }
+        };
+
+        let username = data.get("username").and_then(|v| v.as_str()).unwrap_or("");
+        let password = data.get("password").and_then(|v| v.as_str()).unwrap_or("");
+
+        if username.is_empty() || password.is_empty() {
+            return ctrl.render_error("用户名和密码不能为空", json!({}), 0);
         }
+
+        // 调用 service 层认证 — 控制器不接触 DB
+        let token = match auth_service::authenticate_async(username, password).await {
+            Ok(t) => t,
+            Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+        };
+
+        // 调用 service 层查询用户完整信息 — 控制器不接触 DB
+        let user_info = auth_service::get_user_info_by_username(username).await;
+
+        let mut resp = if let Some(row) = user_info {
+            let info = row_to_json(&row);
+            ctrl.render_success(
+                "登录成功",
+                json!({
+                    "token": token,
+                    "username": username,
+                    "user_id": info.get("user_id"),
+                    "merchant_id": info.get("merchant_id"),
+                    "merchant_name": info.get("merchant_name"),
+                    "phone": info.get("phone"),
+                    "role": info.get("role")
+                }),
+            )
+        } else {
+            // service 返回 None：DB 暂时不可用或用户记录丢失，但 token 已签发
+            // 返回基础信息，前端可凭 token 调用 /me 获取完整信息
+            ctrl.render_success(
+                "登录成功",
+                json!({
+                    "token": token,
+                    "username": username,
+                    "user_id": 0
+                }),
+            )
+        };
+        attach_csrf_cookie(&mut resp);
+        resp
     }
 
-    /// 获取当前登录用户信息 — 参数化查询，避免 SQL 注入
-    pub async fn me(state: &AppState, req: Request<Body>) -> Response {
+    /// 获取当前登录用户信息 — 仅负责解析请求、调用 service、格式化响应
+    ///
+    /// 重构说明（2026-07-26 P1-5）：
+    /// - 移除控制器内嵌 SQL，下沉到 `auth_service::get_user_info_by_id`
+    /// - 控制器不再直接 `state.db_pool.acquire()`，符合分层架构
+    pub async fn me(_state: &AppState, req: Request<Body>) -> Response {
         let auth_header = req
             .headers()
             .get("Authorization")
@@ -178,42 +144,24 @@ impl AuthController {
 
         let ctrl = AuthController;
 
-        // 查询数据库获取完整用户信息 — 参数化查询
-        let mut conn = match state.db_pool.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(error = %e, "me 获取 DB 连接失败");
-                return ctrl.render_error("服务暂时不可用", json!({}), 0);
+        // 调用 service 层查询用户完整信息 — 控制器不接触 DB
+        match auth_service::get_user_info_by_id(user.id).await {
+            Some(row) => {
+                let info = row_to_json(&row);
+                ctrl.render_success("ok", info)
             }
-        };
-
-        let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone as contact_phone, u.role, u.status, \
-                   u.last_login_at, u.created_at, \
-                   m.name as merchant_name \
-                   FROM merchant_user u \
-                   LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
-                   WHERE u.user_id = ?";
-        let params = [Value::I64(user.id)];
-        let rows = match conn.query_with_params(sql, &params).await {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!(error = %e, "me 查询用户失败");
-                return ctrl.render_error("服务暂时不可用", json!({}), 0);
+            None => {
+                // service 返回 None：DB 暂时不可用或用户记录丢失
+                // 回退到 JWT claims 中的基础信息
+                ctrl.render_success(
+                    "ok",
+                    json!({
+                        "user_id": user.id,
+                        "username": user.username,
+                        "roles": user.roles
+                    }),
+                )
             }
-        };
-
-        if let Some(row) = rows.first() {
-            let info = row_to_json(row);
-            ctrl.render_success("ok", info)
-        } else {
-            ctrl.render_success(
-                "ok",
-                json!({
-                    "user_id": user.id,
-                    "username": user.username,
-                    "roles": user.roles
-                }),
-            )
         }
     }
 }
