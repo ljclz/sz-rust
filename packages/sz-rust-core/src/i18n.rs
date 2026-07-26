@@ -1,6 +1,6 @@
 //! i18n 国际化模块 — 对齐 PHP `think\facade\Lang`
 //!
-//! Phase P3-15 交付物。本模块实现多语言支持，对齐 PHP `think\facade\Lang` 的核心 API。
+//! 本模块实现多语言支持，对齐 PHP `think\facade\Lang` 的核心 API。
 //!
 //! ## PHP 对齐
 //!

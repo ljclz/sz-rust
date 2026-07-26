@@ -38,24 +38,25 @@ pub const DEFAULT_ALLOW_HEADERS: &str =
 /// 默认预检缓存时长（秒）（对齐 PHP `Access-Control-Max-Age: 1800`）
 pub const DEFAULT_MAX_AGE: u64 = 1800;
 
-/// 默认 CORS Layer（对齐 PHP `app\CrossDomain` 默认行为）
+/// 默认 CORS Layer — 安全默认（不回显任意 Origin）
 ///
-/// 等价于 PHP 全局中间件配置：
-/// - `Access-Control-Allow-Origin: *`
-/// - `Access-Control-Allow-Credentials: true`
-/// - `Access-Control-Allow-Methods: GET, POST, PATCH, PUT, DELETE, OPTIONS`
-/// - `Access-Control-Allow-Headers: Authorization, Content-Type, ...`
+/// 安全策略（2026-07-25 修复 P1）：
+/// - `Allow-Origin: *`（通配，不携带凭证）
+/// - **不**设置 `Allow-Credentials: true`（避免任意网站携带用户凭证发起跨域请求）
+/// - `Allow-Methods: GET, POST, PATCH, PUT, DELETE, OPTIONS`
+/// - `Allow-Headers: Authorization, Content-Type, ...`
 /// - `Access-Control-Max-Age: 1800`
 ///
-/// ## 注意
+/// ## 安全说明
 ///
-/// 浏览器规范要求：当 `Allow-Credentials: true` 时，`Allow-Origin` 不能为 `*`。
-/// `tower-http` 在处理时会自动将 `*` 替换为请求的 Origin 回显，以满足规范。
-/// 这与 PHP `think\middleware\AllowCrossDomain` 的实际行为一致。
+/// 旧版使用 `mirror_request()` + `allow_credentials(true)` 等同于关闭 CORS 防护 —
+/// 任何网站都可携带用户凭证发起跨域请求，存在 CSRF 风险。
+///
+/// 新版默认不携带凭证（`Allow-Origin: *` + 无 `Allow-Credentials`）。
+/// 需要携带凭证（Cookie）的场景请使用 [`cors_layer_with_origin`] 显式配置可信域名。
 pub fn cors_layer() -> CorsLayer {
     CorsLayer::new()
-        .allow_origin(AllowOrigin::mirror_request())
-        .allow_credentials(true)
+        .allow_origin(AllowOrigin::any())
         .allow_methods(parse_methods(DEFAULT_ALLOW_METHODS))
         .allow_headers(parse_headers(DEFAULT_ALLOW_HEADERS))
         .max_age(std::time::Duration::from_secs(DEFAULT_MAX_AGE))
@@ -221,28 +222,28 @@ mod tests {
     // ====================================================================
 
     #[tokio::test]
-    async fn test_cors_layer_sets_allow_origin_mirror() {
+    async fn test_cors_layer_sets_allow_origin_wildcard() {
         let router = make_router(cors_layer());
         let resp = send_request(router, "GET", "/api", Some("https://example.com")).await;
 
-        // mirror_request 会回显 Origin
+        // 安全默认：Allow-Origin: *（通配，不携带凭证）
         let allow_origin = resp
             .headers()
             .get("access-control-allow-origin")
             .expect("missing Access-Control-Allow-Origin");
-        assert_eq!(allow_origin, "https://example.com");
+        assert_eq!(allow_origin, "*");
     }
 
     #[tokio::test]
-    async fn test_cors_layer_sets_allow_credentials() {
+    async fn test_cors_layer_no_credentials_by_default() {
         let router = make_router(cors_layer());
         let resp = send_request(router, "GET", "/api", Some("https://example.com")).await;
 
-        let creds = resp
-            .headers()
-            .get("access-control-allow-credentials")
-            .expect("missing Access-Control-Allow-Credentials");
-        assert_eq!(creds, "true");
+        // 安全默认：不设置 Allow-Credentials（避免任意网站携带用户凭证）
+        assert!(
+            resp.headers().get("access-control-allow-credentials").is_none(),
+            "default cors_layer() must NOT set Allow-Credentials"
+        );
     }
 
     #[tokio::test]
@@ -597,17 +598,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_php_aligned_default_cors_headers() {
-        // 对齐 PHP `app\CrossDomain` 默认 header 集合
+        // 对齐修复后的 CORS 安全配置：
+        // - allow_origin: any()（允许任意来源，因为不携带凭证）
+        // - allow_credentials: false（修复 P0 安全审计项：移除危险配置）
         let router = make_router(cors_layer());
         let resp = send_request(router, "OPTIONS", "/api", Some("https://example.com")).await;
 
         let headers = resp.headers();
-        // 必须存在的所有 CORS 响应头
+        // 必须存在的 CORS 响应头
         assert!(headers.contains_key("access-control-allow-origin"));
-        assert!(headers.contains_key("access-control-allow-credentials"));
         assert!(headers.contains_key("access-control-allow-methods"));
         assert!(headers.contains_key("access-control-allow-headers"));
         assert!(headers.contains_key("access-control-max-age"));
+        // 修复后不应再返回 allow-credentials（已移除以避免任意跨域请求携带凭证）
+        assert!(
+            !headers.contains_key("access-control-allow-credentials"),
+            "CORS 不应再返回 allow-credentials 头（安全修复）"
+        );
     }
 
     #[tokio::test]

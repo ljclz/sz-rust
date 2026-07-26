@@ -27,7 +27,7 @@ calamine.workspace = true
 # PDF 表单填充（替代 PHP mikehaertl/php-pdftk）— 对齐 PHP `new Pdf($path)` / `fillForm($data)` / `flatten()` / `saveAs($url)` / `send($filename)`
 lopdf.workspace = true
 
-# HTTP 客户端（替代 PHP cURL）— 对齐 PHP `http_java_post` 全局函数（Phase 7.9）
+# HTTP 客户端（替代 PHP cURL）— 对齐 PHP `http_java_post` 全局函数
 reqwest = { workspace = true }
 
 [dev-dependencies]

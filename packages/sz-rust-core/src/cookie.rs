@@ -1,6 +1,6 @@
 //! Cookie 模块 — 对齐 PHP `think\Cookie`
 //!
-//! Phase P2-11 交付物。本模块实现 Cookie 管理，对齐 PHP `think\Cookie` 的核心 API。
+//! 本模块实现 Cookie 管理，对齐 PHP `think\Cookie` 的核心 API。
 //!
 //! ## PHP 对齐
 //!

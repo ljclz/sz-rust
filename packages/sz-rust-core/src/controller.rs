@@ -56,6 +56,10 @@ use crate::validate::Validate;
 // 业务层在解码后自行实现（PHP `PermittedFor` 约束等价）。
 
 /// JWT 配置（运行时从环境变量读取）
+///
+/// 安全约束：`JwtConfig` 未派生 `Serialize`/`Deserialize`，密钥绝不会
+/// 出现在序列化输出中。未来若需派生 `Serialize`，必须为 `secret` 字段
+/// 添加 `#[serde(skip_serializing)]` 防止日志/响应泄露。
 #[derive(Debug, Clone, Default)]
 struct JwtConfig {
     /// 签名密钥（对应 PHP `$_config['id']`，Lcobucci 用作 HMAC 密钥）

@@ -29,33 +29,36 @@ sz-orm-auth.workspace = true
 sz-orm-limit.workspace = true
 sz-orm-tracing.workspace = true
 tracing.workspace = true
-# Phase 1: HTTP 服务器 + 路由 + 请求/响应
+# P4-3: 缓存预热管道
+futures.workspace = true
+# HTTP 服务器 + 路由 + 请求/响应
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-# Phase 1.10: HTTP/2 + TLS
+# HTTP/2 + TLS
 tokio-rustls.workspace = true
 rustls-pemfile.workspace = true
-# Phase 5.5: 文件上传
+# 文件上传
 sha1.workspace = true
 sha2.workspace = true
 md-5.workspace = true
 hex.workspace = true
+base64.workspace = true
 mime_guess.workspace = true
 infer.workspace = true
 tempfile.workspace = true
-# Phase 5.7: 存储对接（复用 sz-orm-storage 7 种驱动）
+# 存储对接（复用 sz-orm-storage 7 种驱动）
 sz-orm-storage.workspace = true
 async-trait.workspace = true
 rand.workspace = true
-# Phase 5.8: 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
+# 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
 image = { workspace = true }
 imageproc = { workspace = true }
 ab_glyph = { workspace = true }
-# Phase 9: Swoole/Worker 适配（tokio 替代）
+# Swoole/Worker 适配（tokio 替代）
 sz-orm-queue.workspace = true
 sz-orm-mqtt.workspace = true
 sz-orm-websocket = { workspace = true, features = ["server"] }
@@ -71,6 +74,13 @@ http-body-util.workspace = true
 rcgen = "0.13"
 sz-rust-macros.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
+chrono = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+# 启用真实 MQTT broker（默认 in-memory mock），透传至 sz-orm-mqtt
+real-broker = ["sz-orm-mqtt/real-broker"]
 
 [lib]
 name = "sz_rust_core"

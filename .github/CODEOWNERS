@@ -1,0 +1,22 @@
+# CODEOWNERS — 自动指派代码审查人
+# 格式: <路径模式> <GitHub 用户名/@团队>
+
+# 核心框架
+/packages/sz-rust-core/       @ljclz
+/packages/sz-rust-macros/     @ljclz
+
+# 应用层
+/packages/sz-rust-sz300/      @ljclz
+
+# 基础设施
+/packages/sz-rust-observability/ @ljclz
+/packages/sz-rust-tracing/    @ljclz
+
+# CI/CD
+/.github/workflows/           @ljclz
+/Dockerfile                   @ljclz
+/docker-compose.yml           @ljclz
+/deploy/                      @ljclz
+
+# 默认
+*                             @ljclz

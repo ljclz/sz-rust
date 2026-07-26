@@ -1,4 +1,5 @@
-version: '3.8'
+# docker-compose.yml — 开发/测试环境
+# 生产部署前必须设置所有环境变量，无默认密码
 
 services:
   sz300-server:
@@ -8,12 +9,12 @@ services:
     ports:
       - "8300:8300"
     environment:
-      - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:-change-me-in-production}
+      - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:?必须设置 JWT 密钥}
       - SZ300_DB_HOST=${SZ300_DB_HOST:-mysql}
       - SZ300_DB_PORT=${SZ300_DB_PORT:-3306}
       - SZ300_DB_NAME=${SZ300_DB_NAME:-sz300}
       - SZ300_DB_USER=${SZ300_DB_USER:-root}
-      - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD}
+      - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
       - RUST_LOG=info,sz_rust_sz300=debug
     depends_on:
       - mysql
@@ -22,7 +23,7 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      - MYSQL_ROOT_PASSWORD=${SZ300_DB_PASSWORD:-test123}
+      - MYSQL_ROOT_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
       - MYSQL_DATABASE=${SZ300_DB_NAME:-sz300}
     ports:
       - "3306:3306"
@@ -33,7 +34,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      - POSTGRES_PASSWORD=${SZ300_PG_PASSWORD:-test123}
+      - POSTGRES_PASSWORD=${SZ300_PG_PASSWORD:?必须设置 PG 密码}
       - POSTGRES_DB=${SZ300_PG_NAME:-sz300}
     ports:
       - "5432:5432"

@@ -1,6 +1,6 @@
 //! Mail 模块 — 对齐 PHP `think\facade\Mail`
 //!
-//! Phase P3-16 交付物。本模块实现邮件抽象层，对齐 PHP `think\facade\Mail` 的核心 API。
+//! 本模块实现邮件抽象层，对齐 PHP `think\facade\Mail` 的核心 API。
 //!
 //! ## PHP 对齐
 //!

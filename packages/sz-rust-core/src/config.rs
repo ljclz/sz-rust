@@ -158,7 +158,10 @@ pub struct DatabaseConnection {
     #[serde(default)]
     pub username: String,
     /// 密码
-    #[serde(default)]
+    ///
+    /// 安全约束：即使未来为 `DatabaseConnection` 派生 `Serialize`，
+    /// 密码也绝不应出现在序列化输出中（防止日志/响应泄露）。
+    #[serde(default, skip_serializing)]
     pub password: String,
     /// 主机端口
     #[serde(default = "default_port_8802")]

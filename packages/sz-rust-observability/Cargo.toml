@@ -15,8 +15,10 @@ categories.workspace = true
 default = []
 # 启用 Prometheus exporter（暴露 /metrics HTTP 端点）
 prometheus = ["dep:hyper", "dep:http-body-util"]
-# 启用 OTLP exporter（导出 traces 到 OpenTelemetry Collector）
+# 启用 OTLP gRPC exporter（导出 traces 到 OpenTelemetry Collector，端口 4317）
 otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk"]
+# 启用 OTLP HTTP/protobuf exporter（端口 4318），自动启用 otlp
+otlp-http = ["otlp", "opentelemetry-otlp/http-proto", "dep:reqwest"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -34,10 +36,12 @@ http-body-util = { version = "0.1", optional = true }
 opentelemetry = { version = "0.27", optional = true }
 opentelemetry-otlp = { version = "0.27", optional = true, features = ["tokio"] }
 opentelemetry_sdk = { version = "0.27", optional = true, features = ["rt-tokio"] }
+# OTLP HTTP/protobuf exporter 依赖（可选，启用 otlp-http feature）
+reqwest = { workspace = true, optional = true }
 
 [lib]
 name = "sz_rust_observability"
 path = "src/lib.rs"
 
 [package.metadata.cargo-machete]
-ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "serde", "serde_json", "thiserror", "tokio", "tracing"]
+ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "reqwest", "serde", "serde_json", "thiserror", "tokio", "tracing"]

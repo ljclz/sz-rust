@@ -6,37 +6,41 @@
 //!
 //! | 模块 | 对齐 PHP | 实现阶段 |
 //! |------|---------|---------|
-//! | `controller` | `app\SzController` / `app\BaseController` | Phase 2 |
-//! | `model` | `think\Model` | Phase 2 + Phase 4 |
-//! | `relation` | `think\Model` 关联关系（HasMany/BelongsTo/HasOne/BelongsToMany/Morph） | Phase 4 |
-//! | `request` | `$this->request->post/get` | Phase 1 + Phase 5 |
-//! | `response` | `renderJson/renderSuccess/renderError` | Phase 1 + Phase 2 |
-//! | `middleware` | CORS/Auth/Log/RateLimit/Trace | Phase 1 + Phase 3 |
+//! | `controller` | `app\SzController` / `app\BaseController` | ✅ |
+//! | `model` | `think\Model` | ✅ |
+//! | `relation` | `think\Model` 关联关系（HasMany/BelongsTo/HasOne/BelongsToMany/Morph） | ✅ |
+//! | `request` | `$this->request->post/get` | ✅ |
+//! | `response` | `renderJson/renderSuccess/renderError` | ✅ |
+//! | `middleware` | CORS/Auth/Log/RateLimit/Trace | ✅ |
 //! | `guard` | NestJS Guard + Spring Security（sz-rust 自研） | Phase 3.7 |
 //! | `hooks` | think-orm Model 钩子（HookDispatcher 16 事件） | Phase 3.8 |
-//! | `multi_app` | `auto_multi_app` | Phase 1 |
+//! | `multi_app` | `auto_multi_app` | ✅ |
 //! | `health` | 健康检查端点（K8s liveness/readiness） | Phase 1.7 |
 //! | `static_files` | 静态文件路由（`tower-http::ServeDir`） | Phase 1.8 |
 //! | `error_handler` | 404/500 标准化 JSON 响应 | Phase 1.9 |
 //! | `h2` | HTTP/2 + TLS（`think-swoole` SSL） | Phase 1.10 |
 //! | `routing` | 三层路由机制（属性宏/配置式/约定式） | Phase 1.11 |
-//! | `addons` | `addons/` 插件 | Phase 10 |
-//! | `router` | `with_route` | Phase 1 |
+//! | `addons` | `addons/` 插件 | ✅ |
+//! | `router` | `with_route` | ✅ |
 //! | `container` | `app()` 容器 | Phase 0.6 |
 //! | `error` | `BaseException` | Phase 0.5 |
-//! | `macros` | `compact()` | Phase 2 |
+//! | `macros` | `compact()` | ✅ |
 //! | `config` | `config/app.php` / `database.php` | Phase 0.4 |
 //! | `log` | `think-logger` | Phase 0.7 |
 //! | `server` | `think-swoole` / `think-worker` 启动入口 | Phase 1.1 |
-//! | `validate` | `think\Validate` 数据验证器 | Phase 5 |
+//! | `validate` | `think\Validate` 数据验证器 | ✅ |
 //! | `upload` | `think\File` + `think\file\UploadedFile` 文件上传 | Phase 5.5 |
-//! | `cache` | `think\facade\Cache` 缓存 facade | Phase 6 |
-//! | `session` | `think\facade\Session` 会话管理（SessionStore trait + MemorySessionStore） | Phase P2-10 |
-//! | `cookie` | `think\Cookie` Cookie 管理（CookieJar + CookieOptions） | Phase P2-11 |
+//! | `cache` | `think\facade\Cache` 缓存 facade | ✅ |
+//! | `session` | `think\facade\Session` 会话管理（SessionStore trait + MemorySessionStore） | ✅ |
+//! | `cookie` | `think\Cookie` Cookie 管理（CookieJar + CookieOptions） | ✅ |
 //! | `event` | `think\Event` 事件系统（Listener/Subscriber/Observer） | Phase 6.6 |
-//! | `env` | `think\facade\Env` 环境变量管理 | Phase P3-17 |
-//! | `i18n` | `think\facade\Lang` 多语言国际化 | Phase P3-15 |
-//! | `mail` | `think\facade\Mail` 邮件抽象（Mailer trait + MemoryMailer） | Phase P3-16 |
+//! | `env` | `think\facade\Env` 环境变量管理 | ✅ |
+//! | `i18n` | `think\facade\Lang` 多语言国际化 | ✅ |
+//! | `mail` | `think\facade\Mail` 邮件抽象（Mailer trait + MemoryMailer） | ✅ |
+//! | `migration_history` | `think migrate` 迁移历史表（多方言 DDL + CRUD SQL 生成） | ✅ |
+//! | `api_version` | API 版本管理（URL/Header/Query 多策略协商） | ✅ |
+//! | `cache_warmer` | 缓存预热管道（部署/启动时预热，串行/并行+超时控制） | ✅ |
+//! | `debug_page` | Whoops-style 调试页（开发环境 HTML + 生产环境简洁页） | ✅ |
 
 #![forbid(unsafe_code)]
 // v0.2.0：启用 missing_docs 警告，要求所有公开项必须有文档注释
@@ -45,11 +49,14 @@
 #![cfg_attr(doctest, warn(missing_docs))]
 
 pub mod addons;
+pub mod api_version;
 pub mod cache;
+pub mod cache_warmer;
 pub mod config;
 pub mod container;
 pub mod controller;
 pub mod cookie;
+pub mod debug_page;
 pub mod env;
 pub mod error;
 pub mod error_handler;
@@ -63,8 +70,10 @@ pub mod log;
 pub mod mail;
 pub mod macros;
 pub mod middleware;
+pub mod migration_history;
 pub mod model;
 pub mod multi_app;
+pub mod orm;
 pub mod relation;
 pub mod request;
 pub mod response;

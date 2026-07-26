@@ -234,20 +234,29 @@ fn resolve_template_path(name: &str, config: &ViewConfig) -> PathBuf {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// 全局计数器，保证并发测试下临时目录名唯一
+    ///
+    /// 修复 flaky test：原实现仅用纳秒时间戳生成目录名，
+    /// 多线程并发测试时可能因纳秒级冲突导致目录被另一测试的 cleanup_dir 误删。
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     // =========================================================================
     // 辅助函数
     // =========================================================================
 
-    /// 创建临时目录
+    /// 创建临时目录（并发安全）
+    ///
+    /// 使用 `纳秒时间戳 + 全局递增计数器` 保证目录名唯一，
+    /// 避免多线程测试下的目录名冲突。
     fn make_temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sz_rust_layout_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
+        let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sz_rust_layout_test_{}_{}", nanos, id));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

@@ -1,10 +1,10 @@
 # SZ-Rust 工程化实践规范
 
-> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，8 workspace 包，2938 测试）
-> **项目版本**：v0.1.0
+> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，10 workspace 包，3815 测试）
+> **项目版本**：v0.2.0
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
-> **文档版本**：v1.0（2026-07-22）
+> **文档版本**：v1.1（2026-07-26）
 
 ---
 
@@ -95,9 +95,11 @@ CI 配置中还包含以下扩展 Job：
 | Job | 触发条件 | 说明 |
 |-----|---------|------|
 | `all-features-compile` | 每次 push/PR | 验证所有 feature 组合编译（与门禁 10 对齐） |
-| `benchmark` | push 到 main | criterion 性能基准测试（待配置） |
-| `soak-smoke` | 每次 push/PR | 短时 Soak 冒烟测试，验证框架不退化（待配置） |
-| `coverage` | push/PR | cargo-tarpaulin 覆盖率报告上传 Codecov（待配置） |
+| `benchmark` | push 到 main / PR | criterion 性能基准测试，结果保存到 gh-pages-bench 分支（benchmark.yml） |
+| `soak-smoke` | 每次 push/PR + 每周日 00:00 UTC | 10s 冒烟（push/PR）+ 24h 完整 soak（每周日），timeout 1500 分钟（soak.yml） |
+| `coverage` | push/PR | cargo-tarpaulin 覆盖率（--fail-under 80），上传 Codecov（coverage.yml） |
+| `fuzz` | 手动触发 / 定时 | cargo-fuzz 模糊测试（路由解析、JSON 解析、路径遍历抵抗）（fuzz.yml） |
+| `mcdc` | 手动触发 / 定时 | MC/DC 覆盖率分析（mcdc.yml） |
 
 ---
 
@@ -301,26 +303,26 @@ SZ-Rust 当前测试数据：
 
 | 层级 | 数量 | 说明 |
 |------|------|------|
-| **T1 — 单元测试** | 2563+ | sz-rust-core 核心模块独立测试（路由/控制器/中间件/钩子/模型/事件/缓存/认证） |
-| **T2 — 契约测试** | 待统计 | 公共 API 行为契约（控制器响应格式 `{code, msg, data}`、中间件链顺序、钩子事件类型） |
+| **T1 — 单元测试** | 2934+ | sz-rust-core 核心模块独立测试（路由/控制器/中间件/钩子/模型/事件/缓存/认证/DI容器/调试页/API版本/迁移历史/缓存预热） |
+| **T2 — 契约测试** | 部分建立 | 公共 API 行为契约（控制器响应格式 `{code, msg, data}`、中间件链顺序、钩子事件类型） |
 | **T3 — 集成测试** | 375+ | sz-rust-addons-operate 真实 HTTP 请求 + addon 集成 |
-| **T4 — 属性测试** | 待建立 | Property-Based Testing（proptest）覆盖路由参数/请求体/钩子不变量 |
-| **T5 — Fuzz 测试** | 待建立 | 模糊测试（路由解析、JSON 解析、multipart 解析、路径遍历抵抗） |
-| **T6 — Soak 测试** | 待建立 | 长时稳定性测试（10s 冒烟 / 24h 完整，检测内存泄漏/句柄泄漏/性能退化） |
-| **合计** | **2938+** | 覆盖全部 8 个 workspace 包 |
+| **T4 — 属性测试** | 部分建立 | Property-Based Testing（proptest）覆盖路由参数/请求体/钩子不变量 |
+| **T5 — Fuzz 测试** | 已建立 | 模糊测试（路由解析、JSON 解析、multipart 解析、路径遍历抵抗），已配置 fuzz.yml |
+| **T6 — Soak 测试** | 已建立 | 长时稳定性测试（10s 冒烟 + 24h 完整，每周日 00:00 UTC，timeout 1500 分钟，检测内存泄漏/句柄泄漏/性能退化） |
+| **合计** | **3815+** | 覆盖全部 10 个 workspace 包 |
 
 ### 4.1 T1：单元测试
 
 - 每个模块的独立功能测试，不依赖外部服务
 - 使用 `#[cfg(test)] mod tests` 内联在源码中
 - 覆盖率要求：核心模块 >= 90%
-- 当前状态：sz-rust-core 2563 个单元测试通过
+- 当前状态：sz-rust-core 2934 个单元测试通过（v1.1：新增 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热 共 +152 测试）
 
 ### 4.2 T2：契约测试
 
-- 集中管理在 `packages/sz-rust-core/tests/contracts/`（待建立）
+- 集中管理在 `packages/sz-rust-core/tests/contracts/`（部分已建立）
 - 每一个公共 API 行为契约对应一个测试用例
-- 契约变更必须同步更新 `docs/api-contracts.md`（待建立）
+- 契约变更必须同步更新 `docs/api-contracts.md`（部分已建立）
 - 运行命令：`cargo test -p sz-rust-core --test contracts`
 
 ### 4.3 T3：集成测试
@@ -344,8 +346,8 @@ SZ-Rust 当前测试数据：
 
 ### 4.6 T6：Soak 测试
 
-- 短时冒烟（每次 push）：`cargo test --package sz-rust-core --test soak soak_smoke_10s`（待建立）
-- 长时完整（每周日）：`cargo test -p sz-rust-core --test soak -- --ignored`（待建立）
+- 短时冒烟（每次 push/PR）：`cargo test --package sz-rust-core --test soak soak_smoke_10s`（已配置 soak.yml）
+- 长时完整（每周日 00:00 UTC）：`cargo test -p sz-rust-core --test soak -- --ignored --nocapture`（已配置 soak.yml，timeout 1500 分钟）
 - 退化检测标准：
   - RSS 增长 > 50MB → 内存泄漏
   - fd_count 增长 > 10 → 句柄泄漏
@@ -405,8 +407,8 @@ flowchart LR
 
 - [ ] **测试检查**
   - [ ] 单元测试 + 集成测试全部通过
-  - [ ] Fuzz 测试至少 1000 次随机请求无 panic（待建立）
-  - [ ] 压力测试至少 10 分钟高并发无内存增长（待建立）
+  - [ ] Fuzz 测试至少 1000 次随机请求无 panic（fuzz.yml 已配置）
+  - [ ] Soak 冒烟测试 10s 高并发无内存增长（soak.yml 已配置）
 
 - [ ] **审查检查**
   - [ ] 五维审查全部通过（正确性/可读性/架构/安全/性能）
@@ -429,7 +431,7 @@ flowchart LR
 |---------|--------|---------|-----------|
 | SQL 注入（C-1~C-6） | 6 | 门禁 9（SQL 拼接扫描）+ 五维审查（安全性） | ✅ 已实现 |
 | 虚假/伪实现（V-1~V-7） | 7 | 门禁 8（占位检查）+ 五维审查（正确性） | ✅ 已实现 |
-| 转义不一致（H-1） | 1 | 契约测试（T2）+ 各场景独立转义测试 | ✅ 待建立 T2 |
+| 转义不一致（H-1） | 1 | 契约测试（T2）+ 各场景独立转义测试 | ✅ T2 部分建立 |
 | 锁 panic（13 处 expect） | 13 | 五维审查（正确性）+ parking_lot 替换 | ✅ 已修复（继承） |
 | 名实不符（S-1~S-8） | 8 | 门禁 6（API 审计）+ 契约测试（T2） | ✅ 已有 |
 | 夸大对比（D-1~D-7） | 7 | 五维审查（架构维度） | ✅ 已有 |
@@ -499,6 +501,18 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-07-22
+> **最后更新**: 2026-07-26
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.0
+> **规范版本**: v1.1
+>
+> **v1.1 变更摘要**（2026-07-26）：
+> - workspace 包数量 8 → 10（新增 sz-rust-tracing、sz-rust-observability）
+> - 测试数量 2938 → 3815（sz-rust-core 2563 → 2934，新增 +152 测试覆盖 DI 容器/迁移集成/调试页/API 版本/迁移历史/缓存预热）
+> - 项目版本 v0.1.0 → v0.2.0
+> - benchmark/soak/coverage CI Job 已配置（原"待配置"标注作废）
+> - 新增 fuzz.yml / mcdc.yml CI workflow
+> - soak.yml：每周日 00:00 UTC 自动运行 24h soak，timeout 1500 分钟（与 sz-orm 保持一致）
+> - 新增 6 项核心功能（DI 容器/ORM 迁移集成/调试页/API 版本管理/迁移历史表/缓存预热）
+> - 新增 remember_async 异步缓存方法（消除同步阻塞）
+> - K8s 部署改为不可变 tag（v0.2.0）+ HPA/PDB/NetworkPolicy/securityContext
+> - 新增 Prometheus 告警规则（13 条覆盖 5 维度）+ Alertmanager 配置

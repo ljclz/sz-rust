@@ -1,0 +1,192 @@
+# sz300-server Prometheus 告警规则
+# 覆盖：可用性、资源、性能、错误率、K8s 状态
+groups:
+# ========== 可用性告警 ==========
+- name: sz300-availability
+  rules:
+  # Pod 不可用（副本数低于期望）
+  - alert: Sz300PodsUnavailable
+    expr: |
+      (kube_deployment_status_replicas_available{deployment="sz300-server"} 
+        / kube_deployment_spec_replicas{deployment="sz300-server"}) < 0.6
+    for: 5m
+    labels:
+      severity: critical
+      service: sz300-server
+      category: availability
+    annotations:
+      summary: "sz300-server 可用副本数低于 60%"
+      description: "Deployment sz300-server 可用副本数 / 期望副本数 < 0.6，持续 5 分钟。当前值: {{ $value }}"
+
+  # Pod 频繁重启
+  - alert: Sz300PodRestartTooFrequent
+    expr: |
+      increase(kube_pod_container_status_restarts_total{container="sz300-server"}[1h]) > 5
+    for: 10m
+    labels:
+      severity: warning
+      service: sz300-server
+      category: availability
+    annotations:
+      summary: "sz300-server Pod 在 1 小时内重启超过 5 次"
+      description: "容器 sz300-server 在过去 1 小时内重启 {{ $value }} 次，可能存在崩溃循环。"
+
+  # 健康检查失败
+  - alert: Sz300HealthCheckFailing
+    expr: |
+      probe_success{job="sz300-server"} == 0
+    for: 2m
+    labels:
+      severity: critical
+      service: sz300-server
+      category: availability
+    annotations:
+      summary: "sz300-server 健康检查失败"
+      description: "{{ $labels.instance }} 健康检查持续失败 2 分钟。"
+# ========== 资源告警 ==========
+- name: sz300-resources
+  rules:
+  # CPU 使用率过高
+  - alert: Sz300HighCpuUsage
+    expr: |
+      avg(rate(container_cpu_usage_seconds_total{container="sz300-server"}[5m])) by (pod) * 100 > 80
+    for: 10m
+    labels:
+      severity: warning
+      service: sz300-server
+      category: resource
+    annotations:
+      summary: "sz300-server CPU 使用率 > 80%"
+      description: "Pod {{ $labels.pod }} CPU 使用率持续 10 分钟超过 80%。当前值: {{ $value }}%"
+
+  # 内存使用率过高
+  - alert: Sz300HighMemoryUsage
+    expr: |
+      (container_memory_working_set_bytes{container="sz300-server"} 
+        / container_spec_memory_limit_bytes{container="sz300-server"}) * 100 > 85
+    for: 10m
+    labels:
+      severity: warning
+      service: sz300-server
+      category: resource
+    annotations:
+      summary: "sz300-server 内存使用率 > 85%"
+      description: "Pod {{ $labels.pod }} 内存使用率持续 10 分钟超过 85%。当前值: {{ $value }}%"
+
+  # HPA 达到最大副本数
+  - alert: Sz300HPAMaxReplicas
+    expr: |
+      kube_hpa_status_current_replicas{hpa="sz300-server"} 
+        == kube_hpa_spec_max_replicas{hpa="sz300-server"}
+    for: 15m
+    labels:
+      severity: warning
+      service: sz300-server
+      category: resource
+    annotations:
+      summary: "sz300-server HPA 已达最大副本数"
+      description: "HPA 持续 15 分钟运行在最大副本数 ({{ $value }})，可能需要扩容上限或优化资源。"
+# ========== 性能告警 ==========
+- name: sz300-performance
+  rules:
+  # 请求延迟过高（P99 > 1s）
+  - alert: Sz300HighLatencyP99
+    expr: |
+      histogram_quantile(0.99, 
+        sum(rate(http_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+      ) > 1
+    for: 5m
+    labels:
+      severity: warning
+      service: sz300-server
+      category: performance
+    annotations:
+      summary: "sz300-server P99 延迟 > 1s"
+      description: "P99 请求延迟持续 5 分钟超过 1s。当前值: {{ $value }}s"
+
+  # 请求延迟过高（P95 > 500ms）
+  - alert: Sz300HighLatencyP95
+    expr: |
+      histogram_quantile(0.95, 
+        sum(rate(http_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+      ) > 0.5
+    for: 10m
+    labels:
+      severity: info
+      service: sz300-server
+      category: performance
+    annotations:
+      summary: "sz300-server P95 延迟 > 500ms"
+      description: "P95 请求延迟持续 10 分钟超过 500ms。当前值: {{ $value }}s"
+
+# ========== 错误率告警 ==========
+- name: sz300-errors
+  rules:
+  # HTTP 5xx 错误率过高
+  - alert: Sz300HighErrorRate
+    expr: |
+      sum(rate(http_requests_total{job="sz300-server", status=~"5.."}[5m])) 
+        / sum(rate(http_requests_total{job="sz300-server"}[5m])) * 100 > 5
+    for: 5m
+    labels:
+      severity: critical
+      service: sz300-server
+      category: error
+    annotations:
+      summary: "sz300-server 5xx 错误率 > 5%"
+      description: "5xx 错误率持续 5 分钟超过 5%。当前值: {{ $value }}%"
+
+  # HTTP 4xx 错误率过高
+  - alert: Sz300High4xxRate
+    expr: |
+      sum(rate(http_requests_total{job="sz300-server", status=~"4.."}[5m])) 
+        / sum(rate(http_requests_total{job="sz300-server"}[5m])) * 100 > 20
+    for: 15m
+    labels:
+      severity: info
+      service: sz300-server
+      category: error
+    annotations:
+      summary: "sz300-server 4xx 错误率 > 20%"
+      description: "4xx 错误率持续 15 分钟超过 20%。当前值: {{ $value }}%"
+# ========== 业务告警 ==========
+- name: sz300-business
+  rules:
+  # 数据库连接失败
+  - alert: Sz300DatabaseConnectionFailure
+    expr: |
+      sz300_db_connection_errors_total > 0
+    for: 1m
+    labels:
+      severity: critical
+      service: sz300-server
+      category: business
+    annotations:
+      summary: "sz300-server 数据库连接失败"
+      description: "过去 1 分钟内数据库连接出现错误，错误计数: {{ $value }}"
+
+  # 缓存命中率过低
+  - alert: Sz300LowCacheHitRate
+    expr: |
+      (sz300_cache_hits_total / (sz300_cache_hits_total + sz300_cache_misses_total)) * 100 < 50
+    for: 30m
+    labels:
+      severity: info
+      service: sz300-server
+      category: business
+    annotations:
+      summary: "sz300-server 缓存命中率 < 50%"
+      description: "缓存命中率持续 30 分钟低于 50%。当前值: {{ $value }}%"
+
+  # 连接池耗尽
+  - alert: Sz300ConnectionPoolExhausted
+    expr: |
+      sz300_db_pool_active / sz300_db_pool_max > 0.9
+    for: 5m
+    labels:
+      severity: critical
+      service: sz300-server
+      category: business
+    annotations:
+      summary: "sz300-server 数据库连接池使用率 > 90%"
+      description: "连接池使用率持续 5 分钟超过 90%。当前值: {{ $value }}"
