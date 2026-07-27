@@ -1,4 +1,4 @@
-﻿# Prometheus 配置 - sz300-server 监控
+# Prometheus 配置 - sz300-server 监控
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -12,7 +12,7 @@ rule_files:
 alerting:
   alertmanagers:
   - static_configs:
-    - targets: ["alertmanager:9093"]
+    - targets: ["alertmanager:9094"]
     timeout: 10s
 scrape_configs:
   # ========== sz300-server 应用指标 ==========
