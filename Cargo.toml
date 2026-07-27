@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -78,15 +78,15 @@ mime_guess = "2"
 infer = "0.16"
 tempfile = "3"
 
-# 随机数（Phase 5.7：对齐 PHP rand(0, 9999)）
+# 随机数（对齐 PHP rand(0, 9999)）
 rand = "0.8"
 
-# 图像处理（Phase 5.8：对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
+# 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
 image = "0.25"
 imageproc = "0.25"
 ab_glyph = "0.2"
 
-# Excel/PDF 处理（Phase 5.9：对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
+# Excel/PDF 处理（对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
 rust_xlsxwriter = "0.79"
 calamine = { version = "0.36", features = ["dates"] }
 lopdf = "0.42"
@@ -144,3 +144,5 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+# 启用算术溢出检查（生产安全要求：溢出属于未定义行为，应 fail-fast 而非静默回绕）
+overflow-checks = true

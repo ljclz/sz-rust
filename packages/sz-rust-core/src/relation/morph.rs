@@ -1,6 +1,6 @@
 //! `MorphMany` / `MorphTo` 多态关联 — PHP 命名约定 + SQL 片段构造器
 //!
-//! Phase 4.8 核心交付物。本模块对齐 PHP `think\Model::morphMany()` /
+//! 本模块对齐 PHP `think\Model::morphMany()` /
 //! `morphTo()` 行为，提供：
 //!
 //! 1. [`default_morph_type_column`]：PHP 默认多态类型列名（`morph . '_type'`）

@@ -1,9 +1,9 @@
-//! 缓存一致性测试（PHP 对比） — Phase 6.10 集成测试
+//! 缓存一致性测试（PHP 对比） — 集成测试
 //!
 //! 本文件验证 sz-rust 缓存模块与 PHP `think\facade\Cache` / `think\cache\Driver`
 //! / `think\cache\driver\File` / `think\cache\driver\Redis` 的行为一致性。
 //!
-//! ## Phase 6.10 验收标准
+//! ## 验收标准
 //!
 //! **Cache::delete 后下次 get 返回 None，与 PHP 行为一致**
 //!
@@ -193,7 +193,7 @@ fn test_r5_p2_is_zero_numeric_returns_string() {
 
 #[test]
 fn test_r5_p3_delete_then_get_returns_none() {
-    // R5-P3: Cache::delete 后下次 get 返回 None（Phase 6.10 核心验收点）
+    // R5-P3: Cache::delete 后下次 get 返回 None（缓存模块核心验收点）
     //
     // PHP:
     //   Cache::set('key', 'value');

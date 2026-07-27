@@ -1,6 +1,6 @@
 //! 验证器模块 — 对齐 PHP `think\Validate`
 //!
-//! Phase 5.1 核心交付物。本模块实现验证器框架，对齐 PHP `think\Validate` 类的
+//! 本模块实现验证器框架，对齐 PHP `think\Validate` 类的
 //! 规则定义、批量验证、错误消息查找、场景管理等核心机制。
 //!
 //! ## PHP 对齐
@@ -82,8 +82,8 @@
 //!
 //! ## 架构说明
 //!
-//! Phase 5.1 实现**框架层**，内置基础规则（`require`/`must`/`is`）。
-//! Phase 5.2 将在 `validate/rules.rs` 添加完整内置规则集
+//! 框架层内置基础规则（`require`/`must`/`is`）。
+//! 完整内置规则集在 `validate/rules.rs` 中
 //! （email/mobile/url/in/notIn/max/min/length 等）。
 //!
 //! 自定义规则通过 [`Validate::extend`] 注册，回调签名：
@@ -387,7 +387,7 @@ pub struct Validate {
     type_callbacks: IndexMap<String, RuleCallback>,
     /// 多语言实例 — 对齐 PHP `think\Validate::$lang`
     ///
-    /// Phase 5.4 交付物。`None` 时跳过翻译（对齐 PHP 未注入 Lang 时的行为）。
+    /// 多语言支持。`None` 时跳过翻译（对齐 PHP 未注入 Lang 时的行为）。
     /// 通过 [`Validate::set_lang`] 注入实例。
     lang: Option<Arc<dyn message::Lang>>,
 }
@@ -474,7 +474,7 @@ impl Validate {
 
     /// 注册场景回调 — 对齐 PHP `protected function scene{Name}()`
     ///
-    /// Phase 5.3 交付物。回调签名 `Fn(&mut Validate) + Send + Sync`，
+    /// 场景回调支持。回调签名 `Fn(&mut Validate) + Send + Sync`,
     /// 回调内部可调用 [`Validate::only_mut`]、[`Validate::append_mut`]、
     /// [`Validate::remove_mut`] 修改场景状态。
     ///
@@ -648,7 +648,7 @@ impl Validate {
         let mut single_error: Option<String> = None;
 
         // 处理场景（对齐 PHP $this->getScene，第 475-477 行 + 第 1659-1669 行）
-        // Phase 5.3：完整对齐 PHP getScene，支持 sceneXxx 回调（回调优先于数组）
+        // 完整对齐 PHP getScene，支持 sceneXxx 回调（回调优先于数组）
         if let Some(scene_name) = self.current_scene.clone() {
             // 重置 only/append/remove（对齐 PHP getScene 第 1661 行，R5-6）
             self.only.clear();
@@ -1018,7 +1018,7 @@ impl Validate {
     /// 4. 如果 type 以 `require` 开头，使用 `type_msg['require']`
     /// 5. 默认 `$title . $this->lang->get('not conform to the rules')`
     ///
-    /// ## Phase 5.4 Lang 翻译
+    /// ## Lang 翻译
     ///
     /// 所有分支的 msg 在占位符替换前先经过 [`Self::parse_error_msg_with_lang`]
     /// 进行 Lang 翻译（对齐 PHP `parseErrorMsg` 第 1598-1602 行）。
@@ -1074,7 +1074,7 @@ impl Validate {
     /// 对齐 PHP 未注入 Lang 时的行为（PHP 中 `$this->lang` 必须存在，否则
     /// `parseErrorMsg` 会致命错误；Rust 使用 `Option` 提供更安全的降级）。
     pub fn parse_error_msg_with_lang(&self, msg: &str, rule: &str, title: &str) -> String {
-        // Phase 5.4：先 Lang 翻译，再占位符替换（对齐 PHP 第 1598-1602 行）
+        // 先 Lang 翻译，再占位符替换（对齐 PHP 第 1598-1602 行）
         let translated = message::translate_msg(msg, self.lang.as_ref());
         Self::parse_error_msg(&translated, rule, title)
     }
@@ -1231,7 +1231,7 @@ impl Validate {
             "zip" => regex_match_default(value, "zip"),
             _ => {
                 // 未知类型默认通过（对齐 PHP default 分支的正则匹配行为）
-                // Phase 5.2 将在 rules.rs 添加更多类型
+                // rules.rs 中已添加更多类型
                 true
             }
         }
@@ -1341,8 +1341,10 @@ fn is_valid_email(value: &Value) -> bool {
         _ => return false,
     };
     // 简化版邮箱正则（PHP filter_var 更宽松）
-    let email_re =
-        Lazy::new(|| Regex::new(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$").expect("内置正则表达式编译失败"));
+    let email_re = Lazy::new(|| {
+        Regex::new(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+            .expect("内置正则表达式编译失败")
+    });
     email_re.is_match(s)
 }
 
@@ -1383,7 +1385,9 @@ fn is_valid_mac(value: &Value) -> bool {
         Value::String(s) => s,
         _ => return false,
     };
-    let mac_re = Lazy::new(|| Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").expect("内置正则表达式编译失败"));
+    let mac_re = Lazy::new(|| {
+        Regex::new(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$").expect("内置正则表达式编译失败")
+    });
     mac_re.is_match(s)
 }
 
@@ -2173,7 +2177,7 @@ mod tests {
     #[test]
     fn test_check_failure_multiple_rules_single_mode() {
         // 非批量模式：返回第一个错误
-        // 注意：IndexMap 保持插入顺序（Phase 5.2 已从 HashMap 迁移到 IndexMap）
+        // 注意：IndexMap 保持插入顺序（已从 HashMap 迁移到 IndexMap）
         let mut v = Validate::new()
             .rule("name", "require")
             .rule("age", "require|integer");
@@ -2681,7 +2685,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 组 18：场景回调测试（Phase 5.3）
+    // 组 18：场景回调测试
     // ========================================================================
 
     #[test]
@@ -2944,7 +2948,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 组 19：错误消息国际化测试（Phase 5.4）
+    // 组 19：错误消息国际化测试
     // ========================================================================
 
     #[test]
@@ -3133,7 +3137,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 组 20：PHP 行为对齐测试（Phase 5.4 — R5-7）
+    // 组 20：PHP 行为对齐测试（R5-7）
     // ========================================================================
 
     #[test]

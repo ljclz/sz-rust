@@ -130,9 +130,8 @@ impl OtlpConfig {
     /// - `OTEL_RESOURCE_ATTRIBUTES`（key=value,key=value 格式）
     pub fn from_env() -> Self {
         let protocol = OtlpProtocol::from_env();
-        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or_else(|_| {
-            format!("http://localhost:{}", protocol.default_port())
-        });
+        let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+            .unwrap_or_else(|_| format!("http://localhost:{}", protocol.default_port()));
         let timeout_ms = std::env::var("OTEL_EXPORTER_OTLP_TIMEOUT")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
@@ -196,8 +195,13 @@ impl OtlpConfig {
     }
 
     /// 添加额外的资源属性
-    pub fn with_resource_attribute(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.extra_resource_attributes.push((key.into(), value.into()));
+    pub fn with_resource_attribute(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.extra_resource_attributes
+            .push((key.into(), value.into()));
         self
     }
 
@@ -206,7 +210,10 @@ impl OtlpConfig {
         let mut kvs: Vec<KeyValue> = vec![
             KeyValue::new("service.name", self.service_name.clone()),
             KeyValue::new("service.version", self.service_version.clone()),
-            KeyValue::new("deployment.environment", self.deployment_environment.clone()),
+            KeyValue::new(
+                "deployment.environment",
+                self.deployment_environment.clone(),
+            ),
         ];
 
         if let Some(instance_id) = &self.service_instance_id {
@@ -229,7 +236,9 @@ impl OtlpConfig {
     }
 
     /// 构建 gRPC SpanExporter
-    fn build_grpc_exporter(&self) -> Result<SpanExporter, Box<dyn std::error::Error + Send + Sync>> {
+    fn build_grpc_exporter(
+        &self,
+    ) -> Result<SpanExporter, Box<dyn std::error::Error + Send + Sync>> {
         let exporter = SpanExporter::builder()
             .with_tonic()
             .with_endpoint(self.endpoint.clone())
@@ -240,7 +249,9 @@ impl OtlpConfig {
 
     /// 构建 HTTP/protobuf SpanExporter
     #[cfg(feature = "otlp-http")]
-    fn build_http_exporter(&self) -> Result<SpanExporter, Box<dyn std::error::Error + Send + Sync>> {
+    fn build_http_exporter(
+        &self,
+    ) -> Result<SpanExporter, Box<dyn std::error::Error + Send + Sync>> {
         let exporter = SpanExporter::builder()
             .with_http()
             .with_endpoint(self.endpoint.clone())
@@ -258,9 +269,7 @@ impl OtlpConfig {
             #[cfg(not(feature = "otlp-http"))]
             OtlpProtocol::HttpProtobuf => {
                 // 未启用 otlp-http feature 时回退到 gRPC
-                tracing::warn!(
-                    "OTLP HTTP 协议未启用（缺少 otlp-http feature），回退到 gRPC"
-                );
+                tracing::warn!("OTLP HTTP 协议未启用（缺少 otlp-http feature），回退到 gRPC");
                 self.build_grpc_exporter()
             }
         }
@@ -533,7 +542,10 @@ mod tests {
         assert_eq!(config.deployment_environment, "staging");
         assert_eq!(config.timeout_ms, 10000);
         assert_eq!(config.extra_resource_attributes.len(), 1);
-        assert_eq!(config.extra_resource_attributes[0], ("team".to_string(), "platform".to_string()));
+        assert_eq!(
+            config.extra_resource_attributes[0],
+            ("team".to_string(), "platform".to_string())
+        );
     }
 
     #[test]
@@ -620,10 +632,7 @@ mod tests {
         std::env::set_var("OTEL_EXPORTER_OTLP_TIMEOUT", "3000");
         std::env::set_var("OTEL_SERVICE_NAME", "env-service");
         std::env::set_var("OTEL_SERVICE_ENV", "staging");
-        std::env::set_var(
-            "OTEL_RESOURCE_ATTRIBUTES",
-            "team=platform,region=us-west-2",
-        );
+        std::env::set_var("OTEL_RESOURCE_ATTRIBUTES", "team=platform,region=us-west-2");
 
         let config = OtlpConfig::from_env();
 

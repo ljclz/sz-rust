@@ -181,7 +181,7 @@ pub fn render_error_with_code(code: i32, msg: impl Into<String>, data: Value) ->
 }
 
 // ============================================================================
-// Phase 7.7: 前后端分离 JSON 默认返回（项目主策略）
+// 前后端分离 JSON 默认返回（项目主策略）
 //
 // 对齐 PHP ThinkPHP 6 `Dispatch::autoResponse()` 行为，但将 JSON 设为默认响应类型
 // （项目主策略：前后端分离）。PHP `autoResponse()` 根据 `$this->request->isJson()`
@@ -189,7 +189,7 @@ pub fn render_error_with_code(code: i32, msg: impl Into<String>, data: Value) ->
 //
 // 本模块扩展三种策略：
 // 1. `DefaultResponseType::Json` — 项目主策略：默认返回 JSON（不渲染模板）
-// 2. `DefaultResponseType::Html` — 兜底场景：返回 HTML（Phase 7.8 模板渲染使用）
+// 2. `DefaultResponseType::Html` — 兜底场景：返回 HTML（模板渲染使用）
 // 3. `DefaultResponseType::Auto` — 对齐 PHP autoResponse：根据 Accept 头判断
 //
 // ## PHP 源码参考
@@ -235,7 +235,7 @@ use axum::http::{header, HeaderMap};
 ///
 /// 项目主策略为前后端分离，因此默认使用 `Json`。`Auto` 严格对齐 PHP TP 6
 /// `autoResponse()` 的行为（根据 Accept 头判断）。`Html` 用于兜底场景
-/// （如 Phase 7.8 模板渲染、PDF/Excel 导出）。
+/// （如模板渲染、PDF/Excel 导出）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DefaultResponseType {
     /// 项目主策略：默认返回 JSON（Content-Type: application/json; charset=utf-8）
@@ -247,7 +247,7 @@ pub enum DefaultResponseType {
 
     /// 兜底场景：返回 HTML（Content-Type: text/html; charset=utf-8）
     ///
-    /// 用于 Phase 7.8 模板渲染、PDF/Excel 导出等非 JSON 场景。
+    /// 用于模板渲染、PDF/Excel 导出等非 JSON 场景。
     Html,
 
     /// 对齐 PHP `autoResponse`：根据请求 `Accept` 头判断
@@ -895,7 +895,7 @@ mod tests {
     }
 
     // ====================================================================
-    // Phase 7.7: 前后端分离 JSON 默认返回测试
+    // 前后端分离 JSON 默认返回测试
     //
     // 测试维度：
     // 1. DefaultResponseType 枚举（3 种策略）

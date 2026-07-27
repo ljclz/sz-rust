@@ -1,0 +1,31 @@
+# cargo-audit 配置 — 安全漏洞扫描
+#
+# cargo-audit 0.22.2 配置格式
+# 字段：ignore / informational_warnings / severity_threshold
+
+[advisories]
+# 忽略的 advisory（与 deny.toml 保持一致，不再报告）
+ignore = [
+    # rustls-webpki 系列漏洞（传递依赖，上游 0.103 不兼容）
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    # serde_yml unsound（仅 emitter API 风险，本项目不使用）
+    "RUSTSEC-2025-0068",
+    # libyml unsound（serde_yml 传递依赖，无替代可用）
+    "RUSTSEC-2025-0067",
+    # paste unmaintained（ab_glyph 传递依赖，无安全风险）
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile unmaintained（tokio-rustls 传递依赖）
+    "RUSTSEC-2025-0134",
+    # ttf-parser unmaintained（ab_glyph 传递依赖，仅字体解析）
+    "RUSTSEC-2026-0192",
+]
+
+# 信息性公告（不阻断，仅警告）
+informational_warnings = [
+    "unmaintained",
+    "unsound",
+    "notice",
+]

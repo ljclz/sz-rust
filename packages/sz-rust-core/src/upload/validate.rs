@@ -1,6 +1,6 @@
 //! 文件上传校验模块 — 对齐 PHP `think\Validate` 文件校验规则 + `app\common\library\storage\Driver::validate`
 //!
-//! Phase 5.6 核心交付物。本模块实现文件类型/大小校验机制，对齐 PHP：
+//! 本模块实现文件类型/大小校验机制，对齐 PHP：
 //! - `think\Validate::fileSize` / `fileExt` / `fileMime` 三个校验规则
 //!   （vendor `framework/src/think/Validate.php` 第 957-1062 行）
 //! - `app\common\library\storage\Driver::validate` 业务层校验驱动

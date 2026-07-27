@@ -1,4 +1,4 @@
-//! Phase 0.10 — Hello World 端点集成测试
+//! Hello World 端点集成测试
 //!
 //! 使用 `tower::ServiceExt::oneshot` 直接向 router 发送请求，验证：
 //! - `GET /` 返回 HTTP 200 + `{ "code": 1, "msg": "hello", "data": {} }`

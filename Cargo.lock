@@ -4287,14 +4287,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sz-orm-config"
-version = "1.0.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "sz-orm-core"
 version = "1.0.0"
 dependencies = [
@@ -4430,7 +4422,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-loader"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "parking_lot",
  "regex",
@@ -4444,7 +4436,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-operate"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -4458,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "clap",
@@ -4473,7 +4465,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -4529,7 +4521,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-examples"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum 0.8.9",
  "http",
@@ -4546,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4556,7 +4548,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-observability"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4576,7 +4568,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pdf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "calamine",
  "chrono",
@@ -4592,7 +4584,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-sz300"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -4602,8 +4594,6 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
- "sz-orm-config",
- "sz-orm-macros",
  "sz-orm-sqlx",
  "sz-rust-core",
  "sz-rust-observability",
@@ -4615,7 +4605,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-tracing"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",

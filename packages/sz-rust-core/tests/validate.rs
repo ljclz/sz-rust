@@ -1,4 +1,4 @@
-//! Phase 0.9 — 运行时 SQL 校验集成测试
+//! 运行时 SQL 校验集成测试
 //!
 //! 验证 `sz_rust_core` 重导出的 `sz-orm-sql-validator` API 可用性，
 //! 覆盖合法 SQL 接受、非法 SQL 拒绝、SQL 注入检测、参数数量校验、

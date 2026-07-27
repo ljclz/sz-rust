@@ -1,4 +1,4 @@
-//! tokio::spawn 异步任务（Phase 9.3）
+//! tokio::spawn 异步任务
 //!
 //! ## PHP 对齐
 //!
@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-/// spawn 一个异步任务并注入 CancellationToken（Phase 9.3）
+/// spawn 一个异步任务并注入 CancellationToken
 ///
 /// 对齐 `Swoole\Coroutine::create()`，额外提供关闭信号监听。
 ///

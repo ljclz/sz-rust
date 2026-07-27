@@ -33,26 +33,14 @@
 // sz-orm-core：连接池 + 模型 trait + 值类型
 // ============================================================================
 pub use sz_orm_core::{
-    Pool,
-    PoolConfig,
-    PoolConfigBuilder,
-    PoolError,
-    Value,
-    value_to_json,
-    Model,
-    ModelExt,
-    RelationLoader,
-    TimestampFields,
+    value_to_json, Model, ModelExt, Pool, PoolConfig, PoolConfigBuilder, PoolError, RelationLoader,
+    TimestampFields, Value,
 };
 
 // ============================================================================
 // sz-orm-auth：认证 + 授权
 // ============================================================================
-pub use sz_orm_auth::{
-    Authorizer,
-    JwtAuthenticator,
-    RbacAuthorizer,
-};
+pub use sz_orm_auth::{Authorizer, JwtAuthenticator, RbacAuthorizer};
 
 /// 认证子模块（Credentials / User / Claims 等数据结构）
 pub mod auth {
@@ -67,12 +55,7 @@ pub mod jwt {
 // ============================================================================
 // sz-orm-mqtt：MQTT 消息队列
 // ============================================================================
-pub use sz_orm_mqtt::{
-    MqttConfig,
-    MqttMessage,
-    MqttTopic,
-    QoS,
-};
+pub use sz_orm_mqtt::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
 // ============================================================================
 // sz-orm-scheduler：定时任务调度器

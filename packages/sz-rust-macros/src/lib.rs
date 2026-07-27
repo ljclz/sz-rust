@@ -4,9 +4,9 @@
 //!
 //! | 宏 | 类型 | 对齐 PHP | 实现阶段 |
 //! |----|------|---------|---------|
-//! | `#[controller]` | 属性宏 | 控制器声明 | Phase 2 |
-//! | `#[model]` | 属性宏 | 模型声明 | Phase 2 |
-//! | `compact!` | 函数式宏 | `compact()` | Phase 2.6 ✅ |
+//! | `#[controller]` | 属性宏 | 控制器声明 | ✅ |
+//! | `#[model]` | 属性宏 | 模型声明 | ✅ |
+//! | `compact!` | 函数式宏 | `compact()` | ✅ |
 //!
 //! 骨架实现，属性宏原样透传 TokenStream，`compact!` 生成空 `serde_json::Map`。
 //! `compact!` 完整实现，对齐 PHP `compact()`。

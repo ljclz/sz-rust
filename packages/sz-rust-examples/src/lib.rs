@@ -18,7 +18,7 @@ use tower_http::trace::TraceLayer;
 /// { "code": 1, "msg": "hello", "data": {} }
 /// ```
 pub async fn hello() -> Json<Value> {
-    // 验证编译时 SQL 校验宏可用（Phase 0.8）
+    // 验证编译时 SQL 校验宏可用
     let _sql = sql_string!("SELECT 1 FROM dual");
 
     // 标准响应：对齐 PHP renderJson(code=1, msg='hello', data=[])

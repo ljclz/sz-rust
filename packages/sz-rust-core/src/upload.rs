@@ -1,6 +1,6 @@
 //! 文件上传模块 — 对齐 PHP `think\File` + `think\file\UploadedFile`
 //!
-//! Phase 5.5 核心交付物。本模块实现文件上传机制，对齐 PHP `think\File` 类
+//! 本模块实现文件上传机制，对齐 PHP `think\File` 类
 //! 的 hash/move/hashName/extension/getMime 等核心方法，以及 `think\file\UploadedFile`
 //! 的 isValid/move/getOriginalName/getOriginalExtension 等方法。
 //!
@@ -434,13 +434,18 @@ impl File {
         }
 
         let file_name = match name {
-            Some(n) => get_name(n),
+            Some(n) => get_name(n)?,
             None => self
                 .path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default(),
         };
+
+        // 安全检查：拒绝路径遍历攻击（防御性校验，确保 file_name 不含路径分隔符或 ..）
+        if file_name == ".." || file_name.contains('/') || file_name.contains('\\') {
+            return Err(UploadError::InvalidFileName(file_name));
+        }
 
         let target_path = directory.join(&file_name);
         Ok(File::new_unchecked(&target_path))
@@ -527,7 +532,11 @@ impl File {
             None => self.extension(),
         };
 
-        let hash_name = self.hash_name.as_ref().expect("hash_name 已在上方初始化").clone();
+        let hash_name = self
+            .hash_name
+            .as_ref()
+            .expect("hash_name 已在上方初始化")
+            .clone();
         if extension.is_empty() {
             Ok(hash_name)
         } else {
@@ -740,13 +749,17 @@ impl UploadedFile {
 ///     return $originalName;
 /// }
 /// ```
-fn get_name(name: &str) -> String {
+fn get_name(name: &str) -> Result<String, UploadError> {
+    // 安全检查：拒绝路径遍历攻击（包含 .. 的文件名视为非法）
+    if name.contains("..") {
+        return Err(UploadError::InvalidFileName(name.to_string()));
+    }
     // 对齐 PHP `str_replace('\\', '/', $name)`
     let original_name = name.replace('\\', "/");
     // 对齐 PHP `strrpos($originalName, '/')`
     match original_name.rfind('/') {
-        Some(pos) => original_name[pos + 1..].to_string(),
-        None => original_name,
+        Some(pos) => Ok(original_name[pos + 1..].to_string()),
+        None => Ok(original_name),
     }
 }
 
@@ -1648,30 +1661,38 @@ mod tests {
     #[test]
     fn test_get_name_simple() {
         // 对齐 PHP `File::getName($name)` 第 146-153 行
-        assert_eq!(get_name("file.txt"), "file.txt");
+        assert_eq!(get_name("file.txt").unwrap(), "file.txt");
     }
 
     #[test]
     fn test_get_name_with_path() {
         // 包含 / 的路径 → 返回最后一段
-        assert_eq!(get_name("/path/to/file.txt"), "file.txt");
+        assert_eq!(get_name("/path/to/file.txt").unwrap(), "file.txt");
     }
 
     #[test]
     fn test_get_name_with_backslash() {
         // 对齐 PHP `str_replace('\\', '/', $name)`
-        assert_eq!(get_name("\\path\\to\\file.txt"), "file.txt");
+        assert_eq!(get_name("\\path\\to\\file.txt").unwrap(), "file.txt");
     }
 
     #[test]
     fn test_get_name_mixed_separators() {
         // 混合分隔符
-        assert_eq!(get_name("\\path/to\\file.txt"), "file.txt");
+        assert_eq!(get_name("\\path/to\\file.txt").unwrap(), "file.txt");
     }
 
     #[test]
     fn test_get_name_only_filename() {
-        assert_eq!(get_name("filename"), "filename");
+        assert_eq!(get_name("filename").unwrap(), "filename");
+    }
+
+    #[test]
+    fn test_get_name_rejects_path_traversal() {
+        // 安全检查：包含 .. 的文件名视为非法（路径遍历攻击防护）
+        assert!(get_name("../etc/passwd").is_err());
+        assert!(get_name("file..txt").is_err());
+        assert!(get_name("..hidden").is_err());
     }
 
     // ------------------------------------------------------------------------

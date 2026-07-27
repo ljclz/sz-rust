@@ -81,9 +81,8 @@ pub fn execute_migrate(args: &MigrateArgs) -> Result<(), CliError> {
         )));
     }
 
-    let db_type = DbType::from_str(&args.db_type).ok_or_else(|| {
-        CliError::Migration(format!("Unknown database type: {}", args.db_type))
-    })?;
+    let db_type = DbType::from_str(&args.db_type)
+        .ok_or_else(|| CliError::Migration(format!("Unknown database type: {}", args.db_type)))?;
 
     let migrations = resolve_migrations(&path, db_type)?;
 

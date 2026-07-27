@@ -185,7 +185,12 @@ impl I18n {
     /// ```php
     /// Lang::get('hello', ['name' => 'John'], 'en-us');
     /// ```
-    pub fn get(&self, key: &str, vars: &HashMap<String, String>, lang: Option<&str>) -> Option<String> {
+    pub fn get(
+        &self,
+        key: &str,
+        vars: &HashMap<String, String>,
+        lang: Option<&str>,
+    ) -> Option<String> {
         let data = self.data.read();
 
         // 确定查找语言顺序
@@ -318,12 +323,11 @@ impl I18n {
         lang: &str,
         path_for_error: &str,
     ) -> Result<(), I18nError> {
-        let parsed: HashMap<String, Value> = serde_json::from_str(json_str).map_err(|e| {
-            I18nError::Parse {
+        let parsed: HashMap<String, Value> =
+            serde_json::from_str(json_str).map_err(|e| I18nError::Parse {
                 path: path_for_error.to_string(),
                 source: e,
-            }
-        })?;
+            })?;
 
         let mut data = self.data.write();
         let lang_data = data.entry(lang.to_string()).or_default();
@@ -471,8 +475,14 @@ mod tests {
         i18n.set("zh-cn", "hello", "你好");
         i18n.set("en-us", "hello", "Hello");
 
-        assert_eq!(i18n.get_simple("hello", Some("zh-cn")), Some("你好".to_string()));
-        assert_eq!(i18n.get_simple("hello", Some("en-us")), Some("Hello".to_string()));
+        assert_eq!(
+            i18n.get_simple("hello", Some("zh-cn")),
+            Some("你好".to_string())
+        );
+        assert_eq!(
+            i18n.get_simple("hello", Some("en-us")),
+            Some("Hello".to_string())
+        );
     }
 
     /// 测试 get 使用当前语言
@@ -556,7 +566,10 @@ mod tests {
 
         // 当前语言 en-us（无此项），回退到 zh-cn
         i18n.set_current_lang("en-us");
-        assert_eq!(i18n.get_simple("only_in_zh", None), Some("只有中文".to_string()));
+        assert_eq!(
+            i18n.get_simple("only_in_zh", None),
+            Some("只有中文".to_string())
+        );
     }
 
     /// 测试 has 检查存在
@@ -586,8 +599,14 @@ mod tests {
         let json = r#"{"hello": "Hello, :name!", "bye": "Goodbye"}"#;
         i18n.load_from_json_str(json, "en-us", "<test>").unwrap();
 
-        assert_eq!(i18n.get_simple("hello", Some("en-us")), Some("Hello, :name!".to_string()));
-        assert_eq!(i18n.get_simple("bye", Some("en-us")), Some("Goodbye".to_string()));
+        assert_eq!(
+            i18n.get_simple("hello", Some("en-us")),
+            Some("Hello, :name!".to_string())
+        );
+        assert_eq!(
+            i18n.get_simple("bye", Some("en-us")),
+            Some("Goodbye".to_string())
+        );
     }
 
     /// 测试从 JSON 文件加载
@@ -604,8 +623,14 @@ mod tests {
         let i18n = I18n::new();
         i18n.load_from_file(&lang_file, "en-us").unwrap();
 
-        assert_eq!(i18n.get_simple("hello", Some("en-us")), Some("Hello!".to_string()));
-        assert_eq!(i18n.get_simple("bye", Some("en-us")), Some("Goodbye".to_string()));
+        assert_eq!(
+            i18n.get_simple("hello", Some("en-us")),
+            Some("Hello!".to_string())
+        );
+        assert_eq!(
+            i18n.get_simple("bye", Some("en-us")),
+            Some("Goodbye".to_string())
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -641,7 +666,10 @@ mod tests {
         let json = r#"{"valid": "string", "number": 123, "bool": true, "null_val": null}"#;
         i18n.load_from_json_str(json, "en-us", "<test>").unwrap();
 
-        assert_eq!(i18n.get_simple("valid", Some("en-us")), Some("string".to_string()));
+        assert_eq!(
+            i18n.get_simple("valid", Some("en-us")),
+            Some("string".to_string())
+        );
         assert_eq!(i18n.get_simple("number", Some("en-us")), None);
         assert_eq!(i18n.get_simple("bool", Some("en-us")), None);
         assert_eq!(i18n.get_simple("null_val", Some("en-us")), None);
@@ -711,11 +739,19 @@ mod tests {
     #[test]
     fn test_multiple_load_accumulates() {
         let i18n = I18n::new();
-        i18n.load_from_json_str(r#"{"key1": "value1"}"#, "en-us", "<test1>").unwrap();
-        i18n.load_from_json_str(r#"{"key2": "value2"}"#, "en-us", "<test2>").unwrap();
+        i18n.load_from_json_str(r#"{"key1": "value1"}"#, "en-us", "<test1>")
+            .unwrap();
+        i18n.load_from_json_str(r#"{"key2": "value2"}"#, "en-us", "<test2>")
+            .unwrap();
 
-        assert_eq!(i18n.get_simple("key1", Some("en-us")), Some("value1".to_string()));
-        assert_eq!(i18n.get_simple("key2", Some("en-us")), Some("value2".to_string()));
+        assert_eq!(
+            i18n.get_simple("key1", Some("en-us")),
+            Some("value1".to_string())
+        );
+        assert_eq!(
+            i18n.get_simple("key2", Some("en-us")),
+            Some("value2".to_string())
+        );
     }
 
     /// 测试 get 不存在的键返回 None

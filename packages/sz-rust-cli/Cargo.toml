@@ -10,6 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+exclude = ["docs/**"]
 
 [dependencies]
 # 命令行框架

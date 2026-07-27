@@ -1,13 +1,15 @@
 # ---- 构建阶段 ----
-FROM rust:1.75-bookworm AS builder
+# 基础镜像 Rust 版本对齐 workspace rust-version = "1.81"
+FROM rust:1.81-bookworm AS builder
 
 WORKDIR /build
 
-# 复制 sz-orm 依赖
-COPY sz-orm/ /build/sz-orm/
+# 复制项目源码（sz-orm 由 release.yml 在 docker build 之前 clone 到 ../sz-orm，
+# 并通过 build context 一并送入；此处 COPY 路径与 release.yml 的 context 配合）
+COPY . /build/sz-rust/
 
-# 复制项目
-COPY sz-rust/ /build/sz-rust/
+# 显式 clone sz-orm 依赖（避免依赖 build context 之外的目录）
+RUN git clone https://github.com/ljclz/sz-orm.git /build/sz-orm
 
 WORKDIR /build/sz-rust
 

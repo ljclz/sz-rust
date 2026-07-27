@@ -1,4 +1,4 @@
-//! SZ-Rust Runtime — Swoole/Worker 适配（Phase 9 主入口）
+//! SZ-Rust Runtime — Swoole/Worker 适配主入口
 //!
 //! ## PHP 对齐
 //!
@@ -56,7 +56,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-/// SZ-Rust 异步运行时（Phase 9.1）
+/// SZ-Rust 异步运行时
 ///
 /// 对齐 PHP `think-swoole` 的运行时模型：基于 tokio multi_thread runtime，
 /// worker 数量默认 = CPU 核数（对齐 `swoole_cpu_num()`）。

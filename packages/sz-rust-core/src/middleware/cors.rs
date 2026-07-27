@@ -241,7 +241,9 @@ mod tests {
 
         // 安全默认：不设置 Allow-Credentials（避免任意网站携带用户凭证）
         assert!(
-            resp.headers().get("access-control-allow-credentials").is_none(),
+            resp.headers()
+                .get("access-control-allow-credentials")
+                .is_none(),
             "default cors_layer() must NOT set Allow-Credentials"
         );
     }

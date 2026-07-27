@@ -237,8 +237,7 @@ mod tests {
         };
         let addr_str = addr.to_string();
 
-        let router =
-            Router::new().route("/", axum::routing::get(|| async { "graceful ok" }));
+        let router = Router::new().route("/", axum::routing::get(|| async { "graceful ok" }));
         tokio::spawn(async move {
             let _ = serve_with_graceful_shutdown(router, &addr_str).await;
         });

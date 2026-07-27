@@ -1,4 +1,4 @@
-//! 信号处理（Phase 9.9）
+//! 信号处理
 //!
 //! ## PHP 对齐
 //!
@@ -32,7 +32,7 @@
 
 use std::future::Future;
 
-/// 等待关闭信号（Phase 9.9）
+/// 等待关闭信号
 ///
 /// 对齐 PHP `think-swoole` 的信号监听：在 Unix 上监听 SIGTERM/SIGINT/SIGQUIT，
 /// 在 Windows 上监听 ctrl_c/ctrl_close/ctrl_break/ctrl_shutdown/ctrl_logoff。
@@ -106,7 +106,7 @@ pub async fn shutdown_signal() {
     }
 }
 
-/// 等待关闭信号并触发 CancellationToken（Phase 9.9）
+/// 等待关闭信号并触发 CancellationToken
 ///
 /// 这是 `shutdown_signal()` + `token.cancel()` 的便捷封装。
 ///

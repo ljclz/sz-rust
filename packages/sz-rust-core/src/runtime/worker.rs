@@ -1,4 +1,4 @@
-//! Worker 数量配置（Phase 9.2）
+//! Worker 数量配置
 //!
 //! ## PHP 对齐
 //!
@@ -26,7 +26,7 @@ pub const MIN_WORKER_NUM: usize = 1;
 /// 最大 worker 数（避免过度创建线程导致调度开销过大）
 pub const MAX_WORKER_NUM: usize = 256;
 
-/// Worker 数量配置（Phase 9.2）
+/// Worker 数量配置
 ///
 /// 对齐 PHP `swoole.php` 配置中的 `worker_num` / `reactor_num` / `task_worker_num`。
 ///

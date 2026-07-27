@@ -1,4 +1,4 @@
-//! 插件加载器（Phase 10.1 主入口）
+//! 插件加载器（主入口）
 //!
 //! ## PHP 对齐
 //!
@@ -44,7 +44,7 @@ use crate::error::{AddonLoaderError, AddonLoaderResult};
 use crate::manifest::AddonManifest;
 use crate::registry::AddonRegistry;
 
-/// 插件加载器（Phase 10.1 主入口）
+/// 插件加载器（主入口）
 ///
 /// 对齐 PHP `think\addons\Service`，统一管理插件发现/清单/注册/路由解析。
 ///

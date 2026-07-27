@@ -1,6 +1,6 @@
 //! `BelongsTo` 关联 — PHP 命名约定 + SQL 片段构造器
 //!
-//! Phase 4.2 核心交付物。本模块对齐 PHP `think\Model::belongsTo()` 行为，提供：
+//! 本模块对齐 PHP `think\Model::belongsTo()` 行为，提供：
 //!
 //! 1. [`default_belongs_to_foreign_key`]：PHP `belongsTo` 默认外键（`Str::snake(related_class) . '_id'`）
 //! 2. [`php_belongs_to`]：构造 `BelongsTo` 配置（应用 PHP 默认值）

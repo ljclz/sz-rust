@@ -1,6 +1,6 @@
 //! `HasMany` 关联 — PHP 命名约定 + SQL 片段构造器
 //!
-//! Phase 4.1 核心交付物。本模块对齐 PHP `think\Model::hasMany()` 行为，提供：
+//! 本模块对齐 PHP `think\Model::hasMany()` 行为，提供：
 //!
 //! 1. [`class_to_snake_case`]：PHP `Str::snake` 命名转换（如 `User` → `user`，`OrderItem` → `order_item`）
 //! 2. [`default_foreign_key`]：PHP `getForeignKey` 默认外键（`snake_case(class) . '_id'`）

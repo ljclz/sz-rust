@@ -1,4 +1,4 @@
-//! 插件注册中心（Phase 10.2）
+//! 插件注册中心
 //!
 //! ## PHP 对齐
 //!
@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 use crate::error::{AddonLoaderError, AddonLoaderResult};
 use crate::manifest::AddonManifest;
 
-/// 插件注册中心（Phase 10.2）
+/// 插件注册中心
 ///
 /// 对齐 PHP `think\addons\Service` 中隐式的插件状态管理。
 ///

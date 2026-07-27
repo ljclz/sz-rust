@@ -161,11 +161,7 @@ impl Env {
     /// - `#` 或 `;` 开头的行 → 注释，忽略
     /// - 空行 → 忽略
     /// - 引号包裹的值会去除引号（`"value"` → `value`）
-    fn parse_ini_content(
-        &self,
-        content: &str,
-        path: &str,
-    ) -> Result<(), EnvError> {
+    fn parse_ini_content(&self, content: &str, path: &str) -> Result<(), EnvError> {
         let mut data = self.data.write();
         let mut current_section: String = String::new();
 

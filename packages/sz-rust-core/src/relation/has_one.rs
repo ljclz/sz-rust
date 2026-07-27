@@ -1,6 +1,6 @@
 //! `HasOne` 关联 — PHP 命名约定 + SQL 片段构造器
 //!
-//! Phase 4.3 核心交付物。本模块对齐 PHP `think\Model::hasOne()` 行为，提供：
+//! 本模块对齐 PHP `think\Model::hasOne()` 行为，提供：
 //!
 //! 1. [`php_has_one`]：构造 `HasOne` 配置（应用 PHP 默认值，复用 `has_many::default_foreign_key`）
 //! 2. [`has_one_sql`]：生成 SQL 片段（用于测试验证）

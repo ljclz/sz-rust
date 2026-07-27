@@ -1,4 +1,4 @@
-//! 插件 RESTful 资源路由注入（Phase 10.3.5）
+//! 插件 RESTful 资源路由注入
 //!
 //! 借鉴 Rails 资源路由 + ThinkPHP 6 多应用机制。
 //!
@@ -17,7 +17,7 @@
 //! | update | PUT | `/<id>` | update |
 //! | delete | DELETE | `/<id>` | delete |
 //!
-//! ## addon 路由前缀注入（Phase 10.3.5 核心）
+//! ## addon 路由前缀注入（核心）
 //!
 //! 插件内 `Route::resource` 自动注入 addon 路由前缀：
 //!
@@ -224,7 +224,7 @@ impl ResourceOptions {
     }
 }
 
-/// 生成的资源路由集合（Phase 10.3.5 主交付物）
+/// 生成的资源路由集合
 #[derive(Debug, Clone)]
 pub struct ResourceRoute {
     /// 插件名
@@ -254,7 +254,7 @@ impl ResourceRoute {
     }
 }
 
-/// 构建资源路由（Phase 10.3.5 主入口）
+/// 构建资源路由（主入口）
 ///
 /// 借鉴 Rails 资源路由 + ThinkPHP 6 多应用机制，
 /// 自动注入 addon 路由前缀 `/addons/<addon>/<controller>`。
@@ -1053,7 +1053,7 @@ mod tests {
 
     #[test]
     fn test_r5_addon_prefix_injection() {
-        // Phase 10.3.5 核心：自动注入 addon 路由前缀
+        // 核心：自动注入 addon 路由前缀
         let route = build_resource_routes("cashier", "Order", &ResourceOptions::new()).unwrap();
         assert!(route.base_url.starts_with("/addons/cashier/"));
         for entry in &route.entries {

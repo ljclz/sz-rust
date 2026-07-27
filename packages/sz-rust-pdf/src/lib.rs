@@ -1,6 +1,6 @@
 //! # sz-rust-pdf — Excel/PDF 导出导入包
 //!
-//! Phase 5.9 核心交付物。本包实现 Excel/PDF 处理功能，对齐 PHP 项目实际使用的
+//! 本包实现 Excel/PDF 处理功能，对齐 PHP 项目实际使用的
 //! `phpoffice/phpspreadsheet` + `mikehaertl/php-pdftk` + `FPDM` API 子集。
 //!
 //! ## PHP 对齐说明
@@ -44,7 +44,7 @@
 //! | `saveAs($url)` | [`pdf_form::Pdf::save_as`] | 保存到文件 |
 //! | `send($filename)` | [`pdf_form::Pdf::to_bytes`] | 输出为字节流 |
 //!
-//! ### CSV 导出（[`csv_export`] 模块，Phase 7.9 新增）
+//! ### CSV 导出（[`csv_export`] 模块）
 //!
 //! | PHP API | Rust API | 说明 |
 //! |---------|----------|------|
@@ -52,13 +52,13 @@
 //! | `exportCsv($filename, $data)` | [`csv_export::export_csv_no_bom_to_writer`] / [`csv_export::export_csv_no_bom_to_bytes`] | 不带 BOM 的 CSV 导出 |
 //! | `fputcsv($fp, $fields)` | [`csv_export::write_csv_row`] | 写入单行 CSV |
 //!
-//! ### HTTP Java 服务客户端（[`java_client`] 模块，Phase 7.9 新增）
+//! ### HTTP Java 服务客户端（[`java_client`] 模块）
 //!
 //! | PHP API | Rust API | 说明 |
 //! |---------|----------|------|
 //! | `http_java_post($url, $data)` | [`java_client::http_java_post`] / [`java_client::JavaClient::post`] | POST JSON 到 Java PDF 服务 |
 //!
-//! ### 辅助函数（[`util`] 模块，Phase 7.9 新增）
+//! ### 辅助函数（[`util`] 模块）
 //!
 //! | PHP API | Rust API | 说明 |
 //! |---------|----------|------|
@@ -157,7 +157,7 @@ pub enum PdfError {
     #[error(transparent)]
     Lopdf(#[from] lopdf::Error),
 
-    /// HTTP 请求错误（对齐 PHP cURL 错误，Phase 7.9 新增）
+    /// HTTP 请求错误（对齐 PHP cURL 错误）
     #[error("HTTP error: {0}")]
     Http(String),
 }

@@ -1,4 +1,4 @@
-//! 定时任务调度接入（Phase 9.7）
+//! 定时任务调度接入
 //!
 //! ## PHP 对齐
 //!
@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use sz_orm_scheduler::{CronScheduler, JobHandler, ScheduledTask, Scheduler, SchedulerError};
 
-/// 调度器运行时配置（Phase 9.7）
+/// 调度器运行时配置
 #[derive(Debug, Clone)]
 pub struct SchedulerRuntimeConfig {
     /// 调度器 tick 间隔（毫秒，对齐 `CronScheduler::start(tick_ms)`）
@@ -49,7 +49,7 @@ impl SchedulerRuntimeConfig {
     }
 }
 
-/// 调度器运行时（Phase 9.7）
+/// 调度器运行时
 ///
 /// 封装 `sz_orm_scheduler::CronScheduler`，提供 tokio 兼容的调度循环。
 ///

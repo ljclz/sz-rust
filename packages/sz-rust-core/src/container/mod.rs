@@ -5,10 +5,10 @@
 //! ## 设计
 //!
 //! - 基于 `OnceCell` 实现全局单例（线程安全，初始化一次后只读）
-//! - Phase 0：持有 `AppConfig` + 5 个 DB 连接配置 + Cache/Log 占位
+//! - 持有 `AppConfig` + 5 个 DB 连接配置 + Cache/Log 占位
 //! - 后续阶段：接入 SZ-ORM `Pool`，替换 `DatabaseConnection` 为真正的连接池
-//! - Phase 6：接入 Cache facade
-//! - Phase 0.7：接入日志系统
+//! - 接入 Cache facade
+//! - 接入日志系统
 //! - DI阶段：接入服务容器（`bind`/`singleton`/`make`，对齐 PHP `app()->bind/make/singleton`）
 //!
 //! ## PHP 对齐
@@ -495,11 +495,11 @@ pub struct App {
     /// 应用配置（只读，初始化后不可变）
     config: AppConfig,
     /// 数据库连接配置（5 个：mysql/njszjt/ljclz/food/oceanbase）
-    /// Phase 1+ 将替换为 SZ-ORM `Pool` 实例
+    /// 后续将替换为 SZ-ORM `Pool` 实例
     db_connections: HashMap<String, DatabaseConnection>,
-    /// Cache 单例占位（Phase 6 接入真正的 Cache facade）
+    /// Cache 单例占位（接入真正的 Cache facade）
     cache: RwLock<Option<String>>,
-    /// Log 单例占位（Phase 0.7 接入 sz-orm-logger + tracing）
+    /// Log 单例占位（接入 sz-orm-logger + tracing）
     log: RwLock<Option<String>>,
     /// DI 服务容器（服务注册/解析/生命周期管理）
     container: Container,
@@ -557,8 +557,8 @@ impl App {
     ///
     /// 对齐 PHP `Db::connect('mysql')`。
     ///
-    /// Phase 0：返回 `DatabaseConnection` 配置。
-    /// Phase 1+：将替换为 SZ-ORM `Pool` 实例。
+    /// 当前返回 `DatabaseConnection` 配置。
+    /// 后续将替换为 SZ-ORM `Pool` 实例。
     pub fn db_connection(&self, name: &str) -> Option<&DatabaseConnection> {
         self.db_connections.get(name)
     }
@@ -573,7 +573,7 @@ impl App {
         self.db_connection(&self.config.database.default)
     }
 
-    /// 设置 Cache 单例（Phase 6 将替换为真正的 Cache facade）
+    /// 设置 Cache 单例（将替换为真正的 Cache facade）
     pub fn set_cache(&self, cache: impl Into<String>) {
         let mut guard = self.cache.write();
         *guard = Some(cache.into());
@@ -584,7 +584,7 @@ impl App {
         self.cache.read().clone()
     }
 
-    /// 设置 Log 单例（Phase 0.7 将替换为真正的日志系统）
+    /// 设置 Log 单例（将替换为真正的日志系统）
     pub fn set_log(&self, log: impl Into<String>) {
         let mut guard = self.log.write();
         *guard = Some(log.into());
@@ -664,10 +664,7 @@ impl App {
     /// 解析服务实例（带作用域 ID）
     ///
     /// 对齐 PHP `app()->make('key')` + 请求作用域支持。
-    pub fn make_with_scope<T: Send + Sync + 'static>(
-        &self,
-        scope_id: ScopeId,
-    ) -> Option<Arc<T>> {
+    pub fn make_with_scope<T: Send + Sync + 'static>(&self, scope_id: ScopeId) -> Option<Arc<T>> {
         self.container.make_with_scope::<T>(scope_id)
     }
 
