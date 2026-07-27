@@ -9,7 +9,7 @@
 //! 调用方（如 `getStatusTextAttr`）用 `!empty($data['status']) ? ... : ''` 包裹，
 //! 即 status 为 0 或不存在时返回空字符串 `''`。
 //!
-//! Rust 端用 [`Self::from_value`] 返回 `Option<Self>`，[`Self::name`] 返回 `&'static str`，
+//! Rust 端用 `Self::from_value` 返回 `Option<Self>`，`Self::name` 返回 `&'static str`，
 //! 调用方在访问器中按 PHP 语义判空。
 
 /// 商户状态 — 对齐 PHP `ContractStatusEnum::customerStatusData`

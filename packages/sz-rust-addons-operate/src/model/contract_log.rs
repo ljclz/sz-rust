@@ -11,17 +11,17 @@
 //! | `getAfterNumAttr` | [`ContractLog::accessor_for`] "after_num" | float 强转 |
 //! | `getChageNumAttr` | [`ContractLog::accessor_for`] "chage_num" | float 强转（PHP typo: chage） |
 //! | `getTypeInfoAttr` | [`ContractLog::accessor_for`] "type_info" | type 字段映射 |
-//! | `personnel()` belongsTo | NOTE(Phase 4) | `IndustryPersonnel` uid→uid |
-//! | `contract()` belongsTo | NOTE(Phase 4) | `Contract` contract_id→contract_id |
-//! | `dept()` belongsTo | NOTE(Phase 4) | `IndustryDept` dept_id→dept_id |
-//! | `customer()` belongsTo | NOTE(Phase 4) | `Customer` customer_id→customer_id |
+//! | `personnel()` belongsTo | NOTE(关联模块) | `IndustryPersonnel` uid→uid |
+//! | `contract()` belongsTo | NOTE(关联模块) | `Contract` contract_id→contract_id |
+//! | `dept()` belongsTo | NOTE(关联模块) | `IndustryDept` dept_id→dept_id |
+//! | `customer()` belongsTo | NOTE(关联模块) | `Customer` customer_id→customer_id |
 //!
 //! ## PHP `if($value) return (float)$value; return 0;` 行为复刻
 //!
 //! ContractLog 的 3 个 float 访问器（before_num/after_num/chage_num）使用
 //! `if($value) return (float)$value; return 0;` 模式，
 //! 与 Contract 的 `$value ? (float)$value : 0` 语义完全相同，
-//! 复用 [`contract::php_price_attr`]。
+//! 复用 `contract::php_price_attr`。
 //!
 //! ## PHP `getTypeInfoAttr` 行为
 //!
@@ -40,8 +40,8 @@
 //!
 //! ## 未实现（标 NOTE）
 //!
-//! - **业务方法**（detail/getLogs/getList/getStat/add）→ NOTE(Phase 5+ 控制器层)
-//! - **关联关系**（personnel/contract/dept/customer belongsTo）→ NOTE(Phase 4)
+//! - **业务方法**（detail/getLogs/getList/getStat/add）→ NOTE(控制器层)
+//! - **关联关系**（personnel/contract/dept/customer belongsTo）→ NOTE(关联模块)
 
 use crate::model::contract::php_price_attr;
 use crate::model::{get_i64, impl_empty_relation_loader};
@@ -240,7 +240,7 @@ impl Accessor for ContractLog {
     /// PHP ContractLog 访问器派发
     ///
     /// - `before_num` / `after_num` / `chage_num`：`if($value) return (float)$value; return 0;`
-    ///   复用 [`contract::php_price_attr`]
+    ///   复用 `contract::php_price_attr`
     /// - `type_info`：基于 `$data['type']` 返回 `{"text":"增加","color":"orange"}` 或
     ///   `{"text":"减少","color":"green"}`
     fn accessor_for(&self, field: &str, value: Option<&Value>) -> Value {

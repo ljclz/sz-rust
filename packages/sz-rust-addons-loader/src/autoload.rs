@@ -1,4 +1,4 @@
-//! 插件自动加载（Phase 10.1）
+//! 插件自动加载
 //!
 //! ## PHP 对齐
 //!
@@ -243,7 +243,9 @@ fn parse_dotted_controller(controller: &str) -> String {
     }
 
     // 末段转大驼峰（对齐 PHP `Str::studly`）
-    let last = parts.pop().expect("已通过 contains('.') 与 len 检查保证 parts 非空");
+    let last = parts
+        .pop()
+        .expect("已通过 contains('.') 与 len 检查保证 parts 非空");
     let last_studly = studly_case(last);
 
     // 前段保持原样（PHP 不转换），用 \ 拼回

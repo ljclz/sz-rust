@@ -308,7 +308,7 @@ impl RentareaController {
     ///
     /// # 简化说明
     ///
-    /// - 事务：NOTE(Phase 6)
+    /// - 事务：NOTE(事务模块)
     /// - 关联更新（customer.rentarea_ids）：已实现
     #[tracing::instrument(skip_all)]
     pub async fn sync(

@@ -12,7 +12,7 @@
 //! ## 外部依赖
 //!
 //! PHP 依赖 `app\common\service\icbcbank\DefaultIcbcClient` SDK 执行 HTTP 请求。
-//! Rust 端真实实现待后续 Phase 补全，当前提供 [`MockIcbcService`] 用于测试。
+//! Rust 端真实实现待后续补全，当前提供 [`MockIcbcService`] 用于测试。
 //!
 //! ## PHP 源码依据
 //!

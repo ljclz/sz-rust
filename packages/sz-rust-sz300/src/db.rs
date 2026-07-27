@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use sz_rust_core::orm::{Pool, PoolConfigBuilder};
 use sz_orm_sqlx::{
     MySqlPoolHandle, PgPoolHandle, SqlxMySqlConnectionFactory, SqlxPgConnectionFactory,
 };
+use sz_rust_core::orm::{Pool, PoolConfigBuilder};
 
 /// 初始化 MySQL 连接池
 pub async fn init_pool(config: &crate::config::AppConfig) -> anyhow::Result<Pool> {

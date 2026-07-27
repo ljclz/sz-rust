@@ -8,12 +8,13 @@
 //!
 //! ## 重构后
 //!
-//! - 控制器：解析请求参数 → 调用 [`product_service::ProductService`] → 格式化响应
+//! - 控制器：解析请求参数 → 调用 [`crate::services::product_service::ProductService`] → 格式化响应
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::product::Product`] 定义实体结构
 
-use crate::controllers::common::{parse_pagination, extract_fields_by_whitelist};
-use crate::services::product_service::{row_to_json, ProductFilters, ProductService};
+use crate::controllers::common::{extract_fields_by_whitelist, parse_pagination};
+use crate::services::product_service::{ProductFilters, ProductService};
+use crate::services::row_to_json;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
@@ -46,11 +47,8 @@ impl ProductController {
 
                 match ProductService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
-                        let list: Vec<serde_json::Value> = page_data
-                            .list
-                            .iter()
-                            .map(row_to_json)
-                            .collect();
+                        let list: Vec<serde_json::Value> =
+                            page_data.list.iter().map(row_to_json).collect();
                         info!("商品列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
@@ -143,15 +141,15 @@ impl ProductController {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    status: data
-                        .get("status")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(1) as i8,
+                    status: data.get("status").and_then(|v| v.as_i64()).unwrap_or(1) as i8,
                     created_at: None,
                     updated_at: None,
                 };
 
-                info!("创建商品: name={}, merchant_id={}", product.name, product.merchant_id);
+                info!(
+                    "创建商品: name={}, merchant_id={}",
+                    product.name, product.merchant_id
+                );
 
                 match ProductService::create(&state.db_pool, &product).await {
                     Ok(new_id) => {

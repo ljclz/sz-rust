@@ -9,14 +9,14 @@
 //! | `$append = ['rentarea_text','status_text']` | [`Customer::append()`] + [`Customer::append_state`] | 静态 append |
 //! | `getRentareaIdsAttr` | [`Customer::accessor_for`] "rentarea_ids" 分支 | CSV → Vec\<i64\> |
 //! | `getStatusTextAttr` | [`Customer::accessor_for`] "status_text" 分支 | 枚举映射 |
-//! | `getRentareaTextAttr` | [`Customer::accessor_for`] "rentarea_text" 分支 | NOTE(Phase 4) |
+//! | `getRentareaTextAttr` | [`Customer::accessor_for`] "rentarea_text" 分支 | NOTE(Repository 层) |
 //! | `setRentareaIdsAttr` | [`Customer::mutator_for`] "rentarea_ids" 分支 | Vec\<i64\> → CSV |
 //!
 //! ## 未实现（标 NOTE）
 //!
 //! - **`getRentareaTextAttr` 静态反查**：PHP 调 `Rentarea::where(['customer_id'=>$data['customer_id'],'is_delete'=>0])->column('position')`
-//!   Phase 2.10 无数据库连接，返回空字符串（与 PHP `customer_id` 为空时行为一致）。
-//!   完整实现在 Phase 4（Repository 层）。
+//!   当前无数据库连接，返回空字符串（与 PHP `customer_id` 为空时行为一致）。
+//!   完整实现在 Repository 层。
 
 use crate::enums::ContractStatusEnum;
 use crate::model::{csv_to_vec_i64, get_i64, impl_empty_relation_loader, vec_i64_to_csv};
@@ -84,7 +84,7 @@ impl Model for Customer {
 
     fn soft_delete_field() -> Option<&'static str> {
         // PHP 端用 `is_delete` 字段做软删除（在 `where` 中手动过滤）
-        // Phase 3 接入 SoftDelete trait 后正式启用
+        // 接入 SoftDelete trait 后正式启用
         None
     }
 }
@@ -188,7 +188,7 @@ impl Accessor for Customer {
     /// |-------|---------|------|
     /// | `rentarea_ids` | `getRentareaIdsAttr` | CSV → Vec\<i64\> |
     /// | `status_text` | `getStatusTextAttr` | 枚举映射中文 |
-    /// | `rentarea_text` | `getRentareaTextAttr` | 静态反查（NOTE Phase 4） |
+    /// | `rentarea_text` | `getRentareaTextAttr` | 静态反查（NOTE Repository 层） |
     fn accessor_for(&self, field: &str, _value: Option<&Value>) -> Value {
         match field {
             // PHP getRentareaIdsAttr($value): CSV → Vec<i64>
@@ -211,8 +211,8 @@ impl Accessor for Customer {
                 }
             }
             // PHP getRentareaTextAttr($value, $data): 静态反查 Rentarea 表
-            // Phase 2.10 无数据库连接，返回空字符串（与 PHP customer_id 为空时一致）
-            // NOTE(Phase 4): 完整实现 Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position')
+            // 当前无数据库连接，返回空字符串（与 PHP customer_id 为空时一致）
+            // NOTE(Repository 层): 完整实现 Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position')
             "rentarea_text" => json!(""),
             _ => Value::Null,
         }
@@ -362,9 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn test_accessor_rentarea_text_returns_empty_in_phase_2_10() {
-        // Phase 2.10 无数据库连接，rentarea_text 始终返回空字符串
-        // 完整实现在 Phase 4（Repository 层）
+    fn test_accessor_rentarea_text_returns_empty_without_db() {
+        // 当前无数据库连接，rentarea_text 始终返回空字符串
+        // 完整实现在 Repository 层
         let model = Customer::new().with_data("customer_id", json!(1));
         let value = model.accessor_for("rentarea_text", None);
         assert_eq!(value, json!(""));

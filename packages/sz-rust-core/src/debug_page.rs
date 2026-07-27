@@ -81,8 +81,7 @@ impl StackFrame {
         for (idx, line_content) in lines.iter().enumerate() {
             let line_num = idx + 1;
             if line_num >= start && line_num <= end {
-                self.source_lines
-                    .push((line_num, line_content.to_string()));
+                self.source_lines.push((line_num, line_content.to_string()));
             }
         }
     }
@@ -306,7 +305,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans
     // 堆栈
     if config.show_stack && !error.stack.is_empty() {
         html.push_str("<div class=\"section\">\n");
-        html.push_str("  <div class=\"section-title\">Stack frames (" );
+        html.push_str("  <div class=\"section-title\">Stack frames (");
         html.push_str(&error.stack.len().to_string());
         html.push_str(")</div>\n");
         html.push_str("  <div class=\"section-body\">\n");
@@ -376,7 +375,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans
     }
 
     html.push_str("</div>\n");
-    html.push_str("<div class=\"footer\">SZ-Rust Whoops-style Debugger — debug mode enabled</div>\n");
+    html.push_str(
+        "<div class=\"footer\">SZ-Rust Whoops-style Debugger — debug mode enabled</div>\n",
+    );
     html.push_str("</body>\n</html>\n");
 
     html
@@ -475,10 +476,7 @@ pub fn debug_error_response(
 
     (
         status,
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "text/html; charset=utf-8",
-        )],
+        [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
         html,
     )
         .into_response()
@@ -494,12 +492,7 @@ pub fn from_panic(panic_info: &std::panic::PanicHookInfo<'_>) -> DebugError {
         .payload()
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
-        .or_else(|| {
-            panic_info
-                .payload()
-                .downcast_ref::<String>()
-                .cloned()
-        })
+        .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "<unknown panic payload>".to_string());
 
     let (file, line) = panic_info
@@ -728,8 +721,11 @@ mod tests {
 
     #[test]
     fn test_render_debug_html_hides_stack_when_disabled() {
-        let error = DebugError::new("Err", "msg", "test.rs", 1)
-            .with_frame(StackFrame::new("frame1.rs", 10, "func1"));
+        let error = DebugError::new("Err", "msg", "test.rs", 1).with_frame(StackFrame::new(
+            "frame1.rs",
+            10,
+            "func1",
+        ));
         let mut config = DebugPageConfig::development();
         config.show_stack = false;
         let html = render_debug_html(&error, &config);
@@ -765,7 +761,10 @@ mod tests {
     #[test]
     fn test_render_debug_html_redacts_sensitive_headers() {
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", HeaderValue::from_static("Bearer secret123"));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer secret123"),
+        );
         headers.insert("cookie", HeaderValue::from_static("session=abc"));
 
         let error = DebugError::new("Err", "msg", "test.rs", 1).with_request(
@@ -829,10 +828,7 @@ mod tests {
 
     #[test]
     fn test_render_production_html_escapes_message() {
-        let html = render_production_html(
-            StatusCode::BAD_REQUEST,
-            "<script>alert('xss')</script>",
-        );
+        let html = render_production_html(StatusCode::BAD_REQUEST, "<script>alert('xss')</script>");
         assert!(!html.contains("<script>alert"));
         assert!(html.contains("&lt;script&gt;"));
     }
@@ -915,8 +911,8 @@ mod tests {
         let file_path = temp.path().join("main.rs");
         std::fs::write(&file_path, "line1\nline2\nline3\nline4\nline5\n").unwrap();
 
-        let error = DebugError::new("Err", "msg", file_path.to_str().unwrap(), 3)
-            .with_source_snippet(1);
+        let error =
+            DebugError::new("Err", "msg", file_path.to_str().unwrap(), 3).with_source_snippet(1);
 
         // 主错误位置应作为虚拟帧插入 stack[0]
         assert!(!error.stack.is_empty());

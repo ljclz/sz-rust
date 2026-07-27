@@ -1,6 +1,6 @@
 //! 模板布局 — 对齐 PHP `think\Template` 的布局（layout）机制
 //!
-//! Phase 7.3 核心交付物。实现对齐 PHP `Template::compiler()` 和 `Template::parseLayout()`
+//! 实现对齐 PHP `Template::compiler()` 和 `Template::parseLayout()`
 //! 的布局功能。
 //!
 //! ## PHP 对齐说明

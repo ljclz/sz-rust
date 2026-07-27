@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use sz_rust_core::orm::{value_to_json, Pool, Value};
+use sz_rust_core::orm::{Pool, Value};
 
 /// 设备列表筛选条件
 #[derive(Debug)]
@@ -217,12 +217,10 @@ impl DeviceService {
         let sql =
             "UPDATE device SET merchant_id = 0, bind_at = NULL, status = 0 WHERE device_id = ?";
         let params = [Value::I64(device_id)];
-        conn.execute_with_params(sql, &params)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "设备解绑失败: device_id={}", device_id);
-                "解绑失败".to_string()
-            })?;
+        conn.execute_with_params(sql, &params).await.map_err(|e| {
+            tracing::error!(error = %e, "设备解绑失败: device_id={}", device_id);
+            "解绑失败".to_string()
+        })?;
 
         Ok(())
     }
@@ -301,22 +299,13 @@ impl DeviceService {
             Value::String(fw_version.to_string()),
             Value::I64(device_id),
         ];
-        conn.execute_with_params(sql, &params)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "设备状态更新失败: device_id={}", device_id);
-                "状态更新失败".to_string()
-            })?;
+        conn.execute_with_params(sql, &params).await.map_err(|e| {
+            tracing::error!(error = %e, "设备状态更新失败: device_id={}", device_id);
+            "状态更新失败".to_string()
+        })?;
 
         Ok(())
     }
 }
 
-/// 将 DB 行转换为 JSON（供控制器使用）
-pub fn row_to_json(row: &HashMap<String, Value>) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (k, v) in row {
-        obj.insert(k.clone(), value_to_json(v.clone()));
-    }
-    serde_json::Value::Object(obj)
-}
+// 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）

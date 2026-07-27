@@ -59,8 +59,9 @@ pub struct PgDatabaseConfig {
 /// - `SZ300_SERVER_HOST` (默认 0.0.0.0)
 /// - `SZ300_SERVER_PORT` (默认 8300)
 pub fn load_config() -> anyhow::Result<AppConfig> {
-    let db_password = std::env::var("SZ300_DB_PASSWORD")
-        .map_err(|_| anyhow::anyhow!("SZ300_DB_PASSWORD 环境变量未设置 — 请在启动前设置数据库密码"))?;
+    let db_password = std::env::var("SZ300_DB_PASSWORD").map_err(|_| {
+        anyhow::anyhow!("SZ300_DB_PASSWORD 环境变量未设置 — 请在启动前设置数据库密码")
+    })?;
 
     Ok(AppConfig {
         server: ServerConfig {
@@ -68,20 +69,16 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(8300),
-            host: std::env::var("SZ300_SERVER_HOST")
-                .unwrap_or_else(|_| "0.0.0.0".into()),
+            host: std::env::var("SZ300_SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".into()),
         },
         database: DatabaseConfig {
-            host: std::env::var("SZ300_DB_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".into()),
+            host: std::env::var("SZ300_DB_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
             port: std::env::var("SZ300_DB_PORT")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3306),
-            database: std::env::var("SZ300_DB_NAME")
-                .unwrap_or_else(|_| "sz300".into()),
-            username: std::env::var("SZ300_DB_USER")
-                .unwrap_or_else(|_| "root".into()),
+            database: std::env::var("SZ300_DB_NAME").unwrap_or_else(|_| "sz300".into()),
+            username: std::env::var("SZ300_DB_USER").unwrap_or_else(|_| "root".into()),
             password: db_password,
         },
     })
@@ -96,20 +93,18 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
 /// - `SZ300_PG_USER` (默认 postgres)
 /// - `SZ300_PG_PASSWORD` (必填)
 pub fn pg_config() -> anyhow::Result<PgDatabaseConfig> {
-    let pg_password = std::env::var("SZ300_PG_PASSWORD")
-        .map_err(|_| anyhow::anyhow!("SZ300_PG_PASSWORD 环境变量未设置 — 请在启动前设置 PostgreSQL 密码"))?;
+    let pg_password = std::env::var("SZ300_PG_PASSWORD").map_err(|_| {
+        anyhow::anyhow!("SZ300_PG_PASSWORD 环境变量未设置 — 请在启动前设置 PostgreSQL 密码")
+    })?;
 
     Ok(PgDatabaseConfig {
-        host: std::env::var("SZ300_PG_HOST")
-            .unwrap_or_else(|_| "127.0.0.1".into()),
+        host: std::env::var("SZ300_PG_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
         port: std::env::var("SZ300_PG_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(5432),
-        database: std::env::var("SZ300_PG_NAME")
-            .unwrap_or_else(|_| "sz300".into()),
-        username: std::env::var("SZ300_PG_USER")
-            .unwrap_or_else(|_| "postgres".into()),
+        database: std::env::var("SZ300_PG_NAME").unwrap_or_else(|_| "sz300".into()),
+        username: std::env::var("SZ300_PG_USER").unwrap_or_else(|_| "postgres".into()),
         password: pg_password,
     })
 }

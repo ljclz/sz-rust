@@ -16,6 +16,12 @@
 //! | `prop_validate_rule_never_panics` | `validate::Validate::check_rule` | 任意规则字符串不 panic |
 //! | `prop_route_config_load_never_panics` | `routing::load_routes_from_yaml_str` | 任意 YAML 字符串不 panic |
 //! | `prop_handler_ref_parse_never_panics` | `routing::HandlerRef::parse` | 任意字符串不 panic |
+//! | `prop_sql_injection_in_validate_never_panics` | `validate::Validate::check_rule` | SQL 注入 payload 不 panic |
+//! | `prop_sql_injection_in_response_never_panics` | `response::ApiResponse` | SQL 注入 payload 序列化不 panic |
+//! | `prop_http_path_semantic_parse` | `router::parse_path` | 语义有效 HTTP 路径正确解析 |
+//! | `prop_handler_ref_semantic_parse` | `routing::HandlerRef::parse` | 语义有效 HandlerRef 不 panic |
+//! | `prop_validation_rule_semantic_check` | `validate::Validate::check_rule` | 语义有效规则不 panic |
+//! | `prop_sql_injection_in_yaml_config_never_panics` | `routing::load_routes_from_yaml_str` | SQL 注入 YAML 不 panic |
 //!
 //! ## 运行方式
 //!
@@ -142,5 +148,212 @@ proptest! {
     #[test]
     fn prop_handler_ref_parse_never_panics(input in ".{0,200}") {
         let _ = HandlerRef::parse(&input);
+    }
+}
+
+// ============================================================================
+// 语义化结构化 Fuzz 测试（2026-07-26 新增 — Brooks-Lint T5 Coverage Illusion 修复）
+//
+// 以下测试针对关键路径生成**语义有效**的畸形输入，覆盖：
+// - SQL 注入向量（验证参数化查询与转义机制不 panic）
+// - 路由路径语义（生成合法 HTTP 路径变体）
+// - HandlerRef 语义（生成 Controller@action 格式字符串）
+// - 验证规则语义（生成 require|max:255|email 格式规则）
+// ============================================================================
+
+/// 生成 SQL 注入 payload 字符串的策略
+///
+/// 包含经典 SQL 注入向量：`' OR '1'='1`、`'; DROP TABLE--`、UNION SELECT 等，
+/// 用于验证参数化查询相关 API 在恶意输入下不 panic。
+fn sql_injection_payload() -> BoxedStrategy<String> {
+    prop_oneof![
+        Just("' OR '1'='1".to_string()),
+        Just("' OR 1=1 --".to_string()),
+        Just("\" OR \"1\"=\"1".to_string()),
+        Just("' UNION SELECT NULL--".to_string()),
+        Just("' UNION ALL SELECT 1,2,3--".to_string()),
+        Just("'; DROP TABLE users--".to_string()),
+        Just("'; INSERT INTO admin VALUES('x','y')--".to_string()),
+        Just("'/*comment*/OR/*comment*/'1'='1".to_string()),
+        Just("' OR 'x' LIKE 'x".to_string()),
+        Just("%27%20OR%20%271%27%3D%271".to_string()),
+        Just("\\' OR \\'1\\'=\\'1".to_string()),
+        ".{0,100}".prop_map(|s| format!("' OR '{}'='1", s)),
+        (
+            ".{0,20}",
+            prop_oneof![
+                Just("SELECT".to_string()),
+                Just("INSERT".to_string()),
+                Just("UPDATE".to_string()),
+                Just("DELETE".to_string()),
+                Just("DROP".to_string()),
+                Just("UNION".to_string())
+            ]
+        )
+            .prop_map(|(prefix, kw)| format!("{} {} --", prefix, kw)),
+    ]
+    .boxed()
+}
+
+/// 生成语义有效的 HTTP 路径策略
+///
+/// 生成形如 `/api/v1/users/123`、`/admin/dashboard`、`/` 等合法路径变体，
+/// 用于验证路由解析器在语义有效输入下行为正确。
+fn http_path_semantic() -> BoxedStrategy<String> {
+    prop_oneof![
+        Just("/".to_string()),
+        "[a-z]{1,10}".prop_map(|s| format!("/{}", s)),
+        ("[a-z]{1,10}", "[a-z]{1,10}").prop_map(|(a, b)| format!("/{}/{}", a, b)),
+        ("[a-z]{1,10}", "[a-z]{1,10}", "[0-9]{1,3}")
+            .prop_map(|(a, b, c)| format!("/{}/{}/{}", a, b, c)),
+        ("[a-z]{1,10}", "[a-z]{1,10}", "[0-9]{1,10}")
+            .prop_map(|(a, b, c)| format!("/{}/{}/{}", a, b, c)),
+        ("[a-z]{1,10}", "[a-z]{1,10}", "[a-z]{1,5}=[0-9]{1,5}")
+            .prop_map(|(a, b, q)| format!("/{}/{}?{}", a, b, q)),
+    ]
+    .boxed()
+}
+
+/// 生成 `Controller@action` 格式的 HandlerRef 字符串策略
+///
+/// 包含合法格式与畸形变体（缺少 @、空 action、特殊字符等），
+/// 用于验证 HandlerRef::parse 在语义变体下行为正确。
+fn handler_ref_semantic() -> BoxedStrategy<String> {
+    prop_oneof![
+        ("[A-Z][a-zA-Z]{0,20}", "[a-z][a-zA-Z]{0,20}").prop_map(|(c, a)| format!("{}@{}", c, a)),
+        ("[A-Z][a-zA-Z]{0,20}", "[a-z][a-zA-Z]{0,20}").prop_map(|(c, a)| format!("{}/{}", c, a)),
+        "[A-Z][a-zA-Z]{0,20}".prop_map(|c| format!("{}@", c)),
+        "[a-z][a-zA-Z]{0,20}".prop_map(|a| format!("@{}", a)),
+        (
+            "[A-Z][a-zA-Z]{0,10}",
+            "[a-z][a-zA-Z]{0,10}",
+            "[a-z][a-zA-Z]{0,10}"
+        )
+            .prop_map(|(a, b, c)| format!("{}@{}@{}", a, b, c)),
+        Just("".to_string()),
+        Just("@".to_string()),
+    ]
+    .boxed()
+}
+
+/// 生成语义有效的验证规则字符串策略
+///
+/// 生成形如 `require|max:255|email`、`integer|between:1,100` 等规则，
+/// 用于验证 Validate::check_rule 在语义有效规则下行为正确。
+fn validation_rule_semantic() -> BoxedStrategy<String> {
+    fn rule_unit() -> BoxedStrategy<String> {
+        prop_oneof![
+            Just("require".to_string()),
+            Just("integer".to_string()),
+            Just("float".to_string()),
+            Just("boolean".to_string()),
+            Just("email".to_string()),
+            Just("url".to_string()),
+            Just("date".to_string()),
+            Just("ip".to_string()),
+            Just("alpha".to_string()),
+            Just("alphaNum".to_string()),
+            Just("alphaDash".to_string()),
+            Just("chs".to_string()),
+            Just("chsAlpha".to_string()),
+            Just("mobile".to_string()),
+            Just("idCard".to_string()),
+            "[a-z]{1,10}".prop_map(|s| s),
+            ("[a-z]{1,10}", "[0-9]{1,5}").prop_map(|(r, n)| format!("{}:{}", r, n)),
+        ]
+        .boxed()
+    }
+
+    prop_oneof![
+        rule_unit(),
+        collection::vec(rule_unit(), 2..5).prop_map(|rs| rs.join("|")),
+        collection::vec(rule_unit(), 2..5).prop_map(|rs| rs.join(",")),
+        Just("".to_string()),
+        Just("|".to_string()),
+        Just(",".to_string()),
+    ]
+    .boxed()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    /// 语义测试：SQL 注入 payload 作为参数值传入 validate::check_rule 不 panic
+    ///
+    /// 验证不变量：对于任意 SQL 注入 payload 字符串，`check_rule` 必须返回 Ok 或 Err，不 panic。
+    /// 这确保恶意输入不会破坏验证器内部状态。
+    #[test]
+    fn prop_sql_injection_in_validate_never_panics(
+        payload in sql_injection_payload(),
+        rule in validation_rule_semantic()
+    ) {
+        let validate = Validate::new();
+        let _ = validate.check_rule(&Value::String(payload), &rule);
+    }
+
+    /// 语义测试：SQL 注入 payload 作为 JSON 字符串值传入 ApiResponse 不 panic
+    ///
+    /// 验证不变量：对于任意 SQL 注入 payload，`ApiResponse::success` 必须能序列化为 JSON。
+    /// 这确保恶意输入不会破坏响应序列化（XSS/响应拆分防护）。
+    #[test]
+    fn prop_sql_injection_in_response_never_panics(
+        payload in sql_injection_payload()
+    ) {
+        let response = ApiResponse::success(Value::String(payload), "ok");
+        let json = serde_json::to_string(&response);
+        prop_assert!(json.is_ok());
+    }
+
+    /// 语义测试：语义有效的 HTTP 路径传入 parse_path 不 panic 且返回合理结构
+    ///
+    /// 验证不变量：对于语义有效的 HTTP 路径，`parse_path` 必须返回非空 ParsedPath。
+    /// 这确保路由解析器在合法路径下行为正确。
+    #[test]
+    fn prop_http_path_semantic_parse(
+        path in http_path_semantic()
+    ) {
+        let parsed = parse_path(&path);
+        prop_assert!(
+            !parsed.app.is_empty() || !parsed.controller.is_empty() || !parsed.action.is_empty(),
+            "路径 {:?} 解析后所有字段均为空",
+            path
+        );
+    }
+
+    /// 语义测试：语义有效的 HandlerRef 字符串传入 parse 不 panic
+    ///
+    /// 验证不变量：对于语义变体的 HandlerRef 字符串，`parse` 必须返回 Ok 或 Err，不 panic。
+    /// 这确保 HandlerRef 解析器在合法/畸形变体下都健壮。
+    #[test]
+    fn prop_handler_ref_semantic_parse(
+        input in handler_ref_semantic()
+    ) {
+        let _ = HandlerRef::parse(&input);
+    }
+
+    /// 语义测试：语义有效的验证规则传入 check_rule 不 panic
+    ///
+    /// 验证不变量：对于语义有效的验证规则字符串，`check_rule` 必须返回 Ok 或 Err，不 panic。
+    /// 这确保验证器在合法/畸形规则组合下都健壮。
+    #[test]
+    fn prop_validation_rule_semantic_check(
+        rule in validation_rule_semantic()
+    ) {
+        let validate = Validate::new();
+        let value = Value::String("test_value".to_string());
+        let _ = validate.check_rule(&value, &rule);
+    }
+
+    /// 语义测试：SQL 注入 payload 作为 YAML 路由配置传入不 panic
+    ///
+    /// 验证不变量：对于包含 SQL 注入 payload 的 YAML 字符串，
+    /// `load_routes_from_yaml_str` 必须返回 Ok 或 Err，不 panic。
+    /// 这确保路由配置加载器在恶意输入下健壮。
+    #[test]
+    fn prop_sql_injection_in_yaml_config_never_panics(
+        payload in sql_injection_payload()
+    ) {
+        let yaml = format!("route:\n  path: {}\n  handler: TestController@index", payload);
+        let _ = load_routes_from_yaml_str(&yaml);
     }
 }

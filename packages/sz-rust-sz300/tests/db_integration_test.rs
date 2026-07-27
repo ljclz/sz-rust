@@ -66,11 +66,42 @@ async fn ensure_mysql_available() -> Option<config::AppConfig> {
     }
 }
 
+/// 检查 PostgreSQL 是否可达，不可达则返回 None（测试跳过）
+///
+/// 与 `ensure_mysql_available` 对齐：CI 中可通过此函数预检 PG 可达性，
+/// 避免在 PG 不可用时测试以非预期错误码退出。
+async fn ensure_pg_available() -> Option<config::PgDatabaseConfig> {
+    let cfg = pg_test_config();
+    match db::init_pg_pool(&cfg).await {
+        Ok(pool) => match pool.acquire().await {
+            Ok(mut conn) => match conn.query("SELECT 1").await {
+                Ok(_) => {
+                    pool.close_all().await;
+                    Some(cfg)
+                }
+                Err(e) => {
+                    eprintln!("⚠️ PostgreSQL 查询失败，跳过测试: {}", e);
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("⚠️ PostgreSQL 获取连接失败，跳过测试: {}", e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("⚠️ PostgreSQL 不可达，跳过测试: {}", e);
+            None
+        }
+    }
+}
+
 #[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
 #[tokio::test]
 async fn test_mysql_pool_init_and_query() {
-    let cfg = ensure_mysql_available().await
-        .expect("MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)");
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
 
     let pool = db::init_pool(&cfg).await.expect("MySQL 连接池初始化失败");
 
@@ -95,10 +126,13 @@ async fn test_mysql_pool_init_and_query() {
 #[ignore = "需真实 PostgreSQL 18，手动运行: cargo test -- --ignored"]
 #[tokio::test]
 async fn test_pg_pool_init_and_query() {
-    let pg_cfg = pg_test_config();
+    let pg_cfg = ensure_pg_available().await.expect(
+        "PostgreSQL 不可达，请启动 PG 18 (127.0.0.1:5432, postgres/test123, sz_orm_test 数据库)",
+    );
 
-    let pool = db::init_pg_pool(&pg_cfg).await
-        .expect("PostgreSQL 不可达，请启动 PG 18 (127.0.0.1:5432, postgres/test123, sz_orm_test 数据库)");
+    let pool = db::init_pg_pool(&pg_cfg)
+        .await
+        .expect("PG 连接池初始化失败");
 
     // 验证连接池配置：db.rs 中 max_size=10, min_idle=1
     assert_eq!(pool.config().max_size, 10, "PG max_size 应为 10");
@@ -120,8 +154,9 @@ async fn test_pg_pool_init_and_query() {
 #[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
 #[tokio::test]
 async fn test_mysql_create_table_and_crud() {
-    let cfg = ensure_mysql_available().await
-        .expect("MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)");
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
     let mut conn = pool.acquire().await.expect("获取连接失败");
@@ -138,9 +173,7 @@ async fn test_mysql_create_table_and_crud() {
         value INT DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )";
-    conn.execute(create_sql)
-        .await
-        .expect("建表失败");
+    conn.execute(create_sql).await.expect("建表失败");
 
     // 插入
     let affected = conn
@@ -186,8 +219,9 @@ async fn test_mysql_create_table_and_crud() {
 #[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
 #[tokio::test]
 async fn test_mysql_sql_injection_protection() {
-    let cfg = ensure_mysql_available().await
-        .expect("MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)");
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
     let mut conn = pool.acquire().await.expect("获取连接失败");
@@ -294,8 +328,9 @@ async fn test_mysql_sql_injection_protection() {
 #[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
 #[tokio::test]
 async fn test_mysql_product_service_like_injection_protection() {
-    let cfg = ensure_mysql_available().await
-        .expect("MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)");
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
     let mut conn = pool.acquire().await.expect("获取连接失败");

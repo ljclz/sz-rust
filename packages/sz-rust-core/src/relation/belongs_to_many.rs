@@ -1,6 +1,6 @@
 //! `BelongsToMany` 关联 — PHP 命名约定 + SQL 片段构造器
 //!
-//! Phase 4.4 核心交付物。本模块对齐 PHP `think\Model::belongsToMany()` 行为，提供：
+//! 本模块对齐 PHP `think\Model::belongsToMany()` 行为，提供：
 //!
 //! 1. [`default_junction_table`]：PHP 默认中间表名（`current_snake + '_' + related_snake`）
 //! 2. [`default_current_fk`]：PHP 默认 localKey（当前模型 FK，对应 sz-orm-core `foreign_key`）

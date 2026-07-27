@@ -4,8 +4,8 @@
 //! 当前提供：分页参数解析（page/page_size）。
 
 use serde_json::Value as JsonValue;
-use sz_rust_core::orm::Value;
 use std::collections::HashMap;
+use sz_rust_core::orm::Value;
 
 /// 解析分页参数（page/page_size），返回 (page, page_size)
 ///
@@ -36,7 +36,10 @@ pub fn parse_pagination(data: &JsonValue, default_page_size: i64) -> (i64, i64) 
 /// - Number(f64) -> Value::F64（无法转为 i64 的浮点数）
 /// - String -> Value::String
 /// - 其他类型（Array/Object）-> 跳过
-pub fn extract_fields_by_whitelist(data: &JsonValue, allowed_keys: &[&str]) -> HashMap<String, Value> {
+pub fn extract_fields_by_whitelist(
+    data: &JsonValue,
+    allowed_keys: &[&str],
+) -> HashMap<String, Value> {
     let mut fields: HashMap<String, Value> = HashMap::new();
     for key in allowed_keys {
         if let Some(val) = data.get(*key) {
@@ -124,7 +127,9 @@ mod tests {
         assert_eq!(fields.len(), 2);
         if let Some(Value::String(s)) = fields.get("name") {
             assert_eq!(s, "apple");
-        } else { panic!("name should be String"); }
+        } else {
+            panic!("name should be String");
+        }
     }
 
     #[test]
@@ -181,6 +186,8 @@ mod tests {
         assert_eq!(fields.len(), 1);
         if let Some(Value::F64(f)) = fields.get("weight") {
             assert!((f - 1.5).abs() < 0.001);
-        } else { panic!("weight should be F64"); }
+        } else {
+            panic!("weight should be F64");
+        }
     }
 }

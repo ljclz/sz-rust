@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use sz_rust_core::orm::{value_to_json, Pool, Value};
+use sz_rust_core::orm::{Pool, Value};
 
 use crate::models::order::Order;
 use crate::models::order_item::OrderItem;
@@ -120,10 +120,13 @@ impl OrderService {
 
         // 总数查询
         let count_sql = format!("SELECT COUNT(*) as total FROM `order` {}", where_clause);
-        let count_rows = conn.query_with_params(&count_sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "订单列表 COUNT 查询失败");
-            "查询失败".to_string()
-        })?;
+        let count_rows = conn
+            .query_with_params(&count_sql, &params)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "订单列表 COUNT 查询失败");
+                "查询失败".to_string()
+            })?;
         let total: i64 = count_rows
             .first()
             .and_then(|row| row.get("total"))
@@ -138,10 +141,13 @@ impl OrderService {
         let mut list_params = params.clone();
         list_params.push(Value::I64(page_size));
         list_params.push(Value::I64(offset));
-        let rows = conn.query_with_params(&list_sql, &list_params).await.map_err(|e| {
-            tracing::error!(error = %e, "订单列表查询失败");
-            "查询失败".to_string()
-        })?;
+        let rows = conn
+            .query_with_params(&list_sql, &list_params)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "订单列表查询失败");
+                "查询失败".to_string()
+            })?;
 
         Ok(OrderPage { list: rows, total })
     }
@@ -154,10 +160,7 @@ impl OrderService {
     /// - `Ok(None)`：订单不存在
     /// - `Err(msg)`：DB 错误（msg 不泄露内部信息）
     #[tracing::instrument(skip(pool))]
-    pub async fn get_with_items(
-        pool: &Pool,
-        order_id: i64,
-    ) -> Result<Option<OrderDetail>, String> {
+    pub async fn get_with_items(pool: &Pool, order_id: i64) -> Result<Option<OrderDetail>, String> {
         let mut conn = pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "订单详情获取 DB 连接失败: order_id={}", order_id);
             "数据库连接失败".to_string()
@@ -203,11 +206,7 @@ impl OrderService {
     /// - `order`：订单实体（`order_id` 字段被忽略，由 DB 自增生成；`status` 字段被忽略，固定为 1=待支付）
     /// - `items`：订单项列表
     #[tracing::instrument(skip(pool, order, items))]
-    pub async fn create(
-        pool: &Pool,
-        order: &Order,
-        items: &[OrderItem],
-    ) -> Result<i64, String> {
+    pub async fn create(pool: &Pool, order: &Order, items: &[OrderItem]) -> Result<i64, String> {
         let mut conn = pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "创建订单获取 DB 连接失败: order_no={}", order.order_no);
             "数据库连接失败".to_string()
@@ -270,11 +269,4 @@ impl OrderService {
     }
 }
 
-/// 将 DB 行转换为 JSON（供控制器使用）
-pub fn row_to_json(row: &HashMap<String, Value>) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (k, v) in row {
-        obj.insert(k.clone(), value_to_json(v.clone()));
-    }
-    serde_json::Value::Object(obj)
-}
+// 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）

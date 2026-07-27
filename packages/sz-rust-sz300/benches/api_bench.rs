@@ -26,9 +26,13 @@ fn build_auth() -> JwtAuthenticator {
 /// 便于未来切换到 auth.encode(...) 路径。
 fn create_test_token(_auth: &JwtAuthenticator) -> String {
     // 直接从 encoder 编码
-    let encoder = sz_rust_core::orm::jwt::JwtEncoder::new("bench-test-secret-key-00000000000000000000");
+    let encoder =
+        sz_rust_core::orm::jwt::JwtEncoder::new("bench-test-secret-key-00000000000000000000");
     encoder
-        .encode(&sz_rust_core::orm::jwt::JwtClaims::new("bench-user", 9999999999))
+        .encode(&sz_rust_core::orm::jwt::JwtClaims::new(
+            "bench-user",
+            9999999999,
+        ))
         .expect("token 生成失败")
 }
 
@@ -84,7 +88,7 @@ fn bench_jwt_authenticate(c: &mut Criterion) {
 // ─── 基准测试: 文件服务 URL 生成 ──────────────────────────────────────────
 
 fn bench_file_url_generation(c: &mut Criterion) {
-    let _filename = "product_photo.jpg";  // 保留作为基准输入标识，不参与 URL 生成逻辑
+    let _filename = "product_photo.jpg"; // 保留作为基准输入标识，不参与 URL 生成逻辑
     let ext = "jpg";
 
     c.bench_function("file/generate_url", |b| {

@@ -1,4 +1,4 @@
-//! 文件上传一致性测试（PHP 对比） — Phase 5.10 集成测试
+//! 文件上传一致性测试（PHP 对比）
 //!
 //! 本文件验证 sz-rust 文件上传模块与 PHP `think\File` / `think\file\UploadedFile`
 //! / `app\common\library\storage\*` 的行为一致性，覆盖：

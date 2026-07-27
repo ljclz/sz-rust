@@ -12,7 +12,7 @@
 //! ## 外部依赖
 //!
 //! PHP 依赖 `app\common\service\ccb\ccbPay` SDK 执行 HTTP 请求。
-//! Rust 端真实实现待后续 Phase 补全（需要 ccbPay SDK 移植），
+//! Rust 端真实实现待后续补全（需要 ccbPay SDK 移植），
 //! 当前提供 [`MockCcbService`] 用于测试。
 //!
 //! ## PHP 源码依据

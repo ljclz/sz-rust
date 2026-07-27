@@ -495,14 +495,14 @@ pub fn validate_find_order(registry: &HookRegistry) -> Result<(), String> {
 }
 
 // ============================================================================
-// HookContextExt — sz-rust 端 Builder 链式 API 扩展（Phase 3.9）
+// HookContextExt — sz-rust 端 Builder 链式 API 扩展
 // ============================================================================
 //
 // sz-orm-core::HookContext 已提供 `with_tenant`/`with_operator`/`with_timestamp`
 // 三个 builder 方法（消耗 self 返回新实例），但 `set_meta` 是 `&mut self` 方法
 // （对齐 PHP `$ctx->metadata['key'] = $value` 就地修改语义）。
 //
-// Phase 3.9 在 sz-rust 端扩展 `HookContextExt` trait，补充 `with_meta`/`with_metas`
+// 在 sz-rust 端扩展 `HookContextExt` trait，补充 `with_meta`/`with_metas`
 // builder 链式 API（消耗 self 返回新实例），便于一行链式构造完整上下文：
 //
 // ```
@@ -529,7 +529,7 @@ pub fn validate_find_order(registry: &HookRegistry) -> Result<(), String> {
 // - `Worklogs::before_insert` 通过 `$model->stat_day = date('Ymd')` 设置统计日字段
 // - 这些操作在 sz-rust 端通过 `Hookable::before_insert(&mut HookContext)` 修改上下文
 //
-// Phase 3.9 的 HookContext Builder 提供请求级别元数据的链式构造能力，对齐 PHP
+// HookContext Builder 提供请求级别元数据的链式构造能力，对齐 PHP
 // `Event::listen` 回调中通过 `$model` 上下文访问请求信息的语义。
 
 /// HookContext Builder 扩展 trait
@@ -653,11 +653,11 @@ where
 }
 
 // ============================================================================
-// SoftDelete 便捷函数与常量（Phase 3.10）
+// SoftDelete 便捷函数与常量
 // ============================================================================
 //
-// sz-orm-core 已提供 `SoftDelete` trait 和 `SoftDeleteScope` 全局作用域（Phase 3.8
-// 已 re-export），本节补充 sz-rust 端的 PHP 行为对齐便捷函数：
+// sz-orm-core 已提供 `SoftDelete` trait 和 `SoftDeleteScope` 全局作用域（已 re-export），
+// 本节补充 sz-rust 端的 PHP 行为对齐便捷函数：
 // - `DEFAULT_SOFT_DELETE_FIELD` 常量对齐 PHP think-orm 默认 `delete_time`
 // - `soft_delete_filter_sql` / `only_trashed_filter_sql` SQL 片段构造函数
 // - `is_soft_deleted` 等价 PHP `trashed()` 判断
@@ -795,11 +795,11 @@ pub fn soft_delete_restore_sql(table: &str, field: &str, pk: &str) -> String {
 }
 
 // ============================================================================
-// TenantModel 便捷函数与常量（Phase 3.11）
+// TenantModel 便捷函数与常量
 // ============================================================================
 //
-// sz-orm-core 已提供 `TenantModel` trait 和 `TenantScope` 全局作用域（Phase 3.8
-// 已 re-export），本节补充 sz-rust 端的 PHP 行为对齐便捷函数：
+// sz-orm-core 已提供 `TenantModel` trait 和 `TenantScope` 全局作用域（已 re-export），
+// 本节补充 sz-rust 端的 PHP 行为对齐便捷函数：
 // - `DEFAULT_TENANT_FIELD` 常量对齐 PHP `BaseModel` 的 `app_id` 字段名
 //   （注意：sz-orm-core `TenantModel::tenant_field()` 默认 `tenant_id`，
 //    但 PHP 项目实际使用 `app_id` 作为多租户字段，sz-rust 端以 PHP 行为准）
@@ -1600,7 +1600,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 13. HookContext Builder — Phase 3.9（tenant_id/operator_id/timestamp/metadata 全部可设置）
+    // 13. HookContext Builder（tenant_id/operator_id/timestamp/metadata 全部可设置）
     // ----------------------------------------------------------------
 
     #[test]
@@ -1718,7 +1718,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 14. 便捷函数（Phase 3.9）
+    // 14. 便捷函数
     // ----------------------------------------------------------------
 
     #[test]
@@ -1779,7 +1779,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 15. PHP 行为对齐验证（Phase 3.9 R5 硬约束）
+    // 15. PHP 行为对齐验证（R5 硬约束）
     // ----------------------------------------------------------------
 
     /// R5-1: PHP think-orm 2.0.x `trigger()` 上下文传递机制
@@ -1930,7 +1930,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 16. SoftDelete 便捷函数与常量（Phase 3.10）
+    // 16. SoftDelete 便捷函数与常量
     // ----------------------------------------------------------------
 
     #[test]
@@ -2033,7 +2033,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 17. Phase 3.10 R5 PHP 行为对齐
+    // 17. SoftDelete R5 PHP 行为对齐
     // ----------------------------------------------------------------
 
     /// R5-1: PHP think-orm SoftDelete trait 默认字段名 `delete_time` 对齐
@@ -2055,7 +2055,7 @@ mod tests {
         // 此处验证 sz-rust 端 SQL 片段对齐 PHP 行为
         let sz_rust_sql = soft_delete_filter_sql(DEFAULT_SOFT_DELETE_FIELD);
         assert_eq!(sz_rust_sql, "delete_time IS NULL");
-        // 验证 SoftDeleteScope 已 re-export（Phase 3.8）
+        // 验证 SoftDeleteScope 已 re-export
         let _ = std::marker::PhantomData::<SoftDeleteScope>;
     }
 
@@ -2105,7 +2105,7 @@ mod tests {
         // PHP `app/common/model/BaseModel.php` 未 `use think\model\concern\SoftDelete`
         // PHP think-orm 默认不启用软删除，需业务模型显式 `use SoftDelete` 才启用
         // sz-orm-core 的 SoftDelete trait 是自研增强，业务模型按需实现
-        // 此测试验证 SoftDeleteScope 已 re-export（Phase 3.8）但 sz-rust 端不强制使用
+        // 此测试验证 SoftDeleteScope 已 re-export 但 sz-rust 端不强制使用
         // SoftDelete trait 的 re-export 通过编译本身验证（若未 re-export，本文件无法编译）
         let _ = std::marker::PhantomData::<SoftDeleteScope>;
     }
@@ -2123,7 +2123,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 18. TenantModel 便捷函数与常量（Phase 3.11）
+    // 18. TenantModel 便捷函数与常量
     // ----------------------------------------------------------------
 
     #[test]
@@ -2196,7 +2196,7 @@ mod tests {
     }
 
     // ----------------------------------------------------------------
-    // 19. Phase 3.11 R5 PHP 行为对齐
+    // 19. TenantModel R5 PHP 行为对齐
     // ----------------------------------------------------------------
 
     /// R5-1: PHP BaseModel 使用 `app_id` 作为多租户字段名（非 `tenant_id`）对齐

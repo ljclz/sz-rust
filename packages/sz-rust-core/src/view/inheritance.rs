@@ -1,6 +1,6 @@
 //! 模板继承 — 对齐 PHP `think\Template` 的继承（extend）机制
 //!
-//! Phase 7.4 核心交付物。实现对齐 PHP `Template::parseExtend()` 和 `parseBlock()`
+//! 实现对齐 PHP `Template::parseExtend()` 和 `parseBlock()`
 //! 的模板继承功能。
 //!
 //! ## PHP 对齐说明
@@ -285,7 +285,10 @@ fn parse_blocks(content: &str, sort: bool, config: &ViewConfig) -> IndexMap<Stri
         let mut pairs: Vec<(String, BlockInfo, usize)> = keys
             .into_iter()
             .map(|(name, pos)| {
-                let info = result.get(&name).cloned().expect("keys 与 result 同源，name 必定存在");
+                let info = result
+                    .get(&name)
+                    .cloned()
+                    .expect("keys 与 result 同源，name 必定存在");
                 (name, info, pos)
             })
             .collect();

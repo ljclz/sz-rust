@@ -1,6 +1,6 @@
 //! SZ-Rust Cache facade — 对齐 PHP `think\facade\Cache`
 //!
-//! Phase 6.1 + Phase 6.2 交付物。
+//! 缓存 facade 模块。
 //!
 //! ## PHP 对齐
 //!
@@ -1137,6 +1137,12 @@ impl Cache {
     /// 1. **锁 key 无 TTL**：若进程崩溃，锁永久存在 → 死锁
     /// 2. **`has()` + `get()` 双查 TOCTOU**：先 `has` 后 `get`
     ///
+    /// ## ⚠ 异步上下文警告
+    ///
+    /// 本方法在等待锁释放时使用 `std::thread::sleep`，会**阻塞 tokio worker 线程**。
+    /// 在异步上下文（axum handler / tokio task）中应改用 [`Cache::remember_async`]，
+    /// 后者使用 `tokio::time::sleep` 让出 worker，避免阻塞调度器。
+    ///
     /// ## 参数
     ///
     /// - `key`：缓存键
@@ -1283,7 +1289,7 @@ impl Cache {
     }
 
     // ========================================================================
-    // 缓存失效策略（Phase 6.8，对齐 PHP 业务代码写后失效模式）
+    // 缓存失效策略（对齐 PHP 业务代码写后失效模式）
     // ========================================================================
 
     /// 批量删除多个缓存 key（对齐 PHP `Driver::deleteMultiple($keys): bool`）
@@ -1433,7 +1439,7 @@ impl Cache {
     }
 
     // ========================================================================
-    // Phase 6.9: 缓存击穿/雪崩防护（Rust 特有扩展）
+    // 缓存击穿/雪崩防护（Rust 特有扩展）
     //
     // PHP `think\cache\Driver::remember` 有"锁雏形"但缺陷严重：
     //   1. 加锁非原子（`$this->set($name.'_lock', true)` 不是 SET NX EX）
@@ -3354,7 +3360,9 @@ mod tests {
     async fn test_cache_remember_async_writes_with_ttl() {
         let cache = make_cache();
         cache
-            .remember_async("key_async", Some(Duration::from_millis(50)), || async { 42i64 })
+            .remember_async("key_async", Some(Duration::from_millis(50)), || async {
+                42i64
+            })
             .await
             .unwrap();
 

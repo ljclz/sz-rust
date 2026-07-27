@@ -1,6 +1,6 @@
 //! SZ-Rust CLI — 命令行工具
 //!
-//! Phase 8 交付物，替代 PHP `think` 命令，借鉴 Laravel Artisan 风格。
+//! 替代 PHP `think` 命令，借鉴 Laravel Artisan 风格。
 //!
 //! ## PHP 对齐
 //!
@@ -24,7 +24,7 @@
 //! | `cmd::migrate` | migrate / migrate:status 迁移命令 |
 //! | `cmd::route` | route:list 路由列表命令 |
 //! | `cmd::cache` | cache:clear 缓存清理命令 |
-//! | `cmd::scheduler` | scheduler:* 调度器命令（Phase 8.11-8.14） |
+//! | `cmd::scheduler` | scheduler:* 调度器命令 |
 //! | `error` | CLI 错误类型 |
 //! | `stubs` | 代码生成模板（对齐 PHP make/stubs） |
 //!

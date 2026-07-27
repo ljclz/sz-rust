@@ -1,6 +1,6 @@
 //! 中间件链构建器 — 统一管理 `MiddlewareChain` + 5 个 `Option<Config>`
 //!
-//! Phase 3.12 核心交付物。提供 `MiddlewareBuilder` 用于：
+//! 提供 `MiddlewareBuilder` 用于：
 //! 1. 持有 `MiddlewareChain`（顺序定义，业务期望顺序，首元素最先执行）
 //! 2. 持有 5 个 `Option<Config>`：`Cors` / `Log` / `Auth` / `RateLimit` / `Trace`
 //! 3. 通过 `apply(self, router: Router) -> Router` 一次性应用所有中间件到 `axum::Router`
@@ -39,7 +39,7 @@
 //!
 //! ## 与 `MiddlewareChain` 的关系
 //!
-//! `MiddlewareChain`（Phase 3.1）只负责「顺序定义」，不持有任何 Layer 实例。
+//! `MiddlewareChain` 只负责「顺序定义」，不持有任何 Layer 实例。
 //! `MiddlewareBuilder` 在 `MiddlewareChain` 之上增加「Config 持有 + 应用到 Router」能力。
 //!
 //! ## `Router::layer` 语义

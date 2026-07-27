@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use sz_rust_core::orm::{value_to_json, Pool, Value};
+use sz_rust_core::orm::{Pool, Value};
 
 use crate::models::product::Product;
 
@@ -96,10 +96,13 @@ impl ProductService {
 
         // 总数查询
         let count_sql = format!("SELECT COUNT(*) as total FROM good {}", where_clause);
-        let count_rows = conn.query_with_params(&count_sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "商品列表 COUNT 查询失败");
-            "查询失败".to_string()
-        })?;
+        let count_rows = conn
+            .query_with_params(&count_sql, &params)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "商品列表 COUNT 查询失败");
+                "查询失败".to_string()
+            })?;
         let total: i64 = count_rows
             .first()
             .and_then(|row| row.get("total"))
@@ -114,10 +117,13 @@ impl ProductService {
         let mut list_params = params.clone();
         list_params.push(Value::I64(page_size));
         list_params.push(Value::I64(offset));
-        let rows = conn.query_with_params(&list_sql, &list_params).await.map_err(|e| {
-            tracing::error!(error = %e, "商品列表查询失败");
-            "查询失败".to_string()
-        })?;
+        let rows = conn
+            .query_with_params(&list_sql, &list_params)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "商品列表查询失败");
+                "查询失败".to_string()
+            })?;
 
         Ok(ProductPage { list: rows, total })
     }
@@ -178,10 +184,13 @@ impl ProductService {
         })?;
 
         // 获取自增主键
-        let id_rows = conn.query("SELECT LAST_INSERT_ID() as good_id").await.map_err(|e| {
-            tracing::error!(error = %e, "获取商品 ID 失败: name={}", product.name);
-            "创建失败".to_string()
-        })?;
+        let id_rows = conn
+            .query("SELECT LAST_INSERT_ID() as good_id")
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "获取商品 ID 失败: name={}", product.name);
+                "创建失败".to_string()
+            })?;
         let new_id = id_rows
             .first()
             .and_then(|row| row.get("good_id"))
@@ -245,7 +254,10 @@ impl ProductService {
         }
 
         set_clauses.push("updated_at = NOW()".to_string());
-        let sql = format!("UPDATE good SET {} WHERE good_id = ?", set_clauses.join(", "));
+        let sql = format!(
+            "UPDATE good SET {} WHERE good_id = ?",
+            set_clauses.join(", ")
+        );
         params.push(Value::I64(good_id));
 
         conn.execute_with_params(&sql, &params).await.map_err(|e| {
@@ -275,11 +287,4 @@ impl ProductService {
     }
 }
 
-/// 将 DB 行转换为 JSON（供控制器使用）
-pub fn row_to_json(row: &HashMap<String, Value>) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (k, v) in row {
-        obj.insert(k.clone(), value_to_json(v.clone()));
-    }
-    serde_json::Value::Object(obj)
-}
+// 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）

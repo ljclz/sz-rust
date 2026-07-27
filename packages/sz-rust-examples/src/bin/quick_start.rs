@@ -1,4 +1,4 @@
-//! Phase 0.10 — Hello World 端点验证
+//! Hello World 端点验证
 //!
 //! 启动 axum HTTP 服务，提供 `GET /` 端点返回标准 JSON 响应：
 //! `{ "code": 1, "msg": "hello", "data": {} }`
@@ -21,12 +21,12 @@ use sz_rust_examples::build_router;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化 tracing 日志（Phase 0.7 接入）
+    // 初始化 tracing 日志
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // 加载配置（Phase 0.4）
+    // 加载配置
     let config_dir = std::env::var("SZ_RUST_CONFIG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("config"));
@@ -35,14 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         AppConfig::default()
     });
 
-    // 初始化 App 容器（Phase 0.6）
+    // 初始化 App 容器
     let app = App::init(config);
     tracing::info!(
         "App 容器初始化完成，数据库连接: {:?}",
         app.db_connection_names()
     );
 
-    // 初始化日志 facade（Phase 0.7）
+    // 初始化日志 facade
     let log_facade = LogFacade::init(&app.config().log);
     log_facade.info("SZ-Rust Hello World 端点启动中...");
 

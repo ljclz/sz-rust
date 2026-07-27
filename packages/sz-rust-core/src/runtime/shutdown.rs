@@ -1,4 +1,4 @@
-//! 优雅关闭协调器（Phase 9.8）
+//! 优雅关闭协调器
 //!
 //! ## PHP 对齐
 //!
@@ -22,7 +22,7 @@ use std::time::Duration;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-/// 优雅关闭协调器（Phase 9.8）
+/// 优雅关闭协调器
 ///
 /// 对齐 PHP `think-swoole` 的关闭流程：管理多个后台任务，触发关闭后等待所有任务
 /// 优雅退出，超时则强制 abort。

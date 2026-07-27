@@ -304,7 +304,7 @@ pub trait SzController: Send + Sync {
 /// | `protected bool $batchValidate = false` | [`BaseController::batch_validate`] |
 /// | `protected array $middleware = []` | [`BaseController::middlewares`] |
 /// | `protected function initialize() {}` | [`BaseController::initialize`] |
-/// | `protected function validate(...)` | [`BaseController::validate`]（占位，Phase 5 完整实现） |
+/// | `protected function validate(...)` | [`BaseController::validate`]（占位，完整实现） |
 ///
 /// # 状态迁移说明
 ///
@@ -322,7 +322,7 @@ pub trait BaseController: SzController {
     /// 控制器中间件列表（对齐 PHP `protected array $middleware = []`）
     ///
     /// 返回中间件标识符列表（如 `["auth", "cors"]`）。
-    /// 实际中间件注册在 Phase 3 中间件系统中处理。
+    /// 实际中间件注册在中间件系统中处理。
     fn middlewares(&self) -> Vec<String> {
         Vec::new()
     }
@@ -443,7 +443,7 @@ pub struct UserInfo {
 /// | `protected string $group` | [`RouteInfo::group`] |
 /// | `protected array $allowAllAction` | [`AddonsBaseController::allow_all_action`] |
 /// | `public function initialize()` | 由 handler 显式调用 `parse_route_info` + `get_token` + `check_login` |
-/// | `public function getToken()` | [`AddonsBaseController::get_token`]（占位，Phase 3 JWT 完整实现） |
+/// | `public function getToken()` | [`AddonsBaseController::get_token`]（占位，JWT 完整实现） |
 /// | `protected function getRouteinfo()` | [`AddonsBaseController::parse_route_info`] |
 /// | `private function checkLogin()` | [`AddonsBaseController::check_login`] |
 ///
@@ -1117,10 +1117,7 @@ mod tests {
         let ctrl = BatchController;
         let data = json!({}); // name 和 age 都缺失
         let rules = [("name", "require"), ("age", "require")];
-        let messages = [
-            ("name.require", "名称必填"),
-            ("age.require", "年龄必填"),
-        ];
+        let messages = [("name.require", "名称必填"), ("age.require", "年龄必填")];
         let result = ctrl.validate(&data, &rules, &messages);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1137,10 +1134,7 @@ mod tests {
         let ctrl = MockBaseController;
         let data = json!({}); // name 和 age 都缺失
         let rules = [("name", "require"), ("age", "require")];
-        let messages = [
-            ("name.require", "名称必填"),
-            ("age.require", "年龄必填"),
-        ];
+        let messages = [("name.require", "名称必填"), ("age.require", "年龄必填")];
         let result = ctrl.validate(&data, &rules, &messages);
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1540,7 +1534,10 @@ mod tests {
 
     #[test]
     fn test_strip_bearer_prefix_with_extra_spaces() {
-        assert_eq!(strip_bearer_prefix("  Bearer   abc.def.ghi  "), "abc.def.ghi");
+        assert_eq!(
+            strip_bearer_prefix("  Bearer   abc.def.ghi  "),
+            "abc.def.ghi"
+        );
     }
 
     /// JWT 端到端验证测试：使用真实 JwtEncoder 签发 token，再通过 verify_token_with_config 验证

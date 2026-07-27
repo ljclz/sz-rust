@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use sz_rust_core::orm::{Credentials, User};
-use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
+use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
+use sz_rust_core::orm::{Credentials, User};
 
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
@@ -137,10 +137,14 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
 #[tracing::instrument]
 pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool.acquire().await.map_err(|e| {
-        tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败");
-        e
-    }).ok()?;
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败");
+            e
+        })
+        .ok()?;
 
     let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone, u.role, \
                m.name as merchant_name \
@@ -148,10 +152,14 @@ pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String,
                LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
                WHERE u.username = ?";
     let params = [Value::String(username.to_string())];
-    let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
-        tracing::error!(error = %e, "查询用户信息失败");
-        e
-    }).ok()?;
+    let rows = conn
+        .query_with_params(sql, &params)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询用户信息失败");
+            e
+        })
+        .ok()?;
 
     rows.into_iter().next()
 }
@@ -173,22 +181,31 @@ pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String,
 #[tracing::instrument]
 pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool.acquire().await.map_err(|e| {
-        tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败: user_id={}", user_id);
-        e
-    }).ok()?;
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败: user_id={}", user_id);
+            e
+        })
+        .ok()?;
 
-    let sql = "SELECT u.user_id, u.username, u.merchant_id, u.phone as contact_phone, u.role, u.status, \
+    let sql =
+        "SELECT u.user_id, u.username, u.merchant_id, u.phone as contact_phone, u.role, u.status, \
                u.last_login_at, u.created_at, \
                m.name as merchant_name \
                FROM merchant_user u \
                LEFT JOIN merchant m ON u.merchant_id = m.merchant_id \
                WHERE u.user_id = ?";
     let params = [Value::I64(user_id)];
-    let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
-        tracing::error!(error = %e, "查询用户信息失败: user_id={}", user_id);
-        e
-    }).ok()?;
+    let rows = conn
+        .query_with_params(sql, &params)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询用户信息失败: user_id={}", user_id);
+            e
+        })
+        .ok()?;
 
     rows.into_iter().next()
 }
@@ -198,12 +215,10 @@ pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>>
 /// 错误信息不泄露 JWT 内部解析细节，统一返回 "token 验证失败"。
 #[tracing::instrument(skip(token))]
 pub fn verify_token(token: &str) -> Result<User, String> {
-    let user = get_auth()
-        .verify_token(token)
-        .map_err(|e| {
-            tracing::error!(error = ?e, "JWT token 验证失败");
-            "token 验证失败".to_string()
-        })?;
+    let user = get_auth().verify_token(token).map_err(|e| {
+        tracing::error!(error = ?e, "JWT token 验证失败");
+        "token 验证失败".to_string()
+    })?;
     Ok(user)
 }
 

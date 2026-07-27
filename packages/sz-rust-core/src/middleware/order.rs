@@ -16,11 +16,11 @@
 //!
 //! | PHP 中间件 | Rust 中间件 | 实现阶段 |
 //! |------------|-------------|---------|
-//! | `SessionInit` | `Trace`（生成 request_id，复用 sz-orm-tracing） | Phase 3.6 |
-//! | `AllowCrossDomain` | `Cors`（已实现于 `cors.rs`） | Phase 1.6 ✅ |
-//! | `app\oapc\middleware\Auth` | `Auth`（JWT 校验，复用 sz-orm-auth） | Phase 3.3 |
-//! | （PHP 端无） | `Log`（请求/响应日志） | Phase 3.4 |
-//! | （PHP 端无） | `RateLimit`（限流，复用 sz-orm-limit） | Phase 3.5 |
+//! | `SessionInit` | `Trace`（生成 request_id，复用 sz-orm-tracing） | ✅ |
+//! | `AllowCrossDomain` | `Cors`（已实现于 `cors.rs`） | ✅ |
+//! | `app\oapc\middleware\Auth` | `Auth`（JWT 校验，复用 sz-orm-auth） | ✅ |
+//! | （PHP 端无） | `Log`（请求/响应日志） | ✅ |
+//! | （PHP 端无） | `RateLimit`（限流，复用 sz-orm-limit） | ✅ |
 //!
 //! ## 执行顺序约定
 //!
@@ -33,7 +33,7 @@ use std::fmt;
 /// 中间件类型枚举
 ///
 /// 对齐 PHP 中间件 + sz-rust 自定义中间件。每个变体对应一个具体的 Layer 实现，
-/// 由后续 Phase（3.3 ~ 3.6）逐个实现。
+/// 由 `auth.rs` / `log.rs` / `cors.rs` / `rate_limit.rs` 等模块逐个实现。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MiddlewareKind {
     /// 追踪 span（生成 request_id，对齐 PHP `SessionInit` 的「请求初始化」语义）

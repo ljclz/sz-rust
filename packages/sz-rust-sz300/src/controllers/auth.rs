@@ -1,27 +1,17 @@
-﻿use crate::services::auth_service;
+use crate::services::auth_service;
+use crate::services::row_to_json;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
-use std::collections::HashMap;
-use sz_rust_core::orm::{value_to_json, Value};
 use sz_rust_core::controller::SzController;
 use sz_rust_core::middleware::csrf::{generate_token, CSRF_COOKIE_NAME};
 use sz_rust_core::request::fetch_post_data;
 
 struct AuthController;
 impl SzController for AuthController {}
-
-/// 将 DB 行转换为 JSON（仅控制器层使用，service 层返回原始 HashMap）
-fn row_to_json(row: &HashMap<String, Value>) -> serde_json::Value {
-    let mut obj = serde_json::Map::new();
-    for (k, v) in row {
-        obj.insert(k.clone(), value_to_json(v.clone()));
-    }
-    serde_json::Value::Object(obj)
-}
 
 /// 在响应中附加 CSRF Cookie（登录成功时调用）
 ///
@@ -43,10 +33,7 @@ fn attach_csrf_cookie(response: &mut Response) {
 
 /// 在响应中清除 CSRF Cookie（退出登录时调用）
 fn clear_csrf_cookie(response: &mut Response) {
-    let cookie_value = format!(
-        "{}=; Path=/; Max-Age=0; SameSite=Strict",
-        CSRF_COOKIE_NAME
-    );
+    let cookie_value = format!("{}=; Path=/; Max-Age=0; SameSite=Strict", CSRF_COOKIE_NAME);
     if let Ok(value) = cookie_value.parse() {
         response.headers_mut().append("set-cookie", value);
     }

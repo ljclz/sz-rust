@@ -1,4 +1,4 @@
-﻿//! 迁移历史表（Migration History Table）
+//! 迁移历史表（Migration History Table）
 //!
 //! 持久化记录已执行的迁移版本，避免重复执行。对齐 PHP `think migrate` 的
 //! `migrations` 表设计：
@@ -23,7 +23,7 @@
 //!
 //! ## 安全约束
 //!
-//! - 所有标识符（表名）经 [`validate_identifier`] 校验，防止 SQL 注入
+//! - 所有标识符（表名）经 `validate_identifier` 校验，防止 SQL 注入
 //! - 占位符按方言生成（`?` vs `$1`），由调用方通过参数绑定执行
 //! - 本模块只生成 SQL，不执行 SQL（执行由 sz-rust-cli 或上层应用负责）
 
@@ -115,10 +115,7 @@ fn validate_identifier(name: &str, label: &str) -> Result<(), String> {
         }
         for c in chars {
             if !c.is_ascii_alphanumeric() && c != '_' {
-                return Err(format!(
-                    "{} contains invalid char '{}': {}",
-                    label, c, name
-                ));
+                return Err(format!("{} contains invalid char '{}': {}", label, c, name));
             }
         }
     }
@@ -143,10 +140,7 @@ impl MigrationHistory {
     /// # 错误
     ///
     /// 返回 `Result<String, String>`，校验失败时返回 `Err(error_msg)`。
-    pub fn create_table_sql(
-        table_name: &str,
-        db_type: HistoryDbType,
-    ) -> Result<String, String> {
+    pub fn create_table_sql(table_name: &str, db_type: HistoryDbType) -> Result<String, String> {
         validate_identifier(table_name, "migration history table name")?;
 
         let ddl = match db_type {
@@ -219,10 +213,7 @@ impl MigrationHistory {
     ///
     /// - `table_name`：历史表名
     /// - `db_type`：目标数据库类型，决定占位符风格
-    pub fn insert_sql(
-        table_name: &str,
-        db_type: HistoryDbType,
-    ) -> Result<String, String> {
+    pub fn insert_sql(table_name: &str, db_type: HistoryDbType) -> Result<String, String> {
         validate_identifier(table_name, "migration history table name")?;
 
         let p1 = db_type.placeholder(1);
@@ -240,10 +231,7 @@ impl MigrationHistory {
     ///
     /// - `table_name`：历史表名
     /// - `db_type`：目标数据库类型，决定占位符风格
-    pub fn delete_sql(
-        table_name: &str,
-        db_type: HistoryDbType,
-    ) -> Result<String, String> {
+    pub fn delete_sql(table_name: &str, db_type: HistoryDbType) -> Result<String, String> {
         validate_identifier(table_name, "migration history table name")?;
         let p1 = db_type.placeholder(1);
         Ok(format!("DELETE FROM {} WHERE version = {}", table_name, p1))
@@ -379,12 +367,30 @@ mod tests {
 
     #[test]
     fn test_db_type_from_str_mysql_family() {
-        assert_eq!(HistoryDbType::parse_db_type("mysql"), Some(HistoryDbType::MySQL));
-        assert_eq!(HistoryDbType::parse_db_type("MySQL"), Some(HistoryDbType::MySQL));
-        assert_eq!(HistoryDbType::parse_db_type("mariadb"), Some(HistoryDbType::MySQL));
-        assert_eq!(HistoryDbType::parse_db_type("oceanbase"), Some(HistoryDbType::MySQL));
-        assert_eq!(HistoryDbType::parse_db_type("tidb"), Some(HistoryDbType::MySQL));
-        assert_eq!(HistoryDbType::parse_db_type("polardb"), Some(HistoryDbType::MySQL));
+        assert_eq!(
+            HistoryDbType::parse_db_type("mysql"),
+            Some(HistoryDbType::MySQL)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("MySQL"),
+            Some(HistoryDbType::MySQL)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("mariadb"),
+            Some(HistoryDbType::MySQL)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("oceanbase"),
+            Some(HistoryDbType::MySQL)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("tidb"),
+            Some(HistoryDbType::MySQL)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("polardb"),
+            Some(HistoryDbType::MySQL)
+        );
     }
 
     #[test]
@@ -409,9 +415,18 @@ mod tests {
 
     #[test]
     fn test_db_type_from_str_others() {
-        assert_eq!(HistoryDbType::parse_db_type("sqlite"), Some(HistoryDbType::SQLite));
-        assert_eq!(HistoryDbType::parse_db_type("oracle"), Some(HistoryDbType::Oracle));
-        assert_eq!(HistoryDbType::parse_db_type("dameng"), Some(HistoryDbType::Oracle));
+        assert_eq!(
+            HistoryDbType::parse_db_type("sqlite"),
+            Some(HistoryDbType::SQLite)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("oracle"),
+            Some(HistoryDbType::Oracle)
+        );
+        assert_eq!(
+            HistoryDbType::parse_db_type("dameng"),
+            Some(HistoryDbType::Oracle)
+        );
         assert_eq!(
             HistoryDbType::parse_db_type("mssql"),
             Some(HistoryDbType::SqlServer)
@@ -515,14 +530,16 @@ mod tests {
 
     #[test]
     fn test_create_table_sql_sqlite() {
-        let sql = MigrationHistory::create_table_sql("__migrations", HistoryDbType::SQLite).unwrap();
+        let sql =
+            MigrationHistory::create_table_sql("__migrations", HistoryDbType::SQLite).unwrap();
         assert!(sql.contains("AUTOINCREMENT"));
         assert!(sql.contains("CURRENT_TIMESTAMP"));
     }
 
     #[test]
     fn test_create_table_sql_oracle() {
-        let sql = MigrationHistory::create_table_sql("__migrations", HistoryDbType::Oracle).unwrap();
+        let sql =
+            MigrationHistory::create_table_sql("__migrations", HistoryDbType::Oracle).unwrap();
         assert!(sql.contains("GENERATED BY DEFAULT AS IDENTITY"));
         assert!(sql.contains("SYSTIMESTAMP"));
         assert!(sql.contains("VARCHAR2"));
@@ -567,8 +584,7 @@ mod tests {
 
     #[test]
     fn test_insert_sql_postgres_uses_dollar() {
-        let sql =
-            MigrationHistory::insert_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
+        let sql = MigrationHistory::insert_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
         assert!(sql.contains("($1, $2, $3)"));
     }
 
@@ -586,8 +602,7 @@ mod tests {
 
     #[test]
     fn test_insert_sql_rejects_injection() {
-        let result =
-            MigrationHistory::insert_sql("m; DROP TABLE users", HistoryDbType::MySQL);
+        let result = MigrationHistory::insert_sql("m; DROP TABLE users", HistoryDbType::MySQL);
         assert!(result.is_err());
     }
 
@@ -603,15 +618,13 @@ mod tests {
 
     #[test]
     fn test_delete_sql_postgres() {
-        let sql =
-            MigrationHistory::delete_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
+        let sql = MigrationHistory::delete_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
         assert!(sql.contains("WHERE version = $1"));
     }
 
     #[test]
     fn test_delete_sql_rejects_injection() {
-        let result =
-            MigrationHistory::delete_sql("m; DROP TABLE users", HistoryDbType::MySQL);
+        let result = MigrationHistory::delete_sql("m; DROP TABLE users", HistoryDbType::MySQL);
         assert!(result.is_err());
     }
 
@@ -643,8 +656,7 @@ mod tests {
 
     #[test]
     fn test_exists_sql_postgres() {
-        let sql =
-            MigrationHistory::exists_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
+        let sql = MigrationHistory::exists_sql("__migrations", HistoryDbType::PostgreSQL).unwrap();
         assert!(sql.contains("WHERE version = $1"));
     }
 
@@ -669,8 +681,8 @@ mod tests {
 
     #[test]
     fn test_history_record_with_executed_at() {
-        let record = MigrationHistoryRecord::new("001", "init", 1)
-            .with_executed_at("2026-07-25T10:00:00Z");
+        let record =
+            MigrationHistoryRecord::new("001", "init", 1).with_executed_at("2026-07-25T10:00:00Z");
         assert_eq!(record.executed_at, "2026-07-25T10:00:00Z");
     }
 
@@ -724,23 +736,19 @@ mod tests {
     fn test_end_to_end_mysql_workflow() {
         let config = MigrationHistoryConfig::mysql();
 
-        let ddl =
-            MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
+        let ddl = MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
         assert!(ddl.contains("CREATE TABLE IF NOT EXISTS __migrations"));
 
-        let insert =
-            MigrationHistory::insert_sql(&config.table_name, config.db_type).unwrap();
+        let insert = MigrationHistory::insert_sql(&config.table_name, config.db_type).unwrap();
         assert!(insert.contains("(?, ?, ?)"));
 
-        let delete =
-            MigrationHistory::delete_sql(&config.table_name, config.db_type).unwrap();
+        let delete = MigrationHistory::delete_sql(&config.table_name, config.db_type).unwrap();
         assert!(delete.contains("WHERE version = ?"));
 
         let list = MigrationHistory::list_sql(&config.table_name).unwrap();
         assert!(list.contains("ORDER BY version ASC"));
 
-        let max_batch =
-            MigrationHistory::max_batch_sql(&config.table_name).unwrap();
+        let max_batch = MigrationHistory::max_batch_sql(&config.table_name).unwrap();
         assert!(max_batch.contains("COALESCE(MAX(batch), 0)"));
     }
 
@@ -748,26 +756,21 @@ mod tests {
     fn test_end_to_end_postgres_workflow() {
         let config = MigrationHistoryConfig::postgres();
 
-        let ddl =
-            MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
+        let ddl = MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
         assert!(ddl.contains("BIGSERIAL"));
 
-        let insert =
-            MigrationHistory::insert_sql(&config.table_name, config.db_type).unwrap();
+        let insert = MigrationHistory::insert_sql(&config.table_name, config.db_type).unwrap();
         assert!(insert.contains("($1, $2, $3)"));
 
-        let delete =
-            MigrationHistory::delete_sql(&config.table_name, config.db_type).unwrap();
+        let delete = MigrationHistory::delete_sql(&config.table_name, config.db_type).unwrap();
         assert!(delete.contains("WHERE version = $1"));
     }
 
     #[test]
     fn test_end_to_end_custom_table_name() {
-        let config =
-            MigrationHistoryConfig::default().with_table_name("app_migrations");
+        let config = MigrationHistoryConfig::default().with_table_name("app_migrations");
 
-        let ddl =
-            MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
+        let ddl = MigrationHistory::create_table_sql(&config.table_name, config.db_type).unwrap();
         assert!(ddl.contains("app_migrations"));
     }
 }

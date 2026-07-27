@@ -1,6 +1,6 @@
 //! 关联预加载（with）— 批量 IN 查询 SQL 片段构造器 + 数据处理纯函数
 //!
-//! Phase 4.5 核心交付物。本模块对齐 PHP `think\Model::with()` + `eagerlyResultSet()`
+//! 本模块对齐 PHP `think\Model::with()` + `eagerlyResultSet()`
 //! 的批量预加载机制，**强制使用 IN 查询避免 N+1 问题**。
 //!
 //! ## PHP 端 with() 机制（think-orm 2.0.x）

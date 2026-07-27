@@ -16,8 +16,8 @@
 //!
 //! ## 未实现（标 NOTE）
 //!
-//! - **业务方法**（detail/getList/add/edit/setDelete/getAll/getCustomerCategoryInfo 等）→ NOTE(Phase 5+ 控制器层)
-//! - **静态缓存**（Cache::get/set）→ NOTE(Phase 6)
+//! - **业务方法**（detail/getList/add/edit/setDelete/getAll/getCustomerCategoryInfo 等）→ NOTE(控制器层)
+//! - **静态缓存**（Cache::get/set）→ NOTE(Cache 模块)
 
 use crate::model::{get_i64, impl_empty_relation_loader};
 use serde_json::{json, Value};

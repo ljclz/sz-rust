@@ -144,8 +144,8 @@ impl CookieEntry {
 
         // Expires 头（仅当 expire > 0 时添加，对齐 PHP 仅在 expire 非零时发送）
         if self.expire > 0 {
-            let expire_dt = DateTime::<Utc>::from_timestamp(self.expire, 0)
-                .unwrap_or_else(Utc::now);
+            let expire_dt =
+                DateTime::<Utc>::from_timestamp(self.expire, 0).unwrap_or_else(Utc::now);
             // 格式：Wed, 21 Oct 2026 07:28:00 GMT（RFC 7231 IMF-fixdate）
             parts.push(format!(
                 "Expires={}",
@@ -546,11 +546,7 @@ mod tests {
     #[test]
     fn test_cookie_jar_set_with_expire_calculates_timestamp() {
         let before = Utc::now().timestamp();
-        let jar = CookieJar::new().set(
-            "token",
-            "abc",
-            CookieOptions::with_expire(3600),
-        );
+        let jar = CookieJar::new().set("token", "abc", CookieOptions::with_expire(3600));
         let after = Utc::now().timestamp();
 
         let entry = &jar.get_response_cookies()[0];
@@ -584,7 +580,7 @@ mod tests {
 
         let entry = &jar.get_response_cookies()[0];
         assert_eq!(entry.value, ""); // 删除 cookie 值为空
-                                         // expire 应该是过去时间（before - 3600 附近）
+                                     // expire 应该是过去时间（before - 3600 附近）
         assert!(entry.expire < before);
     }
 
@@ -651,10 +647,8 @@ mod tests {
     #[test]
     fn test_from_request_empty_cookie_header() {
         let mut req = Request::<Body>::default();
-        req.headers_mut().insert(
-            axum::http::header::COOKIE,
-            HeaderValue::from_static(""),
-        );
+        req.headers_mut()
+            .insert(axum::http::header::COOKIE, HeaderValue::from_static(""));
         let jar = CookieJar::from_request(&req);
         assert!(jar.get("any").is_none());
     }
@@ -711,10 +705,7 @@ mod tests {
 
         let set_cookies: Vec<_> = resp.headers().get_all("set-cookie").iter().collect();
         assert_eq!(set_cookies.len(), 1);
-        assert_eq!(
-            set_cookies[0].to_str().unwrap(),
-            "token=abc; Path=/"
-        );
+        assert_eq!(set_cookies[0].to_str().unwrap(), "token=abc; Path=/");
     }
 
     #[test]
@@ -833,18 +824,13 @@ mod tests {
     fn test_php_consistency_set_and_save_flow() {
         // 模拟 PHP 流程：set() 暂存 → save() 发送
         let req = Request::<Body>::default();
-        let jar = CookieJar::from_request(&req)
-            .set("token", "abc123", CookieOptions::with_expire(3600));
+        let jar =
+            CookieJar::from_request(&req).set("token", "abc123", CookieOptions::with_expire(3600));
 
         let mut resp = Response::new(Body::empty());
         jar.apply_to_response(&mut resp);
 
-        let header = resp
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let header = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
         assert!(header.starts_with("token=abc123"));
         assert!(header.contains("Expires="));
         assert!(header.contains("Path=/"));
@@ -859,12 +845,7 @@ mod tests {
         let mut resp = Response::new(Body::empty());
         jar.apply_to_response(&mut resp);
 
-        let header = resp
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let header = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
         // 删除 cookie：值空 + Expires 为过去时间
         assert!(header.starts_with("token="));
         assert!(header.contains("Expires="));
@@ -878,12 +859,7 @@ mod tests {
         let mut resp = Response::new(Body::empty());
         jar.apply_to_response(&mut resp);
 
-        let header = resp
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let header = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
         assert!(header.contains("pref=dark"));
         assert!(header.contains("Expires="));
     }
@@ -896,8 +872,7 @@ mod tests {
             axum::http::header::COOKIE,
             HeaderValue::from_static("old=value"),
         );
-        let jar = CookieJar::from_request(&req)
-            .set("new", "value", CookieOptions::default());
+        let jar = CookieJar::from_request(&req).set("new", "value", CookieOptions::default());
 
         // 请求 cookie 可读
         assert_eq!(jar.get("old"), Some("value".to_string()));

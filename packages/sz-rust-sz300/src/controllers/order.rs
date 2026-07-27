@@ -8,12 +8,13 @@
 //!
 //! ## 重构后
 //!
-//! - 控制器：解析请求参数 → 调用 [`order_service::OrderService`] → 格式化响应
+//! - 控制器：解析请求参数 → 调用 [`crate::services::order_service::OrderService`] → 格式化响应
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::order::Order`] 与 [`crate::models::order_item::OrderItem`] 定义实体结构
 
 use crate::controllers::common::parse_pagination;
-use crate::services::order_service::{row_to_json, OrderFilters, OrderService};
+use crate::services::order_service::{OrderFilters, OrderService};
+use crate::services::row_to_json;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
@@ -51,11 +52,8 @@ impl OrderController {
 
                 match OrderService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
-                        let list: Vec<serde_json::Value> = page_data
-                            .list
-                            .iter()
-                            .map(row_to_json)
-                            .collect();
+                        let list: Vec<serde_json::Value> =
+                            page_data.list.iter().map(row_to_json).collect();
                         info!("订单列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
@@ -145,15 +143,9 @@ impl OrderController {
                         .get("total_weight_g")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(0),
-                    item_count: data
-                        .get("item_count")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0) as i32,
+                    item_count: data.get("item_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                     status: 1, // 服务层固定为 1=待支付，此字段被忽略
-                    pay_method: data
-                        .get("pay_method")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0) as i8,
+                    pay_method: data.get("pay_method").and_then(|v| v.as_i64()).unwrap_or(0) as i8,
                     pay_at: None,
                     offline_seq: data
                         .get("offline_seq")
@@ -173,10 +165,7 @@ impl OrderController {
                             .map(|item| crate::models::order_item::OrderItem {
                                 item_id: None,
                                 order_id: 0, // 由服务层填充新订单 ID
-                                good_id: item
-                                    .get("good_id")
-                                    .and_then(|v| v.as_i64())
-                                    .unwrap_or(0),
+                                good_id: item.get("good_id").and_then(|v| v.as_i64()).unwrap_or(0),
                                 good_name: item
                                     .get("good_name")
                                     .and_then(|v| v.as_str())
@@ -194,10 +183,8 @@ impl OrderController {
                                     .get("total_fen")
                                     .and_then(|v| v.as_i64())
                                     .unwrap_or(0),
-                                quantity: item
-                                    .get("quantity")
-                                    .and_then(|v| v.as_i64())
-                                    .unwrap_or(1) as i32,
+                                quantity: item.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1)
+                                    as i32,
                             })
                             .collect()
                     })

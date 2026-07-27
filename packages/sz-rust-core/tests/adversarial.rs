@@ -25,24 +25,24 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use chrono::Utc;
+use serde_json::Value;
 use sz_rust_core::cache::{Cache, MemoryCacheDriver};
-use sz_rust_core::config::{DatabaseConnection, DatabaseSection};
-use sz_rust_core::cookie::{CookieJar, CookieOptions};
-use sz_rust_core::env::Env;
-use sz_rust_core::i18n::I18n;
-use sz_rust_core::mail::{MailAddress, MailAttachment, Mailer, MailMessage, MemoryMailer};
-use sz_rust_core::session::{MemorySessionStore, Session, SessionStore};
 use sz_rust_core::config::AppConfig;
 use sz_rust_core::config::LogSection;
-use sz_rust_core::log::LogFacade;
+use sz_rust_core::config::{DatabaseConnection, DatabaseSection};
 use sz_rust_core::container::App;
+use sz_rust_core::cookie::{CookieJar, CookieOptions};
+use sz_rust_core::env::Env;
 use sz_rust_core::event::{ClosureListener, EventDispatcher};
 use sz_rust_core::hooks::{HookContext, HookEvent, HookRegistry};
-use sz_rust_core::router::{parse_path, is_app_in_map, ParsedPath};
+use sz_rust_core::i18n::I18n;
+use sz_rust_core::log::LogFacade;
+use sz_rust_core::mail::{MailAddress, MailAttachment, MailMessage, Mailer, MemoryMailer};
+use sz_rust_core::router::{is_app_in_map, parse_path, ParsedPath};
+use sz_rust_core::session::{MemorySessionStore, Session, SessionStore};
 use sz_rust_core::upload::{HashAlgo, UploadErrCode};
-use sz_rust_core::view::{SimpleTemplateEngine, View, ViewConfig, ViewData};
 use sz_rust_core::validate::Validate;
-use serde_json::Value;
+use sz_rust_core::view::{SimpleTemplateEngine, View, ViewConfig, ViewData};
 
 // ============================================================================
 // A. DML 操作序列对抗测试（检测状态污染）
@@ -102,8 +102,10 @@ fn adversarial_dml_database_section() {
         database: section.clone(),
         ..Default::default()
     };
-    assert!(config.default_connection().is_none(),
-        "删除所有连接后 default_connection() 应返回 None");
+    assert!(
+        config.default_connection().is_none(),
+        "删除所有连接后 default_connection() 应返回 None"
+    );
 
     // 4. 重新创建 — 恢复并添加两个连接
     section.connections.insert(
@@ -207,7 +209,10 @@ fn adversarial_dml_env() {
     assert_eq!(all.get("DB_HOST"), Some(&"db.cluster.internal".to_string()));
     assert_eq!(all.get("DB_PORT"), Some(&"8802".to_string()));
     assert_eq!(all.get("DB_NAME"), Some(&"test_db".to_string()));
-    assert_eq!(all.get("DB_PASSWORD"), Some(&"rotated_password".to_string()));
+    assert_eq!(
+        all.get("DB_PASSWORD"),
+        Some(&"rotated_password".to_string())
+    );
 }
 
 /// A3: I18n 加载→覆盖→回退 序列
@@ -230,21 +235,50 @@ fn adversarial_dml_i18n() {
         "<test_b>",
     )
     .unwrap();
-    assert_eq!(i18n.get_simple("hello", Some("zh-cn")), Some("你好".to_string()));
-    assert_eq!(i18n.get_simple("hello", Some("en-us")), Some("Hello".to_string()));
-    assert_eq!(i18n.get_simple("bye", Some("zh-cn")), Some("再见".to_string()));
+    assert_eq!(
+        i18n.get_simple("hello", Some("zh-cn")),
+        Some("你好".to_string())
+    );
+    assert_eq!(
+        i18n.get_simple("hello", Some("en-us")),
+        Some("Hello".to_string())
+    );
+    assert_eq!(
+        i18n.get_simple("bye", Some("zh-cn")),
+        Some("再见".to_string())
+    );
     // en-us 无 bye 键，但 get 会回退到 default_lang (zh-cn) → 找到
-    assert_eq!(i18n.get_simple("bye", Some("en-us")), Some("再见".to_string()));
+    assert_eq!(
+        i18n.get_simple("bye", Some("en-us")),
+        Some("再见".to_string())
+    );
 
     // 2. 覆盖 — 重新加载部分键
-    i18n.load_from_json_str(r#"{"hello": "你好世界", "new_key": "新键"}"#, "zh-cn", "<test_c>").unwrap();
+    i18n.load_from_json_str(
+        r#"{"hello": "你好世界", "new_key": "新键"}"#,
+        "zh-cn",
+        "<test_c>",
+    )
+    .unwrap();
     // 被覆盖的键更新
-    assert_eq!(i18n.get_simple("hello", Some("zh-cn")), Some("你好世界".to_string()));
+    assert_eq!(
+        i18n.get_simple("hello", Some("zh-cn")),
+        Some("你好世界".to_string())
+    );
     // 未被覆盖的键保留
-    assert_eq!(i18n.get_simple("welcome", Some("zh-cn")), Some("欢迎".to_string()));
-    assert_eq!(i18n.get_simple("bye", Some("zh-cn")), Some("再见".to_string()));
+    assert_eq!(
+        i18n.get_simple("welcome", Some("zh-cn")),
+        Some("欢迎".to_string())
+    );
+    assert_eq!(
+        i18n.get_simple("bye", Some("zh-cn")),
+        Some("再见".to_string())
+    );
     // 新增的键存在
-    assert_eq!(i18n.get_simple("new_key", Some("zh-cn")), Some("新键".to_string()));
+    assert_eq!(
+        i18n.get_simple("new_key", Some("zh-cn")),
+        Some("新键".to_string())
+    );
 
     // 3. 回退测试
     i18n.set_current_lang("en-us");
@@ -391,7 +425,11 @@ fn adversarial_huge_total_ini() {
         content.push_str(&format!("KEY_{} = {}\n", i, "V".repeat(140)));
     }
     // 确保至少 9MB
-    assert!(content.len() >= 9 * 1024 * 1024, "生成内容应接近 10MB，实际 {} bytes", content.len());
+    assert!(
+        content.len() >= 9 * 1024 * 1024,
+        "生成内容应接近 10MB，实际 {} bytes",
+        content.len()
+    );
 
     std::fs::write(&env_file, &content).unwrap();
 
@@ -469,7 +507,9 @@ fn adversarial_i18n_many_placeholders() {
         let expected = format!("val_{}", i);
         assert!(
             result.contains(&expected),
-            "占位符 {} 应被替换为 {}", i, expected
+            "占位符 {} 应被替换为 {}",
+            i,
+            expected
         );
     }
 
@@ -637,7 +677,11 @@ fn adversarial_concurrent_i18n() {
 
     barrier.wait();
     for j in 0..200 {
-        i18n.set("en-us", &format!("main_key_{}", j), &format!("main_value_{}", j));
+        i18n.set(
+            "en-us",
+            &format!("main_key_{}", j),
+            &format!("main_value_{}", j),
+        );
     }
 
     for handle in handles {
@@ -655,7 +699,8 @@ fn adversarial_concurrent_i18n() {
         assert_eq!(
             en_data.get(&key),
             Some(&format!("main_value_{}", j)),
-            "主线程写入的键 {} 不完整", key
+            "主线程写入的键 {} 不完整",
+            key
         );
     }
 
@@ -710,13 +755,16 @@ fn adversarial_concurrent_memory_mailer() {
 
     // 验证主线程每封邮件都可定位
     let all = mailer.all();
-    let main_subjects: Vec<&str> = all.iter().filter_map(|m| {
-        if m.subject.starts_with("Main Subject ") {
-            Some(m.subject.as_str())
-        } else {
-            None
-        }
-    }).collect();
+    let main_subjects: Vec<&str> = all
+        .iter()
+        .filter_map(|m| {
+            if m.subject.starts_with("Main Subject ") {
+                Some(m.subject.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
     assert_eq!(main_subjects.len(), 50, "主线程 50 封邮件应全部存在");
 
     // 验证 post_concurrent 发送仍正常
@@ -832,7 +880,10 @@ fn adversarial_encoding_env_bom() {
     // 第一行变为 "\u{FEFF}APP_KEY = value_with_bom"
     // 包含 '='，key 为 "\u{FEFF}APP_KEY"，value 为 "value_with_bom"
     // 解析应成功，但键包含 BOM 字符
-    assert!(result.is_ok(), "BOM 开头的 INI 应能解析成功（BOM 作为键前缀保留）");
+    assert!(
+        result.is_ok(),
+        "BOM 开头的 INI 应能解析成功（BOM 作为键前缀保留）"
+    );
 
     // 验证 BOM 在键中保留
     let bom_key = "\u{FEFF}APP_KEY".to_string();
@@ -855,7 +906,11 @@ fn adversarial_encoding_i18n_xss_bypass() {
     let i18n = I18n::new();
 
     // 场景 1：HTML 实体在模板中
-    i18n.set("en-us", "html_entity", "&lt;script&gt;alert('xss')&lt;/script&gt;");
+    i18n.set(
+        "en-us",
+        "html_entity",
+        "&lt;script&gt;alert('xss')&lt;/script&gt;",
+    );
     let result = i18n.get_simple("html_entity", Some("en-us")).unwrap();
     assert_eq!(result, "&lt;script&gt;alert('xss')&lt;/script&gt;");
     // 验证 HTML 实体未被二次转义
@@ -871,10 +926,7 @@ fn adversarial_encoding_i18n_xss_bypass() {
     );
     let result2 = i18n.get("user_greeting", &vars, Some("en-us")).unwrap();
     // 插值不转义 HTML（设计如此），但不应 panic
-    assert_eq!(
-        result2,
-        "Hello, <script>alert('xss')</script>!"
-    );
+    assert_eq!(result2, "Hello, <script>alert('xss')</script>!");
     assert!(result2.contains("<script>"));
 
     // 场景 3：插值变量含占位符语法（试图绕过）
@@ -1121,8 +1173,7 @@ fn adversarial_cookie_jar_chain_operations() {
     assert_eq!(cookies.len(), 2);
 
     // forever
-    let jar = CookieJar::new()
-        .forever("forever_key", "forever_val", CookieOptions::default());
+    let jar = CookieJar::new().forever("forever_key", "forever_val", CookieOptions::default());
     let cookies = jar.get_response_cookies();
     let forever_entry = cookies.iter().find(|c| c.name == "forever_key").unwrap();
     // forever 的 expire 应该至少为 315360000（10 年）
@@ -1179,7 +1230,10 @@ fn adversarial_cache_dml_sequence() {
 
     // 1. set + get
     cache.set("k1", "value1", None).unwrap();
-    assert_eq!(cache.get::<String>("k1").unwrap(), Some("value1".to_string()));
+    assert_eq!(
+        cache.get::<String>("k1").unwrap(),
+        Some("value1".to_string())
+    );
 
     // 2. 覆盖
     cache.set("k1", "overwritten", None).unwrap();
@@ -1334,8 +1388,8 @@ fn adversarial_validate_rule_parse_boundaries() {
 /// H2: Validate require/must 边界值
 #[test]
 fn adversarial_validate_require_boundaries() {
-    use sz_rust_core::validate::Validate;
     use serde_json::json;
+    use sz_rust_core::validate::Validate;
 
     // require("0") → 应该为 true（PHP 特殊行为）
     assert!(Validate::require(&json!("0"), ""));
@@ -1479,22 +1533,34 @@ fn adversarial_cross_module_cache_env() {
 #[test]
 fn adversarial_event_dml_sequence() {
     let dispatcher = EventDispatcher::new();
-    dispatcher.listen("user.login", Arc::new(ClosureListener::new(|params| {
-        Ok(params.get("uid").cloned().unwrap_or(Value::Null))
-    })), false);
+    dispatcher.listen(
+        "user.login",
+        Arc::new(ClosureListener::new(|params| {
+            Ok(params.get("uid").cloned().unwrap_or(Value::Null))
+        })),
+        false,
+    );
     assert!(dispatcher.has_listener("user.login"));
     assert_eq!(dispatcher.listener_count("user.login"), 1);
-    let results = dispatcher.trigger("user.login", &serde_json::json!({"uid": 42}), false).unwrap();
+    let results = dispatcher
+        .trigger("user.login", &serde_json::json!({"uid": 42}), false)
+        .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0], serde_json::json!(42));
     dispatcher.bind(vec![("login".to_string(), "user.login".to_string())]);
     assert!(dispatcher.has_listener("login"));
     dispatcher.remove("user.login");
     assert!(!dispatcher.has_listener("user.login"));
-    dispatcher.listen("user.login", Arc::new(ClosureListener::new(|params| {
-        Ok(params.get("uid").cloned().unwrap_or(Value::Null))
-    })), false);
-    let results2 = dispatcher.trigger("user.login", &serde_json::json!({"uid": 99}), false).unwrap();
+    dispatcher.listen(
+        "user.login",
+        Arc::new(ClosureListener::new(|params| {
+            Ok(params.get("uid").cloned().unwrap_or(Value::Null))
+        })),
+        false,
+    );
+    let results2 = dispatcher
+        .trigger("user.login", &serde_json::json!({"uid": 99}), false)
+        .unwrap();
     assert_eq!(results2.len(), 1);
     assert_eq!(results2[0], serde_json::json!(99));
 }
@@ -1503,17 +1569,37 @@ fn adversarial_event_dml_sequence() {
 #[test]
 fn adversarial_event_boundaries() {
     let dispatcher = EventDispatcher::new();
-    dispatcher.listen("", Arc::new(ClosureListener::new(|_| Ok(Value::Null))), false);
+    dispatcher.listen(
+        "",
+        Arc::new(ClosureListener::new(|_| Ok(Value::Null))),
+        false,
+    );
     assert!(dispatcher.has_listener(""));
     dispatcher.trigger("", &Value::Null, false).unwrap();
     let long_name = "A".repeat(10 * 1024);
-    dispatcher.listen(&long_name, Arc::new(ClosureListener::new(|_| Ok(Value::Null))), false);
+    dispatcher.listen(
+        &long_name,
+        Arc::new(ClosureListener::new(|_| Ok(Value::Null))),
+        false,
+    );
     assert!(dispatcher.has_listener(&long_name));
     dispatcher.trigger(&long_name, &Value::Null, false).unwrap();
     let d2 = EventDispatcher::new();
-    d2.listen("order", Arc::new(ClosureListener::new(|_| Ok(Value::String("first".into())))), false);
-    d2.listen("order", Arc::new(ClosureListener::new(|_| Ok(Value::String("second".into())))), false);
-    d2.listen("order", Arc::new(ClosureListener::new(|_| Ok(Value::String("zero".into())))), true);
+    d2.listen(
+        "order",
+        Arc::new(ClosureListener::new(|_| Ok(Value::String("first".into())))),
+        false,
+    );
+    d2.listen(
+        "order",
+        Arc::new(ClosureListener::new(|_| Ok(Value::String("second".into())))),
+        false,
+    );
+    d2.listen(
+        "order",
+        Arc::new(ClosureListener::new(|_| Ok(Value::String("zero".into())))),
+        true,
+    );
     let results = d2.trigger("order", &Value::Null, false).unwrap();
     assert_eq!(results.len(), 3);
     assert_eq!(results[0], Value::String("zero".into()));
@@ -1575,11 +1661,14 @@ fn adversarial_hooks_dml_sequence() {
     let executed = Arc::new(std::sync::Mutex::new(false));
     {
         let executed = Arc::clone(&executed);
-        registry.register(HookEvent::BeforeInsert, Arc::new(move |_ctx| {
-            let mut guard = executed.lock().unwrap();
-            *guard = true;
-            Ok(())
-        }));
+        registry.register(
+            HookEvent::BeforeInsert,
+            Arc::new(move |_ctx| {
+                let mut guard = executed.lock().unwrap();
+                *guard = true;
+                Ok(())
+            }),
+        );
     }
     let ctx = HookContext::new();
     registry.dispatch(HookEvent::BeforeInsert, &ctx).unwrap();
@@ -1590,11 +1679,14 @@ fn adversarial_hooks_dml_sequence() {
     assert!(!*executed.lock().unwrap(), "移除后钩子不应再执行");
     {
         let executed = Arc::clone(&executed);
-        registry.register(HookEvent::BeforeInsert, Arc::new(move |_ctx| {
-            let mut guard = executed.lock().unwrap();
-            *guard = true;
-            Ok(())
-        }));
+        registry.register(
+            HookEvent::BeforeInsert,
+            Arc::new(move |_ctx| {
+                let mut guard = executed.lock().unwrap();
+                *guard = true;
+                Ok(())
+            }),
+        );
     }
     registry.dispatch(HookEvent::BeforeInsert, &ctx).unwrap();
     assert!(*executed.lock().unwrap(), "重新注册后钩子应再次执行");
@@ -1603,13 +1695,22 @@ fn adversarial_hooks_dml_sequence() {
 /// L2: HookEvent 字符串映射边界
 #[test]
 fn adversarial_hooks_event_name_mapping() {
-    use sz_rust_core::hooks::{ALL_EVENTS, PHP_NATIVE_EVENTS, EXTENDED_EVENTS, event_name, event_from_name};
+    use sz_rust_core::hooks::{
+        event_from_name, event_name, ALL_EVENTS, EXTENDED_EVENTS, PHP_NATIVE_EVENTS,
+    };
     assert_eq!(ALL_EVENTS.len(), 16);
     for event in ALL_EVENTS.iter() {
         let name = event_name(*event);
         assert!(!name.is_empty());
         let roundtrip = event_from_name(name);
-        assert_eq!(roundtrip, Some(*event), "双射失败: {:?} -> {} -> {:?}", event, name, roundtrip);
+        assert_eq!(
+            roundtrip,
+            Some(*event),
+            "双射失败: {:?} -> {} -> {:?}",
+            event,
+            name,
+            roundtrip
+        );
     }
     assert_eq!(event_from_name(""), None);
     assert_eq!(event_from_name("BEFORE_INSERT"), None);
@@ -1619,7 +1720,11 @@ fn adversarial_hooks_event_name_mapping() {
     assert_eq!(PHP_NATIVE_EVENTS.len(), 12);
     assert_eq!(EXTENDED_EVENTS.len(), 4);
     for native in PHP_NATIVE_EVENTS.iter() {
-        assert!(!EXTENDED_EVENTS.contains(native), "原生事件 {:?} 不应在扩展事件列表中", native);
+        assert!(
+            !EXTENDED_EVENTS.contains(native),
+            "原生事件 {:?} 不应在扩展事件列表中",
+            native
+        );
     }
 }
 
@@ -1681,7 +1786,9 @@ fn adversarial_upload_err_code_boundaries() {
     assert_eq!(UploadErrCode::from_i32(i32::MAX), UploadErrCode::Ok);
     assert!(UploadErrCode::IniSize.error_message().contains("exceeds"));
     assert!(UploadErrCode::NoFile.error_message().contains("no file"));
-    assert!(UploadErrCode::CantWrite.error_message().contains("write error"));
+    assert!(UploadErrCode::CantWrite
+        .error_message()
+        .contains("write error"));
 }
 
 /// N2: HashAlgo 映射边界
@@ -1727,7 +1834,10 @@ fn adversarial_view_dml_sequence() {
     view.clear_vars();
     assert!(!view.has_var("name"));
     view.assign("new_key", Value::String("new_val".into()));
-    assert_eq!(view.get_var("new_key"), Some(Value::String("new_val".into())));
+    assert_eq!(
+        view.get_var("new_key"),
+        Some(Value::String("new_val".into()))
+    );
 }
 
 /// O2: View 边界值 — 空模板、超大输入、特殊字符
@@ -1744,7 +1854,10 @@ fn adversarial_view_boundaries() {
     let result = view.display("{$long}", None).unwrap();
     assert_eq!(result.len(), 100 * 1024);
     assert_eq!(result, long_val);
-    view.assign("special", Value::String("<script>alert('xss')</script>".into()));
+    view.assign(
+        "special",
+        Value::String("<script>alert('xss')</script>".into()),
+    );
     let result = view.display("{$special}", None).unwrap();
     assert!(!result.contains("<script>"));
     assert!(result.contains("&lt;script&gt;"));
@@ -1842,4 +1955,3 @@ fn adversarial_log_facade_channels() {
     let facade2 = LogFacade::new(&section2);
     assert!(facade2.channel("channel with spaces").is_some());
 }
-

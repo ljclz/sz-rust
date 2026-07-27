@@ -8,11 +8,13 @@
 //!
 //! ## 重构后
 //!
-//! - 控制器：解析请求参数 → 调用 [`device_service::DeviceService`] → 格式化响应
+//! - 控制器：解析请求参数 → 调用 [`crate::services::device_service::DeviceService`] → 格式化响应
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::device::Device`] 定义实体结构
 
-use crate::services::device_service::{row_to_json, DeviceFilters, DeviceService};
+use crate::controllers::common::parse_pagination;
+use crate::services::device_service::{DeviceFilters, DeviceService};
+use crate::services::row_to_json;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
@@ -20,7 +22,6 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use crate::controllers::common::parse_pagination;
 use tracing::{info, warn};
 
 struct DeviceController;
@@ -44,11 +45,8 @@ impl DeviceController {
 
                 match DeviceService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
-                        let list: Vec<serde_json::Value> = page_data
-                            .list
-                            .iter()
-                            .map(row_to_json)
-                            .collect();
+                        let list: Vec<serde_json::Value> =
+                            page_data.list.iter().map(row_to_json).collect();
                         info!(
                             "设备列表查询成功: page={}, page_size={}, total={}",
                             page, page_size, page_data.total

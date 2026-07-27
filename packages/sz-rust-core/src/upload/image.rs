@@ -1,6 +1,6 @@
 //! 图像处理模块 — 对齐 PHP `Grafika\Gd\Editor` + `Grafika\Gd\Image` + `Grafika\Color` + `Grafika\Position`
 //!
-//! Phase 5.8 核心交付物。本模块实现图像处理功能，对齐 PHP `kosinix/grafika` 库
+//! 本模块实现图像处理功能，对齐 PHP `kosinix/grafika` 库
 //! 的 GD 后端 API（项目中实际使用的图像处理库）。
 //!
 //! ## PHP 对齐说明
@@ -2141,12 +2141,27 @@ mod tests {
         assert_eq!(Position::parse("top-left").unwrap(), Position::TopLeft);
         assert_eq!(Position::parse("top-center").unwrap(), Position::TopCenter);
         assert_eq!(Position::parse("top-right").unwrap(), Position::TopRight);
-        assert_eq!(Position::parse("center-left").unwrap(), Position::CenterLeft);
+        assert_eq!(
+            Position::parse("center-left").unwrap(),
+            Position::CenterLeft
+        );
         assert_eq!(Position::parse("center").unwrap(), Position::Center);
-        assert_eq!(Position::parse("center-right").unwrap(), Position::CenterRight);
-        assert_eq!(Position::parse("bottom-left").unwrap(), Position::BottomLeft);
-        assert_eq!(Position::parse("bottom-center").unwrap(), Position::BottomCenter);
-        assert_eq!(Position::parse("bottom-right").unwrap(), Position::BottomRight);
+        assert_eq!(
+            Position::parse("center-right").unwrap(),
+            Position::CenterRight
+        );
+        assert_eq!(
+            Position::parse("bottom-left").unwrap(),
+            Position::BottomLeft
+        );
+        assert_eq!(
+            Position::parse("bottom-center").unwrap(),
+            Position::BottomCenter
+        );
+        assert_eq!(
+            Position::parse("bottom-right").unwrap(),
+            Position::BottomRight
+        );
     }
 
     #[test]
@@ -2339,11 +2354,23 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Multiply, 1.0, Position::TopLeft, 0, 0)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Multiply,
+                1.0,
+                Position::TopLeft,
+                0,
+                0,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         let pixel = rgba.get_pixel(0, 0);
-        assert!((60..=68).contains(&pixel[0]), "expected ~64, got {}", pixel[0]);
+        assert!(
+            (60..=68).contains(&pixel[0]),
+            "expected ~64, got {}",
+            pixel[0]
+        );
     }
 
     #[test]
@@ -2354,11 +2381,23 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Overlay, 1.0, Position::TopLeft, 0, 0)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Overlay,
+                1.0,
+                Position::TopLeft,
+                0,
+                0,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         let pixel = rgba.get_pixel(0, 0);
-        assert!((60..=68).contains(&pixel[0]), "expected ~64, got {}", pixel[0]);
+        assert!(
+            (60..=68).contains(&pixel[0]),
+            "expected ~64, got {}",
+            pixel[0]
+        );
     }
 
     #[test]
@@ -2369,11 +2408,23 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Overlay, 1.0, Position::TopLeft, 0, 0)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Overlay,
+                1.0,
+                Position::TopLeft,
+                0,
+                0,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         let pixel = rgba.get_pixel(0, 0);
-        assert!((225..=235).contains(&pixel[0]), "expected ~231, got {}", pixel[0]);
+        assert!(
+            (225..=235).contains(&pixel[0]),
+            "expected ~231, got {}",
+            pixel[0]
+        );
     }
 
     #[test]
@@ -2384,7 +2435,15 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Screen, 1.0, Position::TopLeft, 0, 0)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Screen,
+                1.0,
+                Position::TopLeft,
+                0,
+                0,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         let pixel = rgba.get_pixel(0, 0);
@@ -2399,7 +2458,15 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Normal, 1.0, Position::TopLeft, -25, -25)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Normal,
+                1.0,
+                Position::TopLeft,
+                -25,
+                -25,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         assert_eq!(rgba.get_pixel(0, 0)[0], 255);
@@ -2415,7 +2482,15 @@ mod tests {
         let img2 = Image::from_rgba8(overlay, ImageType::Png);
         let editor = Editor::new();
         editor
-            .blend(&mut img1, &img2, BlendType::Normal, 1.0, Position::TopLeft, 0, 0)
+            .blend(
+                &mut img1,
+                &img2,
+                BlendType::Normal,
+                1.0,
+                Position::TopLeft,
+                0,
+                0,
+            )
             .unwrap();
         let rgba = img1.to_rgba8();
         let pixel = rgba.get_pixel(0, 0);
@@ -2469,7 +2544,14 @@ mod tests {
         let editor = Editor::new();
         let img = editor.open(tmp_in.path()).unwrap();
         editor
-            .save(&img, tmp_out.path(), Some(ImageType::Png), None, false, 0o755)
+            .save(
+                &img,
+                tmp_out.path(),
+                Some(ImageType::Png),
+                None,
+                false,
+                0o755,
+            )
             .unwrap();
         assert!(tmp_out.path().exists());
     }
@@ -2482,7 +2564,14 @@ mod tests {
         let editor = Editor::new();
         let img = editor.open(tmp_in.path()).unwrap();
         editor
-            .save(&img, tmp_out.path(), Some(ImageType::Jpeg), Some(80), false, 0o755)
+            .save(
+                &img,
+                tmp_out.path(),
+                Some(ImageType::Jpeg),
+                Some(80),
+                false,
+                0o755,
+            )
             .unwrap();
         assert!(tmp_out.path().exists());
     }
@@ -2609,6 +2698,9 @@ mod tests {
         let long_text = "this is a very long text that should wrap";
         let result = wrap_text_with_font(&font, 30, long_text, 100, None);
         assert!(result.contains('\n'), "should contain newline: {result}");
-        assert!(!result.ends_with("..."), "should not end with ... when no max_line");
+        assert!(
+            !result.ends_with("..."),
+            "should not end with ... when no max_line"
+        );
     }
 }

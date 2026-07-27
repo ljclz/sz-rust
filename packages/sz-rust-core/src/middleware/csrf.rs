@@ -58,9 +58,15 @@ pub fn is_safe_method(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
-/// 判断路径是否在公开路径列表中（前缀匹配）
+/// 判断路径是否在公开路径列表中（精确匹配，避免前缀绕过）
+///
+/// 安全说明（2026-07-26 P1 修复）：
+/// - 旧版使用 `path.starts_with(p)` 前缀匹配，会绕过 `/health_evil`、
+///   `/api/v1/auth/login_anything` 等意外路径
+/// - 新版改为精确匹配，仅完全相等的路径才被放行
+/// - 与 `sz-rust-sz300/src/router.rs::is_public_path` 对齐
 pub fn is_public_path(path: &str, public_paths: &[&str]) -> bool {
-    public_paths.iter().any(|p| path.starts_with(p))
+    public_paths.contains(&path)
 }
 
 /// 生成 32 字节随机 CSRF token（Base64 编码，44 字符）
@@ -133,7 +139,10 @@ pub async fn csrf_middleware(req: Request<Body>, next: Next) -> Response {
 /// 从 Cookie header 中提取指定名称的值
 ///
 /// 支持标准 Cookie 格式：`name1=value1; name2=value2`
-pub fn extract_cookie_value(cookie_header: Option<&axum::http::HeaderValue>, name: &str) -> Option<String> {
+pub fn extract_cookie_value(
+    cookie_header: Option<&axum::http::HeaderValue>,
+    name: &str,
+) -> Option<String> {
     let header = cookie_header?;
     let header_str = header.to_str().ok()?;
     for pair in header_str.split(';') {
@@ -174,7 +183,12 @@ mod tests {
             .layer(axum::middleware::from_fn(csrf_middleware))
     }
 
-    async fn send(method: &str, path: &str, cookie: Option<&str>, header: Option<&str>) -> Response {
+    async fn send(
+        method: &str,
+        path: &str,
+        cookie: Option<&str>,
+        header: Option<&str>,
+    ) -> Response {
         let mut builder = Request::builder().method(method).uri(path);
         if let Some(c) = cookie {
             builder = builder.header("cookie", c);
@@ -212,9 +226,18 @@ mod tests {
 
     #[test]
     fn test_is_public_path() {
+        // 精确匹配：仅列表中的路径返回 true
         assert!(is_public_path("/health", DEFAULT_PUBLIC_PATHS));
-        assert!(is_public_path("/health/ready", DEFAULT_PUBLIC_PATHS));
         assert!(is_public_path("/metrics", DEFAULT_PUBLIC_PATHS));
+        assert!(is_public_path("/api/v1/auth/login", DEFAULT_PUBLIC_PATHS));
+        assert!(is_public_path("/api/v1/auth/refresh", DEFAULT_PUBLIC_PATHS));
+        // 不在列表中的路径返回 false（避免前缀绕过）
+        assert!(!is_public_path("/health/ready", DEFAULT_PUBLIC_PATHS));
+        assert!(!is_public_path("/health_evil", DEFAULT_PUBLIC_PATHS));
+        assert!(!is_public_path(
+            "/api/v1/auth/login_anything",
+            DEFAULT_PUBLIC_PATHS
+        ));
         assert!(!is_public_path("/api/v1/data", DEFAULT_PUBLIC_PATHS));
     }
 
@@ -255,13 +278,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_post_with_mismatched_tokens_returns_403() {
-        let resp = send(
-            "POST",
-            "/api/data",
-            Some("csrf_token=abc"),
-            Some("xyz"),
-        )
-        .await;
+        let resp = send("POST", "/api/data", Some("csrf_token=abc"), Some("xyz")).await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 

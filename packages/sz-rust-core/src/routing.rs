@@ -512,14 +512,14 @@ pub async fn load_routes_from_json_file(
 }
 
 // ============================================================================
-// Layer 1 - 属性宏路由契约（接口定义，实现在 Phase 2）
+// Layer 1 - 属性宏路由契约（接口定义，实现见 controller_registry 模块）
 // ============================================================================
 
 /// 控制器路由契约
 ///
 /// 由 `#[controller]` 属性宏自动实现，声明控制器内的所有路由。
 ///
-/// ## 用法（Phase 2 实现后）
+/// ## 用法（属性宏实现后）
 ///
 /// ```ignore
 /// use sz_rust_core::routing::ControllerRouter;
@@ -557,7 +557,7 @@ pub trait ControllerRouter {
 /// 约定式路由元数据
 ///
 /// 基于 `parse_path` 的 `(app, controller, action)` 三元组生成。
-/// 实际路由注册需要 ControllerRegistry（在 Phase 2 实现）。
+/// 实际路由注册需要 ControllerRegistry（在 controller_registry 模块实现）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConventionRoute {
     /// 应用名
@@ -630,8 +630,8 @@ impl ConventionRoute {
 ///
 /// ## 注意
 ///
-/// 实际将路由注册到 `axum::Router` 需要 ControllerRegistry（Phase 2 实现）。
-/// Phase 1.11 仅提供元数据管理和冲突检测。
+/// 实际将路由注册到 `axum::Router` 需要 ControllerRegistry（在 controller_registry 模块实现）。
+/// 本模块仅提供元数据管理和冲突检测。
 #[derive(Debug, Clone, Default)]
 pub struct RouteRegistry {
     /// Layer 1 - 属性宏路由

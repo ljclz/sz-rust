@@ -1,6 +1,6 @@
 //! 内置验证规则 — 对齐 PHP `think\Validate` 类的内置规则方法
 //!
-//! Phase 5.2 交付物。本模块实现 PHP `think\Validate` 类中除 `require`/`must`/`is`/`regex` 外的
+//! 本模块实现 PHP `think\Validate` 类中除 `require`/`must`/`is`/`regex` 外的
 //! 所有内置规则方法。
 //!
 //! ## PHP 对齐

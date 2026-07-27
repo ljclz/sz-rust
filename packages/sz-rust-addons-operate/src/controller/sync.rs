@@ -38,7 +38,7 @@
 //! 4. 单客户匹配时自动分配
 //! 5. 多客户冲突时按当前 customer_id 匹配
 //!
-//! Rust 端通过 [`check_rentarea_customer`] 复刻此逻辑。
+//! Rust 端通过 `check_rentarea_customer` 复刻此逻辑。
 
 use axum::body::Body;
 use axum::http::Request;

@@ -1,6 +1,6 @@
 //! 关联缓存 — 对齐 PHP `withCache()` / `Cache::clear($tag)` 行为
 //!
-//! Phase 4.7 核心交付物。本模块 re-export sz-orm-core `l2_cache` 模块的类型，
+//! 本模块 re-export sz-orm-core `l2_cache` 模块的类型，
 //! 并提供 PHP 命名约定辅助函数对齐 PHP `withCache()` / `Cache::clear($tag)` 行为。
 //!
 //! ## PHP 端关联缓存机制
@@ -144,7 +144,7 @@
 //!
 //! ## 架构说明
 //!
-//! 沿用 Phase 4.1-4.6 确立的 sz-orm-core::model 模块私有约束统一处理模式：
+//! 沿用既有的 sz-orm-core::model 模块私有约束统一处理模式：
 //!
 //! - **re-export sz-orm-core l2_cache 类型**：`L2Cache` / `CacheKey` / `CacheKeyKind` / `L2CacheStats`
 //! - **PHP 命名约定辅助类型**：`WithCacheConfig` / `WithCacheOption`

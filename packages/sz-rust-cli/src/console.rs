@@ -179,10 +179,7 @@ impl Console {
     ///
     /// 返回命令签名向量，顺序不保证（HashMap 迭代顺序不确定）。
     pub fn list(&self) -> Vec<CommandSignature> {
-        self.commands
-            .values()
-            .map(|cmd| cmd.signature())
-            .collect()
+        self.commands.values().map(|cmd| cmd.signature()).collect()
     }
 
     /// 打印命令列表到标准输出

@@ -10,12 +10,8 @@ license.workspace = true
 # sz-orm 穿透依赖已迁移至 sz-rust-core::orm facade（v0.2.0+）
 # 保留的直接依赖：
 #   - sz-orm-sqlx：SQLx 后端实现（sz-rust-core 不提供）
-#   - sz-orm-config：配置管理（sz-rust-core 不提供）
-#   - sz-orm-macros：过程宏（需直接依赖）
 sz-rust-core.workspace = true
 sz-rust-observability.workspace = true
-sz-orm-config.workspace = true
-sz-orm-macros.workspace = true
 sz-orm-sqlx.workspace = true
 serde.workspace = true
 serde_json.workspace = true

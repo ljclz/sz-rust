@@ -322,7 +322,10 @@ impl IntoResponse for VersionError {
     fn into_response(self) -> Response {
         let body = match self {
             VersionError::UnsupportedVersion(v) => {
-                format!("{{\"code\":0,\"msg\":\"Unsupported API version: {}\",\"data\":{{}}}}", v)
+                format!(
+                    "{{\"code\":0,\"msg\":\"Unsupported API version: {}\",\"data\":{{}}}}",
+                    v
+                )
             }
         };
         (

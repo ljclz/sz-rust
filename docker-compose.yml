@@ -4,8 +4,8 @@
 services:
   sz300-server:
     build:
-      context: ..
-      dockerfile: sz-rust/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8300:8300"
     environment:

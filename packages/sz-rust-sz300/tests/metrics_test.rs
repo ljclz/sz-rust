@@ -31,11 +31,7 @@ fn test_metrics_gauge() {
 #[test]
 fn test_metrics_histogram() {
     let registry = MetricsRegistry::new();
-    let hist = registry.register_histogram(
-        "test_duration",
-        "Test histogram",
-        vec![0.1, 1.0, 10.0],
-    );
+    let hist = registry.register_histogram("test_duration", "Test histogram", vec![0.1, 1.0, 10.0]);
     hist.observe(0.5);
     hist.observe(2.0);
 

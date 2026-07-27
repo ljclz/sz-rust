@@ -1,6 +1,6 @@
 //! Tower 生态兼容验证 — tower-http Layer 可插入 sz-rust 中间件链
 //!
-//! Phase 3.13 核心交付物。本模块验证 sz-rust 的 [`MiddlewareBuilder`] 与 tower 生态的兼容性，
+//! 本模块验证 sz-rust 的 [`MiddlewareBuilder`] 与 tower 生态的兼容性，
 //! 提供：
 //!
 //! 1. [`TowerLayer`] 枚举：包装 3 个常用 `tower-http` Layer（`Compression` / `Timeout` / `TowerTrace`），

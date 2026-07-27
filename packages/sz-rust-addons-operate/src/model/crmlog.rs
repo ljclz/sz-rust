@@ -14,8 +14,8 @@
 //! | `$name = 'crm_log'` | [`Crmlog::table_name()`] | 表名 |
 //! | `$pk = 'log_id'` | [`Crmlog::pk_name()`] | 主键列名 |
 //! | `$append = []` | [`Crmlog::append()`]（默认空） | 无静态 append |
-//! | `payment()` belongsTo | NOTE(Phase 4) | `Payment` mid→payment_id |
-//! | `personnel()` belongsTo | NOTE(Phase 4) | `IndustryPersonnel` check_uid→uid |
+//! | `payment()` belongsTo | NOTE(关联模块) | `Payment` mid→payment_id |
+//! | `personnel()` belongsTo | NOTE(关联模块) | `IndustryPersonnel` check_uid→uid |
 //!
 //! ## 无访问器 / 无修改器
 //!
@@ -23,8 +23,8 @@
 //!
 //! ## 未实现（标 NOTE）
 //!
-//! - **业务方法**（detail/getAll/getList/setDelete）→ NOTE(Phase 5+ 控制器层)
-//! - **关联关系**（payment/personnel belongsTo）→ NOTE(Phase 4)
+//! - **业务方法**（detail/getAll/getList/setDelete）→ NOTE(控制器层)
+//! - **关联关系**（payment/personnel belongsTo）→ NOTE(关联模块)
 
 use crate::model::{get_i64, impl_empty_relation_loader};
 use serde_json::{json, Value};

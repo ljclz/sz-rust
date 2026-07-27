@@ -1,4 +1,4 @@
-//! sz-orm-websocket 服务端接入（Phase 9.6）
+//! sz-orm-websocket 服务端接入
 //!
 //! ## PHP 对齐
 //!
@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use sz_orm_websocket::{DefaultWebSocketHandler, WebSocketHandler, WsError, WsServer};
 
-/// WebSocket 运行时配置（Phase 9.6）
+/// WebSocket 运行时配置
 #[derive(Debug, Clone)]
 pub struct WebSocketRuntimeConfig {
     /// 监听地址（如 "0.0.0.0:2346"）
@@ -51,7 +51,7 @@ impl WebSocketRuntimeConfig {
     }
 }
 
-/// WebSocket 运行时（Phase 9.6）
+/// WebSocket 运行时
 ///
 /// 封装 `sz_orm_websocket::WsServer`，提供服务端 lifecycle 管理。
 ///

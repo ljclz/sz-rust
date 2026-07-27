@@ -1,4 +1,4 @@
-//! sz-orm-queue 消费者接入（Phase 9.4）
+//! sz-orm-queue 消费者接入
 //!
 //! ## PHP 对齐
 //!
@@ -38,7 +38,7 @@ pub enum QueueConsumerError {
     Queue(String),
 }
 
-/// 队列消费者 trait（Phase 9.4）
+/// 队列消费者 trait
 ///
 /// 业务侧实现该 trait，处理从队列消费的消息。
 ///
@@ -55,7 +55,7 @@ pub trait QueueConsumer: Send + Sync {
     async fn handle(&self, message: &sz_orm_queue::Message) -> Result<(), QueueConsumerError>;
 }
 
-/// 队列运行时配置（Phase 9.4）
+/// 队列运行时配置
 #[derive(Debug, Clone)]
 pub struct QueueRuntimeConfig {
     /// 消费主题
@@ -98,7 +98,7 @@ impl QueueRuntimeConfig {
     }
 }
 
-/// 队列运行时（Phase 9.4）
+/// 队列运行时
 ///
 /// 管理 consumer lifecycle：启动一个消费循环任务，监听 `CancellationToken` 优雅退出。
 ///

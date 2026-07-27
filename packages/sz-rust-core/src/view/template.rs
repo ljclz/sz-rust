@@ -1,6 +1,6 @@
 //! Cx 标签库控制流标签 — 对齐 PHP `think\template\taglib\Cx`
 //!
-//! Phase 7.2 核心交付物。实现对齐 PHP Cx 标签库的控制流标签解析与渲染。
+//! 实现对齐 PHP Cx 标签库的控制流标签解析与渲染。
 //!
 //! ## 支持的标签
 //!
@@ -1234,7 +1234,7 @@ fn split_top_level<'a>(expr: &'a str, sep: &str) -> Vec<&'a str> {
 /// 解析操作数为 Value（对齐 PHP `autoBuildVar`）
 ///
 /// PHP 规则：
-/// - `:` 开头 → 函数调用（NOTE: Phase 7.3 支持）
+/// - `:` 开头 → 函数调用（NOTE: 函数调用支持）
 /// - `$` 开头 → 变量引用
 /// - 字母/下划线开头 → 自动补 `$` 前缀（视为变量名）
 /// - 数字 → 数字字面量
@@ -1253,7 +1253,7 @@ fn parse_operand_value(expr: &str, data: &ViewData) -> Value {
 
     // 函数调用 (:func())
     if expr.starts_with(':') {
-        // NOTE: Phase 7.3 支持条件中的函数调用
+        // NOTE: 支持条件中的函数调用
         return Value::Null;
     }
 
@@ -1442,7 +1442,7 @@ fn resolve_name(name: &str, data: &ViewData) -> Value {
 
     // 函数调用
     if name.starts_with(':') {
-        // NOTE: Phase 7.3 支持函数调用
+        // NOTE: 支持函数调用
         return Value::Null;
     }
 
@@ -1467,7 +1467,6 @@ fn resolve_case_value(value: &str, data: &ViewData) -> Value {
     }
 
     if value.starts_with(':') {
-        // NOTE: Phase 7.3
         return Value::Null;
     }
 

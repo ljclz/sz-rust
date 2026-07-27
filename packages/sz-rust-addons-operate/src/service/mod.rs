@@ -22,7 +22,7 @@
 //!
 //! 5 个银行/通知服务（Ccb/Icbc/Fuiou/PaySuccess/Refund）依赖外部 SDK
 //!（ccbPay/DefaultIcbcClient/Fuiou Constants/企业微信 qySend），
-//! 真实实现待后续 Phase 补全，当前提供 Mock 实现用于单元测试。
+//! 真实实现待后续补全，当前提供 Mock 实现用于单元测试。
 //!
 //! ### 1:1 PHP 对齐
 //!

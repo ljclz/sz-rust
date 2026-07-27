@@ -2,24 +2,24 @@
 //!
 //! 迁移自 `e:\vue\test\鲜视达\server\addons\operate\`。
 //!
-//! ## 当前迁移范围（Phase 2.10）
+//! ## 当前迁移范围
 //!
 //! | 模型 | PHP 文件 | 元数据 | 访问器 | 修改器 | append | 关联 |
 //! |------|---------|--------|--------|--------|--------|------|
-//! | Customer | `addons/operate/model/Customer.php` | ✅ | ✅ 3 个 | ✅ 1 个 | ✅ 2 个 | ⬜ Phase 4 |
-//! | Contract | `addons/operate/model/Contract.php` | ✅ | ✅ 17 个 | ✅ 2 个 | ✅ 6 个 | ⬜ Phase 4 |
-//! | Rentarea | `addons/operate/model/Rentarea.php` | ✅ | ✅ 2 个 | ❌ | ✅ 2 个 | ⬜ Phase 4 |
-//! | Dept | `app/common/model/szoa/industry/IndustryDept.php` | ✅ | ❌ | ❌ | ❌ | ⬜ Phase 4 |
-//! | Category | `addons/operate/model/Category.php` | ✅ | ❌ | ❌ | ❌ | ⬜ Phase 4 |
+//! | Customer | `addons/operate/model/Customer.php` | ✅ | ✅ 3 个 | ✅ 1 个 | ✅ 2 个 | ⬜ 待实现 |
+//! | Contract | `addons/operate/model/Contract.php` | ✅ | ✅ 17 个 | ✅ 2 个 | ✅ 6 个 | ⬜ 待实现 |
+//! | Rentarea | `addons/operate/model/Rentarea.php` | ✅ | ✅ 2 个 | ❌ | ✅ 2 个 | ⬜ 待实现 |
+//! | Dept | `app/common/model/szoa/industry/IndustryDept.php` | ✅ | ❌ | ❌ | ❌ | ⬜ 待实现 |
+//! | Category | `addons/operate/model/Category.php` | ✅ | ❌ | ❌ | ❌ | ⬜ 待实现 |
 //!
-//! ## 未实现特性（标 NOTE 等待对应 Phase）
+//! ## 未实现特性（标 NOTE 等待后续实现）
 //!
-//! - **关联关系**（belongsTo/hasMany + bind/with/where/withoutField）→ NOTE(Phase 4)
-//! - **全局范围 `scopeApp_id`**（`$globalScope = ['app_id']`）→ NOTE(Phase 3 TenantModel)
-//! - **静态缓存**（`Cache::get/set`）→ NOTE(Phase 6)
+//! - **关联关系**（belongsTo/hasMany + bind/with/where/withoutField）→ NOTE(关联模块)
+//! - **全局范围 `scopeApp_id`**（`$globalScope = ['app_id']`）→ NOTE(TenantModel 模块)
+//! - **静态缓存**（`Cache::get/set`）→ NOTE(Cache 模块)
 //! - **静态反查访问器**（`Customer::getRentareaTextAttr` 调 `Rentarea::where`、
-//!   `Contract::getLogsAttr` 调 `ContractLog::getLogs`）→ NOTE(Phase 4 Repository)
-//! - **业务方法**（detail/getList/add/edit/setDelete 等）→ NOTE(Phase 5+ 控制器层)
+//!   `Contract::getLogsAttr` 调 `ContractLog::getLogs`）→ NOTE(Repository 层)
+//! - **业务方法**（detail/getList/add/edit/setDelete 等）→ NOTE(控制器层)
 //!
 //! ## 序列化策略
 //!
@@ -29,7 +29,7 @@
 //! 3. 逗号分隔字符串（`rentarea_ids`）→ Rust 端用 `Vec<i64>` + 修改器
 //!
 //! **不兼容说明**：PHP `pay_detail` 字段使用 PHP serialize 格式，Rust 端改用 JSON。
-//! 若需与 PHP 数据库现存量兼容，需在 Phase 6 数据迁移层做格式转换。
+//! 若需与 PHP 数据库现存量兼容，需在数据迁移层做格式转换。
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -44,4 +44,3 @@ pub use model::{
     crmlog::Crmlog, customer::Customer, customer_pay::CustomerPay, dept::Dept, level::Level,
     rentarea::Rentarea, store::Store,
 };
-

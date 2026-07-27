@@ -1,3 +1,4 @@
+use crate::services::health_service;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -19,25 +20,17 @@ pub async fn check(State(_state): State<AppState>) -> Json<Value> {
     }))
 }
 
-/// 就绪检查（readiness probe）：通过执行 SELECT 1 验证数据库连接是否正常
+/// 就绪检查（readiness probe）：通过 service 层封装的 DB 探活验证数据库连接是否正常
 ///
 /// 响应体仅返回聚合状态（ok/fail），不泄露 DB 内部错误细节。
-/// DB 错误细节通过 tracing::error! 记录到日志，便于运维排查。
+/// DB 错误细节由 `health_service::ping_db` 通过 `tracing::error!` 记录到日志，便于运维排查。
+///
+/// 重构说明（2026-07-26 P1-5）：
+/// - 移除控制器内嵌 DB 调用（`state.db_pool.acquire()` + `conn.query("SELECT 1")`）
+/// - 下沉到 `health_service::ping_db`，符合分层架构
 #[tracing::instrument(skip(state))]
 pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
-    let db_ok = match state.db_pool.acquire().await {
-        Ok(mut conn) => match conn.query("SELECT 1").await {
-            Ok(_) => true,
-            Err(e) => {
-                tracing::error!(error = %e, "readiness 检查：DB SELECT 1 失败");
-                false
-            }
-        },
-        Err(e) => {
-            tracing::error!(error = %e, "readiness 检查：DB 连接池 acquire 失败");
-            false
-        }
-    };
+    let db_ok = health_service::ping_db(&state.db_pool).await;
 
     if db_ok {
         (

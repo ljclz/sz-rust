@@ -379,10 +379,7 @@ fn test_container_scoped_different_scope() {
         .make_with_scope::<ScopedCounter>(2)
         .expect("scope 2 应能解析");
 
-    assert!(
-        !Arc::ptr_eq(&s1, &s2),
-        "不同作用域必须返回不同实例"
-    );
+    assert!(!Arc::ptr_eq(&s1, &s2), "不同作用域必须返回不同实例");
     assert_eq!(s1.value, 200);
     assert_eq!(s2.value, 200);
 }
@@ -407,10 +404,7 @@ fn test_container_clear_scope() {
     let s2 = container
         .make_with_scope::<ScopedCounter>(1)
         .expect("scope 1 清理后应能再次解析");
-    assert!(
-        !Arc::ptr_eq(&s1, &s2),
-        "清理后再次解析必须返回新实例"
-    );
+    assert!(!Arc::ptr_eq(&s1, &s2), "清理后再次解析必须返回新实例");
 }
 
 /// 测试 scoped 与 singleton 共存
@@ -502,9 +496,7 @@ fn test_container_instance_direct_binding() {
     assert_eq!(resolved.value, 999);
 
     // 多次 make 返回同一实例
-    let resolved2 = container
-        .make::<TestService>()
-        .expect("应能再次解析");
+    let resolved2 = container.make::<TestService>().expect("应能再次解析");
     assert!(Arc::ptr_eq(&resolved, &resolved2));
 
     // 防止 unused 警告
@@ -610,7 +602,10 @@ fn test_container_multiple_aliases() {
 
     let mut aliases = container.debug_aliases();
     aliases.sort();
-    assert_eq!(aliases, vec!["logger".to_string(), "svc1".to_string(), "svc2".to_string()]);
+    assert_eq!(
+        aliases,
+        vec!["logger".to_string(), "svc1".to_string(), "svc2".to_string()]
+    );
 
     // 同一类型的多个别名都解析到同一 TypeId
     let tid1 = container.resolve_alias("svc1").unwrap();

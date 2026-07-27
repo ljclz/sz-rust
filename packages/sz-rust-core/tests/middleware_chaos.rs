@@ -25,14 +25,14 @@ use axum::middleware::from_fn_with_state;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
-use sz_rust_core::middleware::auth::AuthenticatedUser;
-use sz_rust_core::middleware::rate_limit::{
-    extract_client_ip, extract_rate_limit_key, rate_limit_rejected_response, KeyExtractor,
-    RateLimitConfig, sliding_window_config,
-};
-use sz_orm_limit::{RateLimiter, SlidingWindowRateLimiter, TokenBucketRateLimiter};
 use std::sync::Arc;
 use std::time::Duration;
+use sz_orm_limit::{RateLimiter, SlidingWindowRateLimiter, TokenBucketRateLimiter};
+use sz_rust_core::middleware::auth::AuthenticatedUser;
+use sz_rust_core::middleware::rate_limit::{
+    extract_client_ip, extract_rate_limit_key, rate_limit_rejected_response, sliding_window_config,
+    KeyExtractor, RateLimitConfig,
+};
 use tower::ServiceExt;
 
 // ============================================================================
@@ -66,7 +66,10 @@ fn chaos_extract_ip_only_commas_x_forwarded_for() {
 #[test]
 fn chaos_extract_ip_multiple_x_forwarded_for() {
     let mut headers = HeaderMap::new();
-    headers.insert("x-forwarded-for", HeaderValue::from_static("1.1.1.1, 2.2.2.2, 3.3.3.3"));
+    headers.insert(
+        "x-forwarded-for",
+        HeaderValue::from_static("1.1.1.1, 2.2.2.2, 3.3.3.3"),
+    );
     // 取第一个非空段
     assert_eq!(extract_client_ip(&headers), "1.1.1.1");
 }
@@ -134,7 +137,8 @@ fn chaos_rate_limit_key_user_id_with_auth() {
         .header("x-forwarded-for", "1.2.3.4")
         .body(Body::empty())
         .expect("request build");
-    req.extensions_mut().insert(AuthenticatedUser { user_id: 42 });
+    req.extensions_mut()
+        .insert(AuthenticatedUser { user_id: 42 });
     let key = extract_rate_limit_key(&req, &config);
     assert_eq!(key, "api:42");
 }
@@ -194,8 +198,8 @@ async fn chaos_rate_limit_concurrent_does_not_overshoot() {
 #[tokio::test]
 async fn chaos_rate_limit_token_bucket_concurrent_burst() {
     // 令牌桶容量 3，每秒补充 1 — 突发 50 个并发请求，最多 3 个通过
-    let limiter = Arc::new(TokenBucketRateLimiter::new(3, 1.0))
-        as Arc<dyn RateLimiter + Send + Sync>;
+    let limiter =
+        Arc::new(TokenBucketRateLimiter::new(3, 1.0)) as Arc<dyn RateLimiter + Send + Sync>;
     let config = RateLimitConfig::new(limiter).with_key_prefix("chaos_burst");
 
     let app = minimal_router().layer(from_fn_with_state(
@@ -287,10 +291,7 @@ async fn chaos_rate_limit_rejected_response_status_and_headers() {
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     // 应包含 Retry-After 或 X-RateLimit-* headers
     let has_retry_after = response.headers().get("retry-after").is_some();
-    let has_x_ratelimit = response
-        .headers()
-        .get("x-ratelimit-remaining")
-        .is_some();
+    let has_x_ratelimit = response.headers().get("x-ratelimit-remaining").is_some();
     assert!(
         has_retry_after || has_x_ratelimit,
         "限流拒绝响应应包含 Retry-After 或 X-RateLimit-* headers"
@@ -357,10 +358,7 @@ async fn chaos_huge_body_rejected_or_handled() {
         .header("content-type", "application/octet-stream")
         .body(Body::from(huge_body))
         .expect("request build");
-    let app = Router::new().route(
-        "/",
-        post(|| async { StatusCode::OK }),
-    );
+    let app = Router::new().route("/", post(|| async { StatusCode::OK }));
     let resp = app.oneshot(req).await.expect("response");
     // 不应该 panic
     assert!(
@@ -400,9 +398,7 @@ async fn chaos_middleware_chain_panic_propagation() {
         .expect("request build");
 
     // 在独立 task 中执行，panic 会让 task 失败但不终止测试线程
-    let handle = tokio::spawn(async move {
-        app.oneshot(req).await
-    });
+    let handle = tokio::spawn(async move { app.oneshot(req).await });
 
     let result = handle.await;
     // spawn 的 task 因 panic 失败 → result.is_err() 为 true（可接受）
@@ -410,10 +406,7 @@ async fn chaos_middleware_chain_panic_propagation() {
     match result {
         Err(join_err) => {
             // panic 传播到 task — 可接受
-            assert!(
-                join_err.is_panic(),
-                "task 应因 panic 失败，实际是取消"
-            );
+            assert!(join_err.is_panic(), "task 应因 panic 失败，实际是取消");
         }
         Ok(Err(_service_err)) => {
             // oneshot 返回 Service 错误 — 可接受
@@ -517,10 +510,19 @@ async fn chaos_cors_evil_subdomain_suffix_attack_blocked() {
     // 错误实现用 strpos 子串匹配会放行，正确实现用后缀匹配+边界检查会拒绝
     use sz_rust_core::middleware::cors::origin_matches_domain;
 
-    assert!(!origin_matches_domain("https://evil-example.com", "example.com"));
-    assert!(!origin_matches_domain("https://evil.example.com.evil.com", "example.com"));
+    assert!(!origin_matches_domain(
+        "https://evil-example.com",
+        "example.com"
+    ));
+    assert!(!origin_matches_domain(
+        "https://evil.example.com.evil.com",
+        "example.com"
+    ));
     // 合法子域名应放行
-    assert!(origin_matches_domain("https://api.example.com", "example.com"));
+    assert!(origin_matches_domain(
+        "https://api.example.com",
+        "example.com"
+    ));
     assert!(origin_matches_domain("https://example.com", "example.com"));
 }
 
@@ -542,15 +544,12 @@ fn chaos_rate_limit_config_builder_chain_does_not_panic() {
 #[tokio::test]
 async fn chaos_token_bucket_zero_capacity_rejected() {
     // 容量 0 — 应该立即拒绝所有请求（不 panic）
-    let limiter = Arc::new(TokenBucketRateLimiter::new(0, 0.0))
-        as Arc<dyn RateLimiter + Send + Sync>;
+    let limiter =
+        Arc::new(TokenBucketRateLimiter::new(0, 0.0)) as Arc<dyn RateLimiter + Send + Sync>;
     let result = limiter.acquire("test_key");
     assert!(result.is_ok(), "acquire 应返回 Ok 但 result={:?}", result);
     let rl_result = result.expect("acquire ok");
-    assert!(
-        !rl_result.allowed,
-        "容量 0 的令牌桶不应允许任何请求"
-    );
+    assert!(!rl_result.allowed, "容量 0 的令牌桶不应允许任何请求");
 }
 
 // ============================================================================

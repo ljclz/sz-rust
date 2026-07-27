@@ -1,4 +1,4 @@
-//! 插件路由解析（Phase 10.3）
+//! 插件路由解析
 //!
 //! ## PHP 对齐
 //!
@@ -47,7 +47,7 @@ use crate::autoload::AddonAutoload;
 use crate::error::{AddonLoaderError, AddonLoaderResult};
 use crate::registry::AddonRegistry;
 
-/// 解析后的插件路由信息（Phase 10.3）
+/// 解析后的插件路由信息
 ///
 /// 对齐 PHP `Route::execute($addon, $controller, $action)` 的参数三元组。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,7 +93,7 @@ impl AddonRoute {
     }
 }
 
-/// 解析插件路由（Phase 10.3 主入口）
+/// 解析插件路由（主入口）
 ///
 /// 对齐 PHP `Route::execute($addon, $controller, $action)` 完整流程：
 ///
@@ -228,7 +228,9 @@ fn parse_dotted_controller(controller: &str) -> String {
         return controller.to_string();
     }
 
-    let last = parts.pop().expect("已通过 contains('.') 与 len 检查保证 parts 非空");
+    let last = parts
+        .pop()
+        .expect("已通过 contains('.') 与 len 检查保证 parts 非空");
     let last_studly = studly_case(last);
     parts.push(&last_studly);
     parts.join("\\")

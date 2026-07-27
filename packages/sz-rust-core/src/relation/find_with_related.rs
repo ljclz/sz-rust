@@ -1,6 +1,6 @@
 //! find_with_related API 接入 — JOIN / 子查询 / eager_sql 三种模式
 //!
-//! Phase 4.6 核心交付物。本模块 re-export sz-orm-core `find_with_related` 模块的
+//! 本模块 re-export sz-orm-core `find_with_related` 模块的
 //! SQL 生成 API，并提供 PHP 命名约定辅助函数对齐 PHP `withJoin()` / `has()` 行为。
 //!
 //! ## PHP 端关联预加载的三种模式
@@ -99,7 +99,7 @@
 //!
 //! ## 架构说明
 //!
-//! 沿用 Phase 4.1-4.5 确立的 sz-orm-core::model 模块私有约束统一处理模式：
+//! 沿用既有的 sz-orm-core::model 模块私有约束统一处理模式：
 //!
 //! - **re-export sz-orm-core 关联类型**：`FindWithRelated` / `FindWithRelation` / `inspect_relation` / 便捷函数
 //! - **PHP 命名约定辅助函数**：`JoinMode` / `join_mode_str` / `php_with_join_sql` / `php_has_join_sql` / `is_one_to_one`
@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn test_integration_three_modes_comparison() {
         // 集成测试：三种模式 SQL 对比（同一对表 users + orders）
-        // 模式 1：with IN（Phase 4.5 已实现，这里调用 with::has_many_in_sql）
+        // 模式 1：with IN（已实现，这里调用 with::has_many_in_sql）
         use crate::relation::with::has_many_in_sql;
         let in_sql = has_many_in_sql("orders", "user_id", &["1", "2", "3"]);
         assert!(in_sql.contains("WHERE user_id IN (1, 2, 3)"));

@@ -33,11 +33,7 @@ use std::process::Command;
 /// 用作基线对比参考。返回 0 表示调用失败。
 fn powershell_working_set() -> u64 {
     let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "[long][Environment]::WorkingSet",
-        ])
+        .args(["-NoProfile", "-Command", "[long][Environment]::WorkingSet"])
         .output();
 
     match output {
@@ -67,12 +63,9 @@ fn powershell_free_physical_memory() -> u64 {
             let stdout = String::from_utf8_lossy(&out.stdout);
             // PowerShell 可能返回科学计数法或带小数点的字符串
             let trimmed = stdout.trim();
-            trimmed.parse::<u64>().unwrap_or_else(|_| {
-                trimmed
-                    .parse::<f64>()
-                    .map(|v| v as u64)
-                    .unwrap_or(0)
-            })
+            trimmed
+                .parse::<u64>()
+                .unwrap_or_else(|_| trimmed.parse::<f64>().map(|v| v as u64).unwrap_or(0))
         }
         Err(_) => 0,
     }
@@ -92,12 +85,9 @@ fn powershell_total_physical_memory() -> u64 {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let trimmed = stdout.trim();
-            trimmed.parse::<u64>().unwrap_or_else(|_| {
-                trimmed
-                    .parse::<f64>()
-                    .map(|v| v as u64)
-                    .unwrap_or(0)
-            })
+            trimmed
+                .parse::<u64>()
+                .unwrap_or_else(|_| trimmed.parse::<f64>().map(|v| v as u64).unwrap_or(0))
         }
         Err(_) => 0,
     }
@@ -115,9 +105,21 @@ fn baseline_memory_snapshot() {
     let working_set = powershell_working_set();
 
     println!("===== Windows Memory Baseline (Placeholder) =====");
-    println!("TotalPhysicalMemory: {} bytes ({:.2} GB)", total, total as f64 / 1_073_741_824.0);
-    println!("FreePhysicalMemory:  {} bytes ({:.2} GB)", free, free as f64 / 1_073_741_824.0);
-    println!("WorkingSet (PS):     {} bytes ({:.2} MB)", working_set, working_set as f64 / 1_048_576.0);
+    println!(
+        "TotalPhysicalMemory: {} bytes ({:.2} GB)",
+        total,
+        total as f64 / 1_073_741_824.0
+    );
+    println!(
+        "FreePhysicalMemory:  {} bytes ({:.2} GB)",
+        free,
+        free as f64 / 1_073_741_824.0
+    );
+    println!(
+        "WorkingSet (PS):     {} bytes ({:.2} MB)",
+        working_set,
+        working_set as f64 / 1_048_576.0
+    );
     println!("================================================");
 
     // 基础校验：系统内存信息可读取
@@ -154,7 +156,12 @@ fn baseline_memory_growth_over_sampling() {
     for i in 0..samples {
         let ws = powershell_working_set();
         working_sets.push(ws);
-        println!("[{:2}/{}] WorkingSet: {:.2} MB", i + 1, samples, ws as f64 / 1_048_576.0);
+        println!(
+            "[{:2}/{}] WorkingSet: {:.2} MB",
+            i + 1,
+            samples,
+            ws as f64 / 1_048_576.0
+        );
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
 

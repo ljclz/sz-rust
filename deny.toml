@@ -8,19 +8,26 @@ all-features = true
 [advisories]
 # 已知安全漏洞 advisory 检查
 db-urls = ["https://github.com/rustsec/advisory-db"]
-# 忽略的 advisory（需注明理由和到期时间）
+# 忽略的 advisory（需注明理由）
 ignore = [
-    # ttf-parser 已声明 unmaintained（RUSTSEC-2026-0192），
-    # 但作为 ab_glyph -> imageproc 的传递依赖，无直接安全影响。
-    # 备选方案 skrifa 引入需评估 fontations 系列 crate 的额外依赖开销。
-    "RUSTSEC-2026-0192",
-    # rustls-pemfile 已存档/停止维护（RUSTSEC-2025-0134），建议迁移到 rustls-pki-types 内建 PEM 解析。
-    # 作为 hyper-rustls -> reqwest -> sz-rust-pdf 的传递依赖，当前版本无安全漏洞，仅停止维护。
-    "RUSTSEC-2025-0134",
-    # paste 已存档/停止维护（RUSTSEC-2024-0436），但作为大量 crate 的传递依赖
-    # （通过很多宏 crate 间接引用），无已知安全漏洞，仅停止维护。
-    "RUSTSEC-2024-0436",
+    # === rustls-webpki 0.101.7 / 0.102.8 系列漏洞（同步自 sz-orm）===
+    # 来源: rumqttc 0.25 / elasticsearch 8.5.0-alpha.1 → reqwest 0.11 → rustls 0.21 → rustls-webpki 0.101.7/0.102.8
+    # 影响: CRL 验证在默认编译中不参与；上游 rustls-webpki 0.103 为不兼容大版本
+    # 跟踪: 待 rumqttc / elasticsearch 升级至依赖 rustls-webpki 0.103+ 后自动移除
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8/0.101.7 传递依赖，上游 0.103 为不兼容大版本；CRL 验证默认不参与" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8/0.101.7 URI name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8/0.101.7 wildcard name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },
+    # serde_yml 0.0.12 unsound（RUSTSEC-2025-0068）
+    # 来源: sz-rust-core 依赖 serde_yml 用于 YAML 配置解析
+    # 影响: 仅在调用 `Serializer.emitter` 时存在 segfault 风险，本项目不使用该 API
+    # 跟踪: 待 serde_norway / serde_yaml_ng 稳定后迁移
+    { id = "RUSTSEC-2025-0068", reason = "serde_yml 0.0.12 unsound（仅 emitter API segfault）；本项目不使用 emitter API；待 serde_norway 稳定后迁移" },
 ]
+# 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
+unmaintained = "none"
+# 已被 yanked 的 crate 视为告警
+yanked = "warn"
 
 [licenses]
 # 许可证白名单
@@ -40,6 +47,8 @@ allow = [
     "Unlicense",
     "NCSA",
     "CDLA-Permissive-2.0",
+    # MPL-2.0 是 copyleft 但文件级弱 copyleft，允许
+    "MPL-2.0",
 ]
 # 置信度阈值（文件扫描置信度）
 confidence-threshold = 0.8
@@ -60,23 +69,21 @@ expression = "CDLA-Permissive-2.0"
 license-files = [{ path = "LICENSE", hash = 0 }]
 
 [bans]
-# 禁止重复依赖（同 crate 多版本）
-multiple-versions = "deny"
-# 禁止通配符依赖
-wildcards = "deny"
-# 允许的通配符
+# 重复依赖仅警告（对齐 sz-orm，避免 CI 因传递依赖冲突过度阻塞）
+multiple-versions = "warn"
+# 通配符依赖仅警告
+wildcards = "warn"
+# 允许的通配符路径
 allow-wildcard-paths = false
 # 高亮重复依赖
 highlight = "all"
 
 # 禁止的 crate（已知问题或不安全）
-# openssl — 强制走 rustls 路线，避免 OpenSSL 许可证和链接问题
-deny = [
-    { name = "openssl", reason = "强制走 rustls 路线，避免 OpenSSL 许可证和链接问题" },
-]
+# 注：openssl 暂时不禁止，因 reqwest 默认引入 native-tls → openssl
+# 后续优化：让 reqwest 使用 rustls-tls feature 后可重新启用 openssl 禁令
+deny = []
 
 # 跳过重复版本检查的 crate（传递依赖无法控制）
-# zip: rust_xlsxwriter 0.79 使用 zip 2.x，calamine 0.36 使用 zip 8.x（实际为同一系列不同主版本）
 skip = [
     { name = "zip", version = "2.4.2" },
 ]

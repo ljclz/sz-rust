@@ -14,27 +14,27 @@
 //! | `getPaySourceTextAttr` | [`CustomerPay::accessor_for`] "pay_source_text" | 字符串枚举映射 |
 //! | 5 个 `getXxxPriceAttr` | [`CustomerPay::accessor_for`] "xxx_price" | 数值强转 |
 //! | `getPayTimeAttr` | [`CustomerPay::accessor_for`] "pay_time" | Unix 时间戳格式化 |
-//! | `dept()` belongsTo | NOTE(Phase 4) | `IndustryDept` dept_id→dept_id |
-//! | `personnel()` belongsTo | NOTE(Phase 4) | `IndustryPersonnel` opt_uid→uid |
-//! | `category()` belongsTo | NOTE(Phase 4) | `Category` cat_id→cat_id |
-//! | `customer()` belongsTo | NOTE(Phase 4) | `Customer` customer_id→customer_id |
-//! | `contract()` belongsTo | NOTE(Phase 4) | `Contract` contract_id→contract_id |
+//! | `dept()` belongsTo | NOTE(关联模块) | `IndustryDept` dept_id→dept_id |
+//! | `personnel()` belongsTo | NOTE(关联模块) | `IndustryPersonnel` opt_uid→uid |
+//! | `category()` belongsTo | NOTE(关联模块) | `Category` cat_id→cat_id |
+//! | `customer()` belongsTo | NOTE(关联模块) | `Customer` customer_id→customer_id |
+//! | `contract()` belongsTo | NOTE(关联模块) | `Contract` contract_id→contract_id |
 //!
 //! ## PHP `$value ? (float)$value : 0` 行为复刻
 //!
 //! 5 个价格访问器（pay_price/total_price/cash_price/epay_price/refund_price）
-//! 复用 [`contract::php_price_attr`]，与 Contract 模型 11 个价格访问器语义相同。
+//! 复用 `contract::php_price_attr`，与 Contract 模型 11 个价格访问器语义相同。
 //!
 //! ## PHP `!empty($data['xxx']) ? xxxName : ''` 行为复刻
 //!
 //! 4 个数字枚举访问器（pay_status_text/order_status_text/sync_status_text/pay_type_text）
-//! 使用 [`contract::php_is_empty`] 检查字段是否为空。
+//! 使用 `contract::php_is_empty` 检查字段是否为空。
 //!
 //! ## PHP `!empty($data['pay_source'])` 字符串字段行为
 //!
 //! `pay_source` 是字符串字段（值如 `'icbc'`/`'ccb'`/`'fuiou'`/`'cash'`）。
 //! PHP `empty()` 对字符串：`""` 和 `"0"` 视为空，其他非空字符串视为非空。
-//! [`contract::php_is_empty`] 严格对齐此语义。
+//! `contract::php_is_empty` 严格对齐此语义。
 //!
 //! ## PHP `getPayTimeAttr` 时间格式化
 //!
@@ -49,14 +49,14 @@
 //!
 //! Rust 端用 `chrono::NaiveDateTime::from_timestamp_opt` 格式化。
 //! **时区差异**：PHP `date()` 使用服务器配置时区（通常 Asia/Shanghai UTC+8），
-//! chrono `from_timestamp_opt` 使用 UTC。本 Phase 2.10 按 UTC 格式化，
-//! Phase 5 接入应用配置后切换为 Asia/Shanghai。
+//! chrono `from_timestamp_opt` 使用 UTC。当前按 UTC 格式化，
+//! 接入应用配置后切换为 Asia/Shanghai。
 //!
 //! ## 未实现（标 NOTE）
 //!
 //! - **业务方法**（detail/info/getPayDetail/getList/getStat/add/tradeNo/orderNo/
-//!   onPayment/onlinePayment/epayCheck/settle/onPayBuy/onRefund）→ NOTE(Phase 5+ 控制器层)
-//! - **关联关系**（dept/personnel/category/customer/contract belongsTo）→ NOTE(Phase 4)
+//!   onPayment/onlinePayment/epayCheck/settle/onPayBuy/onRefund）→ NOTE(控制器层)
+//! - **关联关系**（dept/personnel/category/customer/contract belongsTo）→ NOTE(关联模块)
 
 use crate::enums::{ContractStatusEnum, CustomerSyncTypeEnum};
 use crate::model::contract::{php_is_empty, php_price_attr};
@@ -98,7 +98,7 @@ impl CustomerPay {
     ///
     /// 条件：`$value ? date('Y-m-d H:i:s', $value) : ''`
     /// - 0/null/空 → `''`
-    /// - Unix 时间戳 → `'YYYY-MM-DD HH:MM:SS'`（PHP 服务器时区，本 Phase 用 UTC）
+    /// - Unix 时间戳 → `'YYYY-MM-DD HH:MM:SS'`（PHP 服务器时区，本模块用 UTC）
     fn pay_time_attr(value: Option<&Value>) -> Value {
         let is_truthy = match value {
             None | Some(Value::Null) => false,
@@ -311,7 +311,7 @@ impl Accessor for CustomerPay {
     /// ### 数值强转访问器（5 个）
     ///
     /// `pay_price` / `total_price` / `cash_price` / `epay_price` / `refund_price`
-    /// 全部走 [`php_price_attr`]，对齐 PHP `$value ? (float)$value : 0`。
+    /// 全部走 `php_price_attr`，对齐 PHP `$value ? (float)$value : 0`。
     ///
     /// ### 时间格式化访问器（1 个）
     ///
@@ -801,8 +801,8 @@ mod tests {
     #[test]
     fn test_r5_php_customer_pay_5_belongs_to_relations_documented_as_todo() {
         // R5: PHP CustomerPay 声明 5 个 belongsTo: dept/personnel/category/customer/contract
-        // Phase 2.10 关联关系留 NOTE(Phase 4)
-        // 此测试验证模型本身可正常构造，关联关系待 Phase 4 实现
+        // 关联关系留 NOTE(关联模块)
+        // 此测试验证模型本身可正常构造，关联关系待后续实现
         let model = CustomerPay::new().with_data("order_id", json!(1));
         assert_eq!(model.pk(), 1);
     }

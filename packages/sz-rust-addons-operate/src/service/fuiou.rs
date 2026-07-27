@@ -13,7 +13,7 @@
 //! ## 外部依赖
 //!
 //! PHP 依赖 `app\common\service\fuiou\Constants` + `Signature` SDK 执行 XML HTTP 请求。
-//! Rust 端真实实现待后续 Phase 补全，当前提供 [`MockFuiouService`] 用于测试。
+//! Rust 端真实实现待后续补全，当前提供 [`MockFuiouService`] 用于测试。
 //!
 //! ## PHP 源码依据
 //!

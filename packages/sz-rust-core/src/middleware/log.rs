@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn test_request_id_format_aligns_with_w3c_span_id_length() {
         // 对齐 W3C traceparent 的 span_id 长度（16 字符 hex）
-        // 便于未来 Phase 3.6 Trace 中间件实现时与 trace_id 格式兼容
+        // 便于未来 Trace 中间件实现时与 trace_id 格式兼容
         let id = RequestId {
             timestamp_secs: 0x12345678,
             counter: 0x9ABCDEF0,

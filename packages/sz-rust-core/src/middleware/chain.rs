@@ -50,7 +50,7 @@
 //! ## 与 `tower::ServiceBuilder` 的关系
 //!
 //! `MiddlewareChain` 只负责「顺序定义和验证」，不直接构造 `ServiceBuilder`。
-//! 具体的 Layer 实例化由后续 Phase（3.3 ~ 3.6）的 `auth.rs` / `log.rs` /
+//! 具体的 Layer 实例化由 `auth.rs` / `log.rs` /
 //! `rate_limit.rs` / `trace.rs` 模块提供，再由调用方按 `chain.order()` 逆序
 //! 调用 `ServiceBuilder::layer` 注册。
 //!

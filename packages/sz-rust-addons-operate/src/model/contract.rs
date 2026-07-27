@@ -12,7 +12,7 @@
 //! | `getPayStatusTextAttr` | [`Contract::accessor_for`] "pay_status_text" | 枚举映射 |
 //! | `getPayTypeTextAttr` | [`Contract::accessor_for`] "pay_type_text" | 枚举映射 |
 //! | `getRemainingDayAttr` | [`Contract::accessor_for`] "remaining_day" | 日期差 |
-//! | `getLogsAttr` | [`Contract::accessor_for`] "logs" | NOTE(Phase 4) |
+//! | `getLogsAttr` | [`Contract::accessor_for`] "logs" | NOTE(Repository 层) |
 //! | 11 个 `getXxxPriceAttr` | [`Contract::accessor_for`] "xxx_price" | 数值强转 |
 //! | `getPayDetailAttr` | [`Contract::accessor_for`] "pay_detail" | 序列化解码 |
 //! | `getFilesAttr` | [`Contract::accessor_for`] "files" | JSON 解码 |
@@ -26,7 +26,7 @@
 //! - 其他非空数值字符串 → 视为 true → 返回 `(float)$value`
 //! - 非数值字符串（如 `"abc"`）→ 视为 true（PHP 字符串真值规则）→ 返回 `(float)"abc" = 0.0`
 //!
-//! Rust 端用 [`php_price_attr`] 严格对齐：
+//! Rust 端用 `php_price_attr` 严格对齐：
 //! - 数值类型：`0` / `0.0` 返回 `json!(0)`，非零返回 `json!(f64)`
 //! - 字符串：`""` / `"0"` 返回 `json!(0)`，其他解析为 f64（解析失败返回 `0.0`）
 //!
@@ -34,7 +34,7 @@
 //!
 //! PHP `pay_detail` 字段使用 `iserializer` / `unserialize`（PHP serialize 格式）。
 //! Rust 端统一改用 JSON（`serde_json`）。
-//! **不兼容说明**：若需与 PHP 数据库现存量兼容，需在 Phase 6 数据迁移层做格式转换。
+//! **不兼容说明**：若需与 PHP 数据库现存量兼容，需在数据迁移层做格式转换。
 
 use crate::enums::ContractStatusEnum;
 use crate::model::{get_i64, impl_empty_relation_loader};
@@ -316,7 +316,7 @@ impl Accessor for Contract {
     /// `contract_price` / `rent_price` / `manage_price` / `sanitation_price` /
     /// `electricity_price` / `water_price` / `security_price` / `paid_price` /
     /// `capacity_price` / `decoration_price` / `decoration_deposit`
-    /// 全部走 [`php_price_attr`]，对齐 PHP `$value ? (float)$value : 0`。
+    /// 全部走 `php_price_attr`，对齐 PHP `$value ? (float)$value : 0`。
     ///
     /// ### 日期计算访问器（1 个）
     ///
@@ -332,8 +332,8 @@ impl Accessor for Contract {
     /// ### 虚拟字段访问器（1 个）
     ///
     /// `logs`：PHP 调 `ContractLog::getLogs($data['contract_id'])`。
-    /// Phase 2.10 无数据库连接，返回空数组（对齐 PHP `contract_id` 为空时 `getLogs(0)` 行为）。
-    /// NOTE(Phase 4): 完整实现 ContractLog::getLogs。
+    /// 当前无数据库连接，返回空数组（对齐 PHP `contract_id` 为空时 `getLogs(0)` 行为）。
+    /// NOTE(Repository 层): 完整实现 ContractLog::getLogs。
     fn accessor_for(&self, field: &str, _value: Option<&Value>) -> Value {
         match field {
             // ==================== 枚举映射访问器 ====================
@@ -417,7 +417,7 @@ impl Accessor for Contract {
 
             // ==================== 序列化解码访问器 ====================
             // PHP getPayDetailAttr: !empty($value) ? unserialize($value) : []
-            // Rust 端用 JSON（不兼容 PHP serialize 格式，需 Phase 6 数据迁移）
+            // Rust 端用 JSON（不兼容 PHP serialize 格式，需数据迁移）
             "pay_detail" => {
                 let v = self.data.get("pay_detail");
                 if php_is_empty(v) {
@@ -440,8 +440,8 @@ impl Accessor for Contract {
 
             // ==================== 虚拟字段访问器 ====================
             // PHP getLogsAttr: ContractLog::getLogs($data['contract_id'])
-            // Phase 2.10 无数据库连接，返回空数组
-            // NOTE(Phase 4): 完整实现 ContractLog::getLogs
+            // 当前无数据库连接，返回空数组
+            // NOTE(Repository 层): 完整实现 ContractLog::getLogs
             "logs" => json!([]),
 
             _ => Value::Null,
@@ -830,9 +830,9 @@ mod tests {
     // -------------------- 虚拟字段访问器测试 --------------------
 
     #[test]
-    fn test_accessor_logs_returns_empty_in_phase_2_10() {
-        // Phase 2.10 无数据库连接，logs 始终返回空数组
-        // 完整实现在 Phase 4（Repository 层）
+    fn test_accessor_logs_returns_empty_without_db() {
+        // 当前无数据库连接，logs 始终返回空数组
+        // 完整实现在 Repository 层
         let model = Contract::new().with_data("contract_id", json!(1));
         assert_eq!(model.accessor_for("logs", None), json!([]));
     }

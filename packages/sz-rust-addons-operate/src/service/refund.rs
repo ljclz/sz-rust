@@ -14,7 +14,7 @@
 //!
 //! PHP 依赖 `IcbcService`/`CcbService`/`FuiouService` 执行银行退款，
 //! 依赖企业微信 `qySend()` 推送通知。
-//! Rust 端真实实现待后续 Phase 补全，当前提供 [`MockRefundService`] 用于测试。
+//! Rust 端真实实现待后续补全，当前提供 [`MockRefundService`] 用于测试。
 //!
 //! ## PHP 源码依据
 //!

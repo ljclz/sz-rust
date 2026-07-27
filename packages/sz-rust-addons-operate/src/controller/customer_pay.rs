@@ -37,7 +37,7 @@
 //! - `icbc`：`pay_status == 1` → `settle()`，其他 → `update(['order_status'=>20])`
 //! - `fuiou`：`result_code == '000000' && trans_stat == 'SUCCESS'` → `settle()`，否则 → `update(['order_status'=>20])`
 //!
-//! Rust 端通过 [`apply_bank_check_result`] 复刻此分支逻辑。
+//! Rust 端通过 `apply_bank_check_result` 复刻此分支逻辑。
 
 use axum::body::Body;
 use axum::http::Request;

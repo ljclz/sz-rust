@@ -8,11 +8,13 @@
 //!
 //! ## 重构后
 //!
-//! - 控制器：解析请求参数 → 调用 [`merchant_service::MerchantService`] → 格式化响应
+//! - 控制器：解析请求参数 → 调用 [`crate::services::merchant_service::MerchantService`] → 格式化响应
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::merchant::Merchant`] 定义实体结构
 
-use crate::services::merchant_service::{row_to_json, MerchantService};
+use crate::controllers::common::{extract_fields_by_whitelist, parse_pagination};
+use crate::services::merchant_service::MerchantService;
+use crate::services::row_to_json;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::extract::State;
@@ -20,7 +22,6 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use crate::controllers::common::{parse_pagination, extract_fields_by_whitelist};
 use tracing::{info, warn};
 
 struct MerchantController;
@@ -38,11 +39,8 @@ impl MerchantController {
 
                 match MerchantService::list(&state.db_pool, page, page_size).await {
                     Ok(page_data) => {
-                        let list: Vec<serde_json::Value> = page_data
-                            .list
-                            .iter()
-                            .map(row_to_json)
-                            .collect();
+                        let list: Vec<serde_json::Value> =
+                            page_data.list.iter().map(row_to_json).collect();
                         info!("商户列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
@@ -114,10 +112,7 @@ impl MerchantController {
 
                 let merchant = crate::models::merchant::Merchant {
                     merchant_id: None,
-                    market_id: data
-                        .get("market_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
+                    market_id: data.get("market_id").and_then(|v| v.as_i64()).unwrap_or(0),
                     name: name.clone(),
                     stall_no: data
                         .get("stall_no")
@@ -134,10 +129,7 @@ impl MerchantController {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    status: data
-                        .get("status")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(1) as i8,
+                    status: data.get("status").and_then(|v| v.as_i64()).unwrap_or(1) as i8,
                     bank_account: data
                         .get("bank_account")
                         .and_then(|v| v.as_str())

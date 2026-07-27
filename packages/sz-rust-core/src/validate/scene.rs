@@ -1,6 +1,6 @@
 //! 验证场景 — 对齐 PHP `think\Validate` 的场景机制
 //!
-//! Phase 5.3 交付物。本模块实现 PHP `think\Validate` 的场景（scene）机制，
+//! 本模块实现 PHP `think\Validate` 的场景（scene）机制，
 //! 支持两种场景定义方式：
 //!
 //! 1. **数组形式**：通过 [`Validate::register_scene`] 注册场景字段列表

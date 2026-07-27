@@ -51,7 +51,7 @@
 //!
 //! PHP `Token::getUserId` 验证流程：
 //! 1. 从 `Authorization` header 取 token（去除 `bearer` 前缀，大小写不敏感）
-//! 2. 检查 token 是否在 `cache('delete_token')` 注销列表中（注销逻辑，Phase 6 缓存层实现）
+//! 2. 检查 token 是否在 `cache('delete_token')` 注销列表中（注销逻辑，缓存层实现）
 //! 3. 解析 JWT
 //! 4. 验证签发人（`IssuedBy`）
 //! 5. 验证接收人（`PermittedFor`）
@@ -69,10 +69,10 @@
 //! | 过期 | ✅ `JwtEncoder::decode` | — |
 //! | 算法（HS256） | ✅ `JwtEncoder::decode` | — |
 //! | 签发人（`iss`） | ❌ 不校验 | ✅ 本模块补充 |
-//! | 接收人（`aud`） | ❌ 不校验 | ⚠️ 延迟到 Phase 3.7（Rust JwtClaims 无 `aud` 字段） |
+//! | 接收人（`aud`） | ❌ 不校验 | ⚠️ 延迟到后续（Rust JwtClaims 无 `aud` 字段） |
 //! | `bearer` 前缀去除 | ❌ | ✅ 本模块补充 |
 //! | 白名单跳过 | ❌ | ✅ 本模块补充 |
-//! | 注销列表 | ❌ | ⚠️ 延迟到 Phase 6（缓存层） |
+//! | 注销列表 | ❌ | ⚠️ 延迟到缓存层 |
 //!
 //! ## 错误码对齐
 //!
@@ -148,7 +148,9 @@ impl Default for AuthConfig {
         // 测试环境：回退到 DEFAULT_SECRET 常量（PHP 原始值）以保持测试兼容
         let secret = std::env::var("SZ_JWT_SECRET").unwrap_or_else(|_| {
             #[cfg(test)]
-            { DEFAULT_SECRET.to_string() }
+            {
+                DEFAULT_SECRET.to_string()
+            }
             #[cfg(not(test))]
             {
                 panic!("SZ_JWT_SECRET 环境变量未设置 — 生产环境必须通过环境变量提供 JWT 密钥");
@@ -175,8 +177,7 @@ impl AuthConfig {
     pub fn from_env() -> Result<Self, std::env::VarError> {
         Ok(Self {
             secret: std::env::var("SZ_JWT_SECRET")?,
-            issuer: std::env::var("SZ_JWT_ISSUER")
-                .unwrap_or_else(|_| DEFAULT_ISSUER.to_string()),
+            issuer: std::env::var("SZ_JWT_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string()),
             expiration: DEFAULT_EXPIRATION,
             allow_all_action: DEFAULT_ALLOW_ALL_ACTION
                 .iter()

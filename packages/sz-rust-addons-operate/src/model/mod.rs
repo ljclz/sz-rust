@@ -5,8 +5,8 @@
 //! ## 共享实现策略
 //!
 //! 5 个业务模型都用 `HashMap<String, serde_json::Value>` 持有数据（PHP `$this->data` 风格），
-//! 通过 [`core::model::BaseModel`] + [`core::model::Accessor`] + [`core::model::Mutator`] +
-//! [`core::model::Appendable`] trait 组合获得完整 PHP 对齐能力。
+//! 通过 `sz_rust_core::model::BaseModel` + `sz_rust_core::model::Accessor` + `sz_rust_core::model::Mutator` +
+//! `sz_rust_core::model::Appendable` trait 组合获得完整 PHP 对齐能力。
 //!
 //! 每个业务模型重写 `accessor_for` / `mutator_for` / `append` / `hidden` / `get_appended_value`
 //! 实现特定 PHP 行为。
@@ -82,8 +82,8 @@ impl_entity_attributes!(store::Store);
 
 /// 业务模型共享的元数据补全宏
 ///
-/// 5 个模型都需要实现 `RelationLoader`，且当前 Phase 2.10 关联关系尚未实现，
-/// 统一返回空实现。Phase 4 完整接入关联关系后移除。
+/// 5 个模型都需要实现 `RelationLoader`，且当前关联关系尚未实现，
+/// 统一返回空实现。完整接入关联关系后移除。
 ///
 /// **注意**：宏内使用完全限定路径 `sz_orm_core::RelationLoader` 和 `sz_orm_core::Value`，
 /// 避免在调用点（如 `customer.rs`）依赖 trait/类型已导入。
@@ -135,7 +135,7 @@ pub(crate) fn get_i64(data: &HashMap<String, Value>, key: &str) -> Option<i64> {
 }
 
 /// 业务模型共享工具：从 HashMap 取字符串
-#[allow(dead_code)] // 预留给后续 Phase 业务模型使用
+#[allow(dead_code)] // 预留给后续业务模型使用
 pub(crate) fn get_str(data: &HashMap<String, Value>, key: &str) -> Option<String> {
     data.get(key)
         .and_then(|v| v.as_str())

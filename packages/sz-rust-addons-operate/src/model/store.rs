@@ -14,8 +14,8 @@
 //! | 继承 `$name = 'industry_dept'` | [`Store::table_name()`] | 表名 |
 //! | 继承 `$pk = 'dept_id'` | [`Store::pk_name()`] | 主键列名 |
 //! | 继承 `$append = []` | [`Store::append()`]（默认空） | 无静态 append |
-//! | `getList($param)` | NOTE(Phase 5) | 业务方法 |
-//! | `getStat($param)` | NOTE(Phase 5) | 业务方法 |
+//! | `getList($param)` | NOTE(控制器层) | 业务方法 |
+//! | `getStat($param)` | NOTE(控制器层) | 业务方法 |
 //!
 //! ## 无访问器 / 无修改器
 //!
@@ -27,12 +27,12 @@
 //!
 //! - **业务方法 `getList`**：PHP 端调用 `Personnel::where()->count()`、
 //!   `Customer::where()->count()`、`Rentarea::where()->count()/SUM()`，
-//!   并对结果列表做 `usort` 按 `rentarea_scale` 降序排序。Phase 2.10 无
-//!   数据库连接，留 NOTE(Phase 5 控制器层 + Phase 4 Repository)。
+//!   并对结果列表做 `usort` 按 `rentarea_scale` 降序排序。当前无
+//!   数据库连接，留 NOTE(控制器层 + Repository 层)。
 //! - **业务方法 `getStat`**：PHP 端调用 `IndustryDept::where()->column()`、
 //!   `Rentarea::where()->count()/SUM()`、`Customer::where()->count()`。
 //!   同上原因留 NOTE。
-//! - **辅助函数 `getPersonnelInfo`**：PHP 全局函数，Rust 端待 Phase 5 移植。
+//! - **辅助函数 `getPersonnelInfo`**：PHP 全局函数，Rust 端待控制器层移植。
 
 use crate::model::{get_i64, impl_empty_relation_loader};
 use serde_json::{json, Value};
@@ -393,8 +393,8 @@ mod tests {
     #[test]
     fn test_r5_php_store_business_methods_documented_as_todo() {
         // R5: PHP Store 声明 getList($param) 和 getStat($param)
-        // Phase 2.10 无数据库连接，业务方法留 NOTE(Phase 5)
-        // 此测试验证 Store 模型本身可正常构造，业务方法待 Phase 5 实现
+        // 当前无数据库连接，业务方法留 NOTE(控制器层)
+        // 此测试验证 Store 模型本身可正常构造，业务方法待控制器层实现
         let model = Store::new().with_data("dept_id", json!(1));
         assert_eq!(model.pk(), 1);
     }

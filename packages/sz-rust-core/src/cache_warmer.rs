@@ -161,7 +161,11 @@ pub struct WarmupItem {
 
 impl WarmupItem {
     /// 创建成功结果
-    pub fn success(name: impl Into<String>, description: impl Into<String>, duration_ms: u64) -> Self {
+    pub fn success(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
@@ -188,7 +192,11 @@ impl WarmupItem {
     }
 
     /// 创建超时结果
-    pub fn timeout(name: impl Into<String>, description: impl Into<String>, duration_ms: u64) -> Self {
+    pub fn timeout(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        duration_ms: u64,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
@@ -719,7 +727,11 @@ mod tests {
         assert_eq!(report.items[0].status, WarmupStatus::Success);
         assert_eq!(report.items[1].name, "failing_warmer");
         assert_eq!(report.items[1].status, WarmupStatus::Failed);
-        assert!(report.items[1].error.as_ref().unwrap().contains("Simulated failure"));
+        assert!(report.items[1]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Simulated failure"));
     }
 
     #[tokio::test]
@@ -798,7 +810,11 @@ mod tests {
         let report = pipeline.warm_one_by_name("nonexistent").await;
         assert_eq!(report.total_count(), 1);
         assert_eq!(report.items[0].status, WarmupStatus::Skipped);
-        assert!(report.items[0].error.as_ref().unwrap().contains("not registered"));
+        assert!(report.items[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("not registered"));
     }
 
     #[tokio::test]
@@ -883,7 +899,10 @@ mod tests {
         let warmer = NoopWarmer::failing("test");
         let result = warmer.warm().await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Simulated failure"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Simulated failure"));
     }
 
     #[tokio::test]

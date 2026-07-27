@@ -11,7 +11,7 @@
 //! - [`SimpleTemplateEngine`]：默认模板引擎（对齐 PHP `think\Template` 的基本标签）
 //! - [`ViewConfig`]：视图配置（对齐 PHP `config/view.php`）
 //!
-//! ## 支持的标签（Phase 7.1 + 7.2 + 7.3 + 7.4）
+//! ## 支持的标签
 //! - `{$var}` — 变量插值（对齐 PHP `parseVar`）
 //! - `{$var.attr}` — 嵌套属性（对齐 PHP `.` 语法，默认 array 模式）
 //! - `{$var|filter}` — 过滤器（对齐 PHP `parseVarFunction`）
@@ -20,17 +20,17 @@
 //! - `{:func(args)}` — 函数调用（对齐 PHP `{:fun()}`）
 //! - `{//comment}` / `{/*comment*/}` — 注释（对齐 PHP `parseTag` 注释分支）
 //! - `{literal}...{/literal}` — 原文保留（对齐 PHP `parseLiteral`）
-//! - `{if}/{elseif}/{else}` — 条件判断（对齐 PHP Cx `tagIf`，Phase 7.2）
-//! - `{foreach}` — foreach 循环（对齐 PHP Cx `tagForeach`，Phase 7.2）
-//! - `{volist}` — volist 循环（对齐 PHP Cx `tagVolist`，Phase 7.2）
-//! - `{switch}/{case}/{default}` — switch 分支（对齐 PHP Cx `tagSwitch`，Phase 7.2）
-//! - `{for}` — for 循环（对齐 PHP Cx `tagFor`，Phase 7.2）
-//! - 配置模式布局（`layout_on=true`，对齐 PHP `compiler()`，Phase 7.3）
-//! - `{layout name="..." replace="..."}` — 标签模式布局（对齐 PHP `parseLayout()`，Phase 7.3）
-//! - `{__NOLAYOUT__}` — 单独禁用布局（Phase 7.3）
-//! - `{extend name="..."}` — 模板继承（对齐 PHP `parseExtend()`，Phase 7.4）
-//! - `{block name="..."}...{/block}` — block 定义（对齐 PHP `parseBlock()`，Phase 7.4）
-//! - `{__BLOCK__}` / `{__block__}` — block 合并标记（对齐 PHP `str_replace`，Phase 7.4）
+//! - `{if}/{elseif}/{else}` — 条件判断（对齐 PHP Cx `tagIf`）
+//! - `{foreach}` — foreach 循环（对齐 PHP Cx `tagForeach`）
+//! - `{volist}` — volist 循环（对齐 PHP Cx `tagVolist`）
+//! - `{switch}/{case}/{default}` — switch 分支（对齐 PHP Cx `tagSwitch`）
+//! - `{for}` — for 循环（对齐 PHP Cx `tagFor`）
+//! - 配置模式布局（`layout_on=true`，对齐 PHP `compiler()`）
+//! - `{layout name="..." replace="..."}` — 标签模式布局（对齐 PHP `parseLayout()`）
+//! - `{__NOLAYOUT__}` — 单独禁用布局
+//! - `{extend name="..."}` — 模板继承（对齐 PHP `parseExtend()`）
+//! - `{block name="..."}...{/block}` — block 定义（对齐 PHP `parseBlock()`）
+//! - `{__BLOCK__}` / `{__block__}` — block 合并标记（对齐 PHP `str_replace`）
 //!
 //! ## PHP 源码参考
 //! - `think\framework\src\think\View.php`（195 行）
@@ -48,13 +48,13 @@ use parking_lot::RwLock;
 use regex::Regex;
 use serde_json::Value;
 
-// Phase 7.2: Cx 标签库控制流标签（对齐 PHP `think\template\taglib\Cx`）
+// Cx 标签库控制流标签（对齐 PHP `think\template\taglib\Cx`）
 pub mod template;
 
-// Phase 7.3: 模板布局（对齐 PHP `Template::compiler()` + `parseLayout()`）
+// 模板布局（对齐 PHP `Template::compiler()` + `parseLayout()`）
 pub mod layout;
 
-// Phase 7.4: 模板继承（对齐 PHP `Template::parseExtend()` + `parseBlock()`）
+// 模板继承（对齐 PHP `Template::parseExtend()` + `parseBlock()`）
 pub mod inheritance;
 
 // ============================================================================
@@ -647,9 +647,9 @@ impl TemplateEngine for SimpleTemplateEngine {
         let content = std::fs::read_to_string(&path)?;
         let config = self.config.read().clone();
         // PHP `parse()` 顺序：parseExtend → parseLayout
-        // Phase 7.4: 应用继承（对齐 PHP `Template::parseExtend()`）
+        // 应用继承（对齐 PHP `Template::parseExtend()`）
         let content = inheritance::apply_inheritance(&content, &config)?;
-        // Phase 7.3: 应用布局（对齐 PHP `Template::compiler()` 在 `parse()` 之前应用布局）
+        // 应用布局（对齐 PHP `Template::compiler()` 在 `parse()` 之前应用布局）
         let content = layout::apply_layout(&content, &config)?;
         self.render_content(&content, data)
     }
@@ -657,9 +657,9 @@ impl TemplateEngine for SimpleTemplateEngine {
     fn display(&self, content: &str, data: &ViewData) -> Result<String, ViewError> {
         let config = self.config.read().clone();
         // PHP `parse()` 顺序：parseExtend → parseLayout
-        // Phase 7.4: 应用继承（对齐 PHP `Template::parseExtend()`）
+        // 应用继承（对齐 PHP `Template::parseExtend()`）
         let content = inheritance::apply_inheritance(content, &config)?;
-        // Phase 7.3: 应用布局（对齐 PHP `Template::display()` 也通过 `compiler()` 应用布局）
+        // 应用布局（对齐 PHP `Template::display()` 也通过 `compiler()` 应用布局）
         let content = layout::apply_layout(&content, &config)?;
         self.render_content(&content, data)
     }
@@ -1125,15 +1125,15 @@ fn php_date_to_chrono(php_format: &str) -> String {
 }
 
 // ============================================================================
-// Phase 7.8: 模板渲染兜底场景（对齐 Phase 7.7 DefaultResponseType::Html）
+// 模板渲染兜底场景（对齐 DefaultResponseType::Html）
 //
-// 项目主策略为前后端分离（JSON 默认返回，Phase 7.7），但部分场景需要渲染 HTML 模板：
+// 项目主策略为前后端分离（JSON 默认返回），但部分场景需要渲染 HTML 模板：
 // - PDF 导出：渲染 HTML 模板作为 PDF 输入（对齐 PHP pdf-pdftk 表单填充场景）
 // - Excel 导出：渲染 HTML 表格作为 Excel 输入（对齐 PHP PhpSpreadsheet 场景）
 // - 邮件内容：渲染 HTML 模板作为邮件正文
 // - 报表页面：渲染 HTML 报表
 //
-// 本模块提供 View 渲染到 axum Response 的桥接方法，复用 Phase 7.7 的
+// 本模块提供 View 渲染到 axum Response 的桥接方法，复用
 // `respond_html` 函数，确保 Content-Type 统一为 text/html; charset=utf-8。
 //
 // ## PHP 源码参考
@@ -1159,7 +1159,7 @@ fn php_date_to_chrono(php_format: &str) -> String {
 
 use axum::response::Response;
 
-/// 模板渲染兜底场景 helper（对齐 Phase 7.7 `DefaultResponseType::Html`）
+/// 模板渲染兜底场景 helper（对齐 `DefaultResponseType::Html`）
 ///
 /// 项目主策略为前后端分离（JSON 默认返回），但 PDF/Excel 导出、邮件内容、
 /// 报表页面等场景需要渲染 HTML 模板。本结构体封装了 View 渲染到 HTML Response
@@ -2143,7 +2143,7 @@ mod tests {
     }
 
     // =========================================================================
-    // 组 16：Phase 7.8 模板渲染兜底场景（ViewFallback + render_*_response）
+    // 组 16：模板渲染兜底场景（ViewFallback + render_*_response）
     // =========================================================================
 
     /// 辅助函数：提取 Response 的 body 为 String（异步）

@@ -1,4 +1,4 @@
-//! sz-orm-mqtt 长连接接入（Phase 9.5）
+//! sz-orm-mqtt 长连接接入
 //!
 //! ## PHP 对齐
 //!
@@ -27,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 
 use sz_orm_mqtt::{MqttConfig, MqttError, MqttPlugin, QoS};
 
-/// MQTT 运行时配置（Phase 9.5）
+/// MQTT 运行时配置
 #[derive(Debug, Clone)]
 pub struct MqttRuntimeConfig {
     /// 客户端 ID
@@ -79,7 +79,7 @@ impl MqttRuntimeConfig {
     }
 }
 
-/// MQTT 运行时（Phase 9.5）
+/// MQTT 运行时
 ///
 /// 封装 `sz_orm_mqtt::MqttPlugin`，提供长连接 lifecycle 管理。
 ///
@@ -87,7 +87,7 @@ impl MqttRuntimeConfig {
 ///
 /// - 使用 `tokio::sync::Mutex` 保护 MqttPlugin（connect/disconnect 需要 `&mut self`）
 /// - `start_keepalive` spawn 后台任务定期检查连接状态，监听 cancel 退出
-/// - Phase 9 默认使用 InMemory MqttPlugin；启用 `real-broker` feature 后可切换到 RealMqttClient
+/// - 默认使用 InMemory MqttPlugin；启用 `real-broker` feature 后可切换到 RealMqttClient
 pub struct MqttRuntime {
     config: MqttRuntimeConfig,
     plugin: Arc<Mutex<MqttPlugin>>,

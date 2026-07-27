@@ -1,6 +1,6 @@
 //! 存储对接模块 — 对齐 PHP `storage\Driver` + `storage\engine\*`
 //!
-//! Phase 5.7 核心交付物。本模块实现 5 种存储驱动（本地/阿里云/腾讯云/七牛/S3），
+//! 本模块实现 5 种存储驱动（本地/阿里云/腾讯云/七牛/S3），
 //! 复用 `sz-orm-storage` crate 的底层实现，对齐 PHP `app\common\library\storage` 命名空间。
 //!
 //! ## PHP 对齐

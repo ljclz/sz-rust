@@ -1,6 +1,6 @@
 //! 错误消息国际化 — 对齐 PHP `think\Lang` 和 `think\Validate::parseErrorMsg`
 //!
-//! Phase 5.4 核心交付物。本模块实现错误消息的国际化翻译机制，对齐 PHP
+//! 本模块实现错误消息的国际化翻译机制，对齐 PHP
 //! `think\Validate::parseErrorMsg`（第 1596-1633 行）的 Lang 翻译行为。
 //!
 //! ## PHP 对齐

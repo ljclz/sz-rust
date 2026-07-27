@@ -150,7 +150,11 @@ impl MailAttachment {
     /// - `filename`: 文件名
     /// - `content`: 文件内容字节
     /// - `mime_type`: MIME 类型
-    pub fn new(filename: impl Into<String>, content: Vec<u8>, mime_type: impl Into<String>) -> Self {
+    pub fn new(
+        filename: impl Into<String>,
+        content: Vec<u8>,
+        mime_type: impl Into<String>,
+    ) -> Self {
         Self {
             filename: filename.into(),
             content,
@@ -318,7 +322,9 @@ impl MailMessage {
             return Err(MailError::MissingField("收件人 (to) 不能为空".to_string()));
         }
         if self.subject.is_empty() {
-            return Err(MailError::MissingField("主题 (subject) 不能为空".to_string()));
+            return Err(MailError::MissingField(
+                "主题 (subject) 不能为空".to_string(),
+            ));
         }
         if self.html_body.is_none() && self.text_body.is_none() {
             return Err(MailError::MissingField(
@@ -518,9 +524,7 @@ mod tests {
     /// 测试 MailMessage validate 缺少内容
     #[test]
     fn test_validate_missing_content() {
-        let msg = MailMessage::new()
-            .to("user@example.com")
-            .subject("Test");
+        let msg = MailMessage::new().to("user@example.com").subject("Test");
 
         let result = msg.validate();
         assert!(result.is_err());
@@ -615,8 +619,7 @@ mod tests {
         let file_path = temp_dir.join("test.txt");
         std::fs::write(&file_path, b"hello attachment").unwrap();
 
-        let attachment =
-            MailAttachment::from_file(&file_path, None, "text/plain").unwrap();
+        let attachment = MailAttachment::from_file(&file_path, None, "text/plain").unwrap();
         assert_eq!(attachment.filename, "test.txt");
         assert_eq!(attachment.content, b"hello attachment");
         assert_eq!(attachment.mime_type, "text/plain");
@@ -627,11 +630,7 @@ mod tests {
     /// 测试 MailAttachment 从不存在文件创建返回错误
     #[test]
     fn test_attachment_from_nonexistent_file_errors() {
-        let result = MailAttachment::from_file(
-            "/nonexistent/file.txt",
-            None,
-            "text/plain",
-        );
+        let result = MailAttachment::from_file("/nonexistent/file.txt", None, "text/plain");
         assert!(result.is_err());
         match result {
             Err(MailError::AttachmentRead { .. }) => {}
@@ -684,7 +683,10 @@ mod tests {
         mailer.send(msg).unwrap();
         let sent = mailer.last().unwrap();
         assert!(sent.html_body.is_none());
-        assert_eq!(sent.text_body, Some("This is plain text content.".to_string()));
+        assert_eq!(
+            sent.text_body,
+            Some("This is plain text content.".to_string())
+        );
     }
 
     /// 测试 HTML 邮件（无纯文本）

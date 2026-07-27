@@ -1,10 +1,10 @@
-﻿//! 鲜视达 SZ-300 后端服务入口
+//! 鲜视达 SZ-300 后端服务入口
 
 #![forbid(unsafe_code)]
 
-use sz_rust_sz300::{config, db, router, services, state::AppState};
-use sz_rust_observability::MetricsRegistry;
 use std::sync::Arc;
+use sz_rust_observability::MetricsRegistry;
+use sz_rust_sz300::{config, db, router, services, state::AppState};
 use tokio::signal;
 use tokio::sync::watch;
 use tracing_subscriber::{fmt, EnvFilter};
@@ -33,7 +33,10 @@ async fn main() -> anyhow::Result<()> {
             let _ = framework_config;
         }
         Err(e) => {
-            tracing::warn!("框架统一 AppConfig 加载失败（非致命，使用环境变量配置）: {}", e);
+            tracing::warn!(
+                "框架统一 AppConfig 加载失败（非致命，使用环境变量配置）: {}",
+                e
+            );
         }
     }
 
@@ -54,14 +57,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化可观测性 — Prometheus 指标注册中心
     let metrics_registry = Arc::new(MetricsRegistry::new());
-    metrics_registry.register_counter(
-        "sz300_requests_total",
-        "Total HTTP requests received",
-    );
-    metrics_registry.register_gauge(
-        "sz300_active_connections",
-        "Active database connections",
-    );
+    metrics_registry.register_counter("sz300_requests_total", "Total HTTP requests received");
+    metrics_registry.register_gauge("sz300_active_connections", "Active database connections");
     metrics_registry.register_histogram(
         "sz300_request_duration_seconds",
         "HTTP request duration in seconds",
@@ -97,12 +94,7 @@ async fn main() -> anyhow::Result<()> {
     // JWT 密钥从环境变量 SZ300_JWT_SECRET 读取（生产安全要求）
     let jwt_secret = std::env::var("SZ300_JWT_SECRET")
         .expect("SZ300_JWT_SECRET 环境变量未设置 — 请在启动前设置 JWT 密钥");
-    services::auth_service::init_auth(
-        &jwt_secret,
-        "sz300",
-        86400,
-        app_state.db_pool.clone(),
-    );
+    services::auth_service::init_auth(&jwt_secret, "sz300", 86400, app_state.db_pool.clone());
 
     // 初始化 MQTT 消费者 — 带优雅退出信号
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -148,10 +140,7 @@ async fn main() -> anyhow::Result<()> {
             // 通知 MQTT 消费者退出
             let _ = shutdown_tx.send(true);
             // 等待 MQTT 任务完成（最多 5 秒）
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                mqtt_handle,
-            ).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
             tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
         })
         .await?;

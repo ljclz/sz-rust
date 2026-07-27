@@ -119,7 +119,7 @@ impl ContractLogController {
     ///
     /// # 简化说明
     ///
-    /// - 关联关系（contract/customer）：NOTE(Phase 6)
+    /// - 关联关系（contract/customer）：NOTE(关联模块)
     fn get_list(
         repo: &dyn Repository<ContractLog, Key = OrmValue>,
         param: &Value,
