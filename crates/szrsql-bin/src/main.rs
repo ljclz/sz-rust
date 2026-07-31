@@ -166,6 +166,13 @@ struct Args {
     #[arg(long, default_value = "ORCL")]
     oracle_service_name: String,
 
+    /// Phase 4.5：SQLite 协议监听端口（默认 0 = 不监听）。
+    ///
+    /// 启用后 SzRSQL 暴露 JSON 行协议的 TCP 入口，允许远程客户端执行 SQL。
+    /// 典型端口：9432。
+    #[arg(long, default_value_t = 0)]
+    sqlite_port: u16,
+
     /// 数据持久化目录（默认 ./data，默认启用持久化）。
     ///
     /// 启动时从 `{data-dir}/tables.json` 加载表数据，后台每 5 秒自动保存。
@@ -275,6 +282,39 @@ struct Args {
     /// 仅在 --auth-mode=scram 时生效。文件格式见 CredentialStore 文档。
     #[arg(long)]
     auth_file: Option<PathBuf>,
+
+    /// OPT-12：禁用 SQL 防火墙（默认 false = 启用）。
+    ///
+    /// 启用后，每个 session 的 SQL 在执行前经过 `SqlFirewall::check`：
+    /// - SQL 注入特征检测（`' OR 1=1`、`UNION SELECT`、堆叠查询等）
+    /// - 禁止命令过滤（默认无禁止命令，可通过 API 配置）
+    /// - 白名单匹配（默认空白名单 = 允许所有）
+    /// 命中规则的 SQL 返回 ERROR，不执行。
+    #[arg(long, default_value_t = false)]
+    no_firewall: bool,
+
+    /// OPT-12：禁用审计日志（默认 false = 启用）。
+    ///
+    /// 启用后，每个 session 执行的 SQL 记录到不可变 append-only 审计日志，
+    /// 使用 SHA-256 哈希链保证日志不可篡改。
+    /// 注意：审计日志存储在内存中，长运行服务器需定期导出避免内存增长。
+    #[arg(long, default_value_t = false)]
+    no_audit_log: bool,
+
+    /// P2-2.2：TCP 流复制监听端口（默认 0 = 不监听）。
+    ///
+    /// 启用后，主库在此端口监听备库连接，将 WAL 记录通过 TCP 推送到备库。
+    /// 典型端口：5434（避免与 pgwire 5432 冲突）。
+    /// 需同时启用 WAL（--wal-path 或默认）。
+    #[arg(long, default_value_t = 0)]
+    repl_port: u16,
+
+    /// P2-2.2：作为备库连接到主库地址（格式：host:port，如 192.168.1.10:5434）。
+    ///
+    /// 启用后，本节点作为备库运行，通过 TCP 连接主库接收 WAL 复制流。
+    /// 与 --repl-port 互斥（备库不监听复制端口）。
+    #[arg(long)]
+    replica_of: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -798,7 +838,7 @@ fn main() -> anyhow::Result<()> {
 
                 tracing::info!(
                     node_id = node_id,
-                    shard_count = handle.read().unwrap().shard_ids().len(),
+                    shard_count = handle.read().shard_ids().len(),
                     listen_addr = ?network.listen_addr(),
                     peer_count = network.peer_count(),
                     "P8-3: cluster node initialized (TCP network + driver thread)"
@@ -819,15 +859,15 @@ fn main() -> anyhow::Result<()> {
             Ok(handle) => {
                 // 初始化：所有分片 Raft 组自选举为 Leader
                 {
-                    let mut rt = handle.write().unwrap();
+                    let mut rt = handle.write();
                     if let Err(e) = rt.init() {
                         tracing::warn!(error = %e, "DistRuntime init failed, continuing in degraded mode");
                     }
                 }
                 tracing::info!(
                     node_id = 1,
-                    shard_count = handle.read().unwrap().shard_ids().len(),
-                    current_ts = handle.read().unwrap().current_timestamp(),
+                    shard_count = handle.read().shard_ids().len(),
+                    current_ts = handle.read().current_timestamp(),
                     "P0-DIST-1/2/3: DistRuntime initialized (single-node, Raft + TSO + Multi-Raft integrated)"
                 );
                 Some(handle)
@@ -1049,10 +1089,15 @@ fn main() -> anyhow::Result<()> {
     let shutdown_persist_tables = mysql_shared_tables.clone();
     let shutdown_dirty_tracker = dirty_tracker.clone();
 
+    // 生产监控告警：创建共享的 Prometheus 指标注册表
+    // 同一实例注入 PgwireServer（用于计数）和 HttpServer（用于暴露 /metrics）
+    let metrics_registry = Arc::new(MetricsRegistry::new());
+
     let mut server_builder = PgwireServer::new(config)
         .with_concurrency(shared_tables, lock_manager)
         .with_shared_txn_counter(shared_txn_counter)
-        .with_mvcc(mvcc_manager.clone());
+        .with_mvcc(mvcc_manager.clone())
+        .with_metrics(metrics_registry.clone());
     // P0-DIST-1/2/3：注入分布式运行时句柄（实际接入，非 _dist_runtime 假装入）
     if let Some(dist_rt) = dist_runtime {
         server_builder = server_builder.with_dist_runtime(dist_rt);
@@ -1085,6 +1130,134 @@ fn main() -> anyhow::Result<()> {
     server_builder = server_builder.with_statistics_store(Arc::new(std::sync::Mutex::new(
         szrsql_optimizer::statistics::InMemoryStatisticsStore::new(),
     )));
+    // OPT-12：注入安全模块（SQL 防火墙 + 审计日志）
+    // 防火墙：默认启用 SQL 注入检测（不配置白名单/禁止命令时仅拦截注入特征）
+    // 审计日志：默认启用，记录所有 SQL 执行事件（SHA-256 哈希链防篡改）
+    if !args.no_firewall {
+        let firewall = Arc::new(tokio::sync::Mutex::new(
+            szrsql_security::firewall::SqlFirewall::new(),
+        ));
+        server_builder = server_builder.with_security_firewall(firewall);
+        tracing::info!("OPT-12: SQL firewall enabled (injection detection active)");
+    }
+    if !args.no_audit_log {
+        let mut audit = szrsql_security::audit::AuditLog::new();
+        audit.enable();
+        server_builder = server_builder.with_audit_log(Arc::new(tokio::sync::Mutex::new(audit)));
+        tracing::info!("OPT-12: audit log enabled (SHA-256 hash chain)");
+    }
+
+    // P2-2.2：TCP 流复制初始化
+    //
+    // 两种角色（互斥）：
+    // - 主库（--repl-port != 0）：创建 ReplicationPrimary，启动 TcpReplicationServer 监听备库连接，
+    //   注入到 PgwireServer，使 COMMIT 路径将 WAL 记录推送到 ReplicationPrimary 扇出到备库。
+    // - 备库（--replica-of <addr>）：启动 TcpReplicationClient 连接主库，接收 WAL 复制流。
+    //
+    // 前置条件：主库模式需启用 WAL（--wal-path 或默认），否则 COMMIT 路径不产生 WAL 记录。
+    if args.repl_port != 0 && args.replica_of.is_some() {
+        anyhow::bail!("--repl-port and --replica-of are mutually exclusive (a node cannot be both primary and replica)");
+    }
+    let replication_primary: Option<Arc<szrsql_replication::stream::ReplicationPrimary>> = if args.repl_port != 0 {
+        let primary = Arc::new(szrsql_replication::stream::ReplicationPrimary::new("primary-1"));
+        let repl_addr: std::net::SocketAddr = format!("{}:{}", listen_host, args.repl_port)
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid --repl-port address: {e}"))?;
+        let tcp_server = szrsql_replication::tcp_transport::TcpReplicationServer::new(
+            primary.clone(),
+            repl_addr,
+        );
+        // 启动 TCP 复制服务器（异步，返回 JoinHandle）
+        match tcp_server.spawn().await {
+            Ok(handle) => {
+                tracing::info!(
+                    repl_addr = %repl_addr,
+                    "P2-2.2: TCP replication server started (primary mode, accepting replica connections)"
+                );
+                // detach 任务：TcpReplicationServer 在 tokio task 中运行，
+                // 进程退出时自动终止。handle 保留防止被立即 cancel。
+                std::mem::forget(handle);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, repl_addr = %repl_addr, "P2-2.2: failed to start TCP replication server");
+                return Err(e.into());
+            }
+        }
+        // 注入到 PgwireServer（COMMIT 路径将 WAL 记录推送到此 primary）
+        server_builder = server_builder.with_replication_primary(primary.clone());
+        Some(primary)
+    } else {
+        None
+    };
+
+    // P2-2.2：备库模式 — 连接主库接收 WAL 复制流
+    let replica_handles: Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)> = if let Some(primary_addr) = &args.replica_of {
+        let addr: std::net::SocketAddr = primary_addr
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid --replica-of address '{primary_addr}': {e}"))?;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<szrsql_replication::stream::ReplicationMessage>();
+        let client = szrsql_replication::tcp_transport::TcpReplicationClient::new(addr);
+        tracing::info!(
+            primary_addr = %addr,
+            "P2-2.2: starting in replica mode, connecting to primary"
+        );
+        // 启动 TCP 复制客户端（带重试：5 次，每次间隔 1 秒）
+        match client.connect_with_retry(5, std::time::Duration::from_secs(1), tx).await {
+            Ok(handle) => {
+                // 启动 WAL 回放任务：从通道接收 ReplicationMessage 并记录日志
+                // （完整回放到本地存储需要后续 P2-2.3 阶段实现，当前仅记录接收计数）
+                let replay_handle = tokio::spawn(async move {
+                    let mut received_count: u64 = 0;
+                    let mut last_lsn: u64 = 0;
+                    while let Some(msg) = rx.recv().await {
+                        match msg {
+                            szrsql_replication::stream::ReplicationMessage::WalBatch { records, start_lsn, end_lsn } => {
+                                received_count += records.len() as u64;
+                                last_lsn = end_lsn;
+                                tracing::debug!(
+                                    batch_size = records.len(),
+                                    start_lsn,
+                                    end_lsn,
+                                    total_received = received_count,
+                                    "P2-2.2: replica received WalBatch"
+                                );
+                            }
+                            szrsql_replication::stream::ReplicationMessage::Heartbeat { current_lsn } => {
+                                last_lsn = current_lsn;
+                                tracing::trace!(
+                                    current_lsn,
+                                    total_received = received_count,
+                                    "P2-2.2: replica received Heartbeat"
+                                );
+                            }
+                            szrsql_replication::stream::ReplicationMessage::Eof => {
+                                tracing::info!(
+                                    total_received = received_count,
+                                    last_lsn,
+                                    "P2-2.2: replica received Eof from primary, disconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    tracing::info!(
+                        total_received = received_count,
+                        last_lsn,
+                        "P2-2.2: replica receiver task exited"
+                    );
+                });
+                tracing::info!(primary_addr = %addr, "P2-2.2: replica connected to primary");
+                Some((handle, replay_handle))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, primary_addr = %addr, "P2-2.2: failed to connect to primary after retries");
+                return Err(e.into());
+            }
+        }
+    } else {
+        None
+    };
+
     let server = server_builder;
 
     // Phase 4.5.8-4.5.10：HTTP 管理服务器
@@ -1096,7 +1269,7 @@ fn main() -> anyhow::Result<()> {
         if let Some(token) = &args.http_auth_token {
             http_config = http_config.with_auth_token(token);
         }
-        let metrics = Arc::new(MetricsRegistry::new());
+        let metrics = metrics_registry.clone();
         // 订阅 pgwire 服务器的关闭状态
         let shutdown_rx = server.shutdown_coordinator().subscribe();
         // P8-2：构造 CdcService 并注入 HttpServer，启用 /api/v1/cdc/* REST API
@@ -1204,6 +1377,31 @@ fn main() -> anyhow::Result<()> {
         None
     };
 
+    // Phase 4.5：SQLite 协议监听（JSON 行协议 TCP 入口）
+    // 启用后客户端可通过 TCP 发送 JSON 请求执行 SQL，典型端口 9432
+    let sqlite_handle = if args.sqlite_port != 0 {
+        let sqlite_config = szrsql_sqlite_bridge::SqliteConfig::new()
+            .with_host(listen_host.clone())
+            .with_port(args.sqlite_port)
+            .with_server_version("3.45-szrsql".to_string())
+            .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
+        let sqlite_server = szrsql_sqlite_bridge::SqliteServer::new(sqlite_config);
+        let sqlite_host = listen_host.clone();
+        let sqlite_port = args.sqlite_port;
+        Some(tokio::spawn(async move {
+            tracing::info!(
+                host = %sqlite_host,
+                port = sqlite_port,
+                "SQLite server starting (JSON line protocol over TCP)"
+            );
+            if let Err(e) = sqlite_server.serve().await {
+                tracing::error!(error = %e, "SQLite server exited with error");
+            }
+        }))
+    } else {
+        None
+    };
+
     // Phase 4.12：安装信号处理器，返回 ShutdownSignal（Graceful=SIGTERM / Immediate=SIGINT）
     let shutdown_signal = setup_signal_handler();
 
@@ -1224,6 +1422,17 @@ fn main() -> anyhow::Result<()> {
         }
         if let Some(handle) = oracle_handle {
             handle.abort();
+        }
+        if let Some(handle) = sqlite_handle {
+            handle.abort();
+        }
+        // P2-2.2：清理复制资源
+        if let Some(primary) = &replication_primary {
+            primary.shutdown();
+        }
+        if let Some((tcp_handle, replay_handle)) = &replica_handles {
+            tcp_handle.abort();
+            replay_handle.abort();
         }
         return Err(e.into());
     }
@@ -1252,6 +1461,26 @@ fn main() -> anyhow::Result<()> {
     if let Some(handle) = oracle_handle {
         handle.abort();
         tracing::info!("Oracle Net server shutdown (aborted)");
+    }
+    if let Some(handle) = sqlite_handle {
+        handle.abort();
+        tracing::info!("SQLite server shutdown (aborted)");
+    }
+
+    // P2-2.2：流复制优雅关闭
+    // - 主库模式：向所有已连接备库发送 Eof，通知备库正常断开
+    // - 备库模式：终止接收任务（主库侧发送 Eof 或连接断开后自然退出）
+    if let Some(primary) = &replication_primary {
+        primary.shutdown();
+        tracing::info!(
+            replica_count = primary.replica_count(),
+            "P2-2.2: replication primary graceful shutdown (Eof sent to all replicas)"
+        );
+    }
+    if let Some((tcp_handle, replay_handle)) = &replica_handles {
+        tcp_handle.abort();
+        replay_handle.abort();
+        tracing::info!("P2-2.2: replica receiver task stopped");
     }
 
     // Phase 6.4：终止周期性保存任务，执行最后一次同步保存

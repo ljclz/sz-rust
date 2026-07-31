@@ -24,6 +24,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, Write};
 use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use tracing::{debug, instrument, trace, warn};
 
 // =====================================================================
@@ -121,7 +123,7 @@ pub enum WalError {
 // =====================================================================
 
 /// WAL 记录 — 对应技术方案 9.11 节
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WalRecord {
     /// 日志序列号（单调递增）
     pub lsn: u64,
@@ -508,7 +510,7 @@ impl WalRowChange {
 /// 6. **崩溃恢复**：写入时若进程崩溃，已 flush 的记录可被 WalReader 读出
 pub struct WalWriter {
     /// WAL 文件句柄（受 Mutex 保护以支持多线程写入）
-    file: std::sync::Mutex<std::fs::File>,
+    file: Mutex<std::fs::File>,
     /// 当前 LSN（下一个分配的 LSN）
     current_lsn: std::sync::atomic::AtomicU64,
     /// WAL 文件路径
@@ -539,7 +541,7 @@ impl WalWriter {
         tracing::Span::current().record("recovered_lsn", recovered_lsn);
         debug!(recovered_lsn, "WAL opened, current_lsn recovered");
         Ok(Self {
-            file: std::sync::Mutex::new(file),
+            file: Mutex::new(file),
             current_lsn: std::sync::atomic::AtomicU64::new(recovered_lsn),
             path,
         })
@@ -567,7 +569,7 @@ impl WalWriter {
         record.update_checksum();
 
         let encoded = record.encode();
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = self.file.lock();
         file.write_all(&encoded).map_err(|e| {
             warn!(lsn, error = %e, "WAL append failed");
             WalError::IoError(e.to_string())
@@ -589,7 +591,7 @@ impl WalWriter {
             .current_lsn
             .fetch_add(records.len() as u64, std::sync::atomic::Ordering::SeqCst);
 
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = self.file.lock();
         for (i, mut record) in records.into_iter().enumerate() {
             record.lsn = start_lsn + i as u64;
             record.update_checksum();
@@ -607,7 +609,7 @@ impl WalWriter {
     /// 强制刷盘（fsync），保证已写入的数据持久化
     #[instrument(skip(self))]
     pub fn flush(&self) -> Result<(), WalError> {
-        let file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let file = self.file.lock();
         file.sync_all().map_err(|e| {
             warn!(error = %e, "WAL fsync failed");
             WalError::IoError(e.to_string())
@@ -636,7 +638,7 @@ impl WalWriter {
         record.update_checksum();
         let encoded = record.encode();
 
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = self.file.lock();
         file.write_all(&encoded).map_err(|e| {
             warn!(lsn, tx_id, error = %e, "WAL append_commit write failed");
             WalError::IoError(e.to_string())
@@ -693,7 +695,7 @@ impl WalWriter {
             )));
         }
 
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = self.file.lock();
 
         // 扫描 WAL 找到第一条 lsn >= keep_lsn 的记录的文件偏移
         let mut reader = std::io::BufReader::new(
@@ -1300,7 +1302,7 @@ impl WalCheckpoint {
         record.update_checksum();
         let encoded = record.encode();
 
-        let mut file = writer.file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = writer.file.lock();
         file.write_all(&encoded).map_err(|e| WalError::IoError(e.to_string()))?;
         file.sync_all().map_err(|e| WalError::IoError(e.to_string()))?;
         debug!(lsn, checkpoint_lsn = self.checkpoint_lsn, "checkpoint written to WAL");
@@ -1816,14 +1818,14 @@ fn arc_data_addr<T: ?Sized>(arc: &std::sync::Arc<T>) -> usize {
 /// 3. **弱引用去重**：unregister 通过 `Arc::ptr_eq` 比较指针
 /// 4. **同步触发**：notify_commit/notify_rollback 同步调用所有 observer（at-least-once 语义）
 pub struct WalObserverManager {
-    observers: std::sync::RwLock<Vec<std::sync::Arc<dyn WalObserver>>>,
+    observers: RwLock<Vec<std::sync::Arc<dyn WalObserver>>>,
 }
 
 impl WalObserverManager {
     /// 创建空的观察者管理器
     pub fn new() -> Self {
         Self {
-            observers: std::sync::RwLock::new(Vec::new()),
+            observers: RwLock::new(Vec::new()),
         }
     }
 
@@ -1831,7 +1833,7 @@ impl WalObserverManager {
     ///
     /// 返回 `true` 表示注册成功；若已注册相同指针的 observer，返回 `false`
     pub fn register(&self, observer: std::sync::Arc<dyn WalObserver>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         // 去重：通过 Arc 数据指针地址比较（fat pointer 转 thin data pointer）
         let target_addr = arc_data_addr(&observer);
         if observers.iter().any(|o| arc_data_addr(o) == target_addr) {
@@ -1845,7 +1847,7 @@ impl WalObserverManager {
     ///
     /// 返回 `true` 表示注销成功；若未找到，返回 `false`
     pub fn unregister<O: WalObserver + 'static>(&self, observer: &std::sync::Arc<O>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         let target_addr = arc_data_addr(observer);
         let original_len = observers.len();
         observers.retain(|o| arc_data_addr(o) != target_addr);
@@ -1857,7 +1859,7 @@ impl WalObserverManager {
     /// 同步调用每个 observer 的 `on_commit`。单个 observer 的 panic 会被
     /// `catch_unwind` 捕获，不影响其他 observer 的通知。
     pub fn notify_commit(&self, tx_id: u32, records: Vec<WalRecord>) {
-        let observers = self.observers.read().unwrap();
+        let observers = self.observers.read();
         for observer in observers.iter() {
             // 每个 observer 独立 clone 一份 records
             let records_clone = records.clone();
@@ -1867,7 +1869,7 @@ impl WalObserverManager {
 
     /// 通知所有观察者：事务回滚
     pub fn notify_rollback(&self, tx_id: u32) {
-        let observers = self.observers.read().unwrap();
+        let observers = self.observers.read();
         for observer in observers.iter() {
             observer.on_rollback(tx_id);
         }
@@ -1875,7 +1877,7 @@ impl WalObserverManager {
 
     /// 获取已注册的观察者数量
     pub fn observer_count(&self) -> usize {
-        self.observers.read().unwrap().len()
+        self.observers.read().len()
     }
 }
 
@@ -1913,7 +1915,7 @@ pub struct WalHookWriter {
     /// 观察者管理器
     observer_manager: Arc<WalObserverManager>,
     /// 按 tx_id 缓冲的记录（等待 commit/abort 触发回调）
-    pending: std::sync::Mutex<std::collections::HashMap<u32, Vec<WalRecord>>>,
+    pending: Mutex<std::collections::HashMap<u32, Vec<WalRecord>>>,
 }
 
 impl WalHookWriter {
@@ -1922,7 +1924,7 @@ impl WalHookWriter {
         Self {
             writer,
             observer_manager,
-            pending: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pending: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -1941,7 +1943,7 @@ impl WalHookWriter {
             WalOpType::Commit => {
                 // 收集该事务的所有记录（含本次 Commit 记录）
                 let mut records = {
-                    let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut pending = self.pending.lock();
                     pending.remove(&tx_id).unwrap_or_default()
                 };
                 record.lsn = lsn;
@@ -1953,7 +1955,7 @@ impl WalHookWriter {
             WalOpType::Abort => {
                 // 丢弃缓冲，触发 on_rollback
                 {
-                    let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut pending = self.pending.lock();
                     pending.remove(&tx_id);
                 }
                 self.observer_manager.notify_rollback(tx_id);
@@ -1962,7 +1964,7 @@ impl WalHookWriter {
                 // 缓冲到 pending[tx_id]
                 record.lsn = lsn;
                 record.update_checksum();
-                let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+                let mut pending = self.pending.lock();
                 pending.entry(tx_id).or_default().push(record);
             }
         }
@@ -1974,7 +1976,7 @@ impl WalHookWriter {
     /// 用于事务已通过其他方式写入 Commit 记录，但需要触发回调的场景。
     pub fn fire_commit(&self, tx_id: u32) -> Result<Vec<WalRecord>, WalError> {
         let records = {
-            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pending = self.pending.lock();
             pending.remove(&tx_id).unwrap_or_default()
         };
         self.observer_manager.notify_commit(tx_id, records.clone());
@@ -1984,7 +1986,7 @@ impl WalHookWriter {
     /// 显式触发事务回滚回调（不写入 Abort 记录到 WAL）
     pub fn fire_rollback(&self, tx_id: u32) {
         {
-            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pending = self.pending.lock();
             pending.remove(&tx_id);
         }
         self.observer_manager.notify_rollback(tx_id);
@@ -2002,14 +2004,13 @@ impl WalHookWriter {
 
     /// 获取当前缓冲中的事务数（用于调试/测试）
     pub fn pending_tx_count(&self) -> usize {
-        self.pending.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.pending.lock().len()
     }
 
     /// 获取指定事务的缓冲记录数（用于调试/测试）
     pub fn pending_record_count(&self, tx_id: u32) -> usize {
         self.pending
             .lock()
-            .unwrap()
             .get(&tx_id)
             .map(|v| v.len())
             .unwrap_or(0)

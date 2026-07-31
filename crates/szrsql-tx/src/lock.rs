@@ -36,7 +36,8 @@
 //!    - 升级请求优先于新请求（避免升级饥饿导致死锁）
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Condvar, Mutex};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{debug, instrument, trace, warn};
 
@@ -265,7 +266,7 @@ impl LockManager {
             if idx == exclude_idx {
                 continue;
             }
-            if let Ok(table) = table_mutex.try_lock() {
+            if let Some(table) = table_mutex.try_lock() {
                 collect(&table, &mut edges);
             }
         }
@@ -319,7 +320,7 @@ impl LockManager {
     #[instrument(skip(self))]
     pub fn try_lock(&self, txn_id: u32, resource: u64, mode: LockMode) -> Result<(), LockError> {
         let idx = self.shard_idx(resource);
-        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = self.tables[idx].lock();
         match self.try_lock_inner(&mut table, txn_id, resource, mode) {
             Ok(()) => {
                 trace!(txn_id, resource, mode = ?mode, "lock acquired (try)");
@@ -346,7 +347,7 @@ impl LockManager {
         timeout: Duration,
     ) -> Result<(), LockError> {
         let idx = self.shard_idx(resource);
-        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = self.tables[idx].lock();
 
         // 先尝试立即获取
         match self.try_lock_inner(&mut table, txn_id, resource, mode) {
@@ -468,8 +469,8 @@ impl LockManager {
             // 等待通知（带剩余超时，但最多等待 500ms 以便周期性检查死锁）
             let remaining = deadline - now;
             let wait_duration = remaining.min(Duration::from_millis(500));
-            let (guard, wait_result) = self.condvars[idx].wait_timeout(table, wait_duration).unwrap();
-            table = guard;
+            // P0-6：parking_lot::Condvar::wait_for 接收 &mut guard，原地等待
+            let wait_result = self.condvars[idx].wait_for(&mut table, wait_duration);
             let _ = wait_result;
         }
     }
@@ -482,7 +483,7 @@ impl LockManager {
     #[instrument(skip(self))]
     pub fn unlock(&self, txn_id: u32, resource: u64) {
         let idx = self.shard_idx(resource);
-        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = self.tables[idx].lock();
         let need_notify = if let Some(entry) = table.get_mut(&resource) {
             // 从等待队列移除（若在等待）
             let prev_len = entry.waiters.len();
@@ -520,7 +521,7 @@ impl LockManager {
     pub fn unlock_all(&self, txn_id: u32) {
         let mut total_released = 0u32;
         for (idx, table_mutex) in self.tables.iter().enumerate() {
-            let mut table = table_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            let mut table = table_mutex.lock();
             let mut resources_to_clean = Vec::new();
             let mut need_notify = false;
 
@@ -564,7 +565,7 @@ impl LockManager {
     #[instrument(skip(self))]
     pub fn upgrade(&self, txn_id: u32, resource: u64, timeout: Duration) -> Result<(), LockError> {
         let idx = self.shard_idx(resource);
-        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let mut table = self.tables[idx].lock();
 
         // 检查当前持有状态
         let current_mode = table
@@ -692,15 +693,15 @@ impl LockManager {
             // 最多等待 500ms 以便周期性检查死锁
             let remaining = deadline - now;
             let wait_duration = remaining.min(Duration::from_millis(500));
-            let (guard, _) = self.condvars[idx].wait_timeout(table, wait_duration).unwrap();
-            table = guard;
+            // P0-6：parking_lot::Condvar::wait_for 接收 &mut guard，原地等待
+            let _ = self.condvars[idx].wait_for(&mut table, wait_duration);
         }
     }
 
     /// 查询事务是否持有指定资源的锁（任意模式）
     pub fn holds_lock(&self, txn_id: u32, resource: u64) -> bool {
         let idx = self.shard_idx(resource);
-        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let table = self.tables[idx].lock();
         table
             .get(&resource)
             .map(|e| e.find_holder(txn_id).is_some())
@@ -710,7 +711,7 @@ impl LockManager {
     /// 查询事务在指定资源上持有的锁模式
     pub fn lock_mode(&self, txn_id: u32, resource: u64) -> Option<LockMode> {
         let idx = self.shard_idx(resource);
-        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let table = self.tables[idx].lock();
         table
             .get(&resource)
             .and_then(|e| e.find_holder(txn_id).map(|(_, m)| m))
@@ -719,20 +720,20 @@ impl LockManager {
     /// 当前持有者数量（用于测试和监控）
     pub fn holder_count(&self, resource: u64) -> usize {
         let idx = self.shard_idx(resource);
-        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let table = self.tables[idx].lock();
         table.get(&resource).map(|e| e.holders.len()).unwrap_or(0)
     }
 
     /// 当前等待者数量（用于测试和监控）
     pub fn waiter_count(&self, resource: u64) -> usize {
         let idx = self.shard_idx(resource);
-        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
+        let table = self.tables[idx].lock();
         table.get(&resource).map(|e| e.waiters.len()).unwrap_or(0)
     }
 
     /// 锁表中的资源数量（用于测试）
     pub fn resource_count(&self) -> usize {
-        self.tables.iter().map(|t| t.lock().unwrap().len()).sum()
+        self.tables.iter().map(|t| t.lock().len()).sum()
     }
 
     // -----------------------------------------------------------------
@@ -915,17 +916,31 @@ impl LockManager {
     ///
     /// OPT-9：跨分片快照所有等待图边后统一检测
     pub fn detect_all_deadlocks(&self) -> Vec<Vec<u32>> {
+        // BUG-004 修复：一次性锁住所有分片构建一致快照，避免逐分片加锁导致的幻影环误报。
+        // 之前的实现逐个分片 lock()，不同分片的状态来自不同时间点，
+        // 可能看到过时的等待关系（holder 已释放但检测器仍认为持有），
+        // 从而构建出不存在的环（false positive）。
+        //
+        // 性能影响：detect_all_deadlocks 是周期性调用的检测操作，非热路径，
+        // 一次性锁住所有分片的影响可接受。
+        let mut guards: Vec<parking_lot::MutexGuard<'_, HashMap<u64, LockEntry>>> =
+            Vec::with_capacity(self.tables.len());
+        for table_mutex in &self.tables {
+            // 按固定顺序（分片 0→15）获取所有分片锁，构建一致快照。
+            // 顺序获取不会死锁（所有调用方都按相同顺序获取）。
+            // P0-6：parking_lot::Mutex 不中毒，lock() 直接返回 guard
+            guards.push(table_mutex.lock());
+        }
+
         let mut edges: Vec<(u32, u32)> = Vec::new();
         let mut all_waiters: HashSet<u32> = HashSet::new();
-        for table_mutex in &self.tables {
-            if let Ok(table) = table_mutex.lock() {
-                for entry in table.values() {
-                    for waiter in &entry.waiters {
-                        all_waiters.insert(waiter.txn_id);
-                        for holder in &entry.holders {
-                            if holder.txn_id != waiter.txn_id {
-                                edges.push((waiter.txn_id, holder.txn_id));
-                            }
+        for table in &guards {
+            for entry in table.values() {
+                for waiter in &entry.waiters {
+                    all_waiters.insert(waiter.txn_id);
+                    for holder in &entry.holders {
+                        if holder.txn_id != waiter.txn_id {
+                            edges.push((waiter.txn_id, holder.txn_id));
                         }
                     }
                 }

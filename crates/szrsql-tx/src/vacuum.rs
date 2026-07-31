@@ -325,6 +325,7 @@ mod phase_2_22 {
         // VACUUM 并发 BEGIN 不应 panic，不破坏不变量
         let mgr = Arc::new(MvccManager::new());
         let iterations = Arc::new(AtomicU64::new(0));
+        let total_vacuumed_during_concurrent = Arc::new(AtomicU64::new(0));
 
         // 预先提交一些事务
         for i in 0..50 {
@@ -340,16 +341,17 @@ mod phase_2_22 {
         {
             let mgr = Arc::clone(&mgr);
             let iterations = Arc::clone(&iterations);
+            let vacuumed = Arc::clone(&total_vacuumed_during_concurrent);
             handles.push(thread::spawn(move || {
-                let mut total_vacuumed = 0;
+                let mut total_vacuumed = 0u64;
                 for _ in 0..10 {
                     let stats = mgr.vacuum();
-                    total_vacuumed += stats.total_vacuumed();
+                    total_vacuumed += stats.total_vacuumed() as u64;
                     // 短暂休眠让其他线程有机会运行
                     std::thread::yield_now();
                 }
+                vacuumed.store(total_vacuumed, Ordering::SeqCst);
                 let _ = iterations; // suppress unused warning
-                let _ = total_vacuumed; // suppress unused warning
             }));
         }
 
@@ -383,7 +385,17 @@ mod phase_2_22 {
         let final_stats = mgr.vacuum();
         // 应该回收所有（无活跃事务）
         assert_eq!(final_stats.retained_active, 0);
-        assert!(final_stats.vacuumed_committed > 0);
+        // 并发期间的 VACUUM 可能已经清理了大部分事务，
+        // 因此最终 VACUUM 的 vacuumed_committed 可能为 0（竞态依赖）。
+        // 断言：整个过程中至少清理了一些已提交事务（并发期间 + 最终）
+        let total_vacuumed = total_vacuumed_during_concurrent.load(Ordering::SeqCst)
+            + final_stats.vacuumed_committed as u64;
+        assert!(
+            total_vacuumed > 0,
+            "整个 VACUUM 过程应至少清理一些已提交事务: concurrent={}, final={}",
+            total_vacuumed_during_concurrent.load(Ordering::SeqCst),
+            final_stats.vacuumed_committed
+        );
     }
 
     #[test]

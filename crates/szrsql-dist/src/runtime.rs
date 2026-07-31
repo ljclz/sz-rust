@@ -33,7 +33,9 @@ use crate::raft::{Index, NodeId, RaftError, RaftNetwork, RaftState, RpcMessage};
 use crate::shard::{KeyRange, KvStateMachine, MultiRaftNode, Shard, ShardCommand, ShardId, ShardRouter};
 use crate::txn::TimestampOracle;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot::RwLock 替代 std::sync::RwLock，消除中毒 panic 风险
+use parking_lot::RwLock;
 
 // =====================================================================
 //  DistRuntimeError — 运行时错误
@@ -785,7 +787,7 @@ impl ClusterDriver {
                 while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
                     // 1. tick 获取出站消息
                     let outbound = {
-                        let mut rt = runtime.write().unwrap();
+                        let mut rt = runtime.write();
                         rt.tick_with_messages(tick_ms)
                     };
 
@@ -800,7 +802,7 @@ impl ClusterDriver {
                     // 4. 处理入站消息（当前仅 shard_id=1）
                     for msg in inbound {
                         let responses = {
-                            let mut rt = runtime.write().unwrap();
+                            let mut rt = runtime.write();
                             rt.handle_message(1, msg)
                         };
                         // 5. 发送处理后的响应
@@ -1028,14 +1030,14 @@ mod tests {
         let handle = new_single_node_runtime(1).unwrap();
         // 初始化
         {
-            let mut rt = handle.write().unwrap();
+            let mut rt = handle.write();
             rt.init().unwrap();
             rt.put(b"shared_key".to_vec(), b"shared_value".to_vec()).unwrap();
         }
         // 跨线程读取
         let handle_clone = handle.clone();
         let thread = std::thread::spawn(move || {
-            let rt = handle_clone.read().unwrap();
+            let rt = handle_clone.read();
             rt.get(b"shared_key").unwrap()
         });
         let result = thread.join().unwrap();
@@ -1346,7 +1348,7 @@ mod tests {
     fn test_new_cluster_node_runtime() {
         let all_nodes = vec![1, 2, 3];
         let handle = new_cluster_node_runtime(1, &all_nodes, 42).unwrap();
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         assert_eq!(rt.node_id(), 1);
         assert!(!rt.shard_ids().is_empty(), "cluster node should have shards");
         // 多节点模式不应自动选举为 Leader（init() 才会）

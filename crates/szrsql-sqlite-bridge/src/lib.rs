@@ -43,11 +43,13 @@ pub mod btree_page;
 pub mod format;
 pub mod record;
 pub mod serial_type;
+pub mod server;
 pub mod types;
 pub mod varint;
 
 pub use adapter::{AdapterError, SqliteAdapter};
 pub use format::{SqliteFormatError, SqliteHeader, HEADER_SIZE, MAGIC_HEADER, PAGE_SIZE_DEFAULT};
+pub use server::{SqliteConfig, SqliteServer, SqliteServerError};
 pub use types::SqliteType;
 
 /// 返回 crate 版本号，供 workspace 骨架冒烟测试使用。

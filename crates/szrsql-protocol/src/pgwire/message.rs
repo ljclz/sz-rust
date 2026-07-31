@@ -564,7 +564,16 @@ impl FrontendMessage {
                         "bind message: truncated parameter format code count",
                     ));
                 }
-                let pfc_count = i16::from_be_bytes([cur[0], cur[1]]) as usize;
+                // BUG-006 修复：使用 u16 解析 pfc_count，避免 i16 负值经 as usize 符号扩展
+                // 为 usize::MAX 导致 Vec::with_capacity panic（远程 DoS，与 BUG-002 同类）。
+                let pfc_count = u16::from_be_bytes([cur[0], cur[1]]) as usize;
+                const MAX_BIND_FORMAT_CODES: usize = 65535;
+                if pfc_count > MAX_BIND_FORMAT_CODES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("bind message: format code count too large: {pfc_count}"),
+                    ));
+                }
                 cur = &cur[2..];
                 if cur.len() < pfc_count * 2 {
                     return Err(io::Error::new(
@@ -630,7 +639,16 @@ impl FrontendMessage {
                         "bind message: truncated result format code count",
                     ));
                 }
-                let rfc_count = i16::from_be_bytes([cur[0], cur[1]]) as usize;
+                // BUG-006 修复：使用 u16 解析 rfc_count，避免 i16 负值经 as usize 符号扩展
+                // 为 usize::MAX 导致 Vec::with_capacity panic（远程 DoS，与 pfc_count 同类）。
+                let rfc_count = u16::from_be_bytes([cur[0], cur[1]]) as usize;
+                const MAX_RESULT_FORMAT_CODES: usize = 65535;
+                if rfc_count > MAX_RESULT_FORMAT_CODES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("bind message: result format code count too large: {rfc_count}"),
+                    ));
+                }
                 cur = &cur[2..];
                 if cur.len() < rfc_count * 2 {
                     return Err(io::Error::new(

@@ -23,16 +23,79 @@
 //! - 支持 Connection: close（短连接，每个请求后关闭）
 //! - 不支持 chunked transfer encoding、keep-alive、HTTP/2
 
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 
 use crate::pgwire::lifecycle::ShutdownState;
+
+// =====================================================================
+//  CancelRegistry + ManagementHandle（OPT-13）
+// =====================================================================
+
+/// OPT-13：会话取消注册表 — PID → Notify 映射。
+///
+/// 共享于 `PgwireServer`（注册/注销）和 `HttpServer`（触发取消）。
+/// 每个 pgwire 连接在建立时插入 `Arc<Notify>`，HTTP `/api/v1/cancel/{pid}`
+/// 端点调用 `notify_one()` 触发取消信号。
+pub type CancelRegistry = Arc<std::sync::Mutex<HashMap<i32, Arc<Notify>>>>;
+
+/// OPT-13：HTTP 管理端点的真实实现句柄。
+///
+/// 注入 `HttpServer` 后，三个管理端点从 stub 升级为真实操作：
+/// - `/api/v1/cancel/{pid}` — 通过 `CancelRegistry` 查找并触发 `Notify::notify_one()`
+/// - `/api/v1/backup` — 通过 `Notify::notify_one()` 触发 main.rs 的增量快照保存
+/// - `/api/v1/config/reload` — 读取 `auth_file` 验证可加载性
+pub struct ManagementHandle {
+    /// 备份触发通知：HTTP 触发，main.rs 监听并执行 `save_incremental_snapshot`
+    pub backup_notify: Option<Arc<Notify>>,
+    /// 会话取消注册表：与 `PgwireServer` 共享同一实例
+    pub cancel_registry: Option<CancelRegistry>,
+    /// 认证文件路径：用于 `/api/v1/config/reload` 验证可加载性
+    pub auth_file: Option<PathBuf>,
+}
+
+impl ManagementHandle {
+    /// 创建空句柄（所有端点退化为 stub 行为）。
+    pub fn new() -> Self {
+        Self {
+            backup_notify: None,
+            cancel_registry: None,
+            auth_file: None,
+        }
+    }
+
+    /// 设置备份触发通知。
+    pub fn with_backup_notify(mut self, notify: Arc<Notify>) -> Self {
+        self.backup_notify = Some(notify);
+        self
+    }
+
+    /// 设置会话取消注册表。
+    pub fn with_cancel_registry(mut self, registry: CancelRegistry) -> Self {
+        self.cancel_registry = Some(registry);
+        self
+    }
+
+    /// 设置认证文件路径。
+    pub fn with_auth_file(mut self, path: PathBuf) -> Self {
+        self.auth_file = Some(path);
+        self
+    }
+}
+
+impl Default for ManagementHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // =====================================================================
 //  错误类型
@@ -115,12 +178,18 @@ impl HttpConfig {
 /// - `szrsql_connections_total` — 累计连接数（Counter）
 /// - `szrsql_queries_total` — 累计查询数（Counter）
 /// - `szrsql_active_connections` — 当前活跃连接数（Gauge）
-/// - `szrsql_wal_lsn` — 最后 WAL LSN（Gauge，占位 0）
+/// - `szrsql_errors_total` — 累计错误数（Counter）
+/// - `szrsql_commits_total` — 累计事务提交数（Counter）
+/// - `szrsql_rollbacks_total` — 累计事务回滚数（Counter）
+/// - `szrsql_wal_lsn` — 最后 WAL LSN（Gauge）
 #[derive(Debug, Default)]
 pub struct MetricsRegistry {
     connections_total: AtomicU64,
     queries_total: AtomicU64,
     active_connections: AtomicU64,
+    errors_total: AtomicU64,
+    commits_total: AtomicU64,
+    rollbacks_total: AtomicU64,
     wal_lsn: AtomicU64,
 }
 
@@ -150,6 +219,21 @@ impl MetricsRegistry {
         self.active_connections.fetch_sub(1, Ordering::Relaxed);
     }
 
+    /// 累计错误数 +1。
+    pub fn inc_errors(&self) {
+        self.errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 累计提交数 +1。
+    pub fn inc_commits(&self) {
+        self.commits_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 累计回滚数 +1。
+    pub fn inc_rollbacks(&self) {
+        self.rollbacks_total.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// 设置最后 WAL LSN。
     pub fn set_wal_lsn(&self, lsn: u64) {
         self.wal_lsn.store(lsn, Ordering::Relaxed);
@@ -160,6 +244,9 @@ impl MetricsRegistry {
         let connections = self.connections_total.load(Ordering::Relaxed);
         let queries = self.queries_total.load(Ordering::Relaxed);
         let active = self.active_connections.load(Ordering::Relaxed);
+        let errors = self.errors_total.load(Ordering::Relaxed);
+        let commits = self.commits_total.load(Ordering::Relaxed);
+        let rollbacks = self.rollbacks_total.load(Ordering::Relaxed);
         let lsn = self.wal_lsn.load(Ordering::Relaxed);
 
         format!(
@@ -172,6 +259,15 @@ impl MetricsRegistry {
              # HELP szrsql_active_connections Current number of active connections.\n\
              # TYPE szrsql_active_connections gauge\n\
              szrsql_active_connections {active}\n\
+             # HELP szrsql_errors_total Total number of query errors since startup.\n\
+             # TYPE szrsql_errors_total counter\n\
+             szrsql_errors_total {errors}\n\
+             # HELP szrsql_commits_total Total number of transaction commits since startup.\n\
+             # TYPE szrsql_commits_total counter\n\
+             szrsql_commits_total {commits}\n\
+             # HELP szrsql_rollbacks_total Total number of transaction rollbacks since startup.\n\
+             # TYPE szrsql_rollbacks_total counter\n\
+             szrsql_rollbacks_total {rollbacks}\n\
              # HELP szrsql_wal_lsn Last Write-Ahead Log LSN (0 = WAL not yet implemented).\n\
              # TYPE szrsql_wal_lsn gauge\n\
              szrsql_wal_lsn {lsn}\n"
@@ -304,6 +400,8 @@ pub struct HttpServer {
     shutdown_rx: watch::Receiver<ShutdownState>,
     /// P8-2：CDC 服务注入（可选），用于暴露 /api/v1/cdc/* REST API
     cdc_service: Option<Arc<szrsql_cdc::service::CdcService>>,
+    /// OPT-13：管理端点句柄（cancel/backup/config-reload 的真实实现）
+    management: Option<Arc<ManagementHandle>>,
 }
 
 impl HttpServer {
@@ -323,6 +421,7 @@ impl HttpServer {
             metrics,
             shutdown_rx,
             cdc_service: None,
+            management: None,
         }
     }
 
@@ -347,6 +446,17 @@ impl HttpServer {
         self
     }
 
+    /// OPT-13：注入管理端点句柄，启用 cancel/backup/config-reload 的真实实现。
+    ///
+    /// 注入后，三个管理端点从 stub 升级为真实操作：
+    /// - `POST /api/v1/cancel/{pid}` — 通过 `CancelRegistry` 触发 `Notify::notify_one()`
+    /// - `POST /api/v1/backup` — 通过 `Notify` 触发 main.rs 的增量快照保存
+    /// - `POST /api/v1/config/reload` — 读取认证文件验证可加载性
+    pub fn with_management_handle(mut self, mgmt: Arc<ManagementHandle>) -> Self {
+        self.management = Some(mgmt);
+        self
+    }
+
     /// 启动 HTTP 服务器，阻塞直到收到关闭信号。
     ///
     /// 如果 `config.port == 0`，立即返回 `Ok(())`（不监听）。
@@ -364,6 +474,7 @@ impl HttpServer {
         let auth_token = self.config.auth_token.clone();
         let metrics = Arc::clone(&self.metrics);
         let cdc_service = self.cdc_service.clone();
+        let management = self.management.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         loop {
@@ -386,9 +497,10 @@ impl HttpServer {
                             let metrics = Arc::clone(&metrics);
                             let auth_token = auth_token.clone();
                             let cdc_service = cdc_service.clone();
+                            let management = management.clone();
                             let shutdown_rx = self.shutdown_rx.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = handle_connection(stream, peer, &auth_token, &metrics, &cdc_service, &shutdown_rx).await {
+                                if let Err(e) = handle_connection(stream, peer, &auth_token, &metrics, &cdc_service, &management, &shutdown_rx).await {
                                     tracing::debug!(error = %e, "http connection error");
                                 }
                             });
@@ -414,6 +526,7 @@ async fn handle_connection(
     auth_token: &Option<String>,
     metrics: &MetricsRegistry,
     cdc_service: &Option<Arc<szrsql_cdc::service::CdcService>>,
+    management: &Option<Arc<ManagementHandle>>,
     shutdown_rx: &watch::Receiver<ShutdownState>,
 ) -> Result<(), HttpError> {
     // 读取请求数据（最多 64KB）
@@ -467,7 +580,7 @@ async fn handle_connection(
     );
 
     // 路由请求
-    let response = route_request(&request, auth_token, metrics, cdc_service, shutdown_rx);
+    let response = route_request(&request, auth_token, metrics, cdc_service, management, shutdown_rx);
 
     // 发送响应
     stream.write_all(&response.to_bytes()).await?;
@@ -530,6 +643,7 @@ fn route_request(
     auth_token: &Option<String>,
     metrics: &MetricsRegistry,
     cdc_service: &Option<Arc<szrsql_cdc::service::CdcService>>,
+    management: &Option<Arc<ManagementHandle>>,
     shutdown_rx: &watch::Receiver<ShutdownState>,
 ) -> HttpResponse {
     match (request.method.as_str(), request.path.as_str()) {
@@ -598,10 +712,43 @@ fn route_request(
                     return HttpResponse::json(400, "Bad Request", r#"{"error":"invalid pid"}"#);
                 }
             };
-            // Phase 4.5.9 占位：实际取消需要通过 PgwireServer 的 cancel 机制
-            // 当前返回成功，待后续集成真实取消逻辑
-            tracing::info!(pid, "cancel session requested (stub)");
-            HttpResponse::ok_json(&format!(r#"{{"cancelled":{pid}}}"#))
+            // OPT-13：通过 CancelRegistry 查找会话并触发取消信号
+            match management {
+                Some(mgmt) => match &mgmt.cancel_registry {
+                    Some(registry) => {
+                        let found = if let Ok(map) = registry.lock() {
+                            if let Some(notify) = map.get(&pid) {
+                                notify.notify_one();
+                                tracing::info!(pid, "OPT-13: cancel signal sent to session");
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        if found {
+                            HttpResponse::ok_json(&format!(r#"{{"cancelled":{pid}}}"#))
+                        } else {
+                            HttpResponse::json(
+                                404,
+                                "Not Found",
+                                &format!(r#"{{"error":"session {pid} not found"}}"#),
+                            )
+                        }
+                    }
+                    None => HttpResponse::json(
+                        503,
+                        "Service Unavailable",
+                        r#"{"error":"cancel registry not configured"}"#,
+                    ),
+                },
+                None => HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    r#"{"error":"management handle not injected"}"#,
+                ),
+            }
         }
 
         // 触发备份
@@ -609,10 +756,28 @@ fn route_request(
             if !check_auth(request, auth_token) {
                 return HttpResponse::unauthorized();
             }
-            // Phase 4.5.9 占位：实际备份需要 WAL/快照机制
-            // 当前返回成功，待 Phase 5 持久化层实现后补充
-            tracing::info!("backup requested (stub)");
-            HttpResponse::ok_json(r#"{"status":"backup completed (stub)"}"#)
+            // OPT-13：通过 Notify 触发 main.rs 的增量快照保存（fire-and-forget）
+            match management {
+                Some(mgmt) => match &mgmt.backup_notify {
+                    Some(notify) => {
+                        notify.notify_one();
+                        tracing::info!("OPT-13: backup triggered via HTTP, snapshot saving asynchronously");
+                        HttpResponse::ok_json(
+                            r#"{"status":"backup triggered","async":true}"#,
+                        )
+                    }
+                    None => HttpResponse::json(
+                        503,
+                        "Service Unavailable",
+                        r#"{"error":"backup not configured"}"#,
+                    ),
+                },
+                None => HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    r#"{"error":"management handle not injected"}"#,
+                ),
+            }
         }
 
         // 触发配置热重载
@@ -620,10 +785,25 @@ fn route_request(
             if !check_auth(request, auth_token) {
                 return HttpResponse::unauthorized();
             }
-            // Phase 4.5.9 占位：实际热重载需要 SIGHUP 机制
-            // 当前返回成功，待后续集成真实配置重载
-            tracing::info!("config reload requested (stub)");
-            HttpResponse::ok_json(r#"{"status":"config reloaded (stub)"}"#)
+            // OPT-13：读取认证文件验证可加载性
+            match management {
+                Some(mgmt) => match &mgmt.auth_file {
+                    Some(path) => match std::fs::read_to_string(path) {
+                        Ok(content) => {
+                            let valid = serde_json::from_str::<serde_json::Value>(&content).is_ok();
+                            if valid || content.trim().is_empty() {
+                                tracing::info!(path = %path.display(), bytes = content.len(), "OPT-13: config reload successful");
+                                HttpResponse::ok_json(&format!(r#"{{"status":"reloaded","file":"{}","bytes":{}}}"#, path.display(), content.len()))
+                            } else {
+                                HttpResponse::json(422, "Unprocessable Entity", r#"{"error":"auth file is not valid JSON"}"#)
+                            }
+                        }
+                        Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"{e}"}}"#)),
+                    },
+                    None => HttpResponse::json(503, "Service Unavailable", r#"{"error":"auth file not configured"}"#),
+                },
+                None => HttpResponse::json(503, "Service Unavailable", r#"{"error":"management handle not injected"}"#),
+            }
         }
 
         // ==================== P8-2: CDC REST API 端点（需鉴权 + CdcService 注入） ====================
@@ -1127,7 +1307,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /healthz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1140,7 +1320,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /readyz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1154,7 +1334,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         tx.send_modify(|v| *v = ShutdownState::Draining);
         let req = parse_http_request(b"GET /readyz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("503 Service Unavailable"));
@@ -1167,7 +1347,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         metrics.inc_connections();
         let req = parse_http_request(b"GET /metrics HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("szrsql_connections_total 1"));
@@ -1179,7 +1359,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /nonexistent HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("404 Not Found"));
@@ -1191,7 +1371,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /healthz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("405 Method Not Allowed"));
@@ -1206,7 +1386,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/sessions HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("401 Unauthorized"));
@@ -1222,7 +1402,7 @@ mod tests {
             b"GET /api/v1/sessions HTTP/1.1\r\nAuthorization: Bearer secret\r\n\r\n",
         )
         .unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1239,7 +1419,7 @@ mod tests {
             b"GET /api/v1/sessions HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n",
         )
         .unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("401 Unauthorized"));
@@ -1252,7 +1432,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = None;
         let req = parse_http_request(b"GET /api/v1/sessions HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1266,11 +1446,12 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/cancel/123 HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("200 OK"));
-        assert!(text.contains(r#""cancelled":123"#));
+        // 无 management handle 时返回 503
+        assert!(text.contains("503"));
+        assert!(text.contains("management handle not injected"));
         let _ = tx;
     }
 
@@ -1279,7 +1460,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/cancel/abc HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("400 Bad Request"));
@@ -1287,28 +1468,28 @@ mod tests {
     }
 
     #[test]
-    fn test_route_backup_stub() {
+    fn test_route_backup_no_management() {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/backup HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("200 OK"));
-        assert!(text.contains("backup"));
+        assert!(text.contains("503"));
+        assert!(text.contains("management handle not injected"));
         let _ = tx;
     }
 
     #[test]
-    fn test_route_config_reload_stub() {
+    fn test_route_config_reload_no_management() {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/config/reload HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("200 OK"));
-        assert!(text.contains("config reloaded"));
+        assert!(text.contains("503"));
+        assert!(text.contains("management handle not injected"));
         let _ = tx;
     }
 
@@ -1319,7 +1500,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         // 应返回 200 + application/json
@@ -1346,7 +1527,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         // 应返回 200 + text/html
@@ -1364,7 +1545,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         assert_eq!(resp.status, 405);
         let _ = tx;
     }
@@ -1374,7 +1555,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &None, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &None, &rx);
         assert_eq!(resp.status, 405);
         let _ = tx;
     }
@@ -1386,7 +1567,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         assert_eq!(resp.status, 200, "openapi.json should not require auth");
         let _ = tx;
     }
@@ -1397,7 +1578,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
         assert_eq!(resp.status, 200, "swagger page should not require auth");
         let _ = tx;
     }

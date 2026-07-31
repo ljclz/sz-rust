@@ -836,6 +836,19 @@ mod tests {
         assert_eq!(CDC_LOG_TABLE, "_szrsql_cdc_log");
     }
 
+    /// 真实 PG 连通性验证（需本机 PostgreSQL 18 运行中，标记为 ignored 避免阻塞 CI）。
+    #[test]
+    #[ignore]
+    fn pg_real_source_connects_to_local_postgres() {
+        let conn_str = "postgresql://postgres:test123@127.0.0.1:5432/sz_orm_test";
+        let result = PgRealSourceConnector::connect(
+            conn_str,
+            SourceConfig::postgres(conn_str),
+            postgres::NoTls,
+        );
+        assert!(result.is_ok(), "PG connect failed (check PG 18 is running on 127.0.0.1:5432)");
+    }
+
     #[test]
     fn cdc_log_ddl_contains_required_columns() {
         assert!(CDC_LOG_DDL.contains("id BIGSERIAL PRIMARY KEY"));

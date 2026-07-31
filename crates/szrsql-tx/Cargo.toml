@@ -23,6 +23,8 @@ crc32c = { workspace = true }
 # Phase 7d.19：WAL 高级特性（zstd 压缩）
 zstd = { workspace = true }
 tracing = { workspace = true }
+# P0-6：Mutex 中毒修复（parking_lot 无中毒语义）
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

@@ -36,6 +36,7 @@ szrsql-pgcompat = { workspace = true }
 szrsql-mysql-protocol = { workspace = true }
 szrsql-tds-protocol = { workspace = true }
 szrsql-oracle-bridge = { workspace = true }
+szrsql-sqlite-bridge = { workspace = true }
 szrsql-ai = { workspace = true }
 szrsql-catalog = { workspace = true }
 tokio = { workspace = true }

@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
 use szrsql_tx::wal::{WalOpType, WalRecord};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -65,7 +66,7 @@ pub enum ReplicationError {
 // =====================================================================
 
 /// 复制协议消息（主库 → 备库）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ReplicationMessage {
     /// WAL 记录批次
     WalBatch {

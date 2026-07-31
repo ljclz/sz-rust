@@ -466,6 +466,12 @@ pub struct ExecutorService {
     ///
     /// 默认为 1（单节点模式）。注入后传递给 Executor 用于 HLC 时间戳和冲突日志。
     node_id: u64,
+    /// P2-2.2：跨会话共享的流复制主库实例。
+    ///
+    /// 注入后，事务 COMMIT 成功后将 WAL 记录（TableData + Commit）推送到
+    /// `ReplicationPrimary`，由后者扇出到所有已连接的 TCP 备库。
+    /// 未注入时退化为旧行为（不推送复制流，单节点模式）。
+    replication_primary: Option<Arc<szrsql_replication::stream::ReplicationPrimary>>,
 }
 
 /// P2-2.1：分布式事务状态（显式事务期间的 Percolator 2PC 累积器）。
@@ -518,6 +524,7 @@ impl ExecutorService {
             hlc_clock: None,
             conflict_log: None,
             node_id: 1,
+            replication_primary: None,
         }
     }
 
@@ -701,6 +708,20 @@ impl ExecutorService {
     /// P2-1：设置本节点 ID（Multi-Master 写操作来源标识）。
     pub fn with_node_id(mut self, node_id: u64) -> Self {
         self.node_id = node_id;
+        self
+    }
+
+    /// P2-2.2：注入跨会话共享的流复制主库实例。
+    ///
+    /// 注入后，事务 COMMIT 成功后将 WAL 记录（TableData + Commit）推送到
+    /// `ReplicationPrimary`，由后者扇出到所有已连接的 TCP 备库。
+    ///
+    /// 未注入时退化为旧行为（不推送复制流，单节点模式）。
+    pub fn with_replication_primary(
+        mut self,
+        primary: Arc<szrsql_replication::stream::ReplicationPrimary>,
+    ) -> Self {
+        self.replication_primary = Some(primary);
         self
     }
 
@@ -1459,7 +1480,7 @@ impl ExecutorService {
         // 从 TSO 获取 start_ts，创建共享 mutations 累积器供 DML 注入。
         if let Some(dist_rt) = &self.dist_runtime {
             let start_ts = {
-                let mut rt = dist_rt.write().unwrap();
+                let mut rt = dist_rt.write();
                 rt.begin_transaction()
             };
             self.dist_txn_state = Some(DistTxnState {
@@ -1556,6 +1577,13 @@ impl ExecutorService {
             // append_batch returns the start LSN; the Commit record is the last in the batch,
             // so its LSN = start_lsn + record_count - 1.
             let record_count = records.len();
+            // P2-2.2：若启用流复制，在 append_batch 消费 records 前克隆副本，
+            // 供 fsync 成功后推送到 ReplicationPrimary（扇出到 TCP 备库）。
+            let repl_records_clone = if self.replication_primary.is_some() {
+                Some(records.clone())
+            } else {
+                None
+            };
             let start_lsn = writer.append_batch(records)?;
             let lsn = start_lsn + record_count as u64 - 1;
             tracing::debug!(txn_id, lsn, "WAL Commit record appended");
@@ -1564,6 +1592,24 @@ impl ExecutorService {
             match writer.flush() {
                 Ok(()) => {
                     tracing::debug!(txn_id, lsn, "WAL fsync succeeded, transaction durable");
+                    // P2-2.2：fsync 成功后，将 WAL 记录推送到 ReplicationPrimary
+                    // 扇出到所有已连接的 TCP 备库。仅在 replication_primary 注入时执行。
+                    if let Some(primary) = &self.replication_primary {
+                        if let Some(mut repl_records) = repl_records_clone {
+                            // 为每条记录填充实际 LSN（append_batch 前为 0 占位）
+                            for (i, record) in repl_records.iter_mut().enumerate() {
+                                record.lsn = start_lsn + i as u64;
+                            }
+                            let end_lsn = primary.append_records(repl_records);
+                            tracing::debug!(
+                                txn_id,
+                                start_lsn,
+                                end_lsn,
+                                replica_count = primary.replica_count(),
+                                "P2-2.2: WAL records pushed to ReplicationPrimary for TCP fan-out"
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     // fsync 失败：事务必须回滚，不能 ACK 成功
@@ -1670,7 +1716,7 @@ impl ExecutorService {
                 .unwrap_or_default();
             if !mutations.is_empty() {
                 if let Some(dist_rt) = &self.dist_runtime {
-                    let mut rt = dist_rt.write().unwrap();
+                    let mut rt = dist_rt.write();
                     let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
                     if let Err(e) = txn.prewrite_all(&mutations, dist_state.start_ts) {
                         tracing::warn!(
@@ -1794,7 +1840,7 @@ impl ExecutorService {
                 .unwrap_or_default();
             if !mutations.is_empty() {
                 if let Some(dist_rt) = &self.dist_runtime {
-                    let mut rt = dist_rt.write().unwrap();
+                    let mut rt = dist_rt.write();
                     let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
                     if let Err(e) = txn.rollback(&mutations, dist_state.start_ts) {
                         tracing::warn!(
@@ -5526,7 +5572,7 @@ mod tests {
     fn make_dist_runtime_for_p2() -> szrsql_dist::runtime::DistRuntimeHandle {
         let handle = szrsql_dist::runtime::new_single_node_runtime(1).unwrap();
         {
-            let mut rt = handle.write().unwrap();
+            let mut rt = handle.write();
             rt.init().unwrap();
         }
         handle
@@ -5574,7 +5620,7 @@ mod tests {
         );
 
         // 验证分布式 KV 中有已提交数据（通过 DistTxnClient 快照读）
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let mut txn = DistTxnClient::new(&mut *rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();
@@ -5612,7 +5658,7 @@ mod tests {
         );
 
         // 验证分布式 KV 中没有数据
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let mut txn = DistTxnClient::new(&mut *rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();
@@ -5648,7 +5694,7 @@ mod tests {
         assert!(results[0].is_ok(), "INSERT should succeed");
 
         // 验证分布式 KV 中有数据（即时 2PC 已提交）
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let mut txn = DistTxnClient::new(&mut *rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();

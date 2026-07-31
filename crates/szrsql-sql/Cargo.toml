@@ -25,6 +25,8 @@ sqlparser = { workspace = true }
 regex = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+# P0-6：Mutex 中毒修复（parking_lot 无中毒语义）
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 # 差分比对测试：连接本地 PG 18 进行结果集比对

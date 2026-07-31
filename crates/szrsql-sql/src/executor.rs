@@ -2995,7 +2995,7 @@ pub struct Executor<'a> {
     /// - 分布式 KV 用于持久化 + 多节点复制（高可用）
     ///
     /// **键编码**：`{table_name}:{row_id}` → serde_json 序列化的行数据
-    dist_runtime: Option<std::sync::Arc<std::sync::RwLock<szrsql_dist::runtime::DistRuntime>>>,
+    dist_runtime: Option<szrsql_dist::runtime::DistRuntimeHandle>,
     /// P7-1：CDC 引擎引用（Arc 共享，跨会话共享同一实例）。
     ///
     /// 注入后，DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件分发到 CDC 引擎，
@@ -3416,7 +3416,7 @@ impl<'a> Executor<'a> {
     /// `handle` 为 `Arc<RwLock<DistRuntime>>`，可跨线程共享。
     pub fn with_dist_runtime(
         mut self,
-        handle: std::sync::Arc<std::sync::RwLock<szrsql_dist::runtime::DistRuntime>>,
+        handle: szrsql_dist::runtime::DistRuntimeHandle,
     ) -> Self {
         self.dist_runtime = Some(handle);
         self
@@ -3799,7 +3799,7 @@ impl<'a> Executor<'a> {
     /// P0-DIST-1/2/3：设置分布式运行时句柄（mutable setter）
     pub fn set_dist_runtime(
         &mut self,
-        handle: std::sync::Arc<std::sync::RwLock<szrsql_dist::runtime::DistRuntime>>,
+        handle: szrsql_dist::runtime::DistRuntimeHandle,
     ) {
         self.dist_runtime = Some(handle);
     }
@@ -3847,7 +3847,7 @@ impl<'a> Executor<'a> {
         }
 
         // Autocommit：即时 2PC（begin → prewrite → commit）
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let mut txn = DistTxnClient::new(&mut *rt);
         let start_ts = txn.begin();
         if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
@@ -3896,7 +3896,7 @@ impl<'a> Executor<'a> {
         }
 
         // Autocommit：即时 2PC
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let mut txn = DistTxnClient::new(&mut *rt);
         let start_ts = txn.begin();
         if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
@@ -3929,7 +3929,7 @@ impl<'a> Executor<'a> {
     ) -> Option<Vec<Value>> {
         let handle = self.dist_runtime.as_ref()?;
         let key = format!("{}:{}", table_name, row_id);
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         let value = rt.get(key.as_bytes()).ok()??;
         serde_json::from_slice(&value).ok()
     }
@@ -3940,7 +3940,7 @@ impl<'a> Executor<'a> {
     /// 未绑定 DistRuntime 时返回 None。
     pub fn dist_current_timestamp(&self) -> Option<u64> {
         let handle = self.dist_runtime.as_ref()?;
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         Some(rt.current_timestamp())
     }
 

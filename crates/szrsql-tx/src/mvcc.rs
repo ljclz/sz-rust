@@ -29,7 +29,8 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::RwLock;
+// P0-6：使用 parking_lot::RwLock 替代 std::sync::RwLock，消除中毒 panic 风险
+use parking_lot::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, instrument, trace, warn};
 
@@ -504,7 +505,7 @@ impl MvccManager {
         let txn_id = self.txn_id_alloc.fetch_add(1, Ordering::SeqCst);
         // 读取活跃事务列表（不含自己，因为还没注册）
         let active_ids: Vec<u32> = {
-            let active = self.active_txns.read().unwrap_or_else(|e| e.into_inner());
+            let active = self.active_txns.read();
             active.keys().copied().collect()
         };
         let active_count = active_ids.len();
@@ -514,7 +515,6 @@ impl MvccManager {
         let txn = Transaction::new(txn_id, snapshot, level);
         self.active_txns
             .write()
-            .unwrap_or_else(|e| e.into_inner())
             .insert(txn_id, txn.clone());
         tracing::Span::current().record("txn_id", txn_id);
         trace!(txn_id, active_count, "transaction begun");
@@ -525,7 +525,7 @@ impl MvccManager {
     ///
     /// 若 txn 不存在或非 Active，返回 Err
     pub fn register_read(&self, txn_id: u32, key: impl Into<String>) -> Result<(), MvccError> {
-        let mut active = self.active_txns.write().unwrap();
+        let mut active = self.active_txns.write();
         let txn = active
             .get_mut(&txn_id)
             .ok_or_else(|| self.lookup_error(txn_id))?;
@@ -542,7 +542,7 @@ impl MvccManager {
 
     /// 向活跃事务的 write_set 添加 key（用于 first-committer-wins + SSI）
     pub fn register_write(&self, txn_id: u32, key: impl Into<String>) -> Result<(), MvccError> {
-        let mut active = self.active_txns.write().unwrap();
+        let mut active = self.active_txns.write();
         let txn = active
             .get_mut(&txn_id)
             .ok_or_else(|| self.lookup_error(txn_id))?;
@@ -629,7 +629,7 @@ impl MvccManager {
     {
         // 阶段 1：从 active_txns 移除并验证状态
         let txn = {
-            let mut active = self.active_txns.write().unwrap();
+            let mut active = self.active_txns.write();
             let txn = active
                 .remove(&txn_id)
                 .ok_or_else(|| self.lookup_error(txn_id))?;
@@ -646,14 +646,14 @@ impl MvccManager {
 
         // 阶段 2：SSI 写偏斜检测（仅 SERIALIZABLE）
         if txn.isolation_level == IsolationLevel::Serializable && self.has_write_skew(&txn)? {
-            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+            self.aborted_txns.write().insert(txn_id);
             warn!(txn_id, "commit_durable: transaction aborted due to write skew");
             return Err(MvccError::WriteSkewDetected(txn_id));
         }
 
         // 阶段 3：First-Committer-Wins（写写冲突检测）
         if !txn.write_set.is_empty() && self.has_write_write_conflict(&txn)? {
-            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+            self.aborted_txns.write().insert(txn_id);
             warn!(txn_id, "commit_durable: transaction aborted due to write-write conflict");
             return Err(MvccError::WriteWriteConflict(txn_id));
         }
@@ -664,7 +664,7 @@ impl MvccManager {
         let commit_lsn = match on_pre_commit(txn_id) {
             Ok(lsn) => lsn,
             Err(e) => {
-                self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+                self.aborted_txns.write().insert(txn_id);
                 warn!(txn_id, error = %e, "commit_durable: WAL fsync failed, transaction aborted");
                 return Err(e);
             }
@@ -674,9 +674,9 @@ impl MvccManager {
         tracing::Span::current().record("write_count", write_count);
 
         // 阶段 5：WAL 已 fsync，注册提交（此时可安全 ACK 客户端）
-        self.committed_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+        self.committed_txns.write().insert(txn_id);
         if !txn.write_set.is_empty() {
-            self.committed_writes.write().unwrap_or_else(|e| e.into_inner()).push(CommittedWrite {
+            self.committed_writes.write().push(CommittedWrite {
                 txn_id,
                 commit_lsn,
                 write_set: txn.write_set.clone(),
@@ -690,7 +690,7 @@ impl MvccManager {
     #[instrument(skip(self), fields(txn_id, commit_lsn, write_count))]
     fn commit_inner(&self, txn_id: u32, commit_lsn: u64) -> Result<(), MvccError> {
         let txn = {
-            let mut active = self.active_txns.write().unwrap();
+            let mut active = self.active_txns.write();
             let txn = active
                 .remove(&txn_id)
                 .ok_or_else(|| self.lookup_error(txn_id))?;
@@ -707,22 +707,22 @@ impl MvccManager {
 
         // SSI 写偏斜检测（仅 SERIALIZABLE）
         if txn.isolation_level == IsolationLevel::Serializable && self.has_write_skew(&txn)? {
-            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+            self.aborted_txns.write().insert(txn_id);
             warn!(txn_id, "transaction aborted due to write skew");
             return Err(MvccError::WriteSkewDetected(txn_id));
         }
 
         // First-Committer-Wins（写写冲突检测，RR + SERIALIZABLE 都启用）
         if !txn.write_set.is_empty() && self.has_write_write_conflict(&txn)? {
-            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+            self.aborted_txns.write().insert(txn_id);
             warn!(txn_id, "transaction aborted due to write-write conflict");
             return Err(MvccError::WriteWriteConflict(txn_id));
         }
 
         // 注册提交
-        self.committed_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+        self.committed_txns.write().insert(txn_id);
         if !txn.write_set.is_empty() {
-            self.committed_writes.write().unwrap_or_else(|e| e.into_inner()).push(CommittedWrite {
+            self.committed_writes.write().push(CommittedWrite {
                 txn_id,
                 commit_lsn,
                 write_set: txn.write_set.clone(),
@@ -738,7 +738,7 @@ impl MvccManager {
     #[instrument(skip(self), fields(txn_id))]
     pub fn abort(&self, txn_id: u32) -> Result<(), MvccError> {
         let txn = {
-            let mut active = self.active_txns.write().unwrap();
+            let mut active = self.active_txns.write();
             let txn = active
                 .remove(&txn_id)
                 .ok_or_else(|| self.lookup_error(txn_id))?;
@@ -752,7 +752,7 @@ impl MvccManager {
             txn
         };
         let _ = txn; // 不需要保留
-        self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
+        self.aborted_txns.write().insert(txn_id);
         trace!(txn_id, "transaction aborted");
         Ok(())
     }
@@ -782,7 +782,7 @@ impl MvccManager {
     /// - `Err(SnapshotRefreshNotAllowed)`：隔离级别不允许刷新
     #[instrument(skip(self), fields(txn_id))]
     pub fn refresh_snapshot(&self, txn_id: u32) -> Result<(), MvccError> {
-        let mut active = self.active_txns.write().unwrap();
+        let mut active = self.active_txns.write();
 
         // 先检查 txn 存在性和隔离级别（不可变借用）
         let isolation_level = active
@@ -815,11 +815,11 @@ impl MvccManager {
 
     /// 查询事务状态
     pub fn get_status(&self, txn_id: u32) -> Option<TxnStatus> {
-        if self.active_txns.read().unwrap_or_else(|e| e.into_inner()).contains_key(&txn_id) {
+        if self.active_txns.read().contains_key(&txn_id) {
             Some(TxnStatus::Active)
-        } else if self.committed_txns.read().unwrap().contains(&txn_id) {
+        } else if self.committed_txns.read().contains(&txn_id) {
             Some(TxnStatus::Committed)
-        } else if self.aborted_txns.read().unwrap().contains(&txn_id) {
+        } else if self.aborted_txns.read().contains(&txn_id) {
             Some(TxnStatus::Aborted)
         } else {
             None
@@ -828,7 +828,7 @@ impl MvccManager {
 
     /// 获取活跃事务的克隆（用于查询其 read_set/write_set/snapshot）
     pub fn get_txn(&self, txn_id: u32) -> Option<Transaction> {
-        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).get(&txn_id).cloned()
+        self.active_txns.read().get(&txn_id).cloned()
     }
 
     /// 查询事务的隔离级别（轻量，仅读 isolation_level 字段，不 clone 整个 Transaction）
@@ -841,24 +841,23 @@ impl MvccManager {
     pub fn get_isolation_level(&self, txn_id: u32) -> Option<IsolationLevel> {
         self.active_txns
             .read()
-            .unwrap()
             .get(&txn_id)
             .map(|t| t.isolation_level)
     }
 
     /// 当前活跃事务数
     pub fn active_count(&self) -> usize {
-        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).len()
+        self.active_txns.read().len()
     }
 
     /// 已提交事务数
     pub fn committed_count(&self) -> usize {
-        self.committed_txns.read().unwrap().len()
+        self.committed_txns.read().len()
     }
 
     /// 已回滚事务数
     pub fn aborted_count(&self) -> usize {
-        self.aborted_txns.read().unwrap().len()
+        self.aborted_txns.read().len()
     }
 
     /// 下一个待分配的 txn_id（即当前 txn_id_alloc 值）
@@ -868,7 +867,7 @@ impl MvccManager {
 
     /// 最老活跃事务 ID（无活跃时返回 None）
     pub fn oldest_active_xid(&self) -> Option<u32> {
-        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).keys().copied().min()
+        self.active_txns.read().keys().copied().min()
     }
 
     // -----------------------------------------------------------------
@@ -889,7 +888,7 @@ impl MvccManager {
     /// **保守性**：此规则是保守的（可能保留一些实际可回收的事务，但绝不回收仍在使用的事务）。
     #[instrument(skip(self), fields(safe_xid))]
     pub fn vacuum_safe_xid(&self) -> u32 {
-        let active = self.active_txns.read().unwrap_or_else(|e| e.into_inner());
+        let active = self.active_txns.read();
         if active.is_empty() {
             let safe_xid = self.txn_id_alloc.load(Ordering::SeqCst);
             tracing::Span::current().record("safe_xid", safe_xid);
@@ -932,7 +931,7 @@ impl MvccManager {
 
         // 回收 committed_txns
         let vacuumed_committed = {
-            let mut committed = self.committed_txns.write().unwrap_or_else(|e| e.into_inner());
+            let mut committed = self.committed_txns.write();
             let before = committed.len();
             committed.retain(|&txn_id| txn_id >= safe_xid);
             before - committed.len()
@@ -940,7 +939,7 @@ impl MvccManager {
 
         // 回收 aborted_txns
         let vacuumed_aborted = {
-            let mut aborted = self.aborted_txns.write().unwrap_or_else(|e| e.into_inner());
+            let mut aborted = self.aborted_txns.write();
             let before = aborted.len();
             aborted.retain(|&txn_id| txn_id >= safe_xid);
             before - aborted.len()
@@ -948,16 +947,16 @@ impl MvccManager {
 
         // 回收 committed_writes
         let vacuumed_writes = {
-            let mut writes = self.committed_writes.write().unwrap_or_else(|e| e.into_inner());
+            let mut writes = self.committed_writes.write();
             let before = writes.len();
             writes.retain(|cw| cw.txn_id >= safe_xid);
             before - writes.len()
         };
 
-        let retained_active = self.active_txns.read().unwrap_or_else(|e| e.into_inner()).len();
-        let retained_committed = self.committed_txns.read().unwrap().len();
-        let retained_aborted = self.aborted_txns.read().unwrap().len();
-        let retained_writes = self.committed_writes.read().unwrap().len();
+        let retained_active = self.active_txns.read().len();
+        let retained_committed = self.committed_txns.read().len();
+        let retained_aborted = self.aborted_txns.read().len();
+        let retained_writes = self.committed_writes.read().len();
 
         tracing::Span::current().record("vacuumed_committed", vacuumed_committed);
         tracing::Span::current().record("vacuumed_aborted", vacuumed_aborted);
@@ -1014,8 +1013,8 @@ impl MvccManager {
             }
         };
         // OPT-8：持有读锁直接传递引用，避免每次可见性检查都 O(N) 全量克隆
-        let committed_guard = self.committed_txns.read().unwrap();
-        let aborted_guard = self.aborted_txns.read().unwrap();
+        let committed_guard = self.committed_txns.read();
+        let aborted_guard = self.aborted_txns.read();
         let parent_map = HashMap::new();
         txn.snapshot
             .is_visible(xmin, xmax, txn_id, &*committed_guard, &*aborted_guard, &parent_map)
@@ -1027,9 +1026,9 @@ impl MvccManager {
 
     /// 构造"未找到 txn"时的精确错误（区分 not found / already committed / already aborted）
     fn lookup_error(&self, txn_id: u32) -> MvccError {
-        if self.committed_txns.read().unwrap().contains(&txn_id) {
+        if self.committed_txns.read().contains(&txn_id) {
             MvccError::AlreadyCommitted(txn_id)
-        } else if self.aborted_txns.read().unwrap().contains(&txn_id) {
+        } else if self.aborted_txns.read().contains(&txn_id) {
             MvccError::AlreadyAborted(txn_id)
         } else {
             MvccError::TxnNotFound(txn_id)
@@ -1049,7 +1048,7 @@ impl MvccManager {
         if txn.read_set.is_empty() {
             return Ok(false);
         }
-        let committed_writes = self.committed_writes.read().unwrap();
+        let committed_writes = self.committed_writes.read();
         for cw in committed_writes.iter() {
             // 仅检查在此事务快照时活跃的已提交事务
             // （这些事务的写对此事务不可见，但已提交，可能形成写偏斜）
@@ -1086,7 +1085,7 @@ impl MvccManager {
         if txn.write_set.is_empty() {
             return Ok(false);
         }
-        let committed_writes = self.committed_writes.read().unwrap();
+        let committed_writes = self.committed_writes.read();
         for cw in committed_writes.iter() {
             let concurrent = txn.snapshot.is_active(cw.txn_id) || cw.txn_id >= txn.snapshot.xmax;
             if !concurrent {

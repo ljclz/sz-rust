@@ -2813,6 +2813,7 @@ dependencies = [
  "szrsql-scheduler",
  "szrsql-security",
  "szrsql-sql",
+ "szrsql-sqlite-bridge",
  "szrsql-storage",
  "szrsql-tds-protocol",
  "szrsql-tx",
@@ -2875,6 +2876,7 @@ name = "szrsql-dist"
 version = "1.0.0-rc.1"
 dependencies = [
  "bincode",
+ "parking_lot",
  "serde",
  "serde_json",
  "szrsql-cdc",
@@ -2993,6 +2995,7 @@ dependencies = [
 name = "szrsql-replication"
 version = "1.0.0-rc.1"
 dependencies = [
+ "bincode",
  "crc32c",
  "serde",
  "serde_json",
@@ -3054,6 +3057,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "bytes",
  "chrono",
+ "parking_lot",
  "postgres",
  "rand 0.9.5",
  "regex",
@@ -3128,6 +3132,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "bytes",
  "crc32c",
+ "parking_lot",
  "proptest",
  "serde",
  "serde_json",

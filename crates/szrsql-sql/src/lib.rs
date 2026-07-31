@@ -33,6 +33,7 @@ pub mod foreign_key;
 pub mod fulltext_v2;
 pub mod gist;
 pub mod grouping_sets;
+pub mod iter_exec;
 pub mod json;
 pub mod lateral;
 pub mod materialized_view;

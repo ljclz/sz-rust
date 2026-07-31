@@ -84,6 +84,9 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # SQL 解析器
 sqlparser = "0.53"
 
+# P0-6：Mutex 中毒修复（parking_lot 无中毒语义，避免 .unwrap() 级联 panic）
+parking_lot = "0.12"
+
 # 正则表达式（用于 LIKE 模式匹配）
 regex = "1"
 

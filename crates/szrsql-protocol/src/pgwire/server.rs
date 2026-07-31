@@ -45,6 +45,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
+use szrsql_replication::stream::ReplicationPrimary;
 use szrsql_sql::executor::{InMemoryTable, SharedSequenceState};
 use szrsql_tx::lock::LockManager;
 use szrsql_tx::mvcc::MvccManager;
@@ -265,6 +266,38 @@ impl Drop for NotifyCleanupGuard {
 }
 
 // =====================================================================
+//  CancelRegistryGuard（OPT-13）
+// =====================================================================
+
+/// RAII 守卫：确保会话结束时从 `cancel_registry` 注销。
+///
+/// 与 `NotifyCleanupGuard` 类似，确保连接因任何原因退出时
+/// （正常 Terminate、客户端断开、协议错误）都从注册表移除 PID，避免内存泄漏。
+struct CancelRegistryGuard {
+    registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
+    pid: i32,
+}
+
+impl CancelRegistryGuard {
+    fn new(
+        registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
+        pid: i32,
+    ) -> Self {
+        Self { registry, pid }
+    }
+}
+
+impl Drop for CancelRegistryGuard {
+    fn drop(&mut self) {
+        if let Some(registry) = &self.registry {
+            if let Ok(mut map) = registry.lock() {
+                map.remove(&self.pid);
+            }
+        }
+    }
+}
+
+// =====================================================================
 //  PgwireServer
 // =====================================================================
 
@@ -360,6 +393,25 @@ pub struct PgwireServer {
     ///
     /// 默认为 1（单节点模式）。注入后传递给每个 session 的 Executor。
     node_id: u64,
+    /// 生产监控告警：跨会话共享的 Prometheus 指标注册表。
+    ///
+    /// 启用后，连接建立/断开、查询执行、事务提交/回滚等关键事件会更新对应计数器，
+    /// 通过 HTTP `/metrics` 端点暴露 Prometheus 文本格式指标。
+    /// 未启用时（None）跳过指标收集（旧行为，用于测试兼容）。
+    metrics: Option<Arc<crate::http::MetricsRegistry>>,
+    /// OPT-13：会话取消注册表（PID → Notify）。
+    ///
+    /// 启用后，HTTP `/api/v1/cancel/{pid}` 端点可触发指定会话的查询取消。
+    /// 每个连接在建立时注册 `Arc<Notify>`，主循环在等待消息时通过
+    /// `tokio::select!` 监听取消信号；收到信号后发送 ErrorResponse + ReadyForQuery。
+    /// 连接断开时自动注销。未启用时（None）取消端点返回 503。
+    cancel_registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
+    /// P2-2.2：跨会话共享的流复制主库实例。
+    ///
+    /// 启用后，每个 session 在事务 COMMIT 成功后将 WAL 记录（TableData + Commit）
+    /// 推送到 `ReplicationPrimary`，由后者扇出到所有已连接的 TCP 备库。
+    /// 未启用时（None）跳过复制推送（旧行为，用于单节点模式或测试兼容）。
+    replication_primary: Option<Arc<ReplicationPrimary>>,
     /// 连接数限制信号量。
     ///
     /// 许可数 = `config.max_connections`；每个连接任务持有一个 `OwnedSemaphorePermit`，
@@ -396,6 +448,9 @@ impl PgwireServer {
             statistics_store: None,
             security_firewall: None,
             audit_log: None,
+            metrics: None,
+            cancel_registry: None,
+            replication_primary: None,
             conn_semaphore: Arc::new(Semaphore::new(max_conn)),
         }
     }
@@ -599,6 +654,45 @@ impl PgwireServer {
         self
     }
 
+    /// 生产监控告警：注入共享的 Prometheus 指标注册表。
+    ///
+    /// 启用后，连接建立/断开、查询执行、事务提交/回滚等关键事件会更新对应计数器，
+    /// 通过 HTTP `/metrics` 端点暴露 Prometheus 文本格式指标。
+    ///
+    /// 通常在 main.rs 中创建一个 `Arc<MetricsRegistry>` 实例，同时注入
+    /// `PgwireServer`（用于计数）和 `HttpServer`（用于暴露 `/metrics`）。
+    pub fn with_metrics(mut self, metrics: Arc<crate::http::MetricsRegistry>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    /// OPT-13：注入会话取消注册表，启用 HTTP `/api/v1/cancel/{pid}` 端点的真实取消逻辑。
+    ///
+    /// 启用后，每个连接在主循环等待消息时通过 `tokio::select!` 监听取消信号。
+    /// HTTP 端点调用 `Notify::notify_one()` 触发取消，连接发送 ErrorResponse 后继续。
+    pub fn with_cancel_registry(
+        mut self,
+        registry: Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>,
+    ) -> Self {
+        self.cancel_registry = Some(registry);
+        self
+    }
+
+    /// P2-2.2：注入跨会话共享的流复制主库实例。
+    ///
+    /// 启用后，每个 session 在事务 COMMIT 成功后将 WAL 记录推送到 `ReplicationPrimary`，
+    /// 由后者扇出到所有已连接的 TCP 备库（通过 `TcpReplicationServer`）。
+    ///
+    /// 未启用时（None）跳过复制推送（旧行为，用于单节点模式或测试兼容）。
+    ///
+    /// # 参数
+    /// - `primary`：共享的 `ReplicationPrimary` 实例（由 main.rs 创建一次，
+    ///   同时传给 `TcpReplicationServer` 用于接受备库连接）
+    pub fn with_replication_primary(mut self, primary: Arc<ReplicationPrimary>) -> Self {
+        self.replication_primary = Some(primary);
+        self
+    }
+
     /// 返回服务器配置引用。
     pub fn config(&self) -> &PgwireConfig {
         &self.config
@@ -730,12 +824,23 @@ impl PgwireServer {
 
                             let inner = Arc::clone(&inner);
                             let tasks = Arc::clone(&tasks);
+                            // 生产监控告警：记录连接计数
+                            if let Some(m) = &inner.metrics {
+                                m.inc_connections();
+                                m.inc_active_connections();
+                            }
                             // Phase 4.11：用 JoinSet 跟踪连接任务，支持优雅排空
                             tasks.lock().await.spawn(async move {
                                 // permit 在连接任务结束时自动 drop → 释放许可
                                 let _permit = permit;
-                                if let Err(e) = inner.handle_connection(stream).await {
+                                // 生产监控告警：连接结束时减少活跃连接数
+                                let metrics_clone = inner.metrics.clone();
+                                let result = inner.handle_connection(stream).await;
+                                if let Err(e) = &result {
                                     tracing::warn!("connection handler error: {e}");
+                                }
+                                if let Some(m) = &metrics_clone {
+                                    m.dec_active_connections();
                                 }
                             });
                         }
@@ -1218,8 +1323,23 @@ impl PgwireServer {
         if let Some(stats) = &self.statistics_store {
             session = session.with_statistics_store(stats.clone());
         }
+        // P2-2.2：注入流复制主库实例，启用 COMMIT 后 WAL 记录推送到备库
+        if let Some(primary) = &self.replication_primary {
+            session = session.with_replication_primary(primary.clone());
+        }
         // Phase 4.6：RAII 守卫，确保连接断开时从 NotifyHub 注销（避免内存泄漏）
         let _notify_guard = NotifyCleanupGuard::new(self.notify_hub.clone(), pid);
+        // OPT-13：注册会话取消信号，HTTP /api/v1/cancel/{pid} 可触发
+        let cancel_notify = self.cancel_registry.as_ref().map(|registry| {
+            let notify = Arc::new(tokio::sync::Notify::new());
+            let notify_clone = Arc::clone(&notify);
+            if let Ok(mut map) = registry.lock() {
+                map.insert(pid, notify_clone);
+            }
+            notify
+        });
+        // RAII 守卫：连接断开时从 cancel_registry 注销（避免内存泄漏）
+        let _cancel_guard = CancelRegistryGuard::new(self.cancel_registry.clone(), pid);
         // Phase 4.3：扩展查询错误后的 "aborted" 状态，需等待 Sync 才能继续
         let mut extended_aborted = false;
 
@@ -1444,12 +1564,38 @@ impl PgwireServer {
                 Ok(None) => {
                     // 数据不足，继续读取
                     let mut chunk = [0u8; 4096];
-                    let n = read_with_idle_timeout(
-                        stream,
-                        &mut chunk,
-                        self.config.connection_idle_timeout,
-                    )
-                    .await?;
+                    // OPT-13：在等待数据时同时监听取消信号
+                    let read_result = if let Some(notify) = &cancel_notify {
+                        tokio::select! {
+                            n = read_with_idle_timeout(
+                                stream,
+                                &mut chunk,
+                                self.config.connection_idle_timeout,
+                            ) => n,
+                            _ = notify.notified() => {
+                                tracing::info!(pid, "OPT-13: query cancelled by HTTP request");
+                                let err = ErrorResponse::error(
+                                    SqlState::INTERNAL_ERROR,
+                                    "canceling statement due to user request",
+                                );
+                                let mut resp = BytesMut::new();
+                                BackendMessage::ErrorResponse(err).encode(&mut resp);
+                                let status = self.session_status(&session);
+                                BackendMessage::ReadyForQuery { status }.encode(&mut resp);
+                                let _ = stream.write_all(&resp).await;
+                                let _ = stream.flush().await;
+                                continue;
+                            }
+                        }
+                    } else {
+                        read_with_idle_timeout(
+                            stream,
+                            &mut chunk,
+                            self.config.connection_idle_timeout,
+                        )
+                        .await
+                    };
+                    let n = read_result?;
                     if n == 0 {
                         tracing::debug!("client disconnected");
                         return Ok(());
@@ -1494,6 +1640,11 @@ impl PgwireServer {
     {
         tracing::debug!(sql = sql.trim(), "received query");
 
+        // 生产监控告警：查询计数 +1
+        if let Some(m) = &self.metrics {
+            m.inc_queries();
+        }
+
         // OPT-12：SQL 防火墙检查（注入检测 + 禁止命令 + 白名单）
         // 命中防火墙规则的 SQL 直接返回 ERROR，不执行
         if let Some(firewall) = &self.security_firewall {
@@ -1502,6 +1653,9 @@ impl PgwireServer {
                 Ok(()) => {}
                 Err(e) => {
                     tracing::warn!(error = %e, sql = sql.trim(), "OPT-12: SQL blocked by firewall");
+                    if let Some(m) = &self.metrics {
+                        m.inc_errors();
+                    }
                     let err = ErrorResponse::error(
                         SqlState::SYNTAX_ERROR,
                         format!("SQL blocked by firewall: {e}"),
@@ -1541,10 +1695,25 @@ impl PgwireServer {
         for result in results {
             match result {
                 Ok(query_result) => {
+                    // 生产监控告警：统计事务提交/回滚
+                    if let Some(m) = &self.metrics {
+                        if let QueryResult::TransactionComplete { tag, .. } = &query_result {
+                            let upper = tag.to_uppercase();
+                            if upper.starts_with("COMMIT") {
+                                m.inc_commits();
+                            } else if upper.starts_with("ROLLBACK") {
+                                m.inc_rollbacks();
+                            }
+                        }
+                    }
                     // 简单查询协议始终使用 text 格式（PG 协议规范）
                     self.encode_query_result(&query_result, &[], &mut resp);
                 }
                 Err(e) => {
+                    // 生产监控告警：错误计数 +1
+                    if let Some(m) = &self.metrics {
+                        m.inc_errors();
+                    }
                     self.encode_session_error(&e, &mut resp);
                     // 出错后停止本批次后续语句的响应（与 PG 一致）
                     break;

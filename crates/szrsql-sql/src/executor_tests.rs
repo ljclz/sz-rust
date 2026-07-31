@@ -3143,12 +3143,11 @@ fn test_p0_store_2_flush_without_enable_errors() {
 // =====================================================================
 
 /// 创建已初始化的 DistRuntime 句柄（用于测试）
-fn make_dist_runtime_handle() -> std::sync::Arc<
-    std::sync::RwLock<szrsql_dist::runtime::DistRuntime>,
-> {
+fn make_dist_runtime_handle() -> szrsql_dist::runtime::DistRuntimeHandle {
     let handle = szrsql_dist::runtime::new_single_node_runtime(1).unwrap();
     {
-        let mut rt = handle.write().unwrap();
+        // P0-6：parking_lot::RwLock 不中毒，write() 直接返回 guard
+        let mut rt = handle.write();
         rt.init().unwrap();
     }
     handle
@@ -3188,7 +3187,7 @@ fn test_p0_dist_dual_write_insert() {
     // 注：dist_dual_write 是私有方法，通过 dist_read 验证效果
     // 直接通过 DistRuntime 写入
     {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         let key = format!("users:{}", row_id);
         let value = serde_json::to_vec(&row).unwrap();
         rt.put(key.into_bytes(), value).unwrap();
@@ -3211,7 +3210,7 @@ fn test_p0_dist_tso_timestamp() {
 
     // 通过 DistRuntime 获取新时间戳
     let ts2 = {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.begin_transaction()
     };
     assert!(ts2 > ts1, "新时间戳应大于初始值");
@@ -3228,25 +3227,25 @@ fn test_p0_dist_end_to_end_kv_and_tso() {
 
     // 1. TSO 时间戳递增
     let ts1 = {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.begin_transaction()
     };
     let ts2 = {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.begin_transaction()
     };
     assert!(ts1 < ts2, "TSO 应单调递增");
 
     // 2. KV 写入和读取
     {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.put(b"table:t1".to_vec(), b"row_data_1".to_vec()).unwrap();
         rt.put(b"table:t2".to_vec(), b"row_data_2".to_vec()).unwrap();
     }
 
     // 3. 读取验证
     {
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         assert_eq!(
             rt.get(b"table:t1").unwrap(),
             Some(b"row_data_1".to_vec())
@@ -3260,7 +3259,7 @@ fn test_p0_dist_end_to_end_kv_and_tso() {
 
     // 4. 分片路由
     {
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         let sid1 = rt.route(b"table:t1").unwrap();
         let sid2 = rt.route(b"table:t2").unwrap();
         assert_eq!(sid1, sid2, "单分片模式下所有键路由到同一分片");
@@ -3268,7 +3267,7 @@ fn test_p0_dist_end_to_end_kv_and_tso() {
 
     // 5. KV 计数
     {
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         assert_eq!(rt.kv_len().unwrap(), 2);
     }
 }
@@ -3280,7 +3279,7 @@ fn test_p0_dist_scan_range() {
 
     // 写入多个键
     {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         for i in 0..10 {
             let key = format!("k{:03}", i);
             let val = format!("v{:03}", i);
@@ -3290,7 +3289,7 @@ fn test_p0_dist_scan_range() {
 
     // 扫描 [k003, k007)
     {
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         let range = szrsql_dist::shard::KeyRange::new(
             b"k003".to_vec(),
             b"k007".to_vec(),
@@ -3308,18 +3307,18 @@ fn test_p0_dist_delete() {
     let handle = make_dist_runtime_handle();
 
     {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.put(b"key1".to_vec(), b"val1".to_vec()).unwrap();
         rt.put(b"key2".to_vec(), b"val2".to_vec()).unwrap();
     }
 
     {
-        let mut rt = handle.write().unwrap();
+        let mut rt = handle.write();
         rt.delete(b"key1".to_vec()).unwrap();
     }
 
     {
-        let rt = handle.read().unwrap();
+        let rt = handle.read();
         assert_eq!(rt.get(b"key1").unwrap(), None, "删除后应返回 None");
         assert_eq!(rt.get(b"key2").unwrap(), Some(b"val2".to_vec()));
         assert_eq!(rt.kv_len().unwrap(), 1);

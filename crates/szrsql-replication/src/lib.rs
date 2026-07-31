@@ -8,6 +8,7 @@ pub mod backup;
 pub mod dr;
 pub mod rolling;
 pub mod stream;
+pub mod tcp_transport;
 
 /// 返回 crate 版本号，供 workspace 骨架冒烟测试使用。
 pub fn version() -> &'static str {
