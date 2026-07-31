@@ -442,6 +442,29 @@ pub struct ExecutorService {
     /// - 统计结果存入此 store，供 CostModel 进行基于成本的优化（P2-1.2 激活）
     /// - 未注入时 ANALYZE 命令返回错误（不支持）
     statistics_store: Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
+    /// P2-2.1：分布式事务状态（显式事务期间持有，COMMIT/ROLLBACK 时消费）。
+    ///
+    /// - **BEGIN**：若 `dist_runtime` 已注入，从 TSO 获取 `start_ts`，
+    ///   创建共享 `Arc<Mutex<Vec<Mutation>>>` 累积器，注入到每次 DML 的 executor。
+    /// - **DML**：executor 的 `dist_dual_write`/`dist_dual_delete` 将 `Mutation` 累积到此 Vec。
+    /// - **COMMIT**：取出 mutations，创建 `DistTxnClient`，执行 `prewrite_all` + `commit`。
+    /// - **ROLLBACK**：取出 mutations，执行 `DistTxnClient::rollback`。
+    ///
+    /// 为 None 时（autocommit 或未注入 dist_runtime），DML 走即时 2PC。
+    dist_txn_state: Option<DistTxnState>,
+}
+
+/// P2-2.1：分布式事务状态（显式事务期间的 Percolator 2PC 累积器）。
+///
+/// 在 BEGIN 时创建，COMMIT/ROLLBACK 时消费。`mutations` 通过 `Arc<Mutex<..>>`
+/// 共享给每次 DML 构造的临时 `Executor`，使 DML 能累积写操作而无需持有
+/// `&mut DistRuntime` 引用（解决生命周期冲突）。
+#[derive(Clone)]
+struct DistTxnState {
+    /// 事务开始时间戳（从 DistRuntime TSO 获取）
+    start_ts: u64,
+    /// 累积的写操作（Put/Delete），COMMIT 时 prewrite + commit，ROLLBACK 时 rollback
+    mutations: Arc<std::sync::Mutex<Vec<szrsql_dist::txn::Mutation>>>,
 }
 
 impl ExecutorService {
@@ -477,6 +500,7 @@ impl ExecutorService {
             cdc_engine: None,
             dirty_tracker: None,
             statistics_store: None,
+            dist_txn_state: None,
         }
     }
 
@@ -1268,6 +1292,23 @@ impl ExecutorService {
             txn_id = self.current_txn_id,
             "transaction begun"
         );
+
+        // P2-2.1：若 dist_runtime 已注入，初始化分布式事务状态（Percolator 2PC 累积器）。
+        // 从 TSO 获取 start_ts，创建共享 mutations 累积器供 DML 注入。
+        if let Some(dist_rt) = &self.dist_runtime {
+            let start_ts = {
+                let mut rt = dist_rt.write().unwrap();
+                rt.begin_transaction()
+            };
+            self.dist_txn_state = Some(DistTxnState {
+                start_ts,
+                mutations: Arc::new(std::sync::Mutex::new(Vec::new())),
+            });
+            tracing::debug!(
+                start_ts,
+                "P2-2.1: distributed transaction begun (Percolator 2PC accumulator)"
+            );
+        }
     }
 
     /// 提交事务（log-then-commit 模型，ADV-F-7 修复）。
@@ -1441,6 +1482,58 @@ impl ExecutorService {
                 tracker.mark_dirty_many(committed_dirty_tables.iter()).await;
             }
         }
+        // Batch 3：事务成功提交后，将缓冲的 CDC 事件统一分发给所有 observer。
+        // 保证 observer 只会收到已提交事务的事件（消除脏读）。
+        if let Some(cdc) = &self.cdc_engine {
+            if txn_id > 0 {
+                let dispatched = cdc.commit_txn(txn_id);
+                if dispatched > 0 {
+                    tracing::debug!(txn_id, dispatched, "CDC events flushed after commit");
+                }
+            }
+        }
+        // P2-2.1：提交分布式事务（Percolator 2PC commit）。
+        //
+        // 取出 BEGIN 时分配的 start_ts 和 DML 累积的 mutations，
+        // 通过 DistTxnClient 执行 prewrite_all + commit。
+        //
+        // **best-effort**：分布式提交失败仅 warn，不影响已成功的本地提交。
+        // 失败时分布式 KV 中可能残留 prewrite 锁，由后续 resolve_lock 或
+        // 后台 GC 清理（与 Percolator 论文一致）。
+        if let Some(dist_state) = self.dist_txn_state.take() {
+            let mutations = dist_state
+                .mutations
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            if !mutations.is_empty() {
+                if let Some(dist_rt) = &self.dist_runtime {
+                    let mut rt = dist_rt.write().unwrap();
+                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
+                    if let Err(e) = txn.prewrite_all(&mutations, dist_state.start_ts) {
+                        tracing::warn!(
+                            start_ts = dist_state.start_ts,
+                            mutation_count = mutations.len(),
+                            error = %e,
+                            "P2-2.1: distributed prewrite_all failed (best-effort, local commit unaffected)"
+                        );
+                    } else if let Err(e) = txn.commit(&mutations, dist_state.start_ts) {
+                        tracing::warn!(
+                            start_ts = dist_state.start_ts,
+                            mutation_count = mutations.len(),
+                            error = %e,
+                            "P2-2.1: distributed commit failed (best-effort, local commit unaffected)"
+                        );
+                    } else {
+                        tracing::debug!(
+                            start_ts = dist_state.start_ts,
+                            mutation_count = mutations.len(),
+                            "P2-2.1: distributed transaction committed via Percolator 2PC"
+                        );
+                    }
+                }
+            }
+        }
         tracing::debug!(txn_id = self.current_txn_id, "transaction committed");
         Ok(())
     }
@@ -1508,12 +1601,56 @@ impl ExecutorService {
             }
         }
 
+        // Batch 3：事务回滚时，丢弃缓冲的 CDC 事件（不分发给 observer）
+        if let Some(cdc) = &self.cdc_engine {
+            if txn_id > 0 {
+                let discarded = cdc.abort_txn(txn_id);
+                if discarded > 0 {
+                    tracing::debug!(txn_id, discarded, "CDC events discarded on rollback");
+                }
+            }
+        }
+
         // ADV-CONC-1：释放本事务持有的所有行级锁（Strict 2PL）
         if let Some(lm) = &self.lock_manager {
             lm.unlock_all(txn_id);
             tracing::debug!(txn_id, "all row locks released on rollback");
         }
         self.current_txn_id = 0;
+
+        // P2-2.1：回滚分布式事务（Percolator 2PC rollback）。
+        //
+        // 取出累积的 mutations，通过 DistTxnClient::rollback 删除 prewrite 锁
+        // 和 data 记录，写入 ROLLBACK 记录防止延迟 prewrite 成功。
+        //
+        // **best-effort**：失败仅 warn，不影响本地回滚正确性。
+        if let Some(dist_state) = self.dist_txn_state.take() {
+            let mutations = dist_state
+                .mutations
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            if !mutations.is_empty() {
+                if let Some(dist_rt) = &self.dist_runtime {
+                    let mut rt = dist_rt.write().unwrap();
+                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
+                    if let Err(e) = txn.rollback(&mutations, dist_state.start_ts) {
+                        tracing::warn!(
+                            start_ts = dist_state.start_ts,
+                            mutation_count = mutations.len(),
+                            error = %e,
+                            "P2-2.1: distributed rollback failed (best-effort, local rollback unaffected)"
+                        );
+                    } else {
+                        tracing::debug!(
+                            start_ts = dist_state.start_ts,
+                            mutation_count = mutations.len(),
+                            "P2-2.1: distributed transaction rolled back via Percolator 2PC"
+                        );
+                    }
+                }
+            }
+        }
         tracing::debug!("transaction rolled back");
     }
 
@@ -1974,6 +2111,10 @@ impl ExecutorService {
                 // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
                 if let Some(dist_rt) = &self.dist_runtime {
                     executor = executor.with_dist_runtime(dist_rt.clone());
+                    // P2-2.1：注入分布式事务累积器（显式事务模式下 DML 累积 Mutation）
+                    if let Some(dist_state) = &self.dist_txn_state {
+                        executor = executor.with_dist_txn_mutations(dist_state.mutations.clone());
+                    }
                 }
                 // P7-1：注入 CDC 引擎，启用 DML 事件分发
                 if let Some(cdc) = &self.cdc_engine {
@@ -2138,6 +2279,10 @@ impl ExecutorService {
         // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
         if let Some(dist_rt) = &self.dist_runtime {
             executor = executor.with_dist_runtime(dist_rt.clone());
+            // P2-2.1：注入分布式事务累积器（显式事务模式下 DML 累积 Mutation）
+            if let Some(dist_state) = &self.dist_txn_state {
+                executor = executor.with_dist_txn_mutations(dist_state.mutations.clone());
+            }
         }
         // P7-1：注入 CDC 引擎，启用 DML 事件分发
         if let Some(cdc) = &self.cdc_engine {
@@ -2284,6 +2429,10 @@ impl ExecutorService {
         // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
         if let Some(dist_rt) = &self.dist_runtime {
             executor = executor.with_dist_runtime(dist_rt.clone());
+            // P2-2.1：注入分布式事务累积器（显式事务模式下 DML 累积 Mutation）
+            if let Some(dist_state) = &self.dist_txn_state {
+                executor = executor.with_dist_txn_mutations(dist_state.mutations.clone());
+            }
         }
         // P7-1：注入 CDC 引擎，启用 DML 事件分发
         if let Some(cdc) = &self.cdc_engine {
@@ -2352,6 +2501,10 @@ impl ExecutorService {
         // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
         if let Some(dist_rt) = &self.dist_runtime {
             executor = executor.with_dist_runtime(dist_rt.clone());
+            // P2-2.1：注入分布式事务累积器（显式事务模式下 DML 累积 Mutation）
+            if let Some(dist_state) = &self.dist_txn_state {
+                executor = executor.with_dist_txn_mutations(dist_state.mutations.clone());
+            }
         }
         // P7-1：注入 CDC 引擎，启用 DML 事件分发
         if let Some(cdc) = &self.cdc_engine {
@@ -2416,6 +2569,10 @@ impl ExecutorService {
         // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
         if let Some(dist_rt) = &self.dist_runtime {
             executor = executor.with_dist_runtime(dist_rt.clone());
+            // P2-2.1：注入分布式事务累积器（显式事务模式下 DML 累积 Mutation）
+            if let Some(dist_state) = &self.dist_txn_state {
+                executor = executor.with_dist_txn_mutations(dist_state.mutations.clone());
+            }
         }
         // P7-1：注入 CDC 引擎，启用 DML 事件分发
         if let Some(cdc) = &self.cdc_engine {
@@ -5157,5 +5314,163 @@ mod tests {
             .expect("InMemoryStatisticsStore should return stats");
         assert_eq!(stats_via_inner.row_count, 3);
         assert_eq!(stats_via_shared.row_count, stats_via_inner.row_count);
+    }
+
+    // =====================================================================
+    //  P2-2.1：Percolator 2PC 接入 SQL BEGIN/COMMIT 测试
+    // =====================================================================
+
+    /// 创建已初始化的单节点 DistRuntime 句柄（用于 P2-2.1 测试）
+    fn make_dist_runtime_for_p2() -> szrsql_dist::runtime::DistRuntimeHandle {
+        let handle = szrsql_dist::runtime::new_single_node_runtime(1).unwrap();
+        {
+            let mut rt = handle.write().unwrap();
+            rt.init().unwrap();
+        }
+        handle
+    }
+
+    /// P2-2.1：显式事务 BEGIN → INSERT → COMMIT 走 Percolator 2PC。
+    ///
+    /// 验证：
+    /// - BEGIN 创建 dist_txn_state（start_ts + 空 mutations 累积器）
+    /// - INSERT 的 dist_dual_write 将 Mutation::Put 累积到共享 Vec
+    /// - COMMIT 取出 mutations，执行 prewrite_all + commit
+    /// - 分布式 KV 中可通过 DistTxnClient::get 读到已提交数据
+    #[tokio::test]
+    async fn test_p2_2_1_dist_txn_commit_2pc() {
+        use szrsql_dist::dist_txn::DistTxnClient;
+
+        let handle = make_dist_runtime_for_p2();
+        let mut svc = ExecutorService::new().with_dist_runtime(handle.clone());
+
+        // 建表
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+
+        // 显式事务：BEGIN → INSERT → COMMIT
+        svc.execute_sql("BEGIN").await;
+        assert!(
+            svc.dist_txn_state.is_some(),
+            "BEGIN should init dist_txn_state when dist_runtime is injected"
+        );
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')")
+            .await;
+        // 验证 mutations 已累积
+        {
+            let state = svc.dist_txn_state.as_ref().expect("dist_txn_state should exist");
+            let guard = state.mutations.lock().unwrap();
+            assert!(
+                !guard.is_empty(),
+                "INSERT should accumulate Mutation into dist_txn_state"
+            );
+        }
+        let results = svc.execute_sql("COMMIT").await;
+        assert!(results[0].is_ok(), "COMMIT should succeed");
+        assert!(
+            svc.dist_txn_state.is_none(),
+            "COMMIT should consume dist_txn_state"
+        );
+
+        // 验证分布式 KV 中有已提交数据（通过 DistTxnClient 快照读）
+        let mut rt = handle.write().unwrap();
+        let mut txn = DistTxnClient::new(&mut *rt);
+        let read_ts = txn.begin();
+        let key = b"t:0".to_vec();
+        let value = txn.get(&key, read_ts);
+        assert!(value.is_ok(), "dist get should not error after COMMIT");
+        assert!(
+            value.unwrap().is_some(),
+            "data should be committed in dist KV after 2PC COMMIT"
+        );
+    }
+
+    /// P2-2.1：显式事务 BEGIN → INSERT → ROLLBACK 走 Percolator 2PC rollback。
+    ///
+    /// 验证：
+    /// - ROLLBACK 取出 mutations，执行 DistTxnClient::rollback
+    /// - 分布式 KV 中读不到数据（rollback 删除 prewrite 的 data 和 lock）
+    #[tokio::test]
+    async fn test_p2_2_1_dist_txn_rollback_2pc() {
+        use szrsql_dist::dist_txn::DistTxnClient;
+
+        let handle = make_dist_runtime_for_p2();
+        let mut svc = ExecutorService::new().with_dist_runtime(handle.clone());
+
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+
+        // 显式事务：BEGIN → INSERT → ROLLBACK
+        svc.execute_sql("BEGIN").await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'bob')")
+            .await;
+        let results = svc.execute_sql("ROLLBACK").await;
+        assert!(results[0].is_ok(), "ROLLBACK should succeed");
+        assert!(
+            svc.dist_txn_state.is_none(),
+            "ROLLBACK should consume dist_txn_state"
+        );
+
+        // 验证分布式 KV 中没有数据
+        let mut rt = handle.write().unwrap();
+        let mut txn = DistTxnClient::new(&mut *rt);
+        let read_ts = txn.begin();
+        let key = b"t:0".to_vec();
+        let value = txn.get(&key, read_ts);
+        assert!(value.is_ok(), "dist get should not error after ROLLBACK");
+        assert!(
+            value.unwrap().is_none(),
+            "data should NOT be in dist KV after 2PC ROLLBACK"
+        );
+    }
+
+    /// P2-2.1：Autocommit 模式走即时 2PC（begin → prewrite → commit）。
+    ///
+    /// 验证：
+    /// - 无显式 BEGIN 时，dist_txn_state 为 None
+    /// - INSERT 的 dist_dual_write 走即时 2PC 路径
+    /// - 分布式 KV 中可读到已提交数据
+    #[tokio::test]
+    async fn test_p2_2_1_autocommit_immediate_2pc() {
+        use szrsql_dist::dist_txn::DistTxnClient;
+
+        let handle = make_dist_runtime_for_p2();
+        let mut svc = ExecutorService::new().with_dist_runtime(handle.clone());
+
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+        assert!(
+            svc.dist_txn_state.is_none(),
+            "autocommit mode should not init dist_txn_state"
+        );
+
+        // Autocommit INSERT（无显式 BEGIN）
+        let results = svc.execute_sql("INSERT INTO t (id) VALUES (42)").await;
+        assert!(results[0].is_ok(), "INSERT should succeed");
+
+        // 验证分布式 KV 中有数据（即时 2PC 已提交）
+        let mut rt = handle.write().unwrap();
+        let mut txn = DistTxnClient::new(&mut *rt);
+        let read_ts = txn.begin();
+        let key = b"t:0".to_vec();
+        let value = txn.get(&key, read_ts).unwrap();
+        assert!(
+            value.is_some(),
+            "autocommit INSERT should immediately 2PC commit to dist KV"
+        );
+    }
+
+    /// P2-2.1：无 dist_runtime 注入时，BEGIN/COMMIT 不创建 dist_txn_state（退化兼容）。
+    #[tokio::test]
+    async fn test_p2_2_1_no_dist_runtime_degrades_gracefully() {
+        let mut svc = ExecutorService::new();
+        // 不注入 dist_runtime
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+
+        svc.execute_sql("BEGIN").await;
+        assert!(
+            svc.dist_txn_state.is_none(),
+            "no dist_runtime → BEGIN should not init dist_txn_state"
+        );
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+        let results = svc.execute_sql("COMMIT").await;
+        assert!(results[0].is_ok(), "COMMIT should succeed without dist_runtime");
     }
 }

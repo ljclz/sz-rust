@@ -456,6 +456,12 @@ pub struct CdcEngine {
     pending_events: std::sync::atomic::AtomicU64,
     /// P7-1：全局 LSN 计数器（跨 Executor 共享，保证 LSN 单调递增）
     lsn_counter: std::sync::atomic::AtomicU64,
+    /// Batch 3：事务级 CDC 事件缓冲（txn_id → 待分发事件列表）
+    ///
+    /// 显式事务（BEGIN...COMMIT）期间，DML 产生的 CDC 事件暂存于此，
+    /// 直到 COMMIT 成功后统一分发（消除脏读）；ROLLBACK 时直接丢弃。
+    /// autocommit 模式不经过此缓冲，直接 dispatch_event。
+    txn_buffers: std::sync::Mutex<std::collections::HashMap<u32, Vec<ChangeEvent>>>,
 }
 
 impl CdcEngine {
@@ -484,6 +490,7 @@ impl CdcEngine {
             total_processed: std::sync::atomic::AtomicU64::new(0),
             pending_events: std::sync::atomic::AtomicU64::new(0),
             lsn_counter: std::sync::atomic::AtomicU64::new(1),
+            txn_buffers: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -536,6 +543,45 @@ impl CdcEngine {
         self.observer_manager.notify(event);
         self.pending_events
             .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Batch 3：将 CDC 事件暂存到事务缓冲（COMMIT 后分发）
+    ///
+    /// 显式事务（BEGIN...COMMIT）期间，DML 产生的事件不立即分发，
+    /// 而是按 txn_id 缓冲。COMMIT 成功后调用 `commit_txn` 统一分发；
+    /// ROLLBACK 时调用 `abort_txn` 丢弃。
+    pub fn stage_event(&self, txn_id: u32, event: ChangeEvent) {
+        let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        buffers.entry(txn_id).or_default().push(event);
+    }
+
+    /// Batch 3：事务提交后，将缓冲的事件统一分发给所有 observer
+    ///
+    /// 返回分发的事件数量。若 txn_id 无缓冲事件，返回 0。
+    pub fn commit_txn(&self, txn_id: u32) -> usize {
+        let events = {
+            let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+            buffers.remove(&txn_id).unwrap_or_default()
+        };
+        let count = events.len();
+        for event in events {
+            self.dispatch_event(event);
+        }
+        count
+    }
+
+    /// Batch 3：事务回滚时，丢弃缓冲的 CDC 事件（不分发）
+    ///
+    /// 返回丢弃的事件数量。若 txn_id 无缓冲事件，返回 0。
+    pub fn abort_txn(&self, txn_id: u32) -> usize {
+        let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        buffers.remove(&txn_id).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// Batch 3：查询指定事务的缓冲事件数（测试/监控用）
+    pub fn staged_event_count(&self, txn_id: u32) -> usize {
+        let buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        buffers.get(&txn_id).map(|v| v.len()).unwrap_or(0)
     }
 
     /// 注册 CdcObserver（透传到 CdcObserverManager）
@@ -1565,6 +1611,121 @@ mod tests {
             assert_eq!(decoded.old_row, Some(vec![1, 2, 3]));
             assert_eq!(decoded.new_row, Some(vec![4, 5, 6]));
             assert_eq!(decoded.timestamp, 88888);
+        }
+    }
+
+    // =================================================================
+    // Batch 3: CDC COMMIT 后分发 — 事务缓冲测试
+    // =================================================================
+
+    mod batch3_txn_buffer {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        /// 计数 observer：记录收到的事件数
+        struct CountingObserver {
+            count: AtomicUsize,
+        }
+        impl CountingObserver {
+            fn new() -> Self {
+                Self { count: AtomicUsize::new(0) }
+            }
+            fn count(&self) -> usize {
+                self.count.load(Ordering::SeqCst)
+            }
+        }
+        impl CdcObserver for CountingObserver {
+            fn on_event(&self, _event: ChangeEvent) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        fn make_engine() -> (CdcEngine, Arc<CountingObserver>) {
+            let mgr = Arc::new(CdcObserverManager::new());
+            let observer = Arc::new(CountingObserver::new());
+            mgr.register(observer.clone());
+            let engine = CdcEngine::new(mgr);
+            (engine, observer)
+        }
+
+        #[test]
+        fn stage_event_does_not_dispatch_immediately() {
+            let (engine, observer) = make_engine();
+            let event = ChangeEvent::insert(10, 1, 42, vec![1, 2], 100);
+            engine.stage_event(10, event);
+            // 事件已缓冲，observer 未收到
+            assert_eq!(observer.count(), 0);
+            assert_eq!(engine.staged_event_count(10), 1);
+        }
+
+        #[test]
+        fn commit_txn_flushes_buffered_events() {
+            let (engine, observer) = make_engine();
+            engine.stage_event(10, ChangeEvent::insert(10, 1, 42, vec![1], 100));
+            engine.stage_event(10, ChangeEvent::update(10, 2, 42, vec![1], vec![2], 101));
+            engine.stage_event(10, ChangeEvent::delete(10, 3, 42, vec![2], 102));
+            assert_eq!(observer.count(), 0);
+
+            let dispatched = engine.commit_txn(10);
+            assert_eq!(dispatched, 3);
+            assert_eq!(observer.count(), 3);
+            // 缓冲已清空
+            assert_eq!(engine.staged_event_count(10), 0);
+        }
+
+        #[test]
+        fn abort_txn_discards_buffered_events() {
+            let (engine, observer) = make_engine();
+            engine.stage_event(20, ChangeEvent::insert(20, 1, 42, vec![1], 100));
+            engine.stage_event(20, ChangeEvent::insert(20, 2, 42, vec![2], 101));
+            assert_eq!(observer.count(), 0);
+
+            let discarded = engine.abort_txn(20);
+            assert_eq!(discarded, 2);
+            // observer 未收到任何事件
+            assert_eq!(observer.count(), 0);
+            assert_eq!(engine.staged_event_count(20), 0);
+        }
+
+        #[test]
+        fn autocommit_dispatch_event_immediately() {
+            let (engine, observer) = make_engine();
+            let event = ChangeEvent::insert(1, 1, 42, vec![1], 100);
+            engine.dispatch_event(event);
+            // autocommit 模式立即分发
+            assert_eq!(observer.count(), 1);
+        }
+
+        #[test]
+        fn multiple_transactions_isolated() {
+            let (engine, observer) = make_engine();
+            // txn 10 和 txn 20 并行缓冲
+            engine.stage_event(10, ChangeEvent::insert(10, 1, 42, vec![1], 100));
+            engine.stage_event(20, ChangeEvent::insert(20, 2, 42, vec![2], 101));
+            engine.stage_event(10, ChangeEvent::insert(10, 3, 42, vec![3], 102));
+
+            // txn 20 回滚
+            let discarded = engine.abort_txn(20);
+            assert_eq!(discarded, 1);
+            assert_eq!(observer.count(), 0);
+
+            // txn 10 提交
+            let dispatched = engine.commit_txn(10);
+            assert_eq!(dispatched, 2);
+            assert_eq!(observer.count(), 2);
+        }
+
+        #[test]
+        fn commit_txn_no_buffer_returns_zero() {
+            let (engine, _observer) = make_engine();
+            assert_eq!(engine.commit_txn(999), 0);
+        }
+
+        #[test]
+        fn abort_txn_no_buffer_returns_zero() {
+            let (engine, _observer) = make_engine();
+            assert_eq!(engine.abort_txn(999), 0);
         }
     }
 }

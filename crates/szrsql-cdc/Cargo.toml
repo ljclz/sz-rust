@@ -32,6 +32,17 @@ postgres = { version = "0.19", features = ["with-chrono-0_4", "with-serde_json-1
 # P8-4 安全加固：API Key 随机生成（256 bit 熵）
 rand = { workspace = true }
 
+# P0-1：真实数据库驱动（按需启用，通过 feature flag 控制）
+# MySQL：纯 Rust 实现，无 C 库依赖
+sqlx = { version = "0.8", default-features = false, features = ["mysql", "runtime-tokio"], optional = true }
+# SQL Server：纯 Rust TDS 客户端
+tiberius = { version = "0.12", default-features = false, optional = true }
+tokio-util = { version = "0.7", features = ["compat"], optional = true }
+# Oracle：需要 Oracle Instant Client C 库
+oracle = { version = "0.6", optional = true }
+# Kafka：需要 librdkafka C 库
+rdkafka = { version = "0.36", optional = true }
+
 [dev-dependencies]
 # 测试专用：临时目录、并发测试工具
 tempfile = { workspace = true }
@@ -40,6 +51,18 @@ tempfile = { workspace = true }
 default = []
 # 启用 loom 并发模型测试（cargo test --features loom_model）
 loom_model = []
+# P0-1：真实数据库驱动集成（按需启用，避免默认引入 C 库依赖）
+# PostgreSQL 真实驱动默认启用（复用已存在的 postgres workspace 依赖，纯 Rust）
+# MySQL：启用 sqlx 依赖（纯 Rust，无 C 库）
+real-mysql = ["sqlx"]
+# SQL Server：启用 tiberius + tokio-util 依赖（纯 Rust，无 C 库）
+real-sqlserver = ["tiberius", "tokio-util"]
+# Oracle：启用 oracle 依赖（需要 Oracle Instant Client C 库）
+real-oracle = ["oracle"]
+# Kafka：启用 rdkafka 依赖（需要 librdkafka C 库）
+real-kafka = ["rdkafka"]
+# 启用所有真实驱动（需要所有 C 库依赖）
+real-drivers = ["real-mysql", "real-sqlserver", "real-oracle", "real-kafka"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

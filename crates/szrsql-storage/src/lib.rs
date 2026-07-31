@@ -11,6 +11,7 @@ pub mod cursor;
 pub mod external_format;
 pub mod format_version;
 pub mod freelist;
+pub mod heap;
 pub mod kv_adapter;
 pub mod page;
 pub mod read_ahead;

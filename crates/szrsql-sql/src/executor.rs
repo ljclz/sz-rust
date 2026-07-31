@@ -2706,6 +2706,17 @@ pub struct Executor<'a> {
     /// None 表示不启用行级 WAL（DML 静默跳过行级记录，仅依赖 commit 时的
     /// TableData 全表快照做崩溃恢复，旧行为）。
     wal_writer: Option<std::sync::Arc<szrsql_tx::wal::WalWriter>>,
+    /// P2-2.1：分布式事务累积器（显式事务模式下共享）。
+    ///
+    /// 当处于显式事务（BEGIN...COMMIT）且 dist_runtime 已注入时，
+    /// 此字段为 `Some(Arc<Mutex<Vec<Mutation>>>)`，与 session 层共享同一 Arc。
+    /// DML 操作将 `Mutation::Put`/`Mutation::Delete` 累积到此处，
+    /// 由 session 的 COMMIT 触发 Percolator 2PC（prewrite → commit），
+    /// ROLLBACK 触发 2PC rollback。
+    ///
+    /// 为 None 时（autocommit 模式或未注入 dist_runtime），DML 走即时 2PC
+    /// （begin → prewrite → commit 单语句事务）或退化为直接写（无 dist_runtime）。
+    dist_txn_mutations: Option<std::sync::Arc<std::sync::Mutex<Vec<szrsql_dist::txn::Mutation>>>>,
 }
 
 // =====================================================================
@@ -2891,6 +2902,7 @@ impl<'a> Executor<'a> {
             dist_runtime: None,
             cdc_engine: None,
             wal_writer: None,
+            dist_txn_mutations: None,
         }
     }
 
@@ -3086,6 +3098,19 @@ impl<'a> Executor<'a> {
         self
     }
 
+    /// P2-2.1：绑定分布式事务累积器（显式事务模式）。
+    ///
+    /// 注入后，DML 操作将 `Mutation` 累积到此共享 `Arc<Mutex<Vec<Mutation>>>`，
+    /// 由 session 层的 COMMIT/ROLLBACK 统一触发 Percolator 2PC。
+    /// 未注入时（autocommit），DML 走即时 2PC 或直接写。
+    pub fn with_dist_txn_mutations(
+        mut self,
+        mutations: std::sync::Arc<std::sync::Mutex<Vec<szrsql_dist::txn::Mutation>>>,
+    ) -> Self {
+        self.dist_txn_mutations = Some(mutations);
+        self
+    }
+
     /// P7-1：绑定 CDC 引擎，启用 DML 事件分发。
     ///
     /// 绑定后，DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件分发到 CDC 引擎，
@@ -3126,6 +3151,9 @@ impl<'a> Executor<'a> {
     }
 
     /// P7-1：分发 CDC Insert 事件（内部辅助方法）
+    ///
+    /// Batch 3：显式事务（mvcc_txn_id != 0）时缓冲到 CdcEngine 事务缓冲区，
+    /// COMMIT 后统一分发；autocommit 模式立即分发。
     fn dispatch_cdc_insert(&self, table_name: &str, new_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3142,11 +3170,17 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(new_row),
                 engine.current_timestamp(),
             );
-            engine.dispatch_event(event);
+            if self.mvcc_txn_id != 0 {
+                engine.stage_event(self.mvcc_txn_id, event);
+            } else {
+                engine.dispatch_event(event);
+            }
         }
     }
 
     /// P7-1：分发 CDC Update 事件（内部辅助方法）
+    ///
+    /// Batch 3：显式事务时缓冲，COMMIT 后统一分发。
     fn dispatch_cdc_update(&self, table_name: &str, old_row: &Row, new_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3164,11 +3198,17 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(new_row),
                 engine.current_timestamp(),
             );
-            engine.dispatch_event(event);
+            if self.mvcc_txn_id != 0 {
+                engine.stage_event(self.mvcc_txn_id, event);
+            } else {
+                engine.dispatch_event(event);
+            }
         }
     }
 
     /// P7-1：分发 CDC Delete 事件（内部辅助方法）
+    ///
+    /// Batch 3：显式事务时缓冲，COMMIT 后统一分发。
     fn dispatch_cdc_delete(&self, table_name: &str, old_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3185,7 +3225,11 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(old_row),
                 engine.current_timestamp(),
             );
-            engine.dispatch_event(event);
+            if self.mvcc_txn_id != 0 {
+                engine.stage_event(self.mvcc_txn_id, event);
+            } else {
+                engine.dispatch_event(event);
+            }
         }
     }
 
@@ -3300,51 +3344,112 @@ impl<'a> Executor<'a> {
         self.dist_runtime.is_some()
     }
 
-    /// P0-DIST-1/2/3：将行数据双写到分布式 KV 存储。
+    /// P2-2.1：将行数据写入分布式 KV 存储（Percolator 2PC）。
     ///
     /// **键编码**：`{table_name}:{row_id}`（UTF-8 字符串）
     /// **值编码**：serde_json 序列化的 `Vec<Value>`（行数据）
     ///
-    /// 写入失败仅记录 warn 日志，不中断 DML 流程（分布式写入为 best-effort）。
-    /// 生产环境可通过监控 warn 日志检测分布式写入异常。
+    /// # 路径分派
+    /// - **显式事务**（`dist_txn_mutations` 已注入）：累积 `Mutation::Put` 到共享 Vec，
+    ///   由 session 的 COMMIT 触发批量 prewrite + commit，ROLLBACK 触发 rollback。
+    /// - **Autocommit**（未注入累积器）：即时 2PC（begin → prewrite → commit），
+    ///   保证单语句原子性。
+    ///
+    /// 写入失败仅记录 warn 日志，不中断 DML 流程（best-effort，与旧版兼容）。
     fn dist_dual_write(
         &self,
         table_name: &str,
         row_id: usize,
         row: &Row,
     ) {
-        if let Some(handle) = &self.dist_runtime {
-            let key = format!("{}:{}", table_name, row_id);
-            let value = serde_json::to_vec(row)
-                .unwrap_or_else(|_| Vec::new());
-            let mut rt = handle.write().unwrap();
-            if let Err(e) = rt.put(key.into_bytes(), value) {
-                tracing::warn!(
-                    table = table_name,
-                    row_id = row_id,
-                    error = %e,
-                    "P0-DIST: dual-write to distributed KV failed (best-effort, continuing)"
-                );
+        use szrsql_dist::dist_txn::DistTxnClient;
+        use szrsql_dist::txn::Mutation;
+
+        let handle = match &self.dist_runtime {
+            Some(h) => h,
+            None => return,
+        };
+        let key = format!("{}:{}", table_name, row_id);
+        let value = serde_json::to_vec(row).unwrap_or_else(|_| Vec::new());
+        let mutation = Mutation::put(key.into_bytes(), value);
+
+        // 显式事务：累积到共享 Vec，由 session COMMIT/ROLLBACK 统一 2PC
+        if let Some(mutations_arc) = &self.dist_txn_mutations {
+            if let Ok(mut guard) = mutations_arc.lock() {
+                guard.push(mutation);
             }
+            return;
+        }
+
+        // Autocommit：即时 2PC（begin → prewrite → commit）
+        let mut rt = handle.write().unwrap();
+        let mut txn = DistTxnClient::new(&mut *rt);
+        let start_ts = txn.begin();
+        if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
+            tracing::warn!(
+                table = table_name,
+                row_id = row_id,
+                error = %e,
+                "P2-2.1: autocommit prewrite failed (best-effort, continuing)"
+            );
+            return;
+        }
+        if let Err(e) = txn.commit(&[mutation], start_ts) {
+            tracing::warn!(
+                table = table_name,
+                row_id = row_id,
+                error = %e,
+                "P2-2.1: autocommit commit failed (best-effort, continuing)"
+            );
         }
     }
 
-    /// P0-DIST-1/2/3：从分布式 KV 存储删除行数据。
+    /// P2-2.1：从分布式 KV 存储删除行数据（Percolator 2PC）。
     ///
-    /// 在 DELETE 操作成功后调用，同步删除分布式 KV 中的对应键。
-    /// 失败时仅记录警告，不影响本地删除结果（best-effort 双写）。
+    /// # 路径分派
+    /// - **显式事务**：累积 `Mutation::Delete`，由 session COMMIT/ROLLBACK 统一 2PC。
+    /// - **Autocommit**：即时 2PC（begin → prewrite → commit with Delete mutation）。
+    ///
+    /// 失败时仅记录警告，不影响本地删除结果（best-effort）。
     fn dist_dual_delete(&self, table_name: &str, row_id: usize) {
-        if let Some(handle) = &self.dist_runtime {
-            let key = format!("{}:{}", table_name, row_id);
-            let mut rt = handle.write().unwrap();
-            if let Err(e) = rt.delete(key.into_bytes()) {
-                tracing::warn!(
-                    table = table_name,
-                    row_id = row_id,
-                    error = %e,
-                    "P0-DIST: dual-delete from distributed KV failed (best-effort, continuing)"
-                );
+        use szrsql_dist::dist_txn::DistTxnClient;
+        use szrsql_dist::txn::Mutation;
+
+        let handle = match &self.dist_runtime {
+            Some(h) => h,
+            None => return,
+        };
+        let key = format!("{}:{}", table_name, row_id);
+        let mutation = Mutation::delete(key.into_bytes());
+
+        // 显式事务：累积
+        if let Some(mutations_arc) = &self.dist_txn_mutations {
+            if let Ok(mut guard) = mutations_arc.lock() {
+                guard.push(mutation);
             }
+            return;
+        }
+
+        // Autocommit：即时 2PC
+        let mut rt = handle.write().unwrap();
+        let mut txn = DistTxnClient::new(&mut *rt);
+        let start_ts = txn.begin();
+        if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
+            tracing::warn!(
+                table = table_name,
+                row_id = row_id,
+                error = %e,
+                "P2-2.1: autocommit delete prewrite failed (best-effort, continuing)"
+            );
+            return;
+        }
+        if let Err(e) = txn.commit(&[mutation], start_ts) {
+            tracing::warn!(
+                table = table_name,
+                row_id = row_id,
+                error = %e,
+                "P2-2.1: autocommit delete commit failed (best-effort, continuing)"
+            );
         }
     }
 
