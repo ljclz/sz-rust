@@ -19,6 +19,8 @@ szrsql-tx = { workspace = true }
 szrsql-dist = { workspace = true }
 szrsql-cdc = { workspace = true }
 szrsql-optimizer = { workspace = true }
+szrsql-replication = { workspace = true }
+szrsql-security = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }

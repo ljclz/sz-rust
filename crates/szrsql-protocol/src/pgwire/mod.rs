@@ -39,6 +39,7 @@ pub mod lifecycle;
 pub mod message;
 pub mod notify;
 pub mod pg_types;
+pub mod replication;
 pub mod server;
 pub mod session;
 pub mod startup;

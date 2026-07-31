@@ -3021,6 +3021,23 @@ pub struct Executor<'a> {
     /// 为 None 时（autocommit 模式或未注入 dist_runtime），DML 走即时 2PC
     /// （begin → prewrite → commit 单语句事务）或退化为直接写（无 dist_runtime）。
     dist_txn_mutations: Option<std::sync::Arc<std::sync::Mutex<Vec<szrsql_dist::txn::Mutation>>>>,
+    /// P2-1：HLC 混合逻辑时钟（Multi-Master 因果排序）。
+    ///
+    /// 注入后，DML 操作会调用 `stamp_hlc_timestamp()` 获取 HLC 时间戳，
+    /// 用于 Multi-Master 场景下的因果排序和冲突检测。
+    /// None 表示不启用 Multi-Master 因果排序（单节点模式，旧行为）。
+    hlc_clock: Option<std::sync::Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>>,
+    /// P2-1：冲突日志（Multi-Master 写入冲突审计）。
+    ///
+    /// 注入后，当检测到写-写冲突（如 duplicate key）时，调用
+    /// `record_write_conflict()` 记录冲突事件到日志，用于审计和回放。
+    /// None 表示不启用冲突日志（单节点模式，旧行为）。
+    conflict_log: Option<std::sync::Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>>,
+    /// P2-1：本节点 ID（Multi-Master 写操作来源标识）。
+    ///
+    /// 用于 HLC 时间戳和冲突日志中标识写操作来源节点。
+    /// 默认为 1（单节点模式）。
+    node_id: u64,
 }
 
 // =====================================================================
@@ -3207,6 +3224,9 @@ impl<'a> Executor<'a> {
             cdc_engine: None,
             wal_writer: None,
             dist_txn_mutations: None,
+            hlc_clock: None,
+            conflict_log: None,
+            node_id: 1,
         }
     }
 
@@ -3436,6 +3456,105 @@ impl<'a> Executor<'a> {
         self
     }
 
+    /// P2-1：绑定 HLC 混合逻辑时钟，启用 Multi-Master 因果排序。
+    ///
+    /// 绑定后，DML 操作会调用 `stamp_hlc_timestamp()` 获取 HLC 时间戳，
+    /// 用于 Multi-Master 场景下的因果排序和冲突检测。
+    /// 未绑定时退化为旧行为（不生成 HLC 时间戳）。
+    pub fn with_hlc_clock(
+        mut self,
+        clock: std::sync::Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>,
+    ) -> Self {
+        self.hlc_clock = Some(clock);
+        self
+    }
+
+    /// P2-1：绑定冲突日志，启用 Multi-Master 写入冲突审计。
+    ///
+    /// 绑定后，当检测到写-写冲突时，调用 `record_write_conflict()` 记录冲突事件。
+    /// 未绑定时退化为旧行为（不记录冲突日志）。
+    pub fn with_conflict_log(
+        mut self,
+        log: std::sync::Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>,
+    ) -> Self {
+        self.conflict_log = Some(log);
+        self
+    }
+
+    /// P2-1：设置本节点 ID（Multi-Master 写操作来源标识）。
+    ///
+    /// 用于 HLC 时间戳和冲突日志中标识写操作来源节点。
+    /// 默认为 1（单节点模式）。
+    pub fn with_node_id(mut self, node_id: u64) -> Self {
+        self.node_id = node_id;
+        self
+    }
+
+    /// P2-1：获取 HLC 时间戳（Multi-Master 因果排序用）。
+    ///
+    /// 若 HLC 时钟未注入，返回 None（单节点模式）。
+    /// 若 HLC 时钟已注入但锁获取失败（poisoned），返回 None 并记录 warn。
+    fn stamp_hlc_timestamp(&self) -> Option<szrsql_dist::conflict::HlcTimestamp> {
+        let clock = self.hlc_clock.as_ref()?;
+        match clock.lock() {
+            Ok(mut c) => Some(c.now()),
+            Err(e) => {
+                tracing::warn!(error = %e, "P2-1: HlcClock mutex poisoned");
+                None
+            }
+        }
+    }
+
+    /// P2-1：记录写-写冲突到 ConflictLog（Multi-Master 审计用）。
+    ///
+    /// 当 Multi-Master 场景下检测到 duplicate key 等写-写冲突时调用。
+    /// 若 ConflictLog 未注入，直接返回（单节点模式）。
+    fn record_write_conflict(
+        &self,
+        winner_key: &[u8],
+        winner_value: &[u8],
+        loser_key: &[u8],
+        loser_value: &[u8],
+    ) {
+        let log = match self.conflict_log.as_ref() {
+            Some(l) => l,
+            None => return,
+        };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let hlc_ts = self.stamp_hlc_timestamp();
+        let timestamp = hlc_ts.as_ref().map(|t| t.l).unwrap_or(now_ms);
+        let winner = szrsql_dist::conflict::WriteOperation {
+            node_id: self.node_id,
+            lsn: now_ms,
+            timestamp,
+            key: winner_key.to_vec(),
+            value: winner_value.to_vec(),
+        };
+        let loser = szrsql_dist::conflict::WriteOperation {
+            node_id: self.node_id,
+            lsn: now_ms,
+            timestamp,
+            key: loser_key.to_vec(),
+            value: loser_value.to_vec(),
+        };
+        let entry = szrsql_dist::conflict::ConflictEntry {
+            winner,
+            loser,
+            detected_at: now_ms,
+            resolution: szrsql_dist::conflict::ConflictResolution::LastTimestampWins,
+        };
+        if let Ok(mut log) = log.lock() {
+            log.record(entry);
+            tracing::info!(
+                node_id = self.node_id,
+                "P2-1: write conflict recorded to ConflictLog"
+            );
+        }
+    }
+
     /// P7-1：将 Row 序列化为字节流（CDC 事件载荷）
     fn serialize_row_for_cdc(row: &Row) -> Vec<u8> {
         serde_json::to_vec(row).unwrap_or_default()
@@ -3452,6 +3571,16 @@ impl<'a> Executor<'a> {
             hash = hash.wrapping_mul(0x01000193);
         }
         hash
+    }
+
+    /// P2-1：获取 CDC 事件时间戳（优先 HLC，回退到引擎时间戳）。
+    ///
+    /// Multi-Master 模式下使用 HLC 时间戳保证因果排序，
+    /// 单节点模式回退到 `engine.current_timestamp()`。
+    fn cdc_event_timestamp(&self, engine: &szrsql_cdc::CdcEngine) -> u64 {
+        self.stamp_hlc_timestamp()
+            .map(|t| t.l)
+            .unwrap_or_else(|| engine.current_timestamp())
     }
 
     /// P7-1：分发 CDC Insert 事件（内部辅助方法）
@@ -3474,7 +3603,7 @@ impl<'a> Executor<'a> {
                 lsn,
                 table_id,
                 Self::serialize_row_for_cdc(new_row),
-                engine.current_timestamp(),
+                self.cdc_event_timestamp(engine),
             );
             // P2-2：统一走 stage_event 路径，减少同步开销
             // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush
@@ -3504,7 +3633,7 @@ impl<'a> Executor<'a> {
                 table_id,
                 Self::serialize_row_for_cdc(old_row),
                 Self::serialize_row_for_cdc(new_row),
-                engine.current_timestamp(),
+                self.cdc_event_timestamp(engine),
             );
             // P2-2：统一走 stage_event 路径，减少同步开销
             // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush
@@ -3533,7 +3662,7 @@ impl<'a> Executor<'a> {
                 lsn,
                 table_id,
                 Self::serialize_row_for_cdc(old_row),
-                engine.current_timestamp(),
+                self.cdc_event_timestamp(engine),
             );
             // P2-2：统一走 stage_event 路径，减少同步开销
             // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush

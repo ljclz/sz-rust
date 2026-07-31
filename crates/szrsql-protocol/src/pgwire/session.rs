@@ -452,6 +452,20 @@ pub struct ExecutorService {
     ///
     /// 为 None 时（autocommit 或未注入 dist_runtime），DML 走即时 2PC。
     dist_txn_state: Option<DistTxnState>,
+    /// P2-1：HLC 混合逻辑时钟（Multi-Master 因果排序）。
+    ///
+    /// 注入后，会传递给 Executor 用于 DML 操作的 HLC 时间戳生成。
+    /// 未注入时退化为旧行为（不生成 HLC 时间戳）。
+    hlc_clock: Option<Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>>,
+    /// P2-1：冲突日志（Multi-Master 写入冲突审计）。
+    ///
+    /// 注入后，会传递给 Executor 用于记录写-写冲突事件。
+    /// 未注入时退化为旧行为（不记录冲突日志）。
+    conflict_log: Option<Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>>,
+    /// P2-1：本节点 ID（Multi-Master 写操作来源标识）。
+    ///
+    /// 默认为 1（单节点模式）。注入后传递给 Executor 用于 HLC 时间戳和冲突日志。
+    node_id: u64,
 }
 
 /// P2-2.1：分布式事务状态（显式事务期间的 Percolator 2PC 累积器）。
@@ -501,6 +515,9 @@ impl ExecutorService {
             dirty_tracker: None,
             statistics_store: None,
             dist_txn_state: None,
+            hlc_clock: None,
+            conflict_log: None,
+            node_id: 1,
         }
     }
 
@@ -654,6 +671,36 @@ impl ExecutorService {
     /// 未注入时退化为旧行为（DML 不触发 CDC 事件，用于测试兼容）。
     pub fn with_cdc_engine(mut self, engine: Arc<szrsql_cdc::CdcEngine>) -> Self {
         self.cdc_engine = Some(engine);
+        self
+    }
+
+    /// P2-1：注入跨会话共享的 HLC 混合逻辑时钟，启用 Multi-Master 因果排序。
+    ///
+    /// 注入后，会传递给 Executor 用于 DML 操作的 HLC 时间戳生成。
+    /// 未注入时退化为旧行为（不生成 HLC 时间戳）。
+    pub fn with_hlc_clock(
+        mut self,
+        clock: Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>,
+    ) -> Self {
+        self.hlc_clock = Some(clock);
+        self
+    }
+
+    /// P2-1：注入跨会话共享的冲突日志，启用 Multi-Master 写入冲突审计。
+    ///
+    /// 注入后，会传递给 Executor 用于记录写-写冲突事件。
+    /// 未注入时退化为旧行为（不记录冲突日志）。
+    pub fn with_conflict_log(
+        mut self,
+        log: Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>,
+    ) -> Self {
+        self.conflict_log = Some(log);
+        self
+    }
+
+    /// P2-1：设置本节点 ID（Multi-Master 写操作来源标识）。
+    pub fn with_node_id(mut self, node_id: u64) -> Self {
+        self.node_id = node_id;
         self
     }
 
@@ -2403,6 +2450,14 @@ impl ExecutorService {
         if let Some(cdc) = &self.cdc_engine {
             executor = executor.with_cdc_engine(cdc.clone());
         }
+        // P2-1：注入 HLC 时钟和冲突日志，启用 Multi-Master 因果排序和冲突审计
+        if let Some(hlc) = &self.hlc_clock {
+            executor = executor.with_hlc_clock(hlc.clone());
+        }
+        if let Some(log) = &self.conflict_log {
+            executor = executor.with_conflict_log(log.clone());
+        }
+        executor = executor.with_node_id(self.node_id);
         for guard in &guards {
             executor.register_table(&**guard);
         }
@@ -2553,6 +2608,14 @@ impl ExecutorService {
         if let Some(cdc) = &self.cdc_engine {
             executor = executor.with_cdc_engine(cdc.clone());
         }
+        // P2-1：注入 HLC 时钟和冲突日志，启用 Multi-Master 因果排序和冲突审计
+        if let Some(hlc) = &self.hlc_clock {
+            executor = executor.with_hlc_clock(hlc.clone());
+        }
+        if let Some(log) = &self.conflict_log {
+            executor = executor.with_conflict_log(log.clone());
+        }
+        executor = executor.with_node_id(self.node_id);
         // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
         if let Some(writer) = &self.wal_writer {
             executor = executor.with_wal_writer(writer.clone());
@@ -2625,6 +2688,14 @@ impl ExecutorService {
         if let Some(cdc) = &self.cdc_engine {
             executor = executor.with_cdc_engine(cdc.clone());
         }
+        // P2-1：注入 HLC 时钟和冲突日志，启用 Multi-Master 因果排序和冲突审计
+        if let Some(hlc) = &self.hlc_clock {
+            executor = executor.with_hlc_clock(hlc.clone());
+        }
+        if let Some(log) = &self.conflict_log {
+            executor = executor.with_conflict_log(log.clone());
+        }
+        executor = executor.with_node_id(self.node_id);
         // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
         if let Some(writer) = &self.wal_writer {
             executor = executor.with_wal_writer(writer.clone());
@@ -2693,6 +2764,14 @@ impl ExecutorService {
         if let Some(cdc) = &self.cdc_engine {
             executor = executor.with_cdc_engine(cdc.clone());
         }
+        // P2-1：注入 HLC 时钟和冲突日志，启用 Multi-Master 因果排序和冲突审计
+        if let Some(hlc) = &self.hlc_clock {
+            executor = executor.with_hlc_clock(hlc.clone());
+        }
+        if let Some(log) = &self.conflict_log {
+            executor = executor.with_conflict_log(log.clone());
+        }
+        executor = executor.with_node_id(self.node_id);
         // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
         if let Some(writer) = &self.wal_writer {
             executor = executor.with_wal_writer(writer.clone());

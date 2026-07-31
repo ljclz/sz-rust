@@ -865,7 +865,7 @@ fn main() -> anyhow::Result<()> {
     //
     // 当前阶段：构造并存储实例，为后续接入执行路径（Executor/Session）奠定基础。
     // 不影响现有单节点模式和集群模式的正常运行。
-    let _multi_master_components = if args.multi_master {
+    let multi_master_components = if args.multi_master {
         // === 1. 构造 HlcClock（混合逻辑时钟）===
         // 物理时钟闭包：返回当前 Unix 时间戳（毫秒）
         // unwrap_or(0) 在 SystemTime 错误（如时钟回拨极端场景）时回退到 0，不 panic
@@ -1061,6 +1061,19 @@ fn main() -> anyhow::Result<()> {
     server_builder = server_builder.with_cdc_engine(cdc_engine);
     if let Some(writer) = wal_writer {
         server_builder = server_builder.with_wal_writer(writer);
+    }
+    // P2-1：注入 Multi-Master 组件（HLC 时钟 + 冲突日志 + 节点 ID）
+    // 启用 --multi-master 时，将 HlcClock/ConflictLog 注入 PgwireServer，
+    // 通过 Session 传递给 Executor，在 DML 路径中生成 HLC 时间戳和记录冲突事件
+    if let Some((hlc_arc, conflict_log_arc, _cluster_arc)) = &multi_master_components {
+        server_builder = server_builder
+            .with_hlc_clock(hlc_arc.clone())
+            .with_conflict_log(conflict_log_arc.clone())
+            .with_node_id(args.node_id);
+        tracing::info!(
+            node_id = args.node_id,
+            "P2-1: Multi-Master components injected into PgwireServer (HlcClock + ConflictLog)"
+        );
     }
     // P1-2：注入脏表跟踪器，启用增量快照机制
     // session 在事务 COMMIT 成功后会调用 tracker.mark_dirty_many 标记修改过的表，

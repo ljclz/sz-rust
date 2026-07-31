@@ -331,6 +331,35 @@ pub struct PgwireServer {
     /// 结果存入此 store，供 CostModel 进行基于成本的优化。
     /// 未启用时 ANALYZE 命令返回错误（不支持）。
     statistics_store: Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
+    /// OPT-12：跨会话共享的 SQL 防火墙（SQL 注入检测 + 禁止命令 + 白名单）。
+    ///
+    /// 启用后，每个 session 的 `handle_query` 在执行 SQL 前调用 `firewall.check(sql)`：
+    /// - 命中注入特征 → 返回 ERROR，不执行
+    /// - 命中禁止命令 → 返回 ERROR，不执行
+    /// - 不在白名单 → 返回 ERROR，不执行
+    /// 未启用时（None）跳过安全检查（旧行为，用于测试兼容）。
+    security_firewall: Option<Arc<tokio::sync::Mutex<szrsql_security::firewall::SqlFirewall>>>,
+    /// OPT-12：跨会话共享的审计日志（不可变 append-only + SHA-256 哈希链）。
+    ///
+    /// 启用后，每个 session 的 `handle_query` 在执行 SQL 后记录审计事件：
+    /// - 事件包含 SQL 文本、执行结果（成功/失败）、客户端信息
+    /// - 哈希链保证日志不可篡改
+    /// 未启用时（None）跳过审计记录（旧行为，用于测试兼容）。
+    audit_log: Option<Arc<tokio::sync::Mutex<szrsql_security::audit::AuditLog>>>,
+    /// P2-1：跨会话共享的 HLC 混合逻辑时钟（Multi-Master 因果排序）。
+    ///
+    /// 启用后传递给每个 session 的 Executor，用于 DML 操作的 HLC 时间戳生成。
+    /// 未启用时退化为旧行为（不生成 HLC 时间戳）。
+    hlc_clock: Option<Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>>,
+    /// P2-1：跨会话共享的冲突日志（Multi-Master 写入冲突审计）。
+    ///
+    /// 启用后传递给每个 session 的 Executor，用于记录写-写冲突事件。
+    /// 未启用时退化为旧行为（不记录冲突日志）。
+    conflict_log: Option<Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>>,
+    /// P2-1：本节点 ID（Multi-Master 写操作来源标识）。
+    ///
+    /// 默认为 1（单节点模式）。注入后传递给每个 session 的 Executor。
+    node_id: u64,
     /// 连接数限制信号量。
     ///
     /// 许可数 = `config.max_connections`；每个连接任务持有一个 `OwnedSemaphorePermit`，
@@ -360,8 +389,13 @@ impl PgwireServer {
             mvcc: None,
             dist_runtime: None,
             cdc_engine: None,
+            hlc_clock: None,
+            conflict_log: None,
+            node_id: 1,
             dirty_tracker: None,
             statistics_store: None,
+            security_firewall: None,
+            audit_log: None,
             conn_semaphore: Arc::new(Semaphore::new(max_conn)),
         }
     }
@@ -475,6 +509,36 @@ impl PgwireServer {
         self
     }
 
+    /// P2-1：注入跨会话共享的 HLC 混合逻辑时钟，启用 Multi-Master 因果排序。
+    ///
+    /// 启用后，会传递给每个 session 的 Executor，用于 DML 操作的 HLC 时间戳生成。
+    /// 未启用时退化为旧行为（不生成 HLC 时间戳）。
+    pub fn with_hlc_clock(
+        mut self,
+        clock: Arc<std::sync::Mutex<szrsql_dist::conflict::HlcClock>>,
+    ) -> Self {
+        self.hlc_clock = Some(clock);
+        self
+    }
+
+    /// P2-1：注入跨会话共享的冲突日志，启用 Multi-Master 写入冲突审计。
+    ///
+    /// 启用后，会传递给每个 session 的 Executor，用于记录写-写冲突事件。
+    /// 未启用时退化为旧行为（不记录冲突日志）。
+    pub fn with_conflict_log(
+        mut self,
+        log: Arc<std::sync::Mutex<szrsql_dist::conflict::ConflictLog>>,
+    ) -> Self {
+        self.conflict_log = Some(log);
+        self
+    }
+
+    /// P2-1：设置本节点 ID（Multi-Master 写操作来源标识）。
+    pub fn with_node_id(mut self, node_id: u64) -> Self {
+        self.node_id = node_id;
+        self
+    }
+
     /// P1-2：注入跨会话共享的脏表跟踪器，启用增量快照机制。
     ///
     /// 启用后，每个 session 在事务 COMMIT 成功后会调用 `tracker.mark_dirty(table_name)`
@@ -508,6 +572,30 @@ impl PgwireServer {
         store: Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>,
     ) -> Self {
         self.statistics_store = Some(store);
+        self
+    }
+
+    /// OPT-12：注入共享的 SQL 防火墙，启用 SQL 注入检测和命令过滤。
+    ///
+    /// 启用后，每个 session 的 `handle_query` 在执行 SQL 前调用 `firewall.check(sql)`，
+    /// 命中注入特征/禁止命令/不在白名单的 SQL 将被拒绝执行并返回 ERROR。
+    pub fn with_security_firewall(
+        mut self,
+        firewall: Arc<tokio::sync::Mutex<szrsql_security::firewall::SqlFirewall>>,
+    ) -> Self {
+        self.security_firewall = Some(firewall);
+        self
+    }
+
+    /// OPT-12：注入共享的审计日志，启用 SQL 审计记录。
+    ///
+    /// 启用后，每个 session 的 `handle_query` 在执行 SQL 后记录审计事件，
+    /// 事件包含 SQL 文本和执行结果，哈希链保证日志不可篡改。
+    pub fn with_audit_log(
+        mut self,
+        audit: Arc<tokio::sync::Mutex<szrsql_security::audit::AuditLog>>,
+    ) -> Self {
+        self.audit_log = Some(audit);
         self
     }
 
@@ -1114,6 +1202,14 @@ impl PgwireServer {
         if let Some(cdc) = &self.cdc_engine {
             session = session.with_cdc_engine(cdc.clone());
         }
+        // P2-1：注入 HLC 时钟和冲突日志，启用 Multi-Master 因果排序和冲突审计
+        if let Some(hlc) = &self.hlc_clock {
+            session = session.with_hlc_clock(hlc.clone());
+        }
+        if let Some(log) = &self.conflict_log {
+            session = session.with_conflict_log(log.clone());
+        }
+        session = session.with_node_id(self.node_id);
         // P1-2：注入脏表跟踪器，启用增量快照机制
         if let Some(tracker) = &self.dirty_tracker {
             session = session.with_dirty_tracker(tracker.clone());
@@ -1398,7 +1494,48 @@ impl PgwireServer {
     {
         tracing::debug!(sql = sql.trim(), "received query");
 
+        // OPT-12：SQL 防火墙检查（注入检测 + 禁止命令 + 白名单）
+        // 命中防火墙规则的 SQL 直接返回 ERROR，不执行
+        if let Some(firewall) = &self.security_firewall {
+            let mut fw = firewall.lock().await;
+            match fw.check(sql) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, sql = sql.trim(), "OPT-12: SQL blocked by firewall");
+                    let err = ErrorResponse::error(
+                        SqlState::SYNTAX_ERROR,
+                        format!("SQL blocked by firewall: {e}"),
+                    );
+                    let mut resp = BytesMut::new();
+                    BackendMessage::ErrorResponse(err).encode(&mut resp);
+                    stream.write_all(&resp).await?;
+                    let mut ready = BytesMut::new();
+                    BackendMessage::ReadyForQuery {
+                        status: STATUS_IDLE,
+                    }
+                    .encode(&mut ready);
+                    stream.write_all(&ready).await?;
+                    return Ok(());
+                }
+            }
+        }
+
         let results = session.execute_sql(sql).await;
+
+        // OPT-12：审计日志记录（SQL 执行结果）
+        if let Some(audit) = &self.audit_log {
+            let mut audit_log = audit.lock().await;
+            let success = results.iter().all(|r| r.is_ok());
+            let event = szrsql_security::audit::AuditEvent::builder()
+                .detail(sql.to_string())
+                .command(if success {
+                    szrsql_security::audit::AuditCommand::Other("QUERY".to_string())
+                } else {
+                    szrsql_security::audit::AuditCommand::Other("QUERY_FAILED".to_string())
+                })
+                .build();
+            let _ = audit_log.record(event);
+        }
 
         let mut resp = BytesMut::new();
         for result in results {
