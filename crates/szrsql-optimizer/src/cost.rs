@@ -654,7 +654,13 @@ impl CostModel {
     }
 
     /// 从计划节点递归查找表名，再查统计信息
-    fn find_table_stats<'a>(&'a self, plan: &LogicalPlan) -> Option<&'a TableStatistics> {
+    ///
+    /// # P2-1.2 重构（2026-07-31）
+    ///
+    /// 返回 `Option<Arc<TableStatistics>>` 而非 `Option<&TableStatistics>`，
+    /// 因为 `StatisticsStore::get_table_stats` 现在返回 Arc（与 `Arc<Mutex<...>>`
+    /// 共享模式兼容）。Arc 解引用后即可访问 `TableStatistics` 的字段和方法。
+    fn find_table_stats(&self, plan: &LogicalPlan) -> Option<Arc<TableStatistics>> {
         match plan {
             LogicalPlan::Scan { table, .. } => {
                 self.stats_store.get_table_stats(&table.qualified_name())

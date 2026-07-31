@@ -945,7 +945,13 @@ fn main() -> anyhow::Result<()> {
         let metrics = Arc::new(MetricsRegistry::new());
         // 订阅 pgwire 服务器的关闭状态
         let shutdown_rx = server.shutdown_coordinator().subscribe();
-        let http_server = HttpServer::new(http_config, metrics, shutdown_rx);
+        // P8-2：构造 CdcService 并注入 HttpServer，启用 /api/v1/cdc/* REST API
+        // 端点：租户 CRUD、任务生命周期管理、使用量查询（见 http.rs:332-344）
+        let cdc_service = Arc::new(szrsql_cdc::service::CdcService::new(
+            replication_task_manager.clone(),
+        ));
+        let http_server = HttpServer::new(http_config, metrics, shutdown_rx)
+            .with_cdc_service(cdc_service);
         let http_host = args.http_host.clone();
         let http_port = args.http_port;
         Some(tokio::spawn(async move {

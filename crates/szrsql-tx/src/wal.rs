@@ -616,6 +616,42 @@ impl WalWriter {
         Ok(())
     }
 
+    /// 追加 Commit 记录并立即 fsync（RPO=0 保证）。
+    ///
+    /// 与 `append()` + `flush()` 分离调用不同，此方法在**同一个文件锁临界区内**
+    /// 完成写入 + fsync，确保 COMMIT 记录在返回前已持久化到磁盘。
+    /// 这是事务 ACID-D（Durability）的核心保证：客户端收到 COMMIT ACK 时，
+    /// 数据已不可能因进程崩溃而丢失。
+    ///
+    /// # 性能权衡
+    ///
+    /// 每次 COMMIT 触发一次 fsync（SSD ~0.1ms，HDD ~5ms），
+    /// 对于高吞吐场景可配合 `WalGroupCommit` 批量提交降低 fsync 频率。
+    #[instrument(skip(self), fields(lsn, tx_id))]
+    pub fn append_commit(&self, tx_id: u32) -> Result<u64, WalError> {
+        let lsn = self
+            .current_lsn
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut record = WalRecord::new(lsn, tx_id, WalOpType::Commit, 0, vec![]);
+        record.update_checksum();
+        let encoded = record.encode();
+
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        file.write_all(&encoded).map_err(|e| {
+            warn!(lsn, tx_id, error = %e, "WAL append_commit write failed");
+            WalError::IoError(e.to_string())
+        })?;
+        // RPO=0：立即 fsync，保证 Commit 记录持久化
+        file.sync_all().map_err(|e| {
+            warn!(lsn, tx_id, error = %e, "WAL append_commit fsync failed");
+            WalError::IoError(e.to_string())
+        })?;
+        tracing::Span::current().record("lsn", lsn);
+        tracing::Span::current().record("tx_id", tx_id);
+        debug!(lsn, tx_id, "WAL commit record persisted (RPO=0)");
+        Ok(lsn)
+    }
+
     /// 获取当前 LSN（下一个将分配的 LSN）
     pub fn current_lsn(&self) -> u64 {
         self.current_lsn.load(std::sync::atomic::Ordering::SeqCst)
@@ -1042,6 +1078,255 @@ impl WalGroupCommit {
     /// 获取配置
     pub fn config(&self) -> &GroupCommitConfig {
         &self.config
+    }
+}
+
+// =====================================================================
+//  WalSegmentManager — WAL 段文件管理器（Batch 1: P0-A）
+// =====================================================================
+
+/// WAL 段文件默认大小（64MB）
+pub const WAL_SEGMENT_SIZE: u64 = 64 * 1024 * 1024;
+
+/// WAL 段文件管理器
+///
+/// 管理一组 WAL 段文件（每段 64MB），支持：
+/// - 当前段写满时自动切换新段
+/// - 已 checkpoint 的旧段归档/删除
+/// - 崩溃恢复时从最近 checkpoint 开始回放
+///
+/// 段文件命名：`wal_00000001.log`, `wal_00000002.log`...
+pub struct WalSegmentManager {
+    /// WAL 段文件所在目录
+    dir: std::path::PathBuf,
+    /// 当前活动段编号（从 1 开始）
+    active_segment: u32,
+    /// 当前段已写入字节数
+    current_segment_bytes: u64,
+    /// 每段最大字节数
+    segment_size: u64,
+    /// 最近 checkpoint 所在的段编号（此段之前的段可安全删除）
+    last_checkpoint_segment: u32,
+}
+
+impl WalSegmentManager {
+    /// 创建段管理器，扫描目录确定当前活动段
+    pub fn open<P: AsRef<std::path::Path>>(dir: P) -> Result<Self, WalError> {
+        let dir = dir.as_ref().to_path_buf();
+        std::fs::create_dir_all(&dir).map_err(|e| WalError::IoError(e.to_string()))?;
+
+        // 扫描已有段文件，找到最大编号
+        let mut max_seg = 0u32;
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(num) = Self::parse_segment_name(name) {
+                        max_seg = max_seg.max(num);
+                    }
+                }
+            }
+        }
+
+        let active_segment = if max_seg == 0 { 1 } else { max_seg };
+        let active_path = Self::segment_path_static(&dir, active_segment);
+        let current_segment_bytes = std::fs::metadata(&active_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        Ok(Self {
+            dir,
+            active_segment,
+            current_segment_bytes,
+            segment_size: WAL_SEGMENT_SIZE,
+            last_checkpoint_segment: 1,
+        })
+    }
+
+    /// 获取当前活动段的文件路径
+    pub fn active_path(&self) -> std::path::PathBuf {
+        Self::segment_path_static(&self.dir, self.active_segment)
+    }
+
+    /// 获取当前活动段编号
+    pub fn active_segment(&self) -> u32 {
+        self.active_segment
+    }
+
+    /// 检查当前段是否已满，若满则切换到新段
+    ///
+    /// 返回新段的文件路径（若发生了切换）或 None（未切换）
+    pub fn maybe_rotate(&mut self) -> Option<std::path::PathBuf> {
+        if self.current_segment_bytes >= self.segment_size {
+            self.active_segment += 1;
+            self.current_segment_bytes = 0;
+            let path = self.active_path();
+            debug!(segment = self.active_segment, "WAL segment rotated");
+            Some(path)
+        } else {
+            None
+        }
+    }
+
+    /// 记录写入字节数（每次 append 后调用）
+    pub fn record_write(&mut self, bytes: u64) {
+        self.current_segment_bytes += bytes;
+    }
+
+    /// 设置 checkpoint 段编号，并删除更早的段文件
+    ///
+    /// 返回被删除的段文件数
+    pub fn checkpoint_and_cleanup(&mut self, checkpoint_segment: u32) -> Result<u32, WalError> {
+        self.last_checkpoint_segment = checkpoint_segment;
+        let mut removed = 0u32;
+        for seg in 1..checkpoint_segment {
+            let path = Self::segment_path_static(&self.dir, seg);
+            if path.exists() {
+                std::fs::remove_file(&path).map_err(|e| WalError::IoError(e.to_string()))?;
+                removed += 1;
+            }
+        }
+        if removed > 0 {
+            debug!(removed, checkpoint_segment, "old WAL segments cleaned up");
+        }
+        Ok(removed)
+    }
+
+    /// 列出所有段文件（按编号升序），用于崩溃恢复回放
+    pub fn list_segments(&self) -> Vec<(u32, std::path::PathBuf)> {
+        let mut segments = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(num) = Self::parse_segment_name(name) {
+                        segments.push((num, entry.path()));
+                    }
+                }
+            }
+        }
+        segments.sort_by_key(|(num, _)| *num);
+        segments
+    }
+
+    /// 解析段文件名 → 段编号（如 "wal_00000003.log" → 3）
+    fn parse_segment_name(name: &str) -> Option<u32> {
+        let name = name.strip_prefix("wal_")?;
+        let name = name.strip_suffix(".log")?;
+        name.parse::<u32>().ok()
+    }
+
+    /// 生成段文件路径
+    fn segment_path_static(dir: &std::path::Path, segment: u32) -> std::path::PathBuf {
+        dir.join(format!("wal_{:08}.log", segment))
+    }
+}
+
+// =====================================================================
+//  WalCheckpoint — WAL Checkpoint 机制（Batch 1: P0-A）
+// =====================================================================
+
+/// Checkpoint 记录（持久化到 WAL 的 Checkpoint 记录的 data 字段）
+///
+/// 二进制格式（小端）：
+/// ```text
+/// Offset  Size  Field
+/// 0       8     checkpoint_lsn (u64 LE)
+/// 8       4     active_txn_count (u32 LE)
+/// 12      N×4   active_txn_ids (N × u32 LE)
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalCheckpoint {
+    /// Checkpoint 时的 LSN（恢复起点）
+    pub checkpoint_lsn: u64,
+    /// Checkpoint 时的活跃事务 ID 列表
+    pub active_txns: Vec<u32>,
+}
+
+impl WalCheckpoint {
+    /// 创建新 checkpoint
+    pub fn new(checkpoint_lsn: u64, active_txns: Vec<u32>) -> Self {
+        Self {
+            checkpoint_lsn,
+            active_txns,
+        }
+    }
+
+    /// 编码为二进制（写入 WAL Checkpoint 记录的 data 字段）
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(12 + self.active_txns.len() * 4);
+        buf.extend_from_slice(&self.checkpoint_lsn.to_le_bytes());
+        buf.extend_from_slice(&(self.active_txns.len() as u32).to_le_bytes());
+        for &txn in &self.active_txns {
+            buf.extend_from_slice(&txn.to_le_bytes());
+        }
+        buf
+    }
+
+    /// 从二进制解码
+    pub fn decode(data: &[u8]) -> Result<Self, WalError> {
+        if data.len() < 12 {
+            return Err(WalError::BufferTooShort { need: 12, have: data.len() });
+        }
+        let checkpoint_lsn = u64::from_le_bytes(data[0..8].try_into().unwrap());
+        let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
+        if data.len() < 12 + count * 4 {
+            return Err(WalError::BufferTooShort {
+                need: 12 + count * 4,
+                have: data.len(),
+            });
+        }
+        let mut active_txns = Vec::with_capacity(count);
+        for i in 0..count {
+            let offset = 12 + i * 4;
+            active_txns.push(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
+        }
+        Ok(Self {
+            checkpoint_lsn,
+            active_txns,
+        })
+    }
+
+    /// 写入 WAL Checkpoint 记录并 fsync
+    pub fn write_to_wal(&self, writer: &WalWriter) -> Result<u64, WalError> {
+        let lsn = writer
+            .current_lsn
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut record = WalRecord::new(
+            lsn,
+            0,
+            WalOpType::Checkpoint,
+            0,
+            self.encode(),
+        );
+        record.update_checksum();
+        let encoded = record.encode();
+
+        let mut file = writer.file.lock().unwrap_or_else(|e| e.into_inner());
+        file.write_all(&encoded).map_err(|e| WalError::IoError(e.to_string()))?;
+        file.sync_all().map_err(|e| WalError::IoError(e.to_string()))?;
+        debug!(lsn, checkpoint_lsn = self.checkpoint_lsn, "checkpoint written to WAL");
+        Ok(lsn)
+    }
+
+    /// 从 WAL 文件中找到最近的 Checkpoint 记录
+    ///
+    /// 扫描整个 WAL 文件，返回最后一个 Checkpoint 记录（若存在）
+    pub fn find_latest<P: AsRef<std::path::Path>>(path: P) -> Result<Option<Self>, WalError> {
+        let mut reader = WalReader::open(path)?;
+        let mut latest: Option<WalCheckpoint> = None;
+        loop {
+            match reader.read_next() {
+                Ok(Some(record)) => {
+                    if record.op_type == WalOpType::Checkpoint {
+                        if let Ok(cp) = WalCheckpoint::decode(&record.data) {
+                            latest = Some(cp);
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        Ok(latest)
     }
 }
 

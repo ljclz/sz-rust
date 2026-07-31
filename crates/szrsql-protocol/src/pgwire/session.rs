@@ -956,8 +956,18 @@ impl ExecutorService {
         // （谓词下推 + 投影裁剪），减少不必要的列扫描和行数。
         // OPT-10：将 CPU 密集的规划 + 优化放入 spawn_blocking，
         // 避免阻塞 tokio worker 线程。
+        //
+        // P2-1.2（2026-07-31 激活）：在 RBO 之后，若 statistics_store 已注入，
+        // 应用 CBO（基于成本的优化）：
+        // - JoinOrderOptimizer（DPccp 算法）：对 Inner/Cross JOIN 子树应用 DPccp
+        //   重排算法，选择成本最低的 JOIN 顺序
+        // - CostModel：基于 ANALYZE 收集的统计信息（行数、NDV、直方图）估算成本
+        //
+        // 未注入 statistics_store 时，跳过 CBO（仅 RBO），保持兼容性。
         let plan = {
             let catalog_clone = self.catalog.clone();
+            // P2-1.2：若 statistics_store 已注入，克隆 Arc 以传入 spawn_blocking
+            let stats_store_inner = self.statistics_store.clone();
             tokio::task::spawn_blocking(move || -> Result<LogicalPlan, SessionError> {
                 let planner = Planner::new(&catalog_clone);
                 let raw_plan = planner.plan_statement(stmt)?;
@@ -974,6 +984,19 @@ impl ExecutorService {
                 // P2-3: 公共子表达式消除
                 let optimized =
                     szrsql_optimizer::rule::CommonSubexpressionElimination::apply(optimized);
+                // P2-1.2: CBO — 若 statistics_store 已注入，应用 JOIN 顺序优化
+                //
+                // 使用 SharedStatisticsStore 包装 Arc<Mutex<InMemoryStatisticsStore>>，
+                // 使其可作为 Arc<dyn StatisticsStore> 注入 CostModel / JoinOrderOptimizer。
+                // DPccp 算法枚举所有 JOIN 顺序，使用 CostModel 估算成本，选最低者。
+                let optimized = if let Some(inner) = stats_store_inner {
+                    let shared = szrsql_optimizer::statistics::SharedStatisticsStore::new(inner);
+                    let cost_model = szrsql_optimizer::cost::CostModel::new(Arc::new(shared));
+                    let join_optimizer = szrsql_optimizer::join_order::JoinOrderOptimizer::new(cost_model);
+                    join_optimizer.optimize(optimized)
+                } else {
+                    optimized
+                };
                 Ok(optimized)
             })
             .await
@@ -5019,5 +5042,120 @@ mod tests {
         let guard = store.lock().unwrap();
         let stats = guard.get_table_stats("t").expect("stats should exist");
         assert_eq!(stats.row_count, 1);
+    }
+
+    /// P2-1.2：CBO 激活后 JOIN 查询仍返回正确结果（CostModel + JoinOrderOptimizer 不破坏正确性）。
+    ///
+    /// 流程：
+    /// 1. 注入 statistics_store
+    /// 2. 创建两张表 t1（3 行）和 t2（2 行），有外键关系
+    /// 3. ANALYZE 收集统计信息
+    /// 4. 执行 INNER JOIN 查询
+    /// 5. 验证结果正确（行数与预期一致）
+    ///
+    /// 这验证了：
+    /// - SharedStatisticsStore 可成功包装 Arc<Mutex<InMemoryStatisticsStore>>
+    /// - CostModel 可读取统计信息（不 panic）
+    /// - JoinOrderOptimizer.optimize() 可处理生产 LogicalPlan（不 panic）
+    /// - JOIN 顺序重排不破坏查询正确性
+    #[tokio::test]
+    async fn test_cbo_activation_join_query_returns_correct_results() {
+        use szrsql_optimizer::statistics::InMemoryStatisticsStore;
+
+        let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(store.clone());
+
+        // 创建两张表
+        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)").await;
+        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT, value TEXT)").await;
+
+        // 插入测试数据
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')").await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (2, 'bob')").await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (3, 'carol')").await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (1, 1, 'v1')").await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (2, 2, 'v2')").await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (3, 1, 'v3')").await;
+
+        // ANALYZE 收集统计信息（激活 CBO）
+        let analyze_results = svc.execute_sql("ANALYZE").await;
+        assert_eq!(analyze_results.len(), 1);
+        assert!(analyze_results[0].is_ok(), "ANALYZE should succeed");
+
+        // 执行 INNER JOIN（应触发 JoinOrderOptimizer）
+        let results = svc
+            .execute_sql("SELECT t1.name, t2.value FROM t1 INNER JOIN t2 ON t1.id = t2.t1_id")
+            .await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                // t1.id=1 → 2 行（t2.t1_id=1 有 2 行：v1, v3）
+                // t1.id=2 → 1 行（t2.t1_id=2 有 1 行：v2）
+                // t1.id=3 → 0 行（t2 无 t1_id=3）
+                // 总计 3 行
+                assert_eq!(rows.len(), 3, "JOIN should return 3 rows, got {}", rows.len());
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    /// P2-1.2：未注入 statistics_store 时 JOIN 查询也正常工作（仅 RBO 路径）。
+    ///
+    /// 这是兼容性测试：确保 CBO 代码路径的添加不影响未注入 store 的场景。
+    #[tokio::test]
+    async fn test_cbo_not_injected_join_works() {
+        let mut svc = ExecutorService::new();
+
+        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)").await;
+        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')").await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id) VALUES (1, 1)").await;
+
+        // 未注入 statistics_store，仅 RBO 生效
+        let results = svc
+            .execute_sql("SELECT t1.name FROM t1 INNER JOIN t2 ON t1.id = t2.t1_id")
+            .await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 1, "JOIN should return 1 row");
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    /// P2-1.2：SharedStatisticsStore 可正确读取统计信息（与 InMemoryStatisticsStore 一致）。
+    ///
+    /// 验证 SharedStatisticsStore 的 `get_table_stats` 返回的 Arc<TableStatistics>
+    /// 与直接访问 InMemoryStatisticsStore 一致。
+    #[tokio::test]
+    async fn test_shared_statistics_store_returns_correct_stats() {
+        use szrsql_optimizer::statistics::{
+            InMemoryStatisticsStore, SharedStatisticsStore, StatisticsStore,
+        };
+
+        let inner = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(inner.clone());
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (2)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (3)").await;
+        let analyze_results = svc.execute_sql("ANALYZE t").await;
+        assert!(analyze_results[0].is_ok(), "ANALYZE should succeed");
+
+        // 通过 SharedStatisticsStore 读取
+        let shared = SharedStatisticsStore::new(inner.clone());
+        let stats_via_shared = shared
+            .get_table_stats("t")
+            .expect("SharedStatisticsStore should return stats");
+        assert_eq!(stats_via_shared.row_count, 3);
+
+        // 通过 InMemoryStatisticsStore 直接读取，应一致
+        let guard = inner.lock().unwrap();
+        let stats_via_inner = guard
+            .get_table_stats("t")
+            .expect("InMemoryStatisticsStore should return stats");
+        assert_eq!(stats_via_inner.row_count, 3);
+        assert_eq!(stats_via_shared.row_count, stats_via_inner.row_count);
     }
 }

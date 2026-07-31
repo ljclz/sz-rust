@@ -37,6 +37,7 @@
 //! - 对于 1M 行 × NDV=1M 的大表：去重约 1s，直方图排序约 200ms（可接受）
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use szrsql_sql::executor::TableStorage;
@@ -553,12 +554,27 @@ impl StatisticsCollector {
 ///
 /// 实现方需保证线程安全（`Send + Sync`）。
 /// ANALYZE 命令通过 `update_table_stats` 更新；优化器通过 `get_table_stats` 读取。
+///
+/// # P2-1.2 重构（2026-07-31）
+///
+/// 将 `get_table_stats` 返回值从 `Option<&TableStatistics>` 改为
+/// `Option<Arc<TableStatistics>>`，使其：
+/// 1. 与 `Arc<Mutex<InMemoryStatisticsStore>>` 共享模式兼容（解锁 P2-1.2）
+/// 2. 通过 `SharedStatisticsStore` 包装类型，session 可将共享 store 注入 CostModel
+/// 3. 避免借用生命周期问题：返回的 Arc 可独立持有，不绑定到 store 的借用
 pub trait StatisticsStore: Send + Sync {
-    /// 获取表的统计信息
-    fn get_table_stats(&self, table: &str) -> Option<&TableStatistics>;
+    /// 获取表的统计信息（返回 Arc 共享引用，避免借用生命周期问题）
+    fn get_table_stats(&self, table: &str) -> Option<Arc<TableStatistics>>;
 
     /// 更新表的统计信息（ANALYZE 调用）
-    fn update_table_stats(&mut self, table: &str, stats: TableStatistics);
+    ///
+    /// 默认实现：通过 `update_table_stats_arc` 转换。
+    fn update_table_stats(&mut self, table: &str, stats: TableStatistics) {
+        self.update_table_stats_arc(table, Arc::new(stats));
+    }
+
+    /// 更新表的统计信息（Arc 版本，避免不必要的克隆）
+    fn update_table_stats_arc(&mut self, table: &str, stats: Arc<TableStatistics>);
 
     /// 删除表的统计信息（DROP TABLE 调用）
     fn drop_table_stats(&mut self, table: &str);
@@ -570,9 +586,13 @@ pub trait StatisticsStore: Send + Sync {
 /// 内存中的统计信息存储（默认实现）
 ///
 /// 用于单进程场景（如 szrsql-bin）；多进程共享需实现基于持久化存储的版本。
+///
+/// 内部使用 `HashMap<String, Arc<TableStatistics>>` 存储，使 `get_table_stats`
+/// 可直接返回 Arc 克隆（零拷贝），与 `Arc<Mutex<InMemoryStatisticsStore>>`
+/// 共享模式协同工作（P2-1.2）。
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStatisticsStore {
-    stats: HashMap<String, TableStatistics>,
+    stats: HashMap<String, Arc<TableStatistics>>,
 }
 
 impl InMemoryStatisticsStore {
@@ -582,11 +602,11 @@ impl InMemoryStatisticsStore {
 }
 
 impl StatisticsStore for InMemoryStatisticsStore {
-    fn get_table_stats(&self, table: &str) -> Option<&TableStatistics> {
-        self.stats.get(&table.to_lowercase())
+    fn get_table_stats(&self, table: &str) -> Option<Arc<TableStatistics>> {
+        self.stats.get(&table.to_lowercase()).cloned()
     }
 
-    fn update_table_stats(&mut self, table: &str, stats: TableStatistics) {
+    fn update_table_stats_arc(&mut self, table: &str, stats: Arc<TableStatistics>) {
         self.stats.insert(table.to_lowercase(), stats);
     }
 
@@ -596,6 +616,71 @@ impl StatisticsStore for InMemoryStatisticsStore {
 
     fn list_tables(&self) -> Vec<String> {
         self.stats.keys().cloned().collect()
+    }
+}
+
+// =====================================================================
+//  SharedStatisticsStore — Arc<Mutex<...>> 共享包装器（P2-1.2）
+// =====================================================================
+
+/// 跨会话共享的统计信息存储包装器
+///
+/// 包装 `Arc<Mutex<InMemoryStatisticsStore>>`，实现 `StatisticsStore` trait，
+/// 使其可作为 `Arc<dyn StatisticsStore>` 注入到 `CostModel` / `JoinOrderOptimizer`。
+///
+/// # 设计
+///
+/// - `get_table_stats`：锁定 mutex，返回 Arc 克隆（不持有锁跨越 await/调用）
+/// - `update_table_stats_arc`：锁定 mutex，写入 Arc<TableStatistics>
+/// - `drop_table_stats` / `list_tables`：锁定 mutex，执行对应操作
+///
+/// # 用法
+///
+/// ```ignore
+/// let inner = Arc::new(Mutex::new(InMemoryStatisticsStore::new()));
+/// let shared = SharedStatisticsStore::new(inner.clone());
+/// let cost_model = CostModel::new(Arc::new(shared));
+/// // 同时，session 仍可通过 inner.clone() 直接调用 InMemoryStatisticsStore 的方法
+/// ```
+pub struct SharedStatisticsStore {
+    inner: Arc<std::sync::Mutex<InMemoryStatisticsStore>>,
+}
+
+impl SharedStatisticsStore {
+    /// 创建共享包装器
+    pub fn new(inner: Arc<std::sync::Mutex<InMemoryStatisticsStore>>) -> Self {
+        Self { inner }
+    }
+
+    /// 获取内部 store 的 Arc 引用（供 session 直接调用 mutable 方法）
+    pub fn inner(&self) -> Arc<std::sync::Mutex<InMemoryStatisticsStore>> {
+        self.inner.clone()
+    }
+}
+
+impl StatisticsStore for SharedStatisticsStore {
+    fn get_table_stats(&self, table: &str) -> Option<Arc<TableStatistics>> {
+        let guard = self.inner.lock().ok()?;
+        StatisticsStore::get_table_stats(&*guard, table)
+    }
+
+    fn update_table_stats_arc(&mut self, table: &str, stats: Arc<TableStatistics>) {
+        if let Ok(mut guard) = self.inner.lock() {
+            StatisticsStore::update_table_stats_arc(&mut *guard, table, stats);
+        }
+    }
+
+    fn drop_table_stats(&mut self, table: &str) {
+        if let Ok(mut guard) = self.inner.lock() {
+            StatisticsStore::drop_table_stats(&mut *guard, table);
+        }
+    }
+
+    fn list_tables(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .map(|guard| StatisticsStore::list_tables(&*guard))
+            .unwrap_or_default()
     }
 }
 
