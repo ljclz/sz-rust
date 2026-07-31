@@ -165,7 +165,7 @@ mod phase_2_5 {
         fn prop_encode_decode_roundtrip(
             lsn in 0u64..=u64::MAX,
             tx_id in 0u32..=u32::MAX,
-            op_type_idx in 0u8..7,
+            op_type_idx in 0u8..8,
             page_id in 0u32..=u32::MAX,
             data_len in 0usize..1024,
             data_seed in 0u64..u64::MAX,
@@ -177,7 +177,8 @@ mod phase_2_5 {
                 3 => WalOpType::Commit,
                 4 => WalOpType::Abort,
                 5 => WalOpType::Checkpoint,
-                _ => WalOpType::FullPageImage,
+                6 => WalOpType::FullPageImage,
+                _ => WalOpType::TableData,
             };
             // 用 data_seed 生成确定性 data
             let mut rng = XorShift64::new(data_seed);
@@ -206,15 +207,15 @@ mod phase_2_5 {
             let _ = WalRecord::decode(&bytes);
         }
 
-        /// 随机 op_type 值 (0-255)：合法 0-6 成功，非法 7-255 返回 InvalidOpType
+        /// 随机 op_type 值 (0-255)：合法 0-7 成功，非法 8-255 返回 InvalidOpType
         #[test]
-        fn prop_op_type_roundtrip(op_val in 0u8..=6u8) {
-            let op = WalOpType::from_u8(op_val).expect("0-6 应为合法 op_type");
+        fn prop_op_type_roundtrip(op_val in 0u8..=7u8) {
+            let op = WalOpType::from_u8(op_val).expect("0-7 应为合法 op_type");
             prop_assert_eq!(op.as_u8(), op_val);
         }
 
         #[test]
-        fn prop_op_type_invalid_returns_err(op_val in 7u8..=255u8) {
+        fn prop_op_type_invalid_returns_err(op_val in 8u8..=255u8) {
             let result = WalOpType::from_u8(op_val);
             prop_assert!(matches!(result, Err(WalError::InvalidOpType(_))));
         }

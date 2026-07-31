@@ -5,9 +5,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL Catalog — 表/索引元数据管理 + 系统表（pg_tables/pg_indexes 子集）"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 szrsql-types = { workspace = true }
 szrsql-sql = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

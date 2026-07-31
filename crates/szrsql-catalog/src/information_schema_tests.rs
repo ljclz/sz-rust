@@ -688,6 +688,97 @@ fn test_columns_with_custom_catalog_name() {
     assert_eq!(rows[0][0], Value::Text("my_db".into()));
 }
 
+/// 改进 P1：COMMENT ON 暴露到 information_schema.columns
+///
+/// 验证：
+/// 1. 未设置注释时 COMMENT 列为 NULL
+/// 2. set_column_comment 后 COMMENT 列反映注释
+/// 3. set_table_comment 不影响列级 COMMENT
+/// 4. 行长度为 12（11 标准 + 1 扩展 COMMENT）
+#[test]
+fn test_columns_comment_column_exposed() {
+    let mut catalog = ManagedCatalog::new();
+    catalog
+        .create_table(
+            make_schema_full(
+                "users",
+                vec![
+                    col_with_pk("id", ColumnType::Int64),
+                    ColumnDefinition::new("name", ColumnType::Text),
+                ],
+            ),
+            false,
+        )
+        .unwrap();
+
+    // 1. 初始状态：所有列 COMMENT 为 NULL
+    let rows = columns(&catalog);
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        assert_eq!(row.len(), 12, "行长度应为 12（11 标准 + 1 COMMENT）");
+        assert_eq!(row[11], Value::Null, "未设置注释时 COMMENT 应为 NULL");
+    }
+
+    // 2. set_column_comment 后 COMMENT 列反映注释
+    catalog
+        .set_column_comment(
+            &TableName::new("users"),
+            "name",
+            Some("用户姓名".to_string()),
+        )
+        .unwrap();
+    let rows = columns(&catalog);
+    let name_row = rows
+        .iter()
+        .find(|r| r[3] == Value::Text("name".into()))
+        .expect("应找到 name 列");
+    assert_eq!(
+        name_row[11],
+        Value::Text("用户姓名".into()),
+        "COMMENT 列应反映 set_column_comment 设置的注释"
+    );
+
+    // 3. set_table_comment 不影响列级 COMMENT
+    catalog
+        .set_table_comment(
+            &TableName::new("users"),
+            Some("用户主表".to_string()),
+        )
+        .unwrap();
+    let rows = columns(&catalog);
+    let id_row = rows
+        .iter()
+        .find(|r| r[3] == Value::Text("id".into()))
+        .expect("应找到 id 列");
+    assert_eq!(
+        id_row[11], Value::Null,
+        "set_table_comment 不应影响列级 COMMENT"
+    );
+    let name_row = rows
+        .iter()
+        .find(|r| r[3] == Value::Text("name".into()))
+        .expect("应找到 name 列");
+    assert_eq!(
+        name_row[11],
+        Value::Text("用户姓名".into()),
+        "列级 COMMENT 应保持不变"
+    );
+
+    // 4. 删除列注释后 COMMENT 列回到 NULL
+    catalog
+        .set_column_comment(&TableName::new("users"), "name", None)
+        .unwrap();
+    let rows = columns(&catalog);
+    let name_row = rows
+        .iter()
+        .find(|r| r[3] == Value::Text("name".into()))
+        .expect("应找到 name 列");
+    assert_eq!(
+        name_row[11], Value::Null,
+        "删除注释后 COMMENT 列应回到 NULL"
+    );
+}
+
 // =====================================================================
 //  列常量测试（1）
 // =====================================================================
@@ -712,6 +803,7 @@ fn test_column_constants() {
             "CHARACTER_MAXIMUM_LENGTH",
             "NUMERIC_PRECISION",
             "NUMERIC_SCALE",
+            "COMMENT",
         ]
     );
     assert_eq!(
@@ -760,9 +852,11 @@ fn test_tables_schema_columns() {
 fn test_columns_schema_columns() {
     let schema = columns_schema();
     assert_eq!(schema.name.name, "columns");
-    assert_eq!(schema.columns.len(), 11);
+    assert_eq!(schema.columns.len(), 12);
     assert_eq!(schema.columns[0].name, "TABLE_CATALOG");
     assert_eq!(schema.columns[10].name, "NUMERIC_SCALE");
+    // szrsql 扩展列：COMMENT（暴露 COMMENT ON COLUMN 设置的注释）
+    assert_eq!(schema.columns[11].name, "COMMENT");
 }
 
 #[test]

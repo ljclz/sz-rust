@@ -232,37 +232,37 @@ impl DataTypeMapping {
             (
                 "interval",
                 vec![],
-                "NotImplemented",
-                false,
-                "时间间隔类型，SzRSQL 尚未实现 Interval 类型".to_string(),
+                "Text",
+                true,
+                "时间间隔类型，SzRSQL 暂存为 Text（如 '1 day 2 hours'）".to_string(),
             ),
             (
                 "bit",
                 vec!["bit varying", "varbit"],
-                "NotImplemented",
-                false,
-                "位串类型，SzRSQL 尚未实现 BitString 类型".to_string(),
+                "Text",
+                true,
+                "位串类型，SzRSQL 暂存为 Text（0/1 字符串表示）".to_string(),
             ),
             (
                 "cidr",
                 vec!["inet", "macaddr"],
-                "NotImplemented",
-                false,
-                "网络地址类型，SzRSQL 尚未实现网络类型".to_string(),
+                "Text",
+                true,
+                "网络地址类型，SzRSQL 暂存为 Text（字符串表示）".to_string(),
             ),
             (
                 "point",
                 vec!["line", "lseg", "box", "path", "polygon", "circle"],
-                "NotImplemented",
-                false,
-                "几何类型，SzRSQL 尚未实现 PostGIS 几何类型".to_string(),
+                "Text",
+                true,
+                "几何类型，SzRSQL 暂存为 Text（无 PostGIS 支持）".to_string(),
             ),
             (
                 "xml",
                 vec![],
-                "NotImplemented",
-                false,
-                "XML 类型，SzRSQL 尚未实现 XML 类型".to_string(),
+                "Text",
+                true,
+                "XML 类型，SzRSQL 暂存为 Text（XML 文档字符串）".to_string(),
             ),
         ]
     }
@@ -304,7 +304,7 @@ impl DataTypeMapping {
     ///
     /// assert_eq!(DataTypeMapping::to_column_type("bigint"), Some(ColumnType::Int64));
     /// assert_eq!(DataTypeMapping::to_column_type("text"), Some(ColumnType::Text));
-    /// assert_eq!(DataTypeMapping::to_column_type("interval"), None);
+    /// assert_eq!(DataTypeMapping::to_column_type("interval"), Some(ColumnType::Text));
     /// ```
     pub fn to_column_type(pg_type: &str) -> Option<ColumnType> {
         let normalized = pg_type.to_lowercase();
@@ -333,9 +333,10 @@ impl DataTypeMapping {
             "json" | "jsonb" => Some(ColumnType::Json),
             "tsvector" => Some(ColumnType::TsVector),
             "tsquery" => Some(ColumnType::TsQuery),
-            // 尚未实现的类型
+            // Phase F-10: 兼容性类型 — 暂存为 Text
             "interval" | "bit" | "bit varying" | "varbit" | "cidr" | "inet" | "macaddr"
-            | "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle" | "xml" => None,
+            | "macaddr8" | "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle"
+            | "xml" => Some(ColumnType::Text),
             _ => None,
         }
     }
@@ -403,9 +404,10 @@ mod tests {
     #[test]
     fn unsupported_types_marked_not_implemented() {
         let results = DataTypeMapping::run_all();
+        // Phase F-10: interval 现已支持（存为 Text）
         let interval = results.iter().find(|r| r.name == "interval")
             .expect("应包含 interval 类型");
-        assert_eq!(interval.status, CompatStatus::NotImplemented);
+        assert_eq!(interval.status, CompatStatus::Pass);
     }
 
     #[test]
@@ -444,9 +446,11 @@ mod tests {
 
     #[test]
     fn to_column_type_unsupported_returns_none() {
-        assert_eq!(DataTypeMapping::to_column_type("interval"), None);
-        assert_eq!(DataTypeMapping::to_column_type("point"), None);
-        assert_eq!(DataTypeMapping::to_column_type("xml"), None);
+        // Phase F-10: interval/point/xml 现已支持（存为 Text）
+        assert_eq!(DataTypeMapping::to_column_type("interval"), Some(ColumnType::Text));
+        assert_eq!(DataTypeMapping::to_column_type("point"), Some(ColumnType::Text));
+        assert_eq!(DataTypeMapping::to_column_type("xml"), Some(ColumnType::Text));
+        // 真正未实现的类型仍返回 None
         assert_eq!(DataTypeMapping::to_column_type("nonexistent"), None);
     }
 
@@ -462,6 +466,8 @@ mod tests {
     #[test]
     fn to_array_column_type_invalid_returns_none() {
         assert_eq!(DataTypeMapping::to_array_column_type("TEXT"), None);
-        assert_eq!(DataTypeMapping::to_array_column_type("INTERVAL[]"), None);
+        // Phase F-10: INTERVAL 现已支持，INTERVAL[] 应可转换
+        let interval_arr = DataTypeMapping::to_array_column_type("INTERVAL[]");
+        assert!(interval_arr.is_some(), "INTERVAL[] 应可转换");
     }
 }

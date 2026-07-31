@@ -34,9 +34,42 @@ pub type SysRow = Vec<Value>;
 /// 默认 catalog 名（单数据库实例）
 const DEFAULT_CATALOG: &str = "szrsql";
 
-/// 计算 schema 名（None 时返回 "public"）
+/// 计算 schema 名（None 时从 name.name 前缀推断，默认 "public"）
+///
+/// tables.json 中表名存储为 `schema_table` 格式（如 `njszjt_soci_article`），
+/// schema 字段为 None。此函数从 name.name 中拆分出真正的 schema 名。
 fn schema_name(name: &TableName) -> String {
-    name.schema.clone().unwrap_or_else(|| "public".into())
+    if let Some(s) = &name.schema {
+        return s.clone();
+    }
+    split_schema_table(&name.name).0
+}
+
+/// 从 `schema_table` 格式的名字中拆分出 (schema, table_name)
+///
+/// 例如 `njszjt_soci_article` → (`njszjt`, `soci_article`)
+/// 如果没有下划线，返回 ("public", 原名)
+fn split_schema_table(name_str: &str) -> (String, String) {
+    if let Some(pos) = name_str.find('_') {
+        let schema = &name_str[..pos];
+        let table = &name_str[pos + 1..];
+        // 已知 schema 前缀列表（从 tables.json 数据推断）
+        const KNOWN_SCHEMAS: &[&str] = &["njszjt", "public", "shop", "sz300"];
+        if KNOWN_SCHEMAS.contains(&schema.to_lowercase().as_str()) && !table.is_empty() {
+            return (schema.to_string(), table.to_string());
+        }
+    }
+    ("public".to_string(), name_str.to_string())
+}
+
+/// 返回不带 schema 前缀的 table_name
+///
+/// 例如 `njszjt_soci_article` → `soci_article`
+fn table_name_only(name: &TableName) -> String {
+    if name.schema.is_some() {
+        return name.name.clone();
+    }
+    split_schema_table(&name.name).1
 }
 
 // =====================================================================
@@ -146,7 +179,7 @@ pub fn tables_with_catalog(catalog: &dyn MutableCatalog, catalog_name: &str) -> 
             vec![
                 Value::Text(catalog_name.into()),
                 Value::Text(schema_name(&name)),
-                Value::Text(name.name.clone()),
+                Value::Text(table_name_only(&name)),
                 Value::Text("BASE TABLE".into()),
             ]
         })
@@ -161,7 +194,10 @@ pub fn tables_with_catalog(catalog: &dyn MutableCatalog, catalog_name: &str) -> 
 ///
 /// 列顺序：(TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION,
 ///        COLUMN_DEFAULT, IS_NULLABLE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
-///        NUMERIC_PRECISION, NUMERIC_SCALE)
+///        NUMERIC_PRECISION, NUMERIC_SCALE, COMMENT)
+///
+/// `COMMENT` 列为 szrsql 扩展（ANSI SQL 标准无此列），用于暴露 COMMENT ON 语句设置的
+/// 列级注释，让外部工具（Navicat / DBeaver / AI Agent）可通过标准 SQL 查询到注释。
 pub const COLUMNS_COLUMNS: &[&str] = &[
     "TABLE_CATALOG",
     "TABLE_SCHEMA",
@@ -174,6 +210,7 @@ pub const COLUMNS_COLUMNS: &[&str] = &[
     "CHARACTER_MAXIMUM_LENGTH",
     "NUMERIC_PRECISION",
     "NUMERIC_SCALE",
+    "COMMENT",
 ];
 
 /// `information_schema.columns` 的 Schema
@@ -192,6 +229,8 @@ pub fn columns_schema() -> TableSchema {
             ColumnDefinition::new("CHARACTER_MAXIMUM_LENGTH", ColumnType::Int64),
             ColumnDefinition::new("NUMERIC_PRECISION", ColumnType::Int64),
             ColumnDefinition::new("NUMERIC_SCALE", ColumnType::Int64),
+            // szrsql 扩展列：COMMENT ON COLUMN 设置的列级注释（NULL 表示未设置）
+            ColumnDefinition::new("COMMENT", ColumnType::Text),
         ],
     }
 }
@@ -220,6 +259,7 @@ pub fn columns_with_catalog(catalog: &dyn MutableCatalog, catalog_name: &str) ->
             None => continue,
         };
         let table_schema = schema_name(&name);
+        let table_name = table_name_only(&name);
         for (idx, col) in schema.columns.iter().enumerate() {
             let ordinal = (idx + 1) as i64;
             let column_default = col
@@ -235,11 +275,18 @@ pub fn columns_with_catalog(catalog: &dyn MutableCatalog, catalog_name: &str) ->
             };
             let data_type = sql_data_type(&col.data_type);
             let (num_precision, num_scale) = numeric_precision_scale(&col.data_type);
+            // 查询列级注释 — 优先 catalog 中通过 COMMENT ON COLUMN 设置的注释，
+            // 退回到 ColumnDefinition.comment 字段（CREATE TABLE 时内联指定）
+            let comment = catalog
+                .get_column_comment(&name, &col.name)
+                .or_else(|| col.comment.clone())
+                .map(Value::Text)
+                .unwrap_or(Value::Null);
 
             rows.push(vec![
                 Value::Text(catalog_name.into()),
                 Value::Text(table_schema.clone()),
-                Value::Text(name.name.clone()),
+                Value::Text(table_name.clone()),
                 Value::Text(col.name.clone()),
                 Value::Int64(ordinal),
                 column_default,
@@ -248,6 +295,7 @@ pub fn columns_with_catalog(catalog: &dyn MutableCatalog, catalog_name: &str) ->
                 Value::Null, // CHARACTER_MAXIMUM_LENGTH — TEXT 不限长度
                 num_precision.map(Value::Int64).unwrap_or(Value::Null),
                 num_scale.map(Value::Int64).unwrap_or(Value::Null),
+                comment,
             ]);
         }
     }
@@ -367,7 +415,8 @@ pub fn table_constraints_with_catalog(
             None => continue,
         };
         let table_schema = schema_name(&name);
-        let table_name = &name.name;
+        let table_name_owned = table_name_only(&name);
+        let table_name: &str = &table_name_owned;
 
         // 列级 PRIMARY KEY：合并为单条约束
         let has_pk = schema.columns.iter().any(|c| c.primary_key);
@@ -511,7 +560,8 @@ pub fn referential_constraints_with_catalog(
             None => continue,
         };
         let table_schema = schema_name(&name);
-        let table_name = &name.name;
+        let table_name_owned = table_name_only(&name);
+        let table_name: &str = &table_name_owned;
 
         for col in &schema.columns {
             let fk = match &col.references {

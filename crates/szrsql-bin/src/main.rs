@@ -37,14 +37,17 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use szrsql_tx::lock::LockManager;
+use szrsql_tx::mvcc::MvccManager;
 
 use clap::Parser;
 use szrsql_protocol::pgwire::{
-    daemonize, install_crash_handler, CrashConfig, PgwireConfig, PgwireServer, PidFile,
-    ShutdownSignal,
+    auth::CredentialStore, daemonize, install_crash_handler, tls::TlsConfig, CrashConfig,
+    PgwireConfig, PgwireServer, PidFile, ShutdownSignal,
 };
 use szrsql_protocol::{HttpConfig, HttpServer, MetricsRegistry};
 use tracing_subscriber::EnvFilter;
+
+mod persistence;
 
 /// SzRSQL 数据库服务命令行参数。
 #[derive(Parser, Debug)]
@@ -68,6 +71,17 @@ struct Args {
     /// SIGINT/Ctrl+C 不受此超时影响，会立即强制中止。
     #[arg(long, default_value_t = 30)]
     shutdown_timeout: u64,
+
+    /// 连接空闲超时（秒，默认 300 = 5 分钟，0 表示禁用）。
+    ///
+    /// 当连接在此时间内未收到任何客户端消息时，服务器主动关闭连接并释放
+    /// session 资源（回滚未提交事务、释放行锁），避免客户端异常断开
+    /// （如被 kill -9 / Stop-Process 强制终止，TCP 未发送 FIN）导致的
+    /// 会话死锁和资源泄漏。
+    ///
+    /// 适用于所有协议（PostgreSQL / MySQL / TDS / Oracle）。
+    #[arg(long, default_value_t = 300)]
+    connection_idle_timeout: u64,
 
     /// Phase 4.12：崩溃日志输出目录。
     ///
@@ -114,27 +128,162 @@ struct Args {
     #[arg(long)]
     http_auth_token: Option<String>,
 
-    /// ADV-F-7：WAL 文件路径（启用 log-then-commit 事务模型）。
+    /// ADV-F-7：WAL 文件路径（启用 log-then-commit 事务模型，默认启用）。
     ///
     /// 设置后，服务器在启动时创建共享的 `WalWriter`，所有 session 的 COMMIT 操作
     /// 会先写入 WAL Commit 记录并 fsync，然后才向客户端返回成功。
     /// 这消除了"ACK 成功但数据未持久化"的风险。
     ///
-    /// 未设置时（默认），退化为 commit-then-log 行为，仅用于测试/兼容。
-    /// **生产环境强烈建议设置此参数**。
+    /// **2026-07-31 更新**：WAL 现已默认启用，默认路径为 `{data-dir}/wal.log`。
+    /// 设置为空字符串（`--wal-path ""`）可显式禁用 WAL（仅用于测试/兼容，不推荐）。
     #[arg(long)]
     wal_path: Option<PathBuf>,
+
+    /// Phase 4.5：MySQL 协议监听端口（默认 0 = 不监听）。
+    ///
+    /// 启用后，SzRSQL 同时监听 MySQL Wire Protocol，Navicat 可用 MySQL 协议连接。
+    /// 典型端口：3306（避免与本地 MySQL 冲突，建议用 3307/3308）。
+    #[arg(long, default_value_t = 0)]
+    mysql_port: u16,
+
+    /// Phase 4.5：TDS 协议监听端口（默认 0 = 不监听）。
+    ///
+    /// 启用后，SzRSQL 同时监听 SQL Server TDS 协议，Navicat 可用 SQL Server 协议连接。
+    /// 典型端口：1433。
+    #[arg(long, default_value_t = 0)]
+    tds_port: u16,
+
+    /// Phase 4.5：Oracle 协议监听端口（默认 0 = 不监听）。
+    ///
+    /// 启用后，SzRSQL 同时监听 Oracle Net (TNS) 协议，Navicat 可用 Oracle 协议连接。
+    /// 典型端口：1521（避免与本地 Oracle 冲突，建议用 1522/1523）。
+    #[arg(long, default_value_t = 0)]
+    oracle_port: u16,
+
+    /// Phase 4.5：Oracle 服务名（SID/Service Name，默认 ORCL）。
+    ///
+    /// 客户端连接时需指定匹配的服务名。
+    #[arg(long, default_value = "ORCL")]
+    oracle_service_name: String,
+
+    /// 数据持久化目录（默认 ./data，默认启用持久化）。
+    ///
+    /// 启动时从 `{data-dir}/tables.json` 加载表数据，后台每 5 秒自动保存。
+    /// 服务器关闭时执行最后一次保存。
+    /// 设置为空字符串可禁用持久化（不推荐，仅用于测试）。
+    #[arg(long, default_value = "./data")]
+    data_dir: String,
+
+    /// 强制以空表集启动（默认 false）。
+    ///
+    /// 仅在快照文件存在但解析失败时生效：
+    /// - false（默认）：快照损坏时拒绝启动，避免数据丢失。
+    /// - true：快照损坏时打印警告并以空表集启动（明确确认接受数据丢失风险）。
+    ///
+    /// 快照文件不存在（首次启动）时，无论此参数取值都返回空表集（正常行为）。
+    #[arg(long, default_value_t = false)]
+    force_empty: bool,
+
+    /// Phase 4.5：TLS 证书文件路径（PEM 格式）。
+    ///
+    /// 设置后启用 TLS 1.3 加密。需同时提供 --tls-key。
+    /// 客户端可通过 SSLRequest 升级为 TLS 加密连接。
+    #[arg(long)]
+    tls_cert: Option<PathBuf>,
+
+    /// Phase 4.5：TLS 私钥文件路径（PEM 格式）。
+    ///
+    /// 需与 --tls-cert 配合使用。
+    #[arg(long)]
+    tls_key: Option<PathBuf>,
+
+    /// Phase 4.5：客户端 CA 证书路径（PEM 格式，用于 mutual TLS）。
+    ///
+    /// 设置后启用 mutual TLS（双向认证）：服务器在 TLS 握手时验证客户端证书。
+    /// 需同时提供 --tls-cert 和 --tls-key。
+    #[arg(long)]
+    tls_client_ca: Option<PathBuf>,
+
+    /// Phase 4.5：强制 TLS（拒绝明文连接）。
+    ///
+    /// 为 true 时，客户端必须使用 SSLRequest 升级为 TLS 才能连接。
+    /// 直接发送明文 StartupMessage 的客户端将被拒绝。
+    /// 需同时提供 --tls-cert 和 --tls-key。
+    #[arg(long, default_value_t = false)]
+    require_tls: bool,
+
+    /// P7-4：启用 MCP（Model Context Protocol）服务器 stdio 模式。
+    ///
+    /// 启用后，主进程会 fork 一个独立线程运行 MCP stdio 主循环，
+    /// 暴露 35 个 LLM 工具（Schema/Query/SlowQuery/TxLock/Perf/Maintenance/
+    /// Alerting/Insight/Replication 9 大类别）。
+    ///
+    /// 其中 5 个 Replication 类工具直接操作 `ReplicationTaskManager`：
+    /// - `create_replication_task` / `list_replication_tasks` /
+    ///   `monitor_replication_task` / `stop_replication_task` /
+    ///   `replication_manager_stats`
+    ///
+    /// MCP 服务器与 pgwire 服务器共享 `CdcEngine`，所有 CDC 任务管理操作
+    /// 真实生效（非 mock）。
+    ///
+    /// 典型用法：`szrsql --mcp-stdio < mcp_input.json > mcp_output.json`
+    #[arg(long, default_value_t = false)]
+    mcp_stdio: bool,
+
+    /// P8-3：集群模式（single = 单节点自选举，cluster = 多节点 TCP 集群）。
+    #[arg(long, default_value = "single")]
+    cluster_mode: String,
+
+    /// P8-3：本节点 ID（集群模式必填，1-based）。
+    #[arg(long, default_value_t = 1)]
+    node_id: u64,
+
+    /// P8-3：Raft RPC 监听地址（集群模式必填，如 127.0.0.1:7000）。
+    #[arg(long)]
+    raft_listen_addr: Option<String>,
+
+    /// P8-3：集群所有节点地址列表（集群模式必填）。
+    ///
+    /// 格式：`node_id@host:port`，多个用逗号分隔。
+    /// 示例：`1@127.0.0.1:7000,2@127.0.0.1:7001,3@127.0.0.1:7002`
+    #[arg(long)]
+    peers: Option<String>,
+
+    /// P8-3：Raft tick 周期（毫秒，默认 50，与 heartbeat_interval 对齐）。
+    #[arg(long, default_value_t = 50)]
+    raft_tick_ms: u64,
+
+    /// OPT-4：pgwire 认证模式（trust = 信任所有连接，scram = SCRAM-SHA-256）。
+    ///
+    /// 默认 trust 保持向后兼容。启用 scram 后，凭据从 `--auth-file` 加载；
+    /// 文件不存在时自动创建空凭据文件（首次启动）。
+    /// CREATE ROLE / ALTER ROLE 修改的凭据会持久化回 auth-file。
+    #[arg(long, default_value = "trust")]
+    auth_mode: String,
+
+    /// OPT-4：SCRAM 凭据文件路径（默认 {data-dir}/auth.json）。
+    ///
+    /// 仅在 --auth-mode=scram 时生效。文件格式见 CredentialStore 文档。
+    #[arg(long)]
+    auth_file: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     // 初始化 tracing 日志
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
         .init();
 
+    // 手动创建 tokio runtime，设置 8MB worker 栈大小（默认 2MB 在 debug 模式下不够用）
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024) // 8MB
+        .build()?;
+
     let args = Args::parse();
 
+    // 在 8MB 栈大小的 tokio runtime 中运行所有 async 逻辑
+    runtime.block_on(async move {
     // Phase 4.13：守护进程化（在创建 PID 文件和 crash handler 之前执行）
     // daemonize 后进程 PID 会变（fork），所以 PID 文件必须在 daemonize 之后创建
     if args.daemon {
@@ -179,6 +328,7 @@ async fn main() -> anyhow::Result<()> {
         port = args.port,
         version = %args.server_version,
         shutdown_timeout_secs = args.shutdown_timeout,
+        connection_idle_timeout_secs = args.connection_idle_timeout,
         crash_log_dir = ?args.crash_log_dir,
         daemon = args.daemon,
         pid_file = ?args.pid_file,
@@ -188,26 +338,224 @@ async fn main() -> anyhow::Result<()> {
         "starting SzRSQL pgwire server"
     );
 
+    // 保存 host 副本，供 MySQL/TDS 协议监听复用（pgwire config 会 move args.host）
+    let listen_host = args.host.clone();
+
     let config = PgwireConfig::new()
         .with_host(args.host)
         .with_port(args.port)
         .with_server_version(args.server_version)
-        .with_shutdown_timeout(std::time::Duration::from_secs(args.shutdown_timeout));
+        .with_shutdown_timeout(std::time::Duration::from_secs(args.shutdown_timeout))
+        .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
 
-    // ADV-F-7：创建共享 WalWriter（如果指定了 --wal-path）
+    // Phase 4.5：TLS 配置（rustls 0.23 + tokio-rustls 0.26）
+    //
+    // --tls-cert + --tls-key：启用单向 TLS（服务器证书）
+    // --tls-client-ca：启用 mutual TLS（双向认证，验证客户端证书）
+    // --require-tls：强制 TLS（拒绝明文连接，防止降级攻击）
+    let config = if let (Some(cert_path), Some(key_path)) = (&args.tls_cert, &args.tls_key) {
+        let tls_config = if let Some(ca_path) = &args.tls_client_ca {
+            tracing::info!(
+                cert = %cert_path.display(),
+                key = %key_path.display(),
+                client_ca = %ca_path.display(),
+                require_tls = args.require_tls,
+                "TLS enabled with mutual TLS (client cert verification)"
+            );
+            TlsConfig::from_files_with_client_auth(cert_path, key_path, ca_path)?
+        } else {
+            tracing::info!(
+                cert = %cert_path.display(),
+                key = %key_path.display(),
+                require_tls = args.require_tls,
+                "TLS enabled (server cert only)"
+            );
+            TlsConfig::from_files(cert_path, key_path, None)?
+        };
+        config.with_tls(tls_config).with_require_tls(args.require_tls)
+    } else {
+        // 未提供 TLS 证书，校验参数一致性
+        if args.require_tls {
+            anyhow::bail!("--require-tls requires --tls-cert and --tls-key");
+        }
+        if args.tls_client_ca.is_some() {
+            anyhow::bail!("--tls-client-ca requires --tls-cert and --tls-key");
+        }
+        if args.tls_cert.is_some() || args.tls_key.is_some() {
+            anyhow::bail!("--tls-cert and --tls-key must be provided together");
+        }
+        tracing::info!("TLS not configured (plaintext only)");
+        config
+    };
+
+    // OPT-4：CredentialStore 接入启动流程
+    //
+    // --auth-mode=scram 时从凭据文件加载用户密码，启用 SCRAM-SHA-256 认证；
+    // 文件不存在时自动创建空凭据文件（首次启动）。--auth-mode=trust（默认）保持
+    // 向后兼容，不加载凭据文件。
+    //
+    // 凭据文件路径解析优先级：
+    //   1. --auth-file 显式指定
+    //   2. {data-dir}/auth.json（data-dir 非空时）
+    //   3. 跳过加载（data-dir 为空且未指定 --auth-file 时，使用空凭据）
+    let config = match args.auth_mode.as_str() {
+        "scram" => {
+            let auth_path = args
+                .auth_file
+                .clone()
+                .or_else(|| {
+                    if args.data_dir.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(&args.data_dir).join("auth.json"))
+                    }
+                });
+            match auth_path {
+                Some(path) => {
+                    let cred_store = match CredentialStore::load_from_file(&path) {
+                        Ok(Some(store)) => {
+                            tracing::info!(
+                                auth_file = %path.display(),
+                                users = store.credentials.len(),
+                                "SCRAM credentials loaded from file"
+                            );
+                            store
+                        }
+                        Ok(None) => {
+                            // 文件不存在：首次启动，创建空凭据文件
+                            let store = CredentialStore::new();
+                            if let Err(e) = store.save_to_file(&path) {
+                                tracing::warn!(
+                                    auth_file = %path.display(),
+                                    error = %e,
+                                    "failed to initialize SCRAM credentials file"
+                                );
+                            } else {
+                                tracing::info!(
+                                    auth_file = %path.display(),
+                                    "SCRAM credentials file created (first start)"
+                                );
+                            }
+                            store
+                        }
+                        Err(e) => {
+                            anyhow::bail!(
+                                "failed to load SCRAM credentials from {}: {}",
+                                path.display(),
+                                e
+                            );
+                        }
+                    };
+                    config.with_auth_mode(cred_store.to_auth_mode())
+                }
+                None => {
+                    tracing::warn!(
+                        "SCRAM auth-mode requested but no auth-file and no data-dir; \
+                         using empty credentials (all login will fail until CREATE ROLE)"
+                    );
+                    config.with_auth_mode(CredentialStore::new().to_auth_mode())
+                }
+            }
+        }
+        "trust" => {
+            tracing::info!("pgwire auth-mode=trust (all connections allowed)");
+            config
+        }
+        other => {
+            anyhow::bail!(
+                "invalid --auth-mode '{}': expected 'trust' or 'scram'",
+                other
+            );
+        }
+    };
+
+    // ADV-F-7：创建共享 WalWriter（默认启用）
     // 启用 log-then-commit 事务模型：COMMIT 先写 WAL 并 fsync，再 ACK 客户端
-    let wal_writer: Option<Arc<szrsql_tx::wal::WalWriter>> = if let Some(wal_path) = &args.wal_path {
+    //
+    // P0-TX-2 修复：启动时先回放已有 WAL 记录（崩溃恢复），再用 open（非 create_new）打开 WAL
+    //   - 旧实现用 create_new 截断 WAL，导致已 commit 但未 checkpoint 的事务记录丢失
+    //   - 新实现用 WalReplayer::replay_all 回放记录，再用 open 追加打开
+    //   - P0-1 修复：WAL 现在记录 TableData（表全量数据），回放时应用到表集合
+    //
+    // 2026-07-31 更新：WAL 默认启用，默认路径为 {data-dir}/wal.log
+    //   - 未指定 --wal-path 时使用默认路径
+    //   - --wal-path "" 显式禁用 WAL（仅用于测试）
+    //
+    // P0-1 修复：保存回放记录，供快照加载后应用 TableData
+    let mut wal_records: Vec<szrsql_tx::wal::WalRecord> = Vec::new();
+    // 解析 WAL 路径：未指定则使用 {data-dir}/wal.log；显式空字符串则禁用
+    let wal_path_resolved: Option<PathBuf> = match &args.wal_path {
+        Some(p) if p.as_os_str().is_empty() => {
+            tracing::warn!(
+                "WAL explicitly disabled (--wal-path \"\"), running in commit-then-log mode. \
+                 This is NOT recommended for production."
+            );
+            None
+        }
+        Some(p) => Some(p.clone()),
+        None => {
+            // 默认启用 WAL：使用 {data-dir}/wal.log
+            let default_wal = if args.data_dir.is_empty() {
+                PathBuf::from("./data/wal.log")
+            } else {
+                PathBuf::from(&args.data_dir).join("wal.log")
+            };
+            tracing::info!(
+                wal_path = %default_wal.display(),
+                "WAL enabled by default (use --wal-path \"\" to disable)"
+            );
+            Some(default_wal)
+        }
+    };
+    let wal_writer: Option<Arc<szrsql_tx::wal::WalWriter>> = if let Some(wal_path) = &wal_path_resolved {
         // 确保父目录存在
         if let Some(parent) = wal_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        match szrsql_tx::wal::WalWriter::create_new(wal_path) {
+        // P0-TX-2 修复：启动时回放已有 WAL 记录（崩溃恢复）
+        if wal_path.exists() {
+            match szrsql_tx::wal::WalReplayer::replay_all(wal_path) {
+                Ok(records) => {
+                    let commit_count = records
+                        .iter()
+                        .filter(|r| r.op_type == szrsql_tx::wal::WalOpType::Commit)
+                        .count();
+                    let abort_count = records
+                        .iter()
+                        .filter(|r| r.op_type == szrsql_tx::wal::WalOpType::Abort)
+                        .count();
+                    let table_data_count = records
+                        .iter()
+                        .filter(|r| r.op_type == szrsql_tx::wal::WalOpType::TableData)
+                        .count();
+                    tracing::info!(
+                        wal_path = %wal_path.display(),
+                        total_records = records.len(),
+                        commit_records = commit_count,
+                        abort_records = abort_count,
+                        table_data_records = table_data_count,
+                        "WAL replay completed on startup (crash recovery)"
+                    );
+                    // P0-1 修复：保存回放记录，供快照加载后应用 TableData
+                    wal_records = records;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        wal_path = %wal_path.display(),
+                        error = %e,
+                        "WAL replay failed on startup, continuing with fresh WAL"
+                    );
+                }
+            }
+        }
+        // P0-TX-2 修复：用 open（追加模式）而非 create_new（截断）打开 WAL
+        match szrsql_tx::wal::WalWriter::open(wal_path) {
             Ok(writer) => {
                 tracing::info!(
                     wal_path = %wal_path.display(),
-                    "WAL writer created, log-then-commit transaction model enabled"
+                    "WAL writer opened (append mode), log-then-commit transaction model enabled"
                 );
                 Some(Arc::new(writer))
             }
@@ -215,30 +563,368 @@ async fn main() -> anyhow::Result<()> {
                 tracing::error!(
                     error = %e,
                     wal_path = %wal_path.display(),
-                    "failed to create WAL writer, falling back to commit-then-log"
+                    "failed to open WAL writer, falling back to commit-then-log"
                 );
                 return Err(e.into());
             }
         }
     } else {
-        tracing::warn!(
-            "WAL path not specified (--wal-path), running in commit-then-log mode. \
-             This is NOT recommended for production. Set --wal-path to enable log-then-commit."
-        );
+        // wal_path_resolved 为 None（用户显式禁用 WAL）
         None
     };
 
-    // ADV-CONC-1：创建共享表存储、锁管理器和事务 ID 计数器（跨 session 全局唯一）
-    let shared_tables = Arc::new(RwLock::new(HashMap::new()));
+    // ADV-CONC-1：创建共享表存储、锁管理器和事务 ID 计数器（跨 session/跨协议全局唯一）
+    // 默认启用快照持久化：从 {data-dir}/tables.json 加载已保存的表数据
+    //
+    // P0-2 修复：快照文件损坏时不再静默降级为空表集（可能导致数据丢失）。
+    //   - 文件不存在（首次启动）→ 空表集（正常）
+    //   - 文件存在但损坏 + --force-empty=false → 拒绝启动（默认行为，保护数据）
+    //   - 文件存在但损坏 + --force-empty=true → warn + 空表集（用户明确确认）
+    let data_dir = std::path::PathBuf::from(&args.data_dir);
+    let mut loaded_tables = if args.data_dir.is_empty() {
+        tracing::info!("persistence disabled (--data-dir is empty)");
+        HashMap::new()
+    } else {
+        match persistence::load_snapshot(&data_dir) {
+            Ok(tables) => {
+                tracing::info!(
+                    table_count = tables.len(),
+                    data_dir = %data_dir.display(),
+                    "tables loaded from snapshot"
+                );
+                tables
+            }
+            Err(e) => {
+                if args.force_empty {
+                    tracing::warn!(
+                        error = %e,
+                        data_dir = %data_dir.display(),
+                        force_empty = true,
+                        "snapshot file is corrupted but --force-empty was set, \
+                         starting with empty table set (data loss accepted by operator)"
+                    );
+                    HashMap::new()
+                } else {
+                    tracing::error!(
+                        error = %e,
+                        data_dir = %data_dir.display(),
+                        "failed to load snapshot, refusing to start to avoid data loss \
+                         (use --force-empty to override and start with empty table set)"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+    };
+
+    // P0-1 修复：应用 WAL 中的 TableData 记录到已加载的表集合
+    //
+    // 顺序：先加载 JSON 快照（基础数据）→ 再回放 WAL TableData（增量提交）
+    // WAL 回放保证 ACID：仅应用紧随其后有 Commit 记录的 TableData，
+    // Abort 记录后的 TableData 被丢弃，未完成事务的 TableData 也不会应用。
+    if !wal_records.is_empty() {
+        let applied = persistence::apply_wal_table_data(&mut loaded_tables, &wal_records);
+        tracing::info!(
+            applied_table_count = applied,
+            "WAL TableData records applied to loaded tables (crash recovery)"
+        );
+    }
+
+    // OPT-3：接入 BufferPool 存储磁盘化
+    //
+    // 为每张已加载的表启用 BufferPool 持久化后端，数据文件落盘到 {data_dir}/{table_name}.db。
+    // - 仅当 --data-dir 非空时启用（空表示持久化被禁用，跳过保持纯内存模式）
+    // - enable_persistence 内部用 FilePageWriter/FilePageLoader 打开文件后端，文件不存在会自动创建
+    // - 单表失败仅记录 warning，不中断启动（避免单表故障影响整体可用性）
+    if !args.data_dir.is_empty() {
+        for (name, table_arc) in &loaded_tables {
+            let db_path = data_dir.join(format!("{name}.db"));
+            let mut table = table_arc.lock().await;
+            match table.enable_persistence(&db_path) {
+                Ok(()) => {
+                    tracing::info!(
+                        table = %name,
+                        path = %db_path.display(),
+                        "OPT-3: BufferPool persistence enabled for table"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        table = %name,
+                        path = %db_path.display(),
+                        error = %e,
+                        "OPT-3: failed to enable BufferPool persistence for table, \
+                         continuing without persistence (table stays in-memory only)"
+                    );
+                }
+            }
+        }
+    }
+
+    let shared_tables = Arc::new(RwLock::new(loaded_tables));
     let lock_manager = Arc::new(LockManager::new());
     let shared_txn_counter = Arc::new(AtomicU32::new(1));
+    // P1-2：跨会话共享的脏表跟踪器（用于增量快照机制）
+    let dirty_tracker = persistence::DirtyTableTracker::new();
+    // P0-TX-1 修复：创建共享 MVCC 事务管理器
+    // 启用 MVCC 事务可见性判断、SSI 写偏斜检测、First-Committer-Wins
+    let mvcc_manager = Arc::new(MvccManager::new());
+    tracing::info!("MVCC transaction manager initialized");
+
+    // P0-DIST-1/2/3：初始化分布式运行时（DistRuntime）
+    //
+    // 将 Raft 共识、TSO 时间戳服务、Multi-Raft 分片整合为统一的 DistRuntime，
+    // 作为 Arc<RwLock<DistRuntime>> 共享资源注入到 session/executor。
+    //
+    // 第一轮迭代（当前）：
+    // - 单节点模式：Raft 自选举为 Leader，无跨节点 RPC
+    // - 单分片：一个 Range 覆盖全键空间
+    // - TSO：全局单调递增时间戳，与 MVCC 协同
+    // - 真实写入路径：put/delete 通过 Raft propose → advance_commit → apply
+    //
+    // 后续迭代：
+    // - 迭代 2：多节点集群，跨节点日志复制 + 故障恢复
+    // - 迭代 3：Percolator 跨分片 2PC，TSO 与 MVCC 时间戳协同
+    // 注：DistRuntime 已初始化并通过 12 个集成测试 + 6 个 Executor 集成测试验证。
+    // P0-DIST 修复：实际注入到 PgwireServer → Session → Executor 完整链路（之前是 _dist_runtime 未注入）。
+    // P8-3：支持多节点集群模式（--cluster-mode cluster）
+    let dist_runtime = if args.cluster_mode == "cluster" {
+        // P8-3：多节点集群模式
+        let node_id = args.node_id;
+        let raft_listen_addr = args.raft_listen_addr.as_deref().unwrap_or("127.0.0.1:7000");
+        let peers_str = args.peers.as_deref().unwrap_or("");
+        let tick_ms = args.raft_tick_ms;
+
+        // 解析 peers: "1@host:port,2@host:port,..."
+        let mut all_nodes: Vec<szrsql_dist::raft::NodeId> = Vec::new();
+        let mut peer_addrs: Vec<(szrsql_dist::raft::NodeId, std::net::SocketAddr)> = Vec::new();
+        for entry in peers_str.split(',') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = entry.splitn(2, '@').collect();
+            if parts.len() != 2 {
+                tracing::warn!(entry = entry, "invalid peer entry, expected node_id@host:port");
+                continue;
+            }
+            let nid: u64 = match parts[0].parse() {
+                Ok(n) => n,
+                Err(_) => {
+                    tracing::warn!(entry = entry, "invalid node_id in peer entry");
+                    continue;
+                }
+            };
+            let addr: std::net::SocketAddr = match parts[1].parse() {
+                Ok(a) => a,
+                Err(_) => {
+                    tracing::warn!(entry = entry, "invalid socket addr in peer entry");
+                    continue;
+                }
+            };
+            all_nodes.push(nid);
+            peer_addrs.push((nid, addr));
+        }
+
+        if !all_nodes.contains(&node_id) {
+            all_nodes.push(node_id);
+        }
+        all_nodes.sort_unstable();
+        all_nodes.dedup();
+
+        tracing::info!(
+            node_id = node_id,
+            all_nodes = ?all_nodes,
+            peer_count = peer_addrs.len(),
+            raft_listen_addr = raft_listen_addr,
+            tick_ms = tick_ms,
+            "P8-3: starting in cluster mode"
+        );
+
+        match szrsql_dist::runtime::new_cluster_node_runtime(node_id, &all_nodes, 42) {
+            Ok(handle) => {
+                // 创建 TcpNetwork 并启动监听
+                let network = std::sync::Arc::new(szrsql_dist::network::TcpNetwork::new(node_id));
+                for (peer_id, addr) in &peer_addrs {
+                    if *peer_id != node_id {
+                        network.add_peer(*peer_id, *addr);
+                    }
+                }
+                let listen_addr: std::net::SocketAddr = raft_listen_addr.parse()
+                    .unwrap_or_else(|_| "127.0.0.1:7000".parse().unwrap());
+                if let Err(e) = network.start_listener(listen_addr) {
+                    tracing::warn!(error = %e, "P8-3: TcpNetwork listener start failed");
+                }
+
+                // 创建并启动集群驱动器
+                let mut driver = szrsql_dist::runtime::ClusterDriver::new(
+                    std::sync::Arc::clone(&handle),
+                    std::sync::Arc::clone(&network),
+                    tick_ms,
+                );
+                if let Err(e) = driver.start() {
+                    tracing::warn!(error = %e, "P8-3: ClusterDriver start failed");
+                }
+                // driver 必须存活到进程结束，forget 防止 Drop::stop 终止线程
+                std::mem::forget(driver);
+
+                tracing::info!(
+                    node_id = node_id,
+                    shard_count = handle.read().unwrap().shard_ids().len(),
+                    listen_addr = ?network.listen_addr(),
+                    peer_count = network.peer_count(),
+                    "P8-3: cluster node initialized (TCP network + driver thread)"
+                );
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "P8-3: Failed to initialize cluster DistRuntime, falling back without distributed runtime"
+                );
+                None
+            }
+        }
+    } else {
+        // 单节点模式（默认）
+        match szrsql_dist::runtime::new_single_node_runtime(1) {
+            Ok(handle) => {
+                // 初始化：所有分片 Raft 组自选举为 Leader
+                {
+                    let mut rt = handle.write().unwrap();
+                    if let Err(e) = rt.init() {
+                        tracing::warn!(error = %e, "DistRuntime init failed, continuing in degraded mode");
+                    }
+                }
+                tracing::info!(
+                    node_id = 1,
+                    shard_count = handle.read().unwrap().shard_ids().len(),
+                    current_ts = handle.read().unwrap().current_timestamp(),
+                    "P0-DIST-1/2/3: DistRuntime initialized (single-node, Raft + TSO + Multi-Raft integrated)"
+                );
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to initialize DistRuntime, continuing without distributed runtime"
+                );
+                None
+            }
+        }
+    };
+
+    // P7-1：初始化 CDC 引擎（变更数据捕获）
+    //
+    // 创建跨会话共享的 CdcEngine，注入到 PgwireServer → Session → Executor，
+    // 使所有 DML 操作（INSERT/UPDATE/DELETE）将行级变更事件分发到 CDC 引擎，
+    // 供已注册的 CdcObserver（如 ReplicationTask）消费。
+    //
+    // 事件流向：
+    //   Executor.mvcc_insert/update/delete → dispatch_cdc_* → CdcEngine.dispatch_event
+    //     → CdcObserverManager.notify → 所有已注册 CdcObserver.on_event
+    //
+    // 下游消费者（如 ReplicationTaskManager）可通过 cdc_engine.register_observer_arc
+    // 注册自身为 CdcObserver，接收实时变更事件流。
+    let cdc_engine = {
+        let observer_manager = Arc::new(szrsql_cdc::CdcObserverManager::new());
+        let engine = Arc::new(szrsql_cdc::CdcEngine::new(observer_manager));
+        tracing::info!(
+            observer_count = engine.observer_count(),
+            "P7-1: CDC engine initialized (DML event dispatch enabled)"
+        );
+        engine
+    };
+
+    // P7-4：初始化 ReplicationTaskManager + MCP 服务器
+    //
+    // 构造 ReplicationTaskManager（共享 cdc_engine，独立 slot_manager/decoder/schema_registry）
+    // 并在 `--mcp-stdio` 启用时启动 MCP stdio 主循环，暴露 35 个 LLM 工具。
+    //
+    // ReplicationTaskManager 是 5 个 Replication 类 MCP 工具的执行后端：
+    //   create_replication_task / list_replication_tasks /
+    //   monitor_replication_task / stop_replication_task /
+    //   replication_manager_stats
+    //
+    // MCP 服务器与 pgwire 服务器共享 cdc_engine，所有任务管理操作真实生效。
+    let replication_task_manager: Arc<szrsql_cdc::task::ReplicationTaskManager> = {
+        let slot_manager = Arc::new(szrsql_cdc::slot::SlotManager::in_memory());
+        let schema_registry = Arc::new(szrsql_cdc::schema::SchemaRegistry::new());
+        let decoder = Arc::new(szrsql_cdc::decoder::RowDecoder::new(schema_registry.clone()));
+        Arc::new(szrsql_cdc::task::ReplicationTaskManager::new(
+            slot_manager,
+            decoder,
+            schema_registry,
+            cdc_engine.clone(),
+        ))
+    };
+    tracing::info!(
+        "P7-4: ReplicationTaskManager initialized (shared CdcEngine, in-memory SlotManager)"
+    );
+
+    // P7-4：启动 MCP stdio 服务器（独立线程，不阻塞 pgwire 主路径）
+    let mcp_handle: Option<std::thread::JoinHandle<Result<(), szrsql_ai::mcp::McpError>>> =
+        if args.mcp_stdio {
+            tracing::info!(
+                "P7-4: starting MCP stdio server (35 tools, 9 categories, ReplicationTaskManager injected)"
+            );
+            // 构造一个独立的 ManagedCatalog 供 MCP 的 Schema 类工具读取元数据
+            // （MCP 服务器与 pgwire 的执行器 catalog 不共享，schema 同步需后续 P8 阶段补齐）
+            let catalog: Box<dyn szrsql_catalog::MutableCatalog> =
+                Box::new(szrsql_catalog::ManagedCatalog::new());
+            let backend = szrsql_ai::mcp_server::CatalogBackend::new(catalog)
+                .with_replication(replication_task_manager.clone());
+            let mut mcp_server = szrsql_ai::mcp_server::McpServerV2::new(Box::new(backend));
+            let handle = std::thread::Builder::new()
+                .name("szrsql-mcp-stdio".to_string())
+                .spawn(move || mcp_server.run_stdio())
+                .map_err(|e| anyhow::anyhow!("spawn MCP stdio thread failed: {e}"))?;
+            Some(handle)
+        } else {
+            None
+        };
+
+    // Clone for MySQL/TDS/Oracle servers (跨协议共享同一份表存储)
+    let mysql_shared_tables = shared_tables.clone();
+    let mysql_lock_manager = lock_manager.clone();
+    let mysql_shared_txn_counter = shared_txn_counter.clone();
+
+    // Phase 6.4：启动后台周期性快照保存任务（默认每 5 秒）
+    // P1-2：使用增量快照机制（仅保存脏表，无 DML 时跳过 IO）
+    // 服务器关闭时 abort 该任务并执行最后一次同步保存
+    let persistence_handle = if !args.data_dir.is_empty() {
+        let persist_tables = mysql_shared_tables.clone();
+        let persist_dir = data_dir.clone();
+        Some(persistence::spawn_periodic_incremental_save(
+            persist_tables,
+            persist_dir,
+            5,
+            dirty_tracker.clone(),
+        ))
+    } else {
+        None
+    };
+    // 保存一份 shared_tables 的 Arc 引用用于关闭时最终保存
+    let shutdown_persist_tables = mysql_shared_tables.clone();
+    let shutdown_dirty_tracker = dirty_tracker.clone();
 
     let mut server_builder = PgwireServer::new(config)
         .with_concurrency(shared_tables, lock_manager)
-        .with_shared_txn_counter(shared_txn_counter);
+        .with_shared_txn_counter(shared_txn_counter)
+        .with_mvcc(mvcc_manager.clone());
+    // P0-DIST-1/2/3：注入分布式运行时句柄（实际接入，非 _dist_runtime 假装入）
+    if let Some(dist_rt) = dist_runtime {
+        server_builder = server_builder.with_dist_runtime(dist_rt);
+    }
+    // P7-1：注入 CDC 引擎，启用 DML 事件分发
+    server_builder = server_builder.with_cdc_engine(cdc_engine);
     if let Some(writer) = wal_writer {
         server_builder = server_builder.with_wal_writer(writer);
     }
+    // P1-2：注入脏表跟踪器，启用增量快照机制
+    // session 在事务 COMMIT 成功后会调用 tracker.mark_dirty_many 标记修改过的表，
+    // 后台周期性快照任务仅序列化脏表，避免无 DML 时的无谓 IO
+    server_builder = server_builder.with_dirty_tracker(Arc::new(dirty_tracker));
     let server = server_builder;
 
     // Phase 4.5.8-4.5.10：HTTP 管理服务器
@@ -270,6 +956,88 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // Phase 4.5：MySQL 协议监听（L2 协议级兼容）
+    // 启用后 Navicat 可用 MySQL 协议连接，典型端口 3306/3307
+    let mysql_handle = if args.mysql_port != 0 {
+        let mysql_config = szrsql_mysql_protocol::MysqlConfig::new()
+            .with_host(listen_host.clone())
+            .with_port(args.mysql_port)
+            .with_server_version("8.0-szrsql".to_string())
+            .with_auth_mode(szrsql_mysql_protocol::AuthMode::Trust)
+            .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
+        let mysql_server = szrsql_mysql_protocol::MysqlServer::new(mysql_config)
+            .with_shared_tables(mysql_shared_tables)
+            .with_lock_manager(mysql_lock_manager)
+            .with_shared_txn_counter(mysql_shared_txn_counter);
+        let mysql_host = listen_host.clone();
+        let mysql_port = args.mysql_port;
+        Some(tokio::spawn(async move {
+            tracing::info!(
+                host = %mysql_host,
+                port = mysql_port,
+                "MySQL protocol server starting (L2 wire-compatible)"
+            );
+            if let Err(e) = mysql_server.serve().await {
+                tracing::error!(error = %e, "MySQL protocol server exited with error");
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Phase 4.5：TDS 协议监听（L2 协议级兼容，SQL Server）
+    // 启用后 Navicat 可用 SQL Server 协议连接，典型端口 1433
+    let tds_handle = if args.tds_port != 0 {
+        let tds_config = szrsql_tds_protocol::TdsConfig::new()
+            .with_host(listen_host.clone())
+            .with_port(args.tds_port)
+            .with_server_version("15.0-szrsql".to_string())
+            .with_auth_mode(szrsql_tds_protocol::AuthMode::Trust)
+            .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
+        let tds_server = szrsql_tds_protocol::TdsServer::new(tds_config);
+        let tds_host = listen_host.clone();
+        let tds_port = args.tds_port;
+        Some(tokio::spawn(async move {
+            tracing::info!(
+                host = %tds_host,
+                port = tds_port,
+                "TDS protocol server starting (L2 wire-compatible, SQL Server)"
+            );
+            if let Err(e) = tds_server.serve().await {
+                tracing::error!(error = %e, "TDS protocol server exited with error");
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Phase 4.5：Oracle 协议监听（L2 协议级兼容，Oracle Net/TNS）
+    // 启用后 Navicat 可用 Oracle 协议连接，典型端口 1521/1522
+    let oracle_handle = if args.oracle_port != 0 {
+        let oracle_config = szrsql_oracle_bridge::OracleConfig::new()
+            .with_host(listen_host.clone())
+            .with_port(args.oracle_port)
+            .with_service_name(args.oracle_service_name.clone())
+            .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
+        let oracle_server = szrsql_oracle_bridge::OracleServer::new(oracle_config);
+        let oracle_host = listen_host.clone();
+        let oracle_port = args.oracle_port;
+        let oracle_service = args.oracle_service_name.clone();
+        Some(tokio::spawn(async move {
+            tracing::info!(
+                host = %oracle_host,
+                port = oracle_port,
+                service = %oracle_service,
+                "Oracle Net server starting (L2 wire-compatible, TNS protocol)"
+            );
+            if let Err(e) = oracle_server.serve().await {
+                tracing::error!(error = %e, "Oracle Net server exited with error");
+            }
+        }))
+    } else {
+        None
+    };
+
     // Phase 4.12：安装信号处理器，返回 ShutdownSignal（Graceful=SIGTERM / Immediate=SIGINT）
     let shutdown_signal = setup_signal_handler();
 
@@ -278,9 +1046,18 @@ async fn main() -> anyhow::Result<()> {
     // - Immediate（SIGINT/Ctrl+C）：立即 abort_all，不等待
     if let Err(e) = server.serve_with_shutdown(shutdown_signal).await {
         tracing::error!(error = %e, "pgwire server exited with error");
-        // 即使 pgwire 失败，也要等待 HTTP 服务器退出
+        // 即使 pgwire 失败，也要等待 HTTP/MySQL/TDS/Oracle 服务器退出
         if let Some(handle) = http_handle {
             let _ = handle.await;
+        }
+        if let Some(handle) = mysql_handle {
+            handle.abort();
+        }
+        if let Some(handle) = tds_handle {
+            handle.abort();
+        }
+        if let Some(handle) = oracle_handle {
+            handle.abort();
         }
         return Err(e.into());
     }
@@ -297,8 +1074,52 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Phase 4.5：终止 MySQL/TDS/Oracle 协议监听（pgwire 退出时一并终止）
+    if let Some(handle) = mysql_handle {
+        handle.abort();
+        tracing::info!("MySQL protocol server shutdown (aborted)");
+    }
+    if let Some(handle) = tds_handle {
+        handle.abort();
+        tracing::info!("TDS protocol server shutdown (aborted)");
+    }
+    if let Some(handle) = oracle_handle {
+        handle.abort();
+        tracing::info!("Oracle Net server shutdown (aborted)");
+    }
+
+    // Phase 6.4：终止周期性保存任务，执行最后一次同步保存
+    if let Some(handle) = persistence_handle {
+        handle.abort();
+        tracing::info!("periodic snapshot save task stopped");
+    }
+    if !args.data_dir.is_empty() {
+        tracing::info!("saving final snapshot before shutdown...");
+        // P1-2：使用增量快照保存最后的脏表（若无 DML 则跳过）
+        if let Err(e) =
+            persistence::save_incremental_snapshot(&shutdown_persist_tables, &data_dir, &shutdown_dirty_tracker).await
+        {
+            tracing::warn!(error = %e, "final incremental snapshot save failed");
+        } else {
+            tracing::info!("final snapshot saved successfully");
+        }
+    }
+
+    // P7-4：等待 MCP stdio 线程退出
+    // MCP 主循环在 stdin EOF 或收到 shutdown 请求时退出，
+    // 此处 join 确保线程资源正确回收（最多等待 5 秒，超时强制 detach）
+    if let Some(handle) = mcp_handle {
+        tracing::info!("waiting for MCP stdio server to exit...");
+        match handle.join() {
+            Ok(Ok(())) => tracing::info!("MCP stdio server shutdown complete"),
+            Ok(Err(e)) => tracing::warn!(error = ?e, "MCP stdio server exited with error"),
+            Err(_) => tracing::warn!("MCP stdio server thread panicked"),
+        }
+    }
+
     // _pid_file 在此处 drop，自动删除 PID 文件
     Ok(())
+    })
 }
 
 /// Phase 4.12：安装信号处理器，返回一个在收到信号时完成的 future。

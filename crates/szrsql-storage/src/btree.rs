@@ -21,10 +21,12 @@
 //! 17      4     parent (u32 LE)
 //! 21      ...   keys（每个 key：4B key_len + key_len 字节）
 //! ...     ...   children（Internal：(keys+1) × 4B；Leaf：0）
-//! ...     ...   tuple_ids（Leaf：keys × 2B；Internal：0）
+//! ...     ...   tuple_ids（Leaf：keys × 4B；Internal：0）
 //! ```
 //!
 //! Header 固定 21 字节。
+//!
+//! 注：P9-1 将 tuple_ids 从 2B (u16) 扩容为 4B (u32)，支持超过 65535 行的大表索引。
 
 use std::cmp::Ordering;
 use std::ops::Bound;
@@ -118,6 +120,12 @@ pub enum BTreeError {
     BulkLoadEmpty,
     #[error("bulk load batch size too small: {0} (min: 2)")]
     BulkLoadBatchTooSmall(usize),
+    /// P0-3 修复：BufferPool 持久化错误
+    #[error("persistence error: {0}")]
+    PersistenceError(String),
+    /// P0-3 修复：节点编码超出单页容量
+    #[error("node encoded size {encoded} exceeds page body capacity {max}")]
+    NodeExceedsPageCapacity { encoded: usize, max: usize },
 }
 
 // =====================================================================
@@ -140,7 +148,9 @@ pub struct BTreeNode {
     pub children: Vec<u32>,
     /// 叶子节点：tuple_id 列表（len == keys.len()）
     /// 内部节点：空
-    pub tuple_ids: Vec<u16>,
+    ///
+    /// P9-1：从 u16 扩容为 u32，支持超过 65535 行的大表索引。
+    pub tuple_ids: Vec<u32>,
     /// 右兄弟页 ID（叶子节点范围扫描用，0 = 无）
     pub next_sibling: u32,
     /// 左兄弟页 ID（叶子节点合并借键用，0 = 无）
@@ -278,7 +288,7 @@ impl BTreeNode {
     pub fn encode(&self) -> Vec<u8> {
         let total_keys_len: usize = self.keys.iter().map(|k| 4 + k.len()).sum();
         let children_len = self.children.len() * 4;
-        let tuple_ids_len = self.tuple_ids.len() * 2;
+        let tuple_ids_len = self.tuple_ids.len() * 4; // P9-1: u32 = 4B
         let total = BTREE_NODE_HEADER_SIZE + total_keys_len + children_len + tuple_ids_len;
 
         let mut buf = Vec::with_capacity(total);
@@ -367,18 +377,18 @@ impl BTreeNode {
                 }
             }
             NodeType::Leaf => {
-                let tid_cap = key_count.min(buf.len().saturating_sub(pos) / 2);
+                let tid_cap = key_count.min(buf.len().saturating_sub(pos) / 4); // P9-1: u32 = 4B
                 tuple_ids.reserve(tid_cap);
                 for _ in 0..key_count {
-                    if pos + 2 > buf.len() {
+                    if pos + 4 > buf.len() {
                         return Err(BTreeError::BufferTooShort {
-                            need: pos + 2,
+                            need: pos + 4,
                             have: buf.len(),
                         });
                     }
-                    let t = u16::from_le_bytes([buf[pos], buf[pos + 1]]);
+                    let t = u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]);
                     tuple_ids.push(t);
-                    pos += 2;
+                    pos += 4;
                 }
             }
         }
@@ -602,6 +612,7 @@ pub fn compare_keys(a: &[u8], b: &[u8]) -> Ordering {
 /// - 树高度查询
 ///
 /// 存储使用内存 `HashMap<u32, BTreeNode>`，后续 Phase 集成 BufferPool。
+#[derive(Debug, Clone)]
 pub struct BTree {
     /// 根节点 page_id
     root_page_id: u32,
@@ -716,7 +727,7 @@ impl BTree {
     ///
     /// 返回 key 对应的 tuple_id，未找到返回 None。
     #[instrument(skip(self, key), fields(key_len = key.len(), root_page_id = self.root_page_id), level = "trace")]
-    pub fn search(&self, key: &[u8]) -> Result<Option<u16>, BTreeError> {
+    pub fn search(&self, key: &[u8]) -> Result<Option<u32>, BTreeError> {
         let mut current = self.root_page_id;
         loop {
             let node = self.read_node(current)?;
@@ -747,7 +758,7 @@ impl BTree {
     /// 若 key 已存在，更新 tuple_id（upsert 语义）。
     /// 满节点递归分裂，根节点分裂时树高度 +1。
     #[instrument(skip(self, key), fields(key_len = key.len(), tuple_id, root_page_id = self.root_page_id), level = "trace")]
-    pub fn insert(&mut self, key: Vec<u8>, tuple_id: u16) -> Result<(), BTreeError> {
+    pub fn insert(&mut self, key: Vec<u8>, tuple_id: u32) -> Result<(), BTreeError> {
         tracing::Span::current().record("tuple_id", tuple_id);
         // 1. 搜索路径（从根到叶）
         let path = self.find_path_to_leaf(&key)?;
@@ -1236,7 +1247,7 @@ impl BTree {
     /// 中序遍历，返回所有 (key, tuple_id) 按升序排列
     ///
     /// 用于验证 B-Tree 不变量：keys 严格递增。
-    pub fn in_order_traverse(&self) -> Result<Vec<(Vec<u8>, u16)>, BTreeError> {
+    pub fn in_order_traverse(&self) -> Result<Vec<(Vec<u8>, u32)>, BTreeError> {
         let mut result = Vec::new();
         self.in_order_recursive(self.root_page_id, &mut result)?;
         Ok(result)
@@ -1245,7 +1256,7 @@ impl BTree {
     fn in_order_recursive(
         &self,
         page_id: u32,
-        result: &mut Vec<(Vec<u8>, u16)>,
+        result: &mut Vec<(Vec<u8>, u32)>,
     ) -> Result<(), BTreeError> {
         let node = self.read_node(page_id)?;
         match node.node_type {
@@ -1268,7 +1279,7 @@ impl BTree {
     }
 
     /// 中序遍历仅叶子节点（实际数据），返回 (key, tuple_id) 按升序
-    pub fn in_order_leaf_traverse(&self) -> Result<Vec<(Vec<u8>, u16)>, BTreeError> {
+    pub fn in_order_leaf_traverse(&self) -> Result<Vec<(Vec<u8>, u32)>, BTreeError> {
         let mut result = Vec::new();
         // 找到最左叶子
         let mut current = self.root_page_id;
@@ -1370,7 +1381,7 @@ impl BTree {
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
-    ) -> Result<Vec<(Vec<u8>, u16)>, BTreeError> {
+    ) -> Result<Vec<(Vec<u8>, u32)>, BTreeError> {
         self.range_scan_with_limit(lower, upper, None)
     }
 
@@ -1383,7 +1394,7 @@ impl BTree {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
         limit: Option<usize>,
-    ) -> Result<Vec<(Vec<u8>, u16)>, BTreeError> {
+    ) -> Result<Vec<(Vec<u8>, u32)>, BTreeError> {
         if let Some(0) = limit {
             return Ok(Vec::new());
         }
@@ -1407,7 +1418,7 @@ impl BTree {
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
-    ) -> Result<Vec<(Vec<u8>, u16)>, BTreeError> {
+    ) -> Result<Vec<(Vec<u8>, u32)>, BTreeError> {
         // 简化实现：先正向扫描，再反转
         // 性能优化留待 REFACTOR 阶段或后续 Phase（实现反向 cursor）
         let mut result = self.range_scan(lower, upper)?;
@@ -1452,10 +1463,10 @@ impl BTree {
     /// 调用后 `self` 的全部状态被替换为批量构建结果。
     pub fn bulk_load<I>(&mut self, items: I) -> Result<(), BTreeError>
     where
-        I: IntoIterator<Item = (Vec<u8>, u16)>,
+        I: IntoIterator<Item = (Vec<u8>, u32)>,
     {
         // 1. 物化为 Vec，校验升序
-        let items_vec: Vec<(Vec<u8>, u16)> = items.into_iter().collect();
+        let items_vec: Vec<(Vec<u8>, u32)> = items.into_iter().collect();
         if items_vec.is_empty() {
             return Err(BTreeError::BulkLoadEmpty);
         }
@@ -1509,7 +1520,7 @@ impl BTree {
                 if borrow < prev_len {
                     let split_at = prev_len - borrow;
                     let moved_keys: Vec<Vec<u8>> = leaves[prev_idx].keys.split_off(split_at);
-                    let moved_tids: Vec<u16> = leaves[prev_idx].tuple_ids.split_off(split_at);
+                    let moved_tids: Vec<u32> = leaves[prev_idx].tuple_ids.split_off(split_at);
                     let last = leaves.last_mut().unwrap();
                     let mut new_keys = moved_keys;
                     new_keys.extend_from_slice(&last.keys);
@@ -1580,7 +1591,7 @@ impl BTree {
     /// 便捷构造函数，等价于 `BTree::new(order)` + `bulk_load(items)`。
     pub fn from_sorted_iter<I>(order: usize, items: I) -> Result<Self, BTreeError>
     where
-        I: IntoIterator<Item = (Vec<u8>, u16)>,
+        I: IntoIterator<Item = (Vec<u8>, u32)>,
     {
         let mut tree = Self::new(order);
         tree.bulk_load(items)?;
@@ -1605,7 +1616,7 @@ impl BTree {
     /// 真正的"磁盘流式构建"需配合 Phase 2 buffer pool 扩展。
     pub fn bulk_load_batched<I>(&mut self, items: I, batch_size: usize) -> Result<(), BTreeError>
     where
-        I: IntoIterator<Item = (Vec<u8>, u16)>,
+        I: IntoIterator<Item = (Vec<u8>, u32)>,
     {
         if batch_size < 2 {
             return Err(BTreeError::BulkLoadBatchTooSmall(batch_size));
@@ -1618,7 +1629,7 @@ impl BTree {
         let mut leaves: Vec<BTreeNode> = Vec::new();
         let mut current_leaf = BTreeNode::new_leaf(self.alloc_page_id());
         let mut last_key: Option<Vec<u8>> = None;
-        let mut batch_buf: Vec<(Vec<u8>, u16)> = Vec::with_capacity(batch_size);
+        let mut batch_buf: Vec<(Vec<u8>, u32)> = Vec::with_capacity(batch_size);
         let mut total_items: usize = 0;
 
         for item in items {
@@ -1715,7 +1726,7 @@ impl BTree {
                 if borrow < prev_len {
                     let split_at = prev_len - borrow;
                     let moved_keys: Vec<Vec<u8>> = leaves[prev_idx].keys.split_off(split_at);
-                    let moved_tids: Vec<u16> = leaves[prev_idx].tuple_ids.split_off(split_at);
+                    let moved_tids: Vec<u32> = leaves[prev_idx].tuple_ids.split_off(split_at);
                     let last = leaves.last_mut().unwrap();
                     let mut new_keys = moved_keys;
                     new_keys.extend_from_slice(&last.keys);
@@ -1775,6 +1786,142 @@ impl BTree {
         self.read_node_mut(self.root_page_id)?.parent = 0;
         Ok(())
     }
+
+    // =================================================================
+    //  P0-3 修复：BufferPool 持久化集成
+    //
+    //  将 BTree 的所有节点通过 BufferPool 持久化到磁盘，实现真正的磁盘持久化。
+    //  每个节点编码为一个 PageType::Index 类型的 Page，通过 BufferPool::put_page 写入。
+    //  调用方应在 persist_to_buffer_pool 后调用 BufferPool::flush_all 确保数据落盘。
+    //  加载时通过 load_from_buffer_pool 从 BufferPool 读取节点并重建 BTree。
+    // =================================================================
+
+    /// 将 BTree 的所有节点通过 BufferPool 持久化到磁盘
+    ///
+    /// # 算法
+    ///
+    /// 1. 遍历 `pages` 中的所有节点
+    /// 2. 每个节点编码为字节串（`BTreeNode::encode`）
+    /// 3. 创建 `PageType::Index` 类型的 Page，将编码写入 body
+    /// 4. 通过 `BufferPool::put_page` 写入缓冲池（自动 mark dirty）
+    /// 5. 调用方需后续调用 `BufferPool::flush_all` 确保落盘
+    ///
+    /// # 返回
+    ///
+    /// 返回 `PersistedBTreeMeta`，包含重建 BTree 所需的元数据。
+    ///
+    /// # 错误
+    ///
+    /// - `NodeExceedsPageCapacity`: 节点编码后超过单页 body 容量（8144 字节）
+    /// - `PersistenceError`: BufferPool 写入失败
+    pub fn persist_to_buffer_pool(
+        &self,
+        pool: &crate::buffer::BufferPool,
+    ) -> Result<PersistedBTreeMeta, BTreeError> {
+        use crate::page::{Page, PageType, PAGE_BODY_SIZE};
+
+        for node in self.pages.values() {
+            let encoded = node.encode();
+            if encoded.len() > PAGE_BODY_SIZE {
+                return Err(BTreeError::NodeExceedsPageCapacity {
+                    encoded: encoded.len(),
+                    max: PAGE_BODY_SIZE,
+                });
+            }
+            let mut page = Page::new(node.page_id, PageType::Index);
+            page.body[..encoded.len()].copy_from_slice(&encoded);
+            page.header.free_offset = encoded.len() as u16;
+            page.header.tuple_count = node.key_count() as u16;
+            page.update_checksum();
+            pool.put_page(node.page_id, page)
+                .map_err(|e| BTreeError::PersistenceError(e.to_string()))?;
+        }
+
+        Ok(PersistedBTreeMeta {
+            root_page_id: self.root_page_id,
+            order: self.order,
+            next_page_id: self.next_page_id,
+            page_count: self.pages.len() as u32,
+        })
+    }
+
+    /// 从 BufferPool 加载 BTree
+    ///
+    /// # 算法
+    ///
+    /// 1. 从 `meta.root_page_id` 开始 BFS 遍历
+    /// 2. 通过 `BufferPool::read_page` 读取每个节点的 Page
+    /// 3. 从 Page body 解码 `BTreeNode`（`BTreeNode::decode`）
+    /// 4. 对于 Internal 节点，将 children 中的 page_id 加入遍历队列
+    /// 5. 重建 BTree 结构
+    ///
+    /// # 参数
+    ///
+    /// - `pool`: BufferPool 引用（需与 persist 时使用相同的存储后端）
+    /// - `meta`: 持久化时返回的元数据
+    ///
+    /// # 错误
+    ///
+    /// - `PersistenceError`: BufferPool 读取失败
+    /// - `BufferTooShort`: 节点解码失败
+    pub fn load_from_buffer_pool(
+        pool: &crate::buffer::BufferPool,
+        meta: PersistedBTreeMeta,
+    ) -> Result<Self, BTreeError> {
+        use std::collections::{HashMap, HashSet, VecDeque};
+
+        let mut pages: HashMap<u32, BTreeNode> = HashMap::new();
+        let mut queue: VecDeque<u32> = VecDeque::new();
+        queue.push_back(meta.root_page_id);
+        let mut visited: HashSet<u32> = HashSet::new();
+
+        while let Some(page_id) = queue.pop_front() {
+            if !visited.insert(page_id) {
+                continue;
+            }
+            let page = pool
+                .read_page(page_id)
+                .map_err(|e| BTreeError::PersistenceError(e.to_string()))?;
+            let encoded_len = page.header.free_offset as usize;
+            if encoded_len == 0 {
+                // 空页：可能是未写入的页，跳过
+                tracing::warn!(page_id, "encountered empty page during BTree load, skipped");
+                continue;
+            }
+            let node = BTreeNode::decode(&page.body[..encoded_len])?;
+            // 收集 Internal 节点的子节点
+            if node.is_internal() {
+                for &child_id in &node.children {
+                    if child_id != 0 {
+                        queue.push_back(child_id);
+                    }
+                }
+            }
+            pages.insert(page_id, node);
+        }
+
+        Ok(Self {
+            root_page_id: meta.root_page_id,
+            order: meta.order,
+            pages,
+            next_page_id: meta.next_page_id,
+        })
+    }
+}
+
+/// BTree 持久化元数据（调用方需保存，用于后续加载）
+///
+/// 包含重建 BTree 所需的全部信息：根节点页 ID、阶数、下一个可用页 ID、页总数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersistedBTreeMeta {
+    /// 根节点 page_id
+    pub root_page_id: u32,
+    /// B-Tree 阶数
+    pub order: usize,
+    /// 下一个将分配的 page_id
+    pub next_page_id: u32,
+    /// 已持久化的页总数
+    pub page_count: u32,
 }
 
 // =====================================================================
@@ -1798,7 +1945,7 @@ mod tests {
         let mut node = BTreeNode::new_leaf(page_id);
         for (i, k) in keys.into_iter().enumerate() {
             node.keys.push(make_key(k));
-            node.tuple_ids.push(i as u16);
+            node.tuple_ids.push(i as u32);
         }
         node
     }
@@ -1897,7 +2044,7 @@ mod tests {
         assert!(!node.is_full(order));
         for i in 0..4 {
             node.keys.push(make_key(i));
-            node.tuple_ids.push(i as u16);
+            node.tuple_ids.push(i as u32);
         }
         assert!(node.is_full(order));
         assert!(!node.is_full(order + 1));
@@ -1911,7 +2058,7 @@ mod tests {
         assert!(node.is_underflow(order));
         for i in 0..2 {
             node.keys.push(make_key(i));
-            node.tuple_ids.push(i as u16);
+            node.tuple_ids.push(i as u32);
         }
         // 2 keys = min_keys → not underflow
         assert!(!node.is_underflow(order));
@@ -1924,7 +2071,7 @@ mod tests {
         assert!(!node.is_at_least_half_full(order));
         for i in 0..2 {
             node.keys.push(make_key(i));
-            node.tuple_ids.push(i as u16);
+            node.tuple_ids.push(i as u32);
         }
         assert!(node.is_at_least_half_full(order));
     }
@@ -2111,7 +2258,7 @@ mod tests {
         original.parent = 5;
         for (i, k) in [10i64, 20, 30, 40, 50].iter().enumerate() {
             original.keys.push(make_key(*k));
-            original.tuple_ids.push(i as u16);
+            original.tuple_ids.push(i as u32);
         }
         let encoded = original.encode();
         let decoded = BTreeNode::decode(&encoded).unwrap();
@@ -2133,7 +2280,7 @@ mod tests {
         original.prev_sibling = u32::MAX - 2;
         original.parent = u32::MAX - 3;
         original.keys.push(make_key(42));
-        original.tuple_ids.push(u16::MAX);
+        original.tuple_ids.push(u32::MAX);
         let encoded = original.encode();
         let decoded = BTreeNode::decode(&encoded).unwrap();
         assert_eq!(original, decoded);
@@ -2543,7 +2690,7 @@ mod tests {
                 let k = encode_i64_key(i as i64);
                 node.keys.push(k);
                 if is_leaf {
-                    node.tuple_ids.push((i % 65536) as u16);
+                    node.tuple_ids.push((i % 65536) as u32);
                 } else {
                     node.children.push((i as u32) + 1000);
                 }
@@ -2571,7 +2718,7 @@ mod tests {
                 let mut n = BTreeNode::new_leaf(1);
                 for (i, k) in keys.iter().enumerate() {
                     n.keys.push(encode_i64_key(*k));
-                    n.tuple_ids.push(i as u16);
+                    n.tuple_ids.push(i as u32);
                 }
                 n
             } else {
@@ -2697,14 +2844,14 @@ mod tests {
     fn btree_insert_sequential_100_keys() {
         let mut bt = BTree::new(4);
         for i in 0..100i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 中序遍历严格递增（使用 in_order_leaf_traverse 只返回叶子节点的数据 key）
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(pairs.len(), 100);
         for (i, (k, tid)) in pairs.iter().enumerate() {
             assert_eq!(*k, make_key(i as i64), "key at index {} mismatch", i);
-            assert_eq!(*tid, i as u16, "tuple_id at index {} mismatch", i);
+            assert_eq!(*tid, i as u32, "tuple_id at index {} mismatch", i);
         }
         // 高度 >= 1（100 个 key、order=4，应该多次分裂）
         assert!(
@@ -2714,7 +2861,7 @@ mod tests {
         );
         // 所有 key 可被 search 找到
         for i in 0..100i64 {
-            assert_eq!(bt.search(&make_key(i)).unwrap(), Some(i as u16));
+            assert_eq!(bt.search(&make_key(i)).unwrap(), Some(i as u32));
         }
     }
 
@@ -2724,7 +2871,7 @@ mod tests {
     fn btree_insert_sequential_100000_keys_in_order_strictly_increasing() {
         let mut bt = BTree::with_default_order();
         for i in 0..100_000i64 {
-            bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+            bt.insert(make_key(i), (i % 65536) as u32).unwrap();
         }
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(pairs.len(), 100_000, "expected 100000 pairs");
@@ -2766,7 +2913,7 @@ mod tests {
             keys.swap(i, j);
         }
         for (idx, &k) in keys.iter().enumerate() {
-            bt.insert(make_key(k), idx as u16).unwrap();
+            bt.insert(make_key(k), idx as u32).unwrap();
         }
         // 中序遍历应为 0..100 严格递增
         let pairs = bt.in_order_leaf_traverse().unwrap();
@@ -2776,7 +2923,7 @@ mod tests {
         }
         // search 验证：每个 key 的 tuple_id 应等于其原始插入顺序
         for (idx, &k) in keys.iter().enumerate() {
-            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(idx as u16));
+            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(idx as u32));
         }
     }
 
@@ -2797,7 +2944,7 @@ mod tests {
             keys.swap(i, j);
         }
         for &k in &keys {
-            bt.insert(make_key(k), (k % 65536) as u16).unwrap();
+            bt.insert(make_key(k), (k % 65536) as u32).unwrap();
         }
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(pairs.len(), n);
@@ -2842,7 +2989,7 @@ mod tests {
         bt.insert(make_key(10), 1).unwrap();
         let nodes_before = bt.node_count();
         // 重复插入 1000 次同一个 key
-        for i in 0..1000u16 {
+        for i in 0..1000u32 {
             bt.insert(make_key(10), i).unwrap();
         }
         let nodes_after = bt.node_count();
@@ -2858,18 +3005,18 @@ mod tests {
         // 先插入足够多 key 触发分裂，再重复插入已有 key
         let mut bt = BTree::new(4);
         for i in 0..50i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         let nodes_before = bt.node_count();
         // 重复插入
         for i in 0..50i64 {
-            bt.insert(make_key(i), (i + 1000) as u16).unwrap();
+            bt.insert(make_key(i), (i + 1000) as u32).unwrap();
         }
         let nodes_after = bt.node_count();
         assert_eq!(nodes_before, nodes_after, "upsert should not grow tree");
         // 验证 tuple_id 已更新
         for i in 0..50i64 {
-            assert_eq!(bt.search(&make_key(i)).unwrap(), Some((i + 1000) as u16));
+            assert_eq!(bt.search(&make_key(i)).unwrap(), Some((i + 1000) as u32));
         }
     }
 
@@ -2880,7 +3027,7 @@ mod tests {
         let mut bt = BTree::new(4);
         // order=4，节点满 = keys.len() >= 4，即插入第 4 个 key 触发分裂
         for i in 0..3i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         assert_eq!(bt.node_count(), 1); // 还未分裂（3 < 4）
         bt.insert(make_key(3), 3).unwrap(); // 第 4 个 key 触发分裂
@@ -2903,7 +3050,7 @@ mod tests {
         let mut bt = BTree::new(3);
         // 插入足够多 key 触发多层分裂
         for i in 0..100i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 中序遍历有序
         let pairs = bt.in_order_leaf_traverse().unwrap();
@@ -2921,7 +3068,7 @@ mod tests {
         let mut bt = BTree::new(4);
         // order=4，插入第 4 个 key 触发根（叶子）分裂
         for i in 0..4i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 新根应为 Internal 节点
         let root = bt.read_node(bt.root_page_id()).unwrap();
@@ -2938,10 +3085,10 @@ mod tests {
         let mut bt = BTree::new(4);
         for i in (0..50).rev() {
             // 反向插入，强制多次分裂
-            bt.insert(make_key(i), (i * 2) as u16).unwrap();
+            bt.insert(make_key(i), (i * 2) as u32).unwrap();
         }
         for i in 0..50i64 {
-            assert_eq!(bt.search(&make_key(i)).unwrap(), Some((i * 2) as u16));
+            assert_eq!(bt.search(&make_key(i)).unwrap(), Some((i * 2) as u32));
         }
     }
 
@@ -2949,7 +3096,7 @@ mod tests {
     fn btree_search_returns_none_for_missing_key() {
         let mut bt = BTree::new(4);
         for i in 0..20i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 未插入的 key
         assert_eq!(bt.search(&make_key(100)).unwrap(), None);
@@ -2982,7 +3129,7 @@ mod tests {
         assert_eq!(bt.height(), 1);
         // order=4：插入 3 个 key 不分裂，第 4 个触发根分裂
         for i in 0..3i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
             assert_eq!(bt.height(), 1);
         }
         bt.insert(make_key(3), 3).unwrap(); // 第 4 个 key 触发根分裂
@@ -2990,7 +3137,7 @@ mod tests {
         // 继续插入，直到下一次根分裂（高度变 3）
         let mut next_id = 4i64;
         loop {
-            bt.insert(make_key(next_id), next_id as u16).unwrap();
+            bt.insert(make_key(next_id), next_id as u32).unwrap();
             if bt.height() >= 3 {
                 break;
             }
@@ -3007,7 +3154,7 @@ mod tests {
         // 大量插入后高度应保持较小（O(log_n)）
         let mut bt = BTree::with_default_order();
         for i in 0..10_000i64 {
-            bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+            bt.insert(make_key(i), (i % 65536) as u32).unwrap();
         }
         let h = bt.height();
         // 10000 keys, order=256: log_256(10000) ≈ 1.66，高度应为 2 或 3
@@ -3025,7 +3172,7 @@ mod tests {
             50, 10, 40, 20, 30, 60, 70, 5, 15, 25, 35, 45, 55, 65, 75, 1, 100,
         ];
         for (idx, &v) in input.iter().enumerate() {
-            bt.insert(make_key(v), idx as u16).unwrap();
+            bt.insert(make_key(v), idx as u32).unwrap();
         }
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(pairs.len(), input.len());
@@ -3049,7 +3196,7 @@ mod tests {
         // 中序遍历（in_order_traverse）会访问 Internal 节点的 key（tuple_id=0）
         let mut bt = BTree::new(4);
         for i in 0..10i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         let all_pairs = bt.in_order_traverse().unwrap();
         let leaf_pairs = bt.in_order_leaf_traverse().unwrap();
@@ -3064,7 +3211,7 @@ mod tests {
         let mut bt = BTree::new(4);
         let mut prev_count = bt.node_count();
         for i in 0..50i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
             let cur = bt.node_count();
             assert!(cur >= prev_count, "node_count should not decrease");
             prev_count = cur;
@@ -3078,7 +3225,7 @@ mod tests {
     fn btree_all_nodes_validate_after_inserts() {
         let mut bt = BTree::new(4);
         for i in 0..100i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 遍历所有节点，检查 validate
         for page_id in 1..bt.next_page_id() {
@@ -3092,7 +3239,7 @@ mod tests {
     fn btree_internal_nodes_have_correct_children_count() {
         let mut bt = BTree::new(4);
         for i in 0..100i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         for page_id in 1..bt.next_page_id() {
             if let Ok(node) = bt.read_node(page_id) {
@@ -3142,7 +3289,7 @@ mod tests {
                 keys.swap(i, j);
             }
             for (idx, &k) in keys.iter().enumerate() {
-                bt.insert(make_key(k), (idx % 65536) as u16).unwrap();
+                bt.insert(make_key(k), (idx % 65536) as u32).unwrap();
             }
             // 中序遍历严格递增
             let pairs = bt.in_order_leaf_traverse().unwrap();
@@ -3160,7 +3307,7 @@ mod tests {
             // search 验证
             for (idx, &k) in keys.iter().enumerate() {
                 let found = bt.search(&make_key(k)).unwrap();
-                prop_assert_eq!(found, Some((idx % 65536) as u16));
+                prop_assert_eq!(found, Some((idx % 65536) as u32));
             }
         }
 
@@ -3174,7 +3321,7 @@ mod tests {
             let mut bt = BTree::new(4);
             // 先插入 base_keys 个唯一 key
             for i in 0..base_keys as i64 {
-                bt.insert(make_key(i), i as u16).unwrap();
+                bt.insert(make_key(i), i as u32).unwrap();
             }
             let nodes_before = bt.node_count();
             // 随机选择 duplicate_count 个已存在的 key 重新插入（更新 tuple_id）
@@ -3182,7 +3329,7 @@ mod tests {
             for _ in 0..duplicate_count {
                 s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
                 let k = (s >> 33) as i64 % base_keys as i64;
-                let new_tid = (s >> 40) as u16;
+                let new_tid = (s >> 40) as u32;
                 bt.insert(make_key(k), new_tid).unwrap();
             }
             // 节点数不应增加（upsert 不应触发分裂）
@@ -3205,7 +3352,7 @@ mod tests {
         ) {
             let mut bt = BTree::new(order);
             for i in 0..n as i64 {
-                bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+                bt.insert(make_key(i), (i % 65536) as u32).unwrap();
             }
             let h = bt.height();
             // 高度上界：log_{order/2}(n) + 2
@@ -3224,11 +3371,11 @@ mod tests {
     use std::ops::Bound;
     use std::time::Instant;
 
-    /// 辅助：构造一棵插入 keys 的 BTree（i64 key → tuple_id = key as u16）
+    /// 辅助：构造一棵插入 keys 的 BTree（i64 key → tuple_id = key as u32）
     fn make_btree_with_keys(order: usize, keys: &[i64]) -> BTree {
         let mut bt = BTree::new(order);
         for &k in keys {
-            bt.insert(make_key(k), k as u16).unwrap();
+            bt.insert(make_key(k), k as u32).unwrap();
         }
         bt
     }
@@ -3240,7 +3387,7 @@ mod tests {
         // 插入 10 万 key，预热后再做点查；测量 1 万次点查平均延迟
         let mut bt = BTree::with_default_order();
         for i in 0..100_000i64 {
-            bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+            bt.insert(make_key(i), (i % 65536) as u32).unwrap();
         }
         // 预热：先做 1000 次点查
         for i in 0..1000i64 {
@@ -3284,9 +3431,9 @@ mod tests {
             .map(|(k, _)| decode_i64_key(k).unwrap())
             .collect();
         assert_eq!(keys, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        // tuple_id 与 key 一致（key as u16）
+        // tuple_id 与 key 一致（key as u32）
         for (k, tid) in &result {
-            assert_eq!(*tid, decode_i64_key(k).unwrap() as u16);
+            assert_eq!(*tid, decode_i64_key(k).unwrap() as u32);
         }
     }
 
@@ -3435,7 +3582,7 @@ mod tests {
         // 用小 order 强制多级树
         let mut bt = BTree::new(4);
         for i in 0..1000i64 {
-            bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+            bt.insert(make_key(i), (i % 65536) as u32).unwrap();
         }
         assert!(bt.height() >= 3, "expected multi-level tree");
         // 范围 [100, 200)
@@ -3622,7 +3769,7 @@ mod tests {
     fn cursor_multi_level_tree_correct() {
         let mut bt = BTree::new(4);
         for i in 0..500i64 {
-            bt.insert(make_key(i), (i % 65536) as u16).unwrap();
+            bt.insert(make_key(i), (i % 65536) as u32).unwrap();
         }
         let cursor = bt
             .cursor(
@@ -3729,7 +3876,7 @@ mod tests {
         for k in [2, 3, 4, 5] {
             assert_eq!(
                 bt.search(&make_key(k)).unwrap(),
-                Some(k as u16),
+                Some(k as u32),
                 "key {} should be found after delete",
                 k
             );
@@ -3906,7 +4053,7 @@ mod tests {
         for k in 1..=9i64 {
             assert_eq!(
                 bt.search(&make_key(k)).unwrap(),
-                Some(k as u16),
+                Some(k as u32),
                 "key {} should be found after borrow-from-left",
                 k
             );
@@ -3940,7 +4087,7 @@ mod tests {
 
         assert_eq!(bt.height(), 1, "height should shrink to 1 after merge");
         for k in [1, 2, 3] {
-            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u16));
+            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u32));
         }
         assert!(bt.search(&make_key(4)).unwrap().is_none());
         assert!(bt.search(&make_key(5)).unwrap().is_none());
@@ -3969,7 +4116,7 @@ mod tests {
 
         assert_eq!(bt.height(), 1, "height should shrink to 1 after merge");
         for k in [1, 2, 5] {
-            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u16));
+            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u32));
         }
         for k in [3, 4] {
             assert!(bt.search(&make_key(k)).unwrap().is_none());
@@ -4051,7 +4198,7 @@ mod tests {
         for k in [1, 2, 4, 5] {
             assert_eq!(
                 bt.search(&make_key(k)).unwrap(),
-                Some(k as u16),
+                Some(k as u32),
                 "key {} should still be found",
                 k
             );
@@ -4073,7 +4220,7 @@ mod tests {
         // order=4, 插入 50 个 key → 高度约 3
         let mut bt = BTree::new(4);
         for i in 1..=50i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         let initial_height = bt.height();
         assert!(
@@ -4093,7 +4240,7 @@ mod tests {
 
         // 验证剩余 3 个 key
         for k in [48, 49, 50] {
-            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u16));
+            assert_eq!(bt.search(&make_key(k)).unwrap(), Some(k as u32));
         }
 
         // 高度应降到 1（所有 key 在根叶子中）
@@ -4110,7 +4257,7 @@ mod tests {
         // 插入 200 个 key，随机删除一半，验证不变量
         let mut bt = BTree::new(4);
         for i in 0..200i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
 
         // 用固定种子删除偶数 key
@@ -4142,7 +4289,7 @@ mod tests {
             if i % 2 == 0 {
                 assert!(result.is_none(), "even key {} should be deleted", i);
             } else {
-                assert_eq!(result, Some(i as u16), "odd key {} should be found", i);
+                assert_eq!(result, Some(i as u32), "odd key {} should be found", i);
             }
         }
     }
@@ -4151,7 +4298,7 @@ mod tests {
     fn phase_017_delete_maintains_strictly_increasing_order() {
         let mut bt = BTree::new(4);
         for i in 0..100i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
 
         // 删除 25, 50, 75（间隔删除）
@@ -4177,7 +4324,7 @@ mod tests {
         // 模拟唯一索引场景：删除后可以重新插入相同 key
         let mut bt = BTree::new(4);
         for i in 1..=10i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
 
         // 删除 5
@@ -4204,7 +4351,7 @@ mod tests {
 
         // 插入 1-20
         for i in 1..=20i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 删除 1-10
         for i in 1..=10i64 {
@@ -4212,7 +4359,7 @@ mod tests {
         }
         // 插入 21-30
         for i in 21..=30i64 {
-            bt.insert(make_key(i), i as u16).unwrap();
+            bt.insert(make_key(i), i as u32).unwrap();
         }
         // 删除 15-20
         for i in 15..=20i64 {
@@ -4230,7 +4377,7 @@ mod tests {
 
         // 验证搜索
         for k in &expected {
-            assert_eq!(bt.search(&make_key(*k)).unwrap(), Some(*k as u16));
+            assert_eq!(bt.search(&make_key(*k)).unwrap(), Some(*k as u32));
         }
         for k in 1..=10i64 {
             assert!(bt.search(&make_key(k)).unwrap().is_none());
@@ -4240,5 +4387,348 @@ mod tests {
         }
 
         bt.validate_all_nodes().unwrap();
+    }
+
+    // -----------------------------------------------------------------
+    //  P0-3 修复：BufferPool 持久化测试
+    // -----------------------------------------------------------------
+
+    /// 辅助函数：将 InMemoryPageWriter 中的页复制到 InMemoryPageLoader
+    /// （模拟磁盘持久化后重新加载的场景）
+    fn transfer_writer_to_loader(
+        writer: &crate::buffer::InMemoryPageWriter,
+        loader: &crate::buffer::InMemoryPageLoader,
+    ) {
+        for page_id in writer.persisted_page_ids() {
+            if let Some(page) = writer.get_persisted(page_id) {
+                loader.insert(page_id, page);
+            }
+        }
+    }
+
+    /// P0-3 测试 1：单节点 BTree 持久化 round-trip
+    ///
+    /// 验证：persist → flush → load → search 结果一致
+    #[test]
+    fn p0_3_persist_single_node_btree_roundtrip() {
+        use crate::buffer::{BufferPool, InMemoryPageLoader, InMemoryPageWriter};
+        use std::sync::Arc;
+
+        let mut bt = BTree::with_default_order();
+        for i in 1..=10i64 {
+            bt.insert(make_key(i), i as u32).unwrap();
+        }
+        bt.validate_all_nodes().unwrap();
+        let original_height = bt.height();
+        let original_node_count = bt.node_count();
+
+        // 持久化
+        let loader = Arc::new(InMemoryPageLoader::new());
+        let writer = Arc::new(InMemoryPageWriter::new());
+        let pool = BufferPool::with_writer(64, loader.clone(), writer.clone()).unwrap();
+        let meta = bt.persist_to_buffer_pool(&pool).unwrap();
+        assert_eq!(meta.page_count, original_node_count as u32);
+        pool.flush_all().unwrap();
+
+        // 模拟重启：新 BufferPool + 从 writer 加载到 loader
+        let new_loader = Arc::new(InMemoryPageLoader::new());
+        transfer_writer_to_loader(&writer, &new_loader);
+        let new_pool = BufferPool::new(64, new_loader).unwrap();
+
+        // 加载
+        let loaded_bt = BTree::load_from_buffer_pool(&new_pool, meta).unwrap();
+
+        // 验证结构一致
+        assert_eq!(loaded_bt.root_page_id(), bt.root_page_id());
+        assert_eq!(loaded_bt.order(), bt.order());
+        assert_eq!(loaded_bt.node_count(), bt.node_count());
+        assert_eq!(loaded_bt.height(), original_height);
+        assert_eq!(loaded_bt.next_page_id(), bt.next_page_id());
+        loaded_bt.validate_all_nodes().unwrap();
+
+        // 验证搜索结果一致
+        for i in 1..=10i64 {
+            assert_eq!(
+                loaded_bt.search(&make_key(i)).unwrap(),
+                Some(i as u32),
+                "search mismatch for key {}",
+                i
+            );
+        }
+        assert!(loaded_bt.search(&make_key(999)).unwrap().is_none());
+    }
+
+    /// P0-3 测试 2：多节点 BTree（触发分裂）持久化 round-trip
+    ///
+    /// 验证：插入足够多数据触发 B-Tree 分裂，持久化后加载，结构和数据一致
+    #[test]
+    fn p0_3_persist_multi_node_btree_roundtrip() {
+        use crate::buffer::{BufferPool, InMemoryPageLoader, InMemoryPageWriter};
+        use std::sync::Arc;
+
+        let mut bt = BTree::new(4); // 小阶数，容易触发分裂
+        for i in 1..=200i64 {
+            bt.insert(make_key(i), i as u32).unwrap();
+        }
+        bt.validate_all_nodes().unwrap();
+        assert!(
+            bt.node_count() > 1,
+            "expected multi-node tree after 200 inserts with order=4"
+        );
+        let original_height = bt.height();
+
+        // 持久化
+        let loader = Arc::new(InMemoryPageLoader::new());
+        let writer = Arc::new(InMemoryPageWriter::new());
+        let pool = BufferPool::with_writer(256, loader.clone(), writer.clone()).unwrap();
+        let meta = bt.persist_to_buffer_pool(&pool).unwrap();
+        pool.flush_all().unwrap();
+
+        // 模拟重启
+        let new_loader = Arc::new(InMemoryPageLoader::new());
+        transfer_writer_to_loader(&writer, &new_loader);
+        let new_pool = BufferPool::new(256, new_loader).unwrap();
+
+        // 加载
+        let loaded_bt = BTree::load_from_buffer_pool(&new_pool, meta).unwrap();
+
+        // 验证结构
+        assert_eq!(loaded_bt.node_count(), bt.node_count());
+        assert_eq!(loaded_bt.height(), original_height);
+        assert_eq!(loaded_bt.next_page_id(), bt.next_page_id());
+        loaded_bt.validate_all_nodes().unwrap();
+
+        // 验证所有 key 可搜索且结果正确
+        for i in 1..=200i64 {
+            assert_eq!(
+                loaded_bt.search(&make_key(i)).unwrap(),
+                Some(i as u32),
+                "search mismatch for key {} after roundtrip",
+                i
+            );
+        }
+
+        // 验证中序遍历一致
+        let original_pairs = bt.in_order_leaf_traverse().unwrap();
+        let loaded_pairs = loaded_bt.in_order_leaf_traverse().unwrap();
+        assert_eq!(original_pairs.len(), loaded_pairs.len());
+        for (a, b) in original_pairs.iter().zip(loaded_pairs.iter()) {
+            assert_eq!(a.0, b.0, "key mismatch in in-order traverse");
+            assert_eq!(a.1, b.1, "tuple_id mismatch in in-order traverse");
+        }
+    }
+
+    /// P0-3 测试 3：持久化后可继续插入和删除
+    ///
+    /// 验证：加载后的 BTree 是可变的，支持后续 DML 操作
+    #[test]
+    fn p0_3_persist_then_mutate() {
+        use crate::buffer::{BufferPool, InMemoryPageLoader, InMemoryPageWriter};
+        use std::sync::Arc;
+
+        let mut bt = BTree::new(4);
+        for i in 1..=50i64 {
+            bt.insert(make_key(i), i as u32).unwrap();
+        }
+
+        // 持久化 + 加载
+        let loader = Arc::new(InMemoryPageLoader::new());
+        let writer = Arc::new(InMemoryPageWriter::new());
+        let pool = BufferPool::with_writer(128, loader.clone(), writer.clone()).unwrap();
+        let meta = bt.persist_to_buffer_pool(&pool).unwrap();
+        pool.flush_all().unwrap();
+
+        let new_loader = Arc::new(InMemoryPageLoader::new());
+        transfer_writer_to_loader(&writer, &new_loader);
+        let new_pool = BufferPool::new(128, new_loader).unwrap();
+        let mut loaded_bt = BTree::load_from_buffer_pool(&new_pool, meta).unwrap();
+
+        // 删除部分 key
+        for i in 1..=25i64 {
+            assert!(loaded_bt.delete(&make_key(i)).unwrap());
+        }
+        // 插入新 key
+        for i in 100..=120i64 {
+            loaded_bt.insert(make_key(i), i as u32).unwrap();
+        }
+        loaded_bt.validate_all_nodes().unwrap();
+
+        // 验证：已删除的 key 不存在
+        for i in 1..=25i64 {
+            assert!(loaded_bt.search(&make_key(i)).unwrap().is_none());
+        }
+        // 验证：保留的 key 存在
+        for i in 26..=50i64 {
+            assert_eq!(loaded_bt.search(&make_key(i)).unwrap(), Some(i as u32));
+        }
+        // 验证：新插入的 key 存在
+        for i in 100..=120i64 {
+            assert_eq!(loaded_bt.search(&make_key(i)).unwrap(), Some(i as u32));
+        }
+    }
+
+    /// P0-3 测试 4：PersistedBTreeMeta 字段正确性
+    #[test]
+    fn p0_3_persisted_meta_fields_correct() {
+        use crate::buffer::{BufferPool, InMemoryPageLoader, InMemoryPageWriter};
+        use std::sync::Arc;
+
+        let mut bt = BTree::new(8);
+        for i in 1..=100i64 {
+            bt.insert(make_key(i), i as u32).unwrap();
+        }
+
+        let loader = Arc::new(InMemoryPageLoader::new());
+        let writer = Arc::new(InMemoryPageWriter::new());
+        let pool = BufferPool::with_writer(128, loader, writer).unwrap();
+        let meta = bt.persist_to_buffer_pool(&pool).unwrap();
+
+        assert_eq!(meta.root_page_id, bt.root_page_id());
+        assert_eq!(meta.order, 8);
+        assert_eq!(meta.next_page_id, bt.next_page_id());
+        assert_eq!(meta.page_count, bt.node_count() as u32);
+    }
+
+    // =================================================================
+    // P9-1 测试：tuple_id u16→u32 扩容验证
+    // =================================================================
+
+    /// P9-1 验证 1：tuple_id 超过 u16::MAX (65535) 后仍可正常插入和查询
+    ///
+    /// 之前 u16 限制下，row_id > 65535 的行无法进入 BTree 索引。
+    /// 扩容为 u32 后，支持最大 ~42 亿行。
+    #[test]
+    fn p9_1_tuple_id_exceeds_u16_max_insert_and_search() {
+        let mut bt = BTree::with_default_order();
+
+        // 插入 tuple_id = u16::MAX + 1 = 65536（旧限制下的第一个溢出值）
+        let large_tid: u32 = u16::MAX as u32 + 1; // 65536
+        let key = make_key(1i64);
+        bt.insert(key.clone(), large_tid).unwrap();
+
+        // 点查应返回正确的 tuple_id
+        let result = bt.search(&key).unwrap();
+        assert_eq!(result, Some(large_tid));
+        assert_eq!(result, Some(65536u32));
+
+        // 插入更大的 tuple_id
+        let very_large_tid: u32 = 1_000_000; // 100 万
+        let key2 = make_key(2i64);
+        bt.insert(key2.clone(), very_large_tid).unwrap();
+        assert_eq!(bt.search(&key2).unwrap(), Some(very_large_tid));
+    }
+
+    /// P9-1 验证 2：批量插入超过 65535 个 tuple_id，验证中序遍历返回正确
+    #[test]
+    fn p9_1_bulk_load_with_large_tuple_ids() {
+        // 构造 70000 个 (key, tuple_id) 对，tuple_id 范围 [65530, 135529]
+        // 覆盖 u16::MAX 边界
+        let items: Vec<(Vec<u8>, u32)> = (0..70_000i64)
+            .map(|i| (make_key(i), (i + 65530) as u32))
+            .collect();
+
+        let mut bt = BTree::with_default_order();
+        bt.bulk_load(items).unwrap();
+
+        // 验证节点数 > 1（确认发生了分裂）
+        assert!(bt.node_count() > 1);
+
+        // 中序遍历应返回 70000 条，且 tuple_id 单调递增
+        let traversed = bt.in_order_leaf_traverse().unwrap();
+        assert_eq!(traversed.len(), 70_000);
+
+        // 验证第一个和最后一个 tuple_id
+        assert_eq!(traversed[0].1, 65530u32);
+        assert_eq!(traversed[69_999].1, 65530 + 69_999u32);
+
+        // 验证 tuple_id 单调递增
+        for i in 1..traversed.len() {
+            assert!(
+                traversed[i - 1].1 < traversed[i].1,
+                "tuple_id not monotonically increasing at index {}",
+                i
+            );
+        }
+    }
+
+    /// P9-1 验证 3：range_scan 返回的 tuple_id 正确跨越 u16::MAX 边界
+    #[test]
+    fn p9_1_range_scan_crosses_u16_boundary() {
+        let mut bt = BTree::with_default_order();
+
+        // 插入 5 个 tuple_id：[65533, 65534, 65535, 65536, 65537]
+        // 其中 65536 和 65537 在旧 u16 限制下无法存储
+        for i in 0..5i64 {
+            let tid = 65533 + i as u32;
+            bt.insert(make_key(i), tid).unwrap();
+        }
+
+        // range_scan 全范围
+        let results = bt
+            .range_scan(Bound::Unbounded, Bound::Unbounded)
+            .unwrap();
+        assert_eq!(results.len(), 5);
+
+        // 验证所有 tuple_id 正确
+        assert_eq!(results[0].1, 65533u32);
+        assert_eq!(results[1].1, 65534u32);
+        assert_eq!(results[2].1, 65535u32); // u16::MAX
+        assert_eq!(results[3].1, 65536u32); // u16::MAX + 1
+        assert_eq!(results[4].1, 65537u32);
+    }
+
+    /// P9-1 验证 4：编码/解码 roundtrip with tuple_id > u16::MAX
+    #[test]
+    fn p9_1_encode_decode_large_tuple_id_roundtrip() {
+        let mut node = BTreeNode::new_leaf(1);
+        node.keys.push(make_key(42));
+        node.tuple_ids.push(u32::MAX); // 最大 u32 值
+        node.keys.push(make_key(100));
+        node.tuple_ids.push(4_294_967_295u32 - 1); // u32::MAX - 1
+
+        let encoded = node.encode();
+        let decoded = BTreeNode::decode(&encoded).unwrap();
+
+        assert_eq!(node, decoded);
+        assert_eq!(decoded.tuple_ids[0], u32::MAX);
+        assert_eq!(decoded.tuple_ids[1], u32::MAX - 1);
+    }
+
+    /// P9-1 验证 5：persist/load to BufferPool with large tuple_ids
+    #[test]
+    fn p9_1_persist_load_large_tuple_ids() {
+        use crate::buffer::{BufferPool, InMemoryPageLoader, InMemoryPageWriter};
+        use std::sync::Arc;
+
+        let mut bt = BTree::new(8);
+        // 插入 tuple_id 跨越 u16::MAX 边界
+        for i in 1..=300i64 {
+            let tid = 65500 + i as u32;
+            bt.insert(make_key(i), tid).unwrap();
+        }
+
+        let loader = Arc::new(InMemoryPageLoader::new());
+        let writer = Arc::new(InMemoryPageWriter::new());
+        let pool = BufferPool::with_writer(128, loader, writer).unwrap();
+        let meta = bt.persist_to_buffer_pool(&pool).unwrap();
+
+        // 从 BufferPool 重建
+        let loaded = BTree::load_from_buffer_pool(&pool, meta).unwrap();
+
+        // 验证重建后的 BTree 可以正确查询大 tuple_id
+        assert_eq!(
+            loaded.search(&make_key(1i64)).unwrap(),
+            Some(65501u32) // 65500 + 1
+        );
+        assert_eq!(
+            loaded.search(&make_key(300i64)).unwrap(),
+            Some(65800u32) // 65500 + 300
+        );
+
+        // 验证 tuple_id 超过 u16::MAX 的行存在
+        assert_eq!(
+            loaded.search(&make_key(36i64)).unwrap(),
+            Some(65536u32) // 65500 + 36 = 65536 = u16::MAX + 1
+        );
     }
 }

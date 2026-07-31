@@ -1,0 +1,23 @@
+[package]
+name = "szrsql-dialect-compat"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL 多方言兼容性测试套件：MySQL / Oracle / SQL Server / SQLite + 对抗性边界测试"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+szrsql-sql = { workspace = true }
+szrsql-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

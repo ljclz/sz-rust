@@ -1,0 +1,33 @@
+[package]
+name = "szrsql-sqlite-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL SQLite 嵌入式适配 — L2 协议级兼容（支持 SQLite 文件格式读写）"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+szrsql-types = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-protocol = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
+
+[lib]
+name = "szrsql_sqlite_bridge"
+path = "src/lib.rs"
+
+[[example]]
+name = "sqlite_compat_check"
+path = "examples/sqlite_compat_check.rs"

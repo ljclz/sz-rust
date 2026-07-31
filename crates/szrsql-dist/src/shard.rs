@@ -426,6 +426,24 @@ impl MultiRaftNode {
         self.state_machines.insert(shard.id, KvStateMachine::new());
     }
 
+    /// P0-DIST-1：单节点模式下，将指定分片的 Raft 组自选举为 Leader。
+    ///
+    /// 单节点配置（peers 为空）下，RaftNode 初始为 Follower，无法通过 tick
+    /// 触发选举（无其他节点投票）。此方法直接调用 `become_candidate` +
+    /// `become_leader`，使本节点成为该分片的 Leader，从而可以接受 propose。
+    ///
+    /// # Errors
+    /// 分片不存在时返回 `RaftError::ConfigError`。
+    pub fn promote_to_leader(&mut self, shard_id: ShardId) -> Result<(), RaftError> {
+        let raft = self
+            .raft_groups
+            .get_mut(&shard_id)
+            .ok_or_else(|| RaftError::ConfigError(format!("shard {} not found", shard_id)))?;
+        raft.become_candidate();
+        raft.become_leader();
+        Ok(())
+    }
+
     /// 推进所有 Raft 组的时钟，返回产生的 RPC 消息
     pub fn tick(&mut self, elapsed_ms: u64) -> Vec<RpcMessage> {
         let mut messages = Vec::new();
@@ -468,7 +486,37 @@ impl MultiRaftNode {
             Ok(idx) => trace!(shard_id, index = idx, "command proposed"),
             Err(e) => warn!(shard_id, error = %e, "propose failed"),
         }
+        // P0-DIST-1：单节点模式下，propose 后立即推进 commit + apply
+        // 多节点模式下，commit 需等待 AppendEntriesResponse，由 tick 触发
+        raft.advance_commit();
+        let applied = raft.apply();
+        let sm = self
+            .state_machines
+            .get_mut(&shard_id)
+            .expect("state machine must exist");
+        for entry in applied {
+            sm.apply_raw(&entry.command);
+        }
         result
+    }
+
+    /// P0-DIST-1：推进指定分片的 commit + apply（用于 tick 后手动触发）
+    ///
+    /// 在多节点模式下，`tick` 发送 AppendEntries 后需等待 Response，
+    /// 调用此方法处理返回的 Response 后推进 commit。
+    pub fn advance_and_apply(&mut self, shard_id: ShardId) {
+        let Some(raft) = self.raft_groups.get_mut(&shard_id) else {
+            return;
+        };
+        raft.advance_commit();
+        let applied = raft.apply();
+        let sm = self
+            .state_machines
+            .get_mut(&shard_id)
+            .expect("state machine must exist");
+        for entry in applied {
+            sm.apply_raw(&entry.command);
+        }
     }
 
     /// 处理收到的 RPC 消息（分发到对应分片的 Raft 组）

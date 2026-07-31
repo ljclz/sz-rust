@@ -777,6 +777,76 @@ fn test_misc_06_between_out_of_range() {
     assert_eq!(eval(&e).unwrap(), Value::Bool(false));
 }
 
+// =====================================================================
+// PG 正则匹配运算符测试（P0-PG 兼容性修复）
+// =====================================================================
+
+#[test]
+fn test_pg_regex_match_basic() {
+    // 'abc' ~ '^a' → true
+    let e = binary(lit_text("abc"), BinaryOp::RegexMatch, lit_text("^a"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(true));
+    // 'abc' ~ '^A' → false（大小写敏感）
+    let e = binary(lit_text("abc"), BinaryOp::RegexMatch, lit_text("^A"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(false));
+}
+
+#[test]
+fn test_pg_regex_imatch_basic() {
+    // 'abc' ~* '^A' → true（大小写不敏感）
+    let e = binary(lit_text("abc"), BinaryOp::RegexIMatch, lit_text("^A"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_pg_regex_not_match_basic() {
+    // 'abc' !~ '^A' → true（大小写敏感，不匹配）
+    let e = binary(lit_text("abc"), BinaryOp::RegexNotMatch, lit_text("^A"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(true));
+    // 'abc' !~ '^a' → false（匹配，取反后 false）
+    let e = binary(lit_text("abc"), BinaryOp::RegexNotMatch, lit_text("^a"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(false));
+}
+
+#[test]
+fn test_pg_regex_not_imatch_basic() {
+    // 'abc' !~* '^A' → false（大小写不敏感，匹配，取反后 false）
+    let e = binary(lit_text("abc"), BinaryOp::RegexNotIMatch, lit_text("^A"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(false));
+}
+
+#[test]
+fn test_pg_regex_partial_match() {
+    // PG ~ 默认是部分匹配（搜索），不是完全匹配
+    // 'foobar' ~ 'bar' → true
+    let e = binary(lit_text("foobar"), BinaryOp::RegexMatch, lit_text("bar"));
+    assert_eq!(eval(&e).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_pg_regex_null_handling() {
+    // NULL ~ 'a' → NULL
+    let e = binary(Expr::Literal(Value::Null), BinaryOp::RegexMatch, lit_text("a"));
+    assert_eq!(eval(&e).unwrap(), Value::Null);
+    // 'a' ~ NULL → NULL
+    let e = binary(lit_text("a"), BinaryOp::RegexMatch, Expr::Literal(Value::Null));
+    assert_eq!(eval(&e).unwrap(), Value::Null);
+}
+
+#[test]
+fn test_pg_regex_type_mismatch() {
+    // 数字 ~ 'a' → TypeMismatch
+    let e = binary(lit_i64(123), BinaryOp::RegexMatch, lit_text("a"));
+    assert!(matches!(eval(&e), Err(EvalError::TypeMismatch { .. })));
+}
+
+#[test]
+fn test_pg_regex_invalid_pattern() {
+    // 无效正则 → InvalidRegex
+    let e = binary(lit_text("abc"), BinaryOp::RegexMatch, lit_text("["));
+    assert!(matches!(eval(&e), Err(EvalError::InvalidRegex(_))));
+}
+
 #[test]
 fn test_misc_07_not_between() {
     let e = Expr::Between {
@@ -795,6 +865,7 @@ fn test_misc_08_like_percent() {
         expr: Box::new(lit_text("hello")),
         pattern: Box::new(lit_text("%ello")),
         negated: false,
+        case_insensitive: false,
     };
     assert_eq!(eval(&e).unwrap(), Value::Bool(true));
 }
@@ -806,6 +877,7 @@ fn test_misc_09_like_underscore() {
         expr: Box::new(lit_text("hello")),
         pattern: Box::new(lit_text("_ello")),
         negated: false,
+        case_insensitive: false,
     };
     assert_eq!(eval(&e).unwrap(), Value::Bool(true));
 }

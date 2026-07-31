@@ -5,10 +5,20 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL AI 引擎：NL2SQL/HNSW 向量索引"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 szrsql-types = { workspace = true }
 szrsql-storage = { workspace = true }
+szrsql-catalog = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-tx = { workspace = true }
+szrsql-cdc = { workspace = true }
+szrsql-optimizer = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

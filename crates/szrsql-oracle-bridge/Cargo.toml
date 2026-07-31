@@ -1,0 +1,28 @@
+[package]
+name = "szrsql-oracle-bridge"
+version = "1.0.0-rc.2"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL Oracle 桥接 — L2 协议级兼容（TNS 协议实现 + SQL 方言转换）"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+szrsql-types = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-protocol = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt"] }

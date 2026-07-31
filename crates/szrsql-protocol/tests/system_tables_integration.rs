@@ -617,7 +617,11 @@ async fn test_e2e_dbeaver_style_browse_workflow() {
     assert_eq!(&rows[2][1], b"TEXT");
 }
 
-/// 验收场景 14：JOIN 查询应被拒绝（当前实现不支持）。
+/// 验收场景 14：系统表 JOIN 查询应被 Navicat 兼容拦截器处理（Phase 3.18+）。
+///
+/// 之前 JOIN 系统表会回退到普通 Planner 并报 TableNotFound；
+/// 现在通过 `execute_system_catalog_join` 用内存 hash join 执行，
+/// 支持 Navicat 等工具的元数据浏览查询。
 #[tokio::test]
 async fn test_e2e_system_table_join_falls_back_to_normal_planner() {
     let port = find_free_port(20332).await;
@@ -627,17 +631,21 @@ async fn test_e2e_system_table_join_falls_back_to_normal_planner() {
 
     send_query_and_read(&mut stream, "CREATE TABLE base (id BIGINT)").await;
 
-    // JOIN 查询：不被系统表拦截器处理，走正常 Planner
-    // 由于 pg_tables 不在 catalog 中注册，Planner 会返回 TableNotFound 错误
+    // 系统表 JOIN：现在由 execute_system_catalog_join 处理，应返回结果集而非错误
     let resp = send_query_and_read(
         &mut stream,
-        "SELECT * FROM pg_tables t1 JOIN pg_tables t2 ON t1.tablename = t2.tablename",
+        "SELECT t1.tablename FROM pg_tables t1 JOIN pg_tables t2 ON t1.tablename = t2.tablename",
     )
     .await;
     let types = parse_message_types(&resp);
     assert!(
-        types.contains(&MSG_ERROR_RESPONSE),
-        "JOIN should fall back to Planner and return error (pg_tables not registered): {:?}",
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "system table JOIN should be handled by execute_system_catalog_join, got error: {:?}",
+        types
+    );
+    assert!(
+        types.contains(&MSG_ROW_DESCRIPTION),
+        "system table JOIN should return RowDescription: {:?}",
         types
     );
 }
@@ -762,4 +770,121 @@ async fn test_e2e_pg_tables_reflects_drop_table() {
     );
     let rows = extract_data_rows(&resp);
     assert_eq!(rows.len(), 0, "table should no longer appear after DROP");
+}
+
+/// 验收场景 17：SET 语句不应返回 "unsupported plan node" 错误。
+///
+/// 回归测试：之前 SET NAMES / SET variable 被错误地路由到 Executor::execute，
+/// 后者没有对应分支，返回 `Unsupported(Discriminant(34))` 错误。
+/// 现在通过 dispatch_plan 直接调用 Executor 的专用方法并传入 session_state。
+#[tokio::test]
+async fn test_e2e_set_names_does_not_return_unsupported_error() {
+    let port = find_free_port(20632).await;
+    let _server = spawn_test_server(port).await;
+    wait_for_server(port).await;
+    let mut stream = setup_connection(port, "set_names_user").await;
+
+    // SET NAMES 'utf8' — 应返回 CommandComplete，不应返回 ErrorResponse
+    let resp = send_query_and_read(&mut stream, "SET NAMES 'utf8'").await;
+    let types = parse_message_types(&resp);
+    assert!(
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "SET NAMES should not return error: {:?}",
+        types
+    );
+    assert!(
+        types.contains(&MSG_COMMAND_COMPLETE),
+        "SET NAMES should return CommandComplete: {:?}",
+        types
+    );
+}
+
+/// 验收场景 18：SET variable = value 语句正常工作。
+#[tokio::test]
+async fn test_e2e_set_variable_does_not_return_unsupported_error() {
+    let port = find_free_port(20732).await;
+    let _server = spawn_test_server(port).await;
+    wait_for_server(port).await;
+    let mut stream = setup_connection(port, "set_var_user").await;
+
+    // SET character_set_results = 'utf8' — 应返回 CommandComplete
+    let resp = send_query_and_read(
+        &mut stream,
+        "SET character_set_results = 'utf8'",
+    )
+    .await;
+    let types = parse_message_types(&resp);
+    assert!(
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "SET variable should not return error: {:?}",
+        types
+    );
+    assert!(
+        types.contains(&MSG_COMMAND_COMPLETE),
+        "SET variable should return CommandComplete: {:?}",
+        types
+    );
+
+    // SET autocommit = 1 — 同样应正常
+    let resp = send_query_and_read(&mut stream, "SET autocommit = 1").await;
+    let types = parse_message_types(&resp);
+    assert!(
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "SET autocommit should not return error: {:?}",
+        types
+    );
+}
+
+/// 验收场景 19：SHOW TABLES 语句正常工作。
+#[tokio::test]
+async fn test_e2e_show_tables_returns_result_set() {
+    let port = find_free_port(20832).await;
+    let _server = spawn_test_server(port).await;
+    wait_for_server(port).await;
+    let mut stream = setup_connection(port, "show_tables_user").await;
+
+    send_query_and_read(&mut stream, "CREATE TABLE st_a (id BIGINT)").await;
+    send_query_and_read(&mut stream, "CREATE TABLE st_b (id BIGINT)").await;
+
+    let resp = send_query_and_read(&mut stream, "SHOW TABLES").await;
+    let types = parse_message_types(&resp);
+    assert!(
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "SHOW TABLES should not return error: {:?}",
+        types
+    );
+    assert!(
+        types.contains(&MSG_ROW_DESCRIPTION),
+        "SHOW TABLES should return RowDescription: {:?}",
+        types
+    );
+    let rows = extract_data_rows(&resp);
+    assert_eq!(rows.len(), 2, "should list 2 tables");
+}
+
+/// 验收场景 20：SHOW variable 语句读取 session_state 中的变量值。
+#[tokio::test]
+async fn test_e2e_show_variable_reads_session_state() {
+    let port = find_free_port(20932).await;
+    let _server = spawn_test_server(port).await;
+    wait_for_server(port).await;
+    let mut stream = setup_connection(port, "show_var_user").await;
+
+    // 先 SET，再 SHOW
+    send_query_and_read(&mut stream, "SET my_var = 'hello'").await;
+    let resp = send_query_and_read(&mut stream, "SHOW my_var").await;
+    let types = parse_message_types(&resp);
+    assert!(
+        !types.contains(&MSG_ERROR_RESPONSE),
+        "SHOW variable should not return error: {:?}",
+        types
+    );
+    assert!(
+        types.contains(&MSG_DATA_ROW),
+        "SHOW variable should return DataRow: {:?}",
+        types
+    );
+    let rows = extract_data_rows(&resp);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(&rows[0][0], b"hello");
 }

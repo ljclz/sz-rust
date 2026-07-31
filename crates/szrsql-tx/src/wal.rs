@@ -22,7 +22,7 @@
 //! （即除 checksum 字段本身外的所有字节）
 
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace, warn};
 
@@ -58,6 +58,17 @@ pub enum WalOpType {
     Checkpoint = 5,
     /// 全页镜像（Full Page Write），包含完整页内容的特殊记录
     FullPageImage = 6,
+    /// 表全量数据（P0-1 修复：用于崩溃恢复）。
+    ///
+    /// `data` 字段格式：
+    /// - `u32 LE`：表名 UTF-8 字节长度
+    /// - `bytes`：表名 UTF-8 字节
+    /// - `bytes`：表数据 JSON（`InMemoryTable` 序列化结果）
+    ///
+    /// 写入时机：事务 COMMIT 前，遍历该事务修改过的所有表，
+    /// 将每张表的全量数据序列化为 `TableData` 记录写入 WAL。
+    /// 回放时仅应用紧随其后有 `Commit` 记录的 `TableData`，保证 ACID。
+    TableData = 7,
 }
 
 impl WalOpType {
@@ -71,6 +82,7 @@ impl WalOpType {
             4 => Ok(WalOpType::Abort),
             5 => Ok(WalOpType::Checkpoint),
             6 => Ok(WalOpType::FullPageImage),
+            7 => Ok(WalOpType::TableData),
             _ => Err(WalError::InvalidOpType(v)),
         }
     }
@@ -100,6 +112,8 @@ pub enum WalError {
     InvalidDataLen(usize),
     #[error("I/O error: {0}")]
     IoError(String),
+    #[error("invalid state: {0}")]
+    InvalidState(String),
 }
 
 // =====================================================================
@@ -252,6 +266,231 @@ impl WalRecord {
     pub fn encoded_size(&self) -> usize {
         WAL_HEADER_SIZE + self.data.len() + WAL_TRAILER_SIZE
     }
+
+    // -----------------------------------------------------------------
+    //  P9-2：行级变更工厂方法（Insert/Update/Delete 行级 WAL 记录）
+    // -----------------------------------------------------------------
+
+    /// P9-2：构造行级 Insert WAL 记录。
+    ///
+    /// `data` 字段载荷格式见 [`WalRowChange::encode_insert`]。
+    pub fn new_row_insert(tx_id: u32, change: &WalRowChange) -> Self {
+        Self::new(
+            0,
+            tx_id,
+            WalOpType::Insert,
+            change.table_id,
+            change.encode_insert(),
+        )
+    }
+
+    /// P9-2：构造行级 Update WAL 记录。
+    ///
+    /// `data` 字段载荷格式见 [`WalRowChange::encode_update`]。
+    pub fn new_row_update(tx_id: u32, change: &WalRowChange) -> Self {
+        Self::new(
+            0,
+            tx_id,
+            WalOpType::Update,
+            change.table_id,
+            change.encode_update(),
+        )
+    }
+
+    /// P9-2：构造行级 Delete WAL 记录。
+    ///
+    /// `data` 字段载荷格式见 [`WalRowChange::encode_delete`]。
+    pub fn new_row_delete(tx_id: u32, change: &WalRowChange) -> Self {
+        Self::new(
+            0,
+            tx_id,
+            WalOpType::Delete,
+            change.table_id,
+            change.encode_delete(),
+        )
+    }
+}
+
+// =====================================================================
+//  WalRowChange — P9-2 行级变更载荷
+// =====================================================================
+
+/// P9-2：行级变更载荷辅助结构。
+///
+/// 用于在 DML 执行路径中将单行变更编码为 WAL `data` 字段，
+/// 替代旧的 `TableData` 全表快照方式，提供细粒度变更流。
+///
+/// # 载荷格式（小端）
+///
+/// 所有变体共享前缀：
+/// ```text
+/// Offset  Size  Field
+/// 0       4     row_id (u32 LE) — 行 ID（Insert 时为新分配的 row_id）
+/// 4       4     payload_len (u32 LE) — 行字节序列长度
+/// 8       N     payload (N 字节) — 行数据（serde_json 序列化的 Vec<Value>）
+/// ```
+///
+/// - **Insert**：仅含 `new_payload`（payload_len = new_payload.len()）
+/// - **Delete**：仅含 `old_payload`（payload_len = old_payload.len()）
+/// - **Update**：先 `old_payload` 再 `new_payload`，各带独立长度前缀
+///
+/// # 与 TableData 的关系
+///
+/// - `WalOpType::Insert/Update/Delete`（行级）用于 CDC 增量流和未来 PITR
+/// - `WalOpType::TableData`（全表）保留作为崩溃恢复兜底，确保回放简单可靠
+/// - 当前迭代仅写入行级记录，回放逻辑仍走 TableData；后续迭代实现行级回放
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalRowChange {
+    /// 表 ID（FNV-1a 32-bit 哈希，与 CDC table_id 一致）
+    pub table_id: u32,
+    /// 行 ID（在表内的稳定标识，用于 Update/Delete 定位）
+    pub row_id: usize,
+    /// 旧行字节序列（serde_json 序列化的 `Vec<Value>`；Insert 时为空）
+    pub old_payload: Vec<u8>,
+    /// 新行字节序列（serde_json 序列化的 `Vec<Value>`；Delete 时为空）
+    pub new_payload: Vec<u8>,
+}
+
+impl WalRowChange {
+    /// 创建 Insert 变更（仅新行）
+    pub fn for_insert(table_id: u32, row_id: usize, new_payload: Vec<u8>) -> Self {
+        Self {
+            table_id,
+            row_id,
+            old_payload: Vec::new(),
+            new_payload,
+        }
+    }
+
+    /// 创建 Update 变更（旧行 + 新行）
+    pub fn for_update(
+        table_id: u32,
+        row_id: usize,
+        old_payload: Vec<u8>,
+        new_payload: Vec<u8>,
+    ) -> Self {
+        Self {
+            table_id,
+            row_id,
+            old_payload,
+            new_payload,
+        }
+    }
+
+    /// 创建 Delete 变更（仅旧行）
+    pub fn for_delete(table_id: u32, row_id: usize, old_payload: Vec<u8>) -> Self {
+        Self {
+            table_id,
+            row_id,
+            old_payload,
+            new_payload: Vec::new(),
+        }
+    }
+
+    /// 编码为 Insert 载荷：`[row_id: u32][new_len: u32][new_payload]`
+    pub fn encode_insert(&self) -> Vec<u8> {
+        let mut buf =
+            Vec::with_capacity(4 + 4 + self.new_payload.len());
+        buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
+        buf.extend_from_slice(&(self.new_payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&self.new_payload);
+        buf
+    }
+
+    /// 编码为 Update 载荷：
+    /// `[row_id: u32][old_len: u32][old_payload][new_len: u32][new_payload]`
+    pub fn encode_update(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            4 + 4 + self.old_payload.len() + 4 + self.new_payload.len(),
+        );
+        buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
+        buf.extend_from_slice(&(self.old_payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&self.old_payload);
+        buf.extend_from_slice(&(self.new_payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&self.new_payload);
+        buf
+    }
+
+    /// 编码为 Delete 载荷：`[row_id: u32][old_len: u32][old_payload]`
+    pub fn encode_delete(&self) -> Vec<u8> {
+        let mut buf =
+            Vec::with_capacity(4 + 4 + self.old_payload.len());
+        buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
+        buf.extend_from_slice(&(self.old_payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&self.old_payload);
+        buf
+    }
+
+    /// 从 Insert 载荷解码
+    pub fn decode_insert(table_id: u32, data: &[u8]) -> Result<Self, WalError> {
+        if data.len() < 8 {
+            return Err(WalError::BufferTooShort {
+                need: 8,
+                have: data.len(),
+            });
+        }
+        let row_id = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let new_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+        if data.len() < 8 + new_len {
+            return Err(WalError::BufferTooShort {
+                need: 8 + new_len,
+                have: data.len(),
+            });
+        }
+        let new_payload = data[8..8 + new_len].to_vec();
+        Ok(Self::for_insert(table_id, row_id, new_payload))
+    }
+
+    /// 从 Update 载荷解码
+    pub fn decode_update(table_id: u32, data: &[u8]) -> Result<Self, WalError> {
+        if data.len() < 8 {
+            return Err(WalError::BufferTooShort {
+                need: 8,
+                have: data.len(),
+            });
+        }
+        let row_id = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let old_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+        if data.len() < 8 + old_len + 4 {
+            return Err(WalError::BufferTooShort {
+                need: 8 + old_len + 4,
+                have: data.len(),
+            });
+        }
+        let old_payload = data[8..8 + old_len].to_vec();
+        let new_len_off = 8 + old_len;
+        let new_len = u32::from_le_bytes(
+            data[new_len_off..new_len_off + 4].try_into().unwrap(),
+        ) as usize;
+        if data.len() < new_len_off + 4 + new_len {
+            return Err(WalError::BufferTooShort {
+                need: new_len_off + 4 + new_len,
+                have: data.len(),
+            });
+        }
+        let new_payload = data[new_len_off + 4..new_len_off + 4 + new_len].to_vec();
+        Ok(Self::for_update(table_id, row_id, old_payload, new_payload))
+    }
+
+    /// 从 Delete 载荷解码
+    pub fn decode_delete(table_id: u32, data: &[u8]) -> Result<Self, WalError> {
+        if data.len() < 8 {
+            return Err(WalError::BufferTooShort {
+                need: 8,
+                have: data.len(),
+            });
+        }
+        let row_id = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        let old_len = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+        if data.len() < 8 + old_len {
+            return Err(WalError::BufferTooShort {
+                need: 8 + old_len,
+                have: data.len(),
+            });
+        }
+        let old_payload = data[8..8 + old_len].to_vec();
+        Ok(Self::for_delete(table_id, row_id, old_payload))
+    }
 }
 
 // =====================================================================
@@ -328,7 +567,7 @@ impl WalWriter {
         record.update_checksum();
 
         let encoded = record.encode();
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
         file.write_all(&encoded).map_err(|e| {
             warn!(lsn, error = %e, "WAL append failed");
             WalError::IoError(e.to_string())
@@ -350,7 +589,7 @@ impl WalWriter {
             .current_lsn
             .fetch_add(records.len() as u64, std::sync::atomic::Ordering::SeqCst);
 
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
         for (i, mut record) in records.into_iter().enumerate() {
             record.lsn = start_lsn + i as u64;
             record.update_checksum();
@@ -368,7 +607,7 @@ impl WalWriter {
     /// 强制刷盘（fsync），保证已写入的数据持久化
     #[instrument(skip(self))]
     pub fn flush(&self) -> Result<(), WalError> {
-        let file = self.file.lock().unwrap();
+        let file = self.file.lock().unwrap_or_else(|e| e.into_inner());
         file.sync_all().map_err(|e| {
             warn!(error = %e, "WAL fsync failed");
             WalError::IoError(e.to_string())
@@ -385,6 +624,157 @@ impl WalWriter {
     /// 获取 WAL 文件路径
     pub fn path(&self) -> &std::path::Path {
         &self.path
+    }
+
+    /// 截断 WAL 文件，保留 `keep_lsn` 及之后的记录（Phase 2.3 实现）
+    ///
+    /// checkpoint 成功后调用此方法清理已落盘的旧 WAL 记录，防止文件无限增长。
+    ///
+    /// # 安全语义
+    /// - 扫描 WAL 文件，找到第一条 `lsn >= keep_lsn` 的记录的文件偏移量
+    /// - 将该偏移量之前的字节删除，保留之后的所有字节
+    /// - 使用 "写入临时文件 + rename" 原子替换原 WAL 文件，防止截断过程中崩溃导致数据损坏
+    /// - 重新打开文件句柄保持追加模式
+    /// - `current_lsn` 不变（截断不影响未来 LSN 分配）
+    ///
+    /// # 参数
+    /// - `keep_lsn`：保留此 LSN 及之后的记录（通常为 `last_checkpoint_lsn`）
+    ///
+    /// # 返回
+    /// - `Ok(removed_bytes)`：被截断的字节数
+    /// - `Err`：截断失败（文件 IO 错误或 `keep_lsn` 大于当前 LSN）
+    ///
+    /// # 错误条件
+    /// - `keep_lsn > current_lsn`：返回 `InvalidState`（不允许截断尚未写入的 LSN）
+    /// - `keep_lsn == 0`：截断全部历史记录（仅保留空文件）
+    #[instrument(skip(self), fields(keep_lsn, removed_bytes))]
+    pub fn truncate_before(&self, keep_lsn: u64) -> Result<u64, WalError> {
+        let current = self.current_lsn();
+        if keep_lsn > current {
+            return Err(WalError::InvalidState(format!(
+                "keep_lsn {} > current_lsn {}",
+                keep_lsn, current
+            )));
+        }
+
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+
+        // 扫描 WAL 找到第一条 lsn >= keep_lsn 的记录的文件偏移
+        let mut reader = std::io::BufReader::new(
+            std::fs::File::open(&self.path).map_err(|e| WalError::IoError(e.to_string()))?,
+        );
+        let mut keep_offset: u64 = 0; // 保留区域的起始偏移
+        let mut header = [0u8; WAL_HEADER_SIZE];
+        loop {
+            let pos = reader
+                .stream_position()
+                .map_err(|e| WalError::IoError(e.to_string()))?;
+            match reader.read_exact(&mut header) {
+                Ok(()) => {}
+                Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(WalError::IoError(e.to_string())),
+            }
+            let lsn = u64::from_le_bytes(header[0..8].try_into().unwrap());
+            let data_len = u32::from_le_bytes(header[17..21].try_into().unwrap()) as usize;
+            if data_len > WAL_MAX_DATA_LEN {
+                break;
+            }
+            // 跳过 data + checksum
+            let tail_len = data_len + WAL_TRAILER_SIZE;
+            if std::io::copy(
+                &mut reader.by_ref().take(tail_len as u64),
+                &mut std::io::sink(),
+            )
+            .map_err(|e| WalError::IoError(e.to_string()))?
+                != tail_len as u64
+            {
+                break;
+            }
+            if lsn >= keep_lsn {
+                keep_offset = pos;
+                break;
+            }
+        }
+
+        if keep_offset == 0 {
+            // 没有找到 lsn >= keep_lsn 的记录（可能 keep_lsn == 0 或文件已结束）
+            // 如果 keep_lsn == 0，截断全部历史
+            // 否则保留整个文件（keep_lsn 超出文件范围但 <= current_lsn，说明记录已被截断）
+            if keep_lsn == 0 {
+                let file_len = file
+                    .metadata()
+                    .map_err(|e| WalError::IoError(e.to_string()))?
+                    .len();
+                // 使用临时文件 + rename 原子替换（避免 Windows 上 append 模式 set_len 权限问题）
+                let tmp_path = self.path.with_extension("trunc.tmp");
+                {
+                    let tmp = std::fs::OpenOptions::new()
+                        .create(true)
+                        .write(true)
+                        .truncate(true)
+                        .open(&tmp_path)
+                        .map_err(|e| WalError::IoError(e.to_string()))?;
+                    tmp.sync_all()
+                        .map_err(|e| WalError::IoError(e.to_string()))?;
+                }
+                std::fs::rename(&tmp_path, &self.path)
+                    .map_err(|e| WalError::IoError(e.to_string()))?;
+                // 重新打开文件句柄
+                let new_file = std::fs::OpenOptions::new()
+                    .append(true)
+                    .read(true)
+                    .open(&self.path)
+                    .map_err(|e| WalError::IoError(e.to_string()))?;
+                *file = new_file;
+                tracing::Span::current().record("removed_bytes", file_len);
+                return Ok(file_len);
+            }
+            return Ok(0);
+        }
+
+        // 读取保留区域
+        let file_len = file
+            .metadata()
+            .map_err(|e| WalError::IoError(e.to_string()))?
+            .len();
+        let keep_len = file_len.saturating_sub(keep_offset);
+        let mut keep_buf = vec![0u8; keep_len as usize];
+        file.seek(std::io::SeekFrom::Start(keep_offset))
+            .map_err(|e| WalError::IoError(e.to_string()))?;
+        file.read_exact(&mut keep_buf)
+            .map_err(|e| WalError::IoError(e.to_string()))?;
+
+        // 原子写入：临时文件 + rename
+        let tmp_path = self.path.with_extension("trunc.tmp");
+        {
+            let mut tmp = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)
+                .map_err(|e| WalError::IoError(e.to_string()))?;
+            tmp.write_all(&keep_buf)
+                .map_err(|e| WalError::IoError(e.to_string()))?;
+            tmp.sync_all()
+                .map_err(|e| WalError::IoError(e.to_string()))?;
+        }
+        std::fs::rename(&tmp_path, &self.path).map_err(|e| WalError::IoError(e.to_string()))?;
+
+        // 重新打开文件句柄（保持追加模式）
+        let new_file = std::fs::OpenOptions::new()
+            .append(true)
+            .read(true)
+            .open(&self.path)
+            .map_err(|e| WalError::IoError(e.to_string()))?;
+        *file = new_file;
+
+        let removed_bytes = keep_offset;
+        tracing::Span::current().record("removed_bytes", removed_bytes);
+        debug!(
+            keep_lsn,
+            removed_bytes, keep_len, "WAL truncated before keep_lsn"
+        );
+        Ok(removed_bytes)
     }
 
     /// 扫描 WAL 文件，返回最大 LSN + 1（用于恢复 current_lsn）
@@ -853,6 +1243,10 @@ impl CheckpointManager {
     /// 5. 更新 `last_checkpoint_lsn`
     /// 6. 若配置了 meta_path，持久化元数据
     ///
+    /// **WAL 截断**：checkpoint 不会自动截断 WAL（避免并发 checkpoint 场景下破坏配对）。
+    /// 调用方应在确认 checkpoint 完成且无并发 checkpoint 进行时，单独调用
+    /// `WalWriter::truncate_before(start_lsn)` 清理旧记录。
+    ///
     /// 返回 `checkpoint_end` 记录的 LSN。
     #[instrument(skip(self, source, wal), fields(start_lsn, end_lsn, flushed_pages))]
     pub fn checkpoint(
@@ -899,6 +1293,67 @@ impl CheckpointManager {
         }
 
         Ok(end_lsn)
+    }
+
+    /// 执行检查点并截断旧 WAL（Phase 2.3 实现）
+    ///
+    /// 在 `checkpoint` 成功后调用 `WalWriter::truncate_before(start_lsn)` 清理旧 WAL。
+    ///
+    /// **注意**：此方法不适用于并发 checkpoint 场景（多个线程同时调用可能破坏配对）。
+    /// 并发场景请使用 `checkpoint` + 单独的 `WalWriter::truncate_before` 调用。
+    ///
+    /// 返回 `(end_lsn, truncated_bytes)`。
+    #[instrument(skip(self, source, wal), fields(start_lsn, end_lsn, truncated_bytes))]
+    pub fn checkpoint_with_truncate(
+        &self,
+        source: &dyn CheckpointSource,
+        wal: &WalWriter,
+    ) -> Result<(u64, u64), WalError> {
+        // 1. 写入 checkpoint_start 记录
+        let start_lsn = wal.append(WalRecord::new(
+            0,
+            0,
+            WalOpType::Checkpoint,
+            0,
+            b"START".to_vec(),
+        ))?;
+        tracing::Span::current().record("start_lsn", start_lsn);
+
+        // 2. 刷脏页到数据文件
+        let _flushed = source.flush_dirty_pages()?;
+
+        // 3. 写入 checkpoint_end 记录
+        let end_lsn = wal.append(WalRecord::new(
+            0,
+            0,
+            WalOpType::Checkpoint,
+            1,
+            start_lsn.to_le_bytes().to_vec(),
+        ))?;
+        tracing::Span::current().record("end_lsn", end_lsn);
+
+        // 4. fsync WAL
+        wal.flush()?;
+
+        // 5. 更新 last_checkpoint_lsn
+        self.last_checkpoint_lsn
+            .store(end_lsn, std::sync::atomic::Ordering::SeqCst);
+        self.records_since_last_checkpoint
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+
+        // 6. 持久化元数据
+        if let Some(meta_path) = &self.meta_path {
+            Self::write_meta(meta_path, end_lsn)?;
+        }
+
+        // 7. 截断 start_lsn 之前的 WAL 记录
+        let truncated = wal.truncate_before(start_lsn).unwrap_or(0);
+        tracing::Span::current().record("truncated_bytes", truncated);
+        debug!(
+            start_lsn, end_lsn, truncated, "checkpoint_with_truncate completed"
+        );
+
+        Ok((end_lsn, truncated))
     }
 
     /// 自动触发 checkpoint（达到 interval 阈值时）
@@ -1201,7 +1656,7 @@ impl WalHookWriter {
             WalOpType::Commit => {
                 // 收集该事务的所有记录（含本次 Commit 记录）
                 let mut records = {
-                    let mut pending = self.pending.lock().unwrap();
+                    let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
                     pending.remove(&tx_id).unwrap_or_default()
                 };
                 record.lsn = lsn;
@@ -1213,7 +1668,7 @@ impl WalHookWriter {
             WalOpType::Abort => {
                 // 丢弃缓冲，触发 on_rollback
                 {
-                    let mut pending = self.pending.lock().unwrap();
+                    let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
                     pending.remove(&tx_id);
                 }
                 self.observer_manager.notify_rollback(tx_id);
@@ -1222,7 +1677,7 @@ impl WalHookWriter {
                 // 缓冲到 pending[tx_id]
                 record.lsn = lsn;
                 record.update_checksum();
-                let mut pending = self.pending.lock().unwrap();
+                let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
                 pending.entry(tx_id).or_default().push(record);
             }
         }
@@ -1234,7 +1689,7 @@ impl WalHookWriter {
     /// 用于事务已通过其他方式写入 Commit 记录，但需要触发回调的场景。
     pub fn fire_commit(&self, tx_id: u32) -> Result<Vec<WalRecord>, WalError> {
         let records = {
-            let mut pending = self.pending.lock().unwrap();
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             pending.remove(&tx_id).unwrap_or_default()
         };
         self.observer_manager.notify_commit(tx_id, records.clone());
@@ -1244,7 +1699,7 @@ impl WalHookWriter {
     /// 显式触发事务回滚回调（不写入 Abort 记录到 WAL）
     pub fn fire_rollback(&self, tx_id: u32) {
         {
-            let mut pending = self.pending.lock().unwrap();
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
             pending.remove(&tx_id);
         }
         self.observer_manager.notify_rollback(tx_id);
@@ -1262,7 +1717,7 @@ impl WalHookWriter {
 
     /// 获取当前缓冲中的事务数（用于调试/测试）
     pub fn pending_tx_count(&self) -> usize {
-        self.pending.lock().unwrap().len()
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// 获取指定事务的缓冲记录数（用于调试/测试）
@@ -1308,13 +1763,15 @@ mod tests {
         assert_eq!(WalOpType::from_u8(4).unwrap(), WalOpType::Abort);
         assert_eq!(WalOpType::from_u8(5).unwrap(), WalOpType::Checkpoint);
         assert_eq!(WalOpType::from_u8(6).unwrap(), WalOpType::FullPageImage);
+        assert_eq!(WalOpType::from_u8(7).unwrap(), WalOpType::TableData);
     }
 
     #[test]
     fn wal_op_type_from_u8_invalid_returns_error() {
+        // P0-1 修复：7 现在是合法的 TableData 变体，使用 8 作为无效值
         assert!(matches!(
-            WalOpType::from_u8(7),
-            Err(WalError::InvalidOpType(7))
+            WalOpType::from_u8(8),
+            Err(WalError::InvalidOpType(8))
         ));
         assert!(matches!(
             WalOpType::from_u8(255),
@@ -1332,6 +1789,7 @@ mod tests {
             WalOpType::Abort,
             WalOpType::Checkpoint,
             WalOpType::FullPageImage,
+            WalOpType::TableData,
         ] {
             assert_eq!(WalOpType::from_u8(op.as_u8()).unwrap(), op);
         }
@@ -2858,6 +3316,112 @@ mod tests {
             assert!(!meta_path.exists());
         }
 
+        // --- Phase 2.3: WAL 截断测试 ---
+
+        fn temp_truncate_path(name: &str) -> std::path::PathBuf {
+            let dir = std::env::temp_dir().join("szrsql_wal_truncate");
+            let _ = std::fs::create_dir_all(&dir);
+            dir.join(format!("{name}.wal"))
+        }
+
+        #[test]
+        fn truncate_before_removes_old_records() {
+            let path = temp_truncate_path("remove_old");
+            let _ = std::fs::remove_file(&path);
+            let writer = WalWriter::create_new(&path).unwrap();
+
+            // 写入 10 条记录（LSN 0-9）
+            for i in 0..10 {
+                writer.append(make_record(i)).unwrap();
+            }
+            writer.flush().unwrap();
+            assert_eq!(writer.current_lsn(), 10);
+
+            // 截断保留 LSN >= 5 的记录
+            let removed = writer.truncate_before(5).unwrap();
+            assert!(removed > 0, "should have removed some bytes");
+
+            // 验证：replay 后只剩 LSN 5-9
+            let records = WalReplayer::replay_all(&path).unwrap();
+            assert_eq!(records.len(), 5, "should have 5 records remaining");
+            for (i, r) in records.iter().enumerate() {
+                assert_eq!(r.lsn, 5 + i as u64, "record {} should have lsn {}", i, 5 + i);
+            }
+
+            // current_lsn 不变
+            assert_eq!(writer.current_lsn(), 10);
+
+            // 继续追加应正常
+            let lsn = writer.append(make_record(99)).unwrap();
+            assert_eq!(lsn, 10);
+
+            std::fs::remove_file(&path).ok();
+        }
+
+        #[test]
+        fn truncate_before_zero_empties_file() {
+            let path = temp_truncate_path("empty_file");
+            let _ = std::fs::remove_file(&path);
+            let writer = WalWriter::create_new(&path).unwrap();
+
+            for i in 0..5 {
+                writer.append(make_record(i)).unwrap();
+            }
+            writer.flush().unwrap();
+
+            let removed = writer.truncate_before(0).unwrap();
+            assert!(removed > 0);
+
+            let records = WalReplayer::replay_all(&path).unwrap();
+            assert!(records.is_empty(), "file should be empty after truncate 0");
+
+            std::fs::remove_file(&path).ok();
+        }
+
+        #[test]
+        fn truncate_before_exceeds_current_returns_error() {
+            let path = temp_truncate_path("exceed_current");
+            let _ = std::fs::remove_file(&path);
+            let writer = WalWriter::create_new(&path).unwrap();
+
+            for i in 0..3 {
+                writer.append(make_record(i)).unwrap();
+            }
+
+            // keep_lsn > current_lsn 应返回错误
+            let result = writer.truncate_before(100);
+            assert!(matches!(result, Err(WalError::InvalidState(_))));
+
+            std::fs::remove_file(&path).ok();
+        }
+
+        #[test]
+        fn checkpoint_with_truncate_clears_old_wal() {
+            let path = temp_truncate_path("cp_truncate");
+            let _ = std::fs::remove_file(&path);
+            let writer = WalWriter::create_new(&path).unwrap();
+            let cm = CheckpointManager::new(100);
+            let source = MockCheckpointSource::new();
+
+            // 写入 5 条记录
+            for i in 0..5 {
+                writer.append(make_record(i)).unwrap();
+            }
+
+            // checkpoint_with_truncate：写入 start(5)+end(6)，截断 start_lsn=5 之前的字节
+            let (end_lsn, truncated) = cm.checkpoint_with_truncate(&source, &writer).unwrap();
+            assert_eq!(end_lsn, 6);
+            assert!(truncated > 0, "should have truncated some bytes");
+
+            // 验证：replay 后只剩 start(5) + end(6) 两条记录
+            let records = WalReplayer::replay_all(&path).unwrap();
+            assert_eq!(records.len(), 2, "should have 2 checkpoint records remaining");
+            assert_eq!(records[0].lsn, 5);
+            assert_eq!(records[1].lsn, 6);
+
+            std::fs::remove_file(&path).ok();
+        }
+
         #[test]
         fn restore_returns_zero_when_meta_file_corrupted() {
             let meta_path = temp_meta_path("cp_restore_corrupt");
@@ -3879,5 +4443,189 @@ mod tests {
 
             std::fs::remove_file(&path).ok();
         }
+    }
+
+    // -----------------------------------------------------------------
+    //  P9-2：WalRowChange 行级变更载荷测试
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn p9_2_wal_row_change_insert_roundtrip() {
+        // Insert 变更：仅 new_payload
+        let payload = b"{\"id\":1,\"name\":\"alice\"}".to_vec();
+        let change = WalRowChange::for_insert(0xABCD_1234, 42, payload.clone());
+        let encoded = change.encode_insert();
+        assert_eq!(encoded.len(), 4 + 4 + payload.len());
+
+        let decoded = WalRowChange::decode_insert(0xABCD_1234, &encoded).unwrap();
+        assert_eq!(decoded, change);
+        assert!(decoded.old_payload.is_empty());
+        assert_eq!(decoded.new_payload, payload);
+    }
+
+    #[test]
+    fn p9_2_wal_row_change_delete_roundtrip() {
+        // Delete 变更：仅 old_payload
+        let change = WalRowChange::for_delete(0x1122_3344, 7, b"old_row_bytes".to_vec());
+        let encoded = change.encode_delete();
+        assert_eq!(encoded.len(), 4 + 4 + 13);
+
+        let decoded = WalRowChange::decode_delete(0x1122_3344, &encoded).unwrap();
+        assert_eq!(decoded, change);
+        assert!(decoded.new_payload.is_empty());
+    }
+
+    #[test]
+    fn p9_2_wal_row_change_update_roundtrip() {
+        // Update 变更：old_payload + new_payload
+        let change = WalRowChange::for_update(
+            0x5566_7788,
+            99,
+            b"old_data".to_vec(),
+            b"new_data_longer".to_vec(),
+        );
+        let encoded = change.encode_update();
+        assert_eq!(encoded.len(), 4 + 4 + 8 + 4 + 15);
+
+        let decoded = WalRowChange::decode_update(0x5566_7788, &encoded).unwrap();
+        assert_eq!(decoded, change);
+    }
+
+    #[test]
+    fn p9_2_wal_row_change_empty_payload_roundtrip() {
+        // 空载荷（如 schema 变更场景）也能正确编解码
+        let change = WalRowChange::for_insert(1, 0, Vec::new());
+        let encoded = change.encode_insert();
+        assert_eq!(encoded.len(), 8); // 仅 row_id + len=0
+        let decoded = WalRowChange::decode_insert(1, &encoded).unwrap();
+        assert_eq!(decoded, change);
+    }
+
+    #[test]
+    fn p9_2_wal_row_change_decode_buffer_too_short() {
+        // 缓冲区过短应返回 BufferTooShort
+        let short_buf = [0u8; 4];
+        let err = WalRowChange::decode_insert(1, &short_buf).unwrap_err();
+        assert!(matches!(err, WalError::BufferTooShort { need: 8, have: 4 }));
+
+        let short_buf2 = [0u8; 7];
+        let err = WalRowChange::decode_delete(1, &short_buf2).unwrap_err();
+        assert!(matches!(err, WalError::BufferTooShort { need: 8, .. }));
+    }
+
+    #[test]
+    fn p9_2_wal_record_new_row_insert_encode_decode() {
+        // 通过 WalRecord 工厂方法构造行级 Insert 记录，验证完整编码/解码
+        let change = WalRowChange::for_insert(0xCAFE, 10, b"payload".to_vec());
+        let mut record = WalRecord::new_row_insert(42, &change);
+        assert_eq!(record.op_type, WalOpType::Insert);
+        assert_eq!(record.tx_id, 42);
+        assert_eq!(record.page_id, 0xCAFE); // table_id 存储在 page_id 字段
+        record.update_checksum();
+
+        let encoded = record.encode();
+        let decoded = WalRecord::decode(&encoded).unwrap();
+        assert_eq!(decoded, record);
+        assert!(decoded.verify_checksum().is_ok());
+
+        // 从 decoded 记录中提取 WalRowChange 验证载荷
+        let decoded_change = WalRowChange::decode_insert(decoded.page_id, &decoded.data).unwrap();
+        assert_eq!(decoded_change, change);
+    }
+
+    #[test]
+    fn p9_2_wal_record_new_row_update_encode_decode() {
+        let change = WalRowChange::for_update(0xBEEF, 5, b"old".to_vec(), b"new".to_vec());
+        let mut record = WalRecord::new_row_update(7, &change);
+        assert_eq!(record.op_type, WalOpType::Update);
+        assert_eq!(record.page_id, 0xBEEF);
+        record.update_checksum();
+
+        let encoded = record.encode();
+        let decoded = WalRecord::decode(&encoded).unwrap();
+        assert!(decoded.verify_checksum().is_ok());
+
+        let decoded_change = WalRowChange::decode_update(decoded.page_id, &decoded.data).unwrap();
+        assert_eq!(decoded_change, change);
+    }
+
+    #[test]
+    fn p9_2_wal_record_new_row_delete_encode_decode() {
+        let change = WalRowChange::for_delete(0xF00D, 3, b"old_row".to_vec());
+        let mut record = WalRecord::new_row_delete(99, &change);
+        assert_eq!(record.op_type, WalOpType::Delete);
+        assert_eq!(record.page_id, 0xF00D);
+        record.update_checksum();
+
+        let encoded = record.encode();
+        let decoded = WalRecord::decode(&encoded).unwrap();
+        assert!(decoded.verify_checksum().is_ok());
+
+        let decoded_change = WalRowChange::decode_delete(decoded.page_id, &decoded.data).unwrap();
+        assert_eq!(decoded_change, change);
+    }
+
+    #[test]
+    fn p9_2_wal_writer_append_row_change_records() {
+        // 端到端验证：WalWriter 写入行级 Insert/Update/Delete 记录，WalReader 读回
+        let temp = std::env::temp_dir().join(format!(
+            "szrsql_p9_2_wal_row_{}.wal",
+            std::process::id()
+        ));
+        std::fs::remove_file(&temp).ok();
+        let writer = WalWriter::create_new(&temp).unwrap();
+
+        // 写入 Insert
+        let ins = WalRowChange::for_insert(1, 10, b"insert_payload".to_vec());
+        let lsn1 = writer.append(WalRecord::new_row_insert(100, &ins)).unwrap();
+        // 写入 Update
+        let upd = WalRowChange::for_update(1, 10, b"old".to_vec(), b"new".to_vec());
+        let lsn2 = writer.append(WalRecord::new_row_update(100, &upd)).unwrap();
+        // 写入 Delete
+        let del = WalRowChange::for_delete(1, 10, b"delete_payload".to_vec());
+        let lsn3 = writer.append(WalRecord::new_row_delete(100, &del)).unwrap();
+        // 写入 Commit
+        let lsn4 = writer
+            .append(WalRecord::new(0, 100, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+        writer.flush().unwrap();
+        assert_eq!(lsn1, 0);
+        assert_eq!(lsn2, 1);
+        assert_eq!(lsn3, 2);
+        assert_eq!(lsn4, 3);
+
+        drop(writer);
+
+        // 读回验证
+        let mut reader = WalReader::open(&temp).unwrap();
+        let r1 = reader.read_next().unwrap().unwrap();
+        assert_eq!(r1.op_type, WalOpType::Insert);
+        assert_eq!(r1.tx_id, 100);
+        assert_eq!(r1.page_id, 1);
+        let c1 = WalRowChange::decode_insert(r1.page_id, &r1.data).unwrap();
+        assert_eq!(c1.row_id, 10);
+        assert_eq!(c1.new_payload, b"insert_payload".to_vec());
+
+        let r2 = reader.read_next().unwrap().unwrap();
+        assert_eq!(r2.op_type, WalOpType::Update);
+        let c2 = WalRowChange::decode_update(r2.page_id, &r2.data).unwrap();
+        assert_eq!(c2.row_id, 10);
+        assert_eq!(c2.old_payload, b"old".to_vec());
+        assert_eq!(c2.new_payload, b"new".to_vec());
+
+        let r3 = reader.read_next().unwrap().unwrap();
+        assert_eq!(r3.op_type, WalOpType::Delete);
+        let c3 = WalRowChange::decode_delete(r3.page_id, &r3.data).unwrap();
+        assert_eq!(c3.row_id, 10);
+        assert_eq!(c3.old_payload, b"delete_payload".to_vec());
+
+        let r4 = reader.read_next().unwrap().unwrap();
+        assert_eq!(r4.op_type, WalOpType::Commit);
+        assert_eq!(r4.tx_id, 100);
+
+        // EOF
+        assert!(reader.read_next().unwrap().is_none());
+
+        std::fs::remove_file(&temp).ok();
     }
 }

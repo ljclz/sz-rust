@@ -16,22 +16,22 @@ use crate::btree::{BTree, BTreeError, BTREE_DEFAULT_ORDER};
 // =====================================================================
 
 /// 生成 n 个升序的 (i64-encoded key, tuple_id) 数据
-fn make_sorted_items(n: usize) -> Vec<(Vec<u8>, u16)> {
+fn make_sorted_items(n: usize) -> Vec<(Vec<u8>, u32)> {
     (0..n)
         .map(|i| {
             let key = (i as i64).to_be_bytes().to_vec(); // i64 升序 → 大端字节序升序
-            let tuple_id = (i % 65536) as u16;
+            let tuple_id = (i % 65536) as u32;
             (key, tuple_id)
         })
         .collect()
 }
 
 /// 生成 n 个升序的 (i64-encoded key, tuple_id) 数据，带起始偏移
-fn make_sorted_items_offset(n: usize, offset: i64) -> Vec<(Vec<u8>, u16)> {
+fn make_sorted_items_offset(n: usize, offset: i64) -> Vec<(Vec<u8>, u32)> {
     (0..n)
         .map(|i| {
             let key = (offset + i as i64).to_be_bytes().to_vec();
-            let tuple_id = (i % 65536) as u16;
+            let tuple_id = (i % 65536) as u32;
             (key, tuple_id)
         })
         .collect()
@@ -79,7 +79,7 @@ fn phase_0110_bulk_load_basic_100_items() {
         let found = bt.search(k).expect("search should not error");
         assert_eq!(
             found,
-            Some((i % 65536) as u16),
+            Some((i % 65536) as u32),
             "key at index {} not found or tuple_id mismatch",
             i
         );
@@ -102,7 +102,7 @@ fn phase_0110_bulk_load_basic_100_items() {
 /// 空输入：返回 BulkLoadEmpty 错误
 #[test]
 fn phase_0110_bulk_load_empty_input_errors() {
-    let items: Vec<(Vec<u8>, u16)> = Vec::new();
+    let items: Vec<(Vec<u8>, u32)> = Vec::new();
     let mut bt = BTree::with_default_order();
     let result = bt.bulk_load(items);
     assert!(matches!(result, Err(BTreeError::BulkLoadEmpty)));
@@ -415,7 +415,7 @@ fn phase_0110_bulk_load_batched_cross_boundary() {
 /// 分批构建：空输入返回 BulkLoadEmpty
 #[test]
 fn phase_0110_bulk_load_batched_empty_errors() {
-    let items: Vec<(Vec<u8>, u16)> = Vec::new();
+    let items: Vec<(Vec<u8>, u32)> = Vec::new();
     let mut bt = BTree::with_default_order();
     let result = bt.bulk_load_batched(items, 100);
     assert!(matches!(result, Err(BTreeError::BulkLoadEmpty)));
@@ -492,14 +492,14 @@ fn phase_0110_bulk_load_matches_btreemap_reference() {
     sorted_keys.sort_unstable();
 
     // 构造 sorted items
-    let items: Vec<(Vec<u8>, u16)> = sorted_keys
+    let items: Vec<(Vec<u8>, u32)> = sorted_keys
         .iter()
         .enumerate()
-        .map(|(i, &k)| (k.to_be_bytes().to_vec(), (i % 65536) as u16))
+        .map(|(i, &k)| (k.to_be_bytes().to_vec(), (i % 65536) as u32))
         .collect();
 
     // BTreeMap 参考
-    let mut ref_map: std::collections::BTreeMap<Vec<u8>, u16> = std::collections::BTreeMap::new();
+    let mut ref_map: std::collections::BTreeMap<Vec<u8>, u32> = std::collections::BTreeMap::new();
     for (k, v) in &items {
         ref_map.insert(k.clone(), *v);
     }
@@ -511,7 +511,7 @@ fn phase_0110_bulk_load_matches_btreemap_reference() {
 
     // 中序遍历 == BTreeMap.iter()
     let bulk_pairs = bt.in_order_leaf_traverse().unwrap();
-    let ref_pairs: Vec<(Vec<u8>, u16)> = ref_map.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let ref_pairs: Vec<(Vec<u8>, u32)> = ref_map.iter().map(|(k, v)| (k.clone(), *v)).collect();
     assert_eq!(bulk_pairs, ref_pairs);
 
     // 全部可查

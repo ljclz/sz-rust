@@ -21,9 +21,10 @@
 //! 对应 `SzRSQL实施进度.md` Phase 3.2。
 
 use crate::ast::*;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use szrsql_types::value::ColumnType;
+use szrsql_types::value::{ColumnType, Value};
 use thiserror::Error;
 
 // =====================================================================
@@ -66,7 +67,7 @@ pub enum PlanError {
 // =====================================================================
 
 /// 表 Schema（列名 + 类型）
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableSchema {
     /// 表名
     pub name: TableName,
@@ -297,6 +298,14 @@ pub trait Catalog {
     fn get_view(&self, _name: &TableName) -> Option<crate::materialized_view::ViewDefinition> {
         None
     }
+
+    /// 列出所有视图名 — Phase 6.15
+    ///
+    /// 默认实现返回空 Vec（不支持视图）。
+    /// 用于 pg_views 系统表查询，返回 catalog 中所有已注册的视图。
+    fn list_views(&self) -> Vec<TableName> {
+        Vec::new()
+    }
 }
 
 /// 索引定义 — Phase 5.7
@@ -375,6 +384,40 @@ impl CheckConstraint {
     }
 }
 
+/// 函数定义 — Phase 6.5（P0-5 修复）
+///
+/// 存储 SQL 函数的元数据，支持 PL/pgSQL、SQL、C 等多种语言。
+/// 函数体执行由表达式求值器在调用时按需触发（PL/pgSQL 解释器或 UDF 注册表）。
+///
+/// # 字段语义
+/// - `name`：函数名（保留原始大小写，catalog 内部以小写为键）
+/// - `parameters`：参数列表（按声明顺序）
+/// - `return_type`：返回类型原文（如 `integer`、`void`、`TABLE(...)`）
+/// - `language`：函数语言（`plpgsql` / `sql` / `c`）
+/// - `body`：函数体原文（已剥离 `$$` / `'` 等定界符）
+/// - `volatility`：IMMUTABLE / STABLE / VOLATILE（None=VOLATILE）
+/// - `strict`：RETURNS NULL ON NULL INPUT
+/// - `security_definer`：以定义者权限执行
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FunctionDefinition {
+    /// 函数名（含可选 schema 前缀）
+    pub name: String,
+    /// 参数列表
+    pub parameters: Vec<crate::ast::FunctionParameter>,
+    /// 返回类型原文
+    pub return_type: String,
+    /// 函数语言
+    pub language: String,
+    /// 函数体原文
+    pub body: String,
+    /// 函数波动性
+    pub volatility: Option<crate::ast::FunctionVolatility>,
+    /// STRICT
+    pub strict: bool,
+    /// SECURITY DEFINER
+    pub security_definer: bool,
+}
+
 /// 内存 Catalog — 用于单元测试和示例
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryCatalog {
@@ -394,6 +437,10 @@ pub struct InMemoryCatalog {
     triggers: HashMap<String, Vec<TriggerDefinition>>,
     /// 视图（视图名小写 → 视图定义）— Phase 6.10
     views: HashMap<String, crate::materialized_view::ViewDefinition>,
+    /// 注释存储（key = "table_name" 或 "table_name.column_name"）— Phase TDengine-P2
+    comments: HashMap<String, String>,
+    /// 函数定义（函数名小写 → 函数定义列表，支持重载）— Phase 6.5（P0-5 修复）
+    functions: HashMap<String, Vec<FunctionDefinition>>,
 }
 
 impl InMemoryCatalog {
@@ -409,6 +456,8 @@ impl InMemoryCatalog {
             indexes: HashMap::new(),
             triggers: HashMap::new(),
             views: HashMap::new(),
+            comments: HashMap::new(),
+            functions: HashMap::new(),
         }
     }
 
@@ -507,8 +556,67 @@ impl InMemoryCatalog {
         Ok(())
     }
 
+    /// 表名 → lowercase qualified key（大小写不敏感）
+    ///
+    /// 当 schema 为 None 时默认使用 "public"，与 ManagedCatalog::table_key 保持一致，
+    /// 确保 `CREATE TABLE t` 和 `SELECT * FROM "public"."t"` 能匹配同一张表。
     fn key(&self, name: &TableName) -> String {
-        name.qualified_name().to_lowercase()
+        match &name.schema {
+            Some(s) => format!("{}.{}", s.to_lowercase(), name.name.to_lowercase()),
+            None => format!("public.{}", name.name.to_lowercase()),
+        }
+    }
+
+    /// 设置表注释 — Phase TDengine-P2
+    ///
+    /// `comment=None` 时删除已有注释。
+    pub fn set_table_comment(
+        &mut self,
+        name: &TableName,
+        comment: Option<String>,
+    ) -> Result<(), PlanError> {
+        let key = self.key(name);
+        match comment {
+            Some(c) => {
+                self.comments.insert(key, c);
+            }
+            None => {
+                self.comments.remove(&key);
+            }
+        }
+        Ok(())
+    }
+
+    /// 设置列注释 — Phase TDengine-P2
+    ///
+    /// `comment=None` 时删除已有注释。
+    pub fn set_column_comment(
+        &mut self,
+        table: &TableName,
+        column: &str,
+        comment: Option<String>,
+    ) -> Result<(), PlanError> {
+        let key = format!("{}.{}", self.key(table), column.to_lowercase());
+        match comment {
+            Some(c) => {
+                self.comments.insert(key, c);
+            }
+            None => {
+                self.comments.remove(&key);
+            }
+        }
+        Ok(())
+    }
+
+    /// 获取表注释 — Phase TDengine-P2
+    pub fn get_table_comment(&self, name: &TableName) -> Option<String> {
+        self.comments.get(&self.key(name)).cloned()
+    }
+
+    /// 获取列注释 — Phase TDengine-P2
+    pub fn get_column_comment(&self, table: &TableName, column: &str) -> Option<String> {
+        let key = format!("{}.{}", self.key(table), column.to_lowercase());
+        self.comments.get(&key).cloned()
     }
 
     /// 从 CREATE TABLE 计划注册表 Schema 和外键 — Phase 3.29
@@ -743,15 +851,271 @@ impl InMemoryCatalog {
     pub fn list_views(&self) -> Vec<TableName> {
         self.views.values().map(|v| v.name.clone()).collect()
     }
+
+    // =================================================================
+    //  函数定义管理 — Phase 6.5（P0-5 修复）
+    // =================================================================
+
+    /// 添加函数定义 — Phase 6.5
+    ///
+    /// 支持函数重载：同名但参数签名不同的函数可共存。
+    /// 若 `or_replace=true` 且存在相同签名的函数，则替换；否则报错。
+    /// 若 `or_replace=false` 且存在相同签名的函数，则报错。
+    pub fn add_function(
+        &mut self,
+        def: FunctionDefinition,
+        or_replace: bool,
+    ) -> Result<(), PlanError> {
+        let key = def.name.to_lowercase();
+        let signatures = self.functions.entry(key.clone()).or_default();
+        // 检查签名冲突（参数类型 + 参数数量）
+        let conflict_idx = signatures.iter().position(|existing| {
+            existing.parameters.len() == def.parameters.len()
+                && existing
+                    .parameters
+                    .iter()
+                    .zip(def.parameters.iter())
+                    .all(|(a, b)| {
+                        a.data_type.trim().eq_ignore_ascii_case(b.data_type.trim())
+                    })
+        });
+        if let Some(idx) = conflict_idx {
+            if or_replace {
+                signatures[idx] = def;
+                Ok(())
+            } else {
+                Err(PlanError::Unsupported(format!(
+                    "function {} already exists with same parameter types",
+                    def.name
+                )))
+            }
+        } else {
+            signatures.push(def);
+            Ok(())
+        }
+    }
+
+    /// 删除函数定义 — Phase 6.5
+    ///
+    /// 按 `parameter_types` 精确匹配签名删除。
+    /// 若 `parameter_types` 为空且该函数名只有一个定义，则删除之；
+    /// 若有多个重载则报错（PG 语义：必须指定参数类型）。
+    ///
+    /// 返回是否实际删除了函数。
+    pub fn drop_function(
+        &mut self,
+        name: &str,
+        parameter_types: &[String],
+        if_exists: bool,
+    ) -> Result<bool, PlanError> {
+        let key = name.to_lowercase();
+        let signatures = match self.functions.get_mut(&key) {
+            Some(s) if !s.is_empty() => s,
+            _ => {
+                if if_exists {
+                    return Ok(false);
+                }
+                return Err(PlanError::Unsupported(format!(
+                    "function {} does not exist",
+                    name
+                )));
+            }
+        };
+        if parameter_types.is_empty() {
+            if signatures.len() == 1 {
+                signatures.clear();
+                Ok(true)
+            } else {
+                Err(PlanError::Unsupported(format!(
+                    "function {} is overloaded ({} variants), must specify parameter types",
+                    name,
+                    signatures.len()
+                )))
+            }
+        } else {
+            let idx = signatures.iter().position(|existing| {
+                existing.parameters.len() == parameter_types.len()
+                    && existing
+                        .parameters
+                        .iter()
+                        .zip(parameter_types.iter())
+                        .all(|(p, t)| p.data_type.trim().eq_ignore_ascii_case(t.trim()))
+            });
+            match idx {
+                Some(i) => {
+                    signatures.remove(i);
+                    Ok(true)
+                }
+                None => {
+                    if if_exists {
+                        Ok(false)
+                    } else {
+                        Err(PlanError::Unsupported(format!(
+                            "function {} with specified parameter types does not exist",
+                            name
+                        )))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 按名查询函数定义（取第一个匹配，用于无重载场景）— Phase 6.5
+    pub fn get_function(&self, name: &str) -> Option<&FunctionDefinition> {
+        self.functions
+            .get(&name.to_lowercase())
+            .and_then(|v| v.first())
+    }
+
+    /// 按名+参数数量查询函数定义（用于调用时解析）— Phase 6.5
+    pub fn find_function(&self, name: &str, arg_count: usize) -> Option<&FunctionDefinition> {
+        self.functions
+            .get(&name.to_lowercase())
+            .and_then(|v| v.iter().find(|f| f.parameters.len() == arg_count))
+    }
+
+    /// 列出所有函数名 — Phase 6.5
+    pub fn list_functions(&self) -> Vec<String> {
+        self.functions.keys().cloned().collect()
+    }
+
+    /// 列出指定函数名的所有重载定义 — Phase 6.5
+    pub fn list_function_overloads(&self, name: &str) -> Vec<&FunctionDefinition> {
+        self.functions
+            .get(&name.to_lowercase())
+            .map(|v| v.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// 替换表 Schema — Phase F-10
+    ///
+    /// 用于 `ALTER TABLE` 系列操作：执行器先 `get_table` 取得现有 Schema，
+    /// 在克隆上修改（增删列、改类型、改约束、改默认值、改 NOT NULL 等），
+    /// 再调用此方法整体替换。
+    ///
+    /// - 若表不存在，返回 `PlanError::TableNotFound`
+    /// - 表名必须与现有表名一致（不可用于 RENAME，RENAME 走 `rename_table`）
+    /// - 不会影响关联索引（索引元数据保持不变；若 DROP COLUMN 删除了被索引引用的列，
+    ///   执行器应先调用 `remove_index` 再调用此方法）
+    pub fn replace_table_schema(&mut self, schema: TableSchema) -> Result<(), PlanError> {
+        let key = self.key(&schema.name);
+        if !self.tables.contains_key(&key) {
+            return Err(PlanError::TableNotFound(schema.name.qualified_name()));
+        }
+        self.tables.insert(key, schema);
+        Ok(())
+    }
+
+    /// 重命名表 — Phase F-10
+    ///
+    /// 用于 `ALTER TABLE ... RENAME TO new_name`。
+    /// - 若旧表不存在，返回 `PlanError::TableNotFound`
+    /// - 若新表名已存在，返回 `PlanError::TableAlreadyExists`
+    /// - 同时更新关联索引、外键、CHECK 约束、触发器中的表名字段
+    pub fn rename_table(
+        &mut self,
+        old_name: &TableName,
+        new_name: &TableName,
+    ) -> Result<(), PlanError> {
+        let old_key = self.key(old_name);
+        let new_key = self.key(new_name);
+
+        if !self.tables.contains_key(&old_key) {
+            return Err(PlanError::TableNotFound(old_name.qualified_name()));
+        }
+        if self.tables.contains_key(&new_key) {
+            return Err(PlanError::Unsupported(format!(
+                "table already exists: {}",
+                new_name.qualified_name()
+            )));
+        }
+
+        // 1. 移除旧 schema，修改表名后插入新 key
+        let mut schema = self.tables.remove(&old_key).expect("checked above");
+        schema.name = new_name.clone();
+        self.tables.insert(new_key.clone(), schema);
+
+        // 2. 更新关联索引的 table 字段
+        if let Some(indexes) = self.indexes.remove(&old_key) {
+            let mut new_indexes = indexes;
+            for idx in new_indexes.iter_mut() {
+                idx.table = new_name.clone();
+            }
+            self.indexes.insert(new_key.clone(), new_indexes);
+        }
+
+        // 3. 更新触发器的 table 字段
+        if let Some(triggers) = self.triggers.remove(&old_key) {
+            let mut new_triggers = triggers;
+            for trg in new_triggers.iter_mut() {
+                trg.table = new_name.clone();
+            }
+            self.triggers.insert(new_key.clone(), new_triggers);
+        }
+
+        // 4. 迁移外键约束 / CHECK 约束的 key
+        if let Some(fks) = self.foreign_keys.remove(&old_key) {
+            self.foreign_keys.insert(new_key.clone(), fks);
+        }
+        if let Some(checks) = self.check_constraints.remove(&old_key) {
+            self.check_constraints.insert(new_key.clone(), checks);
+        }
+
+        Ok(())
+    }
 }
 
 impl Catalog for InMemoryCatalog {
     fn table_exists(&self, name: &TableName) -> bool {
-        self.tables.contains_key(&self.key(name))
+        let key = self.key(name);
+        if self.tables.contains_key(&key) {
+            return true;
+        }
+        // MySQL 兼容回退：schema.table → public.schema_table
+        // Navicat 发送 SELECT * FROM `njszjt`.`soci_article`，
+        // 但 szrsql 表存储为 public.njszjt_soci_article
+        if let Some(schema) = &name.schema {
+            let fallback = format!("public.{}_{}", schema.to_lowercase(), name.name.to_lowercase());
+            if self.tables.contains_key(&fallback) {
+                return true;
+            }
+        }
+        // MySQL 兼容回退：table（无 schema）→ 遍历找 _table 后缀
+        // Navicat 在 USE njszjt 后发送 SELECT * FROM soci_article，
+        // 但 szrsql 表存储为 public.njszjt_soci_article
+        if name.schema.is_none() {
+            let suffix = format!("_{}", name.name.to_lowercase());
+            for k in self.tables.keys() {
+                if k.ends_with(&suffix) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn get_table(&self, name: &TableName) -> Option<TableSchema> {
-        self.tables.get(&self.key(name)).cloned()
+        let key = self.key(name);
+        if let Some(t) = self.tables.get(&key) {
+            return Some(t.clone());
+        }
+        // MySQL 兼容回退：schema.table → public.schema_table
+        if let Some(schema) = &name.schema {
+            let fallback = format!("public.{}_{}", schema.to_lowercase(), name.name.to_lowercase());
+            if let Some(t) = self.tables.get(&fallback) {
+                return Some(t.clone());
+            }
+        }
+        // MySQL 兼容回退：table（无 schema）→ 遍历找 _table 后缀
+        if name.schema.is_none() {
+            let suffix = format!("_{}", name.name.to_lowercase());
+            for k in self.tables.keys() {
+                if k.ends_with(&suffix) {
+                    return self.tables.get(k).cloned();
+                }
+            }
+        }
+        None
     }
 
     fn list_tables(&self) -> Vec<TableName> {
@@ -832,6 +1196,11 @@ impl Catalog for InMemoryCatalog {
 
     fn get_view(&self, name: &TableName) -> Option<crate::materialized_view::ViewDefinition> {
         self.views.get(&self.key(name)).cloned()
+    }
+
+    /// 列出所有视图名 — 用于 pg_views 系统表
+    fn list_views(&self) -> Vec<TableName> {
+        self.views.values().map(|v| v.name.clone()).collect()
     }
 }
 
@@ -1076,6 +1445,34 @@ pub enum LogicalPlan {
         /// 操作
         action: AlterTypeAction,
     },
+    /// ALTER TABLE — Phase F-10
+    ///
+    /// 计划层仅做表存在性校验与基本语义校验，实际 catalog 修改由 executor 执行。
+    /// 操作列表按顺序执行：ADD COLUMN / DROP COLUMN / RENAME COLUMN / RENAME TABLE /
+    /// ALTER COLUMN TYPE / SET DEFAULT / DROP DEFAULT / SET NOT NULL / DROP NOT NULL /
+    /// ADD CONSTRAINT / DROP CONSTRAINT。
+    AlterTable {
+        /// 目标表名
+        name: TableName,
+        /// IF EXISTS（表不存在时是否跳过）
+        if_exists: bool,
+        /// 仅作用于表本身（PG `ALTER TABLE ONLY`，不影响子表）
+        only: bool,
+        /// 操作列表（按顺序执行）
+        operations: Vec<AlterTableOperation>,
+    },
+    /// TRUNCATE TABLE — 清空表数据（保留表结构）
+    ///
+    /// 计划层校验所有目标表存在，执行器实际清空数据文件并重置自增序列。
+    /// 各方言均支持：PG/MySQL/Oracle/SQL Server/SQLite。
+    Truncate {
+        /// 待清空的表名列表
+        names: Vec<TableName>,
+        /// IF EXISTS（PG/MySQL 支持）
+        if_exists: bool,
+        /// CASCADE / RESTRICT（PG/Oracle 支持，当前仅记录）
+        cascade: bool,
+    },
     /// 空计划（BEGIN / COMMIT / ROLLBACK / SAVEPOINT 等事务控制语句）
     Empty,
     /// 虚拟单行表（SELECT without FROM，类似 PG dual）— Phase 3.22
@@ -1303,6 +1700,8 @@ pub enum LogicalPlan {
         materialized: bool,
         /// IF NOT EXISTS
         if_not_exists: bool,
+        /// OR REPLACE
+        or_replace: bool,
     },
     /// DROP VIEW / DROP MATERIALIZED VIEW — Phase 6.10
     DropView {
@@ -1334,6 +1733,183 @@ pub enum LogicalPlan {
         /// 物化视图 Schema（列名 + 类型，与存储表一致）
         schema: TableSchema,
     },
+    /// CREATE FUNCTION — Phase 6.5（P0-5 修复：注册函数定义到 catalog）
+    ///
+    /// 将函数元数据（名称、参数、返回类型、language、body、波动性、strict 等）
+    /// 注册到 catalog，使后续函数调用可路由到 PL/pgSQL 解释器或 UDF 注册表。
+    ///
+    /// 注意：函数体执行（PL/pgSQL 解释器调用）在表达式求值时按需触发，
+    /// 此计划节点仅负责元数据注册，不执行函数体。
+    CreateFunction {
+        /// 函数名（含可选 schema 前缀）
+        name: String,
+        /// 参数列表
+        parameters: Vec<crate::ast::FunctionParameter>,
+        /// 返回类型原文
+        return_type: String,
+        /// 函数语言（plpgsql / sql / c 等）
+        language: String,
+        /// 函数体原文
+        body: String,
+        /// OR REPLACE
+        or_replace: bool,
+        /// 函数波动性
+        volatility: Option<crate::ast::FunctionVolatility>,
+        /// STRICT
+        strict: bool,
+        /// SECURITY DEFINER
+        security_definer: bool,
+    },
+    /// DROP FUNCTION — Phase 6.5（P0-5 修复）
+    DropFunction {
+        /// 函数名
+        name: String,
+        /// 参数类型列表（用于重载解析）
+        parameter_types: Vec<String>,
+        /// IF EXISTS
+        if_exists: bool,
+        /// CASCADE / RESTRICT
+        cascade: bool,
+    },
+}
+
+impl LogicalPlan {
+    /// OPT-6：收集当前计划树中引用的所有物理表名（小写，去重）。
+    ///
+    /// 用于 SELECT / COPY EXPORT 路径仅锁定查询实际引用的表，避免对会话中
+    /// 所有表加锁造成不必要的并发阻塞。
+    ///
+    /// 收集范围：
+    /// - 直接引用：`Scan` / `IndexScan` / `Insert` / `Replace` / `Update` /
+    ///   `Delete` / `Merge` / `Truncate` / `CreateTable` / `DropTable` /
+    ///   `CreateIndex` / `AlterTable` / `ShowCreateTable` / `FlashbackTable`
+    ///   / `MaterializedViewScan` / `DropTrigger` 中出现的表名
+    /// - 递归子计划：`Projection` / `Filter` / `Join` / `Aggregate` / `Window`
+    ///   / `Sort` / `Limit` / `Distinct` / `SetOp` / `Shared` / `With`
+    /// - DML 的 `source` 子计划（UPDATE / DELETE 的 WHERE 子查询）
+    ///
+    /// 不收集：CTE 名称（`CteRef`）、临时表名（执行器内部处理）。
+    /// 返回空集合表示计划不引用任何物理表（如 `SELECT 1`、`Empty`、`Dual`）。
+    pub fn collect_referenced_table_names(&self) -> std::collections::HashSet<String> {
+        let mut names = std::collections::HashSet::new();
+        self.collect_table_names_into(&mut names);
+        names
+    }
+
+    fn collect_table_names_into(&self, names: &mut std::collections::HashSet<String>) {
+        use std::collections::HashSet;
+        // 递归处理子计划
+        let push_name = |names: &mut HashSet<String>, n: &TableName| {
+            names.insert(n.name.to_lowercase());
+        };
+        match self {
+            LogicalPlan::Scan { table, .. } | LogicalPlan::IndexScan { table, .. } => {
+                push_name(names, table);
+            }
+            LogicalPlan::Insert { table, .. } | LogicalPlan::Replace { table, .. } => {
+                push_name(names, table);
+            }
+            LogicalPlan::Update { table, source, .. } => {
+                push_name(names, table);
+                if let Some(src) = source {
+                    src.collect_table_names_into(names);
+                }
+            }
+            LogicalPlan::Delete { table, source, .. } => {
+                push_name(names, table);
+                if let Some(src) = source {
+                    src.collect_table_names_into(names);
+                }
+            }
+            LogicalPlan::Merge { target, .. } => {
+                push_name(names, target);
+            }
+            LogicalPlan::Truncate { names: ns, .. } => {
+                for n in ns {
+                    push_name(names, n);
+                }
+            }
+            LogicalPlan::CreateTable { name, .. }
+            | LogicalPlan::ShowCreateTable { name, .. }
+            | LogicalPlan::AlterTable { name, .. }
+            | LogicalPlan::FlashbackTable { table: name, .. } => {
+                push_name(names, name);
+            }
+            LogicalPlan::DropTable { names: ns, .. } => {
+                for n in ns {
+                    push_name(names, n);
+                }
+            }
+            LogicalPlan::CreateIndex { table, .. } => {
+                push_name(names, table);
+            }
+            LogicalPlan::DropTrigger { table, .. } => {
+                push_name(names, table);
+            }
+            LogicalPlan::MaterializedViewScan { name, .. } => {
+                push_name(names, name);
+            }
+            // 递归子计划
+            LogicalPlan::Projection { input, .. }
+            | LogicalPlan::Filter { input, .. }
+            | LogicalPlan::Aggregate { input, .. }
+            | LogicalPlan::Window { input, .. }
+            | LogicalPlan::Sort { input, .. }
+            | LogicalPlan::Limit { input, .. }
+            | LogicalPlan::Distinct { input, .. }
+            | LogicalPlan::Shared { plan: input, .. } => {
+                input.collect_table_names_into(names);
+            }
+            LogicalPlan::Join { left, right, .. }
+            | LogicalPlan::SetOp { left, right, .. } => {
+                left.collect_table_names_into(names);
+                right.collect_table_names_into(names);
+            }
+            LogicalPlan::With { ctes, input } => {
+                for cte in ctes {
+                    match cte {
+                        CteEntry::Simple { plan, .. } => plan.collect_table_names_into(names),
+                        CteEntry::Recursive {
+                            anchor, recursive, ..
+                        } => {
+                            anchor.collect_table_names_into(names);
+                            recursive.collect_table_names_into(names);
+                        }
+                    }
+                }
+                input.collect_table_names_into(names);
+            }
+            // 不引用物理表的节点
+            LogicalPlan::Empty
+            | LogicalPlan::Dual
+            | LogicalPlan::ShowTables
+            | LogicalPlan::SetNames { .. }
+            | LogicalPlan::SetVariable { .. }
+            | LogicalPlan::ShowVariable { .. }
+            | LogicalPlan::FlashbackTransaction { .. }
+            | LogicalPlan::Listen { .. }
+            | LogicalPlan::Unlisten { .. }
+            | LogicalPlan::Notify { .. }
+            | LogicalPlan::Copy { .. }
+            | LogicalPlan::MemoRef { .. }
+            | LogicalPlan::CteRef { .. }
+            | LogicalPlan::CreateSequence { .. }
+            | LogicalPlan::DropSequence { .. }
+            | LogicalPlan::CreateType { .. }
+            | LogicalPlan::DropType { .. }
+            | LogicalPlan::AlterType { .. }
+            | LogicalPlan::DropIndex { .. }
+            | LogicalPlan::CreateView { .. }
+            | LogicalPlan::DropView { .. }
+            | LogicalPlan::RefreshMaterializedView { .. }
+            | LogicalPlan::CreateFunction { .. }
+            | LogicalPlan::DropFunction { .. }
+            | LogicalPlan::Prepare { .. }
+            | LogicalPlan::Execute { .. }
+            | LogicalPlan::Deallocate { .. }
+            | LogicalPlan::CreateTrigger { .. } => {}
+        }
+    }
 }
 
 /// CTE 条目（普通或递归）— Phase 6.1
@@ -1818,12 +2394,39 @@ impl<'a> Planner<'a> {
                     cascade,
                 })
             }
-            // Phase 6.5: CREATE/DROP FUNCTION 仅解析，执行留待 Phase 6.6
-            Statement::CreateFunction { .. } | Statement::DropFunction { .. } => {
-                Err(PlanError::Unsupported(
-                    "CREATE/DROP FUNCTION execution not yet supported (Phase 6.6)".into(),
-                ))
-            }
+            // Phase 6.5: CREATE/DROP FUNCTION — P0-5 修复：注册函数定义到 catalog
+            Statement::CreateFunction {
+                name,
+                parameters,
+                return_type,
+                language,
+                body,
+                or_replace,
+                volatility,
+                strict,
+                security_definer,
+            } => Ok(LogicalPlan::CreateFunction {
+                name,
+                parameters,
+                return_type,
+                language,
+                body,
+                or_replace,
+                volatility,
+                strict,
+                security_definer,
+            }),
+            Statement::DropFunction {
+                name,
+                parameter_types,
+                if_exists,
+                cascade,
+            } => Ok(LogicalPlan::DropFunction {
+                name,
+                parameter_types,
+                if_exists,
+                cascade,
+            }),
             // Phase 6.10: CREATE VIEW / CREATE MATERIALIZED VIEW
             Statement::CreateView {
                 name,
@@ -1831,12 +2434,14 @@ impl<'a> Planner<'a> {
                 query,
                 materialized,
                 if_not_exists,
+                or_replace,
             } => Ok(LogicalPlan::CreateView {
                 name,
                 columns,
                 query,
                 materialized,
                 if_not_exists,
+                or_replace,
             }),
             // Phase 6.10: DROP VIEW / DROP MATERIALIZED VIEW
             Statement::DropView {
@@ -1854,6 +2459,56 @@ impl<'a> Planner<'a> {
             Statement::RefreshMaterializedView { name, with_data } => {
                 Ok(LogicalPlan::RefreshMaterializedView { name, with_data })
             }
+            // Phase F-10: ALTER TABLE — 计划层仅做表存在性校验
+            // 操作语义校验（如列存在性、约束冲突、类型兼容性等）由 executor 在 catalog 上执行
+            Statement::AlterTable {
+                name,
+                if_exists,
+                only,
+                operations,
+            } => {
+                // 校验目标表存在
+                if !self.catalog.table_exists(&name) {
+                    if if_exists {
+                        // IF EXISTS 时表不存在则静默跳过（返回 Empty 计划）
+                        return Ok(LogicalPlan::Empty);
+                    }
+                    return Err(PlanError::TableNotFound(name.qualified_name()));
+                }
+                // `only` 字段仅影响 PG 子表行为，SzRSQL 无子表继承，记录但不强制
+                Ok(LogicalPlan::AlterTable {
+                    name,
+                    if_exists,
+                    only,
+                    operations,
+                })
+            }
+            // TRUNCATE TABLE — 计划层仅做表存在性校验
+            Statement::Truncate {
+                names,
+                if_exists,
+                cascade,
+            } => {
+                // 校验所有目标表存在
+                for name in &names {
+                    if !self.catalog.table_exists(name) {
+                        if if_exists {
+                            continue;
+                        }
+                        return Err(PlanError::TableNotFound(name.qualified_name()));
+                    }
+                }
+                Ok(LogicalPlan::Truncate {
+                    names,
+                    if_exists,
+                    cascade,
+                })
+            }
+            // Phase TDengine-P2: COMMENT ON 由 session 层直接操作 catalog，
+            // 不经过 Planner，不产生逻辑计划。若到达此处说明调用路径异常。
+            Statement::Comment { .. } => Err(PlanError::Unsupported(
+                "COMMENT ON statements are handled directly in session and do not generate a logical plan".into(),
+            )),
         }
     }
 
@@ -2589,6 +3244,20 @@ fn expr_contains_aggregate(expr: &Expr) -> bool {
         }
         // Phase 6.2: 窗口函数不视为聚合（由 Window 节点单独处理）
         Expr::WindowFunction { .. } => false,
+        // Phase F-9: PG 兼容表达式 — 递归判断子表达式
+        Expr::IsDistinctFrom { left, right, .. } => {
+            expr_contains_aggregate(left) || expr_contains_aggregate(right)
+        }
+        Expr::SimilarTo { expr, pattern, .. } => {
+            expr_contains_aggregate(expr) || expr_contains_aggregate(pattern)
+        }
+        Expr::Substring {
+            expr, from, for_len, ..
+        } => {
+            expr_contains_aggregate(expr)
+                || from.as_ref().is_some_and(|e| expr_contains_aggregate(e))
+                || for_len.as_ref().is_some_and(|e| expr_contains_aggregate(e))
+        }
     }
 }
 
@@ -2680,6 +3349,26 @@ fn extract_aggregates(expr: &Expr, out: &mut Vec<AggregateExpr>) {
         }
         // Phase 6.2: 窗口函数由 Window 节点单独处理，不视为聚合
         Expr::WindowFunction { .. } => {}
+        // Phase F-9: PG 兼容表达式 — 递归提取子表达式中的聚合
+        Expr::IsDistinctFrom { left, right, .. } => {
+            extract_aggregates(left, out);
+            extract_aggregates(right, out);
+        }
+        Expr::SimilarTo { expr, pattern, .. } => {
+            extract_aggregates(expr, out);
+            extract_aggregates(pattern, out);
+        }
+        Expr::Substring {
+            expr, from, for_len, ..
+        } => {
+            extract_aggregates(expr, out);
+            if let Some(e) = from {
+                extract_aggregates(e, out);
+            }
+            if let Some(e) = for_len {
+                extract_aggregates(e, out);
+            }
+        }
     }
 }
 
@@ -2767,6 +3456,26 @@ fn extract_window_functions(expr: &Expr, out: &mut Vec<WindowFunctionExpr>) {
         }
         Expr::InSubquery { .. } | Expr::Exists { .. } | Expr::Subquery(_) => {}
         Expr::Literal(_) | Expr::Identifier(_) | Expr::Wildcard | Expr::Parameter(_) => {}
+        // Phase F-9: PG 兼容表达式 — 递归提取子表达式中的窗口函数
+        Expr::IsDistinctFrom { left, right, .. } => {
+            extract_window_functions(left, out);
+            extract_window_functions(right, out);
+        }
+        Expr::SimilarTo { expr, pattern, .. } => {
+            extract_window_functions(expr, out);
+            extract_window_functions(pattern, out);
+        }
+        Expr::Substring {
+            expr, from, for_len, ..
+        } => {
+            extract_window_functions(expr, out);
+            if let Some(e) = from {
+                extract_window_functions(e, out);
+            }
+            if let Some(e) = for_len {
+                extract_window_functions(e, out);
+            }
+        }
     }
 }
 
@@ -2779,26 +3488,59 @@ fn derive_output_name(expr: &Expr, idx: usize) -> String {
     }
 }
 
+/// 从投影表达式推导列类型 — P0-VIEW 修复
+///
+/// 推导规则：
+/// - `Expr::Literal(v)` → `v.column_type()`
+/// - `Expr::Identifier(names)` → 在 input_schema 中按列名查找（大小写不敏感）
+/// - `Expr::Cast { data_type, .. }` → `data_type.clone()`
+/// - 其他表达式 → `ColumnType::Null`（兜底，由协议层进一步推导）
+fn derive_expr_column_type(expr: &Expr, input_schema: &TableSchema) -> ColumnType {
+    match expr {
+        Expr::Literal(value) => value.column_type(),
+        Expr::Identifier(names) => {
+            let col_name = names.last().map(|s| s.to_lowercase()).unwrap_or_default();
+            input_schema
+                .columns
+                .iter()
+                .find(|c| c.name.to_lowercase() == col_name)
+                .map(|c| c.data_type.clone())
+                .unwrap_or(ColumnType::Null)
+        }
+        Expr::Cast { data_type, .. } => data_type.clone(),
+        _ => ColumnType::Null,
+    }
+}
+
 /// 从 LogicalPlan 推导 Schema（用于通配符展开和派生表）
-fn plan_schema(plan: &LogicalPlan) -> TableSchema {
+pub fn plan_schema(plan: &LogicalPlan) -> TableSchema {
     match plan {
         LogicalPlan::Scan { schema, .. }
         | LogicalPlan::IndexScan { schema, .. }
         | LogicalPlan::MaterializedViewScan { schema, .. } => schema.clone(),
         LogicalPlan::Projection {
+            exprs,
             output_names,
             input,
             ..
         } => {
-            // 投影后的列类型未知（暂用 Null），列名取 output_names
+            // P0-VIEW 修复：从投影表达式和 input schema 推导列类型（类型保真），
+            // 不再将所有列设为 Null。这确保视图展开时 view_schema 携带正确类型。
             let inner = plan_schema(input);
-            let _ = inner;
+            let columns = output_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let ct = exprs
+                        .get(i)
+                        .map(|(e, _)| derive_expr_column_type(e, &inner))
+                        .unwrap_or(ColumnType::Null);
+                    ColumnDefinition::new(name.clone(), ct)
+                })
+                .collect();
             TableSchema {
                 name: TableName::new("__derived__"),
-                columns: output_names
-                    .iter()
-                    .map(|n| ColumnDefinition::new(n.clone(), ColumnType::Null))
-                    .collect(),
+                columns,
             }
         }
         LogicalPlan::Filter { input, .. }
@@ -2878,7 +3620,10 @@ fn plan_schema(plan: &LogicalPlan) -> TableSchema {
         // Phase 6.10: CREATE/DROP VIEW / REFRESH MATERIALIZED VIEW 为 DDL，不返回结果集
         | LogicalPlan::CreateView { .. }
         | LogicalPlan::DropView { .. }
-        | LogicalPlan::RefreshMaterializedView { .. } => TableSchema {
+        | LogicalPlan::RefreshMaterializedView { .. }
+        // Phase 6.5: CREATE/DROP FUNCTION 为 DDL，不返回结果集
+        | LogicalPlan::CreateFunction { .. }
+        | LogicalPlan::DropFunction { .. } => TableSchema {
             name: TableName::new("__empty__"),
             columns: Vec::new(),
         },
@@ -2930,6 +3675,16 @@ fn plan_schema(plan: &LogicalPlan) -> TableSchema {
         LogicalPlan::With { input, .. } => plan_schema(input),
         // Phase 6.1: CteRef 节点的 schema 已在 CTE 注册时确定
         LogicalPlan::CteRef { schema, .. } => schema.clone(),
+        // Phase F-10: ALTER TABLE 不返回结果集（DDL，返回空 Schema）
+        LogicalPlan::AlterTable { .. } => TableSchema {
+            name: TableName::new("__alter_table__"),
+            columns: Vec::new(),
+        },
+        // TRUNCATE TABLE 不返回结果集（DDL，返回空 Schema）
+        LogicalPlan::Truncate { .. } => TableSchema {
+            name: TableName::new("__truncate__"),
+            columns: Vec::new(),
+        },
     }
 }
 
@@ -3188,6 +3943,7 @@ fn apply_column_aliases(
             enum_values: col.enum_values.clone(),
             custom_type_name: col.custom_type_name.clone(),
             generated: col.generated.clone(),
+            comment: col.comment.clone(),
         })
         .collect();
     TableSchema {

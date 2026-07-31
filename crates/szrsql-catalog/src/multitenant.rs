@@ -473,14 +473,40 @@ impl SqlRewriter {
                 expr,
                 pattern,
                 negated,
+                case_insensitive,
             } => Expr::Like {
                 expr: Box::new(self.rewrite_expr(*expr)),
                 pattern: Box::new(self.rewrite_expr(*pattern)),
                 negated,
+                case_insensitive,
             },
             Expr::IsNull { expr, negated } => Expr::IsNull {
                 expr: Box::new(self.rewrite_expr(*expr)),
                 negated,
+            },
+            // Phase F-9: PG 兼容表达式 — 递归重写
+            Expr::IsDistinctFrom { left, right, not } => Expr::IsDistinctFrom {
+                left: Box::new(self.rewrite_expr(*left)),
+                right: Box::new(self.rewrite_expr(*right)),
+                not,
+            },
+            Expr::SimilarTo {
+                expr,
+                pattern,
+                negated,
+            } => Expr::SimilarTo {
+                expr: Box::new(self.rewrite_expr(*expr)),
+                pattern: Box::new(self.rewrite_expr(*pattern)),
+                negated,
+            },
+            Expr::Substring {
+                expr,
+                from,
+                for_len,
+            } => Expr::Substring {
+                expr: Box::new(self.rewrite_expr(*expr)),
+                from: from.map(|e| Box::new(self.rewrite_expr(*e))),
+                for_len: for_len.map(|e| Box::new(self.rewrite_expr(*e))),
             },
             Expr::Subquery(s) => Expr::Subquery(Box::new(self.rewrite_select(*s))),
             Expr::Exists { subquery, negated } => Expr::Exists {

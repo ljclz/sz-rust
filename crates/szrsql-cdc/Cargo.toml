@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL 变更数据捕获：WAL → 事件流"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 szrsql-types = { workspace = true }
@@ -15,3 +20,26 @@ bincode = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 base64 = { workspace = true }
+chrono = { workspace = true }
+# P7-2：真实 PostgreSQL 驱动（默认启用，使用 rust-postgres 同步客户端）
+# 选型理由：
+# - SourceConnector/TargetWriter trait 为同步接口，与 rust-postgres 同步 API 天然契合
+# - rust-postgres 是 Rust 生态最成熟的 PG 客户端，无需 tokio runtime
+# - 已在 dev-dependencies 中验证可用（integration_pg.rs）
+# - 启用 with-serde_json-1 特性以支持 JSONB 列的 FromSql 转换
+# - 启用 with-chrono-0_4 特性以支持 DATE/TIMESTAMP 列的 FromSql 转换
+postgres = { version = "0.19", features = ["with-chrono-0_4", "with-serde_json-1"] }
+# P8-4 安全加固：API Key 随机生成（256 bit 熵）
+rand = { workspace = true }
+
+[dev-dependencies]
+# 测试专用：临时目录、并发测试工具
+tempfile = { workspace = true }
+
+[features]
+default = []
+# 启用 loom 并发模型测试（cargo test --features loom_model）
+loom_model = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)', 'cfg(loom)'] }

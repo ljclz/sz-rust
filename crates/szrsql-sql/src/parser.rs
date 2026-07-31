@@ -18,6 +18,8 @@
 //! - SELECT：DISTINCT / projection / FROM / WHERE / GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET
 
 use crate::ast::*;
+use std::borrow::Cow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use sqlparser::ast::{
     AssignmentTarget, BinaryOperator, ColumnDef as SpColumnDef, ColumnOption, ColumnOptionDef,
     ConflictTarget, DataType, DoUpdate, Expr as SpExpr, FunctionArg as SpFunctionArg,
@@ -32,6 +34,7 @@ use sqlparser::ast::{
     TriggerObject as SpTriggerObject, TriggerPeriod as SpTriggerPeriod, UnaryOperator,
     Value as SpValue, WindowFrame as SpWindowFrame, WindowFrameBound as SpWindowFrameBound,
     WindowFrameUnits as SpWindowFrameUnits, WindowSpec as SpWindowSpec, WindowType as SpWindowType,
+    AlterTableOperation as SpAlterTableOperation,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::{Parser, ParserError};
@@ -56,25 +59,31 @@ use tracing::{trace, warn};
 // - MAX_SQL_LEN=1MB：远超正常 SQL 长度（典型 < 10KB），同时限制 sqlparser-rs 递归深度
 
 /// 表达式最大递归深度（ADV-BUG-001 修复）
-const MAX_EXPR_DEPTH: usize = 512;
+pub(crate) const MAX_EXPR_DEPTH: usize = 512;
 
 /// SQL 文本最大长度（字节），超出直接拒绝（ADV-BUG-001 修复）
-const MAX_SQL_LEN: usize = 1024 * 1024;
+pub(crate) const MAX_SQL_LEN: usize = 1024 * 1024;
 
 /// OR/AND 二值运算符最大链深度，超出直接拒绝（ADV-BUG-001 修复）
 ///
 /// sqlparser-rs 内部递归下降解析二值表达式，左结合链深度 = 操作数个数。
 /// sqlparser-rs 0.53.0 在 2MB 工作线程栈上约 50 个 OR 链即栈溢出，
-/// 阈值设为 32 以提供安全余量，同时满足绝大多数真实 SQL 需求（典型 < 10）。
-/// 对超过 32 个 OR/AND 的场景，建议改用 IN 列表或临时表。
-const MAX_BINARY_OP_CHAIN: usize = 32;
+/// 阈值设为 256 以提供安全余量，同时满足绝大多数真实 SQL 需求（典型 < 10）。
+/// 对超过 256 个 OR/AND 的场景，建议改用 IN 列表或临时表。
+pub(crate) const MAX_BINARY_OP_CHAIN: usize = 256;
+
+/// NestedJoin 自动别名计数器（Navicat 兼容）
+///
+/// 当 SQL 中出现 `(t1 JOIN t2 ON ...)` 无 AS alias 的 nested join 时，
+/// 自动生成 `__nested_join_N__` 形式的别名，避免解析错误。
+static NESTED_JOIN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// 统计 SQL 文本中 OR/AND 关键字出现次数（ADV-BUG-001 修复）
 ///
 /// 使用字节级扫描，识别 `\bOR\b` 和 `\bAND\b`（大小写不敏感）。
 /// 注意：此函数为防御性预检，可能误统计字符串字面量中的 OR/AND，
 /// 但宁可误报也不可漏报（误报只会导致拒绝异常长 SQL，不影响正常使用）。
-fn count_binary_op_keywords(sql: &str) -> usize {
+pub(crate) fn count_binary_op_keywords(sql: &str) -> usize {
     let bytes = sql.as_bytes();
     let mut count = 0;
     let mut i = 0;
@@ -171,12 +180,11 @@ pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParseError> {
     let span = tracing::span!(tracing::Level::TRACE, "parse_sql", sql_len, stmt_count = tracing::field::Empty);
     span.in_scope(|| {
         trace!(sql_len, "parsing SQL");
-        parse_sql_inner(sql).map(|stmts| {
+        parse_sql_inner(sql).inspect(|stmts| {
             tracing::Span::current().record("stmt_count", stmts.len());
             trace!(stmt_count = stmts.len(), "SQL parsed");
-            stmts
         }).map_err(|e| {
-            warn!(error = %e, sql_len, "SQL parse failed");
+            warn!(error = %e, sql_len, sql = %sql, "SQL parse failed");
             e
         })
     })
@@ -192,6 +200,15 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
             MAX_SQL_LEN
         )));
     }
+    // Navicat 兼容：预处理无值的 SET 语句
+    // Navicat 等客户端连接时会发送 "SET AUTOCOMMIT"（无值），
+    // sqlparser 会报 "Expected: equals sign or TO, found: EOF" 错误。
+    // 这里把无值的 SET 语句补充默认值（= 1），使其能被正常解析。
+    let normalized = normalize_set_statements(sql);
+    // Navicat 兼容：预处理 SHOW PROCEDURE/FUNCTION STATUS WHERE Db = 'xxx'
+    // sqlparser 不支持此 MySQL 方言，归一化为空结果集查询。
+    let normalized2 = normalize_show_procedure_function(&normalized);
+    let sql: &str = normalized2.as_ref();
     // ADV-BUG-001 修复：OR/AND 链深度预检
     // sqlparser-rs 内部用递归下降解析二值表达式，左结合链深度 = 操作数个数
     // 在调用 sqlparser-rs 之前统计 SQL 文本中 OR/AND 关键字出现次数，超限直接拒绝
@@ -241,16 +258,37 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         upper.starts_with("LISTEN") || upper.starts_with("UNLISTEN") || upper.starts_with("NOTIFY")
     });
 
-    // Phase 6.10: 检测是否包含 DROP MATERIALIZED VIEW / REFRESH MATERIALIZED VIEW 语句
-    // sqlparser 0.53.0 不支持这两种语法，需要手动预处理
+    // Phase 6.10: 检测是否包含 DROP / REFRESH MATERIALIZED VIEW，或
+    //             CREATE MATERIALIZED VIEW IF NOT EXISTS 语句
+    // sqlparser 0.53.0 不支持这些语法，需要手动预处理
     let has_materialized_ddl = segments.iter().any(|seg| {
         let trimmed = seg.trim();
         if trimmed.is_empty() {
             return false;
         }
         let upper = trimmed.to_uppercase();
-        upper.starts_with("DROP MATERIALIZED VIEW")
+        if upper.starts_with("DROP MATERIALIZED VIEW")
             || upper.starts_with("REFRESH MATERIALIZED VIEW")
+        {
+            return true;
+        }
+        // CREATE MATERIALIZED VIEW IF NOT EXISTS — sqlparser 报
+        // "Expected: AS, found: NOT"，需手动预处理
+        if upper.starts_with("CREATE MATERIALIZED VIEW") {
+            let rest = trimmed["CREATE MATERIALIZED VIEW".len()..].trim_start();
+            return rest.to_uppercase().starts_with("IF NOT EXISTS");
+        }
+        false
+    });
+
+    // Phase TDengine-P2: 检测是否包含 COMMENT ON 语句
+    // sqlparser 0.53.0 不支持 COMMENT ON 语法，需要手动预处理
+    let has_comment = segments.iter().any(|seg| {
+        let trimmed = seg.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        trimmed.to_uppercase().starts_with("COMMENT ON")
     });
 
     // 若没有特殊语句，走原始路径（保持性能与兼容）
@@ -259,6 +297,7 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         && !has_listen_notify
         && !has_function_ddl
         && !has_materialized_ddl
+        && !has_comment
     {
         let contains_replace = contains_replace_statement(sql);
         // Phase 3.34: SET NAMES 是 MySQL 语法，PG dialect 不支持
@@ -281,7 +320,8 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
     let mut non_special_segments: Vec<&str> = Vec::new();
     // 标记每段的类型：0=普通, 1=ALTER TYPE, 2=FLASHBACK, 3=LISTEN, 4=UNLISTEN, 5=NOTIFY,
     //                6=CREATE FUNCTION, 7=DROP FUNCTION,
-    //                8=DROP MATERIALIZED VIEW, 9=REFRESH MATERIALIZED VIEW
+    //                8=DROP MATERIALIZED VIEW, 9=REFRESH MATERIALIZED VIEW,
+    //                10=COMMENT ON, 11=CREATE MATERIALIZED VIEW IF NOT EXISTS
     let mut segment_kind: Vec<u8> = Vec::with_capacity(segments.len());
 
     for seg in &segments {
@@ -308,6 +348,17 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
             segment_kind.push(8);
         } else if !trimmed.is_empty() && upper.starts_with("REFRESH MATERIALIZED VIEW") {
             segment_kind.push(9);
+        } else if !trimmed.is_empty() && upper.starts_with("COMMENT ON") {
+            segment_kind.push(10);
+        } else if !trimmed.is_empty()
+            && upper.starts_with("CREATE MATERIALIZED VIEW")
+            && trimmed["CREATE MATERIALIZED VIEW".len()..]
+                .trim_start()
+                .to_uppercase()
+                .starts_with("IF NOT EXISTS")
+        {
+            // CREATE MATERIALIZED VIEW IF NOT EXISTS — sqlparser 0.53.0 不支持
+            segment_kind.push(11);
         } else if !trimmed.is_empty() {
             segment_kind.push(0);
             non_special_segments.push(trimmed);
@@ -404,6 +455,33 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         }
     }
 
+    // Phase 6.10: 解析所有 CREATE MATERIALIZED VIEW IF NOT EXISTS 段
+    let mut create_mv_if_not_exists_stmts: Vec<Statement> = Vec::new();
+    for seg in &segments {
+        let trimmed = seg.trim();
+        let upper = trimmed.to_uppercase();
+        if !trimmed.is_empty()
+            && upper.starts_with("CREATE MATERIALIZED VIEW")
+            && trimmed["CREATE MATERIALIZED VIEW".len()..]
+                .trim_start()
+                .to_uppercase()
+                .starts_with("IF NOT EXISTS")
+        {
+            create_mv_if_not_exists_stmts.push(parse_create_materialized_view_if_not_exists(
+                trimmed,
+            )?);
+        }
+    }
+
+    // Phase TDengine-P2: 解析所有 COMMENT ON 段
+    let mut comment_stmts: Vec<Statement> = Vec::new();
+    for seg in &segments {
+        let trimmed = seg.trim();
+        if !trimmed.is_empty() && trimmed.to_uppercase().starts_with("COMMENT ON") {
+            comment_stmts.push(parse_comment(trimmed)?);
+        }
+    }
+
     // 解析所有非特殊段（合并后一次性解析）
     let contains_replace = non_special_segments
         .iter()
@@ -446,6 +524,8 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
     let mut drop_function_iter = drop_function_stmts.into_iter();
     let mut drop_materialized_view_iter = drop_materialized_view_stmts.into_iter();
     let mut refresh_materialized_view_iter = refresh_materialized_view_stmts.into_iter();
+    let mut create_mv_if_not_exists_iter = create_mv_if_not_exists_stmts.into_iter();
+    let mut comment_iter = comment_stmts.into_iter();
     let mut non_special_iter = non_special_stmts.into_iter();
     for kind in segment_kind {
         match kind {
@@ -494,6 +574,16 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
                     result.push(stmt);
                 }
             }
+            10 => {
+                if let Some(stmt) = comment_iter.next() {
+                    result.push(stmt);
+                }
+            }
+            11 => {
+                if let Some(stmt) = create_mv_if_not_exists_iter.next() {
+                    result.push(stmt);
+                }
+            }
             _ => {
                 if let Some(stmt) = non_special_iter.next() {
                     result.push(stmt);
@@ -511,6 +601,304 @@ fn split_sql_statements(sql: &str) -> Vec<&str> {
     sql.split(';').collect()
 }
 
+/// 预处理 SQL：把 Navicat 等数据库工具发送的不规范 SET 语句归一化为 sqlparser-rs 可解析的形式。
+///
+/// # 支持的归一化规则
+///
+/// | 原始形式 | 归一化后 | 说明 |
+/// |---------|---------|-----|
+/// | `SET` / `SET ;` | `SET autocommit = 1` | 完全无变量名 |
+/// | `SET variable` | `SET variable = 1` | 仅变量名无值 |
+/// | `SET variable =` | `SET variable = 1` | 等号后无值 |
+/// | `SET variable TO` | `SET variable = 1` | TO 后无值 |
+/// | `SET variable ON` | `SET variable = 'on'` | PG/MySQL 布尔简写 |
+/// | `SET variable OFF` | `SET variable = 'off'` | PG/MySQL 布尔简写 |
+/// | `SET CHARACTER SET charset` | `SET character_set_client = 'charset'` | MySQL 字符集语法 |
+/// | `SET SESSION AUTHORIZATION xxx` | `SET session_authorization = 'xxx'` | PG 会话授权（sqlparser 不支持） |
+/// | `SET TIME ZONE xxx` | `SET timezone = 'xxx'` | PG 时区（sqlparser SetTimeZone 未集成） |
+///
+/// 不处理的合法形式（让 sqlparser-rs 直接解析）：
+/// - `SET variable = value`（有值）
+/// - `SET variable TO value`（有值）
+/// - `SET NAMES 'charset'`（MySQL 特有，已支持）
+/// - `SET ROLE xxx`（sqlparser 已支持，转换为 no-op）
+/// - `SET TRANSACTION ...`（sqlparser 已支持，执行器视为 no-op）
+///
+/// 使用 `Cow` 避免大多数不需要归一化的 SQL 的内存分配。
+fn normalize_set_statements(sql: &str) -> Cow<'_, str> {
+    // 快速检测：不包含 SET 关键字（作为独立词）时直接返回借用。
+    // 检测 "set" 后跟空白/分号/EOF，避免匹配 "asset"/"setting" 等无关词。
+    let lower = sql.to_ascii_lowercase();
+    let contains_set_keyword = lower == "set"
+        || lower.contains("set ")
+        || lower.contains("set\t")
+        || lower.contains("set\n")
+        || lower.contains("set\r")
+        || lower.contains("set;");
+    if !contains_set_keyword {
+        return Cow::Borrowed(sql);
+    }
+
+    // 检查是否有需要归一化的段
+    let needs_norm = sql.split(';').any(needs_set_normalization);
+
+    if !needs_norm {
+        return Cow::Borrowed(sql);
+    }
+
+    // 执行归一化：对每个分号分隔的段应用 normalize_set_no_value
+    let mut result = String::with_capacity(sql.len() + 16);
+    for (i, seg) in sql.split(';').enumerate() {
+        if i > 0 {
+            result.push(';');
+        }
+        result.push_str(&normalize_set_no_value(seg));
+    }
+    Cow::Owned(result)
+}
+
+/// Navicat 兼容：归一化 `SHOW PROCEDURE STATUS` 和 `SHOW FUNCTION STATUS` 语句。
+///
+/// sqlparser 0.53.0 不支持 `SHOW PROCEDURE STATUS WHERE Db = 'xxx'` 语法，
+/// 报 "Expected: end of statement, found: =" 错误。
+///
+/// 归一化策略：转换为空结果集查询，避免解析失败。
+/// - `SHOW PROCEDURE STATUS WHERE Db = 'xxx'` →
+///   `SELECT '' AS Db, '' AS Name, '' AS Type, '' AS Definer, '' AS Modified, '' AS Created, '' AS Security_type, '' AS Comment, '' AS character_set_client, '' AS collation_connection, '' AS Database Collation WHERE 1=0`
+/// - `SHOW FUNCTION STATUS WHERE Db = 'xxx'` → 同上
+/// - `SHOW PROCEDURE STATUS` / `SHOW FUNCTION STATUS` (无 WHERE) → 同上
+fn normalize_show_procedure_function(sql: &str) -> Cow<'_, str> {
+    // 快速检测：不包含 SHOW 关键字直接返回
+    let lower = sql.to_ascii_lowercase();
+    if !lower.contains("show ") && !lower.contains("show\t") && !lower.contains("show\n") {
+        return Cow::Borrowed(sql);
+    }
+
+    // 检测是否包含 SHOW PROCEDURE STATUS 或 SHOW FUNCTION STATUS
+    let needs_norm = sql.split(';').any(|seg| {
+        let trimmed = seg.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let upper = trimmed.to_ascii_uppercase();
+        upper.starts_with("SHOW PROCEDURE STATUS") || upper.starts_with("SHOW FUNCTION STATUS")
+    });
+
+    if !needs_norm {
+        return Cow::Borrowed(sql);
+    }
+
+    // 空结果集的列定义（与 MySQL information_schema.ROUTINES 一致）
+    // 注意：使用双引号而非反引号，因为 szrsql 默认使用 PG 方言解析（PG 不支持反引号）
+    const EMPTY_ROUTINES: &str = "SELECT '' AS Db, '' AS Name, '' AS Type, '' AS Definer, '' AS Modified, '' AS Created, '' AS Security_type, '' AS Comment, '' AS character_set_client, '' AS collation_connection, '' AS \"Database Collation\" WHERE 1=0";
+
+    let mut result = String::with_capacity(sql.len());
+    for (i, seg) in sql.split(';').enumerate() {
+        if i > 0 {
+            result.push(';');
+        }
+        let trimmed = seg.trim();
+        if trimmed.is_empty() {
+            result.push_str(seg);
+            continue;
+        }
+        let upper = trimmed.to_ascii_uppercase();
+        if upper.starts_with("SHOW PROCEDURE STATUS") || upper.starts_with("SHOW FUNCTION STATUS") {
+            result.push_str(EMPTY_ROUTINES);
+        } else {
+            result.push_str(seg);
+        }
+    }
+    Cow::Owned(result)
+}
+
+/// 判断单个分号分隔的 SQL 段是否需要 SET 归一化。
+///
+/// 与 [`normalize_set_no_value`] 的逻辑保持一致：返回 `true` 的段在归一化后会被修改。
+fn needs_set_normalization(seg: &str) -> bool {
+    let trimmed = seg.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    // 检测是否以 SET 关键字开头（"SET" 或 "SET " 形式）
+    if !(upper == "SET" || upper.starts_with("SET ")) {
+        return false;
+    }
+
+    let after_set = if upper.len() > 3 {
+        trimmed[3..].trim()
+    } else {
+        ""
+    };
+    let after_set_upper = if upper.len() > 3 {
+        upper[3..].trim()
+    } else {
+        ""
+    };
+
+    // 1. SET 后空 → 需要归一化
+    if after_set.is_empty() {
+        return true;
+    }
+
+    // 2. SET CHARACTER SET ... (MySQL 字符集语法)
+    if after_set_upper.starts_with("CHARACTER SET") {
+        return true;
+    }
+
+    // 3. SET SESSION AUTHORIZATION ... (PG 会话授权语法，sqlparser 0.53 不支持)
+    if after_set_upper.starts_with("SESSION AUTHORIZATION") {
+        return true;
+    }
+
+    // 4. SET TIME ZONE ... (PG 时区语法，转换为 SetVariable)
+    if after_set_upper == "TIME ZONE" || after_set_upper.starts_with("TIME ZONE ") {
+        return true;
+    }
+
+    // 5. SET variable = (等号后空)
+    if let Some(eq_pos) = trimmed.find('=') {
+        let after_eq = trimmed[eq_pos + 1..].trim();
+        return after_eq.is_empty();
+    }
+
+    // 6. SET variable TO (TO 后空，TO 必须是独立词)
+    if let Some(to_pos) = after_set_upper.find(" TO") {
+        // 确认 TO 是末尾或后跟空白
+        let after_to_rel = to_pos + 3;
+        let after_to = if after_to_rel < after_set.len() {
+            after_set[after_to_rel..].trim_start()
+        } else {
+            ""
+        };
+        return after_to.is_empty();
+    }
+
+    // 7. SET variable ON / OFF (PG/MySQL 布尔简写)
+    if after_set_upper.ends_with(" ON") || after_set_upper.ends_with(" OFF") {
+        return true;
+    }
+
+    // 8. SET variable (仅一个词，无值)
+    let mut parts = after_set.splitn(2, char::is_whitespace);
+    let first = parts.next();
+    let second = parts.next();
+    if first.is_some() && second.is_none() {
+        return true;
+    }
+
+    false
+}
+
+/// 把单个 SET 语句段归一化为 sqlparser-rs 可解析的形式。
+///
+/// 详见 [`normalize_set_statements`] 的规则表。不需要修改的段原样返回。
+fn normalize_set_no_value(seg: &str) -> String {
+    let trimmed = seg.trim();
+    let upper = trimmed.to_ascii_uppercase();
+    // 检测是否以 SET 关键字开头（"SET" 或 "SET " 形式）
+    if !(upper == "SET" || upper.starts_with("SET ")) {
+        return seg.to_string();
+    }
+
+    let after_set = if upper.len() > 3 {
+        trimmed[3..].trim()
+    } else {
+        ""
+    };
+    let after_set_upper = if upper.len() > 3 {
+        upper[3..].trim()
+    } else {
+        ""
+    };
+
+    // 1. SET (空) → SET autocommit = 1
+    if after_set.is_empty() {
+        return "SET autocommit = 1".to_string();
+    }
+
+    // 2. SET CHARACTER SET charset → SET character_set_client = 'charset'
+    if after_set_upper.starts_with("CHARACTER SET") {
+        let charset = after_set[13..].trim();
+        let val = if charset.is_empty() { "UTF8" } else { charset };
+        // 去掉首尾引号（如有），再重新加引号
+        let val = val.trim_matches('\'').trim_matches('"');
+        return format!("SET character_set_client = '{}'", val.replace('\'', "''"));
+    }
+
+    // 3. SET SESSION AUTHORIZATION xxx → SET session_authorization = 'xxx'
+    if after_set_upper.starts_with("SESSION AUTHORIZATION") {
+        let val = after_set[20..].trim();
+        let val = if val.is_empty() { "DEFAULT" } else { val };
+        let val = val.trim_matches('\'').trim_matches('"');
+        return format!("SET session_authorization = '{}'", val.replace('\'', "''"));
+    }
+
+    // 4. SET TIME ZONE xxx → SET timezone = 'xxx'
+    if after_set_upper == "TIME ZONE" || after_set_upper.starts_with("TIME ZONE ") {
+        let val = after_set[9..].trim();
+        let val = if val.is_empty() { "UTC" } else { val };
+        let val = val.trim_matches('\'').trim_matches('"');
+        return format!("SET timezone = '{}'", val.replace('\'', "''"));
+    }
+
+    // 5. SET variable = (等号后空) → SET variable = 1
+    if let Some(eq_pos) = trimmed.find('=') {
+        let after_eq = trimmed[eq_pos + 1..].trim();
+        if after_eq.is_empty() {
+            let var_part = trimmed[..eq_pos].trim();
+            return format!("{} = 1", var_part);
+        }
+        // 等号后有值，不处理
+        return seg.to_string();
+    }
+
+    // 6. SET variable TO (TO 后空) → SET variable = 1
+    if let Some(to_pos) = after_set_upper.find(" TO") {
+        let after_to_rel = to_pos + 3;
+        let after_to = if after_to_rel < after_set.len() {
+            after_set[after_to_rel..].trim_start()
+        } else {
+            ""
+        };
+        if after_to.is_empty() {
+            // 变量名部分（去掉 " TO"）
+            let var_part = after_set[..to_pos].trim();
+            return format!("SET {} = 1", var_part);
+        }
+        // TO 后有值，不处理
+        return seg.to_string();
+    }
+
+    // 7. SET variable ON → SET variable = 'on'
+    if after_set_upper.ends_with(" ON") {
+        let var_part = after_set[..after_set.len() - 3].trim();
+        if !var_part.is_empty() {
+            return format!("SET {} = 'on'", var_part);
+        }
+    }
+
+    // 8. SET variable OFF → SET variable = 'off'
+    if after_set_upper.ends_with(" OFF") {
+        let var_part = after_set[..after_set.len() - 4].trim();
+        if !var_part.is_empty() {
+            return format!("SET {} = 'off'", var_part);
+        }
+    }
+
+    // 9. SET variable (仅一个词，无值) → SET variable = 1
+    let mut parts = after_set.splitn(2, char::is_whitespace);
+    if let Some(first) = parts.next() {
+        if parts.next().is_none() {
+            return format!("SET {} = 1", first);
+        }
+    }
+
+    // 其他情况不处理（SET NAMES、SET ROLE、SET TRANSACTION 等让 sqlparser 解析）
+    seg.to_string()
+}
+
 /// 检测 SQL 字符串是否包含 REPLACE 语句（大小写不敏感，跳过注释/字符串字面量）
 ///
 /// 简化实现：按分号分割语句，检查每条语句是否以 `REPLACE` 关键字开头。
@@ -518,11 +906,16 @@ fn contains_replace_statement(sql: &str) -> bool {
     // 简化：按分号切分，对每段去前导空白后检查是否以 REPLACE（不区分大小写）开头
     // 注意：这是保守检测，可能因分号出现在字符串字面量中而误判；
     // 但 REPLACE 的实际使用场景通常不含分号字面量，可接受。
+    // ADV-BUG-003 修复：使用字节切片比较，避免 str 切片跨越 UTF-8 字符边界导致 panic。
+    // 例如 `SELECT '你' FROM t` 的前 7 字节为 `SELECT `，本身不跨越边界；
+    // 但 `REPLACE '你' ...` 的前 7 字节会落在 '你' (3 字节) 中间，str[..7] 会 panic。
+    // 字节切片 [u8] 不要求 char boundary，安全。
     sql.split(';').any(|stmt| {
         let trimmed = stmt.trim_start();
-        trimmed.len() >= 7
-            && trimmed[..7].eq_ignore_ascii_case("REPLACE")
-            && (trimmed.len() == 7 || trimmed.as_bytes()[7].is_ascii_whitespace())
+        let bytes = trimmed.as_bytes();
+        bytes.len() >= 7
+            && bytes[..7].eq_ignore_ascii_case(b"REPLACE")
+            && (bytes.len() == 7 || bytes[7].is_ascii_whitespace())
     })
 }
 
@@ -531,22 +924,26 @@ fn contains_replace_statement(sql: &str) -> bool {
 /// 简化实现：按分号分割语句，检查每条语句是否以 `SET NAMES` 开头（不区分大小写）。
 /// 用于在 parse_sql 入口处切换到 MySqlDialect（PG dialect 不支持 SET NAMES）。
 fn contains_set_names_statement(sql: &str) -> bool {
+    // ADV-BUG-003 修复：使用字节切片比较，避免 str 切片跨越 UTF-8 字符边界导致 panic。
+    // 例如 `SELECT '你' FROM t`，trim 后前 9 字节为 `SELECT '你`（单引号 1B + '你' 首字节），
+    // 落在 '你' (bytes 8..11) 中间，str[..9] 会 panic "end byte index 9 is not a char boundary"。
+    // 字节切片 [u8] 不要求 char boundary，安全。
     sql.split(';').any(|stmt| {
         let trimmed = stmt.trim_start();
-        let len = trimmed.len();
-        // "SET NAMES" 长度为 9 字符
-        if len < 9 {
+        let bytes = trimmed.as_bytes();
+        // "SET NAMES" 长度为 9 字节（全 ASCII）
+        if bytes.len() < 9 {
             return false;
         }
         // 检查是否以 "SET NAMES" 开头（不区分大小写）
-        if !trimmed[..9].eq_ignore_ascii_case("SET NAMES") {
+        if !bytes[..9].eq_ignore_ascii_case(b"SET NAMES") {
             return false;
         }
         // 后续字符应为空白或字符串结尾（避免误匹配 SET NAMES_OTHER）
-        if len == 9 {
+        if bytes.len() == 9 {
             return true;
         }
-        let next_byte = trimmed.as_bytes()[9];
+        let next_byte = bytes[9];
         next_byte.is_ascii_whitespace() || next_byte == b'\'' || next_byte == b'"'
     })
 }
@@ -916,15 +1313,39 @@ pub(crate) fn convert_statement(stmt: SpStatement) -> Result<Statement, ParseErr
                     convert_object_name_to_string(&names[0])
                 }
             };
-            if value.len() != 1 {
-                return Err(ParseError::Unsupported(format!(
-                    "SET multi-value assignment not supported: {value:?}"
-                )));
+            if value.is_empty() {
+                return Err(ParseError::Unsupported(
+                    "SET variable with empty value list".into(),
+                ));
             }
+            // 多值 SET（如 `SET search_path TO "public","$user", public`）：
+            // 取第一个值作为会话变量值，其余忽略（Navicat 兼容）
+            // 这样可避免 "SET multi-value assignment not supported" 错误。
             let value_expr = convert_expr(value.into_iter().next().unwrap())?;
             Ok(Statement::SetVariable {
                 variable: variable_name,
                 value: value_expr,
+            })
+        }
+        // SET TIME ZONE <value> — Navicat 连接时常见语句
+        // 转换为 SET timezone = '<value>'（no-op，仅设置会话变量）
+        SpStatement::SetTimeZone { value, .. } => {
+            let value_expr = convert_expr(value)?;
+            Ok(Statement::SetVariable {
+                variable: "timezone".to_string(),
+                value: value_expr,
+            })
+        }
+        // SET ROLE [NONE | <role_name>] — Navicat 连接时常见语句
+        // 转换为 SET role = '<role_name>'（no-op，仅设置会话变量）
+        SpStatement::SetRole { role_name, .. } => {
+            let role_str = match role_name {
+                Some(ident) => ident.value.clone(),
+                None => "none".to_string(),
+            };
+            Ok(Statement::SetVariable {
+                variable: "role".to_string(),
+                value: crate::ast::Expr::Literal(szrsql_types::value::Value::Text(role_str)),
             })
         }
         // Phase 4.8: COPY FROM / COPY TO
@@ -967,16 +1388,225 @@ pub(crate) fn convert_statement(stmt: SpStatement) -> Result<Statement, ParseErr
         } => convert_drop_trigger(if_exists, trigger_name, table_name, option),
         // Phase 6.10: CREATE VIEW / CREATE MATERIALIZED VIEW
         SpStatement::CreateView {
-            or_replace: _,
+            or_replace,
             materialized,
             name,
             columns,
             query,
             if_not_exists,
             ..
-        } => convert_create_view(materialized, if_not_exists, name, columns, query),
+        } => convert_create_view(materialized, if_not_exists, or_replace, name, columns, query),
+        // Phase F-10: ALTER TABLE
+        SpStatement::AlterTable {
+            name,
+            if_exists,
+            only,
+            operations,
+            ..
+        } => convert_alter_table(name, if_exists, only, operations),
+        SpStatement::Truncate {
+            table_names,
+            partitions,
+            ..
+        } => {
+            // partitions / only / cascade / identity / on_cluster 当前忽略
+            let _ = partitions;
+            let mut names = Vec::with_capacity(table_names.len());
+            for target in table_names {
+                let n = convert_object_name(target.name)?;
+                names.push(n);
+            }
+            Ok(Statement::Truncate {
+                names,
+                if_exists: false,
+                cascade: false,
+            })
+        }
         other => Err(ParseError::Unsupported(format!(
             "unsupported statement: {other:?}"
+        ))),
+    }
+}
+
+// =====================================================================
+//  Phase F-10: ALTER TABLE 转换
+// =====================================================================
+
+/// 将 sqlparser `ALTER TABLE` 语句转换为 SzRSQL `Statement::AlterTable`
+///
+/// # 支持的操作
+/// - `ADD COLUMN [IF NOT EXISTS] col TYPE [options]`
+/// - `DROP COLUMN [IF EXISTS] col [CASCADE]`
+/// - `RENAME COLUMN old TO new`
+/// - `RENAME TO new_table`
+/// - `ALTER COLUMN col TYPE new_type [USING expr]`
+/// - `ALTER COLUMN col SET DEFAULT expr` / `DROP DEFAULT`
+/// - `ALTER COLUMN col SET NOT NULL` / `DROP NOT NULL`
+/// - `ADD CONSTRAINT ...`
+/// - `DROP CONSTRAINT [IF EXISTS] name [CASCADE]`
+///
+/// # 不支持的操作
+/// 以下操作返回 `ParseError::Unsupported`：
+/// - ClickHouse 专属：ADD/DROP/MATERIALIZE/CLEAR PROJECTION、ATTACH/DETACH/FREEZE PARTITION
+/// - PG 专属：ENABLE/DISABLE TRIGGER/RULE/ROW LEVEL SECURITY
+/// - MySQL 专属：CHANGE/MODIFY COLUMN（语法差异大，建议改用 ALTER COLUMN）
+/// - Snowflake 专属：SWAP WITH、SET TBLPROPERTIES、CLUSTER BY
+/// - PG 专属：OWNER TO、ADD GENERATED AS IDENTITY
+fn convert_alter_table(
+    name: ObjectName,
+    if_exists: bool,
+    only: bool,
+    operations: Vec<SpAlterTableOperation>,
+) -> Result<Statement, ParseError> {
+    let table_name = convert_object_name(name)?;
+    let mut ops = Vec::with_capacity(operations.len());
+    for op in operations {
+        ops.push(convert_alter_table_operation(op)?);
+    }
+    Ok(Statement::AlterTable {
+        name: table_name,
+        if_exists,
+        only,
+        operations: ops,
+    })
+}
+
+/// 转换单个 ALTER TABLE 操作
+fn convert_alter_table_operation(op: SpAlterTableOperation) -> Result<AlterTableOperation, ParseError> {
+    use sqlparser::ast::AlterColumnOperation as SpAlterColOp;
+
+    match op {
+        SpAlterTableOperation::AddColumn {
+            column_def,
+            if_not_exists,
+            ..
+        } => {
+            let col_def = convert_column_def(column_def)?;
+            Ok(AlterTableOperation::AddColumn {
+                column_def: col_def,
+                if_not_exists,
+            })
+        }
+        SpAlterTableOperation::DropColumn {
+            column_name,
+            if_exists,
+            cascade,
+        } => Ok(AlterTableOperation::DropColumn {
+            name: column_name.value,
+            if_exists,
+            cascade,
+        }),
+        SpAlterTableOperation::RenameColumn {
+            old_column_name,
+            new_column_name,
+        } => Ok(AlterTableOperation::RenameColumn {
+            old_name: old_column_name.value,
+            new_name: new_column_name.value,
+        }),
+        SpAlterTableOperation::RenameTable { table_name } => {
+            let new_name = convert_object_name(table_name)?;
+            Ok(AlterTableOperation::RenameTable { new_name })
+        }
+        SpAlterTableOperation::AlterColumn { column_name, op } => {
+            let col_name = column_name.value;
+            match op {
+                SpAlterColOp::SetNotNull => Ok(AlterTableOperation::AlterColumnNotNull {
+                    name: col_name,
+                    not_null: true,
+                }),
+                SpAlterColOp::DropNotNull => Ok(AlterTableOperation::AlterColumnNotNull {
+                    name: col_name,
+                    not_null: false,
+                }),
+                SpAlterColOp::SetDefault { value } => Ok(AlterTableOperation::AlterColumnDefault {
+                    name: col_name,
+                    default: Some(convert_expr(value)?),
+                }),
+                SpAlterColOp::DropDefault => Ok(AlterTableOperation::AlterColumnDefault {
+                    name: col_name,
+                    default: None,
+                }),
+                SpAlterColOp::SetDataType { data_type, using } => {
+                    let dt = convert_data_type(data_type)?;
+                    let using_expr = match using {
+                        Some(e) => Some(convert_expr(e)?),
+                        None => None,
+                    };
+                    Ok(AlterTableOperation::AlterColumnType {
+                        name: col_name,
+                        data_type: dt,
+                        using: using_expr,
+                    })
+                }
+                SpAlterColOp::AddGenerated { .. } => Err(ParseError::Unsupported(
+                    "ALTER COLUMN ADD GENERATED AS IDENTITY".to_string(),
+                )),
+            }
+        }
+        SpAlterTableOperation::AddConstraint(constraint) => {
+            let tc = convert_table_constraint(constraint)?;
+            Ok(AlterTableOperation::AddConstraint { constraint: tc })
+        }
+        SpAlterTableOperation::DropConstraint {
+            if_exists,
+            name,
+            cascade,
+        } => Ok(AlterTableOperation::DropConstraint {
+            name: name.value,
+            if_exists,
+            cascade,
+        }),
+        SpAlterTableOperation::RenameConstraint { old_name, new_name } => {
+            // 简化：将 RENAME CONSTRAINT 转为 DropConstraint + AddConstraint 是不正确的
+            // 这里返回 Unsupported，提示用户手动处理
+            Err(ParseError::Unsupported(format!(
+                "RENAME CONSTRAINT {old_name} TO {new_name}（请手动 DROP + ADD）"
+            )))
+        }
+        // MySQL/Oracle: ALTER TABLE t MODIFY COLUMN col TYPE
+        // sqlparser 0.53 将 MODIFY COLUMN 映射为 ModifyColumn { col_name, data_type, options, column_position }
+        // SzRSQL 等价于 ALTER COLUMN col SET DATA TYPE TYPE + 应用 options（NOT NULL/DEFAULT）
+        SpAlterTableOperation::ModifyColumn {
+            col_name,
+            data_type,
+            options,
+            column_position: _,
+        } => {
+            let dt = convert_data_type(data_type)?;
+            // 提取 NOT NULL 选项（如果存在）
+            let not_null = options
+                .iter()
+                .any(|opt| matches!(opt, sqlparser::ast::ColumnOption::NotNull));
+            // 提取 DEFAULT 选项（如果存在）
+            let default_expr = options
+                .iter()
+                .find_map(|opt| match opt {
+                    sqlparser::ast::ColumnOption::Default(expr) => Some(expr.clone()),
+                    _ => None,
+                })
+                .map(|e| convert_expr(e).unwrap_or(Expr::Literal(Value::Null)));
+
+            if not_null {
+                Ok(AlterTableOperation::AlterColumnNotNull {
+                    name: col_name.value,
+                    not_null: true,
+                })
+            } else if let Some(default) = default_expr {
+                Ok(AlterTableOperation::AlterColumnDefault {
+                    name: col_name.value,
+                    default: Some(default),
+                })
+            } else {
+                Ok(AlterTableOperation::AlterColumnType {
+                    name: col_name.value,
+                    data_type: dt,
+                    using: None,
+                })
+            }
+        }
+        // 不支持的操作（方言专属 / 罕见）
+        other => Err(ParseError::Unsupported(format!(
+            "unsupported ALTER TABLE operation: {other:?}"
         ))),
     }
 }
@@ -1269,6 +1899,41 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
                 alias: alias.map(convert_table_alias),
             })
         }
+        SpTableFactor::NestedJoin {
+            table_with_joins,
+            alias,
+            ..
+        } => {
+            // Navicat 兼容：把 NestedJoin `(t1 JOIN t2 ON ...) AS alias`
+            // 转换为 Derived 子查询 `SELECT * FROM (t1 JOIN t2 ON ...) AS alias`
+            let twj = convert_table_with_joins(*table_with_joins)?;
+            let select = Select {
+                with: None,
+                distinct: false,
+                projection: vec![SelectItem::Wildcard],
+                from: vec![twj],
+                where_clause: None,
+                group_by: Vec::new(),
+                having: None,
+                order_by: Vec::new(),
+                limit: None,
+                offset: None,
+                set_op: None,
+            };
+            // Navicat 兼容：允许 nested join 无 alias（如 `LEFT JOIN (t1 JOIN t2 ON ...)`）
+            // 此时生成自动别名，避免 "nested join without alias" 错误。
+            let alias = match alias {
+                Some(a) => convert_table_alias(a),
+                None => TableAlias {
+                    name: format!("__nested_join_{}__", NESTED_JOIN_COUNTER.fetch_add(1, Ordering::Relaxed)),
+                    column_aliases: None,
+                },
+            };
+            Ok(TableFactor::Derived {
+                subquery: Box::new(select),
+                alias,
+            })
+        }
         other => Err(ParseError::Unsupported(format!(
             "unsupported table factor: {other:?}"
         ))),
@@ -1458,7 +2123,7 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
         )),
         SpExpr::BinaryOp { left, op, right } => Ok(Expr::BinaryOp {
             left: Box::new(convert_expr_inner(*left, depth + 1)?),
-            op: convert_binary_op(op),
+            op: convert_binary_op(op)?,
             right: Box::new(convert_expr_inner(*right, depth + 1)?),
         }),
         SpExpr::UnaryOp { op, expr } => Ok(Expr::UnaryOp {
@@ -1588,6 +2253,84 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             expr: Box::new(convert_expr_inner(*expr, depth + 1)?),
             pattern: Box::new(convert_expr_inner(*pattern, depth + 1)?),
             negated,
+            case_insensitive: false,
+        }),
+        // PG ILIKE：大小写不敏感 LIKE — Phase F-9
+        SpExpr::ILike {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => Ok(Expr::Like {
+            expr: Box::new(convert_expr_inner(*expr, depth + 1)?),
+            pattern: Box::new(convert_expr_inner(*pattern, depth + 1)?),
+            negated,
+            case_insensitive: true,
+        }),
+        // PG SIMILAR TO：SQL 标准正则匹配 — Phase F-9
+        SpExpr::SimilarTo {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => {
+            let similar = Expr::SimilarTo {
+                expr: Box::new(convert_expr_inner(*expr, depth + 1)?),
+                pattern: Box::new(convert_expr_inner(*pattern, depth + 1)?),
+                negated,
+            };
+            Ok(similar)
+        }
+        // MySQL REGEXP / RLIKE：转换为 BinaryOp::RegexMatch
+        // sqlparser 用 regexp=true 区分 REGEXP，regexp=false 区分 RLIKE，
+        // 在 MySQL 中二者等价（大小写不敏感）；这里统一映射为 RegexMatch（大小写敏感近似）
+        SpExpr::RLike {
+            negated,
+            expr,
+            pattern,
+            ..
+        } => {
+            let left = convert_expr_inner(*expr, depth + 1)?;
+            let right = convert_expr_inner(*pattern, depth + 1)?;
+            let regex_expr = Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinaryOp::RegexMatch,
+                right: Box::new(right),
+            };
+            if negated {
+                Ok(Expr::UnaryOp {
+                    op: UnaryOp::Not,
+                    expr: Box::new(regex_expr),
+                })
+            } else {
+                Ok(regex_expr)
+            }
+        }
+        // PG IS DISTINCT FROM / IS NOT DISTINCT FROM — Phase F-9
+        SpExpr::IsDistinctFrom(left, right) => Ok(Expr::IsDistinctFrom {
+            left: Box::new(convert_expr_inner(*left, depth + 1)?),
+            right: Box::new(convert_expr_inner(*right, depth + 1)?),
+            not: false,
+        }),
+        SpExpr::IsNotDistinctFrom(left, right) => Ok(Expr::IsDistinctFrom {
+            left: Box::new(convert_expr_inner(*left, depth + 1)?),
+            right: Box::new(convert_expr_inner(*right, depth + 1)?),
+            not: true,
+        }),
+        // PG SUBSTRING(expr [FROM start] [FOR len]) — Phase F-9
+        SpExpr::Substring {
+            expr,
+            substring_from,
+            substring_for,
+            ..
+        } => Ok(Expr::Substring {
+            expr: Box::new(convert_expr_inner(*expr, depth + 1)?),
+            from: substring_from
+                .map(|e| convert_expr_inner(*e, depth + 1).map(Box::new))
+                .transpose()?,
+            for_len: substring_for
+                .map(|e| convert_expr_inner(*e, depth + 1).map(Box::new))
+                .transpose()?,
         }),
         SpExpr::IsNull(e) => Ok(Expr::IsNull {
             expr: Box::new(convert_expr_inner(*e, depth + 1)?),
@@ -1597,6 +2340,35 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             expr: Box::new(convert_expr_inner(*e, depth + 1)?),
             negated: true,
         }),
+        // TRIM([LEADING|TRAILING|BOTH] [what] FROM expr) — 转换为函数调用
+        // - 无 trim_where + 无 trim_what → btrim(expr)
+        // - LEADING + trim_what → ltrim(expr, what)
+        // - TRAILING + trim_what → rtrim(expr, what)
+        // - BOTH + trim_what → btrim(expr, what)
+        SpExpr::Trim {
+            expr,
+            trim_where,
+            trim_what,
+            trim_characters,
+        } => {
+            // trim_characters（PG 多字符修剪）当前不支持，忽略并使用 trim_what
+            let _ = trim_characters;
+            let inner = convert_expr_inner(*expr, depth + 1)?;
+            let func_name = match trim_where {
+                Some(sqlparser::ast::TrimWhereField::Leading) => "ltrim",
+                Some(sqlparser::ast::TrimWhereField::Trailing) => "rtrim",
+                Some(sqlparser::ast::TrimWhereField::Both) | None => "btrim",
+            };
+            let mut args = vec![inner];
+            if let Some(what) = trim_what {
+                args.push(convert_expr_inner(*what, depth + 1)?);
+            }
+            Ok(Expr::Function {
+                name: func_name.to_string(),
+                args,
+                distinct: false,
+            })
+        },
         SpExpr::Subquery(query) => Ok(Expr::Subquery(Box::new(convert_query(*query)?))),
         SpExpr::Exists { subquery, negated } => Ok(Expr::Exists {
             subquery: Box::new(convert_query(*subquery)?),
@@ -1623,7 +2395,7 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             ..
         } => Ok(Expr::AnyOp {
             left: Box::new(convert_expr_inner(*left, depth + 1)?),
-            op: convert_binary_op(compare_op),
+            op: convert_binary_op(compare_op)?,
             right: Box::new(convert_expr_inner(*right, depth + 1)?),
         }),
         // Phase 3.32: left OP ALL(right)
@@ -1633,7 +2405,7 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             right,
         } => Ok(Expr::AllOp {
             left: Box::new(convert_expr_inner(*left, depth + 1)?),
-            op: convert_binary_op(compare_op),
+            op: convert_binary_op(compare_op)?,
             right: Box::new(convert_expr_inner(*right, depth + 1)?),
         }),
         SpExpr::Nested(e) => convert_expr_inner(*e, depth + 1),
@@ -1643,40 +2415,69 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             let parts: Vec<String> = obj.0.into_iter().map(|i| i.value).collect();
             Ok(Expr::Identifier(parts))
         }
+        // TypedString: DATE '2024-01-01' / TIMESTAMP '2024-01-01 12:00:00' 等类型化字符串字面量
+        // 转换为 Cast(Literal(Text), target_type) 以保持语义一致
+        // PG 语义：DATE 'x' 等价于 CAST('x' AS DATE)
+        SpExpr::TypedString { data_type, value } => {
+            let target_type = convert_data_type(data_type)?;
+            Ok(Expr::Cast {
+                expr: Box::new(Expr::Literal(Value::Text(value))),
+                data_type: target_type,
+            })
+        }
         other => Err(ParseError::Unsupported(format!(
             "unsupported expr: {other:?}"
         ))),
     }
 }
 
-fn convert_binary_op(op: BinaryOperator) -> BinaryOp {
+fn convert_binary_op(op: BinaryOperator) -> Result<BinaryOp, ParseError> {
     match op {
-        BinaryOperator::Plus => BinaryOp::Plus,
-        BinaryOperator::Minus => BinaryOp::Minus,
-        BinaryOperator::Multiply => BinaryOp::Multiply,
-        BinaryOperator::Divide => BinaryOp::Divide,
-        BinaryOperator::Modulo => BinaryOp::Modulo,
-        BinaryOperator::Eq => BinaryOp::Eq,
-        BinaryOperator::NotEq => BinaryOp::NotEq,
-        BinaryOperator::Lt => BinaryOp::Lt,
-        BinaryOperator::LtEq => BinaryOp::LtEq,
-        BinaryOperator::Gt => BinaryOp::Gt,
-        BinaryOperator::GtEq => BinaryOp::GtEq,
-        BinaryOperator::And => BinaryOp::And,
-        BinaryOperator::Or => BinaryOp::Or,
-        BinaryOperator::BitwiseAnd => BinaryOp::BitAnd,
-        BinaryOperator::BitwiseOr => BinaryOp::BitOr,
-        BinaryOperator::BitwiseXor | BinaryOperator::PGBitwiseXor => BinaryOp::BitXor,
-        BinaryOperator::PGBitwiseShiftLeft => BinaryOp::ShiftLeft,
-        BinaryOperator::PGBitwiseShiftRight => BinaryOp::ShiftRight,
-        BinaryOperator::StringConcat => BinaryOp::StringConcat,
+        BinaryOperator::Plus => Ok(BinaryOp::Plus),
+        BinaryOperator::Minus => Ok(BinaryOp::Minus),
+        BinaryOperator::Multiply => Ok(BinaryOp::Multiply),
+        BinaryOperator::Divide => Ok(BinaryOp::Divide),
+        // MySQL DIV 整除：当前 SzRSQL 无独立整除运算符，降级为 Divide（语义近似）
+        BinaryOperator::MyIntegerDivide => Ok(BinaryOp::Divide),
+        BinaryOperator::Modulo => Ok(BinaryOp::Modulo),
+        BinaryOperator::Eq => Ok(BinaryOp::Eq),
+        BinaryOperator::NotEq => Ok(BinaryOp::NotEq),
+        BinaryOperator::Lt => Ok(BinaryOp::Lt),
+        BinaryOperator::LtEq => Ok(BinaryOp::LtEq),
+        BinaryOperator::Gt => Ok(BinaryOp::Gt),
+        BinaryOperator::GtEq => Ok(BinaryOp::GtEq),
+        BinaryOperator::And => Ok(BinaryOp::And),
+        BinaryOperator::Or => Ok(BinaryOp::Or),
+        BinaryOperator::BitwiseAnd => Ok(BinaryOp::BitAnd),
+        BinaryOperator::BitwiseOr => Ok(BinaryOp::BitOr),
+        BinaryOperator::BitwiseXor | BinaryOperator::PGBitwiseXor => Ok(BinaryOp::BitXor),
+        BinaryOperator::PGBitwiseShiftLeft => Ok(BinaryOp::ShiftLeft),
+        BinaryOperator::PGBitwiseShiftRight => Ok(BinaryOp::ShiftRight),
+        BinaryOperator::StringConcat => Ok(BinaryOp::StringConcat),
         // Phase 3.33: PG 全文检索 `@@` 操作符
-        BinaryOperator::AtAt => BinaryOp::AtAt,
-        other => {
-            // 不支持的运算符降级为 Eq，并在调试中记录
-            debug_assert!(false, "unsupported binary op: {other:?}");
-            BinaryOp::Eq
-        }
+        BinaryOperator::AtAt => Ok(BinaryOp::AtAt),
+        // PG 正则匹配运算符：`~` / `~*` / `!~` / `!~*`
+        // MySQL REGEXP/RLIKE：sqlparser 复用 PGRegexMatch 系列变体
+        BinaryOperator::PGRegexMatch => Ok(BinaryOp::RegexMatch),
+        BinaryOperator::PGRegexIMatch => Ok(BinaryOp::RegexIMatch),
+        BinaryOperator::PGRegexNotMatch => Ok(BinaryOp::RegexNotMatch),
+        BinaryOperator::PGRegexNotIMatch => Ok(BinaryOp::RegexNotIMatch),
+        // PG JSON/JSONB 操作符
+        // -> : json -> 'key' / json -> 1（返回 json）
+        BinaryOperator::Arrow => Ok(BinaryOp::JsonArrow),
+        // ->> : json ->> 'key'（返回 text）
+        BinaryOperator::LongArrow => Ok(BinaryOp::JsonLongArrow),
+        // #> : json #> '{a,b}'（路径数组，返回 json）
+        BinaryOperator::HashArrow => Ok(BinaryOp::JsonHashArrow),
+        // #>> : json #>> '{a,b}'（路径数组，返回 text）
+        BinaryOperator::HashLongArrow => Ok(BinaryOp::JsonHashLongArrow),
+        // @> : json @> json（包含，返回 bool）
+        BinaryOperator::AtArrow => Ok(BinaryOp::JsonAtArrow),
+        // <@ : json <@ json（被包含，返回 bool）
+        BinaryOperator::ArrowAt => Ok(BinaryOp::JsonArrowAt),
+        other => Err(ParseError::Unsupported(format!(
+            "unsupported binary operator: {other:?}"
+        ))),
     }
 }
 
@@ -1712,6 +2513,9 @@ fn convert_value(value: SpValue) -> Result<Value, ParseError> {
             }
         }
         SpValue::SingleQuotedString(s) => Ok(Value::Text(s)),
+        // MySQL 方言：双引号字符串等价于单引号字符串（ANSI_QUOTES 模式除外）
+        // SzRSQL 统一映射为 Text
+        SpValue::DoubleQuotedString(s) => Ok(Value::Text(s)),
         SpValue::NationalStringLiteral(s) => Ok(Value::Text(s)),
         SpValue::HexStringLiteral(s) => {
             // 转换为 Blob
@@ -1790,6 +2594,14 @@ fn convert_data_type(dt: DataType) -> Result<ColumnType, ParseError> {
         }
         DataType::Date | DataType::Date32 => ColumnType::Date,
         DataType::Timestamp(_, _) => ColumnType::Timestamp,
+        // TIME 类型（MySQL/PG/SQL Server）：统一映射为 Text（"HH:MM:SS.ffffff"）
+        // SzRSQL 当前无独立 Time 类型，存为字符串保持语义
+        DataType::Time(_, _) => ColumnType::Text,
+        // DATETIME 类型（MySQL/SQL Server）：等价于 TIMESTAMP，映射为 Timestamp
+        DataType::Datetime(_) => ColumnType::Timestamp,
+        // NOTE: TIMESTAMP WITH/WITHOUT TIME ZONE 均由前面的 DataType::Timestamp(_, _)
+        // 分支统一处理（sqlparser 0.53 通过 TimezoneInfo 区分，SzRSQL 统一映射为 Timestamp，
+        // 序列化时使用 UTC，不保留时区信息）
         DataType::Text
         | DataType::Character(_)
         | DataType::Char(_)
@@ -1798,10 +2610,28 @@ fn convert_data_type(dt: DataType) -> Result<ColumnType, ParseError> {
         | DataType::Varchar(_)
         | DataType::Nvarchar(_)
         | DataType::String(_) => ColumnType::Text,
+        // MySQL 大文本类型：MEDIUMTEXT/LONGTEXT/TINYTEXT — 统一映射为 Text
+        DataType::MediumText | DataType::LongText | DataType::TinyText => ColumnType::Text,
+        // Oracle CLOB（Character Large Object）— 等价于 PG/SQLite TEXT
+        // SzRSQL 统一映射为 Text（无独立 CLOB 类型）
+        DataType::Clob(_) => ColumnType::Text,
+        // MySQL 整型变体：MEDIUMINT — 映射为 Int64（i64 范围覆盖 MEDIUMINT 24 位）
+        DataType::MediumInt(_) => ColumnType::Int64,
         DataType::Bytea | DataType::Binary(_) | DataType::Varbinary(_) | DataType::Blob(_) => {
             ColumnType::Blob
         }
+        // MySQL 大对象类型：MEDIUMBLOB/LONGBLOB/TINYBLOB — 统一映射为 Blob
+        DataType::MediumBlob | DataType::LongBlob | DataType::TinyBlob => ColumnType::Blob,
         DataType::JSON | DataType::JSONB => ColumnType::Json,
+        // Phase F-10: PG 兼容类型映射（语法层接受，存储层统一为 Text）
+        //
+        // # 策略
+        // - UUID：128 位值以字符串表示（与 data_type_mapping.rs 中 "SzRSQL 暂存为 Text" 一致）
+        // - Interval：时间间隔以字符串表示（如 '1 day 2 hours'）
+        // - Bit/BitVarying：位串以 0/1 字符串表示
+        // - Regclass：PG 系统类型，存为 Text
+        DataType::Uuid | DataType::Interval | DataType::Regclass => ColumnType::Text,
+        DataType::Bit(_) | DataType::BitVarying(_) => ColumnType::Text,
         DataType::Array(arr_def) => {
             use sqlparser::ast::ArrayElemTypeDef::*;
             let elem_type = match arr_def {
@@ -1836,6 +2666,17 @@ fn convert_data_type(dt: DataType) -> Result<ColumnType, ParseError> {
                 // Phase 3.33: PG 全文检索类型
                 "tsvector" => ColumnType::TsVector,
                 "tsquery" => ColumnType::TsQuery,
+                // Phase F-10: PG 网络类型 / 几何类型 / XML — 统一存为 Text
+                // - inet/cidr/macaddr：网络地址以字符串表示
+                // - point/line/circle 等：几何类型存为字符串（无 PostGIS 支持）
+                // - xml：XML 文档以字符串表示
+                // - interval：PG 也允许 INTERVAL 作为 Custom 类型出现
+                "inet" | "cidr" | "macaddr" | "macaddr8" => ColumnType::Text,
+                "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle" => {
+                    ColumnType::Text
+                }
+                "xml" => ColumnType::Text,
+                "interval" => ColumnType::Text,
                 _ => ColumnType::Text, // 未知自定义类型降级为 Text
             }
         }
@@ -1854,6 +2695,9 @@ fn convert_object_name(name: ObjectName) -> Result<TableName, ParseError> {
     match parts.len() {
         1 => Ok(TableName::new(parts[0].clone())),
         2 => Ok(TableName::with_schema(parts[0].clone(), parts[1].clone())),
+        // 3 段式（SQL Server: db.schema.table / Oracle: schema.table.col）
+        // SzRSQL 简化为只取后两段（schema.table），丢弃第一段（database/catalog）
+        3 => Ok(TableName::with_schema(parts[1].clone(), parts[2].clone())),
         _ => Err(ParseError::Unsupported(format!(
             "unsupported object name with {} parts: {parts:?}",
             parts.len()
@@ -1880,17 +2724,18 @@ fn convert_object_name_to_string(name: &ObjectName) -> String {
 /// # 参数
 /// - `materialized`：true 表示 `CREATE MATERIALIZED VIEW`
 /// - `if_not_exists`：true 表示 `CREATE VIEW IF NOT EXISTS`（SQLite/BigQuery 方言）
+/// - `or_replace`：true 表示 `CREATE OR REPLACE VIEW`（替换同名视图）
 /// - `name`：视图名
 /// - `columns`：显式列别名（`CREATE VIEW v (a, b) AS ...`）；`ViewColumnDef.name` 取列名
 /// - `query`：视图查询体
 ///
 /// # 限制
-/// - `OR REPLACE` 当前被忽略（PG 支持，SzRSQL 暂未实现替换语义）
 /// - `WITH (...)` 选项当前被忽略
 /// - `ViewColumnDef.data_type` 与 `ViewColumnDef.options` 当前被忽略（仅取列名）
 fn convert_create_view(
     materialized: bool,
     if_not_exists: bool,
+    or_replace: bool,
     name: ObjectName,
     columns: Vec<sqlparser::ast::ViewColumnDef>,
     query: Box<SpQuery>,
@@ -1904,6 +2749,7 @@ fn convert_create_view(
         query: Box::new(select),
         materialized,
         if_not_exists,
+        or_replace,
     })
 }
 
@@ -3771,6 +4617,98 @@ fn parse_create_function(sql: &str) -> Result<Statement, ParseError> {
             continue;
         }
 
+        // MySQL 兼容：DETERMINISTIC → IMMUTABLE，NOT DETERMINISTIC → VOLATILE
+        // MySQL 风格的 CREATE FUNCTION 使用 DETERMINISTIC 替代 PG 的 IMMUTABLE/STABLE/VOLATILE
+        if upper_remaining.starts_with("DETERMINISTIC") {
+            volatility = Some(FunctionVolatility::Immutable);
+            remaining = remaining["DETERMINISTIC".len()..].trim_start().to_string();
+            continue;
+        }
+        if upper_remaining.starts_with("NOT DETERMINISTIC") {
+            volatility = Some(FunctionVolatility::Volatile);
+            remaining = remaining["NOT DETERMINISTIC".len()..]
+                .trim_start()
+                .to_string();
+            continue;
+        }
+
+        // MySQL 兼容：READS SQL DATA / NO SQL / CONTAINS SQL / MODIFIES SQL DATA
+        // 这些是 MySQL 函数特性声明，SzRSQL 忽略它们（不影响执行）
+        if upper_remaining.starts_with("READS SQL DATA") {
+            remaining = remaining["READS SQL DATA".len()..].trim_start().to_string();
+            continue;
+        }
+        if upper_remaining.starts_with("NO SQL") {
+            remaining = remaining["NO SQL".len()..].trim_start().to_string();
+            continue;
+        }
+        if upper_remaining.starts_with("CONTAINS SQL") {
+            remaining = remaining["CONTAINS SQL".len()..]
+                .trim_start()
+                .to_string();
+            continue;
+        }
+        if upper_remaining.starts_with("MODIFIES SQL DATA") {
+            remaining = remaining["MODIFIES SQL DATA".len()..]
+                .trim_start()
+                .to_string();
+            continue;
+        }
+
+        // MySQL 兼容：BEGIN ... END 函数体（无需 AS 关键字）
+        // MySQL 风格：CREATE FUNCTION fn(x INT) RETURNS INT DETERMINISTIC BEGIN RETURN x * 2; END
+        // 转换为 PG 风格 body：BEGIN RETURN x * 2; END
+        if upper_remaining.starts_with("BEGIN") {
+            // 提取 BEGIN ... END 之间的内容作为 body
+            let (body_text, after_body) = extract_mysql_begin_end_body(&remaining)?;
+            body = Some(body_text);
+            remaining = after_body.trim_start().to_string();
+            // MySQL 函数默认使用 plpgsql 兼容的语言
+            if language.is_empty() {
+                language = "plpgsql".to_string();
+            }
+            // 去掉可能的尾随分号
+            if remaining.ends_with(';') {
+                remaining = remaining[..remaining.len() - 1].trim_end().to_string();
+            }
+            continue;
+        }
+
+        // MySQL 兼容：RETURN expr 单行函数体（无 BEGIN...END）
+        // MySQL 风格：CREATE FUNCTION fn(a INT, b INT) RETURNS INT DETERMINISTIC RETURN a + b
+        // 转换为 PG 风格 body：BEGIN RETURN a + b; END
+        // 注意：必须区分 RETURN（函数体）和 RETURNS（返回类型声明），
+        // 通过检查 RETURN 后是否跟空白字符且不是 RETURNS 来判断。
+        if upper_remaining.starts_with("RETURN")
+            && !upper_remaining.starts_with("RETURNS")
+        {
+            // 确认 RETURN 后是空白或行尾（独立关键字）
+            let after_return_kw = &remaining["RETURN".len()..];
+            let is_return_keyword = after_return_kw
+                .chars()
+                .next()
+                .map(|c| c.is_whitespace())
+                .unwrap_or(true);
+            if is_return_keyword {
+                // 提取 RETURN 后的表达式（到语句末尾或分号）
+                let expr_text = after_return_kw.trim();
+                // 去掉尾随分号
+                let expr_text = expr_text.trim_end_matches(';').trim();
+                if !expr_text.is_empty() {
+                    // 转换为 BEGIN RETURN expr; END 形式
+                    let body_text = format!("BEGIN RETURN {}; END", expr_text);
+                    body = Some(body_text);
+                    // MySQL 函数默认使用 plpgsql 兼容的语言
+                    if language.is_empty() {
+                        language = "plpgsql".to_string();
+                    }
+                    // RETURN expr 后不应再有其他内容（消费全部剩余文本）
+                    remaining = String::new();
+                    continue;
+                }
+            }
+        }
+
         // STRICT (or RETURNS NULL ON NULL INPUT)
         if upper_remaining.starts_with("STRICT")
             || upper_remaining.starts_with("RETURNS NULL ON NULL INPUT")
@@ -3852,6 +4790,160 @@ fn parse_create_function(sql: &str) -> Result<Statement, ParseError> {
         strict,
         security_definer,
     })
+}
+
+/// 提取 MySQL 风格的 BEGIN ... END 函数体
+///
+/// 输入：`BEGIN RETURN x * 2; END` 或 `BEGIN RETURN x * 2 END`
+/// 输出：(`BEGIN RETURN x * 2; END`, 剩余文本)
+///
+/// 支持：
+/// - 嵌套 BEGIN ... END（如条件分支、循环体）
+/// - END 后可选分号
+/// - 大小写不敏感
+fn extract_mysql_begin_end_body(s: &str) -> Result<(String, String), ParseError> {
+    let trimmed = s.trim_start();
+    let upper = trimmed.to_uppercase();
+
+    if !upper.starts_with("BEGIN") {
+        return Err(ParseError::Unsupported(format!(
+            "expected BEGIN clause in MySQL function body: {s}"
+        )));
+    }
+
+    // 扫描匹配 BEGIN ... END（支持嵌套）
+    // 使用字节索引避免 UTF-8 边界问题
+    let bytes = trimmed.as_bytes();
+    let mut pos = "BEGIN".len(); // 跳过开头的 BEGIN
+    let mut depth: i32 = 1; // 已进入第一层 BEGIN
+
+    while pos < bytes.len() && depth > 0 {
+        // 跳过空白
+        let remaining = &trimmed[pos..];
+        let remaining_upper = remaining.to_uppercase();
+
+        // 检测嵌套 BEGIN（前面是空白或行首）
+        if remaining_upper.starts_with("BEGIN") {
+            // 确保是独立关键字（后面是空白或非字母）
+            let after_begin = &remaining["BEGIN".len()..];
+            if after_begin.is_empty()
+                || after_begin
+                    .chars()
+                    .next()
+                    .map(|c| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(true)
+            {
+                depth += 1;
+                pos += "BEGIN".len();
+                continue;
+            }
+        }
+
+        // 检测 END（前面是空白或行首）
+        if remaining_upper.starts_with("END") {
+            let after_end = &remaining["END".len()..];
+            if after_end.is_empty()
+                || after_end
+                    .chars()
+                    .next()
+                    .map(|c| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(true)
+            {
+                depth -= 1;
+                pos += "END".len();
+                if depth == 0 {
+                    // 找到匹配的 END，跳过可能的分号
+                    let body_text = trimmed[..pos].trim().to_string();
+                    let mut after_body = &trimmed[pos..];
+                    after_body = after_body.trim_start();
+                    if after_body.starts_with(';') {
+                        after_body = &after_body[1..];
+                    }
+                    return Ok((body_text, after_body.to_string()));
+                }
+                continue;
+            }
+        }
+
+        // 跳过单引号字符串（避免字符串中的 BEGIN/END 干扰）
+        if bytes[pos] == b'\'' {
+            pos += 1;
+            while pos < bytes.len() {
+                if bytes[pos] == b'\'' {
+                    // 检查是否是转义的单引号 ''
+                    if pos + 1 < bytes.len() && bytes[pos + 1] == b'\'' {
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                        break;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+            continue;
+        }
+
+        // 跳过双引号字符串
+        if bytes[pos] == b'"' {
+            pos += 1;
+            while pos < bytes.len() {
+                if bytes[pos] == b'"' {
+                    if pos + 1 < bytes.len() && bytes[pos + 1] == b'"' {
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                        break;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+            continue;
+        }
+
+        // 跳过注释 -- 到行尾
+        if pos + 1 < bytes.len() && bytes[pos] == b'-' && bytes[pos + 1] == b'-' {
+            while pos < bytes.len() && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        // 跳过注释 /* ... */
+        if pos + 1 < bytes.len() && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            while pos + 1 < bytes.len() {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // 普通字符，前进一字节
+        pos += 1;
+    }
+
+    // MySQL 兼容：Navicat "测试函数" 功能可能发送不带 END 的简化语法
+    // 例如：CREATE FUNCTION fn_test(x INT) RETURNS INT DETERMINISTIC BEGIN RETURN x * 2
+    // 此时把从 BEGIN 到字符串末尾的所有内容作为 body（补上 END）
+    if depth > 0 {
+        let body_text = format!("{} END", trimmed.trim());
+        tracing::debug!(
+            target: "mysql_function_parser",
+            original = %s,
+            body = %body_text,
+            "MySQL function body has BEGIN but no END; auto-appending END (Navicat privilege test syntax)"
+        );
+        return Ok((body_text, String::new()));
+    }
+
+    Err(ParseError::Unsupported(format!(
+        "unmatched BEGIN in MySQL function body (missing END): {s}"
+    )))
 }
 
 /// 提取函数名（支持 `schema.name` 或 `name`）
@@ -4383,6 +5475,62 @@ fn parse_refresh_materialized_view(sql: &str) -> Result<Statement, ParseError> {
     Ok(Statement::RefreshMaterializedView { name, with_data })
 }
 
+/// 解析 `CREATE MATERIALIZED VIEW IF NOT EXISTS name AS SELECT ...`
+///
+/// sqlparser 0.53.0 不支持此语法（解析到 NOT 时报
+/// "Expected: AS, found: NOT"）。
+///
+/// # 策略
+/// 去掉 `IF NOT EXISTS` 关键字后，重组为标准的
+/// `CREATE MATERIALIZED VIEW name AS SELECT ...` 交给 sqlparser 解析，
+/// 然后将结果 `Statement::CreateView` 的 `if_not_exists` 置为 true。
+///
+/// # 限制
+/// - 不处理视图名或 SELECT 体中字符串字面量内的 `IF NOT EXISTS`
+///   （与现有 DROP/REFRESH MATERIALIZED VIEW 预处理一致）
+fn parse_create_materialized_view_if_not_exists(sql: &str) -> Result<Statement, ParseError> {
+    let trimmed = sql.trim();
+    let upper = trimmed.to_uppercase();
+    let prefix = "CREATE MATERIALIZED VIEW";
+    if !upper.starts_with(prefix) {
+        return Err(ParseError::Unsupported(format!(
+            "not a CREATE MATERIALIZED VIEW IF NOT EXISTS statement: {sql}"
+        )));
+    }
+    let rest = trimmed[prefix.len()..].trim_start();
+    if !rest.to_uppercase().starts_with("IF NOT EXISTS") {
+        return Err(ParseError::Unsupported(format!(
+            "not a CREATE MATERIALIZED VIEW IF NOT EXISTS statement: {sql}"
+        )));
+    }
+    // 去掉 "IF NOT EXISTS"，重组为标准形式交给 sqlparser
+    let after_ine = rest["IF NOT EXISTS".len()..].trim_start();
+    let rewritten = format!("CREATE MATERIALIZED VIEW {after_ine}");
+    let dialect = PostgreSqlDialect {};
+    let mut stmts = Parser::parse_sql(&dialect, &rewritten)?;
+    if stmts.len() != 1 {
+        return Err(ParseError::Unsupported(format!(
+            "CREATE MATERIALIZED VIEW IF NOT EXISTS produced {} statements, expected 1: {sql}",
+            stmts.len()
+        )));
+    }
+    let sp_stmt = stmts.remove(0);
+    let mut inner = convert_statement(sp_stmt)?;
+    match inner {
+        Statement::CreateView {
+            materialized: true,
+            ref mut if_not_exists,
+            ..
+        } => {
+            *if_not_exists = true;
+            Ok(inner)
+        }
+        other => Err(ParseError::Unsupported(format!(
+            "expected materialized CreateView, got {other:?}: {sql}"
+        ))),
+    }
+}
+
 /// 从文本解析表名（支持 `name` 和 `schema.name` 两种形式）
 ///
 /// 简化实现：按 `.` 切分，最多 2 段。不处理引号包裹的标识符。
@@ -4403,6 +5551,129 @@ fn parse_table_name_from_text(s: &str) -> Result<TableName, ParseError> {
             "unsupported table name with {} parts: {s}",
             parts.len()
         ))),
+    }
+}
+
+// =====================================================================
+//  Phase TDengine-P2: COMMENT ON 语句手动解析
+// =====================================================================
+
+/// 解析 COMMENT ON 语句
+///
+/// sqlparser 0.53.0 不支持 COMMENT ON 语法，需手动解析。
+///
+/// 支持形式：
+/// - `COMMENT ON TABLE <name> IS '<comment>'` — 设置表注释
+/// - `COMMENT ON COLUMN <table>.<column> IS '<comment>'` — 设置列注释
+/// - `COMMENT ON TABLE <name> IS NULL` — 删除表注释
+fn parse_comment(sql: &str) -> Result<Statement, ParseError> {
+    let upper = sql.to_uppercase();
+    if !upper.starts_with("COMMENT ON") {
+        return Err(ParseError::Unsupported(format!(
+            "not a COMMENT ON statement: {sql}"
+        )));
+    }
+    let rest = sql["COMMENT ON".len()..].trim();
+    let upper_rest = rest.to_uppercase();
+
+    if upper_rest.starts_with("TABLE") {
+        // COMMENT ON TABLE <name> IS '<comment>'
+        let after_table = rest["TABLE".len()..].trim();
+        let (table_name_str, remaining) = extract_identifier_and_rest(after_table)?;
+        let remaining = remaining.trim();
+        let upper_remaining = remaining.to_uppercase();
+        if !upper_remaining.starts_with("IS") {
+            return Err(ParseError::Unsupported(format!(
+                "expected IS keyword: {remaining}"
+            )));
+        }
+        let after_is = remaining["IS".len()..].trim();
+        let comment = parse_comment_value(after_is)?;
+        let object_name = parse_table_name_from_text(&table_name_str)?;
+        Ok(Statement::Comment {
+            object_type: CommentObjectType::Table,
+            object_name,
+            column_name: None,
+            comment,
+        })
+    } else if upper_rest.starts_with("COLUMN") {
+        // COMMENT ON COLUMN <table>.<column> IS '<comment>'
+        let after_column = rest["COLUMN".len()..].trim();
+        let (full_name, remaining) = extract_identifier_and_rest(after_column)?;
+        // 分离表名和列名：取最后一个 `.` 之后的部分作为列名
+        let (table_part, column_part) = full_name
+            .rsplit_once('.')
+            .ok_or_else(|| ParseError::Unsupported(format!("expected table.column format: {full_name}")))?;
+        let remaining = remaining.trim();
+        let upper_remaining = remaining.to_uppercase();
+        if !upper_remaining.starts_with("IS") {
+            return Err(ParseError::Unsupported(format!(
+                "expected IS keyword: {remaining}"
+            )));
+        }
+        let after_is = remaining["IS".len()..].trim();
+        let comment = parse_comment_value(after_is)?;
+        let object_name = parse_table_name_from_text(table_part.trim())?;
+        Ok(Statement::Comment {
+            object_type: CommentObjectType::Column,
+            object_name,
+            column_name: Some(column_part.trim().to_string()),
+            comment,
+        })
+    } else {
+        Err(ParseError::Unsupported(format!(
+            "unsupported COMMENT ON object: {rest}"
+        )))
+    }
+}
+
+/// 从 SQL 文本中提取第一个标识符和剩余部分
+///
+/// 标识符可包含字母、数字、下划线和点（支持 schema.table.column 格式）。
+/// 遇到空白或分号时终止。支持双引号包裹的标识符。
+fn extract_identifier_and_rest(s: &str) -> Result<(String, String), ParseError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(ParseError::Unsupported(
+            "expected identifier".to_string(),
+        ));
+    }
+    // 处理带引号的标识符
+    if let Some(inner) = s.strip_prefix('"') {
+        let end = inner
+            .find('"')
+            .ok_or_else(|| ParseError::Unsupported("unterminated quoted identifier".to_string()))?;
+        let ident = inner[..end].to_string();
+        let rest = inner[end + 1..].to_string();
+        Ok((ident, rest))
+    } else {
+        // 普通标识符：遇空白或分号终止
+        let end = s
+            .find(|c: char| c.is_whitespace() || c == ';')
+            .unwrap_or(s.len());
+        let ident = s[..end].to_string();
+        let rest = s[end..].to_string();
+        Ok((ident, rest))
+    }
+}
+
+/// 解析注释值（'<comment>' 或 NULL）
+fn parse_comment_value(s: &str) -> Result<Option<String>, ParseError> {
+    let s = s.trim().trim_end_matches(';').trim();
+    let upper = s.to_uppercase();
+    if upper == "NULL" {
+        return Ok(None);
+    }
+    if let Some(inner) = s.strip_prefix('\'') {
+        // 在 strip_prefix 返回的子串上直接 find + 切片，偏移量一致，避免字节边界错位。
+        let end = inner
+            .find('\'')
+            .ok_or_else(|| ParseError::Unsupported("unterminated string literal".to_string()))?;
+        Ok(Some(inner[..end].to_string()))
+    } else {
+        Err(ParseError::Unsupported(format!(
+            "expected string literal or NULL: {s}"
+        )))
     }
 }
 

@@ -118,6 +118,11 @@ pub enum LockError {
         to: LockMode,
     },
 
+    /// 未持有任何锁时尝试升级（L5 修复：原代码使用 `LockMode::Share` 占位，
+    /// 语义不准确且可能误导死锁检测器。新增独立变体精确表达"未持有"语义）
+    #[error("upgrade failed: txn {txn_id} holds no lock on resource {resource}")]
+    NotHeld { txn_id: u32, resource: u64 },
+
     /// 死锁检测（Phase 2.10 实现）
     #[error("deadlock detected: txn {0} aborted")]
     Deadlock(u32),
@@ -201,11 +206,13 @@ impl LockEntry {
 /// 支持多线程并发加锁/解锁/升级。
 ///
 /// **资源 ID 约定**：`u64` 类型，调用方可编码为 `(page_id << 32) | slot_num`。
+const LOCK_SHARD_COUNT: usize = 16;
+
 pub struct LockManager {
-    /// 锁表：resource_id → LockEntry
-    table: Mutex<HashMap<u64, LockEntry>>,
-    /// 全局条件变量（任何锁释放时 notify_all，简化设计）
-    condvar: Condvar,
+    /// 分片锁表：resource_id → LockEntry（分片以减少锁竞争）
+    tables: Vec<Mutex<HashMap<u64, LockEntry>>>,
+    /// 每个分片对应的条件变量
+    condvars: Vec<Condvar>,
 }
 
 impl Default for LockManager {
@@ -217,10 +224,87 @@ impl Default for LockManager {
 impl LockManager {
     /// 创建空锁管理器
     pub fn new() -> Self {
-        Self {
-            table: Mutex::new(HashMap::new()),
-            condvar: Condvar::new(),
+        let mut tables = Vec::with_capacity(LOCK_SHARD_COUNT);
+        let mut condvars = Vec::with_capacity(LOCK_SHARD_COUNT);
+        for _ in 0..LOCK_SHARD_COUNT {
+            tables.push(Mutex::new(HashMap::new()));
+            condvars.push(Condvar::new());
         }
+        Self { tables, condvars }
+    }
+
+    /// OPT-9: calculate shard index for a resource
+    fn shard_idx(&self, resource: u64) -> usize {
+        (resource as usize) % self.tables.len()
+    }
+
+    /// OPT-9: snapshot wait-for edges across all shards (for cross-shard deadlock detection)
+    fn snapshot_wait_for_edges(
+        &self,
+        exclude_idx: usize,
+        exclude_table: &HashMap<u64, LockEntry>,
+    ) -> Vec<(u32, u32)> {
+        let mut edges: Vec<(u32, u32)> = Vec::new();
+        let collect = |table: &HashMap<u64, LockEntry>, edges: &mut Vec<(u32, u32)>| {
+            for entry in table.values() {
+                for waiter in &entry.waiters {
+                    for holder in &entry.holders {
+                        if holder.txn_id != waiter.txn_id {
+                            edges.push((waiter.txn_id, holder.txn_id));
+                        }
+                    }
+                }
+            }
+        };
+        collect(exclude_table, &mut edges);
+        for (idx, table_mutex) in self.tables.iter().enumerate() {
+            if idx == exclude_idx {
+                continue;
+            }
+            if let Ok(table) = table_mutex.lock() {
+                collect(&table, &mut edges);
+            }
+        }
+        edges
+    }
+
+    /// OPT-9: detect deadlock cycle from wait-for edges (DFS + gray/black coloring)
+    fn detect_deadlock_from_edges(edges: &[(u32, u32)], start_txn: u32) -> Option<Vec<u32>> {
+        let mut gray: HashSet<u32> = HashSet::new();
+        let mut black: HashSet<u32> = HashSet::new();
+        let mut path: Vec<u32> = Vec::new();
+        Self::dfs_detect_cycle_edges(edges, start_txn, &mut gray, &mut black, &mut path)
+    }
+
+    fn dfs_detect_cycle_edges(
+        edges: &[(u32, u32)],
+        txn: u32,
+        gray: &mut HashSet<u32>,
+        black: &mut HashSet<u32>,
+        path: &mut Vec<u32>,
+    ) -> Option<Vec<u32>> {
+        if black.contains(&txn) {
+            return None;
+        }
+        if gray.contains(&txn) {
+            let cycle_start = path.iter().position(|&t| t == txn).unwrap();
+            return Some(path[cycle_start..].to_vec());
+        }
+        gray.insert(txn);
+        path.push(txn);
+        for &(waiter, holder) in edges {
+            if waiter == txn {
+                if let Some(cycle) =
+                    Self::dfs_detect_cycle_edges(edges, holder, gray, black, path)
+                {
+                    return Some(cycle);
+                }
+            }
+        }
+        path.pop();
+        gray.remove(&txn);
+        black.insert(txn);
+        None
     }
 
     /// 非阻塞尝试加锁
@@ -230,7 +314,8 @@ impl LockManager {
     /// - 升级时若有其他持有者 → 返回 `Conflict`
     #[instrument(skip(self))]
     pub fn try_lock(&self, txn_id: u32, resource: u64, mode: LockMode) -> Result<(), LockError> {
-        let mut table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         match self.try_lock_inner(&mut table, txn_id, resource, mode) {
             Ok(()) => {
                 trace!(txn_id, resource, mode = ?mode, "lock acquired (try)");
@@ -256,7 +341,8 @@ impl LockManager {
         mode: LockMode,
         timeout: Duration,
     ) -> Result<(), LockError> {
-        let mut table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
 
         // 先尝试立即获取
         match self.try_lock_inner(&mut table, txn_id, resource, mode) {
@@ -306,7 +392,7 @@ impl LockManager {
         debug!(txn_id, resource, mode = ?mode, is_upgrade, "lock waiting");
 
         // **Phase 2.10: 死锁检测** — 进入等待队列后立即检查是否形成环
-        if self.detect_deadlock(&table, txn_id).is_some() {
+        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
             // 检测到死锁，中止自身（从等待队列移除并返回 Deadlock 错误）
             if let Some(entry) = table.get_mut(&resource) {
                 entry
@@ -341,7 +427,7 @@ impl LockManager {
             }
 
             // **Phase 2.10: 周期性死锁检测** — 环可能在等待期间形成
-            if self.detect_deadlock(&table, txn_id).is_some() {
+            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
                 if let Some(entry) = table.get_mut(&resource) {
                     entry
                         .waiters
@@ -378,7 +464,7 @@ impl LockManager {
             // 等待通知（带剩余超时，但最多等待 500ms 以便周期性检查死锁）
             let remaining = deadline - now;
             let wait_duration = remaining.min(Duration::from_millis(500));
-            let (guard, wait_result) = self.condvar.wait_timeout(table, wait_duration).unwrap();
+            let (guard, wait_result) = self.condvars[idx].wait_timeout(table, wait_duration).unwrap();
             table = guard;
             let _ = wait_result;
         }
@@ -391,7 +477,8 @@ impl LockManager {
     /// - 若资源无持有者无等待者，移除表项（避免内存泄漏）
     #[instrument(skip(self))]
     pub fn unlock(&self, txn_id: u32, resource: u64) {
-        let mut table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         let need_notify = if let Some(entry) = table.get_mut(&resource) {
             // 从等待队列移除（若在等待）
             let prev_len = entry.waiters.len();
@@ -418,7 +505,7 @@ impl LockManager {
         drop(table);
         if need_notify {
             trace!(txn_id, resource, "lock released, notifying waiters");
-            self.condvar.notify_all();
+            self.condvars[idx].notify_all();
         } else {
             trace!(txn_id, resource, "lock released (no waiters)");
         }
@@ -427,38 +514,40 @@ impl LockManager {
     /// 释放指定事务的所有锁（COMMIT/ABORT 时调用，Strict 2PL）
     #[instrument(skip(self))]
     pub fn unlock_all(&self, txn_id: u32) {
-        let mut table = self.table.lock().unwrap();
-        let mut resources_to_clean = Vec::new();
-        let mut need_notify = false;
-        let mut released_count = 0u32;
+        let mut total_released = 0u32;
+        for (idx, table_mutex) in self.tables.iter().enumerate() {
+            let mut table = table_mutex.lock().unwrap_or_else(|e| e.into_inner());
+            let mut resources_to_clean = Vec::new();
+            let mut need_notify = false;
 
-        for (&resource, entry) in table.iter_mut() {
-            let prev_holders = entry.holders.len();
-            entry.holders.retain(|h| h.txn_id != txn_id);
-            let prev_waiters = entry.waiters.len();
-            entry.waiters.retain(|w| w.txn_id != txn_id);
+            for (&resource, entry) in table.iter_mut() {
+                let prev_holders = entry.holders.len();
+                entry.holders.retain(|h| h.txn_id != txn_id);
+                let prev_waiters = entry.waiters.len();
+                entry.waiters.retain(|w| w.txn_id != txn_id);
 
-            let removed_holders = prev_holders - entry.holders.len();
-            let removed_waiters = prev_waiters - entry.waiters.len();
-            if removed_holders > 0 || removed_waiters > 0 {
-                need_notify = true;
-                released_count += (removed_holders + removed_waiters) as u32;
+                let removed_holders = prev_holders - entry.holders.len();
+                let removed_waiters = prev_waiters - entry.waiters.len();
+                if removed_holders > 0 || removed_waiters > 0 {
+                    need_notify = true;
+                    total_released += (removed_holders + removed_waiters) as u32;
+                }
+
+                if entry.holders.is_empty() && entry.waiters.is_empty() {
+                    resources_to_clean.push(resource);
+                }
             }
 
-            if entry.holders.is_empty() && entry.waiters.is_empty() {
-                resources_to_clean.push(resource);
+            for resource in resources_to_clean {
+                table.remove(&resource);
+            }
+
+            drop(table);
+            if need_notify {
+                self.condvars[idx].notify_all();
             }
         }
-
-        for resource in resources_to_clean {
-            table.remove(&resource);
-        }
-
-        drop(table);
-        debug!(txn_id, released_count, "unlock_all released locks");
-        if need_notify {
-            self.condvar.notify_all();
-        }
+        debug!(txn_id, released_count = total_released, "unlock_all released locks");
     }
 
     /// 锁升级（S → X）
@@ -470,7 +559,8 @@ impl LockManager {
     /// - 若持有 X 请求升级 S → 返回 `InvalidUpgrade`（不能降级）
     #[instrument(skip(self))]
     pub fn upgrade(&self, txn_id: u32, resource: u64, timeout: Duration) -> Result<(), LockError> {
-        let mut table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let mut table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
 
         // 检查当前持有状态
         let current_mode = table
@@ -481,12 +571,9 @@ impl LockManager {
         match current_mode {
             None => {
                 warn!(txn_id, resource, "upgrade invalid: no lock held");
-                return Err(LockError::InvalidUpgrade {
-                    txn_id,
-                    resource,
-                    from: LockMode::Share, // 占位：实际未持有
-                    to: LockMode::Exclusive,
-                });
+                // L5 修复：原代码用 LockMode::Share 占位，语义不准确且可能
+                // 误导死锁检测器。改为返回 NotHeld 变体精确表达"未持有锁"
+                return Err(LockError::NotHeld { txn_id, resource });
             }
             Some(LockMode::Exclusive) => {
                 // 已持有 X，no-op
@@ -534,7 +621,7 @@ impl LockManager {
         debug!(txn_id, resource, "upgrade waiting for exclusive");
 
         // **Phase 2.10: 死锁检测** — 进入等待队列后立即检查
-        if self.detect_deadlock(&table, txn_id).is_some() {
+        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
             if let Some(entry) = table.get_mut(&resource) {
                 entry.waiters.retain(|w| w.txn_id != txn_id);
             }
@@ -569,7 +656,7 @@ impl LockManager {
             }
 
             // **Phase 2.10: 周期性死锁检测**
-            if self.detect_deadlock(&table, txn_id).is_some() {
+            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
                 if let Some(entry) = table.get_mut(&resource) {
                     entry.waiters.retain(|w| w.txn_id != txn_id);
                 }
@@ -601,14 +688,15 @@ impl LockManager {
             // 最多等待 500ms 以便周期性检查死锁
             let remaining = deadline - now;
             let wait_duration = remaining.min(Duration::from_millis(500));
-            let (guard, _) = self.condvar.wait_timeout(table, wait_duration).unwrap();
+            let (guard, _) = self.condvars[idx].wait_timeout(table, wait_duration).unwrap();
             table = guard;
         }
     }
 
     /// 查询事务是否持有指定资源的锁（任意模式）
     pub fn holds_lock(&self, txn_id: u32, resource: u64) -> bool {
-        let table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         table
             .get(&resource)
             .map(|e| e.find_holder(txn_id).is_some())
@@ -617,7 +705,8 @@ impl LockManager {
 
     /// 查询事务在指定资源上持有的锁模式
     pub fn lock_mode(&self, txn_id: u32, resource: u64) -> Option<LockMode> {
-        let table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         table
             .get(&resource)
             .and_then(|e| e.find_holder(txn_id).map(|(_, m)| m))
@@ -625,20 +714,21 @@ impl LockManager {
 
     /// 当前持有者数量（用于测试和监控）
     pub fn holder_count(&self, resource: u64) -> usize {
-        let table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         table.get(&resource).map(|e| e.holders.len()).unwrap_or(0)
     }
 
     /// 当前等待者数量（用于测试和监控）
     pub fn waiter_count(&self, resource: u64) -> usize {
-        let table = self.table.lock().unwrap();
+        let idx = self.shard_idx(resource);
+        let table = self.tables[idx].lock().unwrap_or_else(|e| e.into_inner());
         table.get(&resource).map(|e| e.waiters.len()).unwrap_or(0)
     }
 
     /// 锁表中的资源数量（用于测试）
     pub fn resource_count(&self) -> usize {
-        let table = self.table.lock().unwrap();
-        table.len()
+        self.tables.iter().map(|t| t.lock().unwrap().len()).sum()
     }
 
     // -----------------------------------------------------------------
@@ -814,70 +904,27 @@ impl LockManager {
     /// - 黑色（black）：已完全处理、无环的节点（剪枝）
     ///
     /// 返回环上的事务 ID 列表（从 `start_txn` 开始），若无环返回 `None`。
-    fn detect_deadlock(&self, table: &HashMap<u64, LockEntry>, start_txn: u32) -> Option<Vec<u32>> {
-        let mut gray: HashSet<u32> = HashSet::new();
-        let mut black: HashSet<u32> = HashSet::new();
-        let mut path: Vec<u32> = Vec::new();
-        self.dfs_detect_cycle(table, start_txn, &mut gray, &mut black, &mut path)
-    }
-
-    /// DFS 递归检测环
-    #[allow(clippy::only_used_in_recursion)]
-    fn dfs_detect_cycle(
-        &self,
-        table: &HashMap<u64, LockEntry>,
-        txn: u32,
-        gray: &mut HashSet<u32>,
-        black: &mut HashSet<u32>,
-        path: &mut Vec<u32>,
-    ) -> Option<Vec<u32>> {
-        // 已完全处理，无环通过此节点
-        if black.contains(&txn) {
-            return None;
-        }
-        // 遇到灰色节点 = 回边 = 发现环
-        if gray.contains(&txn) {
-            let cycle_start = path.iter().position(|&t| t == txn).unwrap();
-            return Some(path[cycle_start..].to_vec());
-        }
-
-        gray.insert(txn);
-        path.push(txn);
-
-        // 遍历 txn 正在等待的所有资源，对每个资源的持有者递归
-        for entry in table.values() {
-            // 检查 txn 是否在此资源的等待队列中
-            let is_waiting = entry.waiters.iter().any(|w| w.txn_id == txn);
-            if is_waiting {
-                // 对每个持有者（非自身）建立边 txn → holder，递归检测
-                for holder in &entry.holders {
-                    if holder.txn_id != txn {
-                        if let Some(cycle) =
-                            self.dfs_detect_cycle(table, holder.txn_id, gray, black, path)
-                        {
-                            return Some(cycle);
-                        }
-                    }
-                }
-            }
-        }
-
-        path.pop();
-        gray.remove(&txn);
-        black.insert(txn);
-        None
-    }
-
     /// 扫描整个锁表，找出所有死锁环（Oracle 风格后台检测用）
     ///
     /// 返回所有独立环的列表（每个环是事务 ID 列表）。
     /// 适用于后台线程定期调用，主动发现并中止死锁事务。
+    ///
+    /// OPT-9：跨分片快照所有等待图边后统一检测
     pub fn detect_all_deadlocks(&self) -> Vec<Vec<u32>> {
-        let table = self.table.lock().unwrap();
+        let mut edges: Vec<(u32, u32)> = Vec::new();
         let mut all_waiters: HashSet<u32> = HashSet::new();
-        for entry in table.values() {
-            for waiter in &entry.waiters {
-                all_waiters.insert(waiter.txn_id);
+        for table_mutex in &self.tables {
+            if let Ok(table) = table_mutex.lock() {
+                for entry in table.values() {
+                    for waiter in &entry.waiters {
+                        all_waiters.insert(waiter.txn_id);
+                        for holder in &entry.holders {
+                            if holder.txn_id != waiter.txn_id {
+                                edges.push((waiter.txn_id, holder.txn_id));
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -887,7 +934,7 @@ impl LockManager {
             if checked.contains(&waiter) {
                 continue;
             }
-            if let Some(cycle) = self.detect_deadlock(&table, waiter) {
+            if let Some(cycle) = Self::detect_deadlock_from_edges(&edges, waiter) {
                 for &txn in &cycle {
                     checked.insert(txn);
                 }
@@ -1018,7 +1065,8 @@ mod phase_2_9 {
     fn upgrade_without_holding_lock_returns_invalid_upgrade() {
         let mgr = LockManager::new();
         let result = mgr.upgrade(1, 100, Duration::from_millis(100));
-        assert!(matches!(result, Err(LockError::InvalidUpgrade { .. })));
+        // L5 修复：未持有锁时返回 NotHeld，而非占位的 InvalidUpgrade
+        assert!(matches!(result, Err(LockError::NotHeld { .. })));
     }
 
     #[test]
@@ -1336,7 +1384,8 @@ mod phase_2_9 {
         assert!(mgr.try_lock(1, 100, LockMode::Share).is_ok());
         mgr.unlock_all(1);
         let result = mgr.upgrade(1, 100, Duration::from_millis(100));
-        assert!(matches!(result, Err(LockError::InvalidUpgrade { .. })));
+        // L5 修复：unlock_all 后未持有锁，返回 NotHeld
+        assert!(matches!(result, Err(LockError::NotHeld { .. })));
     }
 
     #[test]

@@ -32,8 +32,19 @@
 #![allow(dead_code)]
 
 pub mod backpressure;
+pub mod cloud;
+pub mod cluster;
+pub mod comparison;
+pub mod decoder;
 pub mod failover;
+pub mod migration;
 pub mod schema;
+pub mod service;
+pub mod slot;
+pub mod snapshot;
+pub mod source;
+pub mod target;
+pub mod task;
 
 use std::sync::{Arc, Mutex, RwLock};
 use szrsql_tx::wal::{WalObserver, WalOpType, WalRecord};
@@ -71,7 +82,7 @@ impl CdcEventOp {
             WalOpType::Delete => Some(CdcEventOp::Delete),
             WalOpType::Commit => Some(CdcEventOp::Commit),
             WalOpType::Abort => Some(CdcEventOp::Abort),
-            WalOpType::FullPageImage | WalOpType::Checkpoint => None,
+            WalOpType::FullPageImage | WalOpType::Checkpoint | WalOpType::TableData => None,
         }
     }
 
@@ -435,12 +446,16 @@ fn arc_data_addr<T: ?Sized>(arc: &Arc<T>) -> usize {
 pub struct CdcEngine {
     /// CDC 观察者管理器（共享所有权）
     observer_manager: Arc<CdcObserverManager>,
+    /// Schema 变更观察者管理器（P4-2，DDL 事件分发）
+    schema_change_manager: Arc<schema::SchemaChangeObserverManager>,
     /// 时间戳注入函数（便于测试固定时间戳）
     timestamp_fn: Box<dyn Fn() -> u64 + Send + Sync>,
     /// 已处理的 WalRecord 总数
     total_processed: std::sync::atomic::AtomicU64,
     /// 当前缓冲中的事件数（pending，背压监控用）
     pending_events: std::sync::atomic::AtomicU64,
+    /// P7-1：全局 LSN 计数器（跨 Executor 共享，保证 LSN 单调递增）
+    lsn_counter: std::sync::atomic::AtomicU64,
 }
 
 impl CdcEngine {
@@ -464,9 +479,11 @@ impl CdcEngine {
     ) -> Self {
         Self {
             observer_manager,
+            schema_change_manager: Arc::new(schema::SchemaChangeObserverManager::new()),
             timestamp_fn,
             total_processed: std::sync::atomic::AtomicU64::new(0),
             pending_events: std::sync::atomic::AtomicU64::new(0),
+            lsn_counter: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
@@ -474,6 +491,20 @@ impl CdcEngine {
     pub fn total_processed(&self) -> u64 {
         self.total_processed
             .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// P7-1：获取当前时间戳（供外部调用方构造 ChangeEvent 时使用）
+    pub fn current_timestamp(&self) -> u64 {
+        (self.timestamp_fn)()
+    }
+
+    /// P7-1：生成下一个全局 LSN（跨 Executor 共享，保证单调递增）
+    ///
+    /// 所有共享同一 CdcEngine 的 Executor 实例都会从此计数器获取唯一 LSN，
+    /// 确保变更事件的全局有序性。生产环境中 LSN 应来自 WAL，当前为简化模型。
+    pub fn next_lsn(&self) -> u64 {
+        self.lsn_counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// 获取当前缓冲中的事件数（pending）
@@ -492,6 +523,78 @@ impl CdcEngine {
     /// 获取 CDC 观察者数量
     pub fn observer_count(&self) -> usize {
         self.observer_manager.observer_count()
+    }
+
+    /// 直接分发一个 ChangeEvent（P4-3 基准测试与端到端测试用）
+    ///
+    /// 同步调用所有已注册 observer 的 `on_event`。
+    /// 正常生产路径是通过 `WalObserver::on_commit` 触发，此方法供测试/基准测试
+    /// 直接推送合成事件，无需经过 WAL 层。
+    pub fn dispatch_event(&self, event: ChangeEvent) {
+        self.pending_events
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.observer_manager.notify(event);
+        self.pending_events
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// 注册 CdcObserver（透传到 CdcObserverManager）
+    ///
+    /// 供 `ReplicationTaskManager` 注册复制任务为 observer 使用。
+    /// 返回 `true` 表示注册成功；若已注册相同指针的 observer，返回 `false`。
+    pub fn register_observer_arc(&self, observer: Arc<dyn CdcObserver>) -> bool {
+        self.observer_manager.register(observer)
+    }
+
+    /// 注销 CdcObserver（透传到 CdcObserverManager）
+    ///
+    /// 供 `ReplicationTaskManager` 注销复制任务使用。
+    /// 返回 `true` 表示注销成功；若未找到，返回 `false`。
+    pub fn unregister_observer_arc<O: CdcObserver + 'static>(&self, observer: &Arc<O>) -> bool {
+        self.observer_manager.unregister(observer)
+    }
+
+    /// 注册 SchemaChangeObserver（P4-2，DDL 事件分发）
+    ///
+    /// 供 `ReplicationTaskManager` 注册复制任务为 schema 变更观察者使用。
+    /// 返回 `true` 表示注册成功；若已注册相同指针的 observer，返回 `false`。
+    pub fn register_schema_observer(
+        &self,
+        observer: Arc<dyn schema::SchemaChangeObserver>,
+    ) -> bool {
+        self.schema_change_manager.register(observer)
+    }
+
+    /// 注销 SchemaChangeObserver（P4-2）
+    ///
+    /// 供 `ReplicationTaskManager` 注销复制任务使用。
+    /// 返回 `true` 表示注销成功；若未找到，返回 `false`。
+    pub fn unregister_schema_observer<O: schema::SchemaChangeObserver + 'static>(
+        &self,
+        observer: &Arc<O>,
+    ) -> bool {
+        self.schema_change_manager.unregister(observer)
+    }
+
+    /// 通知所有 SchemaChangeObserver：分发一个 SchemaChangeEvent（P4-2）
+    ///
+    /// **调用时机**：上层（如 SQL 执行器执行 DDL 时）调用此方法通知 CDC 引擎。
+    /// CDC 引擎将事件分发给所有已注册的 SchemaChangeObserver（如 ReplicationTask）。
+    ///
+    /// **参数**：
+    /// - `event`：SchemaChangeEvent（CreateTable/AlterTable/DropTable）
+    pub fn notify_schema_change(&self, event: schema::SchemaChangeEvent) {
+        self.schema_change_manager.notify(event);
+    }
+
+    /// 获取已注册的 SchemaChangeObserver 数量（P4-2）
+    pub fn schema_observer_count(&self) -> usize {
+        self.schema_change_manager.observer_count()
+    }
+
+    /// 获取已分发的 SchemaChangeEvent 总次数（P4-2）
+    pub fn schema_change_dispatched(&self) -> u64 {
+        self.schema_change_manager.total_dispatched()
     }
 
     /// 将一批 WalRecord 转换为 ChangeEvent 并分发
@@ -686,14 +789,23 @@ pub fn version() -> &'static str {
 #[cfg(test)]
 mod cdc_fuzz;
 
-#[cfg(test)]
-mod debezium;
+/// Debezium JSON 适配器 — 将 ChangeEvent 转换为 Debezium Connect 官方 JSON 格式
+///
+/// 在生产代码中可用（Kafka Sink 等模块依赖），同时保留测试模块引用。
+pub mod debezium;
 
 #[cfg(test)]
 mod debezium_avro;
 
 #[cfg(test)]
 mod e2e_tests;
+
+/// P4-3 性能基准测试模块
+///
+/// 所有测试标记为 `#[ignore]`，需显式触发：
+/// `cargo test -p szrsql-cdc --release --lib benchmarks -- --ignored --nocapture`
+#[cfg(test)]
+mod benchmarks;
 
 // =====================================================================
 // 测试

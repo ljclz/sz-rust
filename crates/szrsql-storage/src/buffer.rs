@@ -34,6 +34,9 @@ pub enum BufferError {
     FlushWorkerRunning,
     #[error("page error: {0}")]
     PageError(#[from] PageError),
+    /// P0-STORE-2：文件 I/O 错误（FilePageLoader/FilePageWriter 使用）
+    #[error("io error: {0}")]
+    IoError(String),
 }
 
 // =====================================================================
@@ -263,6 +266,15 @@ pub struct BufferPool {
     flush_stop: std::sync::atomic::AtomicBool,
 }
 
+impl std::fmt::Debug for BufferPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferPool")
+            .field("shard_count", &self.shard_count)
+            .field("stats", &self.stats)
+            .finish()
+    }
+}
+
 impl BufferPool {
     /// 创建缓冲池（兼容 Phase 0.9 的旧 API，writer 为 Noop）
     pub fn new(
@@ -489,6 +501,87 @@ impl BufferPool {
         if !was_dirty {
             self.stats.lock().unwrap().dirty_pages += 1;
         }
+        Ok(())
+    }
+
+    /// P0-STORE-2：upsert 语义写入页 — 若 page_id 已存在则更新，否则创建新 entry
+    ///
+    /// 与 `write_page` 的区别：`write_page` 要求 page_id 已缓存（否则 PageNotFound），
+    /// `put_page` 支持首次写入新页（自动创建 PageEntry 插入 lookup + LRU）。
+    ///
+    /// **适用场景**：BufferPool 接入运行时持久化路径时，flush_to_disk 需要写入
+    /// 首次创建的页（page 0 header + page 1..N data），这些页不在 loader 中。
+    ///
+    /// **淘汰策略**：若插入新页导致超出容量，按 LRU 淘汰最久未使用且 pin_count=0 的页。
+    /// 若无可淘汰页（全部 pinned），返回 NoEvictablePages。
+    pub fn put_page(&self, page_id: u32, new_page: Page) -> Result<(), BufferError> {
+        let shard_idx = self.shard_for(page_id);
+        let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+        // 已存在：更新内容 + mark dirty
+        if let Some(entry) = shard_guard.lookup.get_mut(&page_id) {
+            entry.page = new_page;
+            let was_dirty = entry.dirty.swap(true, std::sync::atomic::Ordering::SeqCst);
+            if !was_dirty {
+                self.stats.lock().unwrap().dirty_pages += 1;
+            }
+            // 移到 LRU 前部
+            if let Some(pos) = shard_guard.lru_list.iter().position(|&id| id == page_id) {
+                shard_guard.lru_list.remove(pos);
+                shard_guard.lru_list.push_front(page_id);
+            }
+            return Ok(());
+        }
+        // 不存在：需创建新 entry，先检查容量
+        if shard_guard.lookup.len() >= shard_guard.capacity {
+            // 尝试淘汰最久未使用且 pin_count=0 的页
+            let evict_candidate = shard_guard.lru_list.iter().rev().find(|&&id| {
+                shard_guard
+                    .lookup
+                    .get(&id)
+                    .map(|e| e.pin_count.load(std::sync::atomic::Ordering::SeqCst) == 0)
+                    .unwrap_or(false)
+            }).copied();
+            let evict_id = match evict_candidate {
+                Some(id) => id,
+                None => return Err(BufferError::NoEvictablePages),
+            };
+            // 先在短作用域内取出 is_dirty + page_copy，避免长生命周期借用 shard_guard
+            // 若 evict_id 不在 lookup 中（异常情况），跳过淘汰逻辑
+            let is_dirty = shard_guard.lookup.get(&evict_id)
+                .map(|e| e.dirty.load(std::sync::atomic::Ordering::SeqCst))
+                .unwrap_or(false);
+            let page_copy = shard_guard.lookup.get(&evict_id)
+                .map(|e| e.page.clone());
+            if is_dirty {
+                if let Some(page_copy) = page_copy {
+                    drop(shard_guard);
+                    if let Err(e) = self.writer.write_page(&page_copy) {
+                        tracing::warn!(error = ?e, page_id = evict_id, "evict flush failed");
+                    }
+                    let mut sg = self.shards[shard_idx].lock().unwrap();
+                    if let Some(e) = sg.lookup.get_mut(&evict_id) {
+                        e.dirty.store(false, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    sg.lookup.remove(&evict_id);
+                    if let Some(pos) = sg.lru_list.iter().position(|&id| id == evict_id) {
+                        sg.lru_list.remove(pos);
+                    }
+                    // 重新获取锁以插入新 entry
+                    shard_guard = self.shards[shard_idx].lock().unwrap();
+                }
+            } else {
+                shard_guard.lookup.remove(&evict_id);
+                if let Some(pos) = shard_guard.lru_list.iter().position(|&id| id == evict_id) {
+                    shard_guard.lru_list.remove(pos);
+                }
+            }
+        }
+        // 插入新 entry
+        let entry = PageEntry::new(new_page);
+        entry.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+        shard_guard.lookup.insert(page_id, entry);
+        shard_guard.lru_list.push_front(page_id);
+        self.stats.lock().unwrap().dirty_pages += 1;
         Ok(())
     }
 
@@ -724,6 +817,115 @@ pub struct NoopPageWriter;
 
 impl PageWriter for NoopPageWriter {
     fn write_page(&self, _page: &Page) -> Result<(), BufferError> {
+        Ok(())
+    }
+}
+
+// =====================================================================
+//  P0-STORE-2：FilePageLoader / FilePageWriter — 文件后端
+//  （将 BufferPool 接入运行时持久化路径）
+// =====================================================================
+
+use crate::page::PAGE_SIZE;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
+
+/// 文件页加载器 — 从单个文件按 `page_id * PAGE_SIZE` 偏移读取页
+///
+/// **设计**：所有页连续存储在一个文件中，page_id 直接映射到文件偏移。
+/// 启动时打开已有文件；若 page_id 对应偏移超出文件末尾或读取到全零字节，
+/// 返回 `PageNotFound`（视为该页从未写入）。
+///
+/// **线程安全**：内部用 `Mutex<File>` 保护，所有 read+seek 串行化。
+pub struct FilePageLoader {
+    file: std::sync::Mutex<File>,
+}
+
+impl FilePageLoader {
+    /// 打开已有文件（只读模式）
+    ///
+    /// 文件不存在则返回 IoError
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, BufferError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .open(path)
+            .map_err(|e| BufferError::IoError(format!("open loader failed: {e}")))?;
+        Ok(Self {
+            file: std::sync::Mutex::new(file),
+        })
+    }
+}
+
+impl PageLoader for FilePageLoader {
+    fn load_page(&self, page_id: u32) -> Result<Page, BufferError> {
+        let mut file = self.file.lock().unwrap();
+        let offset = (page_id as u64) * (PAGE_SIZE as u64);
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| BufferError::IoError(format!("seek failed: {e}")))?;
+        let mut buf = [0u8; PAGE_SIZE];
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| BufferError::IoError(format!("read failed: {e}")))?;
+        // 读取 0 字节表示文件末尾，该页从未写入
+        if n == 0 {
+            return Err(BufferError::PageNotFound { page_id });
+        }
+        // 读取不足一页：若是全零，视为未写入；否则尝试解码（容忍尾部零填充）
+        if n < PAGE_SIZE {
+            // 检查读取到的部分是否全零
+            if buf[..n].iter().all(|&b| b == 0) {
+                return Err(BufferError::PageNotFound { page_id });
+            }
+            // 非全零但不完整：报错（数据损坏）
+            return Err(BufferError::IoError(format!(
+                "short read: page_id={page_id} expected {PAGE_SIZE} got {n}"
+            )));
+        }
+        // 全零页视为未写入
+        if buf.iter().all(|&b| b == 0) {
+            return Err(BufferError::PageNotFound { page_id });
+        }
+        Page::decode(&buf).map_err(BufferError::PageError)
+    }
+}
+
+/// 文件页写入器 — 按 `page_id * PAGE_SIZE` 偏移写入页到单个文件
+///
+/// **设计**：write_page 完成后立即 flush+sync 到磁盘，保证崩溃一致性。
+/// 文件不存在时自动创建（create(true)）。
+///
+/// **线程安全**：内部用 `Mutex<File>` 保护，所有 write+seek+sync 串行化。
+pub struct FilePageWriter {
+    file: std::sync::Mutex<File>,
+}
+
+impl FilePageWriter {
+    /// 打开或创建文件（读写模式，create=true）
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, BufferError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .map_err(|e| BufferError::IoError(format!("open writer failed: {e}")))?;
+        Ok(Self {
+            file: std::sync::Mutex::new(file),
+        })
+    }
+}
+
+impl PageWriter for FilePageWriter {
+    fn write_page(&self, page: &Page) -> Result<(), BufferError> {
+        let mut file = self.file.lock().unwrap();
+        let offset = (page.header.page_id as u64) * (PAGE_SIZE as u64);
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| BufferError::IoError(format!("seek failed: {e}")))?;
+        let buf = page.encode();
+        file.write_all(&buf)
+            .map_err(|e| BufferError::IoError(format!("write failed: {e}")))?;
+        file.sync_data()
+            .map_err(|e| BufferError::IoError(format!("sync failed: {e}")))?;
         Ok(())
     }
 }

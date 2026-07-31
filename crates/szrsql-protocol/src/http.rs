@@ -302,6 +302,8 @@ pub struct HttpServer {
     config: HttpConfig,
     metrics: Arc<MetricsRegistry>,
     shutdown_rx: watch::Receiver<ShutdownState>,
+    /// P8-2：CDC 服务注入（可选），用于暴露 /api/v1/cdc/* REST API
+    cdc_service: Option<Arc<szrsql_cdc::service::CdcService>>,
 }
 
 impl HttpServer {
@@ -320,7 +322,29 @@ impl HttpServer {
             config,
             metrics,
             shutdown_rx,
+            cdc_service: None,
         }
+    }
+
+    /// P8-2：注入 CDC 服务，启用 /api/v1/cdc/* REST API 端点。
+    ///
+    /// 注入后，HTTP 服务器将暴露以下端点（均需 auth header）：
+    /// - `GET    /api/v1/cdc/tenants`           — 列出所有租户
+    /// - `POST   /api/v1/cdc/tenants`           — 注册租户（body: TenantConfig JSON）
+    /// - `GET    /api/v1/cdc/tenants/{id}`      — 获取租户配置
+    /// - `DELETE /api/v1/cdc/tenants/{id}`      — 注销租户
+    /// - `PATCH  /api/v1/cdc/tenants/{id}/tier` — 更新租户等级（body: `{"tier":"free"}`)
+    /// - `GET    /api/v1/cdc/tasks?tenant_id=x` — 列出租户的所有任务
+    /// - `GET    /api/v1/cdc/tasks/{id}?tenant_id=x` — 获取任务详情
+    /// - `POST   /api/v1/cdc/tasks/{id}/start?tenant_id=x` — 启动任务
+    /// - `POST   /api/v1/cdc/tasks/{id}/stop?tenant_id=x`  — 停止任务
+    /// - `POST   /api/v1/cdc/tasks/{id}/pause?tenant_id=x` — 暂停任务
+    /// - `POST   /api/v1/cdc/tasks/{id}/resume?tenant_id=x` — 恢复任务
+    /// - `DELETE /api/v1/cdc/tasks/{id}?tenant_id=x` — 删除任务
+    /// - `GET    /api/v1/cdc/usage/{tenant_id}` — 获取租户使用量
+    pub fn with_cdc_service(mut self, cdc_service: Arc<szrsql_cdc::service::CdcService>) -> Self {
+        self.cdc_service = Some(cdc_service);
+        self
     }
 
     /// 启动 HTTP 服务器，阻塞直到收到关闭信号。
@@ -339,6 +363,7 @@ impl HttpServer {
 
         let auth_token = self.config.auth_token.clone();
         let metrics = Arc::clone(&self.metrics);
+        let cdc_service = self.cdc_service.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         loop {
@@ -360,9 +385,10 @@ impl HttpServer {
                         Ok((stream, peer)) => {
                             let metrics = Arc::clone(&metrics);
                             let auth_token = auth_token.clone();
+                            let cdc_service = cdc_service.clone();
                             let shutdown_rx = self.shutdown_rx.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = handle_connection(stream, peer, &auth_token, &metrics, &shutdown_rx).await {
+                                if let Err(e) = handle_connection(stream, peer, &auth_token, &metrics, &cdc_service, &shutdown_rx).await {
                                     tracing::debug!(error = %e, "http connection error");
                                 }
                             });
@@ -387,6 +413,7 @@ async fn handle_connection(
     peer: SocketAddr,
     auth_token: &Option<String>,
     metrics: &MetricsRegistry,
+    cdc_service: &Option<Arc<szrsql_cdc::service::CdcService>>,
     shutdown_rx: &watch::Receiver<ShutdownState>,
 ) -> Result<(), HttpError> {
     // 读取请求数据（最多 64KB）
@@ -440,7 +467,7 @@ async fn handle_connection(
     );
 
     // 路由请求
-    let response = route_request(&request, auth_token, metrics, shutdown_rx);
+    let response = route_request(&request, auth_token, metrics, cdc_service, shutdown_rx);
 
     // 发送响应
     stream.write_all(&response.to_bytes()).await?;
@@ -502,6 +529,7 @@ fn route_request(
     request: &HttpRequest,
     auth_token: &Option<String>,
     metrics: &MetricsRegistry,
+    cdc_service: &Option<Arc<szrsql_cdc::service::CdcService>>,
     shutdown_rx: &watch::Receiver<ShutdownState>,
 ) -> HttpResponse {
     match (request.method.as_str(), request.path.as_str()) {
@@ -598,6 +626,23 @@ fn route_request(
             HttpResponse::ok_json(r#"{"status":"config reloaded (stub)"}"#)
         }
 
+        // ==================== P8-2: CDC REST API 端点（需鉴权 + CdcService 注入） ====================
+
+        // CDC API 前缀统一分发到 cdc_route_request
+        (method, path) if path.starts_with("/api/v1/cdc/") => {
+            if !check_auth(request, auth_token) {
+                return HttpResponse::unauthorized();
+            }
+            match cdc_service {
+                Some(svc) => cdc_route_request(method, path, request, svc),
+                None => HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    r#"{"error":"CDC service not enabled on this server"}"#,
+                ),
+            }
+        }
+
         // ==================== 兜底 ====================
         (_, "/healthz")
         | (_, "/readyz")
@@ -618,6 +663,291 @@ fn check_auth(request: &HttpRequest, auth_token: &Option<String>) -> bool {
             .bearer_token()
             .map(|token| token == expected)
             .unwrap_or(false),
+    }
+}
+
+// =====================================================================
+//  P8-2: CDC REST API 路由
+// =====================================================================
+
+/// 从完整 path（含 query string）中分离出纯 path 和 query 参数。
+///
+/// 例：`/api/v1/cdc/tasks?tenant_id=t1` → (`/api/v1/cdc/tasks`, `Some("tenant_id=t1")`)
+fn split_path_query(full_path: &str) -> (&str, Option<&str>) {
+    match full_path.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (full_path, None),
+    }
+}
+
+/// 从 query string 中提取指定参数的值。
+fn query_param<'a>(query: Option<&'a str>, key: &str) -> Option<&'a str> {
+    let q = query?;
+    for pair in q.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == key {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// 从 path 中提取最后一段作为资源 ID。
+///
+/// 例：`/api/v1/cdc/tenants/t1` → `Some("t1")`
+fn last_path_segment(path: &str) -> Option<&str> {
+    path.rsplit('/').next().filter(|s| !s.is_empty())
+}
+
+/// 将 ServiceError 映射为对应的 HTTP 状态码。
+fn service_error_to_status(e: &szrsql_cdc::service::ServiceError) -> u16 {
+    use szrsql_cdc::service::ServiceError;
+    match e {
+        ServiceError::TenantNotFound(_) | ServiceError::TaskNotFound(_) => 404,
+        ServiceError::TenantAlreadyExists(_) | ServiceError::TaskAlreadyExists(_) => 409,
+        ServiceError::TenantLimitExceeded { .. } | ServiceError::QuotaExceeded { .. } => 429,
+        ServiceError::Unauthorized => 401,
+        ServiceError::Forbidden { .. } => 403,
+        ServiceError::InvalidConfig(_) => 400,
+        ServiceError::ClusterNotAssociated => 503,
+        ServiceError::Cluster(_) | ServiceError::Internal(_) => 500,
+    }
+}
+
+/// 将 ServiceError 转换为 HTTP 错误响应（JSON 格式）。
+fn service_error_response(e: &szrsql_cdc::service::ServiceError) -> HttpResponse {
+    let status = service_error_to_status(e);
+    let status_text = match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        503 => "Service Unavailable",
+        _ => "Internal Server Error",
+    };
+    let body = serde_json::json!({ "error": e.to_string() }).to_string();
+    HttpResponse::json(status, status_text, &body)
+}
+
+/// CDC REST API 路由处理器 — 将 HTTP 请求分发到 CdcService 方法。
+fn cdc_route_request(
+    method: &str,
+    full_path: &str,
+    request: &HttpRequest,
+    svc: &Arc<szrsql_cdc::service::CdcService>,
+) -> HttpResponse {
+    use szrsql_cdc::service::{TenantConfig, TenantTier};
+
+    let (path, query) = split_path_query(full_path);
+
+    match (method, path) {
+        // ==================== 租户管理 ====================
+
+        // 列出所有租户
+        ("GET", "/api/v1/cdc/tenants") => {
+            let tenants = svc.list_tenants();
+            match serde_json::to_string(&tenants) {
+                Ok(json) => HttpResponse::json(200, "OK", &json),
+                Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+            }
+        }
+
+        // 注册租户（body: TenantConfig JSON）
+        ("POST", "/api/v1/cdc/tenants") => {
+            let config: TenantConfig = match serde_json::from_slice(&request.body) {
+                Ok(c) => c,
+                Err(e) => {
+                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid JSON body: {e}"}}"#));
+                }
+            };
+            match svc.register_tenant(config) {
+                Ok(()) => HttpResponse::json(201, "Created", r#"{"status":"tenant registered"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 获取租户配置
+        ("GET", p) if p.starts_with("/api/v1/cdc/tenants/") && !p.ends_with("/tier") => {
+            let tenant_id = match last_path_segment(p) {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+            };
+            match svc.get_tenant(tenant_id) {
+                Ok(config) => match serde_json::to_string(&config) {
+                    Ok(json) => HttpResponse::json(200, "OK", &json),
+                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                },
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 注销租户
+        ("DELETE", p) if p.starts_with("/api/v1/cdc/tenants/") => {
+            let tenant_id = match last_path_segment(p) {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+            };
+            match svc.unregister_tenant(tenant_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"tenant unregistered"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 更新租户等级（body: {"tier":"free"}）
+        ("PATCH", p) if p.ends_with("/tier") && p.starts_with("/api/v1/cdc/tenants/") => {
+            let tenant_id = p
+                .strip_prefix("/api/v1/cdc/tenants/")
+                .and_then(|s| s.strip_suffix("/tier"))
+                .unwrap_or("");
+            if tenant_id.is_empty() {
+                return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#);
+            }
+            let tier_str: String = match serde_json::from_slice::<serde_json::Value>(&request.body) {
+                Ok(v) => v.get("tier").and_then(|t| t.as_str()).map(String::from).unwrap_or_default(),
+                Err(e) => {
+                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid JSON body: {e}"}}"#));
+                }
+            };
+            let tier = match tier_str.as_str() {
+                "free" => TenantTier::Free,
+                "pro" => TenantTier::Pro,
+                "enterprise" => TenantTier::Enterprise,
+                other => {
+                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid tier: {other}"}}"#));
+                }
+            };
+            match svc.update_tenant_tier(tenant_id, tier) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"tier updated"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // ==================== 任务管理 ====================
+
+        // 列出租户的所有任务（?tenant_id=xxx）
+        ("GET", "/api/v1/cdc/tasks") => {
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.list_tasks(tenant_id) {
+                Ok(tasks) => match serde_json::to_string(&tasks) {
+                    Ok(json) => HttpResponse::json(200, "OK", &json),
+                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                },
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 获取任务详情（?tenant_id=xxx）
+        ("GET", p) if p.starts_with("/api/v1/cdc/tasks/") && !p.contains("/start") && !p.contains("/stop") && !p.contains("/pause") && !p.contains("/resume") => {
+            let task_id = match last_path_segment(p) {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#),
+            };
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.get_task(tenant_id, task_id) {
+                Ok(info) => match serde_json::to_string(&info) {
+                    Ok(json) => HttpResponse::json(200, "OK", &json),
+                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                },
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 启动任务（?tenant_id=xxx）
+        ("POST", p) if p.ends_with("/start") && p.starts_with("/api/v1/cdc/tasks/") => {
+            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/start")).unwrap_or("");
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.start_task(tenant_id, task_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"task started"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 停止任务（?tenant_id=xxx）
+        ("POST", p) if p.ends_with("/stop") && p.starts_with("/api/v1/cdc/tasks/") => {
+            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/stop")).unwrap_or("");
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.stop_task(tenant_id, task_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"task stopped"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 暂停任务（?tenant_id=xxx）
+        ("POST", p) if p.ends_with("/pause") && p.starts_with("/api/v1/cdc/tasks/") => {
+            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/pause")).unwrap_or("");
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.pause_task(tenant_id, task_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"task paused"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 恢复任务（?tenant_id=xxx）
+        ("POST", p) if p.ends_with("/resume") && p.starts_with("/api/v1/cdc/tasks/") => {
+            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/resume")).unwrap_or("");
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.resume_task(tenant_id, task_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"task resumed"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // 删除任务（?tenant_id=xxx）
+        ("DELETE", p) if p.starts_with("/api/v1/cdc/tasks/") => {
+            let task_id = match last_path_segment(p) {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#),
+            };
+            let tenant_id = match query_param(query, "tenant_id") {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+            };
+            match svc.delete_task(tenant_id, task_id) {
+                Ok(()) => HttpResponse::ok_json(r#"{"status":"task deleted"}"#),
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // ==================== 使用量查询 ====================
+
+        ("GET", p) if p.starts_with("/api/v1/cdc/usage/") => {
+            let tenant_id = match last_path_segment(p) {
+                Some(id) => id,
+                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+            };
+            match svc.get_usage(tenant_id) {
+                Ok(usage) => match serde_json::to_string(&usage) {
+                    Ok(json) => HttpResponse::json(200, "OK", &json),
+                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                },
+                Err(e) => service_error_response(&e),
+            }
+        }
+
+        // ==================== 兜底 ====================
+        _ => HttpResponse::not_found(),
     }
 }
 
@@ -797,7 +1127,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /healthz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -810,7 +1140,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /readyz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -824,7 +1154,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         tx.send_modify(|v| *v = ShutdownState::Draining);
         let req = parse_http_request(b"GET /readyz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("503 Service Unavailable"));
@@ -837,7 +1167,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         metrics.inc_connections();
         let req = parse_http_request(b"GET /metrics HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("szrsql_connections_total 1"));
@@ -849,7 +1179,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /nonexistent HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("404 Not Found"));
@@ -861,7 +1191,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /healthz HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("405 Method Not Allowed"));
@@ -876,7 +1206,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/sessions HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("401 Unauthorized"));
@@ -892,7 +1222,7 @@ mod tests {
             b"GET /api/v1/sessions HTTP/1.1\r\nAuthorization: Bearer secret\r\n\r\n",
         )
         .unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -909,7 +1239,7 @@ mod tests {
             b"GET /api/v1/sessions HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n",
         )
         .unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("401 Unauthorized"));
@@ -922,7 +1252,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = None;
         let req = parse_http_request(b"GET /api/v1/sessions HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -936,7 +1266,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/cancel/123 HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -949,7 +1279,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/cancel/abc HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("400 Bad Request"));
@@ -961,7 +1291,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/backup HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -974,7 +1304,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/config/reload HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -989,7 +1319,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         // 应返回 200 + application/json
@@ -1016,7 +1346,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"GET /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         // 应返回 200 + text/html
@@ -1034,7 +1364,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         assert_eq!(resp.status, 405);
         let _ = tx;
     }
@@ -1044,7 +1374,7 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let req = parse_http_request(b"POST /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &None, &metrics, &rx);
+        let resp = route_request(&req, &None, &metrics, &None, &rx);
         assert_eq!(resp.status, 405);
         let _ = tx;
     }
@@ -1056,7 +1386,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/openapi.json HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         assert_eq!(resp.status, 200, "openapi.json should not require auth");
         let _ = tx;
     }
@@ -1067,7 +1397,7 @@ mod tests {
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
         let req = parse_http_request(b"GET /api/v1/swagger HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &rx);
         assert_eq!(resp.status, 200, "swagger page should not require auth");
         let _ = tx;
     }

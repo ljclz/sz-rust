@@ -1375,9 +1375,10 @@ fn test_parse_empty_input() {
 
 #[test]
 fn test_parse_unsupported_statement() {
-    // TRUNCATE 当前不在支持列表中
-    let result = parse_one("TRUNCATE TABLE t");
-    assert!(result.is_err());
+    // 当前 SzRSQL 已支持 TRUNCATE TABLE（Phase 6.x），改为测试真正不支持的语句
+    // FLASHBACK 已通过预处理支持，这里使用完全无效的 DBLINK 语句
+    let result = parse_one("CREATE DATABASE LINK link1 CONNECT TO user IDENTIFIED BY pass USING 'db'");
+    assert!(result.is_err(), "expected CREATE DATABASE LINK to be unsupported");
 }
 
 #[test]
@@ -1439,3 +1440,301 @@ fn test_select_with_multiple_joins() {
         other => panic!("expected Select, got {other:?}"),
     }
 }
+
+// =====================================================================
+//  Phase TDengine-P2: COMMENT ON 解析测试
+// =====================================================================
+
+#[test]
+fn test_parse_comment_on_table() {
+    let stmts = parse_sql("COMMENT ON TABLE products IS '商品主表'").unwrap();
+    assert_eq!(stmts.len(), 1);
+    match &stmts[0] {
+        Statement::Comment {
+            object_type,
+            object_name,
+            column_name,
+            comment,
+        } => {
+            assert_eq!(*object_type, CommentObjectType::Table);
+            assert_eq!(object_name.name, "products");
+            assert!(column_name.is_none());
+            assert_eq!(comment.as_ref().unwrap(), "商品主表");
+        }
+        other => panic!("expected Comment, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_comment_on_column() {
+    let stmts = parse_sql("COMMENT ON COLUMN products.price IS '商品零售价'").unwrap();
+    assert_eq!(stmts.len(), 1);
+    match &stmts[0] {
+        Statement::Comment {
+            object_type,
+            object_name,
+            column_name,
+            comment,
+        } => {
+            assert_eq!(*object_type, CommentObjectType::Column);
+            assert_eq!(object_name.name, "products");
+            assert_eq!(column_name.as_ref().unwrap(), "price");
+            assert_eq!(comment.as_ref().unwrap(), "商品零售价");
+        }
+        other => panic!("expected Comment, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_comment_on_null() {
+    let stmts = parse_sql("COMMENT ON TABLE products IS NULL").unwrap();
+    match &stmts[0] {
+        Statement::Comment { comment, .. } => {
+            assert!(comment.is_none());
+        }
+        _ => panic!("expected Comment"),
+    }
+}
+
+// =====================================================================
+//  Navicat 兼容：无值 SET 语句归一化测试
+// =====================================================================
+
+#[test]
+fn test_parse_set_autocommit_no_value() {
+    // Navicat 连接时发送 "SET AUTOCOMMIT"（无值），归一化后应能正常解析
+    let stmts = parse_sql("SET AUTOCOMMIT").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_lowercase_no_value() {
+    let stmts = parse_sql("set autocommit").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_value_unchanged() {
+    // 有值的 SET 语句应正常解析，不受归一化影响
+    let stmts = parse_sql("SET AUTOCOMMIT = 1").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_names_unchanged() {
+    // SET NAMES 是 MySQL 语法，应走 MySqlDialect 路径
+    let stmts = parse_sql("SET NAMES utf8mb4").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_search_path_to() {
+    let stmts = parse_sql("SET search_path TO public").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_multiple_set_statements() {
+    // 多语句混合：无值 + 有值
+    let stmts = parse_sql("SET AUTOCOMMIT; SET extra_float_digits = 3").unwrap();
+    assert_eq!(stmts.len(), 2);
+}
+
+#[test]
+fn test_parse_select_not_affected() {
+    // 非 SET 语句不受归一化影响
+    let stmts = parse_sql("SELECT 1").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+// =====================================================================
+// Navicat 兼容性测试：各种 SET 语句变体
+// =====================================================================
+
+#[test]
+fn test_parse_set_autocommit_on() {
+    // Navicat 连接时发送 SET AUTOCOMMIT ON，归一化为 SET AUTOCOMMIT = 'on'
+    let stmts = parse_sql("SET AUTOCOMMIT ON").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_autocommit_off() {
+    let stmts = parse_sql("SET AUTOCOMMIT OFF").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_standard_conforming_strings_on() {
+    let stmts = parse_sql("SET STANDARD_CONFORMING_STRINGS ON").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_standard_conforming_strings_off() {
+    let stmts = parse_sql("SET STANDARD_CONFORMING_STRINGS OFF").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_variable_equal_no_value() {
+    // SET variable = （等号后无值）→ SET variable = 1
+    let stmts = parse_sql("SET AUTOCOMMIT =").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_variable_to_no_value() {
+    // SET variable TO （TO 后无值）→ SET variable = 1
+    let stmts = parse_sql("SET AUTOCOMMIT TO").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_variable_equal_with_space_no_value() {
+    // 等号后只有空格，无值
+    let stmts = parse_sql("SET extra_float_digits = ").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_variable_to_with_space_no_value() {
+    let stmts = parse_sql("SET search_path TO ").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_character_set() {
+    // MySQL 特有语法：SET CHARACTER SET charset
+    let stmts = parse_sql("SET CHARACTER SET utf8mb4").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_session_authorization_default() {
+    // PG 会话授权语法：SET SESSION AUTHORIZATION DEFAULT
+    let stmts = parse_sql("SET SESSION AUTHORIZATION DEFAULT").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_session_authorization_user() {
+    let stmts = parse_sql("SET SESSION AUTHORIZATION postgres").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_time_zone_default() {
+    // PG 时区语法：SET TIME ZONE DEFAULT
+    let stmts = parse_sql("SET TIME ZONE DEFAULT").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_time_zone_utc() {
+    let stmts = parse_sql("SET TIME ZONE 'UTC'").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_time_zone_offset() {
+    // SET TIME ZONE +08:00（PG interval 语法）
+    let stmts = parse_sql("SET TIME ZONE 'Asia/Shanghai'").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_role_default() {
+    // SET ROLE DEFAULT — Navicat 连接时常见
+    let stmts = parse_sql("SET ROLE DEFAULT").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_role_none() {
+    let stmts = parse_sql("SET ROLE NONE").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_transaction_isolation() {
+    // SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+    let stmts = parse_sql("SET TRANSACTION ISOLATION LEVEL READ COMMITTED").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_session_characteristics() {
+    let stmts = parse_sql(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
+    )
+    .unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_empty() {
+    // 完全无变量名：SET → SET autocommit = 1
+    let stmts = parse_sql("SET").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_trailing_space() {
+    let stmts = parse_sql("SET ").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_semicolon_only() {
+    // SET; → SET autocommit = 1;
+    let stmts = parse_sql("SET ;").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_multiple_set_statements_with_on_off() {
+    // 多语句混合：ON 形式 + 有值形式
+    let stmts = parse_sql("SET AUTOCOMMIT ON; SET extra_float_digits = 3").unwrap();
+    assert_eq!(stmts.len(), 2);
+}
+
+#[test]
+fn test_parse_set_names_with_charset_not_affected() {
+    // SET NAMES 应该走 sqlparser 的 SetNames 路径，不被归一化影响
+    let stmts = parse_sql("SET NAMES 'UTF8'").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_dotted_variable() {
+    // 带点的变量名：SET pg_catalog.timezone = 'UTC'
+    let stmts = parse_sql("SET pg_catalog.timezone = 'UTC'").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_local_statement_timeout() {
+    let stmts = parse_sql("SET LOCAL statement_timeout = 0").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_session_statement_timeout() {
+    let stmts = parse_sql("SET SESSION statement_timeout = 0").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_newline_after_equal() {
+    // 等号后跟换行符
+    let stmts = parse_sql("SET AUTOCOMMIT =\n").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+
+#[test]
+fn test_parse_set_with_newline_after_to() {
+    let stmts = parse_sql("SET AUTOCOMMIT TO\n").unwrap();
+    assert_eq!(stmts.len(), 1);
+}
+

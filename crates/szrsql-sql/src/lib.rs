@@ -60,6 +60,8 @@ mod enum_type_tests;
 #[cfg(test)]
 mod executor_tests;
 #[cfg(test)]
+mod mvcc_integration_tests;
+#[cfg(test)]
 mod expr_tests;
 #[cfg(test)]
 mod extended_index_tests;

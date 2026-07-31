@@ -921,7 +921,8 @@ mod phase_2_17 {
             let r2 = mgr.commit(t2.txn_id, 200);
 
             match level {
-                IsolationLevel::ReadCommitted | IsolationLevel::RepeatableRead => {
+                IsolationLevel::ReadUncommitted | IsolationLevel::ReadCommitted
+                | IsolationLevel::RepeatableRead => {
                     assert!(r1.is_ok(), "seed={}: {:?} T1 应成功", seed, level);
                     assert!(r2.is_ok(), "seed={}: {:?} T2 应成功", seed, level);
                 }

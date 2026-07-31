@@ -27,7 +27,7 @@
 //!    - 两个并发事务写同一 key 时，先提交的成功，后提交的 abort
 //!    - SERIALIZABLE 和 REPEATABLE READ 都启用
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,9 +39,11 @@ use tracing::{debug, instrument, trace, warn};
 
 /// 事务隔离级别
 ///
-/// 对应技术方案 9.10 节：支持 READ COMMITTED / REPEATABLE READ / SERIALIZABLE
+/// 对应技术方案 9.10 节：支持 READ UNCOMMITTED / READ COMMITTED / REPEATABLE READ / SERIALIZABLE
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum IsolationLevel {
+    /// 读未提交（PG 中实际行为等同 ReadCommitted，此处为兼容性提供）
+    ReadUncommitted,
     /// 读已提交：每条 SELECT 重新生成快照
     ReadCommitted,
     /// 可重复读（默认）：事务全程使用 BEGIN 时的快照
@@ -452,8 +454,8 @@ pub struct MvccManager {
     txn_id_alloc: AtomicU32,
     /// 活跃事务表：txn_id → Transaction
     active_txns: RwLock<HashMap<u32, Transaction>>,
-    /// 已提交事务：txn_id → commit_lsn（BTreeMap 便于范围查询）
-    committed_txns: RwLock<BTreeMap<u32, u64>>,
+    /// 已提交事务 ID 集合（commit_lsn 已冗余存储于 committed_writes，此处仅用于可见性判断）
+    committed_txns: RwLock<BTreeSet<u32>>,
     /// 已回滚事务（BTreeSet 便于查询）
     aborted_txns: RwLock<BTreeSet<u32>>,
     /// 已提交事务的写集合（用于 SSI 写偏斜检测 + first-committer-wins）
@@ -477,7 +479,7 @@ impl MvccManager {
         Self {
             txn_id_alloc: AtomicU32::new(initial_xid),
             active_txns: RwLock::new(HashMap::new()),
-            committed_txns: RwLock::new(BTreeMap::new()),
+            committed_txns: RwLock::new(BTreeSet::new()),
             aborted_txns: RwLock::new(BTreeSet::new()),
             committed_writes: RwLock::new(Vec::new()),
         }
@@ -502,7 +504,7 @@ impl MvccManager {
         let txn_id = self.txn_id_alloc.fetch_add(1, Ordering::SeqCst);
         // 读取活跃事务列表（不含自己，因为还没注册）
         let active_ids: Vec<u32> = {
-            let active = self.active_txns.read().unwrap();
+            let active = self.active_txns.read().unwrap_or_else(|e| e.into_inner());
             active.keys().copied().collect()
         };
         let active_count = active_ids.len();
@@ -512,7 +514,7 @@ impl MvccManager {
         let txn = Transaction::new(txn_id, snapshot, level);
         self.active_txns
             .write()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(txn_id, txn.clone());
         tracing::Span::current().record("txn_id", txn_id);
         trace!(txn_id, active_count, "transaction begun");
@@ -644,14 +646,14 @@ impl MvccManager {
 
         // 阶段 2：SSI 写偏斜检测（仅 SERIALIZABLE）
         if txn.isolation_level == IsolationLevel::Serializable && self.has_write_skew(&txn)? {
-            self.aborted_txns.write().unwrap().insert(txn_id);
+            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
             warn!(txn_id, "commit_durable: transaction aborted due to write skew");
             return Err(MvccError::WriteSkewDetected(txn_id));
         }
 
         // 阶段 3：First-Committer-Wins（写写冲突检测）
         if !txn.write_set.is_empty() && self.has_write_write_conflict(&txn)? {
-            self.aborted_txns.write().unwrap().insert(txn_id);
+            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
             warn!(txn_id, "commit_durable: transaction aborted due to write-write conflict");
             return Err(MvccError::WriteWriteConflict(txn_id));
         }
@@ -662,7 +664,7 @@ impl MvccManager {
         let commit_lsn = match on_pre_commit(txn_id) {
             Ok(lsn) => lsn,
             Err(e) => {
-                self.aborted_txns.write().unwrap().insert(txn_id);
+                self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
                 warn!(txn_id, error = %e, "commit_durable: WAL fsync failed, transaction aborted");
                 return Err(e);
             }
@@ -672,12 +674,9 @@ impl MvccManager {
         tracing::Span::current().record("write_count", write_count);
 
         // 阶段 5：WAL 已 fsync，注册提交（此时可安全 ACK 客户端）
-        self.committed_txns
-            .write()
-            .unwrap()
-            .insert(txn_id, commit_lsn);
+        self.committed_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
         if !txn.write_set.is_empty() {
-            self.committed_writes.write().unwrap().push(CommittedWrite {
+            self.committed_writes.write().unwrap_or_else(|e| e.into_inner()).push(CommittedWrite {
                 txn_id,
                 commit_lsn,
                 write_set: txn.write_set.clone(),
@@ -708,25 +707,22 @@ impl MvccManager {
 
         // SSI 写偏斜检测（仅 SERIALIZABLE）
         if txn.isolation_level == IsolationLevel::Serializable && self.has_write_skew(&txn)? {
-            self.aborted_txns.write().unwrap().insert(txn_id);
+            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
             warn!(txn_id, "transaction aborted due to write skew");
             return Err(MvccError::WriteSkewDetected(txn_id));
         }
 
         // First-Committer-Wins（写写冲突检测，RR + SERIALIZABLE 都启用）
         if !txn.write_set.is_empty() && self.has_write_write_conflict(&txn)? {
-            self.aborted_txns.write().unwrap().insert(txn_id);
+            self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
             warn!(txn_id, "transaction aborted due to write-write conflict");
             return Err(MvccError::WriteWriteConflict(txn_id));
         }
 
         // 注册提交
-        self.committed_txns
-            .write()
-            .unwrap()
-            .insert(txn_id, commit_lsn);
+        self.committed_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
         if !txn.write_set.is_empty() {
-            self.committed_writes.write().unwrap().push(CommittedWrite {
+            self.committed_writes.write().unwrap_or_else(|e| e.into_inner()).push(CommittedWrite {
                 txn_id,
                 commit_lsn,
                 write_set: txn.write_set.clone(),
@@ -756,7 +752,7 @@ impl MvccManager {
             txn
         };
         let _ = txn; // 不需要保留
-        self.aborted_txns.write().unwrap().insert(txn_id);
+        self.aborted_txns.write().unwrap_or_else(|e| e.into_inner()).insert(txn_id);
         trace!(txn_id, "transaction aborted");
         Ok(())
     }
@@ -794,7 +790,11 @@ impl MvccManager {
             .ok_or_else(|| self.lookup_error(txn_id))?
             .isolation_level;
 
-        if isolation_level != IsolationLevel::ReadCommitted {
+        // PG 语义：ReadUncommitted 行为等同 ReadCommitted，因此两者均允许刷新快照
+        if !matches!(
+            isolation_level,
+            IsolationLevel::ReadUncommitted | IsolationLevel::ReadCommitted
+        ) {
             warn!(txn_id, isolation = ?isolation_level, "snapshot refresh not allowed");
             return Err(MvccError::SnapshotRefreshNotAllowed {
                 txn_id,
@@ -815,9 +815,9 @@ impl MvccManager {
 
     /// 查询事务状态
     pub fn get_status(&self, txn_id: u32) -> Option<TxnStatus> {
-        if self.active_txns.read().unwrap().contains_key(&txn_id) {
+        if self.active_txns.read().unwrap_or_else(|e| e.into_inner()).contains_key(&txn_id) {
             Some(TxnStatus::Active)
-        } else if self.committed_txns.read().unwrap().contains_key(&txn_id) {
+        } else if self.committed_txns.read().unwrap().contains(&txn_id) {
             Some(TxnStatus::Committed)
         } else if self.aborted_txns.read().unwrap().contains(&txn_id) {
             Some(TxnStatus::Aborted)
@@ -828,12 +828,27 @@ impl MvccManager {
 
     /// 获取活跃事务的克隆（用于查询其 read_set/write_set/snapshot）
     pub fn get_txn(&self, txn_id: u32) -> Option<Transaction> {
-        self.active_txns.read().unwrap().get(&txn_id).cloned()
+        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).get(&txn_id).cloned()
+    }
+
+    /// 查询事务的隔离级别（轻量，仅读 isolation_level 字段，不 clone 整个 Transaction）
+    ///
+    /// **P0-TX-1 Phase C 用途**：executor 在 `execute_scan` 前据此判断是否需要
+    /// 调用 `refresh_snapshot`（仅 ReadCommitted/ReadUncommitted 需要），
+    /// 避免对 RR/Serializable 触发 `SnapshotRefreshNotAllowed` 错误日志。
+    ///
+    /// **返回**：`Some(level)` 事务存在且为 Active；`None` 事务不存在或已结束
+    pub fn get_isolation_level(&self, txn_id: u32) -> Option<IsolationLevel> {
+        self.active_txns
+            .read()
+            .unwrap()
+            .get(&txn_id)
+            .map(|t| t.isolation_level)
     }
 
     /// 当前活跃事务数
     pub fn active_count(&self) -> usize {
-        self.active_txns.read().unwrap().len()
+        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// 已提交事务数
@@ -853,7 +868,7 @@ impl MvccManager {
 
     /// 最老活跃事务 ID（无活跃时返回 None）
     pub fn oldest_active_xid(&self) -> Option<u32> {
-        self.active_txns.read().unwrap().keys().copied().min()
+        self.active_txns.read().unwrap_or_else(|e| e.into_inner()).keys().copied().min()
     }
 
     // -----------------------------------------------------------------
@@ -874,7 +889,7 @@ impl MvccManager {
     /// **保守性**：此规则是保守的（可能保留一些实际可回收的事务，但绝不回收仍在使用的事务）。
     #[instrument(skip(self), fields(safe_xid))]
     pub fn vacuum_safe_xid(&self) -> u32 {
-        let active = self.active_txns.read().unwrap();
+        let active = self.active_txns.read().unwrap_or_else(|e| e.into_inner());
         if active.is_empty() {
             let safe_xid = self.txn_id_alloc.load(Ordering::SeqCst);
             tracing::Span::current().record("safe_xid", safe_xid);
@@ -917,15 +932,15 @@ impl MvccManager {
 
         // 回收 committed_txns
         let vacuumed_committed = {
-            let mut committed = self.committed_txns.write().unwrap();
+            let mut committed = self.committed_txns.write().unwrap_or_else(|e| e.into_inner());
             let before = committed.len();
-            committed.retain(|&txn_id, _| txn_id >= safe_xid);
+            committed.retain(|&txn_id| txn_id >= safe_xid);
             before - committed.len()
         };
 
         // 回收 aborted_txns
         let vacuumed_aborted = {
-            let mut aborted = self.aborted_txns.write().unwrap();
+            let mut aborted = self.aborted_txns.write().unwrap_or_else(|e| e.into_inner());
             let before = aborted.len();
             aborted.retain(|&txn_id| txn_id >= safe_xid);
             before - aborted.len()
@@ -933,13 +948,13 @@ impl MvccManager {
 
         // 回收 committed_writes
         let vacuumed_writes = {
-            let mut writes = self.committed_writes.write().unwrap();
+            let mut writes = self.committed_writes.write().unwrap_or_else(|e| e.into_inner());
             let before = writes.len();
             writes.retain(|cw| cw.txn_id >= safe_xid);
             before - writes.len()
         };
 
-        let retained_active = self.active_txns.read().unwrap().len();
+        let retained_active = self.active_txns.read().unwrap_or_else(|e| e.into_inner()).len();
         let retained_committed = self.committed_txns.read().unwrap().len();
         let retained_aborted = self.aborted_txns.read().unwrap().len();
         let retained_writes = self.committed_writes.read().unwrap().len();
@@ -998,17 +1013,12 @@ impl MvccManager {
                 return false;
             }
         };
-        let committed: BTreeSet<u32> = self
-            .committed_txns
-            .read()
-            .unwrap()
-            .keys()
-            .copied()
-            .collect();
-        let aborted: BTreeSet<u32> = self.aborted_txns.read().unwrap().iter().copied().collect();
+        // OPT-8：持有读锁直接传递引用，避免每次可见性检查都 O(N) 全量克隆
+        let committed_guard = self.committed_txns.read().unwrap();
+        let aborted_guard = self.aborted_txns.read().unwrap();
         let parent_map = HashMap::new();
         txn.snapshot
-            .is_visible(xmin, xmax, txn_id, &committed, &aborted, &parent_map)
+            .is_visible(xmin, xmax, txn_id, &*committed_guard, &*aborted_guard, &parent_map)
     }
 
     // -----------------------------------------------------------------
@@ -1017,7 +1027,7 @@ impl MvccManager {
 
     /// 构造"未找到 txn"时的精确错误（区分 not found / already committed / already aborted）
     fn lookup_error(&self, txn_id: u32) -> MvccError {
-        if self.committed_txns.read().unwrap().contains_key(&txn_id) {
+        if self.committed_txns.read().unwrap().contains(&txn_id) {
             MvccError::AlreadyCommitted(txn_id)
         } else if self.aborted_txns.read().unwrap().contains(&txn_id) {
             MvccError::AlreadyAborted(txn_id)
@@ -2533,6 +2543,70 @@ mod tests {
             // 语句 3 开始：T1 刷新，看到 T3 提交的新版本
             mgr.refresh_snapshot(t1.txn_id).unwrap();
             assert!(mgr.is_visible(t1.txn_id, t3.txn_id, 0));
+        }
+
+        // -----------------------------------------------------------------
+        // 10. READ UNCOMMITTED 行为等同 READ COMMITTED（PG 兼容性）
+        // -----------------------------------------------------------------
+
+        #[test]
+        fn test_read_uncommitted_equals_read_committed() {
+            // PG 语义：ReadUncommitted 实际行为等同 ReadCommitted
+            // 在两个独立 manager 上跑同一场景，逐步对比可见性结果
+            let mgr_ru = MvccManager::new();
+            let mgr_rc = MvccManager::new();
+
+            // T1 BEGIN（一个用 ReadUncommitted，一个用 ReadCommitted）
+            let t1_ru = mgr_ru.begin_with_isolation(IsolationLevel::ReadUncommitted);
+            assert_eq!(t1_ru.isolation_level, IsolationLevel::ReadUncommitted);
+            let t1_rc = mgr_rc.begin_with_isolation(IsolationLevel::ReadCommitted);
+            assert_eq!(t1_rc.isolation_level, IsolationLevel::ReadCommitted);
+
+            // T2 BEGIN + write（未提交）
+            let t2_ru = mgr_ru.begin();
+            let _ = mgr_ru.register_write(t2_ru.txn_id, "t1:r1");
+            let t2_rc = mgr_rc.begin();
+            let _ = mgr_rc.register_write(t2_rc.txn_id, "t1:r1");
+
+            // 维度 1：两者均允许刷新快照
+            assert!(mgr_ru.refresh_snapshot(t1_ru.txn_id).is_ok());
+            assert!(mgr_rc.refresh_snapshot(t1_rc.txn_id).is_ok());
+
+            // 维度 2：不脏读 — 两者均不可见未提交事务
+            let ru_vis_before = mgr_ru.is_visible(t1_ru.txn_id, t2_ru.txn_id, 0);
+            let rc_vis_before = mgr_rc.is_visible(t1_rc.txn_id, t2_rc.txn_id, 0);
+            assert_eq!(
+                ru_vis_before, rc_vis_before,
+                "刷新后对未提交事务的可见性应一致（均不脏读）"
+            );
+            assert!(!ru_vis_before, "ReadUncommitted 不应脏读未提交事务");
+
+            // 维度 3：T2 提交后，两者刷新快照即可见
+            mgr_ru.commit(t2_ru.txn_id, 100).unwrap();
+            mgr_rc.commit(t2_rc.txn_id, 100).unwrap();
+            mgr_ru.refresh_snapshot(t1_ru.txn_id).unwrap();
+            mgr_rc.refresh_snapshot(t1_rc.txn_id).unwrap();
+
+            let ru_vis_after = mgr_ru.is_visible(t1_ru.txn_id, t2_ru.txn_id, 0);
+            let rc_vis_after = mgr_rc.is_visible(t1_rc.txn_id, t2_rc.txn_id, 0);
+            assert_eq!(
+                ru_vis_after, rc_vis_after,
+                "刷新后对已提交事务的可见性应一致"
+            );
+            assert!(ru_vis_after, "ReadUncommitted 刷新后应看到已提交事务");
+        }
+
+        #[test]
+        fn read_uncommitted_refresh_snapshot_allowed() {
+            // ReadUncommitted 应与 RC 一样允许 refresh_snapshot（非 SnapshotRefreshNotAllowed）
+            let mgr = MvccManager::new();
+            let t1 = mgr.begin_with_isolation(IsolationLevel::ReadUncommitted);
+            let result = mgr.refresh_snapshot(t1.txn_id);
+            assert!(
+                result.is_ok(),
+                "ReadUncommitted 应允许刷新快照（等同 RC），实际: {:?}",
+                result
+            );
         }
     }
 

@@ -21,7 +21,7 @@ use std::ops::Bound;
 
 /// B-Tree 范围扫描游标
 ///
-/// 通过 `BTree::cursor(lower, upper)` 创建，实现 `Iterator<Item = (Vec<u8>, u16)>`。
+/// 通过 `BTree::cursor(lower, upper)` 创建，实现 `Iterator<Item = (Vec<u8>, u32)>`。
 pub struct BTreeCursor<'a> {
     /// 借用的 BTree（只读）
     btree: &'a BTree,
@@ -113,7 +113,7 @@ impl<'a> BTreeCursor<'a> {
 }
 
 impl<'a> Iterator for BTreeCursor<'a> {
-    type Item = (Vec<u8>, u16);
+    type Item = (Vec<u8>, u32);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.exhausted {
@@ -191,16 +191,16 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..50i64 {
-                b.insert(make_key(i), i as u16).unwrap();
+                b.insert(make_key(i), i as u32).unwrap();
             }
             b
         };
         let cursor = bt.cursor(Bound::Unbounded, Bound::Unbounded).unwrap();
-        let pairs: Vec<(Vec<u8>, u16)> = cursor.collect();
+        let pairs: Vec<(Vec<u8>, u32)> = cursor.collect();
         assert_eq!(pairs.len(), 50);
         for (i, (k, tid)) in pairs.iter().enumerate() {
             assert_eq!(crate::btree::decode_i64_key(k).unwrap(), i as i64);
-            assert_eq!(*tid, i as u16);
+            assert_eq!(*tid, i as u32);
         }
     }
 
@@ -209,7 +209,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..20i64 {
-                b.insert(make_key(i), i as u16).unwrap();
+                b.insert(make_key(i), i as u32).unwrap();
             }
             b
         };
@@ -227,7 +227,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..20i64 {
-                b.insert(make_key(i), i as u16).unwrap();
+                b.insert(make_key(i), i as u32).unwrap();
             }
             b
         };
@@ -245,7 +245,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..500i64 {
-                b.insert(make_key(i), i as u16).unwrap();
+                b.insert(make_key(i), i as u32).unwrap();
             }
             b
         };

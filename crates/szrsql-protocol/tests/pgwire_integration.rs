@@ -799,11 +799,12 @@ async fn test_e2e_error_insert_into_nonexistent_table() {
 
 /// 验收场景 15：单条 Query 中包含多条 SQL 语句（简单查询协议特性）。
 ///
-/// **ADV-BUG-002 修复后行为变更**：默认禁止多语句执行（`allow_multi_statement = false`），
-/// 防止 SQL 注入攻击（如 `SELECT 1; DROP TABLE users`）。
+/// **Navicat 兼容性**：PgwireServer 默认启用多语句执行（`allow_multi_statement = true`），
+/// 因为 Navicat/psql 等客户端在连接初始化时会发送 "SET AUTOCOMMIT ON; SET extra_float_digits = 3"
+/// 这样的多语句。扩展查询协议（Parse/Bind/Execute）仍强制单语句（PG 协议要求）。
 ///
-/// 此测试验证默认（安全）模式下，多语句 Query 被拒绝并返回 ErrorResponse。
-/// 启用多语句的正面用例由 `session.rs::test_multiple_statements_in_one_query` 单元测试覆盖。
+/// 此测试验证多语句 Query 被正常执行：每条语句返回自己的消息序列，最后以 ReadyForQuery 结束。
+/// 多语句拒绝行为由 `session.rs::test_multi_statement_rejected_when_disabled` 单元测试覆盖。
 #[tokio::test]
 async fn test_e2e_multiple_statements_in_one_query() {
     let port = find_free_port(16832).await;
@@ -815,18 +816,23 @@ async fn test_e2e_multiple_statements_in_one_query() {
     let sql = "CREATE TABLE m (id BIGINT); INSERT INTO m (id) VALUES (1); SELECT * FROM m";
     let resp = send_query_and_read(&mut stream, sql).await;
 
-    // ADV-BUG-002 保护：默认禁止多语句，应收到 ErrorResponse + ReadyForQuery
+    // Navicat 兼容：多语句被允许执行，每条语句返回自己的消息，最后以 ReadyForQuery 结束
     let types = parse_message_types(&resp);
+    // 至少应包含 ReadyForQuery 作为最后一条消息
+    assert!(
+        !types.is_empty(),
+        "response should not be empty for multi-statement query"
+    );
     assert_eq!(
-        types,
-        vec![MSG_ERROR_RESPONSE, MSG_READY_FOR_QUERY],
-        "multi-statement query should be rejected by default (ADV-BUG-002 protection): got {types:?}"
+        types[types.len() - 1],
+        MSG_READY_FOR_QUERY,
+        "last message should be ReadyForQuery: got {types:?}"
     );
 
-    // 验证错误消息包含 ADV-BUG-002 标识
+    // 验证没有 ErrorResponse（多语句应被正常执行）
     assert!(
-        contains_error_response(&resp),
-        "should receive ErrorResponse for multi-statement query"
+        !contains_error_response(&resp),
+        "multi-statement query should execute successfully without ErrorResponse (Navicat compatibility): got {types:?}"
     );
 
     // 验证后续连接仍可用（ReadyForQuery 状态为 Idle）
@@ -834,7 +840,7 @@ async fn test_e2e_multiple_statements_in_one_query() {
     assert_eq!(
         status,
         Some(b'I'),
-        "ReadyForQuery status should be 'I' (Idle) after rejected multi-statement query"
+        "ReadyForQuery status should be 'I' (Idle) after multi-statement query"
     );
 }
 

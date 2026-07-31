@@ -499,3 +499,45 @@ fn test_add_table_constraint_placeholder() {
         Err(CatalogError::TableNotFound("nonexistent".into()))
     );
 }
+
+// =====================================================================
+//  Phase TDengine-P2: COMMENT ON 存储测试
+// =====================================================================
+
+#[test]
+fn test_comment_storage() {
+    let mut catalog = ManagedCatalog::new();
+    let table_name = TableName::new("test_table");
+
+    // 设置表注释
+    catalog
+        .set_table_comment(&table_name, Some("测试表".to_string()))
+        .unwrap();
+    assert_eq!(
+        catalog.get_table_comment(&table_name),
+        Some("测试表".to_string())
+    );
+
+    // 删除表注释（传 None）
+    catalog.set_table_comment(&table_name, None).unwrap();
+    assert_eq!(catalog.get_table_comment(&table_name), None);
+
+    // 设置列注释
+    catalog
+        .set_column_comment(&table_name, "name", Some("名称列".to_string()))
+        .unwrap();
+    assert_eq!(
+        catalog.get_column_comment(&table_name, "name"),
+        Some("名称列".to_string())
+    );
+
+    // 列名大小写不敏感（存储时统一转小写）
+    assert_eq!(
+        catalog.get_column_comment(&table_name, "NAME"),
+        Some("名称列".to_string())
+    );
+
+    // 删除列注释
+    catalog.set_column_comment(&table_name, "name", None).unwrap();
+    assert_eq!(catalog.get_column_comment(&table_name, "name"), None);
+}

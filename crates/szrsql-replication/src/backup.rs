@@ -675,7 +675,8 @@ impl BackupManager {
                 WalOpType::Insert
                 | WalOpType::Update
                 | WalOpType::Delete
-                | WalOpType::FullPageImage => {
+                | WalOpType::FullPageImage
+                | WalOpType::TableData => {
                     if let Some(&idx) = page_index.get(&record.page_id) {
                         // 更新已有页
                         pages[idx].1 = record.data.clone();

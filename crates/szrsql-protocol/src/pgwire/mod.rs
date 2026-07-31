@@ -34,6 +34,7 @@ pub mod auth;
 pub mod copy;
 pub mod crash;
 pub mod daemon;
+pub mod dirty_tracker;
 pub mod lifecycle;
 pub mod message;
 pub mod notify;
@@ -47,6 +48,7 @@ pub mod tls;
 pub use auth::{AuthError, AuthMode, ScramServerSession};
 pub use crash::{install_crash_handler, CrashConfig};
 pub use daemon::{daemonize, DaemonError, PidFile, PidFileError};
+pub use dirty_tracker::DirtyTableTracker;
 pub use lifecycle::{ShutdownCoordinator, ShutdownSignal, ShutdownState};
 pub use message::{BackendMessage, ErrorResponse, FrontendMessage, Severity, SqlState};
 pub use notify::{Notification, NotifyHub};
@@ -55,5 +57,7 @@ pub use session::{
     ExecutorService, ExtendedExecuteResult, ExtendedPreparedStatement, Portal, PortalDescription,
     QueryResult, ResultColumn, SessionError, StatementDescription, TransactionState,
 };
+/// ADV-CONC-1：re-export InMemoryTable，供 MySQL/TDS/Oracle 协议共享表存储使用
+pub use szrsql_sql::executor::InMemoryTable;
 pub use startup::{StartupError, StartupMessage, StartupParams, PROTOCOL_VERSION_3_0};
 pub use tls::{TlsConfig, TlsError};

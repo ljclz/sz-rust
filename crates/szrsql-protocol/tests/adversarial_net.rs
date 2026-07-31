@@ -1419,3 +1419,133 @@ async fn test_adv_net_010c_terminate_closes_connection() {
     let types = read_until_ready_for_query(&mut stream2).await;
     assert_eq!(types[types.len() - 1], MSG_READY_FOR_QUERY);
 }
+
+// =====================================================================
+//  ADV-NET-001 回归测试：BUG-001 / BUG-002 远程 DoS 防护
+// =====================================================================
+
+#[tokio::test]
+async fn test_adv_net_001e_negative_length_message() {
+    // ADV-NET-001 (回归 BUG-001)：
+    // 原缺陷：message.rs:474 使用 i32::from_be_bytes 解析消息长度，负值经 as usize
+    // 符号扩展为 usize::MAX，导致 split_to(usize::MAX) 溢出 panic（远程 DoS）。
+    // 修复：改用 u32::from_be_bytes，并在 length < 4 时返回 InvalidData。
+    // 本测试发送 length=-1 (0xFFFFFFFF) 的 Query 消息，验证服务器不 panic。
+    let port = find_free_port(21004).await;
+    let _server = spawn_trust_server(port).await;
+    wait_for_server(port).await;
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    send_startup(&mut stream, "alice").await;
+    let _ = read_until_ready_for_query(&mut stream).await;
+
+    // 构造恶意 Query 消息：Type='Q' + Length=0xFFFFFFFF + 任意 payload
+    let mut bad_msg = Vec::new();
+    bad_msg.push(b'Q');
+    bad_msg.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());
+    bad_msg.extend_from_slice(b"SELECT 1");
+    bad_msg.push(0);
+    stream.write_all(&bad_msg).await.expect("write");
+    stream.flush().await.expect("flush");
+
+    // 服务器应返回 ErrorResponse 或关闭连接，但不应 panic
+    let response = tokio::time::timeout(
+        Duration::from_millis(500),
+        try_read_backend_message(&mut stream),
+    )
+    .await;
+
+    match response {
+        Err(_) => {
+            println!("ADV-NET-001e: timeout for negative length message (acceptable)");
+        }
+        Ok(None) => {
+            println!("ADV-NET-001e: connection closed for negative length message (acceptable)");
+        }
+        Ok(Some((msg_type, _))) => {
+            assert_eq!(
+                msg_type, MSG_ERROR_RESPONSE,
+                "expected ErrorResponse for negative length message, got: {}",
+                msg_type as char
+            );
+        }
+    }
+
+    // 验证服务器未崩溃：建立新连接应仍能成功
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut stream2 = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("server should still be running after negative length message");
+    send_startup(&mut stream2, "alice").await;
+    let types = read_until_ready_for_query(&mut stream2).await;
+    assert_eq!(types[types.len() - 1], MSG_READY_FOR_QUERY);
+}
+
+#[tokio::test]
+async fn test_adv_net_001f_negative_bind_param_count() {
+    // ADV-NET-001 (回归 BUG-002)：
+    // 原缺陷：message.rs:587-589 使用 i16::from_be_bytes 解析 Bind 消息 param_count，
+    // 负值经 as usize 符号扩展为 usize::MAX，Vec::with_capacity(usize::MAX) panic（远程 DoS）。
+    // 修复：改用 u16::from_be_bytes，并增加 MAX_BIND_PARAMS=65535 上限校验。
+    // 本测试发送 param_count=-1 (0xFFFF) 的 Bind 消息，验证服务器不 panic。
+    let port = find_free_port(21005).await;
+    let _server = spawn_trust_server(port).await;
+    wait_for_server(port).await;
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect");
+    send_startup(&mut stream, "alice").await;
+    let _ = read_until_ready_for_query(&mut stream).await;
+
+    // 构造恶意 Bind 消息：Type='B' + Length + portal\0 + stmt\0 + pfc=0 + param_count=0xFFFF
+    let mut payload = Vec::new();
+    payload.push(0); // portal name (empty cstring)
+    payload.push(0); // statement name (empty cstring)
+    // parameter_format_codes count = 0 (i16)
+    payload.extend_from_slice(&0i16.to_be_bytes());
+    // parameters count = -1 (i16 = 0xFFFF，被修复后的 u16 解析为 65535)
+    payload.extend_from_slice(&(-1i16).to_be_bytes());
+
+    let total_len = (4 + payload.len()) as i32;
+    let mut bad_msg = Vec::new();
+    bad_msg.push(b'B');
+    bad_msg.extend_from_slice(&total_len.to_be_bytes());
+    bad_msg.extend_from_slice(&payload);
+    stream.write_all(&bad_msg).await.expect("write");
+    stream.flush().await.expect("flush");
+
+    // 服务器应返回 ErrorResponse（因为 param_count=65535 超过 MAX_BIND_PARAMS 或 payload 不足）
+    let response = tokio::time::timeout(
+        Duration::from_millis(500),
+        try_read_backend_message(&mut stream),
+    )
+    .await;
+
+    match response {
+        Err(_) => {
+            println!("ADV-NET-001f: timeout for negative bind param count (acceptable)");
+        }
+        Ok(None) => {
+            println!("ADV-NET-001f: connection closed for negative bind param count (acceptable)");
+        }
+        Ok(Some((msg_type, _))) => {
+            assert_eq!(
+                msg_type, MSG_ERROR_RESPONSE,
+                "expected ErrorResponse for negative bind param count, got: {}",
+                msg_type as char
+            );
+        }
+    }
+
+    // 验证服务器未崩溃：建立新连接应仍能成功
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut stream2 = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("server should still be running after negative bind param count");
+    send_startup(&mut stream2, "alice").await;
+    let types = read_until_ready_for_query(&mut stream2).await;
+    assert_eq!(types[types.len() - 1], MSG_READY_FOR_QUERY);
+}

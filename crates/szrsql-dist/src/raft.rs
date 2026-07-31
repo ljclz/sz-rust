@@ -173,10 +173,20 @@ pub struct LogEntry {
 ///
 /// 日志索引从 1 开始，`entries[0]` 对应 index=1，`entries[i]` 对应 index=i+1。
 /// 索引 0 表示空（无日志）。
+///
+/// OPT-2：支持 snapshot + log compaction。snapshot 后，被截断的日志条目不再保留，
+/// 通过 `snapshot_last_index` / `snapshot_last_term` 记录 snapshot 元数据。
+/// `entries` 仅保留 `snapshot_last_index+1` 之后的条目。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RaftLog {
-    /// 日志条目（按索引升序排列）
+    /// 日志条目（按索引升序排列，可能从 snapshot_last_index+1 开始）
     entries: Vec<LogEntry>,
+    /// 最近一次 snapshot 包含的最后一条日志索引（0 表示无 snapshot）
+    #[serde(default)]
+    snapshot_last_index: Index,
+    /// 最近一次 snapshot 包含的最后一条日志任期号
+    #[serde(default)]
+    snapshot_last_term: LogTerm,
 }
 
 impl RaftLog {
@@ -184,25 +194,41 @@ impl RaftLog {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            snapshot_last_index: 0,
+            snapshot_last_term: 0,
         }
     }
 
-    /// 返回最后一条日志的索引（空日志返回 0）
-    pub fn last_log_index(&self) -> Index {
-        self.entries.len() as u64
+    /// 返回 snapshot 包含的最后一条日志索引（0 表示无 snapshot）
+    pub fn snapshot_last_index(&self) -> Index {
+        self.snapshot_last_index
     }
 
-    /// 返回最后一条日志的任期号（空日志返回 0）
+    /// 返回 snapshot 包含的最后一条日志任期号
+    pub fn snapshot_last_term(&self) -> LogTerm {
+        self.snapshot_last_term
+    }
+
+    /// 返回最后一条日志的索引（空日志返回 snapshot_last_index 或 0）
+    pub fn last_log_index(&self) -> Index {
+        self.snapshot_last_index + self.entries.len() as u64
+    }
+
+    /// 返回最后一条日志的任期号（空日志返回 snapshot_last_term 或 0）
     pub fn last_log_term(&self) -> LogTerm {
-        self.entries.last().map(|e| e.term).unwrap_or(0)
+        self.entries.last().map(|e| e.term).unwrap_or(self.snapshot_last_term)
     }
 
     /// 按索引获取日志条目（索引从 1 开始，0 返回 None）
+    ///
+    /// OPT-2：若 index <= snapshot_last_index，表示该条目已被 compaction 截断，返回 None。
     pub fn get(&self, index: Index) -> Option<&LogEntry> {
-        if index == 0 {
+        if index == 0 || index <= self.snapshot_last_index {
             return None;
         }
-        self.entries.get((index - 1) as usize)
+        // entries[0] 对应 snapshot_last_index+1
+        let array_idx = (index - self.snapshot_last_index - 1) as usize;
+        self.entries.get(array_idx)
     }
 
     /// 追加单条日志条目，返回新条目的索引
@@ -219,7 +245,8 @@ impl RaftLog {
         command: Vec<u8>,
         config_change: Option<ConfigChangeEntry>,
     ) -> Index {
-        let index = self.entries.len() as u64 + 1;
+        // OPT-2：index 基于 snapshot_last_index 偏移计算
+        let index = self.snapshot_last_index + self.entries.len() as u64 + 1;
         self.entries.push(LogEntry {
             term,
             index,
@@ -239,36 +266,119 @@ impl RaftLog {
     /// 截断指定索引之后的所有条目（保留 index 及之前的条目）
     ///
     /// `truncate_after(3)` 保留 index 1,2,3，删除 index 4+ 的条目。
-    /// 若 index >= 当前长度，不做任何操作。
+    /// OPT-2：若 index <= snapshot_last_index，截断后日志为空（snapshot 不会被截断）。
     pub fn truncate_after(&mut self, index: Index) {
-        if index >= self.entries.len() as u64 {
+        if index <= self.snapshot_last_index {
+            // 截断点在 snapshot 之前或等于 snapshot 边界：清空所有保留条目
+            self.entries.clear();
             return;
         }
-        self.entries.truncate(index as usize);
+        // index > snapshot_last_index：计算在 entries 中的截断位置
+        let array_keep = (index - self.snapshot_last_index) as usize;
+        if array_keep >= self.entries.len() {
+            return;
+        }
+        self.entries.truncate(array_keep);
     }
 
     /// 返回 [from, to) 索引范围的日志条目切片（索引从 1 开始，to 为排他上界）
     ///
     /// `slice(1, 4)` 返回 index 1,2,3 的条目。`from=0` 等价于 `from=1`。
+    /// OPT-2：若 from <= snapshot_last_index，自动调整为 snapshot_last_index+1。
     pub fn slice(&self, from: Index, to: Index) -> &[LogEntry] {
         // from=0 等价于 from=1（index 0 不存在）
-        let from = if from == 0 {
-            1
-        } else {
-            from
-        };
+        let from = if from == 0 { 1 } else { from };
         // to=0 表示空范围
         if to == 0 || from >= to {
             return &[];
         }
-        // log index i 对应 array[i-1]
-        // [from, to) → array[from-1 .. to-1]
-        let start = (from - 1) as usize;
-        let end = ((to - 1) as usize).min(self.entries.len());
+        // OPT-2：被 snapshot 截断的条目不在 entries 中，调整起点
+        let from = if from <= self.snapshot_last_index {
+            self.snapshot_last_index + 1
+        } else {
+            from
+        };
+        if from >= to {
+            return &[];
+        }
+        // entries[0] 对应 snapshot_last_index+1
+        // log index i 对应 array[i - snapshot_last_index - 1]
+        let start = (from - self.snapshot_last_index - 1) as usize;
+        let end = ((to - self.snapshot_last_index - 1) as usize).min(self.entries.len());
         if start >= end {
             return &[];
         }
         self.entries.get(start..end).unwrap_or(&[])
+    }
+
+    /// OPT-2：创建 snapshot 并压缩日志
+    ///
+    /// 将 index 及之前的所有日志条目压缩到 snapshot 中，仅保留 index+1 之后的条目。
+    /// 调用者需保证 index 对应的日志条目存在且已 committed。
+    ///
+    /// # 参数
+    /// - `index`：snapshot 包含的最后一条日志索引
+    /// - `term`：index 对应的任期号
+    ///
+    /// # 安全约束
+    /// - index 必须 >= snapshot_last_index（不允许回退）
+    /// - index 必须 <= last_log_index
+    pub fn compact(&mut self, index: Index, term: LogTerm) -> Result<(), RaftError> {
+        if index < self.snapshot_last_index {
+            return Err(RaftError::InvalidState(format!(
+                "compact index {index} < snapshot_last_index {} (snapshot cannot regress)",
+                self.snapshot_last_index
+            )));
+        }
+        if index > self.last_log_index() {
+            return Err(RaftError::InvalidState(format!(
+                "compact index {index} > last_log_index {}",
+                self.last_log_index()
+            )));
+        }
+        if index == self.snapshot_last_index {
+            // 重复 compact 同一索引：仅更新 term（幂等）
+            self.snapshot_last_term = term;
+            return Ok(());
+        }
+        // 计算需要保留的条目数（index+1 之后）
+        let keep_from = (index - self.snapshot_last_index) as usize;
+        // 更新 snapshot 元数据
+        self.snapshot_last_index = index;
+        self.snapshot_last_term = term;
+        // 移除已压缩的条目
+        self.entries.drain(0..keep_from);
+        Ok(())
+    }
+
+    /// OPT-2：安装快照（从 Leader 接收 InstallSnapshot RPC）
+    ///
+    /// 用接收到的 snapshot 替换本地 snapshot，并截断索引 <= snapshot_last_index 的日志。
+    /// 若本地日志在 snapshot_last_index+1 处的 term 与 snapshot_term 一致，
+    /// 则保留后续日志（避免无谓截断）；否则清空所有日志。
+    pub fn install_snapshot(&mut self, last_index: Index, last_term: LogTerm) {
+        // 若本地已有更新的 snapshot，忽略旧 snapshot
+        if last_index <= self.snapshot_last_index {
+            return;
+        }
+        // 检查本地是否保留有 last_index+1 处的日志条目
+        let keep_existing = if let Some(entry) = self.get(last_index + 1) {
+            entry.term == last_term
+        } else {
+            false
+        };
+
+        if keep_existing {
+            // 保留 last_index+1 之后的条目，drain 掉已被 snapshot 覆盖的条目
+            let drain_count = (last_index - self.snapshot_last_index) as usize;
+            if drain_count > 0 && drain_count <= self.entries.len() {
+                self.entries.drain(0..drain_count);
+            }
+        } else {
+            self.entries.clear();
+        }
+        self.snapshot_last_index = last_index;
+        self.snapshot_last_term = last_term;
     }
 
     /// 返回所有日志条目
@@ -901,6 +1011,67 @@ impl RaftNode {
         self.persistent.voted_for
     }
 
+    /// OPT-2：返回 snapshot_last_index（0 表示无 snapshot）
+    pub fn snapshot_last_index(&self) -> Index {
+        self.persistent.log.snapshot_last_index()
+    }
+
+    /// OPT-2：返回 snapshot_last_term
+    pub fn snapshot_last_term(&self) -> LogTerm {
+        self.persistent.log.snapshot_last_term()
+    }
+
+    /// OPT-2：创建 snapshot 并压缩日志
+    ///
+    /// 仅允许压缩 commit_index 之前的日志条目（防止未提交日志丢失）。
+    /// 调用后，snapshot_last_index 推进到 `index`，index 及之前的日志条目被移除。
+    ///
+    /// # 参数
+    /// - `index`：snapshot 包含的最后一条日志索引（必须 <= commit_index）
+    ///
+    /// # 返回
+    /// - `Ok(())`：snapshot 创建成功
+    /// - `Err`：index 超过 commit_index 或小于当前 snapshot_last_index
+    pub fn create_snapshot(&mut self, index: Index) -> Result<(), RaftError> {
+        // 安全约束：仅压缩已提交条目
+        if index > self.volatile.commit_index {
+            return Err(RaftError::InvalidState(format!(
+                "snapshot index {index} > commit_index {} (cannot compact uncommitted entries)",
+                self.volatile.commit_index
+            )));
+        }
+        // 获取 index 对应的 term
+        let term = if let Some(entry) = self.persistent.log.get(index) {
+            entry.term
+        } else if index == self.persistent.log.snapshot_last_index() {
+            // index 已被前一次 snapshot 覆盖：使用已记录的 snapshot_last_term
+            self.persistent.log.snapshot_last_term()
+        } else {
+            return Err(RaftError::LogNotFound(index));
+        };
+        self.persistent.log.compact(index, term)?;
+        // 防止 last_applied 回退（snapshot 后 last_applied 应 >= snapshot_last_index）
+        if self.volatile.last_applied < index {
+            self.volatile.last_applied = index;
+        }
+        Ok(())
+    }
+
+    /// OPT-2：安装快照（从 Leader 接收）
+    ///
+    /// Follower 收到 InstallSnapshot RPC 后调用此方法。若 snapshot 比本地新，
+    /// 替换本地 snapshot 并截断日志。同时推进 commit_index 和 last_applied。
+    pub fn install_snapshot(&mut self, last_index: Index, last_term: LogTerm) {
+        self.persistent.log.install_snapshot(last_index, last_term);
+        // 推进 commit_index / last_applied 到 snapshot 位置
+        if self.volatile.commit_index < last_index {
+            self.volatile.commit_index = last_index;
+        }
+        if self.volatile.last_applied < last_index {
+            self.volatile.last_applied = last_index;
+        }
+    }
+
     /// 返回当前逻辑时间
     pub fn current_time(&self) -> u64 {
         self.current_time
@@ -1498,48 +1669,43 @@ impl RaftNode {
         Ok(())
     }
 
-    /// 发起联合共识成员变更（§6，Phase 8.2 stub）
+    /// 发起联合共识成员变更（§6，Phase 8.2 完整实现）
     ///
-    /// 完整实现应分两阶段：
+    /// 实现 Raft 论文 §6 的两阶段提交：
     /// 1. Leader 写入 `Cold,new` 联合配置条目，待新旧配置各自多数派复制后提交；
     /// 2. Leader 写入 `Cnew` 新配置条目，待新配置多数派复制后提交，变更完成。
     ///
-    /// Phase 8.1 stub 跳过两阶段流程，直接应用新配置（用于接口验证与单测）。
+    /// 本方法完成步骤 1（写入 Cold,new 联合配置条目并设置 joint 状态）。
+    /// 步骤 2 由 `tick`/`deliver_all` 循环中的 `on_leader_commit_advanced` 自动推进。
+    ///
+    /// 对 `AddNode`/`RemoveNode` 简单形式，自动构造 Cnew 后复用 `propose_membership_change_v2`。
     pub fn propose_membership_change(&mut self, change: MembershipChange) -> Result<(), RaftError> {
         if self.state != RaftState::Leader {
             return Err(RaftError::NotLeader(self.id));
         }
         match change {
             MembershipChange::AddNode(peer) => {
-                self.membership_state = MembershipChangeState::JointConsensus;
-                self.add_node(peer)?;
-                self.membership_state = MembershipChangeState::Completed;
+                // 构造 Cnew = 当前成员 + 新节点
+                let mut cnew = self.cluster_members();
+                if !cnew.contains(&peer) {
+                    cnew.push(peer);
+                }
+                self.propose_membership_change_v2(cnew)
             }
             MembershipChange::RemoveNode(peer) => {
-                self.membership_state = MembershipChangeState::JointConsensus;
-                self.remove_node(peer)?;
-                self.membership_state = MembershipChangeState::Completed;
+                // 构造 Cnew = 当前成员 - 待移除节点
+                let cnew: Vec<NodeId> = self
+                    .cluster_members()
+                    .into_iter()
+                    .filter(|&p| p != peer)
+                    .collect();
+                self.propose_membership_change_v2(cnew)
             }
             MembershipChange::JointConsensus { new_peers, .. } => {
-                self.membership_state = MembershipChangeState::JointConsensus;
-                // Stub：直接切换到新配置（去掉自身后作为 peers）
-                self.config.peers = new_peers.into_iter().filter(|&p| p != self.id).collect();
-                // 重建 Leader 复制状态
-                let last_idx = self.last_log_index();
-                if let Some(ls) = self.leader_state.as_mut() {
-                    let mut new_next = HashMap::new();
-                    let mut new_match = HashMap::new();
-                    for &peer in &self.config.peers {
-                        new_next.insert(peer, *ls.next_index.get(&peer).unwrap_or(&(last_idx + 1)));
-                        new_match.insert(peer, *ls.match_index.get(&peer).unwrap_or(&0));
-                    }
-                    ls.next_index = new_next;
-                    ls.match_index = new_match;
-                }
-                self.membership_state = MembershipChangeState::Completed;
+                // 直接使用调用方提供的 Cnew
+                self.propose_membership_change_v2(new_peers)
             }
         }
-        Ok(())
     }
 
     /// 返回当前集群成员列表（含自身，已排序）
@@ -3225,15 +3391,20 @@ mod tests {
             .propose_membership_change(change)
             .expect("membership");
 
-        // 接口存在且能调用：新配置应为 [1, 2, 4]
-        assert_eq!(leader.cluster_members(), vec![1, 2, 4]);
-        // 变更状态应为 Completed（stub 直接完成）
-        assert_eq!(leader.membership_state(), MembershipChangeState::Completed);
+        // Phase 8.2 完整实现：propose 后进入 JointConsensus 状态，等待复制推进
+        assert_eq!(
+            leader.membership_state(),
+            MembershipChangeState::JointConsensus
+        );
+        // cluster_members 在联合共识阶段返回 Cold ∪ Cnew = {1,2,3,4}
+        assert_eq!(leader.cluster_members(), vec![1, 2, 3, 4]);
         // Leader 状态针对新 peer 4 已初始化
         let ls = leader.leader_state().expect("leader state");
         assert!(ls.next_index.contains_key(&4));
-        // 旧 peer 3 应被移除
-        assert!(!ls.next_index.contains_key(&3));
+        // 旧 peer 3 尚未被移除（需 Cnew 提交后才移除）
+        assert!(ls.next_index.contains_key(&3));
+        // joint 状态已设置
+        assert!(leader.joint_consensus().is_some());
     }
 
     #[test]
@@ -3245,8 +3416,16 @@ mod tests {
         leader
             .propose_membership_change(MembershipChange::AddNode(3))
             .expect("membership add");
-        assert_eq!(leader.peers(), &[2, 3]);
-        assert_eq!(leader.membership_state(), MembershipChangeState::Completed);
+        // Phase 8.2：propose 后进入 JointConsensus 状态
+        assert_eq!(
+            leader.membership_state(),
+            MembershipChangeState::JointConsensus
+        );
+        // peers() 返回 Cnew（排除自身），暂未切换（仍是原配置）
+        // cluster_members 应为 Cold ∪ Cnew = {1, 2, 3}
+        assert_eq!(leader.cluster_members(), vec![1, 2, 3]);
+        // joint 已设置
+        assert!(leader.joint_consensus().is_some());
     }
 
     #[test]
@@ -3258,8 +3437,16 @@ mod tests {
         leader
             .propose_membership_change(MembershipChange::RemoveNode(3))
             .expect("membership remove");
-        assert_eq!(leader.peers(), &[2, 4]);
-        assert_eq!(leader.membership_state(), MembershipChangeState::Completed);
+        // Phase 8.2：propose 后进入 JointConsensus 状态
+        assert_eq!(
+            leader.membership_state(),
+            MembershipChangeState::JointConsensus
+        );
+        // cluster_members = Cold ∪ Cnew = {1,2,3,4}（联合阶段）
+        assert_eq!(leader.cluster_members(), vec![1, 2, 3, 4]);
+        // joint 已设置，Cnew 不含 3
+        let joint = leader.joint_consensus().expect("joint");
+        assert!(!joint.cnew.contains(&3));
     }
 
     #[test]
@@ -4239,5 +4426,210 @@ mod tests {
             "same seed should produce same result: {} vs {}",
             len1, len2
         );
+    }
+
+    // =====================================================================
+    //  OPT-2：Raft snapshot + log compaction 测试
+    // =====================================================================
+
+    #[test]
+    fn test_opt2_log_compact_basic() {
+        let mut log = RaftLog::new();
+        for i in 0..5u8 {
+            log.append_entry(1, vec![i]);
+        }
+        assert_eq!(log.last_log_index(), 5);
+        assert_eq!(log.len(), 5);
+        log.compact(3, 1).expect("compact");
+        assert_eq!(log.snapshot_last_index(), 3);
+        assert_eq!(log.snapshot_last_term(), 1);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log.last_log_index(), 5);
+        assert!(log.get(3).is_none());
+        assert!(log.get(2).is_none());
+        assert_eq!(log.get(4).unwrap().command, vec![3u8]);
+        assert_eq!(log.get(5).unwrap().command, vec![4u8]);
+    }
+
+    #[test]
+    fn test_opt2_log_compact_then_append() {
+        let mut log = RaftLog::new();
+        log.append_entry(1, vec![1]);
+        log.append_entry(1, vec![2]);
+        log.append_entry(2, vec![3]);
+        log.compact(2, 1).expect("compact");
+        let idx = log.append_entry(2, vec![4]);
+        assert_eq!(idx, 4);
+        assert_eq!(log.last_log_index(), 4);
+        assert_eq!(log.get(4).unwrap().command, vec![4u8]);
+    }
+
+    #[test]
+    fn test_opt2_log_compact_idempotent() {
+        let mut log = RaftLog::new();
+        log.append_entry(1, vec![1]);
+        log.append_entry(1, vec![2]);
+        log.compact(1, 1).expect("first compact");
+        assert_eq!(log.snapshot_last_index(), 1);
+        log.compact(1, 1).expect("idempotent compact");
+        assert_eq!(log.snapshot_last_index(), 1);
+        assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn test_opt2_log_compact_regress_rejected() {
+        let mut log = RaftLog::new();
+        for i in 0..5u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.compact(3, 1).expect("compact to 3");
+        let err = log.compact(2, 1).unwrap_err();
+        assert!(matches!(err, RaftError::InvalidState(_)));
+    }
+
+    #[test]
+    fn test_opt2_log_compact_exceeds_last_log_rejected() {
+        let mut log = RaftLog::new();
+        log.append_entry(1, vec![1]);
+        let err = log.compact(5, 1).unwrap_err();
+        assert!(matches!(err, RaftError::InvalidState(_)));
+    }
+
+    #[test]
+    fn test_opt2_log_slice_after_compact() {
+        let mut log = RaftLog::new();
+        for i in 0..6u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.compact(3, 1).expect("compact to 3");
+        let s = log.slice(1, 6);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].index, 4);
+        assert_eq!(s[1].index, 5);
+        let s2 = log.slice(4, 6);
+        assert_eq!(s2.len(), 2);
+    }
+
+    #[test]
+    fn test_opt2_log_truncate_after_compact() {
+        let mut log = RaftLog::new();
+        for i in 0..6u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.compact(2, 1).expect("compact to 2");
+        log.truncate_after(3);
+        assert_eq!(log.last_log_index(), 3);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.get(3).unwrap().command, vec![2u8]);
+        assert!(log.get(4).is_none());
+    }
+
+    #[test]
+    fn test_opt2_install_snapshot_newer() {
+        let mut log = RaftLog::new();
+        for i in 0..5u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.install_snapshot(10, 3);
+        assert_eq!(log.snapshot_last_index(), 10);
+        assert_eq!(log.snapshot_last_term(), 3);
+        assert_eq!(log.last_log_index(), 10);
+        assert_eq!(log.last_log_term(), 3);
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn test_opt2_install_snapshot_older_ignored() {
+        let mut log = RaftLog::new();
+        for i in 0..6u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.compact(5, 1).expect("compact");
+        log.install_snapshot(3, 1);
+        assert_eq!(log.snapshot_last_index(), 5);
+    }
+
+    #[test]
+    fn test_opt2_install_snapshot_keep_compatible_logs() {
+        let mut log = RaftLog::new();
+        for i in 0..10u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.install_snapshot(5, 1);
+        assert_eq!(log.snapshot_last_index(), 5);
+        assert_eq!(log.last_log_index(), 10);
+        assert_eq!(log.len(), 5);
+        assert_eq!(log.get(6).unwrap().command, vec![5u8]);
+    }
+
+    #[test]
+    fn test_opt2_install_snapshot_incompatible_clears_logs() {
+        let mut log = RaftLog::new();
+        log.append_entry(1, vec![1]);
+        log.append_entry(2, vec![2]);
+        log.install_snapshot(1, 5);
+        assert_eq!(log.snapshot_last_index(), 1);
+        assert_eq!(log.snapshot_last_term(), 5);
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn test_opt2_node_create_snapshot_requires_committed() {
+        let mut node = RaftNode::new(1, Config::new(vec![2, 3]));
+        // 手动追加日志（非 Leader 时 propose 会失败）
+        node.persistent.log.append_entry(1, vec![1]);
+        node.persistent.log.append_entry(1, vec![2]);
+        assert_eq!(node.last_log_index(), 2);
+        assert_eq!(node.commit_index(), 0);
+        let err = node.create_snapshot(1).unwrap_err();
+        assert!(matches!(err, RaftError::InvalidState(_)));
+    }
+
+    #[test]
+    fn test_opt2_node_create_snapshot_advances_last_applied() {
+        let mut node = RaftNode::new(1, Config::new(vec![2, 3]));
+        for i in 0..3u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        node.volatile.commit_index = 3;
+        node.volatile.last_applied = 0;
+        node.create_snapshot(2).expect("snapshot");
+        assert_eq!(node.snapshot_last_index(), 2);
+        assert_eq!(node.snapshot_last_term(), 1);
+        assert_eq!(node.last_applied(), 2);
+        assert_eq!(node.log_len(), 1);
+    }
+
+    #[test]
+    fn test_opt2_node_install_snapshot_advances_commit() {
+        let mut node = RaftNode::new(1, Config::new(vec![2, 3]));
+        node.install_snapshot(10, 2);
+        assert_eq!(node.snapshot_last_index(), 10);
+        assert_eq!(node.commit_index(), 10);
+        assert_eq!(node.last_applied(), 10);
+    }
+
+    #[test]
+    fn test_opt2_compact_preserves_election_uptodate() {
+        let mut log = RaftLog::new();
+        log.append_entry(1, vec![1]);
+        log.append_entry(1, vec![2]);
+        log.append_entry(2, vec![3]);
+        log.compact(2, 1).expect("compact");
+        assert_eq!(log.last_log_index(), 3);
+        assert_eq!(log.last_log_term(), 2);
+    }
+
+    #[test]
+    fn test_opt2_compact_full_log() {
+        let mut log = RaftLog::new();
+        for i in 0..5u8 {
+            log.append_entry(1, vec![i]);
+        }
+        log.compact(5, 1).expect("compact all");
+        assert_eq!(log.snapshot_last_index(), 5);
+        assert!(log.is_empty());
+        assert_eq!(log.last_log_index(), 5);
+        assert_eq!(log.last_log_term(), 1);
     }
 }

@@ -112,8 +112,8 @@ fn test_adv_con_001b_deadlock_via_blocking_lock() {
     // 启动 T2 线程，尝试获取 100（阻塞，因 T1 持有）
     let handle = thread::spawn(move || {
         // T2 等待 100，超时 500ms，应检测死锁或超时
-        let result = lock_mgr_clone.lock(2, 100, LockMode::Exclusive, Duration::from_millis(500));
-        result
+        // clippy fix: 直接返回表达式，避免 let binding 从 block 返回的警告
+        lock_mgr_clone.lock(2, 100, LockMode::Exclusive, Duration::from_millis(500))
     });
 
     // 主线程（T1）尝试获取 200（阻塞，因 T2 持有）→ 形成死锁环
@@ -807,10 +807,9 @@ fn test_adv_con_006b_autovacuum_scheduler() {
     );
 
     let report = scheduler.run(now, 1000, &mgr);
-    assert!(
-        report.vacuumed_table_count() >= 0,
-        "autovacuum should complete without panic"
-    );
+    // clippy fix: vacuumed_table_count() 返回 usize，恒 >= 0，原断言语义无意义。
+    // 测试意图为"autovacuum 应无 panic 完成"，直接消费返回值即可。
+    let _ = report.vacuumed_table_count();
 }
 
 // =====================================================================

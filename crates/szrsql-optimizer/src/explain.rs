@@ -1104,9 +1104,8 @@ mod tests {
     ///
     /// 验收标准：输出格式类似 PG 的 EXPLAIN ANALYZE
     ///
-    /// 注：当前执行器未实现 Sort 节点（Phase 3.x 遗留），集成测试使用
-    /// Distinct(Limit(Filter(Scan(t)))) 代替 Sort(Limit(Filter(Scan(t))))。
-    /// 待 Phase 6.x Sort 执行器实现后可补充 Sort 节点的 ANALYZE 测试。
+    /// 注：执行器已实现 Sort 节点（executor.rs execute_sort），集成测试可
+    /// 使用 Sort(Limit(Filter(Scan(t)))) 验证 ANALYZE 输出。
     #[test]
     fn test_explain_analyze_integration_pg_like_format() {
         let model = make_cost_model();

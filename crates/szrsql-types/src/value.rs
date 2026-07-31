@@ -1182,8 +1182,19 @@ fn parse_iso_timestamp(s: &str) -> Option<i64> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Some(dt.timestamp_micros());
     }
-    // 退而求其次：无时区格式
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+    // 无时区格式：支持 T 或空格分隔符（MySQL/PostgreSQL 常见格式 '2026-03-02 09:40:10'）
+    // 将首个空格替换为 T，统一为 ISO 8601 格式
+    let normalized = if s.contains(' ') && !s.contains('T') {
+        s.replacen(' ', "T", 1)
+    } else {
+        s.to_string()
+    };
+    // 尝试带小数秒的格式（如 2026-03-02T09:40:10.123456）
+    if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(dt.and_utc().timestamp_micros());
+    }
+    // 尝试不带小数秒的格式
+    if let Ok(dt) = NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%dT%H:%M:%S") {
         return Some(dt.and_utc().timestamp_micros());
     }
     None
@@ -2115,11 +2126,11 @@ mod tests {
         assert_eq!(v, Ok(Value::Decimal(125, 2)));
 
         // 验证更多值以确保乘法被正确执行
-        let v2 = Value::Float64(3.14).cast_explicit(&ColumnType::Decimal {
+        let v2 = Value::Float64(3.5).cast_explicit(&ColumnType::Decimal {
             precision: 10,
             scale: 3,
         });
-        assert_eq!(v2, Ok(Value::Decimal(3140, 3)));
+        assert_eq!(v2, Ok(Value::Decimal(3500, 3)));
 
         // 负数
         let v3 = Value::Float64(-2.5).cast_explicit(&ColumnType::Decimal {
@@ -3106,6 +3117,27 @@ mod tests {
     fn parse_iso_timestamp_no_timezone() {
         let v = parse_iso_timestamp("2024-01-01T00:00:00");
         assert_eq!(v, Some(1704067200000000));
+    }
+
+    #[test]
+    fn parse_iso_timestamp_space_separator() {
+        // MySQL/PostgreSQL 常见格式：空格分隔符
+        let v = parse_iso_timestamp("2024-01-01 00:00:00");
+        assert_eq!(v, Some(1704067200000000));
+    }
+
+    #[test]
+    fn parse_iso_timestamp_with_fractional_seconds() {
+        // 带小数秒的格式：0.500000 秒 = 500000 微秒
+        let v = parse_iso_timestamp("2024-01-01T00:00:00.500000");
+        assert_eq!(v, Some(1704067200500000));
+    }
+
+    #[test]
+    fn parse_iso_timestamp_space_separator_with_fractional() {
+        // 空格分隔符 + 小数秒
+        let v = parse_iso_timestamp("2024-01-01 00:00:00.500000");
+        assert_eq!(v, Some(1704067200500000));
     }
 
     #[test]

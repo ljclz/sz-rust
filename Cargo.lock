@@ -1691,6 +1691,8 @@ dependencies = [
  "chrono",
  "fallible-iterator",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
 ]
 
 [[package]]
@@ -2081,6 +2083,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2355,11 +2368,16 @@ dependencies = [
 
 [[package]]
 name = "szrsql-ai"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
+ "szrsql-catalog",
+ "szrsql-cdc",
+ "szrsql-optimizer",
+ "szrsql-sql",
  "szrsql-storage",
+ "szrsql-tx",
  "szrsql-types",
  "thiserror",
  "tokio",
@@ -2367,16 +2385,20 @@ dependencies = [
 
 [[package]]
 name = "szrsql-bin"
-version = "0.1.0"
+version = "1.0.0-rc.2"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "serde",
  "serde_json",
  "szrsql-ai",
+ "szrsql-catalog",
  "szrsql-cdc",
  "szrsql-dist",
+ "szrsql-mysql-protocol",
  "szrsql-optimizer",
+ "szrsql-oracle-bridge",
  "szrsql-pgcompat",
  "szrsql-protocol",
  "szrsql-replication",
@@ -2384,8 +2406,10 @@ dependencies = [
  "szrsql-security",
  "szrsql-sql",
  "szrsql-storage",
+ "szrsql-tds-protocol",
  "szrsql-tx",
  "szrsql-types",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2393,9 +2417,10 @@ dependencies = [
 
 [[package]]
 name = "szrsql-catalog"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "serde",
+ "serde_json",
  "szrsql-sql",
  "szrsql-types",
  "thiserror",
@@ -2403,26 +2428,64 @@ dependencies = [
 
 [[package]]
 name = "szrsql-cdc"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "base64",
  "bincode",
+ "chrono",
+ "postgres",
+ "rand 0.9.5",
  "serde",
  "serde_json",
  "szrsql-tx",
  "szrsql-types",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
-name = "szrsql-dist"
-version = "0.1.0"
+name = "szrsql-dialect-compat"
+version = "1.0.0-rc.1"
 dependencies = [
+ "proptest",
+ "regex",
+ "serde",
+ "serde_json",
+ "szrsql-sql",
+ "szrsql-types",
+ "thiserror",
+]
+
+[[package]]
+name = "szrsql-dist"
+version = "1.0.0-rc.1"
+dependencies = [
+ "bincode",
  "serde",
  "serde_json",
  "szrsql-cdc",
  "szrsql-replication",
+ "szrsql-tx",
+ "szrsql-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "szrsql-mysql-protocol"
+version = "1.0.0-rc.1"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "rand 0.9.5",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "szrsql-protocol",
+ "szrsql-sql",
  "szrsql-tx",
  "szrsql-types",
  "thiserror",
@@ -2432,7 +2495,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-ops"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2442,7 +2505,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-optimizer"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "rand 0.9.5",
  "serde",
@@ -2453,8 +2516,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "szrsql-oracle-bridge"
+version = "1.0.0-rc.2"
+dependencies = [
+ "bytes",
+ "chrono",
+ "regex",
+ "serde_json",
+ "szrsql-protocol",
+ "szrsql-sql",
+ "szrsql-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "szrsql-pgcompat"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "proptest",
  "serde",
@@ -2467,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-protocol"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "base64",
  "bytes",
@@ -2482,6 +2561,9 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "szrsql-catalog",
+ "szrsql-cdc",
+ "szrsql-dist",
+ "szrsql-optimizer",
  "szrsql-sql",
  "szrsql-tx",
  "szrsql-types",
@@ -2494,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-replication"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "crc32c",
  "serde",
@@ -2509,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-scheduler"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "chrono",
  "serde",
@@ -2521,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-security"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2538,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-shadow"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "chrono",
  "postgres",
@@ -2553,7 +2635,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-sql"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -2563,14 +2645,34 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlparser",
+ "szrsql-cdc",
+ "szrsql-dist",
+ "szrsql-storage",
+ "szrsql-tx",
  "szrsql-types",
+ "tempfile",
  "thiserror",
  "tracing",
 ]
 
 [[package]]
+name = "szrsql-sqlite-bridge"
+version = "1.0.0-rc.1"
+dependencies = [
+ "bytes",
+ "chrono",
+ "serde_json",
+ "szrsql-protocol",
+ "szrsql-sql",
+ "szrsql-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "szrsql-storage"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "arrow",
  "bytes",
@@ -2591,8 +2693,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "szrsql-tds-protocol"
+version = "1.0.0-rc.1"
+dependencies = [
+ "bytes",
+ "rand 0.9.5",
+ "serde_json",
+ "szrsql-protocol",
+ "szrsql-sql",
+ "szrsql-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "szrsql-tx"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "bytes",
  "crc32c",
@@ -2609,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "szrsql-types"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 dependencies = [
  "bincode",
  "bytes",

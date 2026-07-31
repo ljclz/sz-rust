@@ -22,9 +22,11 @@
 //!
 //! Phase 6.4 仅支持 Rust 注册的触发器函数；PL/pgSQL 函数体执行留待 Phase 6.5/6.6 实现。
 
-use crate::ast::{TriggerDefinition, TriggerEvent, TriggerLevel, TriggerTiming};
+use crate::ast::{Expr, TriggerDefinition, TriggerEvent, TriggerLevel, TriggerTiming};
 use crate::executor::{ExecutionError, Row};
+use crate::expr::{EvalError, ExprEvaluator, RowContext};
 use crate::plan::TableSchema;
+use szrsql_types::value::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -423,13 +425,17 @@ pub fn fire_row_triggers(
         if !should_fire(trig, kind, updated_columns) {
             continue;
         }
-        // WHEN 条件评估（仅当存在时；当前 Phase 6.4 简化：WHEN 留待 Phase 6.5 实现，
-        // 因为 WHEN 需要 ExprEvaluator + 行上下文，而此处避免引入循环依赖）
-        // TODO Phase 6.5: 评估 trig.when_clause
-        if trig.when_clause.is_some() {
-            // 暂时跳过 WHEN 条件的触发器（避免错误触发）
-            // 注：这是 Phase 6.4 已知限制，将在 Phase 6.5 实现
-            continue;
+        // WHEN 条件评估（P0-FIX-2 实现）
+        // 当触发器带 WHEN 子句时，对当前行求值 WHEN 表达式；
+        // 仅当结果为真（true）时才触发，false/null 时跳过该行。
+        // 构造上下文：使用当前（可能已修改的）NEW 行；
+        // 若 current_new 为 None（未被修改），回退到原 new_row
+        let new_ref = current_new.as_ref().or(new_row);
+        if let Some(when_expr) = &trig.when_clause {
+            if !evaluate_when_clause(when_expr, schema, new_ref, old_row)? {
+                // WHEN 为 false/null，跳过此触发器
+                continue;
+            }
         }
         let func = match registry.get(&trig.func_name) {
             Some(f) => f,
@@ -440,9 +446,6 @@ pub fn fire_row_triggers(
                 )));
             }
         };
-        // 构造上下文：使用当前（可能已修改的）NEW 行；
-        // 若 current_new 为 None（未被修改），回退到原 new_row
-        let new_ref = current_new.as_ref().or(new_row);
         let ctx = TriggerContext::for_row(
             table_name,
             &trig.name,
@@ -513,6 +516,81 @@ pub fn fire_statement_triggers(
         fire_one(func.as_ref(), &ctx, false)?;
     }
     Ok(())
+}
+
+/// 评估行级触发器的 WHEN 子句 — P0-FIX-2
+///
+/// # 语义
+/// - 将 NEW/OLD 行的列值注入 RowContext
+/// - 使用 ExprEvaluator 求值 WHEN 表达式
+/// - 结果为 `Value::Bool(true)` → 返回 true（触发器执行）
+/// - 结果为 `Value::Bool(false)` 或 `Value::Null` → 返回 false（跳过触发器）
+/// - 其他类型 → 按 PG 语义转换为 bool（非零/非空为 true）
+///
+/// # 参数
+/// - `when_expr`：WHEN 子句表达式
+/// - `schema`：表 Schema（用于列名查找）
+/// - `new_row`：NEW 行（INSERT/UPDATE 时存在）
+/// - `old_row`：OLD 行（UPDATE/DELETE 时存在）
+fn evaluate_when_clause(
+    when_expr: &Expr,
+    schema: &TableSchema,
+    new_row: Option<&Row>,
+    old_row: Option<&Row>,
+) -> Result<bool, ExecutionError> {
+    let mut ctx = RowContext::new();
+    // 注入 NEW.column 和 OLD.column 值
+    // PG 语义：WHEN 中可引用 NEW.col / OLD.col，也可直接引用 col（等同 NEW.col）
+    if let Some(new) = new_row {
+        for (i, col) in schema.columns.iter().enumerate() {
+            let val = new.get(i).cloned().unwrap_or(Value::Null);
+            // NEW.col
+            ctx.columns
+                .insert(format!("NEW.{}", col.name).to_lowercase(), val.clone());
+            // 裸列名（等同 NEW.col，PG 行级触发器 WHEN 语义）
+            ctx.columns.insert(col.name.to_lowercase(), val);
+        }
+    }
+    if let Some(old) = old_row {
+        for (i, col) in schema.columns.iter().enumerate() {
+            let val = old.get(i).cloned().unwrap_or(Value::Null);
+            // OLD.col
+            ctx.columns
+                .insert(format!("OLD.{}", col.name).to_lowercase(), val.clone());
+            // 若 NEW 不存在（DELETE），裸列名等同 OLD.col
+            if new_row.is_none() {
+                ctx.columns.insert(col.name.to_lowercase(), val);
+            }
+        }
+    }
+    match ExprEvaluator::eval(when_expr, &ctx) {
+        Ok(Value::Bool(b)) => Ok(b),
+        Ok(Value::Null) => Ok(false),
+        Ok(other) => {
+            // 非 bool/NULL 值：按 PG 语义转换（非零/非空字符串为 true）
+            tracing::warn!(
+                ?other,
+                "WHEN clause evaluated to non-boolean value, coercing to bool"
+            );
+            Ok(match other {
+                Value::Null => false,
+                Value::Int64(0) => false,
+                Value::Text(t) if t.is_empty() => false,
+                _ => true,
+            })
+        }
+        Err(EvalError::ColumnNotFound(name)) => {
+            // 列名未找到：可能是引用了不存在的列，按 PG 语义报错
+            Err(ExecutionError::InvalidArgument(format!(
+                "column \"{}\" does not exist in WHEN clause of trigger",
+                name
+            )))
+        }
+        Err(e) => Err(ExecutionError::InvalidArgument(format!(
+            "WHEN clause evaluation failed: {:?}",
+            e
+        ))),
+    }
 }
 
 // =====================================================================

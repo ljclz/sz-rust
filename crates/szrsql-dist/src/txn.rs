@@ -31,23 +31,23 @@ use std::fmt;
 // =====================================================================
 
 /// 数据记录前缀
-const DATA_PREFIX: u8 = 0x01;
+pub(crate) const DATA_PREFIX: u8 = 0x01;
 /// 锁记录前缀
-const LOCK_PREFIX: u8 = 0x02;
+pub(crate) const LOCK_PREFIX: u8 = 0x02;
 /// 写记录前缀
-const WRITE_PREFIX: u8 = 0x03;
+pub(crate) const WRITE_PREFIX: u8 = 0x03;
 
 /// 锁类型：Put
-const LOCK_KIND_PUT: u8 = 0x01;
+pub(crate) const LOCK_KIND_PUT: u8 = 0x01;
 /// 锁类型：Delete
-const LOCK_KIND_DELETE: u8 = 0x02;
+pub(crate) const LOCK_KIND_DELETE: u8 = 0x02;
 
 /// 写记录类型：Put
-const WRITE_KIND_PUT: u8 = 0x01;
+pub(crate) const WRITE_KIND_PUT: u8 = 0x01;
 /// 写记录类型：Delete
-const WRITE_KIND_DELETE: u8 = 0x02;
+pub(crate) const WRITE_KIND_DELETE: u8 = 0x02;
 /// 写记录类型：Rollback
-const WRITE_KIND_ROLLBACK: u8 = 0x03;
+pub(crate) const WRITE_KIND_ROLLBACK: u8 = 0x03;
 
 // =====================================================================
 //  TimestampOracle — 全局时间戳服务
@@ -350,7 +350,7 @@ impl From<RaftError> for TxnError {
 // =====================================================================
 
 /// 构造数据键：`DATA_PREFIX || original_key || start_ts`
-fn data_key(key: &[u8], start_ts: u64) -> Vec<u8> {
+pub(crate) fn data_key(key: &[u8], start_ts: u64) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + key.len() + 8);
     buf.push(DATA_PREFIX);
     buf.extend_from_slice(key);
@@ -359,7 +359,7 @@ fn data_key(key: &[u8], start_ts: u64) -> Vec<u8> {
 }
 
 /// 构造锁键：`LOCK_PREFIX || original_key`
-fn lock_key(key: &[u8]) -> Vec<u8> {
+pub(crate) fn lock_key(key: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + key.len());
     buf.push(LOCK_PREFIX);
     buf.extend_from_slice(key);
@@ -367,7 +367,7 @@ fn lock_key(key: &[u8]) -> Vec<u8> {
 }
 
 /// 构造写键：`WRITE_PREFIX || original_key || commit_ts`
-fn write_key(key: &[u8], commit_ts: u64) -> Vec<u8> {
+pub(crate) fn write_key(key: &[u8], commit_ts: u64) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + key.len() + 8);
     buf.push(WRITE_PREFIX);
     buf.extend_from_slice(key);
@@ -378,7 +378,7 @@ fn write_key(key: &[u8], commit_ts: u64) -> Vec<u8> {
 /// 构造同一 original_key 的所有数据记录范围
 ///
 /// 返回 (start, end)，覆盖 `DATA_PREFIX || key || 任意 start_ts`。
-fn data_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn data_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut start = Vec::with_capacity(1 + key.len());
     start.push(DATA_PREFIX);
     start.extend_from_slice(key);
@@ -390,7 +390,7 @@ fn data_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// 构造同一 original_key 的所有写记录范围
-fn write_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
+pub(crate) fn write_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut start = Vec::with_capacity(1 + key.len());
     start.push(WRITE_PREFIX);
     start.extend_from_slice(key);

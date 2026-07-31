@@ -4,7 +4,7 @@
 //!
 //! 1. 客户端连接后发送以下之一：
 //!    - `StartupMessage`：开始正常启动握手
-//!    - `SSLRequest`：请求 SSL 加密（Phase 4.1 返回 'N' 拒绝，待 4.5 实现 TLS）
+//!    - `SSLRequest`：请求 SSL 加密（Phase 4.5 已实现 TLS，根据配置返回 'S' 或 'N'）
 //!    - `GSSENCRequest`：请求 GSSAPI 加密（同样拒绝）
 //!    - `CancelRequest`：请求取消正在执行的查询
 //!

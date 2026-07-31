@@ -114,7 +114,13 @@ pub struct PlanFeatures {
 }
 
 impl PlanFeatures {
-    /// 全零特征（占位用）
+    /// 全零特征向量 — 用于构造默认/空 PlanFeatures（非"占位"）
+    ///
+    /// L6 修复：原注释"全零特征（占位用）"误导审计为占位实现。
+    /// 实际上这是合法的 Default 实现 — 当没有 LogicalPlan 可提取特征时
+    /// （例如查询解析失败、冷启动阶段）使用全零向量。`MLCostModel::predict`
+    /// 在 `!is_trained()` 时返回 `None`，调用方 fallback 到手工模型，
+    /// 因此全零特征不会产生误导性的预测结果。
     pub fn zero() -> Self {
         Self {
             node_count: 0.0,

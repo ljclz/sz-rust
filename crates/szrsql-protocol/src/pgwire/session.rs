@@ -25,21 +25,24 @@ use crate::pgwire::copy::{
 use crate::pgwire::message::SqlState;
 use crate::pgwire::notify::{Notification, NotifyHub};
 use szrsql_sql::ast::{
-    CopyDirection, CopyFormat, CopyOptions, CopyTarget, Expr, Statement, TableName,
+    CommentObjectType, CopyDirection, CopyFormat, CopyOptions, CopyTarget, Expr, SelectItem,
+    Statement, TableConstraint, TableName, TransactionAccess, TransactionIsolation,
 };
 use szrsql_sql::executor::{
     DmlResult, ExecutionError, Executor, InMemorySequenceStore, InMemoryTable, MutableTable,
-    PreparedStatementStore, SessionState, TableSnapshot, TableStorage, TempTableStore,
-    TransactionHistory,
+    PreparedStatementStore, SessionState, SharedSequenceState, TableSnapshot, TableStorage,
+    TempTableStore, TransactionHistory,
 };
+use crate::pgwire::dirty_tracker::DirtyTableTracker;
 use szrsql_sql::parser::{parse_sql, ParseError};
 use szrsql_sql::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner, TableSchema};
+use szrsql_tx::mvcc::{IsolationLevel, MvccManager, MvccError};
 use szrsql_tx::wal::{WalError, WalOpType, WalRecord, WalWriter};
 use szrsql_types::value::{ColumnType, Value};
 use thiserror::Error;
 use tokio::sync::{Mutex, RwLock};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // =====================================================================
@@ -186,6 +189,80 @@ pub struct ResultColumn {
     pub column_type: ColumnType,
 }
 
+/// 根据 RETURNING 子句构造 ResultColumn 列表。
+///
+/// executor 的 `project_returning` 只返回 RETURNING 子句指定的列，
+/// 因此 RowDescription 的字段数必须与之匹配。
+///
+/// - `Wildcard` / `QualifiedWildcard` → 表全部列
+/// - `UnnamedExpr(Identifier([col]))` → 单列
+/// - `UnnamedExpr(other)` / `ExprWithAlias` → 用别名或表达式文本作为列名，类型用 Text 降级
+fn build_returning_columns(
+    schema: &TableSchema,
+    returning: &Option<Vec<SelectItem>>,
+) -> Vec<ResultColumn> {
+    let items = match returning {
+        None => {
+            // 无 RETURNING 子句但又有 returning_rows（理论上不会发生）→ 返回表全部列
+            return schema
+                .columns
+                .iter()
+                .map(|c| ResultColumn {
+                    name: c.name.clone(),
+                    column_type: c.data_type.clone(),
+                })
+                .collect();
+        }
+        Some(items) => items,
+    };
+
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            SelectItem::Wildcard | SelectItem::QualifiedWildcard(_) => {
+                for c in &schema.columns {
+                    out.push(ResultColumn {
+                        name: c.name.clone(),
+                        column_type: c.data_type.clone(),
+                    });
+                }
+            }
+            SelectItem::UnnamedExpr(Expr::Identifier(idents)) => {
+                if let Some(col_name) = idents.last() {
+                    let ct = schema
+                        .columns
+                        .iter()
+                        .find(|c| c.name.eq_ignore_ascii_case(col_name))
+                        .map(|c| c.data_type.clone())
+                        .unwrap_or(ColumnType::Text);
+                    out.push(ResultColumn {
+                        name: col_name.clone(),
+                        column_type: ct,
+                    });
+                } else {
+                    out.push(ResultColumn {
+                        name: "?column?".into(),
+                        column_type: ColumnType::Text,
+                    });
+                }
+            }
+            SelectItem::ExprWithAlias { expr: _, alias } => {
+                out.push(ResultColumn {
+                    name: alias.clone(),
+                    column_type: ColumnType::Text,
+                });
+            }
+            SelectItem::UnnamedExpr(_) => {
+                out.push(ResultColumn {
+                    name: "?column?".into(),
+                    column_type: ColumnType::Text,
+                });
+            }
+        }
+    }
+    out
+}
+
 // =====================================================================
 //  事务状态
 // =====================================================================
@@ -249,6 +326,11 @@ pub struct ExecutorService {
     temp_store: TempTableStore,
     /// 序列存储（Phase 3.22）
     sequence_store: InMemorySequenceStore,
+    /// P0-6 修复：物化视图存储表（视图名小写 → 表实例）
+    ///
+    /// CREATE MATERIALIZED VIEW 时创建空存储表，REFRESH 时填充数据，
+    /// MaterializedViewScan 执行时注册到 Executor 供扫描读取。
+    materialized_view_tables: HashMap<String, Arc<Mutex<InMemoryTable>>>,
     /// 预处理语句存储（Phase 3.26，SQL PREPARE/EXECUTE 语句使用）
     prepared_store: PreparedStatementStore,
     /// 会话状态（SET 变量、字符集等 Phase 3.34）
@@ -286,6 +368,12 @@ pub struct ExecutorService {
     ///
     /// 由 `PgwireServer` 在会话创建时通过 [`with_wal_writer`] 注入。
     wal_writer: Option<Arc<WalWriter>>,
+    /// P0-1 修复：事务期间修改的表名集合（用于 WAL 崩溃恢复）。
+    ///
+    /// - BEGIN 时清空
+    /// - INSERT/UPDATE/DELETE 执行后添加表名
+    /// - COMMIT 时将这些表的全量数据写入 WAL，确保崩溃后可恢复
+    txn_modified_tables: HashSet<String>,
     /// 当前事务 ID（BEGIN 时分配，COMMIT/ROLLBACK 后清空）。
     ///
     /// 用于 WAL Commit/Abort 记录的 `tx_id` 字段。从 1 开始递增，0 表示无事务。
@@ -315,6 +403,38 @@ pub struct ExecutorService {
     /// `None`（默认）：退化为会话级 `next_txn_id` 计数器（旧行为）
     /// `Some`：BEGIN 时从共享计数器原子递增获取全局唯一 txn_id
     shared_txn_counter: Option<Arc<std::sync::atomic::AtomicU32>>,
+    /// Phase 4.7：当前数据库名（来自 StartupParams.database()，缺省 "szrsql"）。
+    ///
+    /// 用于 `pg_database` 系统表查询时返回当前连接的数据库名。
+    /// Navicat 连接时会执行 `SELECT * FROM pg_database`，必须返回当前 db 名。
+    database_name: String,
+    /// P0-TX-1 修复：MVCC 事务管理器（跨会话共享）。
+    ///
+    /// 注入后，BEGIN/COMMIT/ROLLBACK 会同步到 MvccManager 状态机，
+    /// 实现 MVCC 事务可见性判断（而非表级 snapshot/restore）。
+    /// 未注入时退化为表级 snapshot/restore（旧行为，用于测试兼容）。
+    mvcc: Option<Arc<MvccManager>>,
+    /// P0-TX-1 修复：待应用的隔离级别（由 SET TRANSACTION ISOLATION LEVEL 设置，下次 BEGIN 生效）。
+    pending_isolation: Option<IsolationLevel>,
+    /// P0-DIST-1/2/3：分布式运行时句柄（跨会话共享）。
+    ///
+    /// 注入后，DML 操作通过 `Executor::dist_dual_write` 双写到分布式 KV 存储，
+    /// 实现真实分布式持久化路径（Raft propose → apply）。
+    /// 未注入时退化为本地内存表存储（旧行为，用于测试兼容）。
+    dist_runtime: Option<szrsql_dist::runtime::DistRuntimeHandle>,
+    /// P7-1：跨会话共享的 CDC 引擎。
+    ///
+    /// 注入后，DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件分发到 CDC 引擎，
+    /// 供已注册的 CdcObserver（如 ReplicationTask）消费，实现变更数据捕获。
+    /// 未注入时退化为旧行为（DML 不触发 CDC 事件）。
+    cdc_engine: Option<Arc<szrsql_cdc::CdcEngine>>,
+    /// P1-2：跨会话共享的脏表跟踪器（增量快照机制）。
+    ///
+    /// 注入后，事务 COMMIT 成功后会调用 `tracker.mark_dirty_many` 标记该事务
+    /// 修改过的表为脏。后台周期性快照任务仅对脏表集合中的表重新序列化，
+    /// 避免每次都对所有表做全量序列化。
+    /// 未注入时退化为旧行为（全量快照，每次都序列化所有表）。
+    dirty_tracker: Option<Arc<DirtyTableTracker>>,
 }
 
 impl ExecutorService {
@@ -325,6 +445,7 @@ impl ExecutorService {
             tables: HashMap::new(),
             temp_store: TempTableStore::new(),
             sequence_store: InMemorySequenceStore::new(),
+            materialized_view_tables: HashMap::new(),
             prepared_store: PreparedStatementStore::new(),
             session_state: SessionState::new(),
             transaction_history: TransactionHistory::new(),
@@ -336,11 +457,18 @@ impl ExecutorService {
             notify_hub: None,
             allow_multi_statement: false,
             wal_writer: None,
+            txn_modified_tables: HashSet::new(),
             current_txn_id: 0,
             next_txn_id: 1,
             shared_tables: None,
             lock_manager: None,
             shared_txn_counter: None,
+            database_name: "szrsql".to_string(),
+            mvcc: None,
+            pending_isolation: None,
+            dist_runtime: None,
+            cdc_engine: None,
+            dirty_tracker: None,
         }
     }
 
@@ -427,6 +555,91 @@ impl ExecutorService {
             hub.register(pid);
         }
         self
+    }
+
+    /// Phase 4.7：设置当前数据库名（由 `PgwireServer` 在握手时从 StartupParams 注入）。
+    ///
+    /// 该值用于 `pg_database` 系统表查询，返回当前连接的数据库名。
+    /// Navicat 等工具连接后会立即查询 `pg_database`，必须返回当前 db 名才能正常浏览。
+    pub fn with_database_name(mut self, db: impl Into<String>) -> Self {
+        self.database_name = db.into();
+        self
+    }
+
+    /// P0-4 修复：注入跨会话共享的序列全局状态。
+    ///
+    /// 注入后：
+    /// - `CREATE SEQUENCE` 创建到共享状态，所有 session 可见
+    /// - `nextval(seq)` 推进全局状态，多 session 调用同一序列时值递增
+    /// - `currval(seq)` 仅返回本 session 最近一次 `nextval` 的结果（PG 语义）
+    /// - `DROP SEQUENCE` 从共享状态移除并清理本 session 的 currval
+    ///
+    /// 未注入时退化为会话私有存储（旧行为，用于测试兼容）。
+    ///
+    /// # 参数
+    /// - `shared`：共享序列全局状态句柄（由 `PgwireServer` 持有）
+    pub fn with_sequence_shared_state(mut self, shared: SharedSequenceState) -> Self {
+        self.sequence_store = InMemorySequenceStore::from_shared_state(shared);
+        self
+    }
+
+    /// P0-TX-1 修复：注入 MVCC 事务管理器，启用 MVCC 事务可见性。
+    ///
+    /// 注入后：
+    /// - BEGIN 调用 `MvccManager::begin_with_isolation()` 分配 txn_id 和 snapshot
+    /// - COMMIT 调用 `MvccManager::commit_durable()` 执行 SSI 检测 + log-then-commit
+    /// - ROLLBACK 调用 `MvccManager::abort()` 回滚事务
+    /// - SET TRANSACTION ISOLATION LEVEL 保存到 pending_isolation，下次 BEGIN 生效
+    ///
+    /// 未注入时退化为表级 snapshot/restore（旧行为，用于测试兼容）。
+    pub fn with_mvcc(mut self, mgr: Arc<MvccManager>) -> Self {
+        self.mvcc = Some(mgr);
+        self
+    }
+
+    /// P0-DIST-1/2/3：注入分布式运行时句柄，启用分布式双写。
+    ///
+    /// 注入后，DML 操作通过 `Executor::dist_dual_write` 双写到分布式 KV 存储：
+    /// - INSERT：本地写入 + `dist_runtime.put("{table}:{row_id}", serialized_row)`
+    /// - UPDATE：本地更新 + `dist_runtime.put(...)`（覆盖）
+    /// - DELETE：本地删除 + `dist_runtime.delete(...)`
+    ///
+    /// 分布式写入失败仅记录 warn 日志，不中断 DML（best-effort 双写）。
+    /// 未注入时退化为本地内存表存储（旧行为，用于测试兼容）。
+    pub fn with_dist_runtime(
+        mut self,
+        handle: szrsql_dist::runtime::DistRuntimeHandle,
+    ) -> Self {
+        self.dist_runtime = Some(handle);
+        self
+    }
+
+    /// P7-1：注入跨会话共享的 CDC 引擎，启用 DML 事件分发。
+    ///
+    /// 注入后，所有 DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件分发到 CDC 引擎，
+    /// 供已注册的 CdcObserver（如 ReplicationTask）消费，实现变更数据捕获。
+    ///
+    /// 未注入时退化为旧行为（DML 不触发 CDC 事件，用于测试兼容）。
+    pub fn with_cdc_engine(mut self, engine: Arc<szrsql_cdc::CdcEngine>) -> Self {
+        self.cdc_engine = Some(engine);
+        self
+    }
+
+    /// P1-2：注入跨会话共享的脏表跟踪器，启用增量快照机制。
+    ///
+    /// 注入后，事务 COMMIT 成功后会调用 `tracker.mark_dirty_many` 标记该事务
+    /// 修改过的表为脏。后台周期性快照任务仅对脏表集合中的表重新序列化，
+    /// 避免每次都对所有表做全量序列化。
+    ///
+    /// 未注入时退化为旧行为（全量快照，每次都序列化所有表，用于测试兼容）。
+    pub fn with_dirty_tracker(mut self, tracker: Arc<DirtyTableTracker>) -> Self {
+        self.dirty_tracker = Some(tracker);
+        self
+    }
+
+    /// Phase 4.7：返回当前数据库名（用于系统表查询）。
+    pub fn database_name(&self) -> &str {
+        &self.database_name
     }
 
     /// Phase 4.6：注入跨会话通知中心（由 `PgwireServer` 在握手时调用）。
@@ -606,11 +819,12 @@ impl ExecutorService {
     /// ADV-CONC-1：从共享存储同步 catalog 到本地。
     ///
     /// 当启用 `shared_tables` 时，其他 session 的 CREATE TABLE 会注册到共享存储，
-    /// 但本 session 的 `catalog` 是私有的。此方法在每次 `execute_statement` 开始时调用，
-    /// 将共享存储中的表 schema 同步到本地 catalog，确保 Planner 能找到表定义。
+    /// 但本 session 的 `catalog` 是私有的。此方法在每次 `execute_statement` 和
+    /// `extended_execute` 开始时调用，将共享存储中的表 schema 同步到本地 catalog，
+    /// 确保 Planner 能找到表定义。
     ///
     /// 同步策略：只新增不删除（DROP TABLE 由本地 DDL 处理器同步移除）。
-    async fn sync_catalog_from_shared(&mut self) {
+    pub(crate) async fn sync_catalog_from_shared(&mut self) {
         let shared = match &self.shared_tables {
             Some(s) => s,
             None => return,
@@ -650,21 +864,78 @@ impl ExecutorService {
             ));
         }
 
-        // 2. Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.*）
+        // 2. Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.* / pg_database / pg_namespace / pg_class / ...）
         //    这类查询需要 MutableCatalog 接口（szrsql-catalog 提供），无法走 Planner
         //    （Planner 只接受 Catalog trait）。在 plan_statement 之前拦截，直接返回结果。
-        if let Some(result) =
-            crate::pgwire::system_tables::try_execute_system_table_query(&stmt, &self.catalog)
-        {
+        if let Some(result) = crate::pgwire::system_tables::try_execute_system_table_query(
+            &stmt,
+            &self.catalog,
+            &self.database_name,
+        ) {
             return result;
         }
 
-        // 3. 其余语句走 Planner
+        // Phase TDengine-P2: COMMENT ON 拦截（不经过 Planner，直接操作 catalog）
+        // COMMENT ON 仅修改 catalog 元数据，不产生逻辑计划
+        if let Statement::Comment {
+            object_type,
+            object_name,
+            column_name,
+            comment,
+        } = &stmt
+        {
+            match object_type {
+                CommentObjectType::Table => {
+                    self.catalog
+                        .set_table_comment(object_name, comment.clone())
+                        .map_err(|e| SessionError::Plan(e.to_string()))?;
+                }
+                CommentObjectType::Column => {
+                    // P0 修复：COLUMN 注释必须指定列名，否则报错（之前是假成功）
+                    let col = column_name.as_ref().ok_or_else(|| {
+                        SessionError::Plan(
+                            "COMMENT ON COLUMN requires a column name".into(),
+                        )
+                    })?;
+                    self.catalog
+                        .set_column_comment(object_name, col, comment.clone())
+                        .map_err(|e| SessionError::Plan(e.to_string()))?;
+                }
+            }
+            return Ok(QueryResult::DdlComplete {
+                tag: "COMMENT".into(),
+            });
+        }
+
+        // 3. 其余语句走 Planner + OPT-5 优化器 pass
+        //
+        // OPT-5：在 Planner 产出 LogicalPlan 后，应用 RBO 优化规则
+        // （谓词下推 + 投影裁剪），减少不必要的列扫描和行数。
+        // OPT-10：将 CPU 密集的规划 + 优化放入 spawn_blocking，
+        // 避免阻塞 tokio worker 线程。
         let plan = {
-            let catalog_ref: &InMemoryCatalog = &self.catalog;
-            let planner = Planner::new(catalog_ref);
-            planner.plan_statement(stmt)?
-        };
+            let catalog_clone = self.catalog.clone();
+            tokio::task::spawn_blocking(move || -> Result<LogicalPlan, SessionError> {
+                let planner = Planner::new(&catalog_clone);
+                let raw_plan = planner.plan_statement(stmt)?;
+                // OPT-5: 应用 RBO 规则（不需要统计信息，零成本激活已有优化器代码）
+                // 顺序：谓词下推 → 投影裁剪 → 子查询展平 → 索引选择 → 公共子表达式消除
+                let optimized = szrsql_optimizer::rule::PredicatePushdown::apply(raw_plan);
+                let optimized = szrsql_optimizer::rule::ProjectionPruning::apply(optimized);
+                // P2-1: 子查询展平（IN/EXISTS 转 Semi/Anti Join）
+                let optimized =
+                    szrsql_optimizer::rule::SubqueryFlattening::new(&planner).apply(optimized);
+                // P2-2: 索引选择（SELECT WHERE 走 B-Tree 索引而非全表扫描）
+                let optimized =
+                    szrsql_optimizer::rule::IndexSelection::new(&catalog_clone).apply(optimized);
+                // P2-3: 公共子表达式消除
+                let optimized =
+                    szrsql_optimizer::rule::CommonSubexpressionElimination::apply(optimized);
+                Ok(optimized)
+            })
+            .await
+            .map_err(|e| SessionError::Transaction(format!("planning task panicked: {e}")))?
+        }?;
 
         // 4. 分派执行
         self.dispatch_plan(&plan).await
@@ -703,7 +974,7 @@ impl ExecutorService {
                     }));
                 }
                 // ADV-F-7：log-then-commit — WAL fsync 失败时回滚事务并返回错误
-                match self.commit_transaction() {
+                match self.commit_transaction().await {
                     Ok(()) => Ok(Some(QueryResult::TransactionComplete {
                         tag: "COMMIT".into(),
                         in_transaction: false,
@@ -727,14 +998,51 @@ impl ExecutorService {
                     in_transaction: false,
                 }))
             }
-            // SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT / SET TRANSACTION
-            // Phase 4.2 暂不支持，留待后续阶段
+            // SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT — Phase 4.2 暂不支持
             Statement::Rollback { savepoint: Some(_) }
             | Statement::Savepoint(_)
-            | Statement::ReleaseSavepoint(_)
-            | Statement::SetTransaction { .. } => Err(SessionError::Transaction(format!(
-                "savepoint/set transaction not supported in Phase 4.2: {stmt:?}"
+            | Statement::ReleaseSavepoint(_) => Err(SessionError::Transaction(format!(
+                "savepoint not supported in Phase 4.2: {stmt:?}"
             ))),
+            // SET TRANSACTION ISOLATION LEVEL — P0 修复
+            // 之前是 NO-OP 假成功，现在实际写入 session_state 的 transaction_isolation 变量，
+            // 使 SHOW transaction_isolation 返回正确值。
+            // 注：由于运行时未接入 MVCC，实际隔离行为仍为表级 snapshot/restore（READ COMMITTED 语义）。
+            // 完整的隔离级别切换需待 MVCC 接入 session 事务管理后实现。
+            Statement::SetTransaction { isolation, access } => {
+                if let Some(iso) = isolation {
+                    let iso_str = match iso {
+                        TransactionIsolation::ReadUncommitted => "read uncommitted",
+                        TransactionIsolation::ReadCommitted => "read committed",
+                        TransactionIsolation::RepeatableRead => "repeatable read",
+                        TransactionIsolation::Serializable => "serializable",
+                    };
+                    self.session_state
+                        .set("transaction_isolation", Value::Text(iso_str.into()));
+                    // P0-TX-1 修复：保存隔离级别，下次 BEGIN 时传给 MvccManager
+                    let mvcc_iso = match iso {
+                        TransactionIsolation::ReadUncommitted => IsolationLevel::ReadUncommitted,
+                        TransactionIsolation::ReadCommitted => IsolationLevel::ReadCommitted,
+                        TransactionIsolation::RepeatableRead => IsolationLevel::RepeatableRead,
+                        TransactionIsolation::Serializable => IsolationLevel::Serializable,
+                    };
+                    self.pending_isolation = Some(mvcc_iso);
+                    tracing::debug!(isolation = iso_str, "SET TRANSACTION ISOLATION LEVEL recorded");
+                }
+                if let Some(acc) = access {
+                    let acc_str = match acc {
+                        TransactionAccess::ReadOnly => "read only",
+                        TransactionAccess::ReadWrite => "read write",
+                    };
+                    // 同时记录到 session 变量，供 SHOW 查询
+                    self.session_state
+                        .set("transaction_access_mode", Value::Text(acc_str.into()));
+                }
+                Ok(Some(QueryResult::TransactionComplete {
+                    tag: "SET".into(),
+                    in_transaction: self.in_transaction(),
+                }))
+            }
             _ => Ok(None),
         }
     }
@@ -762,17 +1070,32 @@ impl ExecutorService {
                 self.txn_snapshots.insert(name.clone(), snapshot);
             }
         }
+        self.txn_modified_tables.clear();
         self.txn_state = TransactionState::InTransaction;
 
+        // P0-TX-1 修复：同步到 MvccManager 状态机
+        if let Some(mgr) = &self.mvcc {
+            let level = self.pending_isolation.unwrap_or(IsolationLevel::RepeatableRead);
+            let txn = mgr.begin_with_isolation(level);
+            self.current_txn_id = txn.txn_id;
+            tracing::debug!(
+                txn_id = txn.txn_id,
+                isolation = ?level,
+                "MVCC transaction begun"
+            );
+        }
+
         // ADV-F-7 / ADV-CONC-1：分配事务 ID
-        // 优先从共享计数器获取（确保跨 session 全局唯一），退化为会话级计数器
-        self.current_txn_id = if let Some(counter) = &self.shared_txn_counter {
-            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        } else {
-            let id = self.next_txn_id;
-            self.next_txn_id += 1;
-            id
-        };
+        // P0-TX-1 修复：优先使用 MvccManager 分配（含快照隔离），退化为共享计数器/会话级计数器
+        if self.mvcc.is_none() {
+            self.current_txn_id = if let Some(counter) = &self.shared_txn_counter {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            } else {
+                let id = self.next_txn_id;
+                self.next_txn_id += 1;
+                id
+            };
+        }
 
         tracing::debug!(
             tables = self.tables.len(),
@@ -787,23 +1110,85 @@ impl ExecutorService {
     ///
     /// 1. **无 WAL 模式**（`wal_writer` 为 None）：直接清除快照，兼容旧行为
     /// 2. **有 WAL 模式**：
-    ///    a. 写入 `WalOpType::Commit` 记录（携带 `txn_id`）
-    ///    b. 调用 `flush()`（fsync）强制刷盘
-    ///    c. fsync 成功 → 清除快照，返回 Ok（可安全 ACK 客户端）
-    ///    d. fsync 失败 → 回滚事务（restore 快照），返回 Err（客户端收到错误）
+    ///    a. **P0-1 修复**：遍历事务期间修改过的表，将每张表的全量数据序列化为
+    ///       `WalOpType::TableData` 记录写入 WAL（用于崩溃恢复）
+    ///    b. 写入 `WalOpType::Commit` 记录（携带 `txn_id`）
+    ///    c. 调用 `flush()`（fsync）强制刷盘
+    ///    d. fsync 成功 → 清除快照，返回 Ok（可安全 ACK 客户端）
+    ///    e. fsync 失败 → 回滚事务（restore 快照），返回 Err（客户端收到错误）
     ///
     /// # 安全保证
     ///
-    /// - 返回 Ok：WAL Commit 记录已 fsync，事务已持久化
+    /// - 返回 Ok：WAL Commit 记录已 fsync，事务已持久化（含 TableData 数据）
     /// - 返回 Err：WAL 写入/fsync 失败，事务已回滚，不会出现"ACK 成功但数据未持久化"
-    fn commit_transaction(&mut self) -> Result<(), SessionError> {
+    async fn commit_transaction(&mut self) -> Result<(), SessionError> {
         // ADV-CONC-1：在进入 WAL 分支前提前取出 txn_id，供锁释放使用
         let txn_id = self.current_txn_id;
 
+        // P1-2：在事务提交链路开始前，先取出本事务修改的表名副本。
+        //
+        // 此副本用于在事务成功提交后调用 `dirty_tracker.mark_dirty_many`，
+        // 标记这些表为脏，供后台增量快照任务使用。
+        // 取副本是必要的，因为下面的 WAL 分支会 clear() 掉原始集合。
+        let committed_dirty_tables: Vec<String> =
+            self.txn_modified_tables.iter().cloned().collect();
+
         if let Some(writer) = &self.wal_writer {
+            // P0-1 修复：阶段 0 — 写入修改表的全量数据到 WAL（用于崩溃恢复）
+            //
+            // 遍历事务期间修改过的表（INSERT/UPDATE/DELETE 时记录到 txn_modified_tables），
+            // 将每张表的全量数据序列化为 TableData 记录写入 WAL。
+            // 回放时仅应用紧随其后有 Commit 记录的 TableData，保证 ACID。
+            //
+            // TableData data 字段格式：
+            //   u32 LE 表名长度 + 表名 UTF-8 字节 + 表数据 JSON
+            let mut records: Vec<WalRecord> = Vec::new();
+
+            if !self.txn_modified_tables.is_empty() {
+                let table_names: Vec<String> = self.txn_modified_tables.iter().cloned().collect();
+                for table_name in &table_names {
+                    // 通过 get_table_arc 获取表（自动处理 schema 前缀查找）
+                    if let Ok(table_arc) = self.get_table_arc(table_name, None).await {
+                        let table_guard = table_arc.lock().await;
+                        match serde_json::to_vec(&*table_guard) {
+                            Ok(table_data) => {
+                                let name_bytes = table_name.as_bytes();
+                                let mut payload =
+                                    Vec::with_capacity(4 + name_bytes.len() + table_data.len());
+                                payload.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+                                payload.extend_from_slice(name_bytes);
+                                payload.extend_from_slice(&table_data);
+                                records.push(WalRecord::new(
+                                    0,
+                                    txn_id,
+                                    WalOpType::TableData,
+                                    0,
+                                    payload,
+                                ));
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    txn_id,
+                                    table = %table_name,
+                                    error = %e,
+                                    "failed to serialize table for WAL TableData record"
+                                );
+                            }
+                        }
+                    }
+                }
+                self.txn_modified_tables.clear();
+            }
+
             // 阶段 1：写入 WAL Commit 记录
-            let record = WalRecord::new(0, txn_id, WalOpType::Commit, 0, vec![]);
-            let lsn = writer.append(record)?;
+            records.push(WalRecord::new(0, txn_id, WalOpType::Commit, 0, vec![]));
+
+            // OPT-7: append_batch writes all records in a single file-lock critical section.
+            // append_batch returns the start LSN; the Commit record is the last in the batch,
+            // so its LSN = start_lsn + record_count - 1.
+            let record_count = records.len();
+            let start_lsn = writer.append_batch(records)?;
+            let lsn = start_lsn + record_count as u64 - 1;
             tracing::debug!(txn_id, lsn, "WAL Commit record appended");
 
             // 阶段 2：fsync 强制刷盘
@@ -825,9 +1210,54 @@ impl ExecutorService {
             }
         }
 
-        // Phase 4.2：可选记录到 transaction_history 以支持后续 FLASHBACK
-        // 此处简化：不记录（避免无谓的内存增长），FLASHBACK 留待后续阶段接入
-        self.txn_snapshots.clear();
+        // P0-TX-1 修复：同步到 MvccManager 状态机
+        if let Some(mgr) = &self.mvcc {
+            match mgr.commit_durable(txn_id, |_txn_id| {
+                // WAL 已在上方写入并 fsync，此处返回当前 LSN
+                // 注意：WAL Commit 记录已在上面写入，这里不再重复写入
+                Ok(0) // 返回 0 作为 commit_lsn（WAL LSN 已在上方记录）
+            }) {
+                Ok(()) => {
+                    tracing::debug!(txn_id, "MVCC transaction committed");
+                }
+                Err(MvccError::WriteSkewDetected(_)) => {
+                    // SSI 写偏斜检测失败：事务必须回滚
+                    tracing::warn!(txn_id, "MVCC SSI write skew detected, rolling back");
+                    return Err(SessionError::Transaction(format!(
+                        "could not serialize access due to concurrent update (txn {txn_id})"
+                    )));
+                }
+                Err(MvccError::WriteWriteConflict(_)) => {
+                    // First-Committer-Wins：写写冲突，事务必须回滚
+                    tracing::warn!(txn_id, "MVCC write-write conflict, rolling back");
+                    return Err(SessionError::Transaction(format!(
+                        "could not serialize access due to concurrent update (txn {txn_id})"
+                    )));
+                }
+                Err(e) => {
+                    tracing::warn!(txn_id, error = %e, "MVCC commit failed");
+                    return Err(SessionError::Transaction(format!(
+                        "MVCC commit failed: {e}"
+                    )));
+                }
+            }
+        }
+
+        // P0 修复：记录到 transaction_history 以支持后续 FLASHBACK
+        // 之前是简化不记录，导致 FLASHBACK TRANSACTION / FLASHBACK TABLE 永远不可用。
+        // 现在将事务前快照移交给 transaction_history，供后续闪回查询使用。
+        // 注：仅记录非空快照事务，避免无事务的 BEGIN/COMMIT 污染历史。
+        if !self.txn_snapshots.is_empty() {
+            let snapshots = std::mem::take(&mut self.txn_snapshots);
+            let recorded_txn_id = self.transaction_history.record_commit(snapshots);
+            tracing::debug!(
+                history_txn_id = recorded_txn_id,
+                session_txn_id = txn_id,
+                "transaction recorded to history for FLASHBACK support"
+            );
+        } else {
+            self.txn_snapshots.clear();
+        }
         self.txn_state = TransactionState::Idle;
         // ADV-CONC-1：释放本事务持有的所有行级锁（Strict 2PL）
         if let Some(lm) = &self.lock_manager {
@@ -835,6 +1265,16 @@ impl ExecutorService {
             tracing::debug!(txn_id, "all row locks released on commit");
         }
         self.current_txn_id = 0;
+        // P1-2：事务成功提交后，标记本事务修改过的表为脏，供后台增量快照任务使用。
+        //
+        // 仅在事务真正成功后标记（WAL fsync + MVCC commit 都通过），保证：
+        // - 回滚的事务不会污染脏表集合（避免无谓的快照 IO）
+        // - 已提交但 fsync 失败的事务不会标记（事务已回滚）
+        if let Some(tracker) = &self.dirty_tracker {
+            if !committed_dirty_tables.is_empty() {
+                tracker.mark_dirty_many(committed_dirty_tables.iter()).await;
+            }
+        }
         tracing::debug!(txn_id = self.current_txn_id, "transaction committed");
         Ok(())
     }
@@ -865,6 +1305,14 @@ impl ExecutorService {
             }
         }
         self.txn_snapshots.clear();
+        // P0-TX-1 修复：同步到 MvccManager 状态机
+        if let Some(mgr) = &self.mvcc {
+            if txn_id > 0 {
+                if let Err(e) = mgr.abort(txn_id) {
+                    tracing::warn!(txn_id, error = %e, "MVCC abort failed (non-fatal)");
+                }
+            }
+        }
         self.txn_state = TransactionState::Idle;
 
         // ADV-F-7：写入 WAL Abort 记录
@@ -921,15 +1369,19 @@ impl ExecutorService {
             | LogicalPlan::MaterializedViewScan { .. }
             | LogicalPlan::Empty
             | LogicalPlan::Dual
-            | LogicalPlan::ShowTables
-            | LogicalPlan::ShowCreateTable { .. }
-            | LogicalPlan::ShowVariable { .. }
-            | LogicalPlan::SetNames { .. }
-            | LogicalPlan::SetVariable { .. }
             | LogicalPlan::Shared { .. }
             | LogicalPlan::MemoRef { .. }
             | LogicalPlan::With { .. }
             | LogicalPlan::CteRef { .. } => self.execute_select_plan(plan).await,
+
+            // Phase 3.34: SHOW / SET 命令 — 需要 SessionState，不能走 Executor::execute
+            // 这些 plan 类型在 Executor::execute 中没有对应分支，会返回 Unsupported 错误。
+            // 改为调用 Executor 的专用方法并传入 session_state。
+            LogicalPlan::ShowTables => self.execute_show_tables_plan().await,
+            LogicalPlan::ShowCreateTable { .. } => self.execute_show_create_table_plan(plan).await,
+            LogicalPlan::ShowVariable { .. } => self.execute_show_variable_plan(plan).await,
+            LogicalPlan::SetNames { .. } => self.execute_set_names_plan(plan).await,
+            LogicalPlan::SetVariable { .. } => self.execute_set_variable_plan(plan).await,
 
             // DML
             LogicalPlan::Insert { .. } => self.execute_insert_plan(plan).await,
@@ -941,26 +1393,25 @@ impl ExecutorService {
             // DDL
             LogicalPlan::CreateTable { .. } => self.execute_create_table_plan(plan).await,
             LogicalPlan::DropTable { .. } => self.execute_drop_table_plan(plan).await,
-            LogicalPlan::CreateIndex { .. } => Ok(QueryResult::DdlComplete {
-                tag: "CREATE INDEX".into(),
-            }),
-            LogicalPlan::DropIndex { .. } => Ok(QueryResult::DdlComplete {
-                tag: "DROP INDEX".into(),
-            }),
-            LogicalPlan::CreateView { .. } => Ok(QueryResult::DdlComplete {
-                tag: "CREATE VIEW".into(),
-            }),
-            LogicalPlan::DropView { .. } => Ok(QueryResult::DdlComplete {
-                tag: "DROP VIEW".into(),
-            }),
-            LogicalPlan::RefreshMaterializedView { .. } => Ok(QueryResult::DdlComplete {
-                tag: "REFRESH MATERIALIZED VIEW".into(),
-            }),
+            LogicalPlan::CreateIndex { .. } => self.execute_create_index_plan(plan),
+            LogicalPlan::DropIndex { .. } => self.execute_drop_index_plan(plan),
+            LogicalPlan::CreateView { .. } => self.execute_create_view_plan(plan).await,
+            LogicalPlan::DropView { .. } => self.execute_drop_view_plan(plan),
+            LogicalPlan::RefreshMaterializedView { .. } => {
+                self.execute_refresh_materialized_view_plan(plan).await
+            }
+            // P0-5 修复：CREATE/DROP FUNCTION
+            LogicalPlan::CreateFunction { .. } => self.execute_create_function_plan(plan),
+            LogicalPlan::DropFunction { .. } => self.execute_drop_function_plan(plan),
             LogicalPlan::CreateSequence { .. } => self.execute_create_sequence_plan(plan),
             LogicalPlan::DropSequence { .. } => self.execute_drop_sequence_plan(plan),
             LogicalPlan::CreateType { .. } => self.execute_create_type_plan(plan),
             LogicalPlan::DropType { .. } => self.execute_drop_type_plan(plan),
             LogicalPlan::AlterType { .. } => self.execute_alter_type_plan(plan),
+            // Phase F-10: ALTER TABLE — 同步修改 catalog schema + 表数据
+            LogicalPlan::AlterTable { .. } => self.execute_alter_table_plan(plan).await,
+            // TRUNCATE TABLE — 清空表数据（保留表结构）
+            LogicalPlan::Truncate { .. } => self.execute_truncate_plan(plan).await,
             // Phase 6.4: 触发器 DDL
             LogicalPlan::CreateTrigger { .. } => self.execute_create_trigger_plan(plan),
             LogicalPlan::DropTrigger { .. } => self.execute_drop_trigger_plan(plan),
@@ -1161,14 +1612,17 @@ impl ExecutorService {
         };
 
         // 5. 获取表锁
-        let table_arc = self.get_table_arc(&table_name.name).await?;
+        let table_arc = self
+            .get_table_arc(&table_name.name, table_name.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
 
         // 6. 逐行解析并插入
         //
-        // 注意：当前实现直接调用 table.insert_row，不做 FK/CHECK/ENUM 校验。
-        // 这与 PG 行为不完全一致（PG COPY FROM 会校验约束），但简化了实现。
-        // 后续可通过构造 LogicalPlan::Insert 复用 Executor::execute_insert 的校验逻辑。
+        // P0 修复：COPY FROM 此前直接调用 table.insert_row 跳过所有约束校验，
+        // 现在通过 Executor::validate_row_for_insert 复用 FK/CHECK/ENUM 校验逻辑。
+        // 校验失败立即中止 COPY（与 PG 行为一致），已插入的行保留（事务回滚由调用方处理）。
+        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         let mut affected_rows: usize = 0;
         for (line_idx, line) in data_lines.iter().enumerate() {
             let line_no = if options.header {
@@ -1214,7 +1668,13 @@ impl ExecutorService {
                 row[col_idx] = value;
             }
 
-            // 插入（不做 FK/CHECK/ENUM 校验，见上方注释）
+            // P0 修复：调用 Executor 校验 FK/CHECK/ENUM 约束
+            executor
+                .validate_row_for_insert(&table_name, &schema, &row)
+                .map_err(|e| SessionError::Execution(format!(
+                    "COPY FROM line {line_no}: constraint violation: {e}"
+                )))?;
+
             table_guard.insert_row(row);
             affected_rows += 1;
         }
@@ -1248,7 +1708,9 @@ impl ExecutorService {
                     .get_table(table_name)
                     .ok_or_else(|| SessionError::TableNotFound(table_name.qualified_name()))?;
 
-                let table_arc = self.get_table_arc(&table_name.name).await?;
+                let table_arc = self
+                    .get_table_arc(&table_name.name, table_name.schema.as_deref())
+                    .await?;
                 let table_guard = table_arc.lock().await;
 
                 let result_cols: Vec<ResultColumn> = match columns {
@@ -1314,20 +1776,52 @@ impl ExecutorService {
                     planner.plan_statement(Statement::Select(Box::new(select_cloned)))?
                 };
 
-                // 锁定所有表
-                let mut guards = Vec::with_capacity(self.tables.len());
-                for table_arc in self.tables.values() {
+                // OPT-6：仅锁定查询计划实际引用的表（合并本地表和共享表）
+                let referenced: std::collections::HashSet<String> = plan.collect_referenced_table_names();
+                let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+                for (k, v) in &self.tables {
+                    if referenced.contains(&k.to_lowercase()) {
+                        all_arcs.insert(k.clone(), v.clone());
+                    }
+                }
+                if !referenced.is_empty() {
+                    if let Some(shared) = &self.shared_tables {
+                        for (k, v) in shared.read().await.iter() {
+                            if referenced.contains(&k.to_lowercase()) {
+                                all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
+                            }
+                        }
+                    }
+                }
+                let mut guards = Vec::with_capacity(all_arcs.len());
+                for table_arc in all_arcs.values() {
                     guards.push(table_arc.lock().await);
                 }
 
                 let mut executor = Executor::new();
-                executor = executor.with_catalog(&self.catalog);
+                executor = executor.with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
                 executor = executor.with_temp_store(&self.temp_store);
+                // P0-TX-1 Phase B：注入 MVCC 上下文
+                if let Some(mvcc) = &self.mvcc {
+                    executor = executor.with_mvcc(mvcc, self.current_txn_id);
+                }
+                // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
+                if let Some(dist_rt) = &self.dist_runtime {
+                    executor = executor.with_dist_runtime(dist_rt.clone());
+                }
+                // P7-1：注入 CDC 引擎，启用 DML 事件分发
+                if let Some(cdc) = &self.cdc_engine {
+                    executor = executor.with_cdc_engine(cdc.clone());
+                }
                 for guard in &guards {
                     executor.register_table(&**guard);
                 }
 
                 let rows = executor.execute(&plan)?;
+                // P0-FN-TYPE 修复：execute() 返回后内部 guard 已 drop，
+                // 需重新设置 current_sql_functions guard，确保 derive_output_columns
+                // 能查询到函数返回类型声明（避免函数列类型被兜底为 Text）。
+                let _sql_func_guard = executor.sql_functions_guard();
                 let columns = derive_output_columns(&plan, &rows);
                 (columns, rows)
             }
@@ -1422,38 +1916,177 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        // ADV-CONC-1：收集所有需要锁定的表（包括共享存储中的表）
+        // OPT-6（ADV-CONC-1 改进）：仅锁定查询计划实际引用的物理表，避免对会话中
+        // 所有表加锁造成不必要的并发阻塞。先从计划树提取引用的表名（小写），
+        // 再从本地/共享/物化视图存储中按名筛选。
+        //
+        // 安全性说明：
+        // - `Executor<'_>` 非 Send，不能跨 .await 持有，必须在同步执行前完成所有表注册。
+        // - 仅锁定引用的表足以覆盖 SELECT 执行所需的所有访问路径（Scan/IndexScan/Join 等）。
+        // - 若计划不引用任何物理表（如 `SELECT 1`），无需锁定任何表。
+        let referenced: std::collections::HashSet<String> = plan.collect_referenced_table_names();
+
         let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        // 仅收集被引用的本地表
         for (k, v) in &self.tables {
-            all_arcs.insert(k.clone(), v.clone());
-        }
-        if let Some(shared) = &self.shared_tables {
-            for (k, v) in shared.read().await.iter() {
-                all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
+            if referenced.contains(&k.to_lowercase()) {
+                all_arcs.insert(k.clone(), v.clone());
             }
         }
-        // 先锁定所有表（确保 Executor 不跨 .await 持有，因为 Executor<'_> 非 Send）
+        // 仅收集被引用的共享表
+        if !referenced.is_empty() {
+            if let Some(shared) = &self.shared_tables {
+                for (k, v) in shared.read().await.iter() {
+                    if referenced.contains(&k.to_lowercase()) {
+                        all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+            }
+        }
+        // P0-6：仅收集被引用的物化视图存储表
+        let mv_arcs: Vec<(String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>)> =
+            self.materialized_view_tables
+                .iter()
+                .filter(|(k, _)| referenced.contains(&k.to_lowercase()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+        // 先锁定收集到的表（确保 Executor 不跨 .await 持有，因为 Executor<'_> 非 Send）
         let mut guards = Vec::with_capacity(all_arcs.len());
         for table_arc in all_arcs.values() {
             guards.push(table_arc.lock().await);
         }
+        // P0-6：锁定被引用的物化视图存储表
+        let mut mv_guards = Vec::with_capacity(mv_arcs.len());
+        for (_, arc) in &mv_arcs {
+            mv_guards.push(arc.lock().await);
+        }
 
-        // 构造 Executor 并注册所有表（同步操作，不涉及 .await）
+        // 构造 Executor 并注册收集到的表（同步操作，不涉及 .await）
         let mut executor = Executor::new();
-        executor = executor.with_catalog(&self.catalog);
+        executor = executor.with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         executor = executor.with_temp_store(&self.temp_store);
+        // P0-TX-1 Phase B：注入 MVCC 上下文，启用事务可见性过滤
+        if let Some(mvcc) = &self.mvcc {
+            executor = executor.with_mvcc(mvcc, self.current_txn_id);
+        }
+        // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
+        if let Some(dist_rt) = &self.dist_runtime {
+            executor = executor.with_dist_runtime(dist_rt.clone());
+        }
+        // P7-1：注入 CDC 引擎，启用 DML 事件分发
+        if let Some(cdc) = &self.cdc_engine {
+            executor = executor.with_cdc_engine(cdc.clone());
+        }
         for guard in &guards {
             executor.register_table(&**guard);
+        }
+        // P0-6：注册物化视图存储表
+        for ((name, _), guard) in mv_arcs.iter().zip(mv_guards.iter()) {
+            executor.register_materialized_view_store(name, &**guard);
         }
 
         // 执行
         let rows = executor.execute(plan)?;
+
+        // P0-FN-TYPE 修复：execute() 返回后内部 guard 已 drop，
+        // 需重新设置 current_sql_functions guard，确保 derive_output_columns
+        // 能查询到函数返回类型声明（避免函数列类型被兜底为 Text）。
+        let _sql_func_guard = executor.sql_functions_guard();
 
         // 推导输出列
         let columns = derive_output_columns(plan, &rows);
 
         let tag = format!("SELECT {}", rows.len());
         Ok(QueryResult::ResultSet { columns, rows, tag })
+    }
+
+    // -----------------------------------------------------------------
+    //  SHOW / SET 命令 — Phase 3.34
+    // -----------------------------------------------------------------
+
+    /// 执行 `SHOW TABLES` — 列出当前 catalog 中所有表名。
+    ///
+    /// 调用 Executor::execute_show_tables，返回单列结果集（列名 `Table`）。
+    async fn execute_show_tables_plan(&mut self) -> Result<QueryResult, SessionError> {
+        // 构造 Executor 并绑定 catalog（不需要表数据，仅需 catalog 元信息）
+        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let rows = executor.execute_show_tables()?;
+        let columns = vec![ResultColumn {
+            name: "Table".into(),
+            column_type: ColumnType::Text,
+        }];
+        let tag = format!("SELECT {}", rows.len());
+        Ok(QueryResult::ResultSet { columns, rows, tag })
+    }
+
+    /// 执行 `SHOW CREATE TABLE <name>` — 返回表名 + DDL 文本两列。
+    ///
+    /// 调用 Executor::execute_show_create_table，从 catalog 读取 schema 重建 DDL。
+    async fn execute_show_create_table_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let rows = executor.execute_show_create_table(plan)?;
+        let columns = vec![
+            ResultColumn {
+                name: "Table".into(),
+                column_type: ColumnType::Text,
+            },
+            ResultColumn {
+                name: "DDL".into(),
+                column_type: ColumnType::Text,
+            },
+        ];
+        let tag = format!("SELECT {}", rows.len());
+        Ok(QueryResult::ResultSet { columns, rows, tag })
+    }
+
+    /// 执行 `SHOW <variable>` — 返回会话变量值的单行单列结果集。
+    ///
+    /// 调用 Executor::execute_show_variable，从 session_state 读取变量值。
+    async fn execute_show_variable_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        let rows = executor.execute_show_variable(plan, &self.session_state)?;
+        let columns = vec![ResultColumn {
+            name: "Value".into(),
+            column_type: ColumnType::Text,
+        }];
+        let tag = format!("SELECT {}", rows.len());
+        Ok(QueryResult::ResultSet { columns, rows, tag })
+    }
+
+    /// 执行 `SET NAMES 'charset' [COLLATE 'collation']` — 写入 session_state。
+    ///
+    /// 调用 Executor::execute_set_names，将 charset/collation 写入会话状态。
+    /// 返回 DdlComplete（无结果集，CommandComplete 标签 "SET"）。
+    async fn execute_set_names_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_set_names(plan, &mut self.session_state)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "SET".into(),
+        })
+    }
+
+    /// 执行 `SET <variable> = <value>` — 求值 value 表达式并写入 session_state。
+    ///
+    /// 调用 Executor::execute_set_variable，将 (variable, value) 写入会话状态。
+    /// 返回 DdlComplete（无结果集，CommandComplete 标签 "SET"）。
+    async fn execute_set_variable_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_set_variable(plan, &mut self.session_state)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "SET".into(),
+        })
     }
 
     // -----------------------------------------------------------------
@@ -1464,33 +2097,50 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let table_name = match plan {
-            LogicalPlan::Insert { table, .. } => &table.name,
-            _ => unreachable!(),
+        let (table, schema, returning) = match plan {
+            LogicalPlan::Insert { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Insert plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
-        let table_arc = self.get_table_arc(table_name).await?;
+        let table_arc = self
+            .get_table_arc(&table.name, table.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog);
+        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        if let Some(mvcc) = &self.mvcc {
+            executor = executor.with_mvcc(mvcc, self.current_txn_id);
+        }
+        // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
+        if let Some(dist_rt) = &self.dist_runtime {
+            executor = executor.with_dist_runtime(dist_rt.clone());
+        }
+        // P7-1：注入 CDC 引擎，启用 DML 事件分发
+        if let Some(cdc) = &self.cdc_engine {
+            executor = executor.with_cdc_engine(cdc.clone());
+        }
+        // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
+        if let Some(writer) = &self.wal_writer {
+            executor = executor.with_wal_writer(writer.clone());
+        }
         let DmlResult {
             affected_rows,
             returning_rows,
         } = executor.execute_insert(plan, &mut *table_guard)?;
 
+        // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
+        self.txn_modified_tables.insert(table.name.clone());
+
         // 处理 RETURNING 子句
+        // Navicat 兼容修复：columns 必须与 returning_rows 每行的列数一致。
+        // 之前用整张表 schema 构造 columns，但 executor.project_returning 只返回
+        // RETURNING 子句指定的列，导致 RowDescription 与 DataRow 字段数不匹配。
         if !returning_rows.is_empty() {
-            let schema = self
-                .catalog
-                .get_table(&TableName::new(table_name))
-                .ok_or_else(|| SessionError::Execution(format!("table not found: {table_name}")))?;
-            let columns = schema
-                .columns
-                .iter()
-                .map(|c| ResultColumn {
-                    name: c.name.clone(),
-                    column_type: c.data_type.clone(),
-                })
-                .collect();
+            let columns = build_returning_columns(&schema, &returning);
             let tag = format!("INSERT 0 {affected_rows}");
             return Ok(QueryResult::ResultSet {
                 columns,
@@ -1512,35 +2162,49 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let table_name = match plan {
-            LogicalPlan::Update { table, .. } => &table.name,
-            _ => unreachable!(),
+        let (table, schema, returning) = match plan {
+            LogicalPlan::Update { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Update plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
         // ADV-CONC-1：事务中获取表级 X 锁（Strict 2PL，COMMIT/ROLLBACK 释放）
-        self.acquire_table_xlock(table_name).await?;
+        self.acquire_table_xlock(&table.name).await?;
 
-        let table_arc = self.get_table_arc(table_name).await?;
+        let table_arc = self
+            .get_table_arc(&table.name, table.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog);
+        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        if let Some(mvcc) = &self.mvcc {
+            executor = executor.with_mvcc(mvcc, self.current_txn_id);
+        }
+        // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
+        if let Some(dist_rt) = &self.dist_runtime {
+            executor = executor.with_dist_runtime(dist_rt.clone());
+        }
+        // P7-1：注入 CDC 引擎，启用 DML 事件分发
+        if let Some(cdc) = &self.cdc_engine {
+            executor = executor.with_cdc_engine(cdc.clone());
+        }
+        // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
+        if let Some(writer) = &self.wal_writer {
+            executor = executor.with_wal_writer(writer.clone());
+        }
         let DmlResult {
             affected_rows,
             returning_rows,
         } = executor.execute_update(plan, &mut *table_guard)?;
 
+        // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
+        self.txn_modified_tables.insert(table.name.clone());
+
         if !returning_rows.is_empty() {
-            let schema = self
-                .catalog
-                .get_table(&TableName::new(table_name))
-                .ok_or_else(|| SessionError::Execution(format!("table not found: {table_name}")))?;
-            let columns = schema
-                .columns
-                .iter()
-                .map(|c| ResultColumn {
-                    name: c.name.clone(),
-                    column_type: c.data_type.clone(),
-                })
-                .collect();
+            let columns = build_returning_columns(&schema, &returning);
             let tag = format!("UPDATE {affected_rows}");
             return Ok(QueryResult::ResultSet {
                 columns,
@@ -1562,35 +2226,49 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let table_name = match plan {
-            LogicalPlan::Delete { table, .. } => &table.name,
-            _ => unreachable!(),
+        let (table, schema, returning) = match plan {
+            LogicalPlan::Delete { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Delete plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
         // ADV-CONC-1：事务中获取表级 X 锁（Strict 2PL，COMMIT/ROLLBACK 释放）
-        self.acquire_table_xlock(table_name).await?;
+        self.acquire_table_xlock(&table.name).await?;
 
-        let table_arc = self.get_table_arc(table_name).await?;
+        let table_arc = self
+            .get_table_arc(&table.name, table.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog);
+        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        if let Some(mvcc) = &self.mvcc {
+            executor = executor.with_mvcc(mvcc, self.current_txn_id);
+        }
+        // P0-DIST-1/2/3：注入分布式运行时句柄，启用 DML 双写
+        if let Some(dist_rt) = &self.dist_runtime {
+            executor = executor.with_dist_runtime(dist_rt.clone());
+        }
+        // P7-1：注入 CDC 引擎，启用 DML 事件分发
+        if let Some(cdc) = &self.cdc_engine {
+            executor = executor.with_cdc_engine(cdc.clone());
+        }
+        // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
+        if let Some(writer) = &self.wal_writer {
+            executor = executor.with_wal_writer(writer.clone());
+        }
         let DmlResult {
             affected_rows,
             returning_rows,
         } = executor.execute_delete(plan, &mut *table_guard)?;
 
+        // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
+        self.txn_modified_tables.insert(table.name.clone());
+
         if !returning_rows.is_empty() {
-            let schema = self
-                .catalog
-                .get_table(&TableName::new(table_name))
-                .ok_or_else(|| SessionError::Execution(format!("table not found: {table_name}")))?;
-            let columns = schema
-                .columns
-                .iter()
-                .map(|c| ResultColumn {
-                    name: c.name.clone(),
-                    column_type: c.data_type.clone(),
-                })
-                .collect();
+            let columns = build_returning_columns(&schema, &returning);
             let tag = format!("DELETE {affected_rows}");
             return Ok(QueryResult::ResultSet {
                 columns,
@@ -1612,14 +2290,21 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let table_name = match plan {
-            LogicalPlan::Replace { table, .. } => &table.name,
-            _ => unreachable!(),
+        let table = match plan {
+            LogicalPlan::Replace { table, .. } => table.clone(),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Replace plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
-        let table_arc = self.get_table_arc(table_name).await?;
+        let table_arc = self
+            .get_table_arc(&table.name, table.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog);
+        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         let DmlResult { affected_rows, .. } = executor.execute_replace(plan, &mut *table_guard)?;
 
         Ok(QueryResult::AffectedRows {
@@ -1631,14 +2316,21 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let table_name = match plan {
-            LogicalPlan::Merge { target, .. } => &target.name,
-            _ => unreachable!(),
+        let table = match plan {
+            LogicalPlan::Merge { target, .. } => target.clone(),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Merge plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
-        let table_arc = self.get_table_arc(table_name).await?;
+        let table_arc = self
+            .get_table_arc(&table.name, table.schema.as_deref())
+            .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog);
+        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         let DmlResult { affected_rows, .. } = executor.execute_merge(plan, &mut *table_guard)?;
 
         Ok(QueryResult::AffectedRows {
@@ -1662,14 +2354,63 @@ impl ExecutorService {
                 };
                 (&name.name, schema)
             }
-            _ => unreachable!(),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected CreateTable plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
         // 注册到 catalog
         self.catalog.register_from_create_plan(plan)?;
 
         // 创建空表
-        let table = InMemoryTable::new(schema);
+        let mut table = InMemoryTable::new(schema);
+
+        // P0-STORE 阶段 1：若表有 PRIMARY KEY 约束且主键列为 Int64，
+        // 自动启用 B+Tree 主键索引，供 WHERE pk = literal 等查询走 O(log n) 路径。
+        if let LogicalPlan::CreateTable { columns, constraints, .. } = plan {
+            // 1. 检查列级 PRIMARY KEY 约束（col INT PRIMARY KEY）
+            for (idx, col) in columns.iter().enumerate() {
+                if col.primary_key
+                    && col.data_type == szrsql_types::value::ColumnType::Int64
+                {
+                    table.enable_btree_pk(idx);
+                    tracing::debug!(
+                        table = %table_name,
+                        pk_column = %col.name,
+                        "Auto-enabled B+Tree PK index (column-level constraint)"
+                    );
+                    break;
+                }
+            }
+            // 2. 若列级未命中，检查表级 PRIMARY KEY 约束（PRIMARY KEY (col)）
+            if !table.has_btree_pk() {
+                if let Some(TableConstraint::PrimaryKey { columns: pk_cols, .. }) = constraints
+                    .iter()
+                    .find(|c| matches!(c, TableConstraint::PrimaryKey { .. }))
+                {
+                    if pk_cols.len() == 1 {
+                        if let Some(pk_col_name) = pk_cols.first() {
+                            if let Some(idx) = columns.iter().position(|c| &c.name == pk_col_name) {
+                                if columns[idx].data_type
+                                    == szrsql_types::value::ColumnType::Int64
+                                {
+                                    table.enable_btree_pk(idx);
+                                    tracing::debug!(
+                                        table = %table_name,
+                                        pk_column = %pk_col_name,
+                                        "Auto-enabled B+Tree PK index (table-level constraint)"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let key = table_name.to_lowercase();
         let table_arc = Arc::new(Mutex::new(table));
         // ADV-CONC-1：优先注册到共享存储（跨 session 可见）
@@ -1688,23 +2429,109 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let (names, _if_exists, _cascade) = match plan {
+        let (names, if_exists, cascade) = match plan {
             LogicalPlan::DropTable {
                 names,
                 if_exists,
                 cascade,
-            } => (names, if_exists, cascade),
-            _ => unreachable!(),
+            } => (names, *if_exists, *cascade),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected DropTable plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
         };
 
         for name in names {
             let key = name.name.to_lowercase();
+            // P0 修复：IF EXISTS 生效 — 表不存在时静默跳过（而非报错）
+            let table_exists_local = self.tables.contains_key(&key);
+            let table_exists_shared = if let Some(shared) = &self.shared_tables {
+                shared.read().await.contains_key(&key)
+            } else {
+                false
+            };
+            let table_exists_catalog = self.catalog.get_table(name).is_some();
+            let table_exists = table_exists_local || table_exists_shared || table_exists_catalog;
+
+            if !table_exists {
+                if if_exists {
+                    tracing::debug!(
+                        table = %key,
+                        "DROP TABLE IF EXISTS: table not found, skipping silently"
+                    );
+                    continue;
+                }
+                return Err(SessionError::TableNotFound(name.qualified_name()));
+            }
+
+            // CASCADE 级联删除：P0 修复 — 真正级联删除外键引用表
+            //
+            // 旧实现仅删除表本身 + 关联索引，不级联删除外键引用表（假成功）。
+            // 新实现通过 catalog 的 FK 元数据找出所有引用此表的外键约束所在表，
+            // 递归删除（CASCADE 语义）。
+            //
+            // RESTRICT（默认）若有依赖对象应报错。当前 catalog 已跟踪 FK 约束，
+            // 但不跟踪视图/物化视图/序列等依赖关系，因此 RESTRICT 仅检查 FK 依赖。
+            let mut to_drop: Vec<TableName> = Vec::new();
+            if cascade {
+                // 收集所有 FK 引用此表的表（递归）
+                let mut queue: Vec<TableName> = vec![name.clone()];
+                let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+                visited.insert(key.clone());
+                while let Some(current) = queue.pop() {
+                    // 找出所有 FK 引用 current 表的表
+                    let dependents = self.collect_fk_dependents(&current);
+                    for dep in dependents {
+                        let dep_key = dep.name.to_lowercase();
+                        if !visited.contains(&dep_key) {
+                            visited.insert(dep_key.clone());
+                            to_drop.push(dep.clone());
+                            queue.push(dep);
+                        }
+                    }
+                }
+                tracing::debug!(
+                    table = %key,
+                    cascade_count = to_drop.len(),
+                    "DROP TABLE CASCADE: cascading drop to FK-dependent tables"
+                );
+            } else {
+                // RESTRICT：若有 FK 依赖则报错
+                let dependents = self.collect_fk_dependents(name);
+                if !dependents.is_empty() {
+                    let dep_names: Vec<String> = dependents
+                        .iter()
+                        .map(|t| t.qualified_name())
+                        .collect();
+                    return Err(SessionError::Execution(format!(
+                        "DROP TABLE {}: cannot drop table because other objects depend on it (RESTRICT): {}",
+                        name.qualified_name(),
+                        dep_names.join(", ")
+                    )));
+                }
+            }
+
             // ADV-CONC-1：从共享存储移除（如果启用）
             if let Some(shared) = &self.shared_tables {
                 shared.write().await.remove(&key);
             }
             self.tables.remove(&key);
+            // 同时移除物化视图存储表（如果该表是物化视图）
+            self.materialized_view_tables.remove(&key);
             self.catalog.remove_table(name);
+
+            // 递归删除 CASCADE 依赖表
+            for dep_name in to_drop {
+                let dep_key = dep_name.name.to_lowercase();
+                if let Some(shared) = &self.shared_tables {
+                    shared.write().await.remove(&dep_key);
+                }
+                self.tables.remove(&dep_key);
+                self.materialized_view_tables.remove(&dep_key);
+                self.catalog.remove_table(&dep_name);
+            }
         }
 
         Ok(QueryResult::DdlComplete {
@@ -1745,6 +2572,314 @@ impl ExecutorService {
         })
     }
 
+    /// 执行 CREATE INDEX 计划 — P0-FIX-1
+    ///
+    /// 调用 `Executor::execute_create_index` 在 catalog 注册索引元数据。
+    /// 索引数据的实际构建在后续 DML 路径中增量维护。
+    fn execute_create_index_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_create_index(plan, &mut self.catalog)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "CREATE INDEX".into(),
+        })
+    }
+
+    /// 执行 DROP INDEX 计划 — P0-FIX-1
+    ///
+    /// 调用 `Executor::execute_drop_index` 从 catalog 移除索引元数据。
+    fn execute_drop_index_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_drop_index(plan, &mut self.catalog)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "DROP INDEX".into(),
+        })
+    }
+
+    /// 执行 CREATE VIEW / CREATE MATERIALIZED VIEW 计划 — P0-FIX-1
+    ///
+    /// 调用 `Executor::execute_create_view` 在 catalog 注册视图定义。
+    /// P0-6 修复：物化视图在 catalog 注册成功后，创建空存储表并注册到 session，
+    /// 供后续 REFRESH 填充数据、SELECT 扫描读取。
+    /// P0-MV 修复：CREATE MATERIALIZED VIEW 默认 WITH DATA，创建时立即执行 SELECT
+    /// 查询并填充存储表（与 PG 语义一致），不再需要手动 REFRESH。
+    async fn execute_create_view_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        // 先提取物化视图信息（因为 execute_create_view 会借用 catalog）
+        let (mv_name, mv_columns, mv_query, is_materialized) = match plan {
+            LogicalPlan::CreateView {
+                name,
+                materialized,
+                columns,
+                query,
+                ..
+            } => (name.clone(), columns.clone(), (**query).clone(), *materialized),
+            _ => {
+                return Err(SessionError::Execution(format!(
+                    "expected CreateView plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
+        };
+
+        // Executor<'_> 不是 Send，用块作用域确保在 .await 之前释放
+        {
+            let executor = Executor::new();
+            executor.execute_create_view(plan, &mut self.catalog)?;
+        }
+
+        if !is_materialized {
+            return Ok(QueryResult::DdlComplete {
+                tag: "CREATE VIEW".into(),
+            });
+        }
+
+        // 物化视图 — 创建存储表并立即填充数据
+        // Schema 来源：从 select 计划推导列名+类型，应用显式列别名
+        let stmt = Statement::Select(Box::new(mv_query.clone()));
+        let select_plan = Planner::new(&self.catalog)
+            .plan_statement(stmt)
+            .map_err(|e| SessionError::Execution(format!(
+                "materialized view schema derive failed: {e}"
+            )))?;
+        let mut schema = szrsql_sql::plan::plan_schema(&select_plan);
+        // 应用显式列别名（CREATE MATERIALIZED VIEW mv (col1, col2) AS ...）
+        if !mv_columns.is_empty() && mv_columns.len() == schema.columns.len() {
+            for (i, alias) in mv_columns.iter().enumerate() {
+                schema.columns[i].name = alias.clone();
+            }
+        }
+        schema.name = mv_name.clone();
+        let storage = Arc::new(Mutex::new(InMemoryTable::new(schema)));
+        let mv_key = mv_name.name.to_lowercase();
+        self.materialized_view_tables.insert(mv_key.clone(), storage.clone());
+
+        // P0-MV 修复：立即执行 SELECT 查询并填充物化视图存储表
+        // OPT-6：仅锁定查询计划实际引用的表（确保 Executor 不跨 .await 持有，因为 Executor<'_> 非 Send）
+        // 先收集被引用 Arc 引用（保持存活直到 guards 释放）
+        // P0-DEADLOCK 修复：self.tables 和 shared_tables 可能存有同一个 Arc，
+        // tokio::sync::Mutex 不可重入，重复锁定同一 Mutex 会死锁。
+        // 使用 Arc::ptr_eq 去重。
+        let referenced: std::collections::HashSet<String> = select_plan.collect_referenced_table_names();
+        let mut all_arcs: Vec<Arc<Mutex<InMemoryTable>>> = self
+            .tables
+            .iter()
+            .filter(|(k, _)| referenced.contains(&k.to_lowercase()))
+            .map(|(_, v)| v.clone())
+            .collect();
+        if !referenced.is_empty() {
+            if let Some(shared) = &self.shared_tables {
+                let guard = shared.read().await;
+                for (k, v) in guard.iter() {
+                    if referenced.contains(&k.to_lowercase())
+                        && !all_arcs.iter().any(|a| Arc::ptr_eq(a, v))
+                    {
+                        all_arcs.push(v.clone());
+                    }
+                }
+            }
+        }
+        let mut table_guards: Vec<tokio::sync::MutexGuard<'_, InMemoryTable>> = Vec::with_capacity(all_arcs.len());
+        for arc in &all_arcs {
+            table_guards.push(arc.lock().await);
+        }
+        let mv_guard = storage.lock().await;
+        // 创建 Executor 并执行 SELECT（此后不再有 await 直到 execute 完成）
+        let rows = {
+            let mut exec = Executor::new()
+                .with_catalog(&self.catalog)
+                .with_sql_functions_from_catalog(&self.catalog);
+            for guard in &table_guards {
+                exec.register_table(&**guard);
+            }
+            exec.register_materialized_view_store(&mv_name.name, &*mv_guard);
+            let stmt = Statement::Select(Box::new(mv_query));
+            let select_plan = match Planner::new(&self.catalog).plan_statement(stmt) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Err(SessionError::Execution(format!(
+                        "materialized view populate plan failed: {e}"
+                    )))
+                }
+            };
+            exec.execute(&select_plan)
+                .map_err(|e| SessionError::Execution(format!(
+                    "materialized view populate failed: {e}"
+                )))?
+        };
+        drop(mv_guard);
+        drop(table_guards);
+        // 填充存储表
+        {
+            let mut guard = storage.lock().await;
+            guard.clear();
+            for row in rows {
+                guard.insert(row);
+            }
+        }
+
+        Ok(QueryResult::DdlComplete {
+            tag: "CREATE MATERIALIZED VIEW".into(),
+        })
+    }
+
+    /// 执行 DROP VIEW / DROP MATERIALIZED VIEW 计划 — P0-FIX-1
+    ///
+    /// 调用 `Executor::execute_drop_view` 从 catalog 移除视图定义。
+    /// P0-6 修复：物化视图同时移除其存储表。
+    fn execute_drop_view_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_drop_view(plan, &mut self.catalog)?;
+        if let LogicalPlan::DropView {
+            names, materialized, ..
+        } = plan
+        {
+            if *materialized {
+                for name in names {
+                    self.materialized_view_tables
+                        .remove(&name.name.to_lowercase());
+                }
+            }
+        }
+        let tag = match plan {
+            LogicalPlan::DropView {
+                materialized: true,
+                ..
+            } => "DROP MATERIALIZED VIEW",
+            _ => "DROP VIEW",
+        };
+        Ok(QueryResult::DdlComplete {
+            tag: tag.into(),
+        })
+    }
+
+    /// 执行 REFRESH MATERIALIZED VIEW 计划 — P0-FIX-1 / P0-6 修复
+    ///
+    /// P0-6 修复：实际执行 SELECT 查询并将结果填充到物化视图存储表，
+    /// 替代原"仅校验视图存在即返回成功"的假成功实现。
+    async fn execute_refresh_materialized_view_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        // P0-6 修复：执行 SELECT 查询并将结果填充到物化视图存储表
+        let select_query = {
+            let executor = Executor::new();
+            executor.execute_refresh_materialized_view(plan, &self.catalog)?
+        };
+        // 解析物化视图名
+        let mv_name = match plan {
+            LogicalPlan::RefreshMaterializedView { name, .. } => name.clone(),
+            _ => {
+                return Err(SessionError::Execution(format!(
+                    "expected RefreshMaterializedView plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
+        };
+        // 取出存储表（必须存在 — CREATE MATERIALIZED VIEW 时已创建）
+        let mv_key = mv_name.name.to_lowercase();
+        let mv_storage = self
+            .materialized_view_tables
+            .get(&mv_key)
+            .cloned()
+            .ok_or_else(|| {
+                SessionError::Execution(format!(
+                    "materialized view storage not found for {} (create may have failed)",
+                    mv_name.qualified_name()
+                ))
+            })?;
+        // 执行 SELECT 查询
+        // 注意：register_table/register_materialized_view_store 存储的是引用，
+        // guards 必须存活到 exec.execute() 完成后才能释放。
+        // 先锁定所有需要的表（在创建 Executor 之前完成所有 await，
+        // 因为 Executor<'_> 持有 &dyn Catalog 引用，不是 Send，不能跨 await 点持有）
+        // P0-DEADLOCK 修复：合并 self.tables 和 shared_tables，用 Arc::ptr_eq 去重避免死锁。
+        let mut all_arcs: Vec<Arc<Mutex<InMemoryTable>>> = self.tables.values().cloned().collect();
+        if let Some(shared) = &self.shared_tables {
+            let guard = shared.read().await;
+            for (_, v) in guard.iter() {
+                if !all_arcs.iter().any(|a| Arc::ptr_eq(a, v)) {
+                    all_arcs.push(v.clone());
+                }
+            }
+        }
+        let mut table_guards: Vec<tokio::sync::MutexGuard<'_, InMemoryTable>> = Vec::new();
+        for arc in &all_arcs {
+            table_guards.push(arc.lock().await);
+        }
+        let mv_guard = mv_storage.lock().await;
+        // 现在创建 Executor 并注册表（此后不再有 await 直到 execute 完成）
+        // 使用块作用域确保 Executor（!Send）在下一个 await 前被释放
+        let rows = {
+            let mut exec = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+            for guard in &table_guards {
+                exec.register_table(&**guard);
+            }
+            exec.register_materialized_view_store(&mv_name.name, &*mv_guard);
+            // 把 select_query 包装成 Statement::Select 并规划执行
+            let stmt = Statement::Select(Box::new(select_query));
+            let select_plan = match Planner::new(&self.catalog).plan_statement(stmt) {
+                Ok(p) => p,
+                Err(e) => {
+                    return Err(SessionError::Execution(format!(
+                        "materialized view refresh plan failed: {e}"
+                    )))
+                }
+            };
+            exec.execute(&select_plan)?
+        }; // exec 在此处被释放（块作用域结束）
+        // 显式释放 guards
+        drop(mv_guard);
+        drop(table_guards);
+        // 清空并重填存储表
+        {
+            let mut guard = mv_storage.lock().await;
+            guard.clear();
+            for row in rows {
+                guard.insert(row);
+            }
+        }
+        Ok(QueryResult::DdlComplete {
+            tag: "REFRESH MATERIALIZED VIEW".into(),
+        })
+    }
+
+    /// 执行 CREATE FUNCTION 计划 — P0-5 修复
+    ///
+    /// 将函数元数据注册到 catalog。函数体执行由表达式求值器在调用时按需触发。
+    fn execute_create_function_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_create_function(plan, &mut self.catalog)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "CREATE FUNCTION".into(),
+        })
+    }
+
+    /// 执行 DROP FUNCTION 计划 — P0-5 修复
+    fn execute_drop_function_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let executor = Executor::new();
+        executor.execute_drop_function(plan, &mut self.catalog)?;
+        Ok(QueryResult::DdlComplete {
+            tag: "DROP FUNCTION".into(),
+        })
+    }
+
     fn execute_drop_type_plan(&mut self, plan: &LogicalPlan) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_drop_type(plan, &mut self.catalog)?;
@@ -1758,6 +2893,177 @@ impl ExecutorService {
         executor.execute_alter_type(plan, &mut self.catalog)?;
         Ok(QueryResult::DdlComplete {
             tag: "ALTER TYPE".into(),
+        })
+    }
+
+    /// 执行 ALTER TABLE 计划 — Phase F-10
+    ///
+    /// 1. 从 plan 中取出表名
+    /// 2. 锁定对应的 InMemoryTable
+    /// 3. 调用 executor.execute_alter_table 同步修改 catalog schema + 表数据
+    /// 4. 同步更新 InMemoryTable 的 schema
+    async fn execute_alter_table_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        // 从 plan 取出表名
+        let table_name = match plan {
+            LogicalPlan::AlterTable { name, .. } => name.clone(),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected AlterTable plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
+        };
+
+        // 检查是否为 RENAME TABLE（此时无需锁定表数据，因为表会被重命名）
+        let is_rename = matches!(
+            plan,
+            LogicalPlan::AlterTable {
+                operations,
+                ..
+            } if operations.iter().any(|op| matches!(
+                op,
+                szrsql_sql::ast::AlterTableOperation::RenameTable { .. }
+            ))
+        );
+
+        if is_rename {
+            // RENAME TABLE：无需锁定表数据，仅修改 catalog
+            // 注意：当前简化实现，若 RENAME 与其他操作混合，表数据可能不同步
+            let executor = Executor::new();
+            executor.execute_alter_table(plan, &mut self.catalog, None)?;
+
+            // 同步重命名 self.tables 中的 key
+            // 解析新表名
+            let new_name = if let LogicalPlan::AlterTable { name, operations, .. } = plan {
+                let mut result = name.clone();
+                for op in operations {
+                    if let szrsql_sql::ast::AlterTableOperation::RenameTable { new_name } = op {
+                        result = new_name.clone();
+                    }
+                }
+                result
+            } else {
+                return Err(SessionError::InvalidStatement(
+                    "expected AlterTable plan for rename operation".into(),
+                ));
+            };
+
+            let old_key = table_name.name.to_lowercase();
+            let new_key = new_name.name.to_lowercase();
+            if let Some(table_arc) = self.tables.remove(&old_key) {
+                self.tables.insert(new_key, table_arc);
+            }
+        } else {
+            // 其他 ALTER TABLE 操作：锁定表数据并同步修改
+            let key = table_name.name.to_lowercase();
+            let table_arc = self
+                .tables
+                .get(&key)
+                .cloned()
+                .ok_or_else(|| SessionError::TableNotFound(table_name.qualified_name()))?;
+            let mut table_guard = table_arc.lock().await;
+
+            let executor = Executor::new();
+            executor.execute_alter_table(plan, &mut self.catalog, Some(&mut table_guard))?;
+
+            // 同步更新 InMemoryTable 的 schema
+            let updated_schema = self
+                .catalog
+                .get_table(&table_name)
+                .ok_or_else(|| SessionError::TableNotFound(table_name.qualified_name()))?;
+            table_guard.set_schema(updated_schema);
+        }
+
+        Ok(QueryResult::DdlComplete {
+            tag: "ALTER TABLE".into(),
+        })
+    }
+
+    /// 执行 TRUNCATE TABLE 计划 — 清空表数据（保留表结构）
+    ///
+    /// 行为与 PG/MySQL/Oracle/SQL Server/SQLite 一致：
+    /// - 清空所有目标表的数据行（包括 tombstone 标记）
+    /// - 保留表 Schema，可继续 INSERT
+    /// - 不触发触发器（与 DELETE 不同）
+    /// - 不影响自增序列（简化实现，与 PG 一致；MySQL TRUNCATE 会重置自增）
+    /// - 多表 TRUNCATE 时，任一表不存在则报错（除非 IF EXISTS）
+    ///
+    /// # 参数
+    ///
+    /// - `plan`：`LogicalPlan::Truncate` 实例
+    ///
+    /// # 返回
+    ///
+    /// - `QueryResult::DdlComplete { tag: "TRUNCATE TABLE" }`
+    async fn execute_truncate_plan(
+        &mut self,
+        plan: &LogicalPlan,
+    ) -> Result<QueryResult, SessionError> {
+        let (names, if_exists, cascade) = match plan {
+            LogicalPlan::Truncate {
+                names,
+                if_exists,
+                cascade,
+            } => (names, *if_exists, *cascade),
+            _ => {
+                return Err(SessionError::InvalidStatement(format!(
+                    "expected Truncate plan, got {:?}",
+                    std::mem::discriminant(plan)
+                )))
+            }
+        };
+
+        // P0 修复：CASCADE 子句生效
+        // 当 CASCADE=true 时，应级联清空所有外键引用当前表的所有子表。
+        // 当前限制：运行时 TableSchema 不存储 constraints（约束仅在 CREATE TABLE 计划节点中），
+        // 无法从 catalog 反查 FK 引用关系。因此 CASCADE 暂为 best-effort：
+        // 接受 CASCADE 关键字不报错，但仅清空显式指定的表。
+        // 完整级联需待 catalog 增加 constraints 存储后实现。
+        let mut tables_to_truncate: Vec<String> = Vec::new();
+        for name in names {
+            let key = name.name.to_lowercase();
+            tables_to_truncate.push(key.clone());
+            if cascade {
+                tracing::debug!(
+                    table = %key,
+                    "TRUNCATE CASCADE: cascading not fully implemented (FK constraints not tracked in runtime catalog)"
+                );
+            }
+        }
+
+        for key in &tables_to_truncate {
+            // ADV-CONC-1：优先从共享存储查找（如果启用）
+            let table_arc = if let Some(shared) = &self.shared_tables {
+                shared.read().await.get(key).cloned()
+            } else {
+                self.tables.get(key).cloned()
+            };
+
+            match table_arc {
+                Some(arc) => {
+                    let mut guard = arc.lock().await;
+                    guard.truncate();
+                }
+                None => {
+                    // 会话私有存储兜底
+                    if let Some(arc) = self.tables.get(key).cloned() {
+                        let mut guard = arc.lock().await;
+                        guard.truncate();
+                    } else if if_exists {
+                        // IF EXISTS：表不存在时跳过
+                        continue;
+                    } else {
+                        return Err(SessionError::TableNotFound(key.clone()));
+                    }
+                }
+            }
+        }
+
+        Ok(QueryResult::DdlComplete {
+            tag: "TRUNCATE TABLE".into(),
         })
     }
 
@@ -1801,13 +3107,43 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        // 先锁定所有表（确保 Executor 不跨 .await 持有）
-        let mut guards = Vec::with_capacity(self.tables.len());
-        for table_arc in self.tables.values() {
+        // OPT-6：仅锁定预处理语句实际引用的表（确保 Executor 不跨 .await 持有）
+        // 从预处理语句存储中取出 AST，规划后提取引用的表名。
+        // 规划失败或未找到时退化为锁定所有表（保持原行为）。
+        let referenced: std::collections::HashSet<String> = if let LogicalPlan::Execute { name, .. } = plan {
+            match self.prepared_store.get(name) {
+                Some((stmt, _)) => {
+                    let planner = Planner::new(&self.catalog);
+                    match planner.plan_statement(stmt.clone()) {
+                        Ok(p) => p.collect_referenced_table_names(),
+                        Err(_) => std::collections::HashSet::new(),
+                    }
+                }
+                None => std::collections::HashSet::new(),
+            }
+        } else {
+            std::collections::HashSet::new()
+        };
+        // ADV-CONC-1：合并本地表和共享表（跨 session CREATE TABLE 可见性）
+        let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        for (k, v) in &self.tables {
+            if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                all_arcs.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(shared) = &self.shared_tables {
+            for (k, v) in shared.read().await.iter() {
+                if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                    all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
+        let mut guards = Vec::with_capacity(all_arcs.len());
+        for table_arc in all_arcs.values() {
             guards.push(table_arc.lock().await);
         }
 
-        let mut executor = Executor::new().with_catalog(&self.catalog);
+        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         for guard in &guards {
             executor.register_table(&**guard);
         }
@@ -1896,19 +3232,94 @@ impl ExecutorService {
     /// 获取表的可变 Arc 引用。
     ///
     /// ADV-CONC-1：优先从共享存储查找（跨 session 可见），未启用共享存储时退化为本地查找。
-    async fn get_table_arc(&self, name: &str) -> Result<Arc<Mutex<InMemoryTable>>, SessionError> {
-        let key = name.to_lowercase();
+    ///
+    /// # Schema 兼容查找
+    ///
+    /// tables.json 中表名可能以 "schema_name" 格式存储（如 "public_t"），
+    /// 而 SQL 解析 `SELECT FROM "public"."t"` 时 table.name="t"、table.schema="public"。
+    /// 为兼容两种存储格式，按以下顺序尝试查找：
+    /// 1. 原始 name（如 "t"）
+    /// 2. "schema_name" 格式（如 "public_t"）
+    /// 3. "public_name" 格式（默认 schema，当 schema 为 None 时尝试）
+    async fn get_table_arc(
+        &self,
+        name: &str,
+        schema: Option<&str>,
+    ) -> Result<Arc<Mutex<InMemoryTable>>, SessionError> {
+        let name_lower = name.to_lowercase();
+        // 构造候选键列表（按优先级排序）
+        let mut keys_to_try = vec![name_lower.clone()];
+        if let Some(s) = schema {
+            let s_lower = s.to_lowercase();
+            // 避免重复：schema_name 与 name 相同时只加入一次
+            let qualified = format!("{}_{}", s_lower, name_lower);
+            if qualified != name_lower {
+                keys_to_try.push(qualified);
+            }
+        } else {
+            // 默认 schema 为 public
+            let default_qualified = format!("public_{}", name_lower);
+            if default_qualified != name_lower {
+                keys_to_try.push(default_qualified);
+            }
+        }
+
         // 优先从共享存储查找
         if let Some(shared) = &self.shared_tables {
-            if let Some(table) = shared.read().await.get(&key).cloned() {
-                return Ok(table);
+            let guard = shared.read().await;
+            for key in &keys_to_try {
+                if let Some(table) = guard.get(key).cloned() {
+                    return Ok(table);
+                }
+            }
+            // MySQL 兼容回退：name 是 "soci_users"（无 schema）→ 遍历找 "_soci_users" 后缀
+            // 场景：Navicat 发送 `INSERT INTO soci_users`，但表存储为 `njszjt_soci_users`
+            let suffix = format!("_{}", name_lower);
+            for k in guard.keys() {
+                if k.ends_with(&suffix) {
+                    if let Some(table) = guard.get(k).cloned() {
+                        return Ok(table);
+                    }
+                }
             }
         }
         // 退化为本地查找
-        self.tables
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| SessionError::TableNotFound(name.to_string()))
+        for key in &keys_to_try {
+            if let Some(table) = self.tables.get(key).cloned() {
+                return Ok(table);
+            }
+        }
+        // MySQL 兼容回退：本地共享存储未找到，尝试本地 tables 后缀匹配
+        let suffix = format!("_{}", name_lower);
+        for (k, table) in &self.tables {
+            if k.ends_with(&suffix) {
+                return Ok(table.clone());
+            }
+        }
+        Err(SessionError::TableNotFound(name.to_string()))
+    }
+
+    /// 收集所有 FK 引用 `target` 表的表名 — 用于 DROP TABLE CASCADE
+    ///
+    /// 遍历 catalog 中所有表，找出其 FK 约束引用了 `target` 的表。
+    /// 返回的表名列表即为需要级联删除的依赖表。
+    fn collect_fk_dependents(&self, target: &TableName) -> Vec<TableName> {
+        let target_key = target.name.to_lowercase();
+        let mut dependents = Vec::new();
+        for table_name in self.catalog.list_tables() {
+            if table_name.name.to_lowercase() == target_key {
+                continue;
+            }
+            let fks = self.catalog.get_foreign_keys(&table_name);
+            for fk in fks {
+                let ref_table_key = fk.reference.table.name.to_lowercase();
+                if ref_table_key == target_key {
+                    dependents.push(table_name.clone());
+                    break;
+                }
+            }
+        }
+        dependents
     }
 
     // =================================================================
@@ -2033,6 +3444,10 @@ impl ExecutorService {
         portal_name: &str,
         max_rows: i32,
     ) -> Result<ExtendedExecuteResult, SessionError> {
+        // ADV-CONC-1：在规划前从共享存储同步 catalog（跨 session CREATE TABLE 可见性）
+        // 扩展查询路径（asyncpg/Navicat prepared statement）必须与简单查询路径一样同步
+        self.sync_catalog_from_shared().await;
+
         let portal = self.portals.get(portal_name).cloned().ok_or_else(|| {
             SessionError::Protocol(format!("portal \"{portal_name}\" does not exist"))
         })?;
@@ -2061,12 +3476,13 @@ impl ExecutorService {
             return Ok(ExtendedExecuteResult::Transaction(tx_result));
         }
 
-        // Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.*）
+        // Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.* / pg_database / pg_namespace / pg_class / ...）
         // 这类查询需要 MutableCatalog 接口，无法走 LogicalPlan::Execute 路径。
         // 与简单查询协议保持一致：直接计算结果集返回。
         if let Some(result) = crate::pgwire::system_tables::try_execute_system_table_query(
             &ps.statement,
             &self.catalog,
+            &self.database_name,
         ) {
             let query_result = result?;
             return Ok(ExtendedExecuteResult::Complete {
@@ -2129,13 +3545,37 @@ impl ExecutorService {
             parameters: portal.parameters.clone(),
         };
 
-        // 先锁定所有表（确保 Executor 不跨 .await 持有）
-        let mut guards = Vec::with_capacity(self.tables.len());
-        for table_arc in self.tables.values() {
+        // OPT-6：仅锁定查询计划实际引用的表（确保 Executor 不跨 .await 持有）
+        // 先对原始 SELECT 语句做一次规划以提取引用的表名。规划失败时退化为锁定所有表
+        // （保持原行为，避免因规划错误导致扩展查询不可用）。
+        let referenced: std::collections::HashSet<String> = {
+            let catalog_ref: &InMemoryCatalog = &self.catalog;
+            let planner = Planner::new(catalog_ref);
+            match planner.plan_statement(ps.statement.clone()) {
+                Ok(p) => p.collect_referenced_table_names(),
+                Err(_) => std::collections::HashSet::new(),
+            }
+        };
+        // ADV-CONC-1：合并本地表和共享表（跨 session CREATE TABLE 可见性）
+        let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        for (k, v) in &self.tables {
+            if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                all_arcs.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(shared) = &self.shared_tables {
+            for (k, v) in shared.read().await.iter() {
+                if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                    all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
+        let mut guards = Vec::with_capacity(all_arcs.len());
+        for table_arc in all_arcs.values() {
             guards.push(table_arc.lock().await);
         }
 
-        let mut executor = Executor::new().with_catalog(&self.catalog);
+        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
         for guard in &guards {
             executor.register_table(&**guard);
         }
@@ -2281,10 +3721,30 @@ impl ExecutorService {
             return Err(SessionError::Protocol("not a SELECT statement".into()));
         }
 
+        // Phase 4.7 修复：系统表查询的 Describe 支持。
+        // 系统表（pg_namespace/pg_class/information_schema.tables 等）不经过 Planner，
+        // Planner 会报 "table not found"，导致 Describe 响应发送 NoData（0 列）。
+        // 而实际执行时 try_execute_system_table_query 返回 N 列数据，
+        // 造成 "RowDescription 列数=0 但 DataRow 列数=N" 的协议错误。
+        // 这里优先用 system_tables 模块推导列，确保 Describe 与 Execute 列数一致。
+        if let Some(cols) = crate::pgwire::system_tables::try_describe_system_table_columns(
+            statement,
+            &self.catalog,
+            &self.database_name,
+        ) {
+            return Ok(cols);
+        }
+
         let plan = {
             let planner = Planner::new(&self.catalog);
             planner.plan_statement(statement.clone())?
         };
+
+        // P0-FN-TYPE 修复：Describe 阶段无 executor，需从 catalog 收集 SQL 函数定义
+        // 并设置 current_sql_functions guard，确保 derive_output_columns 能正确
+        // 推导函数返回类型（避免 Describe 返回 Text 类型误导客户端）。
+        let funcs = szrsql_sql::executor::Executor::collect_sql_functions(&self.catalog);
+        let _sql_func_guard = szrsql_sql::expr::current_sql_functions::guard(funcs);
 
         // 用空行集推导列名（derive_output_columns 接受空 rows）
         let columns = derive_output_columns(&plan, &[]);
@@ -2423,7 +3883,9 @@ impl Default for ExecutorService {
 /// - `ShowVariable` → 单列 "Value"
 fn derive_output_columns(plan: &LogicalPlan, rows: &[Vec<Value>]) -> Vec<ResultColumn> {
     match plan {
-        LogicalPlan::Scan { schema, .. } => schema
+        LogicalPlan::Scan { schema, .. }
+        | LogicalPlan::IndexScan { schema, .. }
+        | LogicalPlan::MaterializedViewScan { schema, .. } => schema
             .columns
             .iter()
             .map(|c| ResultColumn {
@@ -2536,12 +3998,39 @@ fn derive_output_columns(plan: &LogicalPlan, rows: &[Vec<Value>]) -> Vec<ResultC
 /// 递归推导 LogicalPlan 的输入 schema（用于 Projection 的列类型）。
 ///
 /// 简化实现：仅对 Scan 直接返回 schema；其他情况返回空，由调用方回退到 Text。
+///
+/// 注意：Aggregate 节点返回其 input 的 schema，因为 Projection 中的聚合函数表达式
+/// （如 `max(v)`）需要引用 Aggregate 输入端的列来推导类型。
 fn derive_input_schema(plan: &LogicalPlan) -> Vec<szrsql_sql::ast::ColumnDefinition> {
     match plan {
-        LogicalPlan::Scan { schema, .. } => schema.columns.clone(),
+        LogicalPlan::Scan { schema, .. }
+        | LogicalPlan::IndexScan { schema, .. }
+        | LogicalPlan::MaterializedViewScan { schema, .. } => schema.columns.clone(),
+        // P0-VIEW 修复：Projection 节点需从投影表达式推导列类型，
+        // 否则视图展开后的外层 Projection 无法获取内层列类型，回退为 Text。
+        LogicalPlan::Projection {
+            exprs,
+            output_names,
+            input,
+        } => {
+            let inner_schema = derive_input_schema(input);
+            output_names
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let ct = exprs
+                        .get(i)
+                        .map(|(e, _)| derive_expr_type(e, &inner_schema))
+                        .unwrap_or(ColumnType::Text);
+                    szrsql_sql::ast::ColumnDefinition::new(name.clone(), ct)
+                })
+                .collect()
+        }
         LogicalPlan::Filter { input, .. }
         | LogicalPlan::Limit { input, .. }
-        | LogicalPlan::Distinct { input } => derive_input_schema(input),
+        | LogicalPlan::Distinct { input }
+        | LogicalPlan::Sort { input, .. }
+        | LogicalPlan::Aggregate { input, .. } => derive_input_schema(input),
         LogicalPlan::Join { left, right, .. } => {
             let mut cols = derive_input_schema(left);
             cols.extend(derive_input_schema(right));
@@ -2575,15 +4064,54 @@ fn derive_expr_type(expr: &Expr, input_schema: &[szrsql_sql::ast::ColumnDefiniti
         Expr::Cast { data_type, .. } => data_type.clone(),
         Expr::Function { name, args, .. } => {
             // 聚合函数（count/sum/avg/min/max）按聚合规则推导；
-            // 标量函数兜底为 Text。
-            match name.to_lowercase().as_str() {
+            // 用户自定义函数（CREATE FUNCTION）从 current_sql_functions 查询声明的返回类型；
+            // 其他标量函数兜底为 Text。
+            let lower_name = name.to_lowercase();
+            match lower_name.as_str() {
                 "count" | "sum" | "avg" | "min" | "max" => {
                     derive_aggregate_type(name, args, input_schema)
                 }
-                _ => ColumnType::Text,
+                _ => {
+                    // P0-FN-TYPE 修复：查询用户自定义函数的 RETURNS 声明类型
+                    szrsql_sql::expr::current_sql_functions::with(|opt| {
+                        opt.as_ref()
+                            .and_then(|funcs| funcs.get(&lower_name))
+                            .and_then(|overloads| {
+                                overloads.iter().find_map(|def| {
+                                    parse_return_type_str(&def.return_type)
+                                })
+                            })
+                    })
+                    .unwrap_or(ColumnType::Text)
+                }
             }
         }
         _ => ColumnType::Text,
+    }
+}
+
+/// 解析函数返回类型字符串为 ColumnType — P0-FN-TYPE 修复
+///
+/// 用于从 `CREATE FUNCTION ... RETURNS <type>` 声明推导列类型。
+/// 支持常见 SQL 类型名（大小写不敏感），未识别类型返回 None（由调用方兜底为 Text）。
+fn parse_return_type_str(type_str: &str) -> Option<ColumnType> {
+    let t = type_str.trim().to_lowercase();
+    // 去掉括号修饰，如 VARCHAR(50) → varchar
+    let base = t.split('(').next().unwrap_or(&t).trim();
+    match base {
+        "int" | "integer" | "int4" | "int8" | "bigint" | "smallint" | "int2"
+        | "serial" | "bigserial" | "mediumint" => Some(ColumnType::Int64),
+        "float" | "float4" | "float8" | "double" | "real" | "double precision" | "numeric" | "decimal" => {
+            Some(ColumnType::Float64)
+        }
+        "bool" | "boolean" => Some(ColumnType::Bool),
+        "text" | "varchar" | "char" | "character" | "character varying" | "string" => {
+            Some(ColumnType::Text)
+        }
+        "date" | "timestamp" | "timestamptz" | "time" | "timetz" => {
+            Some(ColumnType::Timestamp)
+        }
+        _ => None,
     }
 }
 

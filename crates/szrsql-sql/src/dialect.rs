@@ -42,7 +42,7 @@
 //! ```
 
 use crate::ast::{InsertSource, OrderByExpr, Select, SetOperation, Statement};
-use crate::parser::{convert_statement, ParseError};
+use crate::parser::{convert_statement, count_binary_op_keywords, ParseError, MAX_BINARY_OP_CHAIN, MAX_SQL_LEN};
 use regex::Regex;
 use sqlparser::dialect::{
     AnsiDialect, Dialect as SpDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
@@ -134,6 +134,27 @@ impl std::fmt::Display for Dialect {
 /// - `ParseError::SqlParser(msg)`：sqlparser 解析失败
 /// - `ParseError::Unsupported(msg)`：不支持的方言
 pub fn parse_with_dialect(sql: &str, dialect: &Dialect) -> Result<Vec<Statement>, ParseError> {
+    // ADV-BUG-001 修复：SQL 长度预检，防止超长输入导致 sqlparser-rs 递归栈溢出
+    // 与 parse_sql_inner 保持一致的安全防护，避免方言入口绕过预检
+    if sql.len() > MAX_SQL_LEN {
+        return Err(ParseError::Unsupported(format!(
+            "SQL too long: {} bytes (max {} bytes)",
+            sql.len(),
+            MAX_SQL_LEN
+        )));
+    }
+    // ADV-BUG-001 修复：OR/AND 链深度预检
+    // sqlparser-rs 内部用递归下降解析二值表达式，左结合链深度 = 操作数个数
+    // 在调用 sqlparser-rs 之前统计 SQL 文本中 OR/AND 关键字出现次数，超限直接拒绝
+    let or_and_count = count_binary_op_keywords(sql);
+    if or_and_count > MAX_BINARY_OP_CHAIN {
+        return Err(ParseError::Unsupported(format!(
+            "too many OR/AND operators in SQL: {} (max {}); this is a ADV-BUG-001 protection against stack overflow DoS",
+            or_and_count,
+            MAX_BINARY_OP_CHAIN
+        )));
+    }
+
     // 1. 预处理
     let preprocessed = preprocess(sql, dialect);
 
@@ -265,7 +286,10 @@ fn preprocess(sql: &str, dialect: &Dialect) -> String {
 /// # 转换规则
 /// 1. `LIMIT offset, count` → `LIMIT count OFFSET offset`
 ///    （MySQL 语法；PG 不支持逗号分隔的 LIMIT）
-/// 2. `\\` 字符串转义 → `''` （MySQL 反斜杠转义 → PG 标准转义）
+/// 2. `ON DUPLICATE KEY UPDATE col=val, ...` → `ON CONFLICT DO UPDATE SET col=val, ...`
+///    （MySQL upsert 语法 → PG ON CONFLICT 语法）
+/// 3. `a MOD b` → `a % b`（MySQL MOD 运算符 → PG % 运算符）
+/// 4. `\\` 字符串转义 → `''` （MySQL 反斜杠转义 → PG 标准转义）
 ///    （当前仅处理简单情况，复杂场景由 MySqlDialect 处理）
 fn preprocess_mysql(sql: &str) -> String {
     let mut result = sql.to_string();
@@ -277,6 +301,23 @@ fn preprocess_mysql(sql: &str) -> String {
     result = limit_re
         .replace_all(&result, "LIMIT $2 OFFSET $1")
         .to_string();
+
+    // 2. ON DUPLICATE KEY UPDATE col=val, ... → ON CONFLICT DO UPDATE SET col=val, ...
+    // MySQL upsert 语法转换为 PG ON CONFLICT 语法
+    // 注意：简化处理，不解析冲突目标列（PG 需指定冲突列或用 ON CONFLICT (col)）
+    // 这里使用 ON CONFLICT DO UPDATE（无冲突目标，相当于冲突时更新所有列）
+    let on_dup_re = Regex::new(r"(?i)\bON\s+DUPLICATE\s+KEY\s+UPDATE\b").unwrap();
+    result = on_dup_re
+        .replace_all(&result, "ON CONFLICT DO UPDATE SET")
+        .to_string();
+
+    // 3. a MOD b → a % b（MOD 运算符 → % 运算符）
+    // 仅匹配 MOD 作为运算符（MOD 后跟空白，非左括号）
+    // 注意：MOD 作为函数调用 MOD(a, b) 不受影响（函数调用后跟 '('，无空白）
+    // regex crate 不支持 lookahead，使用 \bMOD\s+ 匹配 MOD + 空白（运算符用法）
+    // 函数调用 MOD( 不会匹配，因为 MOD 后直接跟 '('，无空白
+    let mod_re = Regex::new(r"(?i)\bMOD\b\s+").unwrap();
+    result = mod_re.replace_all(&result, "% ").to_string();
 
     result
 }
@@ -387,6 +428,66 @@ fn preprocess_oracle(sql: &str) -> String {
     let sysdate_re = Regex::new(r"(?i)\bSYSDATE\b").unwrap();
     result = sysdate_re
         .replace_all(&result, "CURRENT_TIMESTAMP")
+        .to_string();
+
+    // 12. MINUS → EXCEPT（Oracle MINUS 等价于 PG/SQL 标准 EXCEPT）
+    // 仅作为集合操作关键字替换（避免误伤包含 "minus" 字面量的字符串）
+    let minus_re = Regex::new(r"(?i)\bMINUS\b").unwrap();
+    result = minus_re.replace_all(&result, "EXCEPT").to_string();
+
+    // 13. DROP TABLE x CASCADE CONSTRAINTS → DROP TABLE x CASCADE
+    // Oracle CASCADE CONSTRAINTS 等价于 PG CASCADE（删除所有外键约束）
+    let cascade_cons_re = Regex::new(r"(?i)\bCASCADE\s+CONSTRAINTS\b").unwrap();
+    result = cascade_cons_re.replace_all(&result, "CASCADE").to_string();
+
+    // 14. ALTER TABLE t ADD (col TYPE) → ALTER TABLE t ADD COLUMN col TYPE
+    // Oracle 括号语法 → PG 标准 ADD COLUMN 语法
+    // 简化：仅处理单个列定义（多列 ADD (c1 T1, c2 T2) 较少见）
+    let add_paren_re = Regex::new(r"(?i)\bADD\s*\(\s*(\w+)\s+(\w+(?:\([^)]*\))?)\s*\)").unwrap();
+    result = add_paren_re
+        .replace_all(&result, "ADD COLUMN $1 $2")
+        .to_string();
+
+    // 15. ALTER TABLE t DROP (col) → ALTER TABLE t DROP COLUMN col
+    let drop_paren_re = Regex::new(r"(?i)\bDROP\s*\(\s*(\w+)\s*\)").unwrap();
+    result = drop_paren_re
+        .replace_all(&result, "DROP COLUMN $1")
+        .to_string();
+
+    // 16. ALTER TABLE t MODIFY (col TYPE [options]) → ALTER TABLE t ALTER COLUMN col SET DATA TYPE TYPE
+    // Oracle MODIFY → PG ALTER COLUMN SET DATA TYPE
+    // 注：sqlparser 不支持 SET DATA TYPE 后跟 NOT NULL，简化：仅转换类型，NOT NULL 需单独执行
+    let modify_paren_re =
+        Regex::new(r"(?i)\bMODIFY\s*\(\s*(\w+)\s+(\w+(?:\([^)]*\))?)(?:\s+(?:NOT\s+NULL|NULL|DEFAULT\s+[^)]+))?\s*\)").unwrap();
+    result = modify_paren_re
+        .replace_all(&result, "ALTER COLUMN $1 SET DATA TYPE $2")
+        .to_string();
+
+    // 17. ALTER TABLE t MODIFY col TYPE → ALTER TABLE t ALTER COLUMN col SET DATA TYPE TYPE
+    // 无括号形式
+    let modify_re = Regex::new(r"(?i)\bMODIFY\s+(\w+)\s+(\w+(?:\([^)]*\))?)").unwrap();
+    result = modify_re
+        .replace_all(&result, "ALTER COLUMN $1 SET DATA TYPE $2")
+        .to_string();
+
+    // 18. CREATE SYNONYM name FOR target → SELECT 1（占位）
+    // SzRSQL 不支持 SYNONYM，转换为无操作 SELECT 1 避免破坏批处理
+    let synonym_re = Regex::new(r"(?im)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b[^;]*;?").unwrap();
+    result = synonym_re.replace_all(&result, "SELECT 1;").to_string();
+
+    // 19. DROP SYNONYM name → SELECT 1（占位）
+    let drop_synonym_re = Regex::new(r"(?im)^\s*DROP\s+(?:PUBLIC\s+)?SYNONYM\b[^;]*;?").unwrap();
+    result = drop_synonym_re.replace_all(&result, "SELECT 1;").to_string();
+
+    // 注：COMMENT ON 不再在此预处理中转换为 SELECT 1（占位）— Phase TDengine-P2
+    // 已由 parser.rs 的 parse_comment 手动解析为 Statement::Comment，直接操作 catalog。
+
+    // 21. CREATE SEQUENCE name START WITH m INCREMENT BY n → CREATE SEQUENCE name INCREMENT BY n START WITH m
+    // Oracle 语法（START WITH 在前）→ PG 标准语法（INCREMENT BY 在前）
+    // sqlparser 0.53 PostgreSqlDialect 要求 INCREMENT BY 在 START WITH 之前
+    let ora_seq_re = Regex::new(r"(?i)\bCREATE\s+SEQUENCE\s+(\w+)\s+START\s+WITH\s+(\d+)\s+INCREMENT\s+BY\s+(\d+)").unwrap();
+    result = ora_seq_re
+        .replace_all(&result, "CREATE SEQUENCE $1 INCREMENT BY $3 START WITH $2")
         .to_string();
 
     result
@@ -556,10 +657,19 @@ fn build_case_from_decode(args: &[String]) -> String {
 /// 4. `GETUTCDATE()` → `CURRENT_TIMESTAMP`（近似处理）
 /// 5. `LEN(s)` → `LENGTH(s)`（PG 使用 LENGTH）
 /// 6. `DATEDIFF(unit, a, b)` → `EXTRACT(EPOCH FROM (b - a))`（简化，忽略 unit）
+/// 7. `CREATE CLUSTERED/NONCLUSTERED INDEX` → `CREATE INDEX`（移除聚簇关键字）
+/// 8. `ALTER COLUMN col TYPE` → `ALTER COLUMN col SET DATA TYPE TYPE`（PG 语法）
+/// 9. `SELECT TOP N WITH TIES` → `SELECT TOP N`（移除 WITH TIES）
+/// 10. `CONVERT(type, expr)` → `CAST(expr AS type)`（PG CAST 语法）
+/// 11. `CREATE SCHEMA name` → `SELECT 1`（占位，SzRSQL 不支持 schema）
 fn preprocess_sqlserver(sql: &str) -> String {
     let mut result = sql.to_string();
 
-    // 1. SELECT TOP N → SELECT ... LIMIT N
+    // 1. SELECT TOP N [WITH TIES] → SELECT ... LIMIT N
+    // 先处理 WITH TIES（移除后再处理 TOP N）
+    let with_ties_re = Regex::new(r"(?i)\bWITH\s+TIES\b").unwrap();
+    result = with_ties_re.replace_all(&result, "").to_string();
+
     // 匹配：SELECT TOP N（N 为数字）
     let top_re = Regex::new(r"(?i)\bSELECT\s+TOP\s+(\d+)\s+").unwrap();
     if let Some(caps) = top_re.captures(&result.clone()) {
@@ -598,6 +708,54 @@ fn preprocess_sqlserver(sql: &str) -> String {
     let len_re = Regex::new(r"(?i)\bLEN\s*\(").unwrap();
     result = len_re.replace_all(&result, "LENGTH(").to_string();
 
+    // 7. CREATE [CLUSTERED|NONCLUSTERED] INDEX → CREATE INDEX
+    // 移除 CLUSTERED / NONCLUSTERED 关键字（SzRSQL 不区分聚簇/非聚簇索引）
+    let clustered_re = Regex::new(r"(?i)\bCREATE\s+(?:CLUSTERED|NONCLUSTERED)\s+INDEX").unwrap();
+    result = clustered_re
+        .replace_all(&result, "CREATE INDEX")
+        .to_string();
+
+    // 8a. ALTER TABLE t ALTER COLUMN col TYPE NOT NULL → 拆分为两条语句
+    // SQL Server 语法：ALTER TABLE t ALTER COLUMN col NVARCHAR(100) NOT NULL
+    // PG 不支持单句 SET DATA TYPE 后跟 NOT NULL，拆分为：
+    //   1. ALTER TABLE t ALTER COLUMN col SET DATA TYPE TYPE
+    //   2. ALTER TABLE t ALTER COLUMN col SET NOT NULL
+    // 必须先于 8b 处理（带 NOT NULL 的更具体情况）
+    let alter_col_notnull_re = Regex::new(
+        r"(?i)\bALTER\s+TABLE\s+(\w+)\s+ALTER\s+COLUMN\s+(\w+)\s+(NVARCHAR|VARCHAR|CHAR|NCHAR|INT|INTEGER|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|FLOAT|REAL|DOUBLE|BIT|BOOLEAN|DATE|TIME|DATETIME|SMALLDATETIME|DATETIME2|DATETIMEOFFSET|TEXT|NTEXT|IMAGE|BINARY|VARBINARY|MONEY|SMALLMONEY|UNIQUEIDENTIFIER|XML|JSON)(\([^)]*\))?\s+NOT\s+NULL",
+    )
+    .unwrap();
+    result = alter_col_notnull_re
+        .replace_all(
+            &result,
+            "ALTER TABLE $1 ALTER COLUMN $2 SET DATA TYPE $3$4; ALTER TABLE $1 ALTER COLUMN $2 SET NOT NULL",
+        )
+        .to_string();
+
+    // 8b. ALTER COLUMN col TYPE → ALTER COLUMN col SET DATA TYPE TYPE（无 NOT NULL）
+    // SQL Server 语法：ALTER TABLE t ALTER COLUMN col NVARCHAR(100)
+    // PG 语法：ALTER TABLE t ALTER COLUMN col SET DATA TYPE NVARCHAR(100)
+    let alter_col_re =
+        Regex::new(r"(?i)\bALTER\s+COLUMN\s+(\w+)\s+(NVARCHAR|VARCHAR|CHAR|NCHAR|INT|INTEGER|BIGINT|SMALLINT|TINYINT|DECIMAL|NUMERIC|FLOAT|REAL|DOUBLE|BIT|BOOLEAN|DATE|TIME|DATETIME|SMALLDATETIME|DATETIME2|DATETIMEOFFSET|TEXT|NTEXT|IMAGE|BINARY|VARBINARY|MONEY|SMALLMONEY|UNIQUEIDENTIFIER|XML|JSON)(\([^)]*\))?")
+            .unwrap();
+    result = alter_col_re
+        .replace_all(&result, "ALTER COLUMN $1 SET DATA TYPE $2$3")
+        .to_string();
+
+    // 11. CREATE SCHEMA name → SELECT 1（占位）
+    // SzRSQL 不支持 CREATE SCHEMA（schema 概念简化为命名空间）
+    let create_schema_re =
+        Regex::new(r"(?im)^\s*CREATE\s+SCHEMA\b[^;]*;?").unwrap();
+    result = create_schema_re.replace_all(&result, "SELECT 1;").to_string();
+
+    // 12. CONVERT(type, expr) → CAST(expr AS type)
+    // SQL Server CONVERT 函数 → PG CAST 函数
+    // 简化：仅处理两个参数的 CONVERT（type, expr），不支持 style 参数
+    let convert_re = Regex::new(r"(?i)\bCONVERT\s*\(\s*(\w+(?:\([^)]*\))?)\s*,\s*([^)]+)\)").unwrap();
+    result = convert_re
+        .replace_all(&result, "CAST($2 AS $1)")
+        .to_string();
+
     result
 }
 
@@ -616,6 +774,10 @@ fn preprocess_sqlserver(sql: &str) -> String {
 /// 4. `INTEGER PRIMARY KEY` → 保留（SzRSQL 视为自增主键等价语义）
 /// 5. SQLite 方括号标识符 `[foo]` → 已由 SQLiteDialect 处理
 /// 6. `GROUP_CONCAT(x)` / `GROUP_CONCAT(x, sep)` → 保留原样由 sqlparser 解析
+/// 7. `GLOB` 运算符 → `LIKE`（语义不完全一致：GLOB 大小写敏感且使用 * ?，
+///    SzRSQL 简化为 LIKE 转换以保持基本兼容）
+/// 8. `CREATE VIRTUAL TABLE name USING module(args)` → `CREATE TABLE name(args)`
+///    （SzRSQL 不支持虚拟表，降级为普通 CREATE TABLE）
 fn preprocess_sqlite(sql: &str) -> String {
     let mut result = sql.to_string();
 
@@ -628,6 +790,70 @@ fn preprocess_sqlite(sql: &str) -> String {
     // 简化处理：匹配 PRAGMA 开头直到行尾或分号
     let pragma_re = Regex::new(r"(?im)^\s*PRAGMA\b[^;]*;?").unwrap();
     result = pragma_re.replace_all(&result, "SELECT 1;").to_string();
+
+    // 7. GLOB 运算符 → LIKE（简化转换）
+    // GLOB 使用 * ? 通配符，LIKE 使用 % _ 通配符
+    // 简化：仅替换关键字，不转换通配符（用户需自行适配）
+    let glob_re = Regex::new(r"(?i)\bGLOB\b").unwrap();
+    result = glob_re.replace_all(&result, "LIKE").to_string();
+
+    // 8. CREATE VIRTUAL TABLE name USING module(args) → CREATE TABLE name(args_with_text)
+    // SzRSQL 不支持虚拟表（FTS5等），降级为普通 CREATE TABLE
+    // FTS5 列无类型，统一添加 TEXT 类型以符合 PG CREATE TABLE 语法
+    // 例：CREATE VIRTUAL TABLE docs USING fts5(title, body)
+    //   → CREATE TABLE docs (title TEXT, body TEXT)
+    let virtual_table_re = Regex::new(
+        r"(?i)\bCREATE\s+VIRTUAL\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(\w+)\s+USING\s+\w+\s*\(([^)]+)\)",
+    )
+    .unwrap();
+    result = virtual_table_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let if_not_exists = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let table_name = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let cols_str = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+            // 按逗号分割列名，每列添加 TEXT 类型
+            // 忽略 FTS5 特殊参数（如 tokenize=, prefix=, content=）
+            let cols: Vec<String> = cols_str
+                .split(',')
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .filter_map(|c| {
+                    // 跳过 FTS5 配置参数（包含 = 的）
+                    if c.contains('=') {
+                        return None;
+                    }
+                    // 列名可能带引号或前缀，提取纯列名
+                    let col_name = c.trim_matches(|ch: char| ch == '"' || ch == '`' || ch == '[' || ch == ']');
+                    if col_name.is_empty() || col_name.contains(' ') {
+                        return None;
+                    }
+                    Some(format!("{col_name} TEXT"))
+                })
+                .collect();
+            format!("CREATE TABLE {if_not_exists}{table_name} ({})", cols.join(", "))
+        })
+        .to_string();
+
+    // 9. MATCH 运算符（FTS5）→ LIKE
+    // SQLite FTS5 MATCH 简化为 LIKE（语义不完全一致，但保持基本兼容）
+    let match_re = Regex::new(r"(?i)\bMATCH\b").unwrap();
+    result = match_re.replace_all(&result, "LIKE").to_string();
+
+    // 10. 位运算符 << / >> → shift_left / shift_right 函数调用
+    // SQLiteDialect 不支持 << / >> 运算符（sqlparser 限制）
+    // SzRSQL PG 方言支持 PGBitwiseShiftLeft/Right，但 SQLiteDialect 解析阶段就报错
+    // 预处理：将 a << b / a >> b 转换为 shift_left(a, b) / shift_right(a, b) 函数调用
+    // 简化：仅处理简单操作数（标识符、数字、括号表达式），不处理复杂嵌套
+    // << 运算符
+    let shift_left_re = Regex::new(r"(\w+|\d+)\s*<<\s*(\w+|\d+)").unwrap();
+    result = shift_left_re
+        .replace_all(&result, "shift_left($1, $2)")
+        .to_string();
+    // >> 运算符
+    let shift_right_re = Regex::new(r"(\w+|\d+)\s*>>\s*(\w+|\d+)").unwrap();
+    result = shift_right_re
+        .replace_all(&result, "shift_right($1, $2)")
+        .to_string();
 
     result
 }

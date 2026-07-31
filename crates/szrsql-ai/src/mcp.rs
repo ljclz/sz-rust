@@ -186,6 +186,8 @@ pub struct ColumnDef {
     pub data_type: String,
     pub nullable: bool,
     pub primary_key: bool,
+    /// 列注释 — Phase TDengine-P2
+    pub comment: Option<String>,
 }
 
 /// 表结构
@@ -240,24 +242,28 @@ impl Default for MockBackend {
                         data_type: "BIGINT".to_string(),
                         nullable: false,
                         primary_key: true,
+                        comment: None,
                     },
                     ColumnDef {
                         name: "name".to_string(),
                         data_type: "VARCHAR(255)".to_string(),
                         nullable: false,
                         primary_key: false,
+                        comment: None,
                     },
                     ColumnDef {
                         name: "price".to_string(),
                         data_type: "DECIMAL(10,2)".to_string(),
                         nullable: true,
                         primary_key: false,
+                        comment: None,
                     },
                     ColumnDef {
                         name: "stock".to_string(),
                         data_type: "INT".to_string(),
                         nullable: true,
                         primary_key: false,
+                        comment: None,
                     },
                 ],
             },
@@ -275,18 +281,21 @@ impl Default for MockBackend {
                         data_type: "BIGINT".to_string(),
                         nullable: false,
                         primary_key: true,
+                        comment: None,
                     },
                     ColumnDef {
                         name: "customer_id".to_string(),
                         data_type: "BIGINT".to_string(),
                         nullable: false,
                         primary_key: false,
+                        comment: None,
                     },
                     ColumnDef {
                         name: "total".to_string(),
                         data_type: "DECIMAL(10,2)".to_string(),
                         nullable: false,
                         primary_key: false,
+                        comment: None,
                     },
                 ],
             },
@@ -1376,6 +1385,7 @@ mod tests {
                     data_type: "INT".to_string(),
                     nullable: false,
                     primary_key: true,
+                    comment: None,
                 }],
             })
         }

@@ -90,3 +90,91 @@ mutants.out/
 # === 临时测试文件 ===
 README_test.md
 x.md
+
+# === Python 虚拟环境（本地依赖，不入库）===
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+
+# === 临时调试 / 测试脚本（一次性使用，不入库）===
+/test_*.py
+/fix_*.py
+/fix_*.ps1
+/import_*.py
+/list_*.py
+/parse_*.py
+/verify_*.py
+/final_verify.py
+/decode_handshake.py
+/mysql_debug.py
+/navicat_sim_test.py
+/navicat_test*.sql
+/navicat_test*.log
+/check_*.py
+/check_cols.py
+/check_schema.py
+/check_aiomysql_hs.py
+
+# === tools/ 目录：仅保留 navicat-recorder Rust 项目，所有 Python 脚本不入库 ===
+/tools/*.py
+/tools/*.md
+/tools/navicat-recorder/target/
+/tools/navicat-recorder/Cargo.lock
+
+# === scripts/ 目录：仅保留 big_data_compare.py，其他临时脚本不入库 ===
+/scripts/big_data_compare_missing.py
+/scripts/regenerate_report*.py
+/scripts/missing_results.json
+
+# === 临时日志 / 标准输出 / 错误输出文件 ===
+*_stderr.txt
+*_stdout.txt
+*stderr.txt
+*stdout.txt
+/server_debug.log
+/server_stderr.log
+/server_stdout.log
+/szrsql-crash-*.log
+/mod_test.txt
+/oracle_test.txt
+/compile_errors.txt
+/errors.txt
+/errors_*.txt
+/test_p8p9_*.txt
+/test_plpgsql_*.txt
+
+# === 临时报告文件 ===
+/多方言兼容性测试报告.txt
+/clippy_ws*.txt
+/项目状态检测报告_2026-07-30.md
+
+# === 工具脚本输出（本地分析数据，不入库）===
+/tools/data/
+/tools/*.log
+/tools/*.txt
+/tools/*.db
+/tools/auto_test_errors.log
+/tools/full_test_errors.log
+/tools/navicat-recorder/target/
+
+# === 脚本临时输出 ===
+/scripts/missing_results.json
+/scripts/__pycache__/
+
+# === PID / 锁文件 ===
+*.pid
+*.lock.tmp
+
+# === Navicat 抓包数据（本地调试用，不入库）===
+/captures/
+
+# === Clippy 输出（本地静态分析，不入库）===
+/clippy_*.txt
+/clippy_*.log
+
+# === Navicat 回放测试（依赖 tests/golden 基线数据，基线未入库故测试不入库）===
+/tests/replay_navicat.rs
+/tests/golden/

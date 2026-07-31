@@ -5,12 +5,20 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL 协议层：PG Wire/REST/WebSocket"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 szrsql-types = { workspace = true }
 szrsql-sql = { workspace = true }
 szrsql-catalog = { workspace = true }
 szrsql-tx = { workspace = true }
+szrsql-dist = { workspace = true }
+szrsql-cdc = { workspace = true }
+szrsql-optimizer = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }

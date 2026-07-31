@@ -42,6 +42,7 @@ pub mod llm_cache;
 pub mod mcp;
 pub mod mcp_server;
 pub mod nl2sql;
+pub mod proactive_insights;
 pub mod rag;
 
 /// 返回 crate 版本号，供 workspace 骨架冒烟测试使用。

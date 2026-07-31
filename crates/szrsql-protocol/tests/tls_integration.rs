@@ -20,7 +20,7 @@ use std::time::Duration;
 use szrsql_protocol::pgwire::{
     message::{
         MSG_AUTHENTICATION, MSG_BACKEND_KEY_DATA, MSG_COMMAND_COMPLETE, MSG_DATA_ROW,
-        MSG_PARAMETER_STATUS, MSG_READY_FOR_QUERY, MSG_ROW_DESCRIPTION,
+        MSG_ERROR_RESPONSE, MSG_PARAMETER_STATUS, MSG_READY_FOR_QUERY, MSG_ROW_DESCRIPTION,
     },
     server::{PgwireConfig, PgwireServer},
     startup::{
@@ -68,6 +68,26 @@ async fn spawn_tls_server(port: u16, tls: TlsConfig) -> tokio::task::JoinHandle<
         .with_port(port)
         .with_server_version("14.0-test")
         .with_tls(tls);
+    let server = PgwireServer::new(config);
+    tokio::spawn(async move {
+        let _ = server.serve().await;
+    })
+}
+
+/// 启动一个带 TLS 且强制 TLS（require_tls=true）的测试服务器。
+///
+/// `require_tls=true` 时，客户端必须先发送 SSLRequest 升级为 TLS 才能继续握手；
+/// 直接发送明文 StartupMessage 将被服务器拒绝。
+async fn spawn_tls_server_with_require_tls(
+    port: u16,
+    tls: TlsConfig,
+) -> tokio::task::JoinHandle<()> {
+    let config = PgwireConfig::new()
+        .with_host("127.0.0.1")
+        .with_port(port)
+        .with_server_version("14.0-test")
+        .with_tls(tls)
+        .with_require_tls(true);
     let server = PgwireServer::new(config);
     tokio::spawn(async move {
         let _ = server.serve().await;
@@ -300,7 +320,7 @@ async fn test_e2e_ssl_request_refused_without_tls_returns_n() {
 async fn test_e2e_sslmode_require_tls_handshake_success() {
     let port = find_free_port(16132).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -352,7 +372,7 @@ async fn test_e2e_sslmode_require_tls_handshake_success() {
 async fn test_e2e_sslmode_require_select_one_returns_result_set() {
     let port = find_free_port(16232).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -400,7 +420,7 @@ async fn test_e2e_sslmode_require_select_one_returns_result_set() {
 async fn test_e2e_sslmode_verify_full_with_trusted_root_succeeds() {
     let port = find_free_port(16332).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -441,7 +461,7 @@ async fn test_e2e_sslmode_verify_full_with_trusted_root_succeeds() {
 async fn test_e2e_sslmode_verify_full_rejects_untrusted_cert() {
     let port = find_free_port(16432).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -476,7 +496,7 @@ async fn test_e2e_sslmode_verify_full_rejects_untrusted_cert() {
 async fn test_e2e_tls_server_accepts_plaintext_startup() {
     let port = find_free_port(16532).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -512,7 +532,7 @@ async fn test_tls_stream_satisfies_async_read_write_unpin() {
 
     let port = find_free_port(16632).await;
     let (cert_pem, key_pem) = generate_self_signed_pem();
-    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem).expect("TlsConfig from PEM");
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
     let _server = spawn_tls_server(port, tls_config).await;
     wait_for_server(port).await;
 
@@ -538,4 +558,116 @@ async fn test_tls_stream_satisfies_async_read_write_unpin() {
 
     // 类型断言：如果 TlsStream<TcpStream> 不满足约束，编译会失败
     assert_stream(tls_stream);
+}
+
+// =====================================================================
+//  require_tls 集成测试
+// =====================================================================
+
+/// 验收场景 7：require_tls=true 时，客户端直接发送明文 StartupMessage（不经过
+/// SSLRequest），服务器应回复 ErrorResponse（'E'）并包含 "SSLRequired" 文案，
+/// 随后关闭连接，拒绝明文降级。
+#[tokio::test]
+async fn test_e2e_require_tls_rejects_plaintext_startup() {
+    let port = find_free_port(16732).await;
+    let (cert_pem, key_pem) = generate_self_signed_pem();
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
+    let _server = spawn_tls_server_with_require_tls(port, tls_config).await;
+    wait_for_server(port).await;
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect should succeed");
+
+    // 直接发送明文 StartupMessage（不发送 SSLRequest）
+    send_startup(&mut stream).await;
+
+    // 读取服务器响应：应为 ErrorResponse（'E'）
+    let mut buf = [0u8; 256];
+    let n = stream.read(&mut buf).await.expect("read should succeed");
+    assert!(n > 0, "server should respond with ErrorResponse before closing");
+
+    // 首字节应为 'E'（MSG_ERROR_RESPONSE）
+    assert_eq!(
+        buf[0], MSG_ERROR_RESPONSE,
+        "require_tls=true should respond with ErrorResponse to plaintext StartupMessage"
+    );
+
+    // 解析消息长度（紧跟 type 后的 4 字节 i32）
+    let length = i32::from_be_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+    assert!(length >= 4, "error response length should be at least 4");
+
+    // 整个消息体应在一次读取中（type=1 + length=4 + payload）
+    let total_len = 1 + length;
+    assert!(
+        n >= total_len,
+        "expected at least {total_len} bytes, got {n}"
+    );
+
+    // payload 中应包含 "SSLRequired" 文案（ASCII 字节匹配）
+    let payload = &buf[5..total_len];
+    let payload_str = String::from_utf8_lossy(payload);
+    assert!(
+        payload_str.contains("SSLRequired"),
+        "error response should contain 'SSLRequired', got: {payload_str}"
+    );
+
+    // 继续读取，服务器应关闭连接（返回 0 表示 EOF）
+    let n2 = stream.read(&mut buf).await.expect("read after error");
+    assert_eq!(n2, 0, "server should close connection after sending error");
+}
+
+/// 验收场景 8：require_tls=true 时，客户端正常发送 SSLRequest → 'S' → TLS 握手，
+/// 服务器应接受 TLS 连接并完成 pgwire 启动握手，证明 require_tls 仅拒绝明文降级，
+/// 不影响合法的 TLS 客户端。
+#[tokio::test]
+async fn test_e2e_require_tls_accepts_tls_handshake() {
+    let port = find_free_port(16832).await;
+    let (cert_pem, key_pem) = generate_self_signed_pem();
+    let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("TlsConfig from PEM");
+    let _server = spawn_tls_server_with_require_tls(port, tls_config).await;
+    wait_for_server(port).await;
+
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
+        .await
+        .expect("connect should succeed");
+
+    // 发送 SSLRequest
+    let ssl_bytes = encode_special_request(PROTOCOL_SSL_REQUEST);
+    stream
+        .write_all(&ssl_bytes)
+        .await
+        .expect("write SSLRequest");
+    stream.flush().await.expect("flush");
+
+    // 服务器应回 'S' 表示支持 SSL
+    let mut resp = [0u8; 1];
+    stream.read_exact(&mut resp).await.expect("read 'S'");
+    assert_eq!(resp[0], b'S', "server with require_tls should accept SSLRequest");
+
+    // 执行 TLS 握手（sslmode=require，跳过证书验证）
+    let connector = tls_connector_no_verify();
+    let server_name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+    let mut tls_stream = connector
+        .connect(server_name, stream)
+        .await
+        .expect("TLS handshake should succeed even with require_tls=true");
+
+    // 通过加密通道发送 StartupMessage，握手应成功
+    send_startup(&mut tls_stream).await;
+    let response = read_until_ready_for_query(&mut tls_stream).await;
+    let types = parse_message_types(&response);
+
+    assert_eq!(types[0], MSG_AUTHENTICATION, "first message should be AuthenticationOk");
+    assert_eq!(
+        types[types.len() - 1], MSG_READY_FOR_QUERY,
+        "last message should be ReadyForQuery"
+    );
+
+    // 验证加密通道上的查询也正常
+    send_select_one(&mut tls_stream).await;
+    let response = read_until_ready_for_query(&mut tls_stream).await;
+    let types = parse_message_types(&response);
+    assert_eq!(types[0], MSG_ROW_DESCRIPTION);
+    assert_eq!(types[types.len() - 1], MSG_READY_FOR_QUERY);
 }

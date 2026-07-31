@@ -1,10 +1,10 @@
 # SzRSQL 工程化实践规范
 
 > **项目名**：SzRSQL（自研关系型数据库，PG 协议兼容）
-> **适用范围**：szrsql workspace 全部 15 个 crate（含 fuzz）
-> **版本**：v1.0  日期：2026-07-20
-> **当前 Phase**：Phase 3（枚举类型实现）
-> **来源**：sz-orm v0.2.1 工程实践提炼 + szrsql Phase 1-3 开发经验 + sz-orm 全面审查 6 Critical + 5 High + 7 伪实现教训
+> **适用范围**：szrsql workspace 全部 22 个 crate（含 fuzz / dialect-compat / pgcompat / 4 个协议级 crate）
+> **版本**：v1.2  日期：2026-07-27
+> **当前状态**：v1.0.0-rc.1（已实现完整数据库栈：SQL/事务/存储/分布式/协议/复制/CDC/安全/运维/AI；5 种方言均达 L2 协议级兼容；8,592 测试通过；待发布 crates.io）
+> **来源**：sz-orm v0.2.1 工程实践提炼 + szrsql 全量开发经验 + sz-orm 全面审查 6 Critical + 5 High + 7 伪实现教训
 > **核心定位**：针对 **数据库内核级 AI 开发** 场景强化的工程化规范——AI 生成代码有独特的缺陷模式（虚假实现、panic 路径、锁中毒、feature 遗漏），本规范从门禁、审查、测试三个维度系统性防御
 
 ---
@@ -177,8 +177,8 @@ function Invoke-Gate-AllFeatures {
 ```
 
 **规则**：
-- **当前（Phase 3）**：szrsql 尚无 feature flag，门禁 9 为通过状态，但必须每新增一个 feature 时立即激活此检查
-- **Phase 4+**：每次提交必须对所有 feature 组合执行 `cargo check --all-features`
+- **当前（Phase 4.5）**：szrsql 已引入 feature flag（如 `wal-compression`、`tls` 等），门禁 9 已激活
+- **Phase 5+**：每次提交必须对所有 feature 组合执行 `cargo check --all-features`
 - 新加 feature 时必须确保所有组合都能编译
 - CI 必须配置 matrix 覆盖 `--no-default-features` / `--all-features` / 关键 feature 子集
 - 参考 CI matrix 配置：
@@ -209,7 +209,7 @@ function Invoke-Gate-PhasePin {
 
     # 当前 Phase 允许的依赖白名单（按 Phase 维护）
     $phaseAllowList = @{
-        "phase-3" = @(
+        "phase-4.5" = @(
             # Phase 1 核心依赖
             "tokio", "serde", "serde_json", "tracing", "tracing-subscriber",
             "anyhow", "thiserror", "bytes", "crc32c", "sha2", "hmac", "rand",
@@ -218,15 +218,21 @@ function Invoke-Gate-PhasePin {
             "sqlparser", "regex",
             # Phase 3 枚举类型
             "proptest",  # 仅 dev-dependencies
-            # Phase 3 内部 crate
+            # Phase 4 协议层
+            "rustls", "ring", "tokio-rustls", "aes-gcm", "zstd",
+            # Phase 4.5 协议级兼容 crate
+            "szrsql-mysql-protocol", "szrsql-sqlite-bridge",
+            "szrsql-tds-protocol", "szrsql-oracle-bridge",
+            # 内部 crate
             "szrsql-types", "szrsql-storage", "szrsql-tx", "szrsql-cdc",
             "szrsql-sql", "szrsql-catalog", "szrsql-protocol", "szrsql-optimizer",
             "szrsql-ai", "szrsql-security", "szrsql-scheduler", "szrsql-replication",
-            "szrsql-dist", "szrsql-pgcompat", "szrsql-bin"
+            "szrsql-dist", "szrsql-pgcompat", "szrsql-ops", "szrsql-shadow",
+            "szrsql-dialect-compat", "szrsql-bin"
         )
     }
 
-    $currentPhase = "phase-3"
+    $currentPhase = "phase-4.5"
     $allowed = $phaseAllowList[$currentPhase]
     $violations = @()
 
@@ -259,7 +265,7 @@ function Invoke-Gate-PhasePin {
 ```
 
 **规则**：
-- szrsql 按 Phase 1→2→3→4→4.5 分阶段交付，当前 Phase 为 **Phase 3（枚举类型）**
+- szrsql 按 Phase 1→2→3→4→4.5 分阶段交付，当前 Phase 为 **Phase 4.5（生产就绪 + 协议级兼容）**，已完成 5 种方言 L2 协议级兼容
 - 每个 Phase 有明确的**依赖白名单**，不允许提前引入未来 Phase 的 crate
 - `[features]` 中未来应明确声明每个 Phase 对应的 feature（当前尚无，建议 Phase 4 开始引入）
 - 未到 Phase 的代码必须用 `#[cfg(feature = "phase-N")]` 或模块级 `#[cfg]` 隔离
@@ -546,7 +552,7 @@ Write-Host "=================================================="
 
 ### 3.3 审查标签与版本标记
 
-- 审查通过的模块必须 `git tag` 标记版本：`szrsql-v0.1.0-<crate-name>`
+- 审查通过的模块必须 `git tag` 标记版本：`szrsql-v1.0.0-rc.1-<crate-name>`
 - 已标记版本不允许重新修改（除非有新的 MAJOR 变更）
 - 每个 tag 关联对应的审查报告（ADR 或 PR 描述）
 
@@ -643,9 +649,9 @@ proptest! {
 }
 ```
 
-### 4.4 T4 压力测试（待补充）
+### 4.4 T4 压力测试
 
-当前 szrsql 处于 Phase 3，尚未覆盖压力测试。**预计 Phase 4 完成后补充**。
+当前 szrsql 已处于 Phase 4.5，压力测试已通过 `szrsql-shadow` 的 soak test（6 小时混合负载）覆盖，详见 `crates/szrsql-shadow/tests/soak_test.rs`。
 
 压力测试要求：
 - 并发连接数 ≥ 100
@@ -784,8 +790,8 @@ jobs:
   - [ ] 无 SQL 拼接（SQL 解析/执行路径全参数化）
 
 - [ ] **Phase 合规检查**
-  - [ ] 未引入 Phase 规划之外的外部依赖
-  - [ ] 当前 Phase 功能全部实现并通过测试
+  - [ ] 未引入 Phase 规划之外的外部依赖（Phase 4.5 白名单见门禁 10）
+  - [ ] 当前 Phase 功能全部实现并通过测试（Phase 4.5：5 种方言 L2 协议级兼容已完成）
   - [ ] 下一 Phase 功能的代码已用 feature flag 隔离（如有）
 
 ### 5.4 AI 辅助开发约束
@@ -850,7 +856,7 @@ jobs:
 | Phase 2（SQL 解析） | SQL 拼接扫描、Parser fuzz 覆盖率、类型转换精度检查 |
 | Phase 3（枚举类型） | 类型系统扩展的 feature gate、新类型的内存布局对齐检查 |
 | Phase 4（PG 协议） | 认证路径安全性审计、协议解析 fuzz、TLS 集成测试 |
-| Phase 4.5（生产就绪） | 压力测试基线、内存泄漏 24h soak、全量审计门禁 |
+| Phase 4.5（生产就绪 + 协议级兼容） | 压力测试基线、6h soak、全量审计门禁、5 种方言 L2 协议级兼容（mysql/sqlite/tds/oracle 各 crate 测试全过）、版本号升级到 1.0.0-rc.1 |
 
 ---
 

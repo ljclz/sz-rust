@@ -33,14 +33,19 @@ mod tests {
 
     #[test]
     fn version_is_valid_semver() {
-        // version() 应符合 semver 格式 X.Y.Z
+        // version() 应符合 semver 格式 X.Y.Z（可含预发布段，如 1.0.0-rc.1）
         let v = version();
-        let parts: Vec<&str> = v.split('.').collect();
-        assert!(parts.len() >= 3, "version '{v}' is not semver (expected X.Y.Z)");
+        // 去掉预发布段后应得到 X.Y.Z
+        let main = v.split('-').next().unwrap_or(v);
+        let parts: Vec<&str> = main.split('.').collect();
+        assert!(
+            parts.len() >= 3,
+            "version '{v}' is not semver (expected X.Y.Z, got main='{main}')"
+        );
         for part in &parts[..3] {
             assert!(
                 part.chars().all(|c| c.is_ascii_digit()),
-                "version part '{part}' is not numeric"
+                "version part '{part}' is not numeric (in '{v}')"
             );
         }
     }

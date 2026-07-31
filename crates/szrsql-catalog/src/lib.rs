@@ -20,16 +20,19 @@
 //! 对应 `SzRSQL实施进度.md` Phase 3.8。
 
 pub mod information_schema;
+pub mod lineage;
 pub mod multitenant;
 pub mod navicat;
 pub mod quota;
 pub mod rbac;
 pub mod rls;
+pub mod semantic_tag;
 pub mod system_tables;
+pub mod catalog_tree;
 
 use std::collections::HashMap;
 use szrsql_sql::ast::{ColumnDefinition, IndexColumn, TableConstraint, TableName};
-use szrsql_sql::plan::{Catalog, TableSchema};
+use szrsql_sql::plan::{Catalog, SequenceDefinition, TableSchema};
 use thiserror::Error;
 
 // =====================================================================
@@ -54,6 +57,9 @@ pub enum CatalogError {
     /// 无效参数
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+    /// 依赖对象存在（L7：DROP TABLE cascade=false 时若有索引/视图依赖该表）
+    #[error("cannot drop table {table}: other objects depend on it (use CASCADE): {dependent}")]
+    DependencyExists { table: String, dependent: String },
 }
 
 // =====================================================================
@@ -115,7 +121,7 @@ impl IndexInfo {
 /// - `drop_table` 后 `table_exists` 返回 false，关联索引也被删除
 /// - `create_index` 后 `get_index` 返回 Some，`list_indexes_for_table` 包含该索引
 /// - 索引名全局唯一（跨表也不允许重名，与 PG 一致）
-pub trait MutableCatalog: Catalog {
+pub trait MutableCatalog: Catalog + Send {
     /// 创建表
     ///
     /// - `if_not_exists=true` 时若表已存在，静默返回 Ok(())（与 `CREATE TABLE IF NOT EXISTS` 语义一致）
@@ -159,6 +165,56 @@ pub trait MutableCatalog: Catalog {
 
     /// 按索引名查询
     fn get_index(&self, name: &str) -> Option<IndexInfo>;
+
+    /// 替换表 Schema — Phase F-10
+    ///
+    /// 用于 `ALTER TABLE` 系列操作：执行器先 `get_table` 取得现有 Schema，
+    /// 在克隆上修改（增删列、改类型、改约束、改默认值、改 NOT NULL 等），
+    /// 再调用此方法整体替换。
+    ///
+    /// - 若表不存在，返回 `CatalogError::TableNotFound`
+    /// - 表名必须与现有表名一致（不可用于 RENAME，RENAME 走 `rename_table`）
+    /// - 不会影响数据行（数据迁移由执行器在 storage 层完成）
+    /// - 不会影响关联索引（索引元数据保持不变；若 DROP COLUMN 删除了被索引引用的列，
+    ///   执行器应先调用 `drop_index` 再调用此方法）
+    fn replace_table_schema(&mut self, schema: TableSchema) -> Result<(), CatalogError>;
+
+    /// 重命名表 — Phase F-10
+    ///
+    /// 用于 `ALTER TABLE ... RENAME TO new_name`。
+    /// - 若旧表不存在，返回 `CatalogError::TableNotFound`
+    /// - 若新表名已存在，返回 `CatalogError::TableAlreadyExists`
+    /// - 同时更新关联索引的 `table` 字段
+    fn rename_table(
+        &mut self,
+        old_name: &TableName,
+        new_name: &TableName,
+    ) -> Result<(), CatalogError>;
+
+    /// 设置表注释 — Phase TDengine-P2
+    ///
+    /// `comment=None` 时删除已有注释。
+    fn set_table_comment(
+        &mut self,
+        name: &TableName,
+        comment: Option<String>,
+    ) -> Result<(), CatalogError>;
+
+    /// 设置列注释 — Phase TDengine-P2
+    ///
+    /// `comment=None` 时删除已有注释。
+    fn set_column_comment(
+        &mut self,
+        table: &TableName,
+        column: &str,
+        comment: Option<String>,
+    ) -> Result<(), CatalogError>;
+
+    /// 获取表注释 — Phase TDengine-P2
+    fn get_table_comment(&self, name: &TableName) -> Option<String>;
+
+    /// 获取列注释 — Phase TDengine-P2
+    fn get_column_comment(&self, table: &TableName, column: &str) -> Option<String>;
 }
 
 // =====================================================================
@@ -175,6 +231,15 @@ pub struct ManagedCatalog {
     tables: HashMap<String, TableSchema>,
     /// 索引名（lowercase）→ IndexInfo
     indexes: HashMap<String, IndexInfo>,
+    /// 注释存储（key = "table_name" 或 "table_name.column_name"）— Phase TDengine-P2
+    comments: HashMap<String, String>,
+    /// 序列存储（lowercase qualified key → SequenceDefinition）— P0-PG-7 修复
+    sequences: HashMap<String, SequenceDefinition>,
+    /// 视图存储（lowercase qualified key → ViewDefinition）— 用于 pg_views 系统表
+    views: HashMap<String, szrsql_sql::materialized_view::ViewDefinition>,
+    /// 表约束存储（L8 修复：原 add_table_constraint 是占位，现真实持久化）
+    /// key = table_key, value = 该表的所有约束列表
+    constraints: HashMap<String, Vec<TableConstraint>>,
 }
 
 impl ManagedCatalog {
@@ -193,30 +258,37 @@ impl ManagedCatalog {
         self.indexes.len()
     }
 
+    /// 序列数量 — P0-PG-7 修复
+    pub fn sequence_count(&self) -> usize {
+        self.sequences.len()
+    }
+
+    /// 注册序列 — P0-PG-7 修复
+    ///
+    /// 用于测试和运行时序列元数据管理。同名覆盖。
+    pub fn create_sequence(&mut self, def: SequenceDefinition) {
+        let key = self.table_key(&def.name);
+        self.sequences.insert(key, def);
+    }
+
     /// 表名 → lowercase qualified key（大小写不敏感）
+    ///
+    /// 当 schema 为 None 时默认使用 "public"，确保：
+    /// - `CREATE TABLE t (...)` 创建的表（schema=None）
+    /// - `SELECT * FROM t` 查询的表（schema=None）
+    /// - `SELECT * FROM "public"."t"` 查询的表（schema=Some("public")）
+    ///
+    /// 三者使用相同的 key，能互相匹配。
     fn table_key(&self, name: &TableName) -> String {
-        name.qualified_name().to_lowercase()
+        match &name.schema {
+            Some(s) => format!("{}.{}", s.to_lowercase(), name.name.to_lowercase()),
+            None => format!("public.{}", name.name.to_lowercase()),
+        }
     }
 
     /// 索引名 → lowercase key（大小写不敏感，与 PG 一致）
     fn index_key(&self, name: &str) -> String {
         name.to_lowercase()
-    }
-
-    /// 删除指定表的所有关联索引（内部辅助）
-    fn drop_indexes_for_table(&mut self, table: &TableName) -> usize {
-        let table_key = self.table_key(table);
-        let to_remove: Vec<String> = self
-            .indexes
-            .iter()
-            .filter(|(_, idx)| self.table_key(&idx.table) == table_key)
-            .map(|(k, _)| k.clone())
-            .collect();
-        let removed = to_remove.len();
-        for k in to_remove {
-            self.indexes.remove(&k);
-        }
-        removed
     }
 }
 
@@ -231,6 +303,34 @@ impl Catalog for ManagedCatalog {
 
     fn list_tables(&self) -> Vec<TableName> {
         self.tables.values().map(|t| t.name.clone()).collect()
+    }
+
+    /// 检查序列是否存在 — P0-PG-7 修复
+    fn sequence_exists(&self, name: &TableName) -> bool {
+        self.sequences.contains_key(&self.table_key(name))
+    }
+
+    /// 获取序列定义 — P0-PG-7 修复
+    fn get_sequence(&self, name: &TableName) -> Option<SequenceDefinition> {
+        self.sequences.get(&self.table_key(name)).cloned()
+    }
+
+    /// 列出所有序列 — P0-PG-7 修复
+    fn list_sequences(&self) -> Vec<TableName> {
+        self.sequences.values().map(|s| s.name.clone()).collect()
+    }
+
+    /// 列出所有视图名 — 用于 pg_views 系统表
+    fn list_views(&self) -> Vec<TableName> {
+        self.views.values().map(|v| v.name.clone()).collect()
+    }
+
+    /// 获取视图定义 — 用于 pg_views 系统表
+    fn get_view(
+        &self,
+        name: &TableName,
+    ) -> Option<szrsql_sql::materialized_view::ViewDefinition> {
+        self.views.get(&self.table_key(name)).cloned()
     }
 }
 
@@ -266,14 +366,37 @@ impl MutableCatalog for ManagedCatalog {
             }
             return Err(CatalogError::TableNotFound(name.qualified_name()));
         }
-        self.tables.remove(&key);
-        // 当前实现总是删除关联索引；cascade 参数为未来外键级联保留
-        if cascade {
-            self.drop_indexes_for_table(name);
-        } else {
-            // 即使 cascade=false，也删除关联索引（索引不能独立于表存在）
-            self.drop_indexes_for_table(name);
+
+        // L7 修复：原实现 cascade 参数被完全忽略，无论取值都删除关联索引。
+        // 正确语义（与 PostgreSQL 一致）：
+        // - cascade=false：若有依赖索引则拒绝删除，返回 DependencyExists 错误
+        // - cascade=true：级联删除所有依赖对象（索引 + 视图）
+        //
+        // 注：视图级联需要从 ViewDefinition.query 提取表引用，复杂度高，
+        // 当前仅检测索引依赖；视图级联留作后续 P8 阶段扩展。
+        let dependent_indexes: Vec<String> = self
+            .indexes
+            .values()
+            .filter(|idx| self.table_key(&idx.table) == key)
+            .map(|idx| idx.name.clone())
+            .collect();
+
+        if !cascade && !dependent_indexes.is_empty() {
+            let dep = dependent_indexes.first().cloned().unwrap_or_default();
+            return Err(CatalogError::DependencyExists {
+                table: name.qualified_name(),
+                dependent: dep,
+            });
         }
+
+        // cascade=true 或无依赖：执行删除
+        self.tables.remove(&key);
+        // 删除关联索引（索引不能独立于表存在）
+        for idx_name in &dependent_indexes {
+            self.indexes.remove(&self.index_key(idx_name));
+        }
+        // L8：同时删除该表的所有约束
+        self.constraints.remove(&key);
         Ok(())
     }
 
@@ -321,6 +444,104 @@ impl MutableCatalog for ManagedCatalog {
     fn get_index(&self, name: &str) -> Option<IndexInfo> {
         self.indexes.get(&self.index_key(name)).cloned()
     }
+
+    /// 替换表 Schema — Phase F-10
+    ///
+    /// 行为：
+    /// - 表不存在 → `CatalogError::TableNotFound`
+    /// - 表存在 → 用新 Schema 整体替换（保留索引元数据）
+    fn replace_table_schema(&mut self, schema: TableSchema) -> Result<(), CatalogError> {
+        let key = self.table_key(&schema.name);
+        if !self.tables.contains_key(&key) {
+            return Err(CatalogError::TableNotFound(schema.name.qualified_name()));
+        }
+        self.tables.insert(key, schema);
+        Ok(())
+    }
+
+    /// 重命名表 — Phase F-10
+    ///
+    /// 行为：
+    /// - 旧表不存在 → `CatalogError::TableNotFound`
+    /// - 新表名已存在 → `CatalogError::TableAlreadyExists`
+    /// - 同时更新关联索引的 `table` 字段，保持索引可用
+    fn rename_table(
+        &mut self,
+        old_name: &TableName,
+        new_name: &TableName,
+    ) -> Result<(), CatalogError> {
+        let old_key = self.table_key(old_name);
+        let new_key = self.table_key(new_name);
+
+        if !self.tables.contains_key(&old_key) {
+            return Err(CatalogError::TableNotFound(old_name.qualified_name()));
+        }
+        if self.tables.contains_key(&new_key) {
+            return Err(CatalogError::TableAlreadyExists(new_name.qualified_name()));
+        }
+
+        // 移除旧 schema，修改表名后插入新 key
+        let mut schema = self.tables.remove(&old_key).expect("checked above");
+        schema.name = new_name.clone();
+        self.tables.insert(new_key, schema);
+
+        // 更新关联索引的 table 字段
+        // 注意：old_table_key 已在循环外计算，避免与 self.indexes.values_mut() 借用冲突
+        let old_table_key = old_key.clone();
+        for idx in self.indexes.values_mut() {
+            // 直接用 lowercase qualified name 比较（与 table_key 逻辑一致）
+            if idx.table.qualified_name().to_lowercase() == old_table_key {
+                idx.table = new_name.clone();
+            }
+        }
+        Ok(())
+    }
+
+    // Phase TDengine-P2: COMMENT ON 存储实现
+
+    fn set_table_comment(
+        &mut self,
+        name: &TableName,
+        comment: Option<String>,
+    ) -> Result<(), CatalogError> {
+        let key = self.table_key(name);
+        match comment {
+            Some(c) => {
+                self.comments.insert(key, c);
+            }
+            None => {
+                self.comments.remove(&key);
+            }
+        }
+        Ok(())
+    }
+
+    fn set_column_comment(
+        &mut self,
+        table: &TableName,
+        column: &str,
+        comment: Option<String>,
+    ) -> Result<(), CatalogError> {
+        let key = format!("{}.{}", self.table_key(table), column.to_lowercase());
+        match comment {
+            Some(c) => {
+                self.comments.insert(key, c);
+            }
+            None => {
+                self.comments.remove(&key);
+            }
+        }
+        Ok(())
+    }
+
+    fn get_table_comment(&self, name: &TableName) -> Option<String> {
+        self.comments.get(&self.table_key(name)).cloned()
+    }
+
+    fn get_column_comment(&self, table: &TableName, column: &str) -> Option<String> {
+        let key = format!("{}.{}", self.table_key(table), column.to_lowercase());
+        self.comments.get(&key).cloned()
+    }
 }
 
 // =====================================================================
@@ -347,21 +568,57 @@ impl ManagedCatalog {
         let _ = self.create_table(schema, true);
     }
 
-    /// 添加表级约束（占位：当前 ManagedCatalog 不持久化约束，仅记录 Schema）
+    /// 添加视图定义 — 用于测试 pg_views 系统表
     ///
-    /// 未来扩展时可在此处添加 `constraints: HashMap<String, Vec<TableConstraint>>` 字段。
-    #[allow(unused_variables)]
+    /// 若同名视图已存在，直接替换（简化测试场景）。
+    pub fn add_view(&mut self, view: szrsql_sql::materialized_view::ViewDefinition) {
+        let key = self.table_key(&view.name);
+        self.views.insert(key, view);
+    }
+
+    /// 添加表级约束（L8 修复：原方法是占位 — 仅校验表存在不持久化约束）
+    ///
+    /// 现在真实持久化到 `constraints: HashMap<String, Vec<TableConstraint>>`，
+    /// 可通过 `list_table_constraints` 查询。
+    ///
+    /// 重复添加同名约束返回 `ConstraintAlreadyExists` 错误（与 PG 行为一致）。
     pub fn add_table_constraint(
         &mut self,
         table: &TableName,
         constraint: TableConstraint,
     ) -> Result<(), CatalogError> {
-        // 当前实现：约束校验留待执行器层处理，Catalog 仅记录 Schema
-        // 此方法为 API 预留，供未来扩展
         if !self.table_exists(table) {
             return Err(CatalogError::TableNotFound(table.qualified_name()));
         }
+        let key = self.table_key(table);
+        let constraints = self.constraints.entry(key).or_default();
+        // 检查重名约束（Primary/Unique/Foreign/Check 各类约束名唯一）
+        if let Some(name) = constraint.name() {
+            if constraints.iter().any(|c| c.name() == Some(name)) {
+                return Err(CatalogError::InvalidArgument(format!(
+                    "constraint \"{}\" already exists for table \"{}\"",
+                    name,
+                    table.qualified_name()
+                )));
+            }
+        }
+        constraints.push(constraint);
         Ok(())
+    }
+
+    /// 列出表的所有约束（L8 新增：配合 add_table_constraint 持久化）
+    pub fn list_table_constraints(&self, table: &TableName) -> Vec<TableConstraint> {
+        let key = self.table_key(table);
+        self.constraints
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// 删除表的所有约束（L8 新增：DROP TABLE cascade 时调用）
+    pub fn drop_constraints_for_table(&mut self, table: &TableName) {
+        let key = self.table_key(table);
+        self.constraints.remove(&key);
     }
 }
 

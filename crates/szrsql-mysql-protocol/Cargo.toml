@@ -1,0 +1,35 @@
+[package]
+name = "szrsql-mysql-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL MySQL Wire Protocol 实现 — L2 协议级兼容（客户端驱动可直接连接）"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+bytes = { workspace = true }
+sha1 = "0.10"
+sha2 = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+szrsql-types = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-protocol = { workspace = true }
+szrsql-tx = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lib]
+name = "szrsql_mysql_protocol"
+path = "src/lib.rs"

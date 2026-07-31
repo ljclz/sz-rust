@@ -17,14 +17,25 @@ members = [
     "crates/szrsql-pgcompat",
     "crates/szrsql-ops",
     "crates/szrsql-shadow",
+    "crates/szrsql-dialect-compat",
+    "crates/szrsql-mysql-protocol",
+    "crates/szrsql-sqlite-bridge",
+    "crates/szrsql-tds-protocol",
+    "crates/szrsql-oracle-bridge",
     "crates/szrsql-bin",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0-rc.1"
 edition = "2021"
 license = "MIT"
 authors = ["SzRSQL Team"]
+repository = "https://github.com/szrsql/szrsql"
+homepage = "https://github.com/szrsql/szrsql"
+documentation = "https://docs.rs/szrsql"
+keywords = ["database", "sql", "postgresql", "rust", "distributed"]
+categories = ["database-implementations", "database"]
+readme = "README.md"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -93,22 +104,27 @@ fakefs = "0.3"
 predicates = "3.1"
 
 # 内部 crate 依赖
-szrsql-types = { path = "crates/szrsql-types" }
-szrsql-storage = { path = "crates/szrsql-storage" }
-szrsql-tx = { path = "crates/szrsql-tx" }
-szrsql-cdc = { path = "crates/szrsql-cdc" }
-szrsql-sql = { path = "crates/szrsql-sql" }
-szrsql-catalog = { path = "crates/szrsql-catalog" }
-szrsql-protocol = { path = "crates/szrsql-protocol" }
-szrsql-optimizer = { path = "crates/szrsql-optimizer" }
-szrsql-ai = { path = "crates/szrsql-ai" }
-szrsql-security = { path = "crates/szrsql-security" }
-szrsql-scheduler = { path = "crates/szrsql-scheduler" }
-szrsql-replication = { path = "crates/szrsql-replication" }
-szrsql-dist = { path = "crates/szrsql-dist" }
-szrsql-pgcompat = { path = "crates/szrsql-pgcompat" }
-szrsql-ops = { path = "crates/szrsql-ops" }
-szrsql-shadow = { path = "crates/szrsql-shadow" }
+szrsql-types = { path = "crates/szrsql-types", version = "1.0.0-rc.1" }
+szrsql-storage = { path = "crates/szrsql-storage", version = "1.0.0-rc.1" }
+szrsql-tx = { path = "crates/szrsql-tx", version = "1.0.0-rc.1" }
+szrsql-cdc = { path = "crates/szrsql-cdc", version = "1.0.0-rc.1" }
+szrsql-sql = { path = "crates/szrsql-sql", version = "1.0.0-rc.1" }
+szrsql-catalog = { path = "crates/szrsql-catalog", version = "1.0.0-rc.1" }
+szrsql-protocol = { path = "crates/szrsql-protocol", version = "1.0.0-rc.1" }
+szrsql-optimizer = { path = "crates/szrsql-optimizer", version = "1.0.0-rc.1" }
+szrsql-ai = { path = "crates/szrsql-ai", version = "1.0.0-rc.1" }
+szrsql-security = { path = "crates/szrsql-security", version = "1.0.0-rc.1" }
+szrsql-scheduler = { path = "crates/szrsql-scheduler", version = "1.0.0-rc.1" }
+szrsql-replication = { path = "crates/szrsql-replication", version = "1.0.0-rc.1" }
+szrsql-dist = { path = "crates/szrsql-dist", version = "1.0.0-rc.1" }
+szrsql-pgcompat = { path = "crates/szrsql-pgcompat", version = "1.0.0-rc.1" }
+szrsql-ops = { path = "crates/szrsql-ops", version = "1.0.0-rc.1" }
+szrsql-shadow = { path = "crates/szrsql-shadow", version = "1.0.0-rc.1" }
+szrsql-dialect-compat = { path = "crates/szrsql-dialect-compat", version = "1.0.0-rc.1" }
+szrsql-mysql-protocol = { path = "crates/szrsql-mysql-protocol", version = "1.0.0-rc.1" }
+szrsql-sqlite-bridge = { path = "crates/szrsql-sqlite-bridge", version = "1.0.0-rc.1" }
+szrsql-tds-protocol = { path = "crates/szrsql-tds-protocol", version = "1.0.0-rc.1" }
+szrsql-oracle-bridge = { path = "crates/szrsql-oracle-bridge", version = "1.0.0-rc.1" }
 
 # ========== 编译 Profile 强制安全门禁 ==========
 [profile.dev]

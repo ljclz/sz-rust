@@ -1,10 +1,15 @@
 [package]
 name = "szrsql-bin"
-version.workspace = true
+version = "1.0.0-rc.2"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL 数据库服务二进制入口"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [[bin]]
 name = "szrsql"
@@ -23,12 +28,16 @@ szrsql-cdc = { workspace = true }
 szrsql-sql = { workspace = true }
 szrsql-protocol = { workspace = true }
 szrsql-optimizer = { workspace = true }
-szrsql-ai = { workspace = true }
 szrsql-security = { workspace = true }
 szrsql-scheduler = { workspace = true }
 szrsql-replication = { workspace = true }
 szrsql-dist = { workspace = true }
 szrsql-pgcompat = { workspace = true }
+szrsql-mysql-protocol = { workspace = true }
+szrsql-tds-protocol = { workspace = true }
+szrsql-oracle-bridge = { workspace = true }
+szrsql-ai = { workspace = true }
+szrsql-catalog = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
@@ -36,3 +45,7 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -23,6 +23,7 @@
 //! - 未配置 TLS：回复 'N'，客户端应回退明文继续 StartupMessage
 
 use crate::pgwire::auth::{AuthError, AuthMode, ScramServerSession, SCRAM_MECHANISM};
+use crate::pgwire::dirty_tracker::DirtyTableTracker;
 use crate::pgwire::lifecycle::{ShutdownCoordinator, ShutdownSignal};
 use crate::pgwire::message::{
     BackendMessage, ErrorResponse, FrontendMessage, SqlState, STATUS_IDLE,
@@ -39,18 +40,19 @@ use crate::pgwire::startup::{
     build_auth_error_response, build_protocol_error_response, build_startup_response, StartupError,
     StartupMessage, StartupParams,
 };
-use crate::pgwire::tls::TlsConfig;
+use crate::pgwire::tls::{TlsConfig, TlsError};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use szrsql_sql::executor::InMemoryTable;
+use szrsql_sql::executor::{InMemoryTable, SharedSequenceState};
 use szrsql_tx::lock::LockManager;
+use szrsql_tx::mvcc::MvccManager;
 use szrsql_tx::wal::WalWriter;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 // =====================================================================
 //  配置
@@ -73,10 +75,28 @@ pub struct PgwireConfig {
     pub auth_mode: AuthMode,
     /// Phase 4.5：TLS 配置（None 表示不支持 SSL，收到 SSLRequest 回复 'N'）。
     pub tls: Option<TlsConfig>,
+    /// Phase 4.5：是否强制 TLS（拒绝明文连接）。
+    ///
+    /// 为 `true` 时，收到非 SSLRequest 的 StartupMessage 将被拒绝
+    /// （回复 'E' + "SSLRequired" 并关闭连接），强制客户端使用 SSLRequest。
+    /// 为 `false` 时（默认），允许客户端回退到明文连接。
+    pub require_tls: bool,
     /// Phase 4.11：优雅关闭超时（默认 30s）。
     ///
     /// 收到关闭信号后，等待活跃连接完成的最长时间；超时后强制中止剩余连接。
     pub shutdown_timeout: std::time::Duration,
+    /// 连接空闲超时（默认 300s = 5 分钟；`Duration::ZERO` 表示禁用）。
+    ///
+    /// 当连接在此时间内未收到任何客户端消息时，服务器主动关闭连接并释放
+    /// session 资源（回滚未提交事务、释放行锁），避免因客户端异常断开
+    /// （如被 kill -9 / Stop-Process 强制终止，TCP 未发送 FIN）导致的
+    /// 会话死锁和资源泄漏。
+    pub connection_idle_timeout: std::time::Duration,
+    /// 最大并发连接数（默认 100；0 表示不限制）。
+    ///
+    /// 超过此限制时新连接将被拒绝（回复 FATAL 错误并关闭），
+    /// 防止连接数耗尽导致 OOM 或文件描述符耗尽。
+    pub max_connections: usize,
 }
 
 impl Default for PgwireConfig {
@@ -90,7 +110,10 @@ impl Default for PgwireConfig {
             allowed_users: Vec::new(),
             auth_mode: AuthMode::Trust,
             tls: None,
+            require_tls: false,
             shutdown_timeout: std::time::Duration::from_secs(30),
+            connection_idle_timeout: std::time::Duration::from_secs(300),
+            max_connections: 100,
         }
     }
 }
@@ -131,11 +154,35 @@ impl PgwireConfig {
         self
     }
 
+    /// Phase 4.5：设置是否强制 TLS（拒绝明文连接）。
+    ///
+    /// 为 `true` 时，客户端必须先发送 SSLRequest 升级为 TLS 才能继续握手；
+    /// 直接发送明文 StartupMessage 将被拒绝（回复 'E' + "SSLRequired"）。
+    pub fn with_require_tls(mut self, require: bool) -> Self {
+        self.require_tls = require;
+        self
+    }
+
     /// Phase 4.11：设置优雅关闭超时。
     ///
     /// 收到关闭信号后，等待活跃连接完成的最长时间；超时后强制中止剩余连接。
     pub fn with_shutdown_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.shutdown_timeout = timeout;
+        self
+    }
+
+    /// 设置连接空闲超时（`Duration::ZERO` 表示禁用）。
+    ///
+    /// 当连接在此时间内未收到任何客户端消息时，服务器主动关闭连接并释放
+    /// session 资源（回滚未提交事务、释放行锁），避免客户端异常断开导致的死锁。
+    pub fn with_connection_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.connection_idle_timeout = timeout;
+        self
+    }
+
+    /// 设置最大并发连接数（0 表示不限制）。
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.max_connections = max;
         self
     }
 }
@@ -152,6 +199,10 @@ pub enum ServerError {
 
     #[error("startup error: {0}")]
     Startup(#[from] StartupError),
+
+    /// Phase 4.5：TLS 配置或握手错误。
+    #[error("tls error: {0}")]
+    Tls(#[from] TlsError),
 }
 
 // =====================================================================
@@ -245,12 +296,51 @@ pub struct PgwireServer {
     /// COMMIT/ROLLBACK 时 unlock_all(txn_id)（Strict 2PL）。
     lock_manager: Option<Arc<LockManager>>,
     shared_txn_counter: Option<Arc<std::sync::atomic::AtomicU32>>,
+    /// P0-4 修复：跨会话共享的序列全局状态。
+    ///
+    /// 启用后所有 session 共享同一份序列 nextval 推进状态，符合 PG 语义。
+    /// `None`（默认）：退化为每 session 私有序列存储（旧行为，用于测试兼容）。
+    shared_sequence_state: Option<SharedSequenceState>,
+    /// P0-TX-1 修复：跨会话共享的 MVCC 事务管理器。
+    ///
+    /// 启用后，每个 session 的 BEGIN/COMMIT/ROLLBACK 会同步到 MvccManager，
+    /// 实现 MVCC 事务可见性判断（而非表级 snapshot/restore）。
+    /// 未启用时退化为表级 snapshot/restore（旧行为，用于测试兼容）。
+    mvcc: Option<Arc<MvccManager>>,
+    /// P0-DIST-1/2/3：跨会话共享的分布式运行时句柄。
+    ///
+    /// 启用后，DML 操作通过 `dist_dual_write` 双写到分布式 KV 存储
+    /// （Raft propose → apply），实现真实分布式持久化路径。
+    /// 未启用时退化为本地内存表存储（旧行为，用于测试兼容）。
+    dist_runtime: Option<szrsql_dist::runtime::DistRuntimeHandle>,
+    /// P7-1：跨会话共享的 CDC 引擎。
+    ///
+    /// 启用后，DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件分发到 CDC 引擎，
+    /// 供已注册的 CdcObserver（如 ReplicationTask）消费，实现变更数据捕获。
+    /// 未启用时退化为旧行为（DML 不触发 CDC 事件）。
+    cdc_engine: Option<Arc<szrsql_cdc::CdcEngine>>,
+    /// P1-2：跨会话共享的脏表跟踪器（用于增量快照机制）。
+    ///
+    /// 启用后，session 在事务 COMMIT 成功后调用 `tracker.mark_dirty(table_name)`，
+    /// 后台周期性快照任务仅对脏表集合中的表重新序列化，避免无谓的全量 IO。
+    /// 未启用时退化为旧行为（全量快照，每次都序列化所有表）。
+    dirty_tracker: Option<Arc<DirtyTableTracker>>,
+    /// 连接数限制信号量。
+    ///
+    /// 许可数 = `config.max_connections`；每个连接任务持有一个 `OwnedSemaphorePermit`，
+    /// 连接结束后自动释放。`max_connections == 0` 时使用 `usize::MAX` 表示不限制。
+    conn_semaphore: Arc<Semaphore>,
 }
 
 impl PgwireServer {
     /// 构造一个新服务器实例。
     pub fn new(config: PgwireConfig) -> Self {
         let shutdown = ShutdownCoordinator::new(config.shutdown_timeout);
+        let max_conn = if config.max_connections == 0 {
+            usize::MAX
+        } else {
+            config.max_connections
+        };
         Self {
             config,
             pid_counter: AtomicI32::new(1),
@@ -260,6 +350,12 @@ impl PgwireServer {
             shared_tables: None,
             lock_manager: None,
             shared_txn_counter: None,
+            shared_sequence_state: None,
+            mvcc: None,
+            dist_runtime: None,
+            cdc_engine: None,
+            dirty_tracker: None,
+            conn_semaphore: Arc::new(Semaphore::new(max_conn)),
         }
     }
 
@@ -313,6 +409,79 @@ impl PgwireServer {
     /// 两个独立事务误判为同一事务，重入锁不阻塞，导致并发隔离失效）。
     pub fn with_shared_txn_counter(mut self, counter: Arc<std::sync::atomic::AtomicU32>) -> Self {
         self.shared_txn_counter = Some(counter);
+        self
+    }
+
+    /// P0-4 修复：注入跨会话共享的序列全局状态。
+    ///
+    /// 启用后所有 session 共享同一份序列 nextval 推进状态：
+    /// - `CREATE SEQUENCE` 在共享状态中创建，所有 session 可见
+    /// - `nextval(seq)` 推进全局状态，多 session 调用同一序列时返回递增值
+    /// - `currval(seq)` 仍按 session 隔离（PG 语义）
+    ///
+    /// 未启用时退化为每 session 私有序列存储（旧行为，用于测试兼容）。
+    pub fn with_shared_sequence_state(mut self, state: SharedSequenceState) -> Self {
+        self.shared_sequence_state = Some(state);
+        self
+    }
+
+    /// P0-TX-1 修复：注入跨会话共享的 MVCC 事务管理器。
+    ///
+    /// 启用后，所有 session 的 BEGIN/COMMIT/ROLLBACK 会同步到 MvccManager 状态机，
+    /// 实现 MVCC 事务可见性判断、SSI 写偏斜检测、First-Committer-Wins。
+    ///
+    /// 未启用时退化为表级 snapshot/restore（旧行为，用于测试兼容）。
+    pub fn with_mvcc(mut self, mgr: Arc<MvccManager>) -> Self {
+        self.mvcc = Some(mgr);
+        self
+    }
+
+    /// P0-DIST-1/2/3：注入跨会话共享的分布式运行时句柄。
+    ///
+    /// 启用后，DML 操作通过 `Executor::dist_dual_write` 双写到分布式 KV 存储
+    /// （Raft propose → apply），实现真实分布式持久化路径。
+    ///
+    /// 未启用时退化为本地内存表存储（旧行为，用于测试兼容）。
+    ///
+    /// # 参数
+    /// - `handle`：`Arc<RwLock<DistRuntime>>` 共享句柄（由 main.rs 创建并初始化）
+    pub fn with_dist_runtime(
+        mut self,
+        handle: szrsql_dist::runtime::DistRuntimeHandle,
+    ) -> Self {
+        self.dist_runtime = Some(handle);
+        self
+    }
+
+    /// P7-1：注入跨会话共享的 CDC 引擎，启用 DML 事件分发。
+    ///
+    /// 启用后，所有 session 的 DML 操作（INSERT/UPDATE/DELETE）会将行级变更事件
+    /// 分发到 CDC 引擎，供已注册的 CdcObserver（如 ReplicationTask）消费，
+    /// 实现变更数据捕获。
+    ///
+    /// 未启用时退化为旧行为（DML 不触发 CDC 事件）。
+    ///
+    /// # 参数
+    /// - `engine`：共享的 `CdcEngine` 实例（由 main.rs 创建一次，所有连接共享）
+    pub fn with_cdc_engine(mut self, engine: Arc<szrsql_cdc::CdcEngine>) -> Self {
+        self.cdc_engine = Some(engine);
+        self
+    }
+
+    /// P1-2：注入跨会话共享的脏表跟踪器，启用增量快照机制。
+    ///
+    /// 启用后，每个 session 在事务 COMMIT 成功后会调用 `tracker.mark_dirty(table_name)`
+    /// 标记该事务修改过的表为脏。后台周期性快照任务仅对脏表集合中的表重新序列化，
+    /// 避免每次都对所有表做全量序列化。
+    ///
+    /// 未启用时退化为旧行为（全量快照）。
+    ///
+    /// # 参数
+    ///
+    /// - `tracker`：共享的 `DirtyTableTracker` 实例（通常在 main.rs 中创建一次，
+    ///   传递给 PgwireServer 和后台快照任务共享）
+    pub fn with_dirty_tracker(mut self, tracker: Arc<DirtyTableTracker>) -> Self {
+        self.dirty_tracker = Some(tracker);
         self
     }
 
@@ -425,10 +594,32 @@ impl PgwireServer {
                                 continue;
                             }
 
+                            // 连接数硬限制：尝试获取信号量许可
+                            let permit = match inner.conn_semaphore.clone().try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        peer = %peer,
+                                        max = inner.config.max_connections,
+                                        "rejecting connection: too many connections"
+                                    );
+                                    let mut resp = BytesMut::new();
+                                    build_protocol_error_response(
+                                        "FATAL: too many connections for role \"szrsql\"",
+                                        &mut resp,
+                                    );
+                                    let _ = stream.write_all(&resp).await;
+                                    let _ = stream.flush().await;
+                                    continue;
+                                }
+                            };
+
                             let inner = Arc::clone(&inner);
                             let tasks = Arc::clone(&tasks);
                             // Phase 4.11：用 JoinSet 跟踪连接任务，支持优雅排空
                             tasks.lock().await.spawn(async move {
+                                // permit 在连接任务结束时自动 drop → 释放许可
+                                let _permit = permit;
                                 if let Err(e) = inner.handle_connection(stream).await {
                                     tracing::warn!("connection handler error: {e}");
                                 }
@@ -481,7 +672,7 @@ impl PgwireServer {
                     tracing::debug!("SSLRequest received, upgrading to TLS 1.3");
                     stream.write_all(b"S").await?;
                     stream.flush().await?;
-                    let acceptor = tokio_rustls::TlsAcceptor::from(tls.server_config());
+                    let acceptor = tokio_rustls::TlsAcceptor::from(tls.server_config()?);
                     let tls_stream = acceptor.accept(stream).await?;
                     self.handle_full_connection(tls_stream, buf).await
                 } else {
@@ -492,6 +683,17 @@ impl PgwireServer {
                 }
             }
             FirstStartupMessage::Startup => {
+                // Phase 4.5：require_tls=true 时拒绝明文 StartupMessage
+                if self.config.require_tls {
+                    tracing::warn!(
+                        "plaintext StartupMessage rejected: server requires TLS (require_tls=true)"
+                    );
+                    let mut resp = BytesMut::new();
+                    build_protocol_error_response("SSLRequired: server requires SSL encryption", &mut resp);
+                    let _ = stream.write_all(&resp).await;
+                    let _ = stream.flush().await;
+                    return Ok(());
+                }
                 // 首个消息为 Startup（buf 中已包含未消费的 StartupMessage），直接处理
                 self.handle_full_connection(stream, buf).await
             }
@@ -553,7 +755,12 @@ impl PgwireServer {
                 },
                 Ok(None) => {
                     let mut chunk = [0u8; 4096];
-                    let n = stream.read(&mut chunk).await?;
+                    let n = read_with_idle_timeout(
+                        stream,
+                        &mut chunk,
+                        self.config.connection_idle_timeout,
+                    )
+                    .await?;
                     if n == 0 {
                         tracing::debug!("client disconnected before first startup message");
                         return Ok(FirstStartupMessage::None);
@@ -652,7 +859,12 @@ impl PgwireServer {
                 Ok(None) => {
                     // 数据不足，继续读取
                     let mut chunk = [0u8; 4096];
-                    let n = stream.read(&mut chunk).await?;
+                    let n = read_with_idle_timeout(
+                        stream,
+                        &mut chunk,
+                        self.config.connection_idle_timeout,
+                    )
+                    .await?;
                     if n == 0 {
                         tracing::debug!("client disconnected during startup");
                         return Ok(None);
@@ -727,7 +939,7 @@ impl PgwireServer {
         let mut session = ScramServerSession::new(credentials.clone(), salt.to_vec(), iterations);
 
         // 步骤 2：等待客户端 SASLInitialResponse
-        let initial_response = match read_frontend_message(stream, buf).await? {
+        let initial_response = match read_frontend_message(stream, buf, self.config.connection_idle_timeout).await? {
             FrontendMessage::SASLInitialResponse {
                 mechanism,
                 initial_response,
@@ -783,7 +995,7 @@ impl PgwireServer {
         }
 
         // 步骤 4：等待客户端 SASLResponse（client-final）
-        let final_data = match read_frontend_message(stream, buf).await? {
+        let final_data = match read_frontend_message(stream, buf, self.config.connection_idle_timeout).await? {
             FrontendMessage::SASLResponse { data } => data,
             FrontendMessage::Terminate => {
                 tracing::debug!("client terminated during SCRAM auth (final stage)");
@@ -828,7 +1040,7 @@ impl PgwireServer {
     async fn handle_main_loop<S>(
         &self,
         stream: &mut S,
-        _params: &StartupParams,
+        params: &StartupParams,
         pid: i32,
     ) -> Result<(), ServerError>
     where
@@ -839,9 +1051,16 @@ impl PgwireServer {
         // Phase 4.6：注入 pid 和共享 NotifyHub，使 LISTEN/NOTIFY 跨会话广播
         // ADV-F-7：注入共享 WalWriter，启用 log-then-commit 事务模型
         // ADV-CONC-1：注入共享表存储 + 行锁管理器，启用多线程并发
+        // Phase 4.7：注入 database 名（来自 StartupParams，缺省 "szrsql"），供 pg_database 系统表查询
+        let db_name = params.database().unwrap_or("szrsql");
+        // 简单查询协议启用多语句执行（PostgreSQL 协议规范允许，Navicat/psql 等客户端连接时
+        // 会发送 "SET AUTOCOMMIT ON; SET extra_float_digits = 3" 这样的多语句）。
+        // 扩展查询协议（Parse/Bind/Execute）不受影响，仍强制单语句（PG 协议要求）。
         let mut session = ExecutorService::new()
             .with_pid(pid)
-            .with_notify_hub(self.notify_hub.clone());
+            .with_database_name(db_name)
+            .with_notify_hub(self.notify_hub.clone())
+            .with_multi_statement(true);
         if let Some(writer) = &self.wal_writer {
             session = session.with_wal_writer(writer.clone());
         }
@@ -852,6 +1071,26 @@ impl PgwireServer {
             if let Some(counter) = &self.shared_txn_counter {
                 session = session.with_shared_txn_counter(counter.clone());
             }
+        }
+        // P0-4：注入跨会话共享的序列全局状态
+        if let Some(seq_state) = &self.shared_sequence_state {
+            session = session.with_sequence_shared_state(seq_state.clone());
+        }
+        // P0-TX-1：注入 MVCC 事务管理器
+        if let Some(mvcc) = &self.mvcc {
+            session = session.with_mvcc(mvcc.clone());
+        }
+        // P0-DIST-1/2/3：注入分布式运行时句柄
+        if let Some(dist_rt) = &self.dist_runtime {
+            session = session.with_dist_runtime(dist_rt.clone());
+        }
+        // P7-1：注入 CDC 引擎，启用 DML 事件分发
+        if let Some(cdc) = &self.cdc_engine {
+            session = session.with_cdc_engine(cdc.clone());
+        }
+        // P1-2：注入脏表跟踪器，启用增量快照机制
+        if let Some(tracker) = &self.dirty_tracker {
+            session = session.with_dirty_tracker(tracker.clone());
         }
         // Phase 4.6：RAII 守卫，确保连接断开时从 NotifyHub 注销（避免内存泄漏）
         let _notify_guard = NotifyCleanupGuard::new(self.notify_hub.clone(), pid);
@@ -906,6 +1145,8 @@ impl PgwireServer {
                             sql,
                             parameter_oids,
                         } => {
+                            // ADV-CONC-1：Parse 之前同步共享 catalog，确保后续 Describe 能推导列
+                            session.sync_catalog_from_shared().await;
                             let mut resp = BytesMut::new();
                             match session.extended_parse(&statement_name, &sql, parameter_oids) {
                                 Ok(()) => {
@@ -1077,7 +1318,12 @@ impl PgwireServer {
                 Ok(None) => {
                     // 数据不足，继续读取
                     let mut chunk = [0u8; 4096];
-                    let n = stream.read(&mut chunk).await?;
+                    let n = read_with_idle_timeout(
+                        stream,
+                        &mut chunk,
+                        self.config.connection_idle_timeout,
+                    )
+                    .await?;
                     if n == 0 {
                         tracing::debug!("client disconnected");
                         return Ok(());
@@ -1432,11 +1678,43 @@ fn generate_secret_key(pid: i32) -> i32 {
 
 /// Phase 4.4：从流中读取并解码下一条前端消息。
 ///
+/// 读取数据，支持连接空闲超时。
+///
+/// 当 `idle_timeout` 为 `Duration::ZERO` 时，不启用超时（阻塞等待）。
+/// 超时后返回 `TimedOut` 错误，调用方据此关闭连接并释放 session 资源
+/// （回滚未提交事务、释放行锁），避免客户端异常断开导致的死锁。
+async fn read_with_idle_timeout<S>(
+    stream: &mut S,
+    chunk: &mut [u8],
+    idle_timeout: std::time::Duration,
+) -> Result<usize, std::io::Error>
+where
+    S: AsyncRead + Unpin,
+{
+    if idle_timeout.is_zero() {
+        return stream.read(chunk).await;
+    }
+    match tokio::time::timeout(idle_timeout, stream.read(chunk)).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!(
+                timeout_secs = idle_timeout.as_secs(),
+                "connection idle timeout, closing connection"
+            );
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connection idle timeout",
+            ))
+        }
+    }
+}
+
 /// 用于 SCRAM 认证阶段读取 SASLInitialResponse / SASLResponse。
 /// 复用主循环的 `FrontendMessage::decode` 流式解码逻辑。
 async fn read_frontend_message<S>(
     stream: &mut S,
     buf: &mut BytesMut,
+    idle_timeout: std::time::Duration,
 ) -> Result<FrontendMessage, std::io::Error>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -1451,7 +1729,7 @@ where
             }
             Ok(None) => {
                 let mut chunk = [0u8; 4096];
-                let n = stream.read(&mut chunk).await?;
+                let n = read_with_idle_timeout(stream, &mut chunk, idle_timeout).await?;
                 if n == 0 {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
@@ -1519,6 +1797,23 @@ mod tests {
         assert_eq!(config.host, "0.0.0.0");
         assert_eq!(config.port, 6543);
         assert_eq!(config.server_version, "15.0-szrsql");
+    }
+
+    // ---- require_tls 配置测试 ----
+
+    #[test]
+    fn test_pgwire_config_require_tls_default_false() {
+        let config = PgwireConfig::default();
+        assert!(!config.require_tls, "require_tls should default to false");
+    }
+
+    #[test]
+    fn test_pgwire_config_with_require_tls() {
+        let config = PgwireConfig::new().with_require_tls(true);
+        assert!(config.require_tls);
+        // 链式调用后再次关闭
+        let config = config.with_require_tls(false);
+        assert!(!config.require_tls);
     }
 
     // ---- 服务器构造 ----

@@ -162,7 +162,7 @@ fn m1_bench_point_query_latency() {
     let mut bt = BTree::with_default_order();
     let build_start = Instant::now();
     for (idx, &k) in unique_keys.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u16)
+        bt.insert(encode_u64_key(k), (idx % 65536) as u32)
             .expect("insert should not fail");
     }
     let build_elapsed = build_start.elapsed();
@@ -351,7 +351,7 @@ fn m1_bench_insert_throughput() {
     let rand_start = Instant::now();
     for (idx, &k) in keys.iter().enumerate() {
         bt_rand
-            .insert(encode_u64_key(k), (idx % 65536) as u16)
+            .insert(encode_u64_key(k), (idx % 65536) as u32)
             .expect("insert");
     }
     let rand_elapsed = rand_start.elapsed();
@@ -364,7 +364,7 @@ fn m1_bench_insert_throughput() {
     let sorted_start = Instant::now();
     for (idx, &k) in sorted_keys.iter().enumerate() {
         bt_sorted
-            .insert(encode_u64_key(k), (idx % 65536) as u16)
+            .insert(encode_u64_key(k), (idx % 65536) as u32)
             .expect("insert");
     }
     let sorted_elapsed = sorted_start.elapsed();

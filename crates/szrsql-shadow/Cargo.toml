@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 description = "SzRSQL 影子流量回放：录制 PG 流量 → 在 szrsql 上回放 → 比对结果与延迟"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 szrsql-sql = { workspace = true }

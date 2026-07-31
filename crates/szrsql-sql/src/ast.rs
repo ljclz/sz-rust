@@ -72,6 +72,19 @@ pub enum Statement {
         /// IF EXISTS
         if_exists: bool,
     },
+    /// TRUNCATE TABLE — 清空表数据（保留表结构）
+    ///
+    /// 等价于 `DELETE FROM table` 但不触发触发器、不记录逐行 WAL，
+    /// 通常通过重建表文件实现，性能远高于 DELETE。
+    /// 各方言均支持：PG/MySQL/Oracle/SQL Server/SQLite。
+    Truncate {
+        /// 待清空的表名列表
+        names: Vec<TableName>,
+        /// IF EXISTS（PG/MySQL 支持）
+        if_exists: bool,
+        /// CASCADE / RESTRICT（PG/Oracle 支持，当前仅记录）
+        cascade: bool,
+    },
     /// CREATE SEQUENCE — Phase 3.22
     CreateSequence {
         /// 序列名
@@ -171,6 +184,8 @@ pub enum Statement {
         materialized: bool,
         /// IF NOT EXISTS
         if_not_exists: bool,
+        /// OR REPLACE（CREATE OR REPLACE VIEW）
+        or_replace: bool,
     },
     /// DROP VIEW / DROP MATERIALIZED VIEW — Phase 6.10
     DropView {
@@ -319,6 +334,28 @@ pub enum Statement {
         name: TableName,
         /// 操作
         action: AlterTypeAction,
+    },
+    /// ALTER TABLE — Phase F-10
+    ///
+    /// 支持 PG/MySQL/Oracle/SQL Server/SQLite 通用的 ALTER TABLE 操作：
+    /// - `ADD COLUMN [IF NOT EXISTS] col TYPE [options]`
+    /// - `DROP COLUMN [IF EXISTS] col [CASCADE]`
+    /// - `RENAME COLUMN old TO new`
+    /// - `RENAME TO new_table`
+    /// - `ALTER COLUMN col TYPE new_type`
+    /// - `ALTER COLUMN col SET DEFAULT expr`
+    /// - `ALTER COLUMN col DROP DEFAULT`
+    /// - `ALTER COLUMN col SET NOT NULL`
+    /// - `ALTER COLUMN col DROP NOT NULL`
+    AlterTable {
+        /// 目标表名
+        name: TableName,
+        /// IF EXISTS（表不存在时是否跳过）
+        if_exists: bool,
+        /// 仅作用于表本身（PG `ALTER TABLE ONLY`，不影响子表）
+        only: bool,
+        /// 操作列表（按顺序执行）
+        operations: Vec<AlterTableOperation>,
     },
     /// SHOW TABLES — Phase 3.34
     ///
@@ -517,6 +554,17 @@ pub enum Statement {
         /// CASCADE / RESTRICT（当前仅记录）
         cascade: bool,
     },
+    /// COMMENT ON TABLE/COLUMN — Phase TDengine-P2
+    Comment {
+        /// 对象类型（TABLE / COLUMN）
+        object_type: CommentObjectType,
+        /// 对象名（表名）
+        object_name: TableName,
+        /// 列名（仅 COLUMN 时有值）
+        column_name: Option<String>,
+        /// 注释内容（NULL 表示删除注释）
+        comment: Option<String>,
+    },
 }
 
 /// 函数参数 — Phase 6.5
@@ -706,6 +754,80 @@ pub enum AlterTypeAction {
     Rename {
         /// 新类型名
         new_name: TableName,
+    },
+}
+
+/// ALTER TABLE 操作 — Phase F-10
+///
+/// 覆盖 PG/MySQL/Oracle/SQL Server/SQLite 通用的 ALTER TABLE 操作。
+/// 执行器按 operations 列表顺序依次执行。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum AlterTableOperation {
+    /// `ADD [COLUMN] [IF NOT EXISTS] <column_def>`
+    AddColumn {
+        /// 列定义
+        column_def: ColumnDefinition,
+        /// IF NOT EXISTS
+        if_not_exists: bool,
+    },
+    /// `DROP [COLUMN] [IF EXISTS] <name> [CASCADE]`
+    DropColumn {
+        /// 列名
+        name: String,
+        /// IF EXISTS
+        if_exists: bool,
+        /// CASCADE / RESTRICT（当前仅记录）
+        cascade: bool,
+    },
+    /// `RENAME COLUMN old TO new`
+    RenameColumn {
+        /// 旧列名
+        old_name: String,
+        /// 新列名
+        new_name: String,
+    },
+    /// `RENAME TO new_table`
+    RenameTable {
+        /// 新表名
+        new_name: TableName,
+    },
+    /// `ALTER COLUMN name TYPE new_type [USING expr]`
+    AlterColumnType {
+        /// 列名
+        name: String,
+        /// 新类型
+        data_type: ColumnType,
+        /// USING expr（当前仅记录，不实际执行表达式转换）
+        using: Option<Expr>,
+    },
+    /// `ALTER COLUMN name SET DEFAULT expr` / `DROP DEFAULT`
+    AlterColumnDefault {
+        /// 列名
+        name: String,
+        /// None 表示 DROP DEFAULT
+        default: Option<Expr>,
+    },
+    /// `ALTER COLUMN name SET NOT NULL` / `DROP NOT NULL`
+    AlterColumnNotNull {
+        /// 列名
+        name: String,
+        /// true 表示 SET NOT NULL，false 表示 DROP NOT NULL
+        not_null: bool,
+    },
+    /// `ADD <table_constraint>` — 主键/唯一/外键/CHECK
+    AddConstraint {
+        /// 表级约束
+        constraint: TableConstraint,
+    },
+    /// `DROP CONSTRAINT [IF EXISTS] name [CASCADE]`
+    DropConstraint {
+        /// 约束名
+        name: String,
+        /// IF EXISTS
+        if_exists: bool,
+        /// CASCADE / RESTRICT
+        cascade: bool,
     },
 }
 
@@ -901,12 +1023,12 @@ fn is_sql_reserved_keyword(ident: &str) -> bool {
             | "RESTRICT" | "USING" | "FETCH" | "FOR" | "ONLY" | "NOWAIT" | "SKIP" | "LOCKED"
             | "SHARE" | "MODE" | "LOCK" | "UNLOCKED" | "ASC" | "DESC" | "NULLS" | "FIRST"
             | "LAST" | "WINDOW" | "OVER" | "PARTITION" | "RANGE" | "ROWS" | "GROUPS" | "PRECEDING"
-            | "FOLLOWING" | "CURRENT" | "ROW" | "FILTER" | "EXCLUDE" | "TIES" | "OTHERS" | "GROUP"
+            | "FOLLOWING" | "CURRENT" | "ROW" | "FILTER" | "EXCLUDE" | "TIES" | "OTHERS"
             | "EXTRACT" | "EPOCH" | "YEAR" | "MONTH" | "DAY" | "HOUR" | "MINUTE" | "SECOND"
             | "INTERVAL" | "TIMESTAMP" | "DATE" | "TIME" | "TEXT" | "INTEGER" | "INT" | "BIGINT"
             | "SMALLINT" | "DECIMAL" | "NUMERIC" | "REAL" | "FLOAT" | "DOUBLE" | "BOOLEAN"
             | "BOOL" | "CHAR" | "VARCHAR" | "BLOB" | "BYTEA" | "JSON" | "JSONB" | "UUID"
-            | "ARRAY" | "ENUM" | "RANGE" | "FOREIGN" | "REFERENCES"
+            | "ARRAY" | "ENUM"
     )
 }
 
@@ -1014,6 +1136,11 @@ pub struct ColumnDefinition {
     /// 生成列的值由表达式自动计算，不能在 INSERT/UPDATE 中显式赋值。
     /// 表达式可引用同行的其他列，求值顺序按列声明顺序。
     pub generated: Option<GeneratedColumn>,
+    /// 列注释 — Phase TDengine-P2
+    ///
+    /// 由 `COMMENT ON COLUMN <table>.<column> IS '...'` 设置。
+    /// 仅用于元数据展示，不影响查询语义。
+    pub comment: Option<String>,
 }
 
 /// 生成列定义 — Phase 6.18
@@ -1044,6 +1171,7 @@ impl ColumnDefinition {
             enum_values: None,
             custom_type_name: None,
             generated: None,
+            comment: None,
         }
     }
 }
@@ -1125,6 +1253,18 @@ pub enum TableConstraint {
         /// CHECK 表达式
         expr: Expr,
     },
+}
+
+impl TableConstraint {
+    /// 返回约束名（L8 新增：配合 catalog 持久化做重名检测）
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            TableConstraint::PrimaryKey { name, .. }
+            | TableConstraint::Unique { name, .. }
+            | TableConstraint::ForeignKey { name, .. }
+            | TableConstraint::Check { name, .. } => name.as_deref(),
+        }
+    }
 }
 
 /// 索引列定义
@@ -1570,20 +1710,51 @@ pub enum Expr {
         /// NOT BETWEEN
         negated: bool,
     },
-    /// expr [NOT] LIKE pattern
+    /// expr [NOT] LIKE pattern  /  expr [NOT] ILIKE pattern
+    ///
+    /// `case_insensitive=true` 表示 ILIKE（大小写不敏感），false 表示 LIKE（大小写敏感）。
+    /// PG 语义：ILIKE 等价于对 expr 与 pattern 都调用 lower() 后再 LIKE。
     Like {
         /// 被测试的表达式
         expr: Box<Expr>,
         /// 模式
         pattern: Box<Expr>,
-        /// NOT LIKE
+        /// NOT LIKE / NOT ILIKE
         negated: bool,
+        /// true 表示 ILIKE（大小写不敏感）
+        case_insensitive: bool,
     },
     /// expr IS [NOT] NULL
     IsNull {
         /// 被测试的表达式
         expr: Box<Expr>,
         /// IS NOT NULL
+        negated: bool,
+    },
+    /// expr IS DISTINCT FROM other  /  expr IS NOT DISTINCT FROM other
+    ///
+    /// PG 语义：NULL 安全的不等比较。
+    /// - `IS DISTINCT FROM`：两值不同（含 NULL 与非 NULL 视为不同）→ true
+    /// - `IS NOT DISTINCT FROM`：两值相同（NULL = NULL 视为相同）→ true
+    IsDistinctFrom {
+        /// 左表达式
+        left: Box<Expr>,
+        /// 右表达式
+        right: Box<Expr>,
+        /// true 表示 `IS NOT DISTINCT FROM`（相等），false 表示 `IS DISTINCT FROM`（不等）
+        not: bool,
+    },
+    /// expr [NOT] SIMILAR TO pattern
+    ///
+    /// PG 语义：SQL 标准正则匹配（介于 LIKE 与 POSIX ~ 之间）。
+    /// SIMILAR TO 使用 SQL 正则语法（支持 `|`、`*`、`+`、`?`、`[...]`、`(...)`），
+    /// 必须完全匹配整个字符串（不像 ~ 是部分匹配）。
+    SimilarTo {
+        /// 被测试的表达式
+        expr: Box<Expr>,
+        /// 模式
+        pattern: Box<Expr>,
+        /// NOT SIMILAR TO
         negated: bool,
     },
     /// 子查询 (SELECT ...)
@@ -1594,6 +1765,22 @@ pub enum Expr {
         subquery: Box<Select>,
         /// NOT EXISTS
         negated: bool,
+    },
+    /// SUBSTRING(expr [FROM start] [FOR length])  /  SUBSTRING(expr, start [, length])
+    ///
+    /// PG 语义：1-based 索引截取子串。
+    /// - `SUBSTRING('hello' FROM 2)` → `'ello'`
+    /// - `SUBSTRING('hello' FROM 2 FOR 3)` → `'ell'`
+    /// - `SUBSTRING('hello' FROM 0 FOR 3)` → `'he'`（PG 特殊语义：start=0 时实际从 1 开始，长度-1）
+    /// - `SUBSTRING('hello', 2, 3)` → `'ell'`（MySQL/SQL Server 语法）
+    /// - start/length 为 NULL 或负数时返回 NULL
+    Substring {
+        /// 源字符串
+        expr: Box<Expr>,
+        /// 起始位置（1-based）
+        from: Option<Box<Expr>>,
+        /// 长度
+        for_len: Option<Box<Expr>>,
     },
     /// 元组 `(expr1, expr2, ...)`
     Tuple(Vec<Expr>),
@@ -1696,6 +1883,38 @@ pub enum BinaryOp {
     ///
     /// 语义：`tsvector @@ tsquery` → bool
     AtAt,
+    /// `~`（PG 正则匹配，大小写敏感）
+    ///
+    /// 语义：`text ~ pattern` → bool，等价于 `text SIMILAR TO pattern` 但使用 POSIX 正则
+    RegexMatch,
+    /// `~*`（PG 正则匹配，大小写不敏感）
+    RegexIMatch,
+    /// `!~`（PG 正则不匹配，大小写敏感）
+    RegexNotMatch,
+    /// `!~*`（PG 正则不匹配，大小写不敏感）
+    RegexNotIMatch,
+    /// `->`（PG JSON/JSONB 路径访问：`json -> 'key'` 返回 json/jsonb，`json -> 1` 返回数组元素）
+    ///
+    /// 语义：左侧为 JSON/JSONB，右侧为 text（键名）或 int（数组索引）
+    JsonArrow,
+    /// `->>`PG JSON/JSONB 路径访问（文本结果）：`json ->> 'key'` 返回 text
+    ///
+    /// 语义：与 JsonArrow 一致，但返回 text 而非 json
+    JsonLongArrow,
+    /// `#>`（PG JSON/JSONB 路径数组访问：`json #> '{a,b}'` 返回 json）
+    ///
+    /// 语义：按路径数组访问嵌套 JSON
+    JsonHashArrow,
+    /// `#>>`（PG JSON/JSONB 路径数组访问（文本结果）：`json #>> '{a,b}'` 返回 text）
+    JsonHashLongArrow,
+    /// `@>`（PG JSON 包含：`json @> json` 返回 bool）
+    ///
+    /// 语义：左侧 JSON 是否包含右侧 JSON
+    JsonAtArrow,
+    /// `<@`（PG JSON 被包含：`json <@ json` 返回 bool）
+    ///
+    /// 语义：左侧 JSON 是否被右侧 JSON 包含
+    JsonArrowAt,
 }
 
 /// 一元运算符
@@ -1735,4 +1954,13 @@ pub enum TransactionAccess {
     ReadOnly,
     /// READ WRITE（默认）
     ReadWrite,
+}
+
+/// COMMENT ON 的对象类型 — Phase TDengine-P2
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CommentObjectType {
+    /// TABLE
+    Table,
+    /// COLUMN
+    Column,
 }

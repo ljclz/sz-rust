@@ -1,0 +1,30 @@
+[package]
+name = "szrsql-tds-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SzRSQL TDS 协议实现 — L2 协议级兼容（SQL Server 客户端可直接连接）"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+szrsql-types = { workspace = true }
+szrsql-sql = { workspace = true }
+szrsql-protocol = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lib]
+name = "szrsql_tds_protocol"
+path = "src/lib.rs"

@@ -42,8 +42,10 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::Path;
 use thiserror::Error;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -120,6 +122,122 @@ impl AuthMode {
     /// 是否为 SCRAM-SHA-256 模式。
     pub fn is_scram(&self) -> bool {
         matches!(self, Self::ScramSha256 { .. })
+    }
+}
+
+// =====================================================================
+//  CredentialStore — P0-PG-8 修复：凭据持久化
+// =====================================================================
+
+/// 持久化凭据存储 — P0-PG-8 修复
+///
+/// 将 SCRAM-SHA-256 凭据（用户名→密码 + 盐 + 迭代次数）持久化到 JSON 文件，
+/// 重启后加载恢复，避免 CREATE ROLE 创建的用户丢失。
+///
+/// # 文件格式
+///
+/// ```json
+/// {
+///   "credentials": {"alice": "secret123", "bob": "hunter2"},
+///   "salt_base64": "MDEyMzQ1Njc4OWFiY2RlZg==",
+///   "iterations": 4096
+/// }
+/// ```
+///
+/// # 安全注意
+///
+/// 当前存储明文密码（与 `AuthMode::ScramSha256` 一致），用于 SCRAM 握手时派生密钥。
+/// 未来应改为存储 SCRAM-SHA-256 哈希（`SCRAM-SHA-256$<iter>:<salt>$<stored>:<server>`），
+/// 与 PostgreSQL `pg_authid.rolpassword` 格式一致。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CredentialStore {
+    /// 用户名（小写）→ 明文密码
+    pub credentials: HashMap<String, String>,
+    /// 盐值（base64 编码）
+    pub salt_base64: String,
+    /// PBKDF2 迭代次数
+    pub iterations: u32,
+}
+
+impl CredentialStore {
+    /// 创建新的空凭据存储，使用随机盐和默认迭代次数
+    pub fn new() -> Self {
+        let mut salt = vec![0u8; 16];
+        rand::rng().fill(&mut salt[..]);
+        Self {
+            credentials: HashMap::new(),
+            salt_base64: BASE64.encode(&salt),
+            iterations: DEFAULT_SCRYPT_ITERATIONS,
+        }
+    }
+
+    /// 从 `AuthMode::ScramSha256` 提取凭据存储
+    pub fn from_auth_mode(
+        credentials: HashMap<String, String>,
+        salt: Vec<u8>,
+        iterations: u32,
+    ) -> Self {
+        Self {
+            credentials,
+            salt_base64: BASE64.encode(&salt),
+            iterations,
+        }
+    }
+
+    /// 获取盐值（解码 base64）
+    pub fn salt(&self) -> Vec<u8> {
+        BASE64.decode(&self.salt_base64).unwrap_or_default()
+    }
+
+    /// 添加或更新用户凭据
+    pub fn add_user(&mut self, username: &str, password: &str) {
+        self.credentials
+            .insert(username.to_lowercase(), password.to_string());
+    }
+
+    /// 删除用户凭据，返回是否删除成功
+    pub fn remove_user(&mut self, username: &str) -> bool {
+        self.credentials.remove(&username.to_lowercase()).is_some()
+    }
+
+    /// 持久化到 JSON 文件
+    ///
+    /// `path` 通常为 `{data_dir}/auth.json`
+    pub fn save_to_file(&self, path: &Path) -> Result<(), AuthError> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| AuthError::Protocol(format!("serialize credentials failed: {e}")))?;
+        std::fs::write(path, json)
+            .map_err(|e| AuthError::Protocol(format!("write credentials file failed: {e}")))?;
+        Ok(())
+    }
+
+    /// 从 JSON 文件加载凭据
+    ///
+    /// 文件不存在时返回 `None`（首次启动无凭据文件属正常）
+    pub fn load_from_file(path: &Path) -> Result<Option<Self>, AuthError> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let json = std::fs::read_to_string(path)
+            .map_err(|e| AuthError::Protocol(format!("read credentials file failed: {e}")))?;
+        let store: Self = serde_json::from_str(&json)
+            .map_err(|e| AuthError::Protocol(format!("deserialize credentials failed: {e}")))?;
+        Ok(Some(store))
+    }
+
+    /// 转换为 `AuthMode::ScramSha256`
+    pub fn to_auth_mode(&self) -> AuthMode {
+        AuthMode::ScramSha256 {
+            credentials: self.credentials.clone(),
+            salt: self.salt(),
+            iterations: self.iterations,
+        }
+    }
+}
+
+impl Default for CredentialStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -519,6 +637,73 @@ mod tests {
         m.insert("alice".into(), "secret123".into());
         m.insert("bob".into(), "hunter2".into());
         m
+    }
+
+    // ---- CredentialStore 持久化测试（P0-PG-8） ----
+
+    #[test]
+    fn test_credential_store_new() {
+        let store = CredentialStore::new();
+        assert!(store.credentials.is_empty());
+        assert!(!store.salt_base64.is_empty());
+        assert_eq!(store.iterations, DEFAULT_SCRYPT_ITERATIONS);
+    }
+
+    #[test]
+    fn test_credential_store_add_remove_user() {
+        let mut store = CredentialStore::new();
+        store.add_user("Charlie", "pass123");
+        assert_eq!(store.credentials.len(), 1);
+        assert_eq!(store.credentials.get("charlie"), Some(&"pass123".to_string()));
+
+        assert!(store.remove_user("charlie"));
+        assert!(store.credentials.is_empty());
+        assert!(!store.remove_user("nonexistent"));
+    }
+
+    #[test]
+    fn test_credential_store_save_load_roundtrip() {
+        let temp_dir = std::env::temp_dir();
+        let path = temp_dir.join("szrsql_test_auth.json");
+
+        let mut store = CredentialStore::new();
+        store.add_user("alice", "secret123");
+        store.add_user("bob", "hunter2");
+
+        store.save_to_file(&path).expect("save should succeed");
+        let loaded = CredentialStore::load_from_file(&path)
+            .expect("load should succeed")
+            .expect("file should exist");
+
+        assert_eq!(loaded.credentials, store.credentials);
+        assert_eq!(loaded.salt_base64, store.salt_base64);
+        assert_eq!(loaded.iterations, store.iterations);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_credential_store_load_nonexistent() {
+        let path = std::path::Path::new("/nonexistent/path/auth.json");
+        let result = CredentialStore::load_from_file(path).expect("should not error");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_credential_store_to_auth_mode() {
+        let mut store = CredentialStore::new();
+        store.add_user("alice", "secret123");
+
+        let mode = store.to_auth_mode();
+        assert!(mode.is_scram());
+        match mode {
+            AuthMode::ScramSha256 { credentials, salt, iterations } => {
+                assert_eq!(credentials.get("alice"), Some(&"secret123".to_string()));
+                assert!(!salt.is_empty());
+                assert_eq!(iterations, DEFAULT_SCRYPT_ITERATIONS);
+            }
+            _ => panic!("expected ScramSha256"),
+        }
     }
 
     /// 固定盐值（16 字节）。

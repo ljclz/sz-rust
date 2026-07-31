@@ -570,7 +570,7 @@ pub trait StatisticsStore: Send + Sync {
 /// 内存中的统计信息存储（默认实现）
 ///
 /// 用于单进程场景（如 szrsql-bin）；多进程共享需实现基于持久化存储的版本。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryStatisticsStore {
     stats: HashMap<String, TableStatistics>,
 }

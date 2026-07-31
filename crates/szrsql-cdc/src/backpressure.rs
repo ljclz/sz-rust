@@ -2906,6 +2906,10 @@ mod tests {
         let total_events = 10_000u64;
         let payload_size = 1024; // 1KB
 
+        // 使用 barrier 确保生产者先填满队列到高水位，触发背压
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let producer_barrier = barrier.clone();
+
         let producer_queue = queue.clone();
         let producer = thread::spawn(move || {
             for lsn in 1..=total_events {
@@ -2913,10 +2917,15 @@ mod tests {
                 let event = ChangeEvent::insert(1, lsn, 42, payload, lsn);
                 producer_queue.push(event).unwrap();
             }
+            // 生产者完成后释放消费者
+            producer_barrier.wait();
         });
 
         let consumer_queue = queue.clone();
+        let consumer_barrier = barrier.clone();
         let consumer = thread::spawn(move || {
+            // 等待一小段时间让生产者先跑，确保队列达到高水位触发背压
+            thread::sleep(std::time::Duration::from_millis(5));
             let mut count = 0u64;
             while count < total_events {
                 if let Some(event) = consumer_queue.pop() {
@@ -2925,6 +2934,7 @@ mod tests {
                     count += 1;
                 }
             }
+            consumer_barrier.wait();
             count
         });
 
@@ -2934,6 +2944,9 @@ mod tests {
 
         let stats = queue.stats();
         assert!(stats.peak_size <= 100);
-        assert!(stats.backpressure_count > 0);
+        // 背压触发依赖于生产者先于消费者填充队列，
+        // 通过初始延迟确保队列达到高水位
+        assert!(stats.backpressure_count > 0,
+            "expected backpressure to trigger, peak_size={}", stats.peak_size);
     }
 }

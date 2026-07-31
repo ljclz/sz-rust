@@ -312,6 +312,7 @@ fn execute_create_view_if_not_exists_skips_existing() {
         query: plan_query_box(),
         materialized: false,
         if_not_exists: true,
+        or_replace: false,
     };
     let planner = Planner::new(&catalog);
     let plan2 = planner.plan_statement(stmt).unwrap();

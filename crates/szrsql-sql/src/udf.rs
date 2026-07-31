@@ -59,6 +59,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use szrsql_types::value::Value;
@@ -235,13 +236,14 @@ pub trait UdfFunction: Send + Sync {
 ///
 /// # 线程安全
 /// `UdfRegistry` 内部使用 `HashMap<String, Arc<dyn UdfFunction>>`。
-/// `Arc` 允许 UDF 跨线程共享；`UdfRegistry` 本身非 `Sync`（需 `Mutex` 包装用于多线程）。
+/// `Arc` 允许 UDF 跨线程共享；`call_counter` 使用 `AtomicU64`，
+/// 因此 `call` / `next_call_id` 仅需 `&self`，可在不可变上下文中调用。
 #[derive(Default)]
 pub struct UdfRegistry {
     /// 函数名（小写） → UDF
     functions: HashMap<String, Arc<dyn UdfFunction>>,
-    /// 调用计数器（用于生成 call_id）
-    call_counter: u64,
+    /// 调用计数器（用于生成 call_id，原子操作以支持 `&self` 调用）
+    call_counter: AtomicU64,
 }
 
 impl std::fmt::Debug for UdfRegistry {
@@ -249,7 +251,7 @@ impl std::fmt::Debug for UdfRegistry {
         f.debug_struct("UdfRegistry")
             .field("registered_count", &self.functions.len())
             .field("names", &self.functions.keys().collect::<Vec<_>>())
-            .field("call_counter", &self.call_counter)
+            .field("call_counter", &self.call_counter.load(Ordering::Relaxed))
             .finish()
     }
 }
@@ -259,7 +261,7 @@ impl UdfRegistry {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
-            call_counter: 0,
+            call_counter: AtomicU64::new(0),
         }
     }
 
@@ -335,7 +337,7 @@ impl UdfRegistry {
     /// 5. panic 捕获（`catch_unwind` → `Panic`）
     /// 6. 调用 UDF（返回 `UdfError` 或 `Ok(Value)`）
     pub fn call(
-        &mut self,
+        &self,
         name: &str,
         args: &[Value],
         ctx: &UdfContext,
@@ -388,9 +390,8 @@ impl UdfRegistry {
     }
 
     /// 生成下一个 call_id（单调递增）
-    pub fn next_call_id(&mut self) -> u64 {
-        self.call_counter += 1;
-        self.call_counter
+    pub fn next_call_id(&self) -> u64 {
+        self.call_counter.fetch_add(1, Ordering::Relaxed) + 1
     }
 }
 
@@ -446,7 +447,7 @@ impl UdfSandbox {
     /// - `Err(UdfError)`：调用失败（含超时）
     pub fn call(
         &mut self,
-        registry: &mut UdfRegistry,
+        registry: &UdfRegistry,
         name: &str,
         args: &[Value],
     ) -> Result<Value, UdfError> {
@@ -616,60 +617,6 @@ impl UdfFunction for StrictSquareUdf {
     }
 }
 
-/// 内置 UDF：故意 panic（用于测试 panic 捕获）
-pub struct PanicUdf;
-
-impl UdfFunction for PanicUdf {
-    fn signature(
-        &self,
-    ) -> (
-        &'static str,
-        &'static [(&'static str, &'static str)],
-        &'static str,
-    ) {
-        ("panic_udf", &[], "integer")
-    }
-    fn call(&self, _args: &[Value], _ctx: &UdfContext) -> Result<Value, UdfError> {
-        panic!("intentional panic from PanicUdf")
-    }
-}
-
-/// 内置 UDF：长耗时操作（用于测试超时）
-pub struct SlowUdf;
-
-impl UdfFunction for SlowUdf {
-    fn signature(
-        &self,
-    ) -> (
-        &'static str,
-        &'static [(&'static str, &'static str)],
-        &'static str,
-    ) {
-        ("slow_udf", &[("ms", "integer")], "integer")
-    }
-    fn call(&self, args: &[Value], ctx: &UdfContext) -> Result<Value, UdfError> {
-        let ms = match &args[0] {
-            Value::Int64(n) => *n as u64,
-            _ => return Err(UdfError::TypeError("expected integer".into())),
-        };
-        let start = Instant::now();
-        let target = Duration::from_millis(ms);
-        // 忙等（模拟长耗时操作）
-        while start.elapsed() < target {
-            if ctx.is_timeout() {
-                return Err(UdfError::Timeout(
-                    ctx.deadline.map(|d| d.elapsed()).unwrap_or_default(),
-                ));
-            }
-            std::hint::spin_loop();
-        }
-        Ok(Value::Int64(ms as i64))
-    }
-    fn immutable(&self) -> bool {
-        false // 耗时操作视为 VOLATILE
-    }
-}
-
 // =====================================================================
 //  单元测试
 // =====================================================================
@@ -677,6 +624,62 @@ impl UdfFunction for SlowUdf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- 测试专用 UDF（仅编译进测试二进制，避免污染生产代码） ---
+
+    /// 测试用 UDF：故意 panic（用于验证 UdfRegistry 的 panic 捕获机制）
+    pub struct PanicUdf;
+
+    impl UdfFunction for PanicUdf {
+        fn signature(
+            &self,
+        ) -> (
+            &'static str,
+            &'static [(&'static str, &'static str)],
+            &'static str,
+        ) {
+            ("panic_udf", &[], "integer")
+        }
+        fn call(&self, _args: &[Value], _ctx: &UdfContext) -> Result<Value, UdfError> {
+            panic!("intentional panic from PanicUdf")
+        }
+    }
+
+    /// 测试用 UDF：长耗时操作（用于验证 UdfRegistry 的超时控制机制）
+    pub struct SlowUdf;
+
+    impl UdfFunction for SlowUdf {
+        fn signature(
+            &self,
+        ) -> (
+            &'static str,
+            &'static [(&'static str, &'static str)],
+            &'static str,
+        ) {
+            ("slow_udf", &[("ms", "integer")], "integer")
+        }
+        fn call(&self, args: &[Value], ctx: &UdfContext) -> Result<Value, UdfError> {
+            let ms = match &args[0] {
+                Value::Int64(n) => *n as u64,
+                _ => return Err(UdfError::TypeError("expected integer".into())),
+            };
+            let start = Instant::now();
+            let target = Duration::from_millis(ms);
+            // 忙等（模拟长耗时操作）
+            while start.elapsed() < target {
+                if ctx.is_timeout() {
+                    return Err(UdfError::Timeout(
+                        ctx.deadline.map(|d| d.elapsed()).unwrap_or_default(),
+                    ));
+                }
+                std::hint::spin_loop();
+            }
+            Ok(Value::Int64(ms as i64))
+        }
+        fn immutable(&self) -> bool {
+            false // 耗时操作视为 VOLATILE
+        }
+    }
 
     // --- 基础注册与查找 ---
 
@@ -754,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_call_not_found() {
-        let mut registry = UdfRegistry::new();
+        let registry = UdfRegistry::new();
         let ctx = UdfContext::default();
         let result = registry.call("nonexistent", &[], &ctx);
         assert!(matches!(result, Err(UdfError::NotFound(_))));
@@ -933,7 +936,7 @@ mod tests {
 
     #[test]
     fn test_next_call_id_monotonic() {
-        let mut registry = UdfRegistry::new();
+        let registry = UdfRegistry::new();
         let id1 = registry.next_call_id();
         let id2 = registry.next_call_id();
         let id3 = registry.next_call_id();

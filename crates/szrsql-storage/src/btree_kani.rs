@@ -132,13 +132,13 @@ mod kani_proofs {
         let n: usize = kani::any();
         kani::assume(n >= 1 && n <= 4);
         let mut keys: Vec<Vec<u8>> = Vec::with_capacity(n);
-        let mut tuple_ids: Vec<u16> = Vec::with_capacity(n);
+        let mut tuple_ids: Vec<u32> = Vec::with_capacity(n);
         let mut prev: i64 = i64::MIN;
         for i in 0..n {
             let v: i64 = kani::any();
             kani::assume(v > prev);
             keys.push(encode_i64_key(v));
-            tuple_ids.push(i as u16);
+            tuple_ids.push(i as u32);
             prev = v;
         }
         let node = BTreeNode {
@@ -165,13 +165,13 @@ mod kani_proofs {
         let n: usize = kani::any();
         kani::assume(n >= 2 && n <= 4);
         let mut keys: Vec<Vec<u8>> = Vec::with_capacity(n);
-        let mut tuple_ids: Vec<u16> = Vec::with_capacity(n);
+        let mut tuple_ids: Vec<u32> = Vec::with_capacity(n);
         let mut prev: i64 = i64::MIN;
         for i in 0..n {
             let v: i64 = kani::any();
             kani::assume(v > prev);
             keys.push(encode_i64_key(v));
-            tuple_ids.push(i as u16);
+            tuple_ids.push(i as u32);
             prev = v;
         }
         let mut node = BTreeNode {
@@ -307,13 +307,13 @@ mod kani_proofs {
         let n: usize = kani::any();
         kani::assume(n >= 2 && n <= 4);
         let mut keys: Vec<Vec<u8>> = Vec::with_capacity(n);
-        let mut tuple_ids: Vec<u16> = Vec::with_capacity(n);
+        let mut tuple_ids: Vec<u32> = Vec::with_capacity(n);
         let mut prev: i64 = i64::MIN;
         for i in 0..n {
             let v: i64 = kani::any();
             kani::assume(v > prev);
             keys.push(encode_i64_key(v));
-            tuple_ids.push(i as u16);
+            tuple_ids.push(i as u32);
             prev = v;
         }
         let mut node = BTreeNode {
@@ -484,7 +484,7 @@ mod kani_proofs {
         // 3 次 insert + 2 次 delete，全部符号化
         for i in 0..3 {
             let v: i64 = kani::any();
-            let _ = bt.insert(encode_i64_key(v), i as u16);
+            let _ = bt.insert(encode_i64_key(v), i as u32);
         }
         for _ in 0..2 {
             let v: i64 = kani::any();
@@ -592,7 +592,7 @@ mod property_tests {
             sorted.sort();
             sorted.dedup();
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u16> = (0..keys.len() as u16).collect();
+            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
             let node = BTreeNode {
                 page_id: 1,
                 node_type: NodeType::Leaf,
@@ -620,7 +620,7 @@ mod property_tests {
                 return Ok(());
             }
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u16> = (0..keys.len() as u16).collect();
+            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
             let n = keys.len();
             let mut node = BTreeNode {
                 page_id: 10,
@@ -714,7 +714,7 @@ mod property_tests {
                 return Ok(());
             }
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u16> = (0..keys.len() as u16).collect();
+            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
             let n = keys.len();
             let mut node = BTreeNode {
                 page_id: 10,
@@ -859,7 +859,7 @@ mod property_tests {
             for (i, v) in ops.iter().enumerate() {
                 let key = encode_i64_key(*v);
                 if i % 2 == 0 {
-                    let _ = bt.insert(key, i as u16);
+                    let _ = bt.insert(key, i as u32);
                 } else {
                     let _ = bt.delete(&key);
                 }

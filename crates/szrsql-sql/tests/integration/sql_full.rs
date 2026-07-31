@@ -8,8 +8,8 @@
 //!
 //! # 设计要点
 //!
-//! 1. **不依赖 `Executor::execute(Sort)`**：当前执行器未实现 Sort 算子，
-//!    ORDER BY 通过手动排序 `Vec<Row>` 模拟（planner 已支持 Sort 计划生成）
+//! 1. **执行器已实现 Sort 算子**（executor.rs execute_sort），
+//!    ORDER BY 可通过 Sort 计划节点执行（planner 已支持 Sort 计划生成）
 //! 2. **大表使用 `CounterTable`**：1M 行测试不分配实际 1M × Vec<Value> 内存，
 //!    通过 CounterTable 惰性生成验证扫描行数正确性
 //! 3. **事务用 `snapshot/restore`**：与 `executor_tests::test_dml_integration_full_cycle`

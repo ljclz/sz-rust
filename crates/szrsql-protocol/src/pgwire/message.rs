@@ -471,7 +471,8 @@ impl FrontendMessage {
             return Ok(None);
         }
         let msg_type = src[0];
-        let length = i32::from_be_bytes([src[1], src[2], src[3], src[4]]) as usize;
+        // BUG-001 修复：使用 u32 解析长度，避免 i32 负值经 as usize 符号扩展为 usize::MAX 导致溢出 panic
+        let length = u32::from_be_bytes([src[1], src[2], src[3], src[4]]) as usize;
         if length < 4 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -526,7 +527,8 @@ impl FrontendMessage {
                         "parse message: truncated parameter count",
                     ));
                 }
-                let param_count = i16::from_be_bytes([cur[0], cur[1]]) as usize;
+                // BUG-002 修复：Parse 消息同样使用 u16 避免 i16 负值符号扩展
+                let param_count = u16::from_be_bytes([cur[0], cur[1]]) as usize;
                 cur = &cur[2..];
                 if cur.len() < param_count * 4 {
                     return Err(io::Error::new(
@@ -584,7 +586,16 @@ impl FrontendMessage {
                         "bind message: truncated parameter count",
                     ));
                 }
-                let param_count = i16::from_be_bytes([cur[0], cur[1]]) as usize;
+                // BUG-002 修复：使用 u16 解析 param_count，避免 i16 负值经 as usize 符号扩展
+                // 为 usize::MAX 导致 Vec::with_capacity panic（远程 DoS）。
+                let param_count = u16::from_be_bytes([cur[0], cur[1]]) as usize;
+                const MAX_BIND_PARAMS: usize = 65535;
+                if param_count > MAX_BIND_PARAMS {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("bind message: parameter count too large: {param_count}"),
+                    ));
+                }
                 cur = &cur[2..];
                 let mut parameters = Vec::with_capacity(param_count);
                 for _ in 0..param_count {
