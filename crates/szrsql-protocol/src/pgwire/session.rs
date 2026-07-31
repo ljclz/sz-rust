@@ -918,10 +918,18 @@ impl ExecutorService {
         // 2. Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.* / pg_database / pg_namespace / pg_class / ...）
         //    这类查询需要 MutableCatalog 接口（szrsql-catalog 提供），无法走 Planner
         //    （Planner 只接受 Catalog trait）。在 plan_statement 之前拦截，直接返回结果。
+        //    P2-1.3：注入 statistics_store，使 pg_class.reltuples / pg_statistic 可从 ANALYZE 统计信息填充。
+        let stats_ref = self.statistics_store.as_ref().map(|inner| {
+            szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone())
+        });
+        let stats_dyn = stats_ref
+            .as_ref()
+            .map(|s| s as &dyn szrsql_optimizer::statistics::StatisticsStore);
         if let Some(result) = crate::pgwire::system_tables::try_execute_system_table_query(
             &stmt,
             &self.catalog,
             &self.database_name,
+            stats_dyn,
         ) {
             return result;
         }
@@ -972,6 +980,18 @@ impl ExecutorService {
         // 结果存入 `statistics_store`，供 CostModel 进行基于成本的优化（P2-1.2 激活）
         if let Statement::Analyze { tables, verbose } = &stmt {
             return self.execute_analyze(tables, *verbose).await;
+        }
+
+        // P2-2.1：EXPLAIN 拦截（规划内部语句但不执行，返回计划文本）
+        //
+        // 行为与 PostgreSQL 一致：
+        // - `EXPLAIN SELECT ...` — 返回优化后的查询计划（不执行）
+        // - `EXPLAIN ANALYZE SELECT ...` — 实际执行并附加运行统计
+        // - `EXPLAIN VERBOSE ...` — 当前等同于普通 EXPLAIN（后续扩展）
+        //
+        // 结果以单列 "QUERY PLAN" 结果集返回，每行一个计划节点。
+        if let Statement::Explain { statement, analyze, verbose: _ } = &stmt {
+            return self.execute_explain(*statement.clone(), *analyze).await;
         }
 
         // 3. 其余语句走 Planner + OPT-5 优化器 pass
@@ -1128,6 +1148,101 @@ impl ExecutorService {
 
         Ok(QueryResult::DdlComplete {
             tag: "ANALYZE".into(),
+        })
+    }
+
+    /// P2-2.1：执行 EXPLAIN 语句，返回查询计划文本。
+    ///
+    /// # 流程
+    ///
+    /// 1. 对内部语句执行完整的 Planner + RBO + CBO 优化管线
+    /// 2. 使用 `format_plan` 将优化后的 LogicalPlan 格式化为文本
+    /// 3. 若 `analyze` 为 true，实际执行计划并附加执行时间
+    /// 4. 以单列 "QUERY PLAN" 结果集返回（与 PostgreSQL 一致）
+    async fn execute_explain(
+        &mut self,
+        inner_stmt: Statement,
+        analyze: bool,
+    ) -> Result<QueryResult, SessionError> {
+        // 1. 规划 + 优化（与正常路径相同的管线）
+        let catalog_clone = self.catalog.clone();
+        let stats_store_inner = self.statistics_store.clone();
+        let plan = tokio::task::spawn_blocking(move || -> Result<LogicalPlan, SessionError> {
+            let planner = Planner::new(&catalog_clone);
+            let raw_plan = planner.plan_statement(inner_stmt)?;
+            let optimized = szrsql_optimizer::rule::PredicatePushdown::apply(raw_plan);
+            let optimized = szrsql_optimizer::rule::ProjectionPruning::apply(optimized);
+            let optimized =
+                szrsql_optimizer::rule::SubqueryFlattening::new(&planner).apply(optimized);
+            let optimized =
+                szrsql_optimizer::rule::IndexSelection::new(&catalog_clone).apply(optimized);
+            let optimized =
+                szrsql_optimizer::rule::CommonSubexpressionElimination::apply(optimized);
+            let optimized = if let Some(inner) = stats_store_inner {
+                let shared = szrsql_optimizer::statistics::SharedStatisticsStore::new(inner);
+                let cost_model = szrsql_optimizer::cost::CostModel::new(Arc::new(shared));
+                let join_optimizer =
+                    szrsql_optimizer::join_order::JoinOrderOptimizer::new(cost_model);
+                join_optimizer.optimize(optimized)
+            } else {
+                optimized
+            };
+            Ok(optimized)
+        })
+        .await
+        .map_err(|e| SessionError::Transaction(format!("explain planning task panicked: {e}")))?
+        ?;
+
+        // 2. 格式化计划
+        let plan_text = szrsql_sql::plan::format_plan(&plan);
+        let mut lines: Vec<String> = plan_text.lines().map(|l| l.to_string()).collect();
+
+        // 3. EXPLAIN ANALYZE：实际执行并附加时间信息
+        if analyze {
+            let start = std::time::Instant::now();
+            let exec_result = self.dispatch_plan(&plan).await;
+            let elapsed = start.elapsed();
+            match exec_result {
+                Ok(QueryResult::ResultSet { rows, .. }) => {
+                    lines.push(format!(
+                        "Execution Time: {:.3} ms ({} rows)",
+                        elapsed.as_secs_f64() * 1000.0,
+                        rows.len()
+                    ));
+                }
+                Ok(QueryResult::AffectedRows { tag }) => {
+                    lines.push(format!(
+                        "Execution Time: {:.3} ms ({})",
+                        elapsed.as_secs_f64() * 1000.0,
+                        tag
+                    ));
+                }
+                Ok(_) => {
+                    lines.push(format!(
+                        "Execution Time: {:.3} ms",
+                        elapsed.as_secs_f64() * 1000.0
+                    ));
+                }
+                Err(e) => {
+                    lines.push(format!("Execution Error: {e}"));
+                }
+            }
+        }
+
+        // 4. 构造单列 "QUERY PLAN" 结果集（PG 兼容格式）
+        let rows: Vec<Vec<Value>> = lines
+            .into_iter()
+            .map(|line| vec![Value::Text(line)])
+            .collect();
+        let row_count = rows.len();
+
+        Ok(QueryResult::ResultSet {
+            columns: vec![ResultColumn {
+                name: "QUERY PLAN".into(),
+                column_type: ColumnType::Text,
+            }],
+            rows,
+            tag: format!("EXPLAIN {row_count}"),
         })
     }
 
@@ -3802,10 +3917,18 @@ impl ExecutorService {
         // Phase 4.7：系统表查询拦截（pg_tables / pg_indexes / information_schema.* / pg_database / pg_namespace / pg_class / ...）
         // 这类查询需要 MutableCatalog 接口，无法走 LogicalPlan::Execute 路径。
         // 与简单查询协议保持一致：直接计算结果集返回。
+        // P2-1.3：注入 statistics_store，使 pg_class.reltuples / pg_statistic 可从 ANALYZE 统计信息填充。
+        let stats_ref = self.statistics_store.as_ref().map(|inner| {
+            szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone())
+        });
+        let stats_dyn = stats_ref
+            .as_ref()
+            .map(|s| s as &dyn szrsql_optimizer::statistics::StatisticsStore);
         if let Some(result) = crate::pgwire::system_tables::try_execute_system_table_query(
             &ps.statement,
             &self.catalog,
             &self.database_name,
+            stats_dyn,
         ) {
             let query_result = result?;
             return Ok(ExtendedExecuteResult::Complete {

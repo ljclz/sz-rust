@@ -333,6 +333,8 @@ pub enum SystemTableKind {
     PgStatBgwriter,
     /// `pg_stats` — 统计信息（占位空）
     PgStats,
+    /// `pg_statistic` — 列级统计信息（P2-1.3：从 ANALYZE 收集的统计信息填充）
+    PgStatistic,
     /// `pg_operator` — 操作符目录（已实现）
     PgOperator,
     /// `pg_foreign_table` — 外部表目录（占位空）
@@ -441,6 +443,8 @@ impl SystemTableKind {
             (Some("pg_catalog"), "pg_stat_database_conflicts") | (None, "pg_stat_database_conflicts") => Some(Self::PgStatDatabaseConflicts),
             (Some("pg_catalog"), "pg_stat_bgwriter") | (None, "pg_stat_bgwriter") => Some(Self::PgStatBgwriter),
             (Some("pg_catalog"), "pg_stats") | (None, "pg_stats") => Some(Self::PgStats),
+            // P2-1.3：pg_statistic 系统表（列级统计信息，从 ANALYZE 收集）
+            (Some("pg_catalog"), "pg_statistic") | (None, "pg_statistic") => Some(Self::PgStatistic),
             // Navicat 兼容：pg_operator / pg_foreign_table（占位空）
             (Some("pg_catalog"), "pg_operator") | (None, "pg_operator") => Some(Self::PgOperator),
             (Some("pg_catalog"), "pg_foreign_table") | (None, "pg_foreign_table") => Some(Self::PgForeignTable),
@@ -518,6 +522,7 @@ impl SystemTableKind {
             Self::PgStatDatabaseConflicts => szrsql_catalog::navicat::pg_stat_database_conflicts_schema(),
             Self::PgStatBgwriter => szrsql_catalog::navicat::pg_stat_bgwriter_schema(),
             Self::PgStats => szrsql_catalog::navicat::pg_stats_schema(),
+            Self::PgStatistic => szrsql_catalog::navicat::pg_statistic_schema(),
             Self::PgOperator => szrsql_catalog::navicat::pg_operator_schema(),
             Self::PgForeignTable => szrsql_catalog::navicat::pg_foreign_table_schema(),
             Self::InfoSchemaRoutines => szrsql_catalog::navicat::information_schema_routines_schema(),
@@ -535,10 +540,12 @@ impl SystemTableKind {
     /// 计算该系统表的所有行
     ///
     /// `current_db` 仅 `PgDatabase` 使用（返回当前连接的数据库名）；其他系统表忽略此参数。
+    /// `stats` 为统计信息存储（P2-1.3：PgClass/PgStatistic/PgStats 使用，其他系统表忽略）。
     pub fn compute_rows(
         self,
         catalog: &dyn MutableCatalog,
         current_db: &str,
+        stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
     ) -> Vec<Vec<Value>> {
         match self {
             Self::PgTables => system_tables::pg_tables(catalog),
@@ -551,7 +558,7 @@ impl SystemTableKind {
             }
             Self::PgDatabase => szrsql_catalog::navicat::pg_database(current_db),
             Self::PgNamespace => szrsql_catalog::navicat::pg_namespace(catalog),
-            Self::PgClass => szrsql_catalog::navicat::pg_class(catalog),
+            Self::PgClass => pg_class_with_stats(catalog, stats),
             Self::PgAttribute => szrsql_catalog::navicat::pg_attribute(catalog),
             Self::PgType => szrsql_catalog::navicat::pg_type(),
             Self::PgIndex => szrsql_catalog::navicat::pg_index(catalog),
@@ -598,7 +605,8 @@ impl SystemTableKind {
             Self::PgStatDatabase => szrsql_catalog::navicat::empty_rows(),
             Self::PgStatDatabaseConflicts => szrsql_catalog::navicat::empty_rows(),
             Self::PgStatBgwriter => szrsql_catalog::navicat::empty_rows(),
-            Self::PgStats => szrsql_catalog::navicat::empty_rows(),
+            Self::PgStats => pg_stats_view(catalog, stats),
+            Self::PgStatistic => pg_statistic_with_stats(catalog, stats),
             Self::PgOperator => szrsql_catalog::navicat::pg_operator(),
             Self::PgForeignTable => szrsql_catalog::navicat::empty_rows(),
             Self::InfoSchemaRoutines => szrsql_catalog::navicat::empty_rows(),
@@ -607,6 +615,131 @@ impl SystemTableKind {
             Self::PgForeignServer => szrsql_catalog::navicat::empty_rows(),
         }
     }
+}
+
+// =====================================================================
+//  P2-1.3：统计信息感知的系统表行计算
+// =====================================================================
+
+/// 从统计信息存储构建 pg_class 行，填充 reltuples 和 relpages
+///
+/// # 行为
+///
+/// - 无 stats：返回原始 pg_class 行（reltuples=0.0, relpages=0）
+/// - 有 stats：遍历 catalog 中的表，对每个有统计信息的表：
+///   - `reltuples`（index 10）= row_count as f64
+///   - `relpages`（index 9）= ceil(row_count / 80.0)（估算：每页 8KB，每行约 100 字节）
+///
+/// # 列索引
+///
+/// pg_class 行结构（31 列）：
+/// - index 1：relname（表名）
+/// - index 9：relpages
+/// - index 10：reltuples
+/// - index 16：relkind（"r"=表，"i"=索引）
+fn pg_class_with_stats(
+    catalog: &dyn MutableCatalog,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
+) -> Vec<Vec<Value>> {
+    let mut rows = szrsql_catalog::navicat::pg_class(catalog);
+    let Some(stats) = stats else { return rows; };
+
+    // 构建 relname → TableStatistics 的查找表
+    // stats 以 qualified_name().to_lowercase() 为键，但 pg_class 行中只有 relname（不含 schema）
+    // 对无 schema 的表（常见情况），relname == qualified_name
+    use std::sync::Arc;
+    let mut stats_by_relname: std::collections::HashMap<String, Arc<szrsql_optimizer::statistics::TableStatistics>> =
+        std::collections::HashMap::new();
+    for table_name in catalog.list_tables() {
+        let qualified = table_name.qualified_name().to_lowercase();
+        if let Some(table_stats) = stats.get_table_stats(&qualified) {
+            stats_by_relname.insert(table_name.name.to_lowercase(), table_stats);
+        }
+    }
+
+    // 遍历 pg_class 行，填充表行（relkind="r"）的 reltuples 和 relpages
+    for row in &mut rows {
+        // relname at index 1, relkind at index 16
+        if let (Value::Text(name), Value::Text(kind)) = (&row[1], &row[16]) {
+            if kind == "r" {
+                if let Some(table_stats) = stats_by_relname.get(&name.to_lowercase()) {
+                    // reltuples at index 10
+                    row[10] = Value::Float64(table_stats.row_count as f64);
+                    // relpages at index 9：估算每页约 80 行（8KB 页 / 100 字节每行）
+                    let relpages = ((table_stats.row_count as f64) / 80.0).ceil() as i64;
+                    row[9] = Value::Int64(relpages);
+                }
+            }
+        }
+    }
+    rows
+}
+
+/// 从统计信息存储构建 pg_statistic 行
+///
+/// # 行为
+///
+/// - 无 stats：返回空 Vec（pg_statistic 表无数据）
+/// - 有 stats：遍历 catalog 中的表，对每个有统计信息的表，
+///   遍历其所有列，构建 pg_statistic 行（每列一行）
+///
+/// # 每列的统计信息
+///
+/// - `stanullfrac` = null_count / row_count（NULL 比例）
+/// - `stadistinct` = distinct_count（正数=绝对值）
+/// - `stavalues1` = [min_value, max_value]（文本表示，stakind1=2 histogram_bounds）
+fn pg_statistic_with_stats(
+    catalog: &dyn MutableCatalog,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
+) -> Vec<Vec<Value>> {
+    let mut rows = Vec::new();
+    let Some(stats) = stats else { return rows; };
+
+    for table_name in catalog.list_tables() {
+        let qualified = table_name.qualified_name().to_lowercase();
+        let Some(table_stats) = stats.get_table_stats(&qualified) else {
+            continue;
+        };
+        let table_oid = szrsql_catalog::navicat::oid_class_table(&table_name);
+        let Some(table_schema) = catalog.get_table(&table_name) else {
+            continue;
+        };
+
+        for (attnum, col_def) in table_schema.columns.iter().enumerate() {
+            let Some(col_stats) = table_stats.column(&col_def.name) else {
+                continue;
+            };
+            // stanullfrac = null_count / row_count（避免除零）
+            let row_count = table_stats.row_count.max(1);
+            let stanullfrac = col_stats.null_count as f64 / row_count as f64;
+            // stadistinct：正数表示绝对值（与 PG 一致）
+            let stadistinct = col_stats.distinct_count as f64;
+            let row = szrsql_catalog::navicat::build_pg_statistic_row(
+                table_oid,
+                (attnum + 1) as i64,
+                stanullfrac,
+                stadistinct,
+                &col_stats.min_value,
+                &col_stats.max_value,
+            );
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+/// pg_stats 视图（pg_statistic 的可读视图）
+///
+/// pg_stats 列结构与 pg_statistic 不同（tablename/attname/null_frac/n_distinct 等），
+/// 需要单独的 schema 和行构建逻辑。
+///
+/// **简化实现**：暂时返回空行（保持现状），pg_statistic 表已提供完整统计信息。
+/// 后续可通过映射 pg_statistic 行到 pg_stats 视图列来实现。
+fn pg_stats_view(
+    _catalog: &dyn MutableCatalog,
+    _stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
+) -> Vec<Vec<Value>> {
+    Vec::new()
 }
 
 // =====================================================================
@@ -629,6 +762,7 @@ pub fn try_execute_system_table_query(
     stmt: &Statement,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Option<Result<QueryResult, SessionError>> {
     let select = match stmt {
         Statement::Select(s) if s.set_op.is_none() => s.as_ref(),
@@ -661,7 +795,7 @@ pub fn try_execute_system_table_query(
     // Navicat 兼容：CTE 查询 `WITH d AS (SELECT * FROM pg_database) SELECT * FROM d`
     // 如果 CTE 体本身是系统表查询，且外层 FROM 引用 CTE 名，则展开为对系统表的直接查询。
     if let Some(with) = &select.with {
-        return try_execute_cte_system_table(select, with, catalog, current_db);
+        return try_execute_cte_system_table(select, with, catalog, current_db, stats);
     }
 
     // Navicat 兼容：含 JOIN 的系统目录查询（如 pg_class JOIN pg_namespace）。
@@ -671,7 +805,7 @@ pub fn try_execute_system_table_query(
         if contains_system_table_factor(&select.from[0].relation)
             || select.from[0].joins.iter().any(|j| contains_system_table_factor(&j.relation))
         {
-            return Some(execute_system_catalog_join(select, catalog, current_db));
+            return Some(execute_system_catalog_join(select, catalog, current_db, stats));
         }
         return None;
     }
@@ -681,7 +815,7 @@ pub fn try_execute_system_table_query(
     if select.from.len() > 1 {
         let any_system = select.from.iter().any(|t| contains_system_table_factor(&t.relation));
         if any_system {
-            return Some(execute_system_catalog_cross_join(select, catalog, current_db));
+            return Some(execute_system_catalog_cross_join(select, catalog, current_db, stats));
         }
         return None;
     }
@@ -700,13 +834,13 @@ pub fn try_execute_system_table_query(
     // Navicat 兼容：GROUP BY + count(*) 聚合查询（简化支持）
     // HAVING 在分组后作为行级过滤应用（聚合表达式暂用 NULL 降级，仅 count 求值）
     if !select.group_by.is_empty() {
-        return Some(execute_system_table_group_by(select, kind, catalog, current_db));
+        return Some(execute_system_table_group_by(select, kind, catalog, current_db, stats));
     }
     if select.having.is_some() {
         return None;
     }
 
-    Some(execute_system_table_select(select, kind, catalog, current_db))
+    Some(execute_system_table_select(select, kind, catalog, current_db, stats))
 }
 
 /// Describe 阶段推导系统表查询的结果列（不执行实际查询）。
@@ -769,7 +903,7 @@ pub fn try_describe_system_table_columns(
             return None;
         }
 
-        return match execute_system_catalog_join(select, catalog, current_db) {
+        return match execute_system_catalog_join(select, catalog, current_db, None) {
             Ok(QueryResult::ResultSet { columns, .. }) => Some(columns),
             _ => None,
         };
@@ -789,9 +923,10 @@ pub fn try_describe_system_table_columns(
 
     // 用真实 catalog 计算 rows（project_columns 需要行数据来处理通配符展开）
     // 对 pg_namespace 等固定系统表，rows 为预定义行；对 pg_tables 等，rows 反映 catalog 内容
+    // Describe 阶段不需要统计信息（仅推导列结构），传 None
     let adapter = CatalogAdapter::new(catalog);
     let schema = kind.schema();
-    let rows = kind.compute_rows(&adapter, current_db);
+    let rows = kind.compute_rows(&adapter, current_db, None);
 
     // 调用 project_columns 推导列（与执行时一致的列描述）
     let (columns, _projected_rows) = project_columns(&select.projection, &schema, &rows).ok()?;
@@ -807,10 +942,11 @@ fn execute_system_table_group_by(
     kind: SystemTableKind,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Result<QueryResult, SessionError> {
     let adapter = CatalogAdapter::new(catalog);
     let schema = kind.schema();
-    let mut rows = kind.compute_rows(&adapter, current_db);
+    let mut rows = kind.compute_rows(&adapter, current_db, stats);
 
     // 提取 GROUP BY 列索引
     let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.to_lowercase()).collect();
@@ -1049,6 +1185,7 @@ fn try_execute_cte_system_table(
     with: &szrsql_sql::ast::WithClause,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Option<Result<QueryResult, SessionError>> {
     // 仅处理单 CTE、非递归
     if with.ctes.len() != 1 || with.recursive {
@@ -1112,7 +1249,7 @@ fn try_execute_cte_system_table(
                 }
             }
         }
-        return Some(execute_system_catalog_join(&new_select, catalog, current_db));
+        return Some(execute_system_catalog_join(&new_select, catalog, current_db, stats));
     }
 
     // 外层 FROM 必须是简单的 Table 引用，且名字匹配 CTE 名
@@ -1131,7 +1268,7 @@ fn try_execute_cte_system_table(
     let adapter = CatalogAdapter::new(catalog);
     let schema = kind.schema();
     let column_names = kind.column_names();
-    let mut rows = kind.compute_rows(&adapter, current_db);
+    let mut rows = kind.compute_rows(&adapter, current_db, stats);
 
     // 应用 CTE 体的 WHERE
     if let Some(where_expr) = &cte_select.where_clause {
@@ -1177,11 +1314,12 @@ fn execute_system_table_select(
     kind: SystemTableKind,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Result<QueryResult, SessionError> {
     let adapter = CatalogAdapter::new(catalog);
     let schema = kind.schema();
     let column_names = kind.column_names();
-    let mut rows = kind.compute_rows(&adapter, current_db);
+    let mut rows = kind.compute_rows(&adapter, current_db, stats);
 
     // 1. WHERE 过滤
     if let Some(where_expr) = &select.where_clause {
@@ -1328,20 +1466,21 @@ fn materialize_system_table_factor(
     factor: &TableFactor,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Option<(Vec<String>, Vec<Vec<Value>>)> {
     match factor {
         TableFactor::Table { name, .. } => {
             let kind = SystemTableKind::from_name(name)?;
             let adapter = CatalogAdapter::new(catalog);
             let column_names = kind.column_names();
-            let rows = kind.compute_rows(&adapter, current_db);
+            let rows = kind.compute_rows(&adapter, current_db, stats);
             Some((column_names, rows))
         }
         TableFactor::Derived { subquery, alias } => {
             // Navicat 兼容：子查询作为 JOIN 的左表或右表
             // 递归执行子查询（必须是系统表查询），再应用子查询自身的投影
             let sub_stmt = Statement::Select(subquery.clone());
-            match try_execute_system_table_query(&sub_stmt, catalog, current_db)? {
+            match try_execute_system_table_query(&sub_stmt, catalog, current_db, stats)? {
                 Ok(QueryResult::ResultSet { columns, rows, .. }) => {
                     // 应用列别名（如果指定）
                     let col_names: Vec<String> = match &alias.column_aliases {
@@ -1407,6 +1546,7 @@ fn execute_system_catalog_cross_join(
     select: &Select,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Result<QueryResult, SessionError> {
     if select.distinct {
         return Err(SessionError::Protocol(
@@ -1423,6 +1563,7 @@ fn execute_system_catalog_cross_join(
             &table_with_joins.relation,
             catalog,
             current_db,
+            stats,
         ) {
             Some(v) => v,
             None => {
@@ -1496,6 +1637,7 @@ fn execute_system_catalog_join(
     select: &Select,
     catalog: &szrsql_sql::plan::InMemoryCatalog,
     current_db: &str,
+    stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Result<QueryResult, SessionError> {
     // Navicat 兼容：DISTINCT 暂不支持（需去重，复杂度高）
     if select.distinct {
@@ -1507,7 +1649,7 @@ fn execute_system_catalog_join(
     let from = &select.from[0];
 
     // 物化主表
-    let (left_cols, left_rows) = match materialize_system_table_factor(&from.relation, catalog, current_db) {
+    let (left_cols, left_rows) = match materialize_system_table_factor(&from.relation, catalog, current_db, stats) {
         Some(v) => v,
         None => {
             return Err(SessionError::Protocol(format!(
@@ -1534,7 +1676,7 @@ fn execute_system_catalog_join(
                 join.join_type
             )));
         }
-        let (right_cols, right_rows) = match materialize_system_table_factor(&join.relation, catalog, current_db) {
+        let (right_cols, right_rows) = match materialize_system_table_factor(&join.relation, catalog, current_db, stats) {
             Some(v) => v,
             None => {
                 // Navicat 兼容：无法物化的 JOIN 右表（如复杂子查询、未知系统表）
@@ -3606,7 +3748,7 @@ mod tests {
     fn test_pg_tables_compute_rows() {
         let cat = make_catalog_with_tables();
         let adapter = CatalogAdapter::new(&cat);
-        let rows = SystemTableKind::PgTables.compute_rows(&adapter, "szrsql");
+        let rows = SystemTableKind::PgTables.compute_rows(&adapter, "szrsql", None);
         assert_eq!(rows.len(), 2);
         // 每行：schemaname, tablename, tableowner, hasindexes
         let names: Vec<String> = rows
@@ -3624,7 +3766,7 @@ mod tests {
     fn test_info_schema_tables_compute_rows() {
         let cat = make_catalog_with_tables();
         let adapter = CatalogAdapter::new(&cat);
-        let rows = SystemTableKind::InfoSchemaTables.compute_rows(&adapter, "szrsql");
+        let rows = SystemTableKind::InfoSchemaTables.compute_rows(&adapter, "szrsql", None);
         assert_eq!(rows.len(), 2);
         // 每行：TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE
         for row in &rows {
@@ -3636,7 +3778,7 @@ mod tests {
     fn test_info_schema_columns_compute_rows() {
         let cat = make_catalog_with_tables();
         let adapter = CatalogAdapter::new(&cat);
-        let rows = SystemTableKind::InfoSchemaColumns.compute_rows(&adapter, "szrsql");
+        let rows = SystemTableKind::InfoSchemaColumns.compute_rows(&adapter, "szrsql", None);
         // users: 2 cols + orders: 2 cols = 4 rows
         assert_eq!(rows.len(), 4);
     }
@@ -3647,7 +3789,7 @@ mod tests {
         let stmts =
             szrsql_sql::parser::parse_sql("SELECT * FROM users").expect("parse should succeed");
         assert_eq!(stmts.len(), 1);
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_none());
     }
 
@@ -3657,7 +3799,7 @@ mod tests {
         let stmts =
             szrsql_sql::parser::parse_sql("SELECT * FROM pg_tables").expect("parse should succeed");
         assert_eq!(stmts.len(), 1);
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_some());
         let inner = result.unwrap().expect("should be Ok");
         match inner {
@@ -3675,7 +3817,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables WHERE tablename = 'users'";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3691,7 +3833,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables ORDER BY tablename DESC";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3713,7 +3855,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables LIMIT 1";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3729,7 +3871,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM information_schema.tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3746,7 +3888,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM information_schema.columns";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3764,7 +3906,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT tablename, tableowner FROM pg_tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3784,7 +3926,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT tablename AS name FROM pg_tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3801,7 +3943,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables OFFSET 1";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3817,7 +3959,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables LIMIT 1 OFFSET 1";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3835,7 +3977,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM employees t1 JOIN employees t2 ON t1.id = t2.id";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_none());
     }
 
@@ -3845,7 +3987,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_some(), "system catalog JOIN should be handled");
         let query_result = result.unwrap().expect("JOIN should succeed");
         match query_result {
@@ -3873,7 +4015,7 @@ mod tests {
         assert_eq!(cols.len(), 3, "should describe 3 columns for JOIN query");
 
         // 执行也应返回 3 列（列数必须一致，否则协议错误）
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be handled")
             .expect("should succeed");
         match result {
@@ -3896,7 +4038,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT DISTINCT tablename FROM pg_tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_some(), "DISTINCT should be supported for system table queries");
         match result.unwrap() {
             Ok(QueryResult::ResultSet { rows, .. }) => {
@@ -3913,7 +4055,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT tablename FROM pg_tables GROUP BY tablename";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_some(), "GROUP BY should now be supported");
     }
 
@@ -3922,7 +4064,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_catalog.pg_tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         assert!(result.is_some());
     }
 
@@ -3931,7 +4073,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT * FROM pg_tables WHERE TABLENAME = 'USERS'";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3952,7 +4094,7 @@ mod tests {
         // 单个中文字符
         let sql = "SELECT '你' FROM pg_database d";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3971,7 +4113,7 @@ mod tests {
         let cat = make_catalog_with_tables();
         let sql = "SELECT '你a' FROM pg_database d";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql")
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None)
             .expect("should be Some")
             .expect("should be Ok");
         match result {
@@ -3989,8 +4131,207 @@ mod tests {
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
         // 无 FROM 的字面量投影，try_execute_system_table_query 应返回 None
         // 走主路径执行器
-        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
         // 这种情况应该返回 None（不是系统表查询）
         assert!(result.is_none(), "纯字面量查询不应由系统表路径处理");
+    }
+
+    // =================================================================
+    //  P2-1.3：pg_class.reltuples + pg_statistic 系统表测试
+    // =================================================================
+
+    /// 构建 users 表的统计信息（row_count = 100，2 列）
+    fn make_stats_store_for_users() -> szrsql_optimizer::statistics::InMemoryStatisticsStore {
+        use szrsql_optimizer::statistics::{
+            ColumnStatistics, InMemoryStatisticsStore, StatisticsStore, TableStatistics,
+        };
+        use std::collections::HashMap;
+        use std::time::SystemTime;
+
+        let mut column_stats = HashMap::new();
+        column_stats.insert(
+            "id".to_string(),
+            ColumnStatistics {
+                null_count: 0,
+                distinct_count: 100,
+                min_value: Some(Value::Int64(1)),
+                max_value: Some(Value::Int64(100)),
+                histogram: None,
+            },
+        );
+        column_stats.insert(
+            "name".to_string(),
+            ColumnStatistics {
+                null_count: 5,
+                distinct_count: 95,
+                min_value: Some(Value::Text("alice".into())),
+                max_value: Some(Value::Text("zoe".into())),
+                histogram: None,
+            },
+        );
+        let table_stats = TableStatistics {
+            table_name: "users".to_string(),
+            row_count: 100,
+            column_stats,
+            collected_at: SystemTime::now(),
+        };
+
+        let mut store = InMemoryStatisticsStore::new();
+        store.update_table_stats("users", table_stats);
+        store
+    }
+
+    /// P2-1.3：ANALYZE 后查询 pg_class，验证 reltuples 从统计信息填充真实行数
+    #[test]
+    fn test_pg_class_reltuples_filled_from_stats() {
+        let cat = make_catalog_with_tables();
+        let adapter = CatalogAdapter::new(&cat);
+        let store = make_stats_store_for_users();
+
+        // 查询 pg_class，传入统计信息
+        let rows = SystemTableKind::PgClass.compute_rows(&adapter, "szrsql", Some(&store));
+
+        // 找到 users 表的行（relname="users", relkind="r"）
+        let users_row = rows
+            .iter()
+            .find(|r| {
+                matches!(&r[1], Value::Text(name) if name == "users")
+                    && matches!(&r[16], Value::Text(kind) if kind == "r")
+            })
+            .expect("users table row should exist in pg_class");
+
+        // reltuples at index 10 — 应为 100.0（从统计信息填充）
+        match &users_row[10] {
+            Value::Float64(n) => {
+                assert_eq!(*n, 100.0, "reltuples should be 100.0 after ANALYZE")
+            }
+            other => panic!("expected Float64 for reltuples, got {:?}", other),
+        }
+
+        // relpages at index 9 — 应为 ceil(100/80) = 2
+        match &users_row[9] {
+            Value::Int64(n) => assert_eq!(*n, 2, "relpages should be 2 (ceil(100/80))"),
+            other => panic!("expected Int64 for relpages, got {:?}", other),
+        }
+    }
+
+    /// P2-1.3：无统计信息时 pg_class.reltuples 保持 0.0（兼容旧行为）
+    #[test]
+    fn test_pg_class_reltuples_zero_without_stats() {
+        let cat = make_catalog_with_tables();
+        let adapter = CatalogAdapter::new(&cat);
+
+        // 无统计信息
+        let rows = SystemTableKind::PgClass.compute_rows(&adapter, "szrsql", None);
+
+        let users_row = rows
+            .iter()
+            .find(|r| {
+                matches!(&r[1], Value::Text(name) if name == "users")
+                    && matches!(&r[16], Value::Text(kind) if kind == "r")
+            })
+            .expect("users table row should exist");
+
+        // reltuples 应为 0.0（无统计信息时保持默认）
+        match &users_row[10] {
+            Value::Float64(n) => assert_eq!(*n, 0.0, "reltuples should be 0.0 without stats"),
+            other => panic!("expected Float64 for reltuples, got {:?}", other),
+        }
+    }
+
+    /// P2-1.3：ANALYZE 后查询 pg_statistic，验证返回行包含列统计信息
+    #[test]
+    fn test_pg_statistic_returns_column_stats() {
+        let cat = make_catalog_with_tables();
+        let adapter = CatalogAdapter::new(&cat);
+        let store = make_stats_store_for_users();
+
+        // 查询 pg_statistic
+        let rows = SystemTableKind::PgStatistic.compute_rows(&adapter, "szrsql", Some(&store));
+
+        // users 表有 2 列（id, name），所以应返回 2 行
+        assert_eq!(
+            rows.len(),
+            2,
+            "pg_statistic should have 2 rows for users table (2 columns)"
+        );
+
+        // 验证第一行（id 列，staattnum=1）
+        let id_row = &rows[0];
+        // staattnum at index 1
+        match &id_row[1] {
+            Value::Int64(n) => assert_eq!(*n, 1, "staattnum should be 1 for id column"),
+            other => panic!("expected Int64 for staattnum, got {:?}", other),
+        }
+        // stanullfrac at index 3 (0/100 = 0.0)
+        match &id_row[3] {
+            Value::Float64(n) => {
+                assert!(
+                    (n - 0.0).abs() < f64::EPSILON,
+                    "stanullfrac should be 0.0 for id column"
+                )
+            }
+            other => panic!("expected Float64 for stanullfrac, got {:?}", other),
+        }
+        // stadistinct at index 4 (100.0)
+        match &id_row[4] {
+            Value::Float64(n) => {
+                assert!(
+                    (n - 100.0).abs() < f64::EPSILON,
+                    "stadistinct should be 100.0 for id column"
+                )
+            }
+            other => panic!("expected Float64 for stadistinct, got {:?}", other),
+        }
+
+        // 验证第二行（name 列，staattnum=2）
+        let name_row = &rows[1];
+        match &name_row[1] {
+            Value::Int64(n) => assert_eq!(*n, 2, "staattnum should be 2 for name column"),
+            other => panic!("expected Int64 for staattnum, got {:?}", other),
+        }
+        // stanullfrac at index 3 (5/100 = 0.05)
+        match &name_row[3] {
+            Value::Float64(n) => {
+                assert!(
+                    (n - 0.05).abs() < 1e-9,
+                    "stanullfrac should be 0.05 for name column (5 nulls / 100 rows)"
+                )
+            }
+            other => panic!("expected Float64 for stanullfrac, got {:?}", other),
+        }
+    }
+
+    /// P2-1.3：未 ANALYZE 时查询 pg_statistic 返回空
+    #[test]
+    fn test_pg_statistic_empty_without_analyze() {
+        let cat = make_catalog_with_tables();
+        let adapter = CatalogAdapter::new(&cat);
+
+        // 无统计信息时，pg_statistic 应返回空
+        let rows = SystemTableKind::PgStatistic.compute_rows(&adapter, "szrsql", None);
+        assert!(
+            rows.is_empty(),
+            "pg_statistic should be empty without ANALYZE"
+        );
+    }
+
+    /// P2-1.3：通过 SQL 查询 pg_statistic 验证完整流程
+    #[test]
+    fn test_try_execute_pg_statistic_query() {
+        let cat = make_catalog_with_tables();
+        let store = make_stats_store_for_users();
+        let sql = "SELECT starelid, staattnum, stanullfrac, stadistinct FROM pg_statistic";
+        let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
+        let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", Some(&store))
+            .expect("should be Some")
+            .expect("should be Ok");
+        match result {
+            QueryResult::ResultSet { columns, rows, .. } => {
+                assert_eq!(columns.len(), 4);
+                assert_eq!(rows.len(), 2, "users table has 2 columns");
+            }
+            _ => panic!("expected ResultSet"),
+        }
     }
 }

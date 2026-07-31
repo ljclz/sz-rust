@@ -570,6 +570,32 @@ impl CdcEngine {
         count
     }
 
+    /// P2-2：将指定 tx_id 的所有 staged 事件统一分发到 observer（autocommit 模式使用）
+    ///
+    /// # 设计目的
+    /// autocommit 模式下，DML 产生的 CDC 事件不再逐条同步分发，而是先 stage 到
+    /// 缓冲区（虚拟 tx_id=1，见 `Executor::dispatch_cdc_*`），在语句执行完成后
+    /// 由 `Executor::flush_autocommit_cdc_events` 调用此方法一次性分发，减少每行的
+    /// 同步开销（observer 锁获取/释放、catch_unwind 等）。
+    ///
+    /// # 与 `commit_txn` 的语义区别
+    /// - `commit_txn`：用于显式事务提交后分发（语义：事务已提交，变更可见）
+    /// - `flush_staged_events`：用于 autocommit 模式语句执行完成后分发
+    ///   （语义：语句已完成，将暂存事件统一分发以降低同步开销）
+    ///
+    /// 两者底层逻辑一致：取出指定 tx_id 的缓冲事件并逐一分发。本方法复用
+    /// `commit_txn` 的实现以避免代码重复。
+    ///
+    /// # 参数
+    /// - `tx_id`：要 flush 的事务 ID（autocommit 模式下为虚拟 tx_id=1）
+    ///
+    /// # 返回
+    /// 分发的事件数量。若 tx_id 无缓冲事件，返回 0（no-op）。
+    pub fn flush_staged_events(&self, tx_id: u32) -> usize {
+        // 复用 commit_txn 的分发逻辑：取出缓冲事件并逐一分发
+        self.commit_txn(tx_id)
+    }
+
     /// Batch 3：事务回滚时，丢弃缓冲的 CDC 事件（不分发）
     ///
     /// 返回丢弃的事件数量。若 txn_id 无缓冲事件，返回 0。

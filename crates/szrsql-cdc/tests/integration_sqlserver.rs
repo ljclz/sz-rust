@@ -12,6 +12,9 @@
 //! 5. **Schema 变更同步**：CREATE TABLE + ALTER TABLE DDL 执行
 //! 6. **类型映射覆盖**：所有 SzValue 类型 → T-SQL 字面量
 
+// 兼容旧闭包/非参数化 SQL 方法（P0-2 已废弃，测试仍需验证向后兼容）
+#![allow(deprecated)]
+
 use szrsql_cdc::schema::{ColumnDef, DataType, TableSchema};
 use szrsql_cdc::target::sqlserver::SqlServerWriter;
 use szrsql_cdc::target::{TargetWriter, WriterError};

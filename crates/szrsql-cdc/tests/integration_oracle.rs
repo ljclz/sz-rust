@@ -21,6 +21,9 @@
 //!
 //! 当前测试已验证 SQL 生成正确性，真实连接测试待后续添加。
 
+// 兼容旧闭包/非参数化 SQL 方法（P0-2 已废弃，测试仍需验证向后兼容）
+#![allow(deprecated)]
+
 use szrsql_cdc::schema::{ColumnDef, DataType, TableSchema};
 use szrsql_cdc::target::oracle::OracleWriter;
 use szrsql_cdc::target::{TargetWriter, WriterError};

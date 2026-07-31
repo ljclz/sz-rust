@@ -994,6 +994,42 @@ pub struct InMemoryTable {
     /// 序列化时跳过（BufferPool 不实现 Serialize）。
     #[serde(skip)]
     persistence: Option<std::sync::Arc<szrsql_storage::buffer::BufferPool>>,
+
+    /// P1-1：分页存储主路径 — 数据按页存储在 BufferPool，Vec<Row> 作为热数据缓存
+    ///
+    /// 启用后（通过 `enable_paged_storage(path)`）：
+    /// - `spill_to_paged_storage()` 将 rows 中的所有行分页写入 paged_storage（作为持久化镜像）
+    /// - `restore_from_paged_storage()` 从 paged_storage 读取所有页重建 rows
+    /// - `auto_spill_if_needed()` 在 insert 后检查行数，超过阈值时自动 spill
+    ///
+    /// **与 persistence 的区别**：
+    /// - persistence：整表序列化字节流分页写入（一次性快照）
+    /// - paged_storage：按行分页存储（支持增量更新和按页读取）
+    ///
+    /// None 表示未启用分页存储（旧行为，纯内存）。
+    /// 序列化时跳过（BufferPool 不实现 Serialize）。
+    #[serde(skip)]
+    paged_storage: Option<std::sync::Arc<szrsql_storage::buffer::BufferPool>>,
+
+    /// P1-1：自动 spill 阈值（行数超过此值时自动 spill 到 paged_storage）
+    ///
+    /// 默认 100_000 行。可通过 `set_spill_threshold()` 调整。
+    /// 仅在 `paged_storage` 启用后生效。
+    #[serde(skip)]
+    spill_threshold: usize,
+}
+
+/// P1-1：分页存储信息（由 `InMemoryTable::paged_storage_info()` 返回）
+///
+/// 用于观测分页存储状态：当前缓存页数、热数据行数、spill 阈值。
+#[derive(Debug, Clone)]
+pub struct PagedStorageInfo {
+    /// 当前 BufferPool 缓存的页数（含 header 页；若页被 LRU 淘汰，该值可能小于磁盘实际页数）
+    pub page_count: usize,
+    /// rows 中的行数（热数据缓存）
+    pub row_count: usize,
+    /// 自动 spill 阈值
+    pub threshold: usize,
 }
 
 impl InMemoryTable {
@@ -1009,6 +1045,8 @@ impl InMemoryTable {
             pk_index: None,
             pk_column_idx: None,
             persistence: None,
+            paged_storage: None,
+            spill_threshold: 100_000, // P1-1：默认 10 万行后自动 spill 到分页存储
         }
     }
 
@@ -1381,6 +1419,270 @@ impl InMemoryTable {
         Ok(())
     }
 
+    // -----------------------------------------------------------------
+    //  P1-1：BTree+BufferPool 分页存储主路径
+    //  （Vec<Row> 热缓存 + BufferPool 分页主存，热数据溢出到冷存储）
+    // -----------------------------------------------------------------
+
+    /// P1-1：启用分页存储主路径
+    ///
+    /// `path` 为分页存储文件路径。启用后：
+    /// - `spill_to_paged_storage()` 将 rows 分页写入 paged_storage
+    /// - `restore_from_paged_storage()` 从 paged_storage 重建 rows
+    /// - `auto_spill_if_needed()` 在 insert 后自动检查并 spill
+    ///
+    /// **与 enable_persistence 的区别**：
+    /// - enable_persistence：整表序列化字节流分页写入（一次性快照）
+    /// - enable_paged_storage：按行分页存储（支持增量更新和按页读取）
+    ///
+    /// **BufferPool 配置**：容量 256 页（256 * 8KB = 2MB 缓存），
+    /// FilePageLoader/FilePageWriter 文件后端（与 enable_persistence 相同的 I/O 策略）。
+    ///
+    /// **幂等性**：重复调用会覆盖现有 paged_storage（旧 BufferPool 被 drop）。
+    /// **错误**：文件无法打开时返回 ExecutionError。
+    pub fn enable_paged_storage<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), ExecutionError> {
+        let path_ref = path.as_ref();
+        let writer = szrsql_storage::buffer::FilePageWriter::open(path_ref)
+            .map_err(|e| ExecutionError::Storage(format!("paged_storage: open writer failed: {e}")))?;
+        // 文件已存在则用 FilePageLoader，否则（首次启用）用 InMemoryPageLoader 占位
+        // （首次启用时文件尚未创建，FilePageLoader::open 会失败，退化为内存 loader；
+        //   spill 后 flush_all 通过 FilePageWriter 写盘，重启时文件已存在可正常加载）
+        let loader: std::sync::Arc<dyn szrsql_storage::buffer::PageLoader> =
+            match szrsql_storage::buffer::FilePageLoader::open(path_ref) {
+                Ok(l) => std::sync::Arc::new(l),
+                Err(_) => std::sync::Arc::new(szrsql_storage::buffer::InMemoryPageLoader::new()),
+            };
+        let writer: std::sync::Arc<dyn szrsql_storage::buffer::PageWriter> =
+            std::sync::Arc::new(writer);
+        let pool = szrsql_storage::buffer::BufferPool::with_writer(256, loader, writer)
+            .map_err(|e| ExecutionError::Storage(format!("paged_storage: buffer pool init failed: {e}")))?;
+        self.paged_storage = Some(std::sync::Arc::new(pool));
+        tracing::debug!(table = %self.name, path = ?path_ref, "P1-1: paged_storage enabled");
+        Ok(())
+    }
+
+    /// P1-1：查询是否启用了分页存储
+    pub fn has_paged_storage(&self) -> bool {
+        self.paged_storage.is_some()
+    }
+
+    /// P1-1：设置自动 spill 阈值（仅当 paged_storage 已启用时生效）
+    ///
+    /// `threshold` 为行数阈值，rows 行数超过此值时触发自动 spill。
+    pub fn set_spill_threshold(&mut self, threshold: usize) {
+        self.spill_threshold = threshold;
+    }
+
+    /// P1-1：将 rows 分页写入 paged_storage（不清空 rows，作为持久化镜像）
+    ///
+    /// **页布局**：
+    /// - page 0：header 页，body = [8 字节 LE 总行数][8 字节 LE data 页数]
+    /// - page 1..N：data 页，每页存储若干行
+    ///   （每行格式：[4 字节 LE row_len][row_bytes]，row_bytes 为行的 serde_json 序列化）
+    ///
+    /// **分页策略**：逐行填充当前页，当当前页剩余空间不足以容纳下一行（4 + row_len 字节）
+    /// 时封页并开新页。单行超过单页容量时该行独占一页（body 由 Page::append_body 校验）。
+    ///
+    /// **幂等性**：重复调用会覆盖现有分页数据（按 page_id 覆盖写）。
+    /// **注意**：不清空 rows，rows 仍作为热数据缓存保留。
+    pub fn spill_to_paged_storage(&self) -> Result<(), ExecutionError> {
+        let pool = self.paged_storage.as_ref().ok_or_else(|| {
+            ExecutionError::Storage(
+                "paged_storage not enabled, call enable_paged_storage() first".into(),
+            )
+        })?;
+
+        let total_rows = self.rows.len();
+        tracing::debug!(table = %self.name, total_rows, "spill_to_paged_storage: starting");
+
+        // 预先序列化所有行，便于分页计算
+        let mut row_bytes_list: Vec<Vec<u8>> = Vec::with_capacity(total_rows);
+        for (idx, row) in self.rows.iter().enumerate() {
+            let bytes = serde_json::to_vec(row)
+                .map_err(|e| ExecutionError::Storage(format!("spill: serialize row {idx} failed: {e}")))?;
+            row_bytes_list.push(bytes);
+        }
+
+        // 按 data 页组织：每页存储尽可能多的行
+        let mut data_pages: Vec<Vec<u8>> = Vec::new();
+        let mut current_body: Vec<u8> = Vec::with_capacity(BODY_SIZE);
+        for row_bytes in &row_bytes_list {
+            let needed = 4 + row_bytes.len();
+            // 当前页非空且放不下此行 → 封页开新页
+            if !current_body.is_empty() && current_body.len() + needed > BODY_SIZE {
+                data_pages.push(std::mem::take(&mut current_body));
+                current_body = Vec::with_capacity(BODY_SIZE);
+            }
+            // 写入 [4 字节 LE row_len][row_bytes]
+            current_body.extend_from_slice(&(row_bytes.len() as u32).to_le_bytes());
+            current_body.extend_from_slice(row_bytes);
+        }
+        if !current_body.is_empty() {
+            data_pages.push(current_body);
+        }
+        let data_page_count = data_pages.len();
+
+        // page 0：header 页 — body = [8 字节 LE total_rows][8 字节 LE data_page_count]
+        let mut header_page =
+            szrsql_storage::page::Page::new(0, szrsql_storage::page::PageType::Data);
+        let mut header_body = Vec::with_capacity(16);
+        header_body.extend_from_slice(&(total_rows as u64).to_le_bytes());
+        header_body.extend_from_slice(&(data_page_count as u64).to_le_bytes());
+        header_page
+            .append_body(&header_body)
+            .map_err(|e| ExecutionError::Storage(format!("spill: header append failed: {e}")))?;
+        header_page.update_checksum();
+        pool.put_page(0, header_page)
+            .map_err(|e| ExecutionError::Storage(format!("spill: write header page failed: {e}")))?;
+
+        // page 1..N：data 页
+        for (page_idx, body_bytes) in data_pages.iter().enumerate() {
+            let page_id = (page_idx + 1) as u32;
+            let mut page =
+                szrsql_storage::page::Page::new(page_id, szrsql_storage::page::PageType::Data);
+            page.append_body(body_bytes).map_err(|e| {
+                ExecutionError::Storage(format!("spill: data page {page_id} append failed: {e}"))
+            })?;
+            page.update_checksum();
+            pool.put_page(page_id, page).map_err(|e| {
+                ExecutionError::Storage(format!("spill: write data page {page_id} failed: {e}"))
+            })?;
+        }
+
+        // flush_all 确保所有脏页落盘
+        pool.flush_all()
+            .map_err(|e| ExecutionError::Storage(format!("spill: flush_all failed: {e}")))?;
+        tracing::info!(
+            table = %self.name, total_rows, data_page_count,
+            "P1-1: spill_to_paged_storage completed"
+        );
+        Ok(())
+    }
+
+    /// P1-1：从 paged_storage 读取所有页重建 rows
+    ///
+    /// **流程**：
+    /// 1. 读取 page 0（header）— 解析 total_rows 和 data_page_count
+    /// 2. 读取 page 1..(1+data_page_count)（data）— 按页解析每行
+    /// 3. 用读取的行替换 self.rows
+    ///
+    /// **注意**：重建后 deleted/xmin/xmax 会被重置（paged_storage 不存储版本元数据）：
+    /// - deleted 清空
+    /// - xmin/xmax 重置为 0（长度对齐 rows）
+    /// - pk_index 不重建（需调用方重新 `enable_btree_pk()`）
+    pub fn restore_from_paged_storage(&mut self) -> Result<(), ExecutionError> {
+        let pool = self.paged_storage.as_ref().ok_or_else(|| {
+            ExecutionError::Storage(
+                "paged_storage not enabled, call enable_paged_storage() first".into(),
+            )
+        })?;
+
+        // page 0：header
+        let header_page = pool
+            .read_page(0)
+            .map_err(|e| ExecutionError::Storage(format!("restore: read header page failed: {e}")))?;
+        let header_body = header_page
+            .read_body(0, 16)
+            .map_err(|e| ExecutionError::Storage(format!("restore: header body read failed: {e}")))?;
+        if header_body.len() < 16 {
+            return Err(ExecutionError::Storage(format!(
+                "restore: header body too short: {} < 16",
+                header_body.len()
+            )));
+        }
+        let mut arr8 = [0u8; 8];
+        arr8.copy_from_slice(&header_body[..8]);
+        let total_rows = u64::from_le_bytes(arr8) as usize;
+        arr8.copy_from_slice(&header_body[8..16]);
+        let data_page_count = u64::from_le_bytes(arr8) as usize;
+
+        // 逐页读取 data 页，解析每行
+        let mut restored_rows: Vec<Row> = Vec::with_capacity(total_rows);
+        for page_idx in 0..data_page_count {
+            let page_id = (page_idx + 1) as u32;
+            let page = pool.read_page(page_id).map_err(|e| {
+                ExecutionError::Storage(format!("restore: read data page {page_id} failed: {e}"))
+            })?;
+            // 用 free_offset 知道本页实际写入字节数
+            let body_len = page.header.free_offset as usize;
+            if body_len == 0 {
+                continue;
+            }
+            let body = page.read_body(0, body_len).map_err(|e| {
+                ExecutionError::Storage(format!("restore: data page {page_id} body read failed: {e}"))
+            })?;
+            // 按 [4 字节 row_len][row_bytes] 解析
+            let mut offset = 0usize;
+            while offset + 4 <= body.len() && restored_rows.len() < total_rows {
+                let mut arr4 = [0u8; 4];
+                arr4.copy_from_slice(&body[offset..offset + 4]);
+                let row_len = u32::from_le_bytes(arr4) as usize;
+                offset += 4;
+                if offset + row_len > body.len() {
+                    return Err(ExecutionError::Storage(format!(
+                        "restore: row data truncated at page {page_id} offset {offset}, need {row_len} have {}",
+                        body.len() - offset
+                    )));
+                }
+                let row: Row = serde_json::from_slice(&body[offset..offset + row_len]).map_err(|e| {
+                    ExecutionError::Storage(format!(
+                        "restore: deserialize row at page {page_id} offset {offset} failed: {e}"
+                    ))
+                })?;
+                restored_rows.push(row);
+                offset += row_len;
+            }
+        }
+
+        if restored_rows.len() != total_rows {
+            return Err(ExecutionError::Storage(format!(
+                "restore: row count mismatch: expected {total_rows} got {}",
+                restored_rows.len()
+            )));
+        }
+
+        // 用读取的行替换 self.rows，重置版本元数据
+        self.rows = restored_rows;
+        self.deleted = HashSet::new();
+        self.xmin = vec![0u32; self.rows.len()];
+        self.xmax = vec![0u32; self.rows.len()];
+        tracing::info!(
+            table = %self.name, total_rows, data_page_count,
+            "P1-1: restore_from_paged_storage completed"
+        );
+        Ok(())
+    }
+
+    /// P1-1：如果 rows 行数超过 spill_threshold，自动 spill 到 paged_storage
+    ///
+    /// 在 insert/bulk_insert 后调用，实现"热数据溢出到冷存储"。
+    /// 仅在 paged_storage 已启用且行数超过阈值时触发；
+    /// spill 失败仅记录 warning，不影响主路径（rows 仍保留在内存）。
+    fn auto_spill_if_needed(&mut self) {
+        if self.paged_storage.is_some() && self.rows.len() > self.spill_threshold {
+            if let Err(e) = self.spill_to_paged_storage() {
+                tracing::warn!(table = %self.name, error = %e, "P1-1: auto spill failed");
+            }
+        }
+    }
+
+    /// P1-1：返回分页存储信息（页数、行数、阈值）
+    ///
+    /// 返回 None 表示未启用分页存储。
+    /// **注意**：`page_count` 取自 BufferPool 当前缓存页数（含 header 页），
+    /// 若部分页已被 LRU 淘汰，该值可能小于实际磁盘页数。
+    pub fn paged_storage_info(&self) -> Option<PagedStorageInfo> {
+        let pool = self.paged_storage.as_ref()?;
+        Some(PagedStorageInfo {
+            page_count: pool.total_len(),
+            row_count: self.rows.len(),
+            threshold: self.spill_threshold,
+        })
+    }
+
     /// 批量插入多行，返回起始 row_id
     pub fn bulk_insert(&mut self, rows: Vec<Row>) -> usize {
         let start = self.rows.len();
@@ -1390,6 +1692,8 @@ impl InMemoryTable {
         self.xmax.resize(self.rows.len(), 0);
         // 已有的行保持原值，新行默认 0
         let _ = count;
+        // P1-1：批量插入后检查是否需要自动 spill 到分页存储
+        self.auto_spill_if_needed();
         start
     }
 
@@ -3153,7 +3457,9 @@ impl<'a> Executor<'a> {
     /// P7-1：分发 CDC Insert 事件（内部辅助方法）
     ///
     /// Batch 3：显式事务（mvcc_txn_id != 0）时缓冲到 CdcEngine 事务缓冲区，
-    /// COMMIT 后统一分发；autocommit 模式立即分发。
+    /// COMMIT 后统一分发。
+    /// P2-2：autocommit 模式（mvcc_txn_id == 0）也走 staging 缓冲（虚拟 tx_id=1），
+    /// 在语句执行完成后由 `flush_autocommit_cdc_events` 统一 flush，减少同步开销。
     fn dispatch_cdc_insert(&self, table_name: &str, new_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3170,17 +3476,19 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(new_row),
                 engine.current_timestamp(),
             );
-            if self.mvcc_txn_id != 0 {
-                engine.stage_event(self.mvcc_txn_id, event);
-            } else {
-                engine.dispatch_event(event);
-            }
+            // P2-2：统一走 stage_event 路径，减少同步开销
+            // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush
+            // - autocommit（mvcc_txn_id == 0）：stage 到虚拟 tx_id=1，
+            //   由 flush_autocommit_cdc_events 在语句执行完成后统一 flush
+            engine.stage_event(tx_id, event);
         }
     }
 
     /// P7-1：分发 CDC Update 事件（内部辅助方法）
     ///
     /// Batch 3：显式事务时缓冲，COMMIT 后统一分发。
+    /// P2-2：autocommit 模式也走 staging 缓冲（虚拟 tx_id=1），
+    /// 语句执行完成后由 `flush_autocommit_cdc_events` 统一 flush。
     fn dispatch_cdc_update(&self, table_name: &str, old_row: &Row, new_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3198,17 +3506,19 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(new_row),
                 engine.current_timestamp(),
             );
-            if self.mvcc_txn_id != 0 {
-                engine.stage_event(self.mvcc_txn_id, event);
-            } else {
-                engine.dispatch_event(event);
-            }
+            // P2-2：统一走 stage_event 路径，减少同步开销
+            // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush
+            // - autocommit（mvcc_txn_id == 0）：stage 到虚拟 tx_id=1，
+            //   由 flush_autocommit_cdc_events 在语句执行完成后统一 flush
+            engine.stage_event(tx_id, event);
         }
     }
 
     /// P7-1：分发 CDC Delete 事件（内部辅助方法）
     ///
     /// Batch 3：显式事务时缓冲，COMMIT 后统一分发。
+    /// P2-2：autocommit 模式也走 staging 缓冲（虚拟 tx_id=1），
+    /// 语句执行完成后由 `flush_autocommit_cdc_events` 统一 flush。
     fn dispatch_cdc_delete(&self, table_name: &str, old_row: &Row) {
         if let Some(engine) = &self.cdc_engine {
             let table_id = Self::table_name_to_id(table_name);
@@ -3225,11 +3535,37 @@ impl<'a> Executor<'a> {
                 Self::serialize_row_for_cdc(old_row),
                 engine.current_timestamp(),
             );
-            if self.mvcc_txn_id != 0 {
-                engine.stage_event(self.mvcc_txn_id, event);
-            } else {
-                engine.dispatch_event(event);
-            }
+            // P2-2：统一走 stage_event 路径，减少同步开销
+            // - 显式事务（mvcc_txn_id != 0）：stage 到 mvcc_txn_id，COMMIT 时统一 flush
+            // - autocommit（mvcc_txn_id == 0）：stage 到虚拟 tx_id=1，
+            //   由 flush_autocommit_cdc_events 在语句执行完成后统一 flush
+            engine.stage_event(tx_id, event);
+        }
+    }
+
+    /// P2-2：autocommit 模式下统一分发暂存的 CDC 事件
+    ///
+    /// # 调用时机
+    /// 在 DML 语句（INSERT/UPDATE/DELETE）执行成功后调用。若处于 autocommit
+    /// 模式（`mvcc_txn_id == 0`），将虚拟 tx_id=1 的所有暂存事件统一 flush 到
+    /// CdcEngine 的 observer。
+    ///
+    /// # 设计要点
+    /// - autocommit 模式下 `dispatch_cdc_*` 将事件 stage 到缓冲区（虚拟 tx_id=1），
+    ///   而非逐条同步分发，减少每行的同步开销（observer 锁获取/释放、catch_unwind）
+    /// - 语句执行完成后一次性 flush，语义等价于立即分发，但走 staging 路径
+    /// - 显式事务模式（`mvcc_txn_id != 0`）不在此处 flush，由 COMMIT 时统一 flush
+    /// - 若无 staged 事件，`flush_staged_events` 返回 0（no-op），无副作用
+    /// - 未绑定 CDC 引擎时（`cdc_engine == None`），直接返回（no-op）
+    fn flush_autocommit_cdc_events(&self) {
+        // 仅 autocommit 模式（mvcc_txn_id == 0）需要在此 flush
+        // 显式事务模式由 COMMIT 流程统一 flush，此处跳过
+        if self.mvcc_txn_id != 0 {
+            return;
+        }
+        if let Some(engine) = &self.cdc_engine {
+            // autocommit 模式使用虚拟 tx_id=1，与 dispatch_cdc_* 中的 tx_id 一致
+            engine.flush_staged_events(1);
         }
     }
 
@@ -7163,6 +7499,8 @@ impl<'a> Executor<'a> {
                 }
             }
             self.fire_after_statement(&triggers, DmlKind::Insert, table_name, schema)?;
+            // P2-2：autocommit 模式下统一 flush 暂存的 CDC 事件
+            self.flush_autocommit_cdc_events();
             return Ok(if has_returning {
                 DmlResult::with_returning(count, returning_rows)
             } else {
@@ -7233,6 +7571,8 @@ impl<'a> Executor<'a> {
         // Phase 6.4: ON CONFLICT 路径下，行级触发器未触发（Phase 6.4 已知限制）；
         // 但仍触发 AFTER STATEMENT 触发器
         self.fire_after_statement(&triggers, DmlKind::Insert, table_name, schema)?;
+        // P2-2：autocommit 模式下统一 flush 暂存的 CDC 事件
+        self.flush_autocommit_cdc_events();
         Ok(if has_returning {
             DmlResult::with_returning(count, returning_rows)
         } else {
@@ -7584,6 +7924,8 @@ impl<'a> Executor<'a> {
         }
         // Phase 6.4: AFTER STATEMENT 触发器
         self.fire_after_statement(&triggers, DmlKind::Update, table_name, schema)?;
+        // P2-2：autocommit 模式下统一 flush 暂存的 CDC 事件
+        self.flush_autocommit_cdc_events();
         Ok(if has_returning {
             DmlResult::with_returning(count, returning_rows)
         } else {
@@ -7717,6 +8059,8 @@ impl<'a> Executor<'a> {
         }
         // Phase 6.4: AFTER STATEMENT 触发器
         self.fire_after_statement(&triggers, DmlKind::Delete, table_name, schema)?;
+        // P2-2：autocommit 模式下统一 flush 暂存的 CDC 事件
+        self.flush_autocommit_cdc_events();
         Ok(if has_returning {
             DmlResult::with_returning(count, returning_rows)
         } else {

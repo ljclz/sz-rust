@@ -565,6 +565,175 @@ fn build_pg_class_row(oid: i64, name: &str, ns_oid: i64, kind: &str, natts: i64)
 }
 
 // =====================================================================
+//  pg_statistic — 列级统计信息（P2-1.3）
+// =====================================================================
+
+/// `pg_statistic` 系统表的列名
+///
+/// 列顺序与 PostgreSQL 14 的 pg_statistic 一致（31 列）。
+/// 存储 ANALYZE 收集的每列统计信息：NULL 比例、不同值数量、min/max 等。
+///
+/// 参考：https://www.postgresql.org/docs/current/catalog-pg-statistic.html
+pub const PG_STATISTIC_COLUMNS: &[&str] = &[
+    "starelid",          // 表的 OID
+    "staattnum",         // 列号（从 1 开始）
+    "stainherit",        // 是否继承统计
+    "stanullfrac",       // NULL 比例
+    "stadistinct",       // 不同值数量（正数=绝对值，负数=占行数比例）
+    "stakind1",          // slot 1 类型
+    "stakind2",          // slot 2 类型
+    "stakind3",          // slot 3 类型
+    "stakind4",          // slot 4 类型
+    "stakind5",          // slot 5 类型
+    "staop1",            // slot 1 操作符 OID
+    "staop2",            // slot 2 操作符 OID
+    "staop3",            // slot 3 操作符 OID
+    "staop4",            // slot 4 操作符 OID
+    "staop5",            // slot 5 操作符 OID
+    "stacoll1",          // slot 1 排序规则 OID
+    "stacoll2",          // slot 2 排序规则 OID
+    "stacoll3",          // slot 3 排序规则 OID
+    "stacoll4",          // slot 4 排序规则 OID
+    "stacoll5",          // slot 5 排序规则 OID
+    "stanumbers1",       // slot 1 数值数组
+    "stanumbers2",       // slot 2 数值数组
+    "stanumbers3",       // slot 3 数值数组
+    "stanumbers4",       // slot 4 数值数组
+    "stanumbers5",       // slot 5 数值数组
+    "stavalues1",        // slot 1 值数组
+    "stavalues2",        // slot 2 值数组
+    "stavalues3",        // slot 3 值数组
+    "stavalues4",        // slot 4 值数组
+    "stavalues5",        // slot 5 值数组
+    "statistics_target", // 统计目标
+];
+
+/// `pg_statistic` 系统表的 Schema
+///
+/// 与 PostgreSQL 14 的 pg_statistic 表结构一致（31 列）。
+/// 列类型参考 PG：starelid/staattnum 为 Int64，stainherit 为 Bool，
+/// stanullfrac/stadistinct 为 Float64，stakindN/staopN/stacollN 为 Int64，
+/// stanumbersN 为 Array(Float64)，stavaluesN 为 Array(Text)，statistics_target 为 Int64。
+pub fn pg_statistic_schema() -> TableSchema {
+    TableSchema {
+        name: TableName::new("pg_statistic"),
+        columns: vec![
+            ColumnDefinition::new("starelid", ColumnType::Int64),
+            ColumnDefinition::new("staattnum", ColumnType::Int64),
+            ColumnDefinition::new("stainherit", ColumnType::Bool),
+            ColumnDefinition::new("stanullfrac", ColumnType::Float64),
+            ColumnDefinition::new("stadistinct", ColumnType::Float64),
+            ColumnDefinition::new("stakind1", ColumnType::Int64),
+            ColumnDefinition::new("stakind2", ColumnType::Int64),
+            ColumnDefinition::new("stakind3", ColumnType::Int64),
+            ColumnDefinition::new("stakind4", ColumnType::Int64),
+            ColumnDefinition::new("stakind5", ColumnType::Int64),
+            ColumnDefinition::new("staop1", ColumnType::Int64),
+            ColumnDefinition::new("staop2", ColumnType::Int64),
+            ColumnDefinition::new("staop3", ColumnType::Int64),
+            ColumnDefinition::new("staop4", ColumnType::Int64),
+            ColumnDefinition::new("staop5", ColumnType::Int64),
+            ColumnDefinition::new("stacoll1", ColumnType::Int64),
+            ColumnDefinition::new("stacoll2", ColumnType::Int64),
+            ColumnDefinition::new("stacoll3", ColumnType::Int64),
+            ColumnDefinition::new("stacoll4", ColumnType::Int64),
+            ColumnDefinition::new("stacoll5", ColumnType::Int64),
+            ColumnDefinition::new("stanumbers1", ColumnType::Array(Box::new(ColumnType::Float64))),
+            ColumnDefinition::new("stanumbers2", ColumnType::Array(Box::new(ColumnType::Float64))),
+            ColumnDefinition::new("stanumbers3", ColumnType::Array(Box::new(ColumnType::Float64))),
+            ColumnDefinition::new("stanumbers4", ColumnType::Array(Box::new(ColumnType::Float64))),
+            ColumnDefinition::new("stanumbers5", ColumnType::Array(Box::new(ColumnType::Float64))),
+            ColumnDefinition::new("stavalues1", ColumnType::Array(Box::new(ColumnType::Text))),
+            ColumnDefinition::new("stavalues2", ColumnType::Array(Box::new(ColumnType::Text))),
+            ColumnDefinition::new("stavalues3", ColumnType::Array(Box::new(ColumnType::Text))),
+            ColumnDefinition::new("stavalues4", ColumnType::Array(Box::new(ColumnType::Text))),
+            ColumnDefinition::new("stavalues5", ColumnType::Array(Box::new(ColumnType::Text))),
+            ColumnDefinition::new("statistics_target", ColumnType::Int64),
+        ],
+    }
+}
+
+/// 将 Value 转换为文本表示（用于 stavaluesN 数组）
+///
+/// 常见类型（Int64/Float64/Text/Bool）使用自然文本表示，
+/// 其他类型降级为 Debug 表示（pg_statistic 仅用于元数据查看，非数据查询）。
+fn value_to_statistic_text(v: &Value) -> Value {
+    match v {
+        Value::Text(s) => Value::Text(s.clone()),
+        Value::Int64(i) => Value::Text(i.to_string()),
+        Value::Float64(f) => Value::Text(f.to_string()),
+        Value::Bool(b) => Value::Text(b.to_string()),
+        _ => Value::Text(format!("{:?}", v)),
+    }
+}
+
+/// 构建 pg_statistic 行（31 列）
+///
+/// # 参数
+///
+/// - `starelid`：表的 OID（来自 `oid_class_table`）
+/// - `staattnum`：列号（从 1 开始）
+/// - `stanullfrac`：NULL 行比例（null_count / row_count）
+/// - `stadistinct`：不同值数量（正数=绝对值，负数=占行数比例）
+/// - `min_value` / `max_value`：列的最小/最大值（Option<Value>）
+///
+/// # slot 分配
+///
+/// - slot 1 (stakind1=2)：histogram_bounds，存放 [min, max] 文本表示
+/// - slot 2-5：未使用（stakind=0，空数组）
+pub fn build_pg_statistic_row(
+    starelid: i64,
+    staattnum: i64,
+    stanullfrac: f64,
+    stadistinct: f64,
+    min_value: &Option<Value>,
+    max_value: &Option<Value>,
+) -> SysRow {
+    // 构建 stavalues1：min/max 的文本表示数组（stakind1=2 表示 histogram_bounds）
+    let mut stavalues1: Vec<Value> = Vec::new();
+    if let Some(min) = min_value {
+        stavalues1.push(value_to_statistic_text(min));
+    }
+    if let Some(max) = max_value {
+        stavalues1.push(value_to_statistic_text(max));
+    }
+
+    vec![
+        Value::Int64(starelid),          // starelid
+        Value::Int64(staattnum),         // staattnum
+        Value::Bool(false),              // stainherit
+        Value::Float64(stanullfrac),     // stanullfrac
+        Value::Float64(stadistinct),     // stadistinct
+        Value::Int64(2),                 // stakind1 (histogram_bounds)
+        Value::Int64(0),                 // stakind2
+        Value::Int64(0),                 // stakind3
+        Value::Int64(0),                 // stakind4
+        Value::Int64(0),                 // stakind5
+        Value::Int64(0),                 // staop1
+        Value::Int64(0),                 // staop2
+        Value::Int64(0),                 // staop3
+        Value::Int64(0),                 // staop4
+        Value::Int64(0),                 // staop5
+        Value::Int64(0),                 // stacoll1
+        Value::Int64(0),                 // stacoll2
+        Value::Int64(0),                 // stacoll3
+        Value::Int64(0),                 // stacoll4
+        Value::Int64(0),                 // stacoll5
+        Value::Array(vec![]),            // stanumbers1
+        Value::Array(vec![]),            // stanumbers2
+        Value::Array(vec![]),            // stanumbers3
+        Value::Array(vec![]),            // stanumbers4
+        Value::Array(vec![]),            // stanumbers5
+        Value::Array(stavalues1),        // stavalues1 (min/max)
+        Value::Array(vec![]),            // stavalues2
+        Value::Array(vec![]),            // stavalues3
+        Value::Array(vec![]),            // stavalues4
+        Value::Array(vec![]),            // stavalues5
+        Value::Int64(100),               // statistics_target
+    ]
+}
+
+// =====================================================================
 //  pg_attribute — 表的列定义
 // =====================================================================
 

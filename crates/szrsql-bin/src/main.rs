@@ -253,6 +253,15 @@ struct Args {
     #[arg(long, default_value_t = 50)]
     raft_tick_ms: u64,
 
+    /// P2-1：启用 Multi-Master/DistTxn 模式。
+    ///
+    /// 启用后构造 HlcClock（混合逻辑时钟）、ConflictLog（冲突日志）和
+    /// ClusterTxnCoordinator（跨节点事务协调器），为 Multi-Master 写入
+    /// 冲突检测和分布式 2PC 事务协调奠定基础。
+    /// 可与 `--cluster-mode cluster` 组合使用；单独启用时使用内存集群。
+    #[arg(long, default_value_t = false)]
+    multi_master: bool,
+
     /// OPT-4：pgwire 认证模式（trust = 信任所有连接，scram = SCRAM-SHA-256）。
     ///
     /// 默认 trust 保持向后兼容。启用 scram 后，凭据从 `--auth-file` 加载；
@@ -658,6 +667,25 @@ fn main() -> anyhow::Result<()> {
                     );
                 }
             }
+
+            // P1-1：启用分页存储主路径（Vec<Row> 热缓存 + BufferPool 分页主存）
+            //
+            // 独立于 persistence（整表快照），paged_storage 按行分页存储，支持：
+            // - 增量更新（spill_to_paged_storage 不清空 rows，作为持久化镜像）
+            // - 按页读取（restore_from_paged_storage 逐页重建 rows）
+            // - 自动溢出（insert/bulk_insert 后行数超阈值时自动 spill）
+            //
+            // 单表失败仅记录 warning，不中断启动（与 persistence 一致的容错策略）
+            let paged_path = data_dir.join(format!("{name}.paged"));
+            if let Err(e) = table.enable_paged_storage(&paged_path) {
+                tracing::warn!(
+                    table = %name,
+                    path = %paged_path.display(),
+                    error = %e,
+                    "P1-1: enable_paged_storage failed, continuing without paged storage \
+                     (table stays with Vec<Row> hot cache only)"
+                );
+            }
         }
     }
 
@@ -812,6 +840,119 @@ fn main() -> anyhow::Result<()> {
                 None
             }
         }
+    };
+
+    // P2-1：Multi-Master/DistTxn 组件初始化
+    //
+    // 当 --multi-master 启用时，构造以下三大组件：
+    //
+    // 1. HlcClock — 混合逻辑时钟（Hybrid Logical Clock, Kulkarni 2014）
+    //    - 结合物理时钟（毫秒）与逻辑计数器，在节点间时钟偏差下仍能
+    //      正确排序因果相关的事件
+    //    - HlcClock 本身为单线程实现，用 Arc<Mutex<>> 包装为线程安全
+    //    - 物理时钟使用 SystemTime::now() → 毫秒级 Unix 时间戳
+    //
+    // 2. ConflictLog — 冲突日志
+    //    - 按时间顺序记录 Multi-Master 场景下的写入冲突事件
+    //    - 支持持久化编解码（encode/decode），用于审计与回放
+    //    - 用 Arc<Mutex<>> 包装为线程安全
+    //
+    // 3. ClusterTxnCoordinator — 跨节点事务协调器
+    //    - 基于 DistCluster 实现 Percolator 两阶段提交（prewrite→commit）
+    //    - 自动路由到当前 Leader，Leader 故障时自动重试
+    //    - 需要 &mut DistCluster（生命周期绑定），因此存储 DistCluster 本身，
+    //      Coordinator 按需从 DistCluster 创建
+    //
+    // 当前阶段：构造并存储实例，为后续接入执行路径（Executor/Session）奠定基础。
+    // 不影响现有单节点模式和集群模式的正常运行。
+    let _multi_master_components = if args.multi_master {
+        // === 1. 构造 HlcClock（混合逻辑时钟）===
+        // 物理时钟闭包：返回当前 Unix 时间戳（毫秒）
+        // unwrap_or(0) 在 SystemTime 错误（如时钟回拨极端场景）时回退到 0，不 panic
+        let hlc_clock = szrsql_dist::conflict::HlcClock::new(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        });
+        let hlc_arc = Arc::new(std::sync::Mutex::new(hlc_clock));
+        tracing::info!(
+            "P2-1: HlcClock initialized (Hybrid Logical Clock for multi-master causal ordering)"
+        );
+
+        // === 2. 构造 ConflictLog（冲突日志）===
+        let conflict_log = szrsql_dist::conflict::ConflictLog::new();
+        let conflict_log_arc = Arc::new(std::sync::Mutex::new(conflict_log));
+        tracing::info!(
+            "P2-1: ConflictLog initialized (multi-master conflict audit log)"
+        );
+
+        // === 3. 构造 DistCluster + ClusterTxnCoordinator ===
+        // ClusterTxnCoordinator::new 签名要求 &mut DistCluster（生命周期绑定），
+        // 因此先构造并初始化 DistCluster，Coordinator 按需创建。
+        //
+        // 节点 ID 列表来源：
+        // - 有 --peers 配置：解析其中的 node_id 部分
+        // - 无 --peers 配置：默认 3 节点开发集群 [1, 2, 3]
+        let node_id = args.node_id;
+        let peers_str = args.peers.as_deref().unwrap_or("");
+        let cluster_node_ids: Vec<szrsql_dist::raft::NodeId> = if !peers_str.is_empty() {
+            // 解析 "1@host:port,2@host:port,..." 中的 node_id 部分
+            let mut ids: Vec<u64> = peers_str
+                .split(',')
+                .filter_map(|entry| {
+                    entry.trim().splitn(2, '@').next().and_then(|s| s.parse().ok())
+                })
+                .collect();
+            if !ids.contains(&node_id) {
+                ids.push(node_id);
+            }
+            ids.sort_unstable();
+            ids.dedup();
+            ids
+        } else {
+            vec![1, 2, 3]
+        };
+
+        match szrsql_dist::cluster::DistCluster::new(&cluster_node_ids, 42) {
+            Ok(mut cluster) => {
+                // 初始化集群：运行 Raft 选举（500ms 足以保证 Leader 产生）
+                if let Err(e) = cluster.init() {
+                    tracing::warn!(
+                        error = %e,
+                        "P2-1: DistCluster init failed; coordinator may operate in degraded mode"
+                    );
+                }
+
+                // 构造 ClusterTxnCoordinator 并验证可用性（调用 begin 获取初始时间戳）
+                {
+                    let mut coordinator =
+                        szrsql_dist::dist_txn::ClusterTxnCoordinator::new(&mut cluster);
+                    let start_ts = coordinator.begin();
+                    tracing::info!(
+                        start_ts = start_ts,
+                        node_ids = ?cluster_node_ids,
+                        leader = ?cluster.leader(),
+                        "P2-1: ClusterTxnCoordinator initialized (cross-node Percolator 2PC coordinator)"
+                    );
+                }
+
+                // 存储 DistCluster（Coordinator 是借用，按需从 cluster 创建）
+                let cluster_arc = Arc::new(std::sync::Mutex::new(cluster));
+                Some((hlc_arc, conflict_log_arc, Some(cluster_arc)))
+            }
+            Err(e) => {
+                // DistCluster 构造失败时，HlcClock 和 ConflictLog 仍然保留
+                tracing::warn!(
+                    error = %e,
+                    node_ids = ?cluster_node_ids,
+                    "P2-1: DistCluster creation failed; HlcClock and ConflictLog remain active"
+                );
+                Some((hlc_arc, conflict_log_arc, None))
+            }
+        }
+    } else {
+        None
     };
 
     // P7-1：初始化 CDC 引擎（变更数据捕获）

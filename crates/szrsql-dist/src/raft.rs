@@ -79,6 +79,16 @@ pub const DEFAULT_HEARTBEAT_INTERVAL_MS: u64 = 50;
 /// 默认随机种子（确定性，可复现）
 pub const DEFAULT_RAFT_SEED: u64 = 0x5EED_5EED_5EED_5EED;
 
+/// OPT-11：默认 snapshot 触发阈值（日志条目数）
+///
+/// 当 `commit_index - snapshot_last_index` 达到此阈值时，Leader 在
+/// `maybe_compact` 中自动触发 `create_snapshot` 压缩日志。
+/// 设为 0 表示禁用自动 snapshot（仅手动 compact）。
+///
+/// **默认禁用**：避免在测试和小规模部署中意外触发日志压缩导致 Follower
+/// 同步失败。生产部署应通过 Config 显式设置合理阈值（如 10000）。
+pub const DEFAULT_SNAPSHOT_THRESHOLD: usize = 0;
+
 // =====================================================================
 //  Lcg — 确定性伪随机数生成器（参考 embedding.rs）
 // =====================================================================
@@ -488,6 +498,12 @@ pub struct Config {
     pub heartbeat_interval_ms: u64,
     /// 随机种子（确定性，可复现）
     pub seed: u64,
+    /// OPT-11：自动 snapshot 触发阈值（日志条目数）
+    ///
+    /// 当可压缩日志条目数（`commit_index - snapshot_last_index`）达到此阈值时，
+    /// Leader 在 `maybe_compact` 中自动触发 `create_snapshot`。
+    /// 设为 0 表示禁用自动 snapshot。
+    pub snapshot_threshold: usize,
 }
 
 impl Config {
@@ -499,6 +515,7 @@ impl Config {
             election_timeout_max_ms: DEFAULT_ELECTION_TIMEOUT_MAX_MS,
             heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
             seed: DEFAULT_RAFT_SEED,
+            snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
         }
     }
 
@@ -1072,6 +1089,56 @@ impl RaftNode {
         }
     }
 
+    /// OPT-11：自动 snapshot 触发检查
+    ///
+    /// 在每次 append_entries / commit 推进后调用。当可压缩日志条目数
+    /// （`commit_index - snapshot_last_index`）达到 `config.snapshot_threshold`
+    /// 时，自动调用 `create_snapshot(commit_index)` 压缩日志。
+    ///
+    /// # 设计要点
+    /// - 阈值为 0 时禁用自动 snapshot（直接返回 Ok(false)）
+    /// - 仅压缩 `commit_index` 之前的条目，未提交日志不受影响
+    /// - 压缩失败不影响调用方流程（仅记录 warn，返回 Ok(false)）
+    /// - 压缩成功后 `snapshot_last_index` 推进到 `commit_index`
+    ///
+    /// # 返回
+    /// - `Ok(true)`：本次触发了 snapshot
+    /// - `Ok(false)`：未触发（阈值未达或禁用）
+    /// - `Err`：不应发生（commit_index 一定 >= snapshot_last_index）
+    pub fn maybe_compact(&mut self) -> Result<bool, RaftError> {
+        if self.config.snapshot_threshold == 0 {
+            return Ok(false);
+        }
+        let compactable = self
+            .volatile
+            .commit_index
+            .saturating_sub(self.persistent.log.snapshot_last_index());
+        if (compactable as usize) < self.config.snapshot_threshold {
+            return Ok(false);
+        }
+        // 触发 snapshot：压缩到 commit_index
+        let target = self.volatile.commit_index;
+        match self.create_snapshot(target) {
+            Ok(()) => {
+                tracing::debug!(
+                    node_id = self.id,
+                    snapshot_last_index = target,
+                    compactable_before = compactable,
+                    "OPT-11: auto snapshot triggered"
+                );
+                Ok(true)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    node_id = self.id,
+                    error = %e,
+                    "OPT-11: auto snapshot failed"
+                );
+                Ok(false)
+            }
+        }
+    }
+
     /// 返回当前逻辑时间
     pub fn current_time(&self) -> u64 {
         self.current_time
@@ -1570,6 +1637,9 @@ impl RaftNode {
         if new_commit > self.volatile.commit_index {
             self.volatile.commit_index = new_commit;
             self.on_leader_commit_advanced();
+            // OPT-11：commit 推进后检查是否需要自动 snapshot
+            // 错误已内部处理（记录 warn），此处忽略以不影响 commit 流程
+            let _ = self.maybe_compact();
         }
     }
 
@@ -1983,6 +2053,7 @@ mod tests {
                     election_timeout_max_ms: 300,
                     heartbeat_interval_ms: 50,
                     seed,
+                    snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
                 };
                 nodes.insert(id, RaftNode::new(id, config));
             }
@@ -3816,6 +3887,7 @@ mod tests {
                 election_timeout_max_ms: 300,
                 heartbeat_interval_ms: 50,
                 seed: 900,
+                snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
             };
             cluster.nodes.insert(new_id, RaftNode::new(new_id, config));
         }
@@ -3909,6 +3981,7 @@ mod tests {
                 election_timeout_max_ms: 300,
                 heartbeat_interval_ms: 50,
                 seed: 1000,
+                snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
             };
             cluster.nodes.insert(new_id, RaftNode::new(new_id, config));
         }
@@ -4607,6 +4680,114 @@ mod tests {
         assert_eq!(node.snapshot_last_index(), 10);
         assert_eq!(node.commit_index(), 10);
         assert_eq!(node.last_applied(), 10);
+    }
+
+    #[test]
+    fn test_opt11_maybe_compact_disabled_when_threshold_zero() {
+        // 阈值为 0 时禁用自动 snapshot
+        let mut config = Config::new(vec![2, 3]);
+        config.snapshot_threshold = 0;
+        let mut node = RaftNode::new(1, config);
+        for i in 0..100u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        node.volatile.commit_index = 100;
+        let triggered = node.maybe_compact().expect("maybe_compact");
+        assert!(!triggered);
+        assert_eq!(node.snapshot_last_index(), 0);
+        assert_eq!(node.log_len(), 100);
+    }
+
+    #[test]
+    fn test_opt11_maybe_compact_no_trigger_below_threshold() {
+        // 可压缩条目数 < 阈值，不触发
+        let mut config = Config::new(vec![2, 3]);
+        config.snapshot_threshold = 10;
+        let mut node = RaftNode::new(1, config);
+        for i in 0..5u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        node.volatile.commit_index = 5;
+        let triggered = node.maybe_compact().expect("maybe_compact");
+        assert!(!triggered);
+        assert_eq!(node.snapshot_last_index(), 0);
+        assert_eq!(node.log_len(), 5);
+    }
+
+    #[test]
+    fn test_opt11_maybe_compact_triggers_at_threshold() {
+        // 可压缩条目数 >= 阈值，触发 snapshot
+        let mut config = Config::new(vec![2, 3]);
+        config.snapshot_threshold = 5;
+        let mut node = RaftNode::new(1, config);
+        for i in 0..10u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        node.volatile.commit_index = 10;
+        let triggered = node.maybe_compact().expect("maybe_compact");
+        assert!(triggered);
+        // snapshot 推进到 commit_index=10，10 条日志全部被压缩
+        assert_eq!(node.snapshot_last_index(), 10);
+        assert_eq!(node.snapshot_last_term(), 1);
+        assert_eq!(node.log_len(), 0);
+        assert_eq!(node.last_applied(), 10);
+    }
+
+    #[test]
+    fn test_opt11_maybe_compact_preserves_uncommitted() {
+        // commit_index 之前的被压缩，之后的保留
+        let mut config = Config::new(vec![2, 3]);
+        config.snapshot_threshold = 3;
+        let mut node = RaftNode::new(1, config);
+        for i in 0..10u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        // 只 commit 前 5 条
+        node.volatile.commit_index = 5;
+        let triggered = node.maybe_compact().expect("maybe_compact");
+        assert!(triggered);
+        assert_eq!(node.snapshot_last_index(), 5);
+        // 后 5 条保留
+        assert_eq!(node.log_len(), 5);
+        assert_eq!(node.last_log_index(), 10);
+    }
+
+    #[test]
+    fn test_opt11_maybe_compact_idempotent() {
+        // 已压缩到 commit_index 后再次调用不应重复触发
+        let mut config = Config::new(vec![2, 3]);
+        config.snapshot_threshold = 5;
+        let mut node = RaftNode::new(1, config);
+        for i in 0..10u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        node.volatile.commit_index = 10;
+        let first = node.maybe_compact().expect("maybe_compact");
+        assert!(first);
+        // 再次调用：compactable = 10 - 10 = 0 < threshold
+        let second = node.maybe_compact().expect("maybe_compact");
+        assert!(!second);
+    }
+
+    #[test]
+    fn test_opt11_advance_commit_triggers_auto_snapshot() {
+        // 验证 advance_commit 流程内集成 maybe_compact
+        let mut config = Config::single_node();
+        config.snapshot_threshold = 3;
+        let mut node = RaftNode::new(1, config);
+        // 追加 5 条 term=1 的日志
+        for i in 0..5u8 {
+            node.persistent.log.append_entry(1, vec![i]);
+        }
+        // 设为 term=1 并成为 Leader（单节点）
+        node.persistent.current_term = 1;
+        node.become_leader();
+        // 单节点 Leader：自身 last_log_index=5 满足多数派
+        node.advance_commit();
+        // 应该 commit 到 5，并触发自动 snapshot
+        assert_eq!(node.commit_index(), 5);
+        assert_eq!(node.snapshot_last_index(), 5);
+        assert_eq!(node.log_len(), 0);
     }
 
     #[test]

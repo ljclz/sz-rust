@@ -34,6 +34,7 @@ use crate::decoder::DecodedRow;
 use crate::schema::TableSchema;
 use std::sync::Arc;
 
+pub mod logical_replication;
 pub mod pg_real;
 pub mod pg_source;
 pub mod reverse;
@@ -553,6 +554,53 @@ pub fn create_real_pg_source_connector(
         client,
         config.clone(),
     )?))
+}
+
+/// P1-2: 创建 PG logical replication 源端连接器（基于 replication slot + START_REPLICATION）
+///
+/// 与 `create_real_pg_source_connector`（触发器模式）不同，本函数返回的
+/// `LogicalReplicationSource` 使用 PG 原生 logical replication 协议，
+/// 性能更高、对源端侵入更小。
+///
+/// # 参数
+/// - `config`：源端配置（连接串需包含 `replication=database` 参数）
+/// - `slot_name`：replication slot 名称（需在 PG 端唯一）
+/// - `publication_name`：publication 名称（需在 PG 端唯一）
+///
+/// # 返回
+/// - `Ok(Arc<LogicalReplicationSource>)`：创建成功（已建立 PG 连接）
+/// - `Err(SourceError)`：连接失败
+///
+/// # 使用示例
+///
+/// ```ignore
+/// use szrsql_cdc::source::create_logical_replication_source;
+/// use szrsql_cdc::source::{SourceConfig, SourceConnector};
+///
+/// let conn_str = "postgres://postgres:test123@127.0.0.1:5432/sz_orm_test?replication=database";
+/// let connector = create_logical_replication_source(
+///     &SourceConfig::postgres(conn_str),
+///     "szrsql_slot",
+///     "szrsql_pub",
+/// ).unwrap();
+/// connector.connect().unwrap();
+/// ```
+pub fn create_logical_replication_source(
+    config: &SourceConfig,
+    slot_name: &str,
+    publication_name: &str,
+) -> Result<Arc<crate::source::logical_replication::LogicalReplicationSource>, SourceError> {
+    // 使用 `::postgres::` 显式引用外部 crate
+    let client = ::postgres::Client::connect(&config.connection_string, ::postgres::NoTls)
+        .map_err(|e| SourceError::Connection(format!("PG connect failed: {e}")))?;
+    Ok(Arc::new(
+        crate::source::logical_replication::LogicalReplicationSource::new(
+            client,
+            config.clone(),
+            slot_name,
+            publication_name,
+        )?,
+    ))
 }
 
 // =====================================================================

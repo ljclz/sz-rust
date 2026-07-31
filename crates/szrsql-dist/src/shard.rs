@@ -14,7 +14,8 @@
 //! - [`ShardCluster`] — 多分片集群测试夹具
 
 use crate::raft::{
-    Config, InMemoryNetwork, Index, MessageType, NodeId, RaftError, RaftNode, RpcMessage,
+    Config, DEFAULT_SNAPSHOT_THRESHOLD, InMemoryNetwork, Index, MessageType, NodeId, RaftError,
+    RaftNode, RpcMessage,
 };
 use std::collections::{BTreeMap, HashMap};
 use tracing::{instrument, trace, warn};
@@ -420,6 +421,7 @@ impl MultiRaftNode {
             election_timeout_max_ms: 300,
             heartbeat_interval_ms: 50,
             seed,
+            snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
         };
         let raft_node = RaftNode::new(self.node_id, config);
         self.raft_groups.insert(shard.id, raft_node);
@@ -1030,6 +1032,7 @@ impl ShardCluster {
                 election_timeout_max_ms: 300,
                 heartbeat_interval_ms: 50,
                 seed: seed + nid + 99999,
+                snapshot_threshold: DEFAULT_SNAPSHOT_THRESHOLD,
             };
             meta_rafts.insert(nid, RaftNode::new(nid, meta_config));
             let mut meta_sm = MetadataStateMachine::new();

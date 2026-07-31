@@ -25,6 +25,9 @@
 //! 若 PG 不可连接，所有测试自动跳过（返回 Ok，不失败），
 //! 避免在无 PG 环境的 CI 上报错。
 
+// 兼容旧闭包/非参数化 SQL 方法（P0-2 已废弃，测试仍需验证向后兼容）
+#![allow(deprecated)]
+
 use postgres::NoTls;
 use std::sync::{Arc, Mutex};
 use szrsql_cdc::schema::{ColumnDef, DataType, SchemaChangeEvent, SchemaChangeType, TableSchema};
