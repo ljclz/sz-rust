@@ -2509,6 +2509,11 @@ impl<'a> Planner<'a> {
             Statement::Comment { .. } => Err(PlanError::Unsupported(
                 "COMMENT ON statements are handled directly in session and do not generate a logical plan".into(),
             )),
+            // P2-1.1: ANALYZE 由 session 层直接扫描表数据收集统计信息，
+            // 不经过 Planner，不产生逻辑计划。若到达此处说明调用路径异常。
+            Statement::Analyze { .. } => Err(PlanError::Unsupported(
+                "ANALYZE statements are handled directly in session and do not generate a logical plan".into(),
+            )),
         }
     }
 

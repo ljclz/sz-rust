@@ -291,6 +291,18 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         trimmed.to_uppercase().starts_with("COMMENT ON")
     });
 
+    // P2-1: 检测是否包含 ANALYZE 语句
+    // sqlparser 0.53.0 的 ANALYZE 是 Hive 方言（需要 TABLE 关键字），
+    // PG 的 ANALYZE [VERBOSE] [table_name [, ...]] 语法需要手动预处理
+    let has_analyze = segments.iter().any(|seg| {
+        let trimmed = seg.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let upper = trimmed.to_uppercase();
+        upper.starts_with("ANALYZE")
+    });
+
     // 若没有特殊语句，走原始路径（保持性能与兼容）
     if !has_alter_type
         && !has_flashback
@@ -298,6 +310,7 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         && !has_function_ddl
         && !has_materialized_ddl
         && !has_comment
+        && !has_analyze
     {
         let contains_replace = contains_replace_statement(sql);
         // Phase 3.34: SET NAMES 是 MySQL 语法，PG dialect 不支持
@@ -350,6 +363,9 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
             segment_kind.push(9);
         } else if !trimmed.is_empty() && upper.starts_with("COMMENT ON") {
             segment_kind.push(10);
+        } else if !trimmed.is_empty() && upper.starts_with("ANALYZE") {
+            // P2-1: ANALYZE [VERBOSE] [table_name [, ...]]
+            segment_kind.push(12);
         } else if !trimmed.is_empty()
             && upper.starts_with("CREATE MATERIALIZED VIEW")
             && trimmed["CREATE MATERIALIZED VIEW".len()..]
@@ -482,6 +498,15 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
         }
     }
 
+    // P2-1: 解析所有 ANALYZE 段
+    let mut analyze_stmts: Vec<Statement> = Vec::new();
+    for seg in &segments {
+        let trimmed = seg.trim();
+        if !trimmed.is_empty() && trimmed.to_uppercase().starts_with("ANALYZE") {
+            analyze_stmts.push(parse_analyze(trimmed)?);
+        }
+    }
+
     // 解析所有非特殊段（合并后一次性解析）
     let contains_replace = non_special_segments
         .iter()
@@ -526,6 +551,7 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
     let mut refresh_materialized_view_iter = refresh_materialized_view_stmts.into_iter();
     let mut create_mv_if_not_exists_iter = create_mv_if_not_exists_stmts.into_iter();
     let mut comment_iter = comment_stmts.into_iter();
+    let mut analyze_iter = analyze_stmts.into_iter();
     let mut non_special_iter = non_special_stmts.into_iter();
     for kind in segment_kind {
         match kind {
@@ -581,6 +607,11 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
             }
             11 => {
                 if let Some(stmt) = create_mv_if_not_exists_iter.next() {
+                    result.push(stmt);
+                }
+            }
+            12 => {
+                if let Some(stmt) = analyze_iter.next() {
                     result.push(stmt);
                 }
             }
@@ -3817,6 +3848,95 @@ fn parse_notify(sql: &str) -> Result<Statement, ParseError> {
         ))
     })?;
     Ok(Statement::Notify { channel, payload })
+}
+
+/// 解析 `ANALYZE [VERBOSE] [table_name [, ...]]` — P2-1
+///
+/// 语法（PostgreSQL 兼容子集）：
+/// - `ANALYZE` — 分析所有用户表
+/// - `ANALYZE VERBOSE` — 详细模式分析所有用户表
+/// - `ANALYZE table_name` — 分析指定表
+/// - `ANALYZE VERBOSE table_name` — 详细模式分析指定表
+/// - `ANALYZE table1, table2, ...` — 分析多张表
+/// - `ANALYZE schema.table` — 分析带 schema 的表
+///
+/// 不支持（PG 完整语法中的选项）：PARTITION、column 列表、option 列表
+fn parse_analyze(sql: &str) -> Result<Statement, ParseError> {
+    let tokens = tokenize_listen_notify(sql);
+    if tokens.is_empty() {
+        return Err(ParseError::Unsupported(format!(
+            "ANALYZE statement is empty: {sql}"
+        )));
+    }
+    if tokens[0].to_uppercase() != "ANALYZE" {
+        return Err(ParseError::Unsupported(format!(
+            "expected ANALYZE, got: {}",
+            tokens[0]
+        )));
+    }
+
+    let mut idx = 1;
+    let mut verbose = false;
+
+    // 检查 VERBOSE 关键字
+    if idx < tokens.len() && tokens[idx].to_uppercase() == "VERBOSE" {
+        verbose = true;
+        idx += 1;
+    }
+
+    // 剩余 token 解析为逗号分隔的表名列表
+    let mut tables: Vec<TableName> = Vec::new();
+    let mut current_parts: Vec<String> = Vec::new();
+
+    while idx < tokens.len() {
+        let tok = &tokens[idx];
+        if tok == "," {
+            if !current_parts.is_empty() {
+                tables.push(build_table_name_from_parts(&current_parts)?);
+                current_parts.clear();
+            }
+        } else if tok == "." {
+            // schema.table 分隔符，忽略，下一 token 是表名
+        } else {
+            current_parts.push(tok.clone());
+        }
+        idx += 1;
+    }
+    if !current_parts.is_empty() {
+        tables.push(build_table_name_from_parts(&current_parts)?);
+    }
+
+    Ok(Statement::Analyze { tables, verbose })
+}
+
+/// 从表名部分（["table"] 或 ["schema", "table"]）构建 TableName
+fn build_table_name_from_parts(parts: &[String]) -> Result<TableName, ParseError> {
+    match parts.len() {
+        1 => {
+            let name = strip_identifier_quotes(&parts[0]);
+            Ok(TableName::new(name))
+        }
+        2 => {
+            let schema = strip_identifier_quotes(&parts[0]);
+            let name = strip_identifier_quotes(&parts[1]);
+            Ok(TableName::with_schema(schema, name))
+        }
+        _ => Err(ParseError::Unsupported(format!(
+            "invalid table name with {} parts: {parts:?}",
+            parts.len()
+        ))),
+    }
+}
+
+/// 去除标识符两端的引号（支持双引号和反引号）
+fn strip_identifier_quotes(s: &str) -> String {
+    if (s.starts_with('"') && s.ends_with('"') && s.len() >= 2)
+        || (s.starts_with('`') && s.ends_with('`') && s.len() >= 2)
+    {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s.to_string()
+    }
 }
 
 /// 解析频道名：支持裸标识符和双引号字符串。

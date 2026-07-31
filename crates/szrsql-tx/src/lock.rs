@@ -239,6 +239,10 @@ impl LockManager {
     }
 
     /// OPT-9: snapshot wait-for edges across all shards (for cross-shard deadlock detection)
+    ///
+    /// 使用 `try_lock` 而非 `lock` 采集跨分片等待边，避免死锁检测器自身死锁：
+    /// 若两个线程同时持有不同分片并互相尝试锁定对方的分片，使用阻塞 `lock` 会
+    /// 造成检测器死锁。`try_lock` 跳过繁忙分片，牺牲少量检测精度换取无死锁保证。
     fn snapshot_wait_for_edges(
         &self,
         exclude_idx: usize,
@@ -261,7 +265,7 @@ impl LockManager {
             if idx == exclude_idx {
                 continue;
             }
-            if let Ok(table) = table_mutex.lock() {
+            if let Ok(table) = table_mutex.try_lock() {
                 collect(&table, &mut edges);
             }
         }

@@ -565,6 +565,18 @@ pub enum Statement {
         /// 注释内容（NULL 表示删除注释）
         comment: Option<String>,
     },
+    /// ANALYZE [ table_name [, ...] ] — P2-1
+    ///
+    /// 行为与 PostgreSQL 一致：
+    /// - 收集指定表（或所有表）的统计信息（行数、列基数、NULL 比例、直方图等）
+    /// - 统计结果存入 StatisticsStore，供 CostModel 进行基于成本的优化
+    /// - 无指定表时分析所有用户表
+    Analyze {
+        /// 目标表列表（空表示分析所有用户表）
+        tables: Vec<TableName>,
+        /// VERBOSE 标志（控制输出详细程度，当前仅记录日志）
+        verbose: bool,
+    },
 }
 
 /// 函数参数 — Phase 6.5

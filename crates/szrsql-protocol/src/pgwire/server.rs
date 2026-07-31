@@ -325,6 +325,12 @@ pub struct PgwireServer {
     /// 后台周期性快照任务仅对脏表集合中的表重新序列化，避免无谓的全量 IO。
     /// 未启用时退化为旧行为（全量快照，每次都序列化所有表）。
     dirty_tracker: Option<Arc<DirtyTableTracker>>,
+    /// P2-1.1：跨会话共享的统计信息存储（ANALYZE 写入，CostModel 读取）。
+    ///
+    /// 启用后，`ANALYZE` 命令扫描表数据收集统计信息（行数、NDV、min/max、直方图），
+    /// 结果存入此 store，供 CostModel 进行基于成本的优化。
+    /// 未启用时 ANALYZE 命令返回错误（不支持）。
+    statistics_store: Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
     /// 连接数限制信号量。
     ///
     /// 许可数 = `config.max_connections`；每个连接任务持有一个 `OwnedSemaphorePermit`，
@@ -355,6 +361,7 @@ impl PgwireServer {
             dist_runtime: None,
             cdc_engine: None,
             dirty_tracker: None,
+            statistics_store: None,
             conn_semaphore: Arc::new(Semaphore::new(max_conn)),
         }
     }
@@ -482,6 +489,25 @@ impl PgwireServer {
     ///   传递给 PgwireServer 和后台快照任务共享）
     pub fn with_dirty_tracker(mut self, tracker: Arc<DirtyTableTracker>) -> Self {
         self.dirty_tracker = Some(tracker);
+        self
+    }
+
+    /// P2-1.1：注入跨会话共享的统计信息存储，启用 ANALYZE 命令支持。
+    ///
+    /// 启用后，所有 session 的 `ANALYZE [table_name [, ...]]` 命令会扫描表数据
+    /// 收集统计信息（行数、NDV、min/max、直方图），存入共享 store，
+    /// 供 CostModel 进行基于成本的优化（P2-1.2 激活）。
+    ///
+    /// 未启用时 ANALYZE 命令返回错误（不支持，用于测试兼容）。
+    ///
+    /// # 参数
+    ///
+    /// - `store`：共享的统计信息存储（通常在 main.rs 中创建一次，所有连接共享）
+    pub fn with_statistics_store(
+        mut self,
+        store: Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>,
+    ) -> Self {
+        self.statistics_store = Some(store);
         self
     }
 
@@ -1091,6 +1117,10 @@ impl PgwireServer {
         // P1-2：注入脏表跟踪器，启用增量快照机制
         if let Some(tracker) = &self.dirty_tracker {
             session = session.with_dirty_tracker(tracker.clone());
+        }
+        // P2-1.1：注入统计信息存储，启用 ANALYZE 命令
+        if let Some(stats) = &self.statistics_store {
+            session = session.with_statistics_store(stats.clone());
         }
         // Phase 4.6：RAII 守卫，确保连接断开时从 NotifyHub 注销（避免内存泄漏）
         let _notify_guard = NotifyCleanupGuard::new(self.notify_hub.clone(), pid);

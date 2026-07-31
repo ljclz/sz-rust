@@ -925,6 +925,12 @@ fn main() -> anyhow::Result<()> {
     // session 在事务 COMMIT 成功后会调用 tracker.mark_dirty_many 标记修改过的表，
     // 后台周期性快照任务仅序列化脏表，避免无 DML 时的无谓 IO
     server_builder = server_builder.with_dirty_tracker(Arc::new(dirty_tracker));
+    // P2-1.1：注入跨会话共享的统计信息存储，启用 ANALYZE 命令
+    // ANALYZE 扫描表数据收集统计信息（行数、NDV、min/max、直方图），
+    // 结果存入共享 store，供 CostModel 进行基于成本的优化（P2-1.2 激活）
+    server_builder = server_builder.with_statistics_store(Arc::new(std::sync::Mutex::new(
+        szrsql_optimizer::statistics::InMemoryStatisticsStore::new(),
+    )));
     let server = server_builder;
 
     // Phase 4.5.8-4.5.10：HTTP 管理服务器

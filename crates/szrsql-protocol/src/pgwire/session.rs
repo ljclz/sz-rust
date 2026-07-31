@@ -435,6 +435,13 @@ pub struct ExecutorService {
     /// 避免每次都对所有表做全量序列化。
     /// 未注入时退化为旧行为（全量快照，每次都序列化所有表）。
     dirty_tracker: Option<Arc<DirtyTableTracker>>,
+    /// P2-1.1：跨会话共享的统计信息存储（ANALYZE 写入，CostModel 读取）。
+    ///
+    /// 注入后：
+    /// - `ANALYZE [table_name [, ...]]` 扫描表数据收集统计信息（行数、NDV、min/max、直方图）
+    /// - 统计结果存入此 store，供 CostModel 进行基于成本的优化（P2-1.2 激活）
+    /// - 未注入时 ANALYZE 命令返回错误（不支持）
+    statistics_store: Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
 }
 
 impl ExecutorService {
@@ -469,6 +476,7 @@ impl ExecutorService {
             dist_runtime: None,
             cdc_engine: None,
             dirty_tracker: None,
+            statistics_store: None,
         }
     }
 
@@ -634,6 +642,25 @@ impl ExecutorService {
     /// 未注入时退化为旧行为（全量快照，每次都序列化所有表，用于测试兼容）。
     pub fn with_dirty_tracker(mut self, tracker: Arc<DirtyTableTracker>) -> Self {
         self.dirty_tracker = Some(tracker);
+        self
+    }
+
+    /// P2-1.1：注入跨会话共享的统计信息存储，启用 ANALYZE 命令。
+    ///
+    /// 注入后：
+    /// - `ANALYZE` 扫描所有用户表，收集统计信息（行数、NDV、min/max、直方图）
+    /// - `ANALYZE table_name [, ...]` 仅扫描指定表
+    /// - 统计结果存入共享 store，供 CostModel 进行基于成本的优化（P2-1.2 激活）
+    ///
+    /// 未注入时 ANALYZE 命令返回错误（不支持，用于测试兼容）。
+    ///
+    /// # 参数
+    /// - `store`：共享统计信息存储（`Arc<Mutex<InMemoryStatisticsStore>>`，由 `PgwireServer` 持有）
+    pub fn with_statistics_store(
+        mut self,
+        store: Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>,
+    ) -> Self {
+        self.statistics_store = Some(store);
         self
     }
 
@@ -907,6 +934,22 @@ impl ExecutorService {
             });
         }
 
+        // P2-1.1：ANALYZE 拦截（不经过 Planner，直接扫描表数据收集统计信息）
+        //
+        // 行为与 PostgreSQL 一致：
+        // - `ANALYZE` — 扫描所有用户表
+        // - `ANALYZE table_name [, ...]` — 仅扫描指定表
+        // - `ANALYZE VERBOSE ...` — verbose 标志当前仅记录日志（与 PG 一致不输出结果集）
+        //
+        // 收集的统计信息：
+        // - row_count（表总行数）
+        // - 每列的 null_count / distinct_count / min_value / max_value / histogram
+        //
+        // 结果存入 `statistics_store`，供 CostModel 进行基于成本的优化（P2-1.2 激活）
+        if let Statement::Analyze { tables, verbose } = &stmt {
+            return self.execute_analyze(tables, *verbose).await;
+        }
+
         // 3. 其余语句走 Planner + OPT-5 优化器 pass
         //
         // OPT-5：在 Planner 产出 LogicalPlan 后，应用 RBO 优化规则
@@ -939,6 +982,106 @@ impl ExecutorService {
 
         // 4. 分派执行
         self.dispatch_plan(&plan).await
+    }
+
+    /// P2-1.1：执行 ANALYZE 语句，收集表统计信息。
+    ///
+    /// # 流程
+    ///
+    /// 1. 检查 `statistics_store` 是否注入（未注入返回错误）
+    /// 2. 确定目标表列表：
+    ///    - `tables` 为空 → 取 catalog 中所有用户表
+    ///    - `tables` 非空 → 验证每张表存在
+    /// 3. 对每张表：
+    ///    - 获取 `Arc<Mutex<InMemoryTable>>`
+    ///    - 锁定表，调用 `StatisticsCollector::collect(&*table)` 扫描全表
+    ///    - 将 `TableStatistics` 写入 `statistics_store`
+    /// 4. 返回 `QueryResult::DdlComplete { tag: "ANALYZE" }`
+    ///
+    /// # 参数
+    ///
+    /// - `tables`：目标表列表（空表示分析所有用户表）
+    /// - `verbose`：VERBOSE 标志（当前仅记录日志，与 PG 一致不输出结果集）
+    async fn execute_analyze(
+        &mut self,
+        tables: &[TableName],
+        verbose: bool,
+    ) -> Result<QueryResult, SessionError> {
+        use szrsql_optimizer::statistics::{StatisticsCollector, StatisticsStore};
+
+        // 1. 检查 statistics_store 注入
+        let store = self.statistics_store.clone().ok_or_else(|| {
+            SessionError::InvalidStatement(
+                "ANALYZE is not supported: statistics_store not configured".into(),
+            )
+        })?;
+
+        // 2. 确定目标表列表
+        let target_tables: Vec<TableName> = if tables.is_empty() {
+            // ANALYZE 无指定表 → 取 catalog 中所有用户表
+            self.catalog.list_tables()
+        } else {
+            // 验证每张表存在
+            for t in tables {
+                if self.catalog.get_table(t).is_none() {
+                    return Err(SessionError::TableNotFound(t.qualified_name()));
+                }
+            }
+            tables.to_vec()
+        };
+
+        if target_tables.is_empty() {
+            // 无表可分析：返回成功（PG 行为，warning 在日志层记录）
+            tracing::info!("ANALYZE: no tables to analyze");
+            return Ok(QueryResult::DdlComplete {
+                tag: "ANALYZE".into(),
+            });
+        }
+
+        // 3. 逐表收集统计信息
+        let analyzed_count = target_tables.len();
+        for table_name in &target_tables {
+            let table_arc = self
+                .get_table_arc(&table_name.name, table_name.schema.as_deref())
+                .await?;
+            let stats = {
+                let table_guard = table_arc.lock().await;
+                if verbose {
+                    tracing::info!(
+                        table = %table_name.qualified_name(),
+                        rows = table_guard.row_count(),
+                        "ANALYZE: collecting statistics"
+                    );
+                }
+                StatisticsCollector::collect(&*table_guard)
+            };
+
+            // 写入共享 store
+            let table_key = table_name.qualified_name();
+            {
+                let mut store_guard = store
+                    .lock()
+                    .map_err(|e| SessionError::Plan(format!("statistics_store poisoned: {e}")))?;
+                store_guard.update_table_stats(&table_key, stats);
+            }
+
+            if verbose {
+                tracing::info!(
+                    table = %table_name.qualified_name(),
+                    "ANALYZE: statistics collected and stored"
+                );
+            }
+        }
+
+        tracing::info!(
+            tables_analyzed = analyzed_count,
+            verbose,
+            "ANALYZE completed"
+        );
+
+        Ok(QueryResult::DdlComplete {
+            tag: "ANALYZE".into(),
+        })
     }
 
     /// 处理 BEGIN / COMMIT / ROLLBACK / SAVEPOINT 等事务控制语句。
@@ -4752,5 +4895,129 @@ mod tests {
         }
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// P2-1.1：ANALYZE 未注入 statistics_store 时返回错误（测试兼容路径）。
+    #[tokio::test]
+    async fn test_analyze_without_statistics_store_returns_error() {
+        let mut svc = ExecutorService::new();
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')").await;
+
+        // 未注入 statistics_store，ANALYZE 应返回错误
+        let results = svc.execute_sql("ANALYZE t").await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_err(),
+            "ANALYZE without statistics_store should error"
+        );
+    }
+
+    /// P2-1.1：ANALYZE 注入 statistics_store 后正常收集统计信息。
+    #[tokio::test]
+    async fn test_analyze_with_statistics_store_collects_stats() {
+        use szrsql_optimizer::statistics::{InMemoryStatisticsStore, StatisticsStore};
+
+        let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(store.clone());
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')").await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (2, 'bob')").await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (3, 'alice')").await;
+
+        // 执行 ANALYZE
+        let results = svc.execute_sql("ANALYZE t").await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(QueryResult::DdlComplete { tag }) => assert_eq!(tag, "ANALYZE"),
+            other => panic!("expected DdlComplete ANALYZE, got {other:?}"),
+        }
+
+        // 验证统计信息已收集
+        let guard = store.lock().unwrap();
+        let stats = guard
+            .get_table_stats("t")
+            .expect("stats for table t should exist");
+        assert_eq!(stats.row_count, 3, "row_count should be 3");
+        let id_stats = stats
+            .column("id")
+            .expect("column stats for id should exist");
+        assert_eq!(id_stats.null_count, 0, "id null_count should be 0");
+        assert_eq!(id_stats.distinct_count, 3, "id distinct_count should be 3");
+        assert!(id_stats.min_value.is_some(), "id min should be Some");
+        assert!(id_stats.max_value.is_some(), "id max should be Some");
+        let name_stats = stats
+            .column("name")
+            .expect("column stats for name should exist");
+        assert_eq!(name_stats.distinct_count, 2, "name distinct_count should be 2 (alice, bob)");
+    }
+
+    /// P2-1.1：ANALYZE 不带表名时扫描所有用户表。
+    #[tokio::test]
+    async fn test_analyze_all_tables() {
+        use szrsql_optimizer::statistics::{InMemoryStatisticsStore, StatisticsStore};
+
+        let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(store.clone());
+        svc.execute_sql("CREATE TABLE t1 (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t1 (id) VALUES (1)").await;
+        svc.execute_sql("CREATE TABLE t2 (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t2 (id) VALUES (1)").await;
+        svc.execute_sql("INSERT INTO t2 (id) VALUES (2)").await;
+
+        // ANALYZE 无指定表 → 扫描所有用户表
+        let results = svc.execute_sql("ANALYZE").await;
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_ok(), "ANALYZE should succeed");
+
+        // 验证两张表都被分析了
+        let guard = store.lock().unwrap();
+        let tables = guard.list_tables();
+        assert!(
+            tables.iter().any(|t| t == "t1"),
+            "t1 should be analyzed, got tables: {tables:?}"
+        );
+        assert!(
+            tables.iter().any(|t| t == "t2"),
+            "t2 should be analyzed, got tables: {tables:?}"
+        );
+    }
+
+    /// P2-1.1：ANALYZE 表不存在时返回 TableNotFound 错误。
+    #[tokio::test]
+    async fn test_analyze_nonexistent_table_errors() {
+        use szrsql_optimizer::statistics::InMemoryStatisticsStore;
+
+        let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(store.clone());
+
+        let results = svc.execute_sql("ANALYZE nonexistent_table").await;
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_err(),
+            "ANALYZE on nonexistent table should error"
+        );
+    }
+
+    /// P2-1.1：ANALYZE VERBOSE 等价于 ANALYZE（verbose 仅控制日志）。
+    #[tokio::test]
+    async fn test_analyze_verbose_works() {
+        use szrsql_optimizer::statistics::{InMemoryStatisticsStore, StatisticsStore};
+
+        let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
+        let mut svc = ExecutorService::new().with_statistics_store(store.clone());
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+
+        let results = svc.execute_sql("ANALYZE VERBOSE t").await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(QueryResult::DdlComplete { tag }) => assert_eq!(tag, "ANALYZE"),
+            other => panic!("expected DdlComplete ANALYZE, got {other:?}"),
+        }
+
+        let guard = store.lock().unwrap();
+        let stats = guard.get_table_stats("t").expect("stats should exist");
+        assert_eq!(stats.row_count, 1);
     }
 }
