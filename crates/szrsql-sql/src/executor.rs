@@ -224,6 +224,9 @@ pub trait SequenceStore {
 
     /// 列出所有序列名
     fn list_sequences(&self) -> Vec<TableName>;
+
+    /// 重置序列到起始值 — TRUNCATE TABLE 时用于将关联序列归零
+    fn reset_sequence(&mut self, name: &TableName) -> Result<(), ExecutionError>;
 }
 
 /// 内存序列存储 — 用于单元测试和示例
@@ -457,6 +460,25 @@ impl SequenceStore for InMemorySequenceStore {
             .map(|s| s.definition.name.clone())
             .collect()
     }
+
+    /// P1-8：将序列重置到起始值，清除会话 currval 缓存
+    ///
+    /// TRUNCATE TABLE 后调用，使后续 INSERT 的 SERIAL 列从 start 重新计数。
+    fn reset_sequence(&mut self, name: &TableName) -> Result<(), ExecutionError> {
+        let key = Self::key(name);
+        let mut sequences = self
+            .sequences
+            .lock()
+            .expect("sequence store mutex poisoned");
+        let state = sequences
+            .get_mut(&key)
+            .ok_or_else(|| ExecutionError::SequenceNotFound(name.qualified_name()))?;
+        state.current = state.definition.start;
+        state.initialized = false;
+        drop(sequences);
+        self.session_currval.remove(&key);
+        Ok(())
+    }
 }
 
 // =====================================================================
@@ -469,7 +491,7 @@ impl SequenceStore for InMemorySequenceStore {
 /// 接受参数形态：
 /// - `Expr::Literal(Value::Text(name))`
 /// - `Expr::Identifier([name])`
-fn extract_sequence_name(arg: &Expr) -> Result<TableName, ExecutionError> {
+pub fn extract_sequence_name(arg: &Expr) -> Result<TableName, ExecutionError> {
     match arg {
         Expr::Literal(Value::Text(s)) => Ok(parse_seq_name(s)),
         Expr::Identifier(parts) if !parts.is_empty() => {
@@ -2366,6 +2388,25 @@ impl InMemoryTable {
         self.deleted.clear();
         self.row_cache.clear();
         // pk_index 保留（主键约束仍有效）
+    }
+
+    /// P1-8：返回与该表关联的序列名列表
+    ///
+    /// 扫描表 schema 中各列的 DEFAULT 表达式，若为 `nextval('seq_name')` 形式，
+    /// 则将 `seq_name` 纳入返回列表。SERIAL 列在 parser 阶段会被改写为
+    /// `DEFAULT nextval('table_col_seq')`，因此可通过此方法反查关联序列。
+    pub fn associated_sequences(&self) -> Vec<TableName> {
+        self.schema
+            .columns
+            .iter()
+            .filter_map(|col| col.default.as_ref())
+            .filter_map(|expr| match expr {
+                Expr::Function { name, args, .. } if name == "nextval" && args.len() == 1 => {
+                    extract_sequence_name(&args[0]).ok()
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
 

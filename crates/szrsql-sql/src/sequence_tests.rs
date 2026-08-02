@@ -833,3 +833,120 @@ fn test_end_to_end_custom_increment_and_start() {
         assert_eq!(rows[0][0], Value::Int64(expected));
     }
 }
+
+// =====================================================================
+//  P1-8 TRUNCATE 重置序列测试
+// =====================================================================
+
+#[test]
+fn test_p1_8_associated_sequences_detects_serial_seq() {
+    use crate::executor::InMemoryTable;
+
+    let create_table_plan = plan_sql("CREATE TABLE t (id SERIAL PRIMARY KEY, name TEXT)");
+    let schema = match &create_table_plan {
+        LogicalPlan::CreateTable { name, columns, .. } => TableSchema {
+            name: name.clone(),
+            columns: columns.clone(),
+        },
+        other => panic!("expected CreateTable, got {other:?}"),
+    };
+    let table = InMemoryTable::new(schema);
+
+    // SERIAL 列的 DEFAULT 是 nextval('t_id_seq')
+    let seqs = table.associated_sequences();
+    assert_eq!(seqs.len(), 1);
+    assert_eq!(seqs[0].qualified_name(), "t_id_seq");
+}
+
+#[test]
+fn test_p1_8_associated_sequences_no_seq_for_plain_int() {
+    use crate::executor::InMemoryTable;
+
+    let create_table_plan = plan_sql("CREATE TABLE t (id INT PRIMARY KEY, name TEXT)");
+    let schema = match &create_table_plan {
+        LogicalPlan::CreateTable { name, columns, .. } => TableSchema {
+            name: name.clone(),
+            columns: columns.clone(),
+        },
+        other => panic!("expected CreateTable, got {other:?}"),
+    };
+    let table = InMemoryTable::new(schema);
+    let seqs = table.associated_sequences();
+    assert!(
+        seqs.is_empty(),
+        "plain INT column should have no associated sequence"
+    );
+}
+
+#[test]
+fn test_p1_8_reset_sequence_returns_to_start() {
+    let mut store = InMemorySequenceStore::new();
+    store
+        .create_sequence(SequenceDefinition::new(TableName::new("t_id_seq")))
+        .unwrap();
+
+    // nextval 推进到 1, 2, 3
+    assert_eq!(store.next_value(&TableName::new("t_id_seq")).unwrap(), 1);
+    assert_eq!(store.next_value(&TableName::new("t_id_seq")).unwrap(), 2);
+    assert_eq!(store.next_value(&TableName::new("t_id_seq")).unwrap(), 3);
+
+    // reset 后应回到 start=1
+    store.reset_sequence(&TableName::new("t_id_seq")).unwrap();
+    assert_eq!(store.next_value(&TableName::new("t_id_seq")).unwrap(), 1);
+}
+
+#[test]
+fn test_p1_8_truncate_then_insert_restarts_from_one() {
+    use crate::executor::InMemoryTable;
+
+    // 1. CREATE TABLE + 建序列
+    let create_table_plan = plan_sql("CREATE TABLE t (id SERIAL PRIMARY KEY, name TEXT)");
+    let schema = match &create_table_plan {
+        LogicalPlan::CreateTable { name, columns, .. } => TableSchema {
+            name: name.clone(),
+            columns: columns.clone(),
+        },
+        other => panic!("expected CreateTable, got {other:?}"),
+    };
+    let mut table = InMemoryTable::new(schema);
+    let mut catalog = InMemoryCatalog::new();
+    register_table_from_create_plan(&create_table_plan, &mut catalog);
+
+    let mut store = InMemorySequenceStore::new();
+    store
+        .create_sequence(SequenceDefinition::new(TableName::new("t_id_seq")))
+        .unwrap();
+
+    // 2. INSERT 两行 → id=1, id=2
+    let executor = Executor::new();
+    let p1 = plan_sql_with_catalog("INSERT INTO t (name) VALUES ('alice')", &catalog);
+    executor
+        .execute_insert_with_sequences(&p1, &mut table, &mut store)
+        .unwrap();
+    let p2 = plan_sql_with_catalog("INSERT INTO t (name) VALUES ('bob')", &catalog);
+    executor
+        .execute_insert_with_sequences(&p2, &mut table, &mut store)
+        .unwrap();
+    let rows: Vec<_> = table.scan_iter().collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0], Value::Int64(1));
+    assert_eq!(rows[1][0], Value::Int64(2));
+
+    // 3. TRUNCATE（手动调用，模拟 execute_truncate_plan 的序列重置逻辑）
+    let seqs = table.associated_sequences();
+    assert_eq!(seqs.len(), 1);
+    table.truncate();
+    // 重置关联序列
+    for seq in &seqs {
+        let _ = store.reset_sequence(seq);
+    }
+
+    // 4. 再次 INSERT → id 应从 1 重新开始
+    let p3 = plan_sql_with_catalog("INSERT INTO t (name) VALUES ('charlie')", &catalog);
+    executor
+        .execute_insert_with_sequences(&p3, &mut table, &mut store)
+        .unwrap();
+    let rows: Vec<_> = table.scan_iter().collect();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][0], Value::Int64(1));
+}

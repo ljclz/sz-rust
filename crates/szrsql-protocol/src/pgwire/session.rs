@@ -31,8 +31,8 @@ use szrsql_sql::ast::{
 };
 use szrsql_sql::executor::{
     DmlResult, ExecutionError, Executor, InMemorySequenceStore, InMemoryTable, MutableTable,
-    PreparedStatementStore, SessionState, SharedSequenceState, TableSnapshot, TableStorage,
-    TempTableStore, TransactionHistory,
+    PreparedStatementStore, SequenceStore, SessionState, SharedSequenceState, TableSnapshot,
+    TableStorage, TempTableStore, TransactionHistory,
 };
 use szrsql_sql::parser::{parse_sql, ParseError};
 use szrsql_sql::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner, TableSchema};
@@ -3788,7 +3788,7 @@ impl ExecutorService {
     /// - 清空所有目标表的数据行（包括 tombstone 标记）
     /// - 保留表 Schema，可继续 INSERT
     /// - 不触发触发器（与 DELETE 不同）
-    /// - 不影响自增序列（简化实现，与 PG 一致；MySQL TRUNCATE 会重置自增）
+    /// - P1-8：重置关联序列（SERIAL 列的 nextval 序列归零），使 TRUNCATE 后 INSERT 自增从 start 重新开始
     /// - 多表 TRUNCATE 时，任一表不存在则报错（除非 IF EXISTS）
     ///
     /// # 参数
@@ -3798,6 +3798,17 @@ impl ExecutorService {
     /// # 返回
     ///
     /// - `QueryResult::DdlComplete { tag: "TRUNCATE TABLE" }`
+
+    /// 从列 DEFAULT 表达式中提取 `nextval('seq_name')` 对应的序列名
+    fn col_default_sequence(default: &Option<Expr>) -> Option<TableName> {
+        match default {
+            Some(Expr::Function { name, args, .. }) if name == "nextval" && args.len() == 1 => {
+                szrsql_sql::executor::extract_sequence_name(&args[0]).ok()
+            }
+            _ => None,
+        }
+    }
+
     async fn execute_truncate_plan(
         &mut self,
         plan: &LogicalPlan,
@@ -3842,22 +3853,54 @@ impl ExecutorService {
                 self.tables.get(key).cloned()
             };
 
+            // P1-8：收集该表关联的序列名（SERIAL 列的 nextval 序列），
+            // 在释放表锁后再重置，避免持锁期间操作序列存储。
+            let mut seqs_to_reset: Vec<TableName> = Vec::new();
+
             match table_arc {
                 Some(arc) => {
-                    let mut guard = arc.lock().await;
+                    let (schema_clone, mut guard) = {
+                        let guard = arc.lock().await;
+                        let sc = guard.schema().clone();
+                        (sc, guard)
+                    };
                     guard.truncate();
+                    drop(guard);
+                    // 收集关联序列（表锁已释放）
+                    for col in &schema_clone.columns {
+                        if let Some(seq) = Self::col_default_sequence(&col.default) {
+                            seqs_to_reset.push(seq);
+                        }
+                    }
                 }
                 None => {
                     // 会话私有存储兜底
                     if let Some(arc) = self.tables.get(key).cloned() {
-                        let mut guard = arc.lock().await;
+                        let (schema_clone, mut guard) = {
+                            let guard = arc.lock().await;
+                            let sc = guard.schema().clone();
+                            (sc, guard)
+                        };
                         guard.truncate();
+                        drop(guard);
+                        for col in &schema_clone.columns {
+                            if let Some(seq) = Self::col_default_sequence(&col.default) {
+                                seqs_to_reset.push(seq);
+                            }
+                        }
                     } else if if_exists {
                         // IF EXISTS：表不存在时跳过
                         continue;
                     } else {
                         return Err(SessionError::TableNotFound(key.clone()));
                     }
+                }
+            }
+
+            // P1-8：重置关联序列（TRUNCATE 后 INSERT 自增从 start 重新开始）
+            for seq_name in &seqs_to_reset {
+                if self.sequence_store.sequence_exists(seq_name) {
+                    let _ = self.sequence_store.reset_sequence(seq_name);
                 }
             }
         }
