@@ -359,8 +359,7 @@ impl<'a> DistTxnClient<'a> {
             let dkey = data_key(key, start_ts);
 
             // 删除 lock
-            let _ = self
-                .runtime
+            self.runtime
                 .delete_shard(shard_id, lkey)
                 .map_err(txn_err_from)?;
 
@@ -374,8 +373,7 @@ impl<'a> DistTxnClient<'a> {
                 .map_err(txn_err_from)?;
 
             // 删除 data
-            let _ = self
-                .runtime
+            self.runtime
                 .delete_shard(shard_id, dkey)
                 .map_err(txn_err_from)?;
         }
@@ -839,14 +837,14 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 let wkey = write_key(key, rollback_ts);
                 let dkey = data_key(key, start_ts);
 
-                let _ = rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
+                rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
                 let wrecord = WriteRecord {
                     start_ts,
                     kind: WRITE_KIND_ROLLBACK,
                 };
                 rt.put_shard(shard_id, wkey, wrecord.encode())
                     .map_err(txn_err_from)?;
-                let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
+                rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
             }
             Ok(rollback_ts)
         })?;
@@ -911,7 +909,7 @@ impl<'a> ClusterTxnCoordinator<'a> {
                             .map_err(txn_err_from)?;
                         rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
                         let dkey = data_key(key, lock.start_ts);
-                        let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
+                        rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
                         return Ok(ResolveResult::RolledBack);
                     }
                     _ => {}
@@ -929,7 +927,7 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 .map_err(txn_err_from)?;
             rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
             let dkey = data_key(key, lock.start_ts);
-            let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
+            rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
             Ok(ResolveResult::RolledBack)
         })?;
         self.cluster.run_for(200);
@@ -940,6 +938,7 @@ impl<'a> ClusterTxnCoordinator<'a> {
     ///
     /// 用于测试：确保 commit 后的数据在所有在线节点上都可读。
     /// 返回 (节点 ID, 读取结果) 列表。
+    #[allow(clippy::type_complexity)]
     pub fn verify_replication(
         &self,
         key: &[u8],

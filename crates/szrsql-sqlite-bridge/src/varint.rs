@@ -27,10 +27,10 @@ pub fn encode_varint(value: u64) -> Vec<u8> {
         let mut buf = vec![0u8; 9];
         // 前 8 字节：各取 7 bit，高位置 1
         // 第 9 字节：取低 8 bit
-        for i in 0..8usize {
+        for (i, item) in buf.iter_mut().take(8).enumerate() {
             // shift 依次为 57, 50, 43, 36, 29, 22, 15, 8
             let shift = 8 + 7 * (7 - i);
-            buf[i] = ((value >> shift) as u8 & 0x7F) | 0x80;
+            *item = ((value >> shift) as u8 & 0x7F) | 0x80;
         }
         buf[8] = value as u8;
         return buf;
@@ -43,13 +43,13 @@ pub fn encode_varint(value: u64) -> Vec<u8> {
     }
 
     let mut buf = vec![0u8; n];
-    for i in 0..n {
+    for (i, item) in buf.iter_mut().enumerate() {
         // 大端序：最高有效位在前
         let shift = 7 * (n - 1 - i);
-        buf[i] = ((value >> shift) as u8) & 0x7F;
+        *item = ((value >> shift) as u8) & 0x7F;
         // 除最后一字节外，高位置 1 表示后续还有字节
         if i < n - 1 {
-            buf[i] |= 0x80;
+            *item |= 0x80;
         }
     }
     buf

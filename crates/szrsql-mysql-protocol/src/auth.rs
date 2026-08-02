@@ -38,21 +38,16 @@ pub enum AuthError {
 }
 
 /// 认证模式。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AuthMode {
     /// 信任模式（无密码，仅用于测试）
+    #[default]
     Trust,
     /// mysql_native_password 认证
     MysqlNativePassword {
         /// 用户名 → SHA1(password) 映射
         users: std::collections::HashMap<String, [u8; 20]>,
     },
-}
-
-impl Default for AuthMode {
-    fn default() -> Self {
-        AuthMode::Trust
-    }
 }
 
 /// 单次认证会话。
@@ -125,7 +120,7 @@ impl AuthSession {
                 // 所以 recovered = client_response XOR SHA1(salt + stored_hash) = password_hash
                 // 验证 recovered == stored_hash（即 SHA1(password)）
                 let mut hasher = Sha1::new();
-                hasher.update(&self.salt);
+                hasher.update(self.salt);
                 hasher.update(stored_hash);
                 let stage1 = hasher.finalize();
 

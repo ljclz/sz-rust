@@ -170,7 +170,7 @@ fn value_to_text(value: &Value) -> String {
     match value {
         Value::Array(arr) => {
             // 数组序列化为 JSON
-            let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| value_to_json(v)).collect();
+            let json_arr: Vec<serde_json::Value> = arr.iter().map(value_to_json).collect();
             serde_json::to_string(&json_arr).unwrap_or_else(|_| "[]".to_string())
         }
         Value::Range(r) => {

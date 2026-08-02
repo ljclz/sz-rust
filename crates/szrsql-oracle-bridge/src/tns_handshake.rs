@@ -350,12 +350,12 @@ pub fn negotiate_version(client_version: u16) -> u16 {
 
 /// 协商 SDU 大小：取客户端请求与服务器默认的较小值。
 pub fn negotiate_sdu(client_sdu: u16) -> u16 {
-    client_sdu.min(DEFAULT_SDU).max(512)
+    client_sdu.clamp(512, DEFAULT_SDU)
 }
 
 /// 协商 TDU 大小：取客户端请求与服务器默认的较小值。
 pub fn negotiate_tdu(client_tdu: u16) -> u16 {
-    client_tdu.min(DEFAULT_TDU).max(512)
+    client_tdu.clamp(512, DEFAULT_TDU)
 }
 
 // =====================================================================

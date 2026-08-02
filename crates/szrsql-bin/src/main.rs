@@ -291,6 +291,7 @@ struct Args {
     /// - SQL 注入特征检测（`' OR 1=1`、`UNION SELECT`、堆叠查询等）
     /// - 禁止命令过滤（默认无禁止命令，可通过 API 配置）
     /// - 白名单匹配（默认空白名单 = 允许所有）
+    ///
     /// 命中规则的 SQL 返回 ERROR，不执行。
     #[arg(long, default_value_t = false)]
     no_firewall: bool,
@@ -1011,7 +1012,7 @@ fn main() -> anyhow::Result<()> {
             let mut ids: Vec<u64> = peers_str
                 .split(',')
                 .filter_map(|entry| {
-                    entry.trim().splitn(2, '@').next().and_then(|s| s.parse().ok())
+                    entry.trim().split('@').next().and_then(|s| s.parse().ok())
                 })
                 .collect();
             if !ids.contains(&node_id) {

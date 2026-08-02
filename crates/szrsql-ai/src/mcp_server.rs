@@ -3323,7 +3323,7 @@ impl ExecutorBackend {
             let tables = self.tables.borrow();
             let mut exec = Executor::new()
                 .with_catalog(&*catalog)
-                .with_sql_functions_from_catalog(&*catalog);
+                .with_sql_functions_from_catalog(&catalog);
             for other_table in (*tables).values() {
                 exec.register_table(other_table);
             }
@@ -3383,7 +3383,7 @@ impl ExecutorBackend {
             let tables = self.tables.borrow();
             let mut exec = Executor::new()
                 .with_catalog(&*catalog)
-                .with_sql_functions_from_catalog(&*catalog);
+                .with_sql_functions_from_catalog(&catalog);
             for table in (*tables).values() {
                 exec.register_table(table);
             }

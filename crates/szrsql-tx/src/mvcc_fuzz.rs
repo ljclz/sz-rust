@@ -174,8 +174,6 @@ mod phase_2_8 {
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
-    // P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
-    use parking_lot::Mutex;
     use std::thread;
 
     // -----------------------------------------------------------------

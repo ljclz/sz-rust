@@ -39,21 +39,16 @@ pub enum AuthError {
 }
 
 /// 认证模式。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AuthMode {
     /// 信任模式（无密码，仅用于测试）
+    #[default]
     Trust,
     /// SQL Server 密码混淆认证（Ntlm 命名沿用任务约定）
     Ntlm {
         /// 用户名 → 明文密码 映射
         users: HashMap<String, String>,
     },
-}
-
-impl Default for AuthMode {
-    fn default() -> Self {
-        AuthMode::Trust
-    }
 }
 
 /// 单次认证会话。

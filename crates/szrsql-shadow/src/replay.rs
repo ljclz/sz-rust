@@ -13,7 +13,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use szrsql_sql::executor::{Executor, InMemoryTable, TableStorage};
+use szrsql_sql::executor::{Executor, InMemoryTable};
 use szrsql_sql::parser::parse_sql;
 use szrsql_sql::plan::{InMemoryCatalog, LogicalPlan, Planner};
 use szrsql_types::value::{ColumnType, Value};

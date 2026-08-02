@@ -97,6 +97,7 @@ pub struct MysqlServer {
     config: MysqlConfig,
     connection_id_counter: AtomicI32,
     /// ADV-CONC-1：跨会话/跨协议共享的表存储（与 PgwireServer 共享同一实例）
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// ADV-CONC-1：跨会话/跨协议共享的行锁管理器
     lock_manager: Option<Arc<szrsql_tx::lock::LockManager>>,
@@ -181,6 +182,7 @@ struct Connection {
     executor: Arc<Mutex<ExecutorService>>,
     current_db: Option<String>,
     /// 跨会话共享的表存储（用于元数据查询处理器读取真实表结构）
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// 当前连接的 Prepared Statement 存储（按 stmt_id 索引）
     prepared_statements: PreparedStatementStore,
@@ -1224,10 +1226,8 @@ fn check_begin_end_keyword(word: &str, depth: &mut i32, current: &str) {
                 *depth += 1;
             }
         }
-        "END" => {
-            if *depth > 0 {
-                *depth -= 1;
-            }
+        "END" if *depth > 0 => {
+            *depth -= 1;
         }
         _ => {}
     }
@@ -1934,13 +1934,13 @@ fn parse_show_variables_like(sql_upper: &str) -> Option<String> {
         .trim();
 
     // 提取引号内的模式
-    if after_like.starts_with('\'') {
-        let end = after_like[1..].find('\'')?;
-        return Some(after_like[1..1 + end].to_string());
+    if let Some(stripped) = after_like.strip_prefix('\'') {
+        let end = stripped.find('\'')?;
+        return Some(stripped[..end].to_string());
     }
-    if after_like.starts_with('"') {
-        let end = after_like[1..].find('"')?;
-        return Some(after_like[1..1 + end].to_string());
+    if let Some(stripped) = after_like.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        return Some(stripped[..end].to_string());
     }
     None
 }
@@ -1975,7 +1975,7 @@ fn mysql_like_match_impl(text: &[char], pattern: &[char], ti: usize, pi: usize) 
             }
         }
         c => {
-            if ti < text.len() && text[ti].to_ascii_lowercase() == c.to_ascii_lowercase() {
+            if ti < text.len() && text[ti].eq_ignore_ascii_case(&c) {
                 mysql_like_match_impl(text, pattern, ti + 1, pi + 1)
             } else {
                 false

@@ -48,7 +48,7 @@ impl ColumnDefinition {
         write_lenenc_string(&mut buf, self.org_table.as_bytes());
         write_lenenc_string(&mut buf, self.name.as_bytes());
         write_lenenc_string(&mut buf, self.org_name.as_bytes());
-        write_lenenc_int(&mut buf, 0x0C as u64);
+        write_lenenc_int(&mut buf, 0x0C_u64);
         buf.extend_from_slice(&self.character_set.to_le_bytes());
         buf.extend_from_slice(&self.column_length.to_le_bytes());
         buf.push(self.column_type as u8);

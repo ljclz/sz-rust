@@ -296,7 +296,7 @@ pub fn pg_database(current_db: &str) -> Vec<SysRow> {
             Value::Int64(722),               // datfrozenxid
             Value::Int64(722),               // datminmxid
             Value::Int64(1663),              // dattablespace
-            Value::Array(vec![]),            // datacl
+            Value::Null,                     // datacl（无 ACL 时返回 NULL，与 PG 一致）
         ],
         vec![
             Value::Int64(16384),            // oid
@@ -312,7 +312,7 @@ pub fn pg_database(current_db: &str) -> Vec<SysRow> {
             Value::Int64(722),              // datfrozenxid
             Value::Int64(722),              // datminmxid
             Value::Int64(1663),             // dattablespace
-            Value::Array(vec![]),           // datacl
+            Value::Null,                    // datacl（无 ACL 时返回 NULL，与 PG 一致）
         ],
     ]
 }
@@ -558,9 +558,9 @@ fn build_pg_class_row(oid: i64, name: &str, ns_oid: i64, kind: &str, natts: i64)
         Value::Int64(0),          // relrewrite
         Value::Int64(722),        // relfrozenxid
         Value::Int64(722),        // relminmxid
-        Value::Array(vec![]),     // relacl
-        Value::Array(vec![]),     // reloptions
-        Value::Blob(vec![]),      // relpartbound
+        Value::Null,              // relacl（无 ACL 时返回 NULL，与 PG 一致）
+        Value::Null,              // reloptions（无存储参数时返回 NULL）
+        Value::Null,              // relpartbound（非分区表返回 NULL）
     ]
 }
 
@@ -734,16 +734,16 @@ pub fn build_pg_statistic_row(
         Value::Int64(0),             // stacoll3
         Value::Int64(0),             // stacoll4
         Value::Int64(0),             // stacoll5
-        Value::Array(vec![]),        // stanumbers1
-        Value::Array(vec![]),        // stanumbers2
-        Value::Array(vec![]),        // stanumbers3
-        Value::Array(vec![]),        // stanumbers4
-        Value::Array(vec![]),        // stanumbers5
+        Value::Null,                 // stanumbers1（无数值统计时返回 NULL）
+        Value::Null,                 // stanumbers2
+        Value::Null,                 // stanumbers3
+        Value::Null,                 // stanumbers4
+        Value::Null,                 // stanumbers5
         Value::Array(stavalues1),    // stavalues1 (min/max)
-        Value::Array(vec![]),        // stavalues2
-        Value::Array(vec![]),        // stavalues3
-        Value::Array(vec![]),        // stavalues4
-        Value::Array(vec![]),        // stavalues5
+        Value::Null,                 // stavalues2（无数据时返回 NULL）
+        Value::Null,                 // stavalues3
+        Value::Null,                 // stavalues4
+        Value::Null,                 // stavalues5
         Value::Int64(100),           // statistics_target
     ]
 }
@@ -852,10 +852,10 @@ pub fn pg_attribute(catalog: &dyn MutableCatalog) -> Vec<SysRow> {
                 Value::Bool(true),                            // attlocal
                 Value::Int64(0),                              // attinhcount
                 Value::Int64(0),                              // attcollation
-                Value::Array(vec![]),                         // attacl
-                Value::Array(vec![]),                         // attoptions
-                Value::Array(vec![]),                         // attfdwoptions
-                Value::Array(vec![]),                         // attmissingval
+                Value::Null,                                  // attacl（无列级 ACL 时返回 NULL）
+                Value::Null,                                  // attoptions（无存储参数时返回 NULL）
+                Value::Null,                                  // attfdwoptions
+                Value::Null,                                  // attmissingval
             ]);
         }
     }
@@ -1083,10 +1083,10 @@ pub fn pg_constraint(catalog: &dyn MutableCatalog) -> Vec<SysRow> {
 
         // 列级 CHECK
         for (idx, col) in schema.columns.iter().enumerate() {
-            if col.check.is_some() {
+            if let Some(check) = &col.check {
                 let conname = format!("{}_{}_check", name.name, col.name);
                 let conkey = (idx + 1).to_string();
-                let condef = format!("CHECK ({:?})", col.check.as_ref().unwrap());
+                let condef = format!("CHECK ({check:?})");
                 rows.push(make_constraint_row(
                     &conname,
                     table_oid,
@@ -1099,10 +1099,9 @@ pub fn pg_constraint(catalog: &dyn MutableCatalog) -> Vec<SysRow> {
 
         // 列级 FOREIGN KEY
         for (idx, col) in schema.columns.iter().enumerate() {
-            if col.references.is_some() {
+            if let Some(fk_ref) = &col.references {
                 let conname = format!("{}_{}_fkey", name.name, col.name);
                 let conkey = (idx + 1).to_string();
-                let fk_ref = col.references.as_ref().unwrap();
                 let ref_cols = fk_ref
                     .columns
                     .as_ref()
@@ -1425,7 +1424,7 @@ pub fn pg_shadow(allowed_users: &[String]) -> Vec<SysRow> {
                 Value::Bool(true),             // usebypassrls
                 Value::Null,                   // passwd
                 Value::Null,                   // valuntil
-                Value::Array(vec![]),          // useconfig
+                Value::Null,                   // useconfig（无用户配置时返回 NULL）
             ]
         })
         .collect()
@@ -1485,7 +1484,7 @@ pub fn pg_user(allowed_users: &[String]) -> Vec<SysRow> {
                 Value::Bool(false),            // userepl
                 Value::Bool(true),             // usebypassrls
                 Value::Null,                   // valuntil
-                Value::Array(vec![]),          // useconfig
+                Value::Null,                   // useconfig（无用户配置时返回 NULL）
             ]
         })
         .collect()
@@ -1742,16 +1741,16 @@ pub fn pg_tablespace() -> Vec<SysRow> {
             Value::Int64(1663),               // oid (pg_default)
             Value::Text("pg_default".into()), // spcname
             Value::Int64(10),                 // spcowner
-            Value::Array(vec![]),             // spcacl
-            Value::Array(vec![]),             // spcoptions
+            Value::Null,                      // spcacl（无 ACL 时返回 NULL）
+            Value::Null,                      // spcoptions（无存储参数时返回 NULL）
             Value::Null,                      // spcmaxsize
         ],
         vec![
             Value::Int64(1664),              // oid (pg_global)
             Value::Text("pg_global".into()), // spcname
             Value::Int64(10),                // spcowner
-            Value::Array(vec![]),            // spcacl
-            Value::Array(vec![]),            // spcoptions
+            Value::Null,                     // spcacl
+            Value::Null,                     // spcoptions
             Value::Null,                     // spcmaxsize
         ],
     ]
@@ -2556,15 +2555,15 @@ pub fn pg_proc() -> Vec<SysRow> {
                 Value::Int64(0),                       // pronargdefaults
                 Value::Int64(*ret_type),               // prorettype
                 Value::Text(proargtypes),              // proargtypes
-                Value::Array(vec![]),                  // proallargtypes
-                Value::Array(vec![]),                  // proargmodes
-                Value::Array(vec![]),                  // proargnames
-                Value::Null,                           // proargdefaults
-                Value::Array(vec![]),                  // protrftypes
-                Value::Text((*name).into()),           // prosrc
-                Value::Null,                           // probin
-                Value::Array(vec![]),                  // proconfig
-                Value::Array(vec![]),                  // proacl
+                Value::Null, // proallargtypes（无参数类型数组时返回 NULL）
+                Value::Null, // proargmodes
+                Value::Null, // proargnames
+                Value::Null, // proargdefaults
+                Value::Null, // protrftypes
+                Value::Text((*name).into()), // prosrc
+                Value::Null, // probin
+                Value::Null, // proconfig（无函数配置时返回 NULL）
+                Value::Null, // proacl（无函数 ACL 时返回 NULL）
             ]
         })
         .collect()

@@ -317,11 +317,9 @@ impl TcpNetwork {
         let len = encoded.len() as u32;
         stream
             .write_all(&len.to_be_bytes())
-            .map_err(|e| TcpNetworkError::Io(e))?;
-        stream
-            .write_all(&encoded)
-            .map_err(|e| TcpNetworkError::Io(e))?;
-        stream.flush().map_err(|e| TcpNetworkError::Io(e))?;
+            .map_err(TcpNetworkError::Io)?;
+        stream.write_all(&encoded).map_err(TcpNetworkError::Io)?;
+        stream.flush().map_err(TcpNetworkError::Io)?;
 
         let _ = from; // from 用于日志，此处不记录
         Ok(())

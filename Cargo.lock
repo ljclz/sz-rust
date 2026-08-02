@@ -2984,6 +2984,7 @@ dependencies = [
  "szrsql-catalog",
  "szrsql-cdc",
  "szrsql-dist",
+ "szrsql-ops",
  "szrsql-optimizer",
  "szrsql-replication",
  "szrsql-security",

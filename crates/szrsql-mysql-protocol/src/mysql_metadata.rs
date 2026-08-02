@@ -12,6 +12,13 @@ use szrsql_sql::executor::TableStorage;
 use szrsql_types::value::{ColumnType, Value};
 use tokio::sync::{Mutex, RwLock};
 
+/// 跨会话共享的表存储类型。
+#[allow(clippy::type_complexity)]
+type SharedTables = Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>;
+/// 跨会话共享的表存储引用。
+#[allow(clippy::type_complexity)]
+type SharedTablesRef = Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>;
+
 /// 已知的 MySQL 数据库名列表（用于解析表键中的 schema 前缀）
 const KNOWN_DATABASES: &[&str] = &[
     "information_schema",
@@ -27,7 +34,7 @@ const KNOWN_DATABASES: &[&str] = &[
 pub async fn try_handle_metadata_query(
     sql: &str,
     current_db: &Option<String>,
-    shared_tables: &Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
+    shared_tables: &SharedTables,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let trimmed = sql.trim();
     let upper = trimmed.to_uppercase();
@@ -84,7 +91,7 @@ fn parse_table_key(key: &str) -> (String, String) {
 /// `table_name` 是从 `original_key` 拆分出的纯表名（如 `soci_article`），
 /// `original_key` 是 shared_tables 中的完整键名（如 `njszjt_soci_article`）。
 async fn get_all_tables(
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Vec<(String, String, String, Vec<SqlColumnDefinition>)> {
     let guard = shared.read().await;
     let mut result = Vec::new();
@@ -99,7 +106,7 @@ async fn get_all_tables(
 }
 
 async fn get_tables_for_db(
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
     db_name: &str,
 ) -> Vec<(String, Vec<SqlColumnDefinition>)> {
     let all = get_all_tables(shared).await;
@@ -121,7 +128,7 @@ async fn get_tables_for_db(
 /// 2. db + 拆分后的表名匹配（如 db=`njszjt`, table=`soci_article`）
 /// 3. 仅拆分后的表名匹配
 async fn find_table_columns(
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
     db: Option<&str>,
     table_name: &str,
 ) -> Option<(String, String, Vec<SqlColumnDefinition>)> {
@@ -238,15 +245,15 @@ fn rci(name: &str) -> ResultColumn {
 async fn handle_show_table_status(
     sql: &str,
     current_db: &Option<String>,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let like_pattern: Option<String> = {
         if let Some(pos) = upper.find(" LIKE ") {
             let rest = sql[pos + 6..].trim();
-            if rest.starts_with('\'') {
-                let end = rest[1..].find('\'')?;
-                Some(rest[1..1 + end].to_string())
+            if let Some(stripped) = rest.strip_prefix('\'') {
+                let end = stripped.find('\'')?;
+                Some(stripped[..end].to_string())
             } else {
                 None
             }
@@ -323,7 +330,7 @@ async fn handle_show_table_status(
 async fn handle_show_create_table(
     sql: &str,
     _current_db: &Option<String>,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let after = sql[upper.find("SHOW CREATE TABLE ")? + 18..]
@@ -366,7 +373,7 @@ async fn handle_show_create_table(
 async fn handle_show_columns(
     sql: &str,
     current_db: &Option<String>,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let is_full = upper.starts_with("SHOW FULL COLUMNS FROM");
@@ -462,7 +469,7 @@ async fn handle_show_columns(
 async fn handle_show_index(
     sql: &str,
     current_db: &Option<String>,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let after_from = if upper.starts_with("SHOW INDEX FROM ") {
@@ -567,7 +574,7 @@ async fn handle_show_index(
 async fn handle_show_tables(
     sql: &str,
     current_db: &Option<String>,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let is_full = upper.starts_with("SHOW FULL TABLES");
@@ -620,7 +627,7 @@ async fn handle_show_tables(
 
 async fn handle_information_schema(
     sql: &str,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
 
@@ -735,7 +742,7 @@ async fn handle_information_schema(
 }
 
 async fn handle_info_schema_schemata(
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let all_tables = get_all_tables(shared).await;
     let mut dbs: Vec<String> = all_tables
@@ -773,7 +780,7 @@ async fn handle_info_schema_schemata(
 
 async fn handle_info_schema_tables(
     sql: &str,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let schema_filter = extract_schema_filter(&upper, sql);
@@ -800,7 +807,7 @@ async fn handle_info_schema_tables(
 
 async fn handle_info_schema_tables_count(
     sql: &str,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let schema_filter = extract_schema_filter(&upper, sql);
@@ -825,7 +832,7 @@ async fn handle_info_schema_tables_count(
 
 async fn handle_info_schema_columns(
     sql: &str,
-    shared: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    shared: &SharedTablesRef,
 ) -> Option<(Vec<ResultColumn>, Vec<Vec<Value>>)> {
     let upper = sql.to_uppercase();
     let schemas = extract_all_schema_filters(&upper, sql);
@@ -838,10 +845,8 @@ async fn handle_info_schema_columns(
     let all_tables = get_all_tables(shared).await;
     let mut rows = Vec::new();
     for (db, table_name, _, cols) in &all_tables {
-        if !schemas.is_empty() {
-            if !schemas.iter().any(|s| db.eq_ignore_ascii_case(s)) {
-                continue;
-            }
+        if !schemas.is_empty() && !schemas.iter().any(|s| db.eq_ignore_ascii_case(s)) {
+            continue;
         }
         for col in cols {
             let mysql_type = column_type_to_mysql(&col.data_type);
@@ -895,7 +900,7 @@ fn like_match_impl(text: &[char], pattern: &[char], ti: usize, pi: usize) -> boo
             }
         }
         c => {
-            if ti < text.len() && text[ti].to_ascii_lowercase() == c.to_ascii_lowercase() {
+            if ti < text.len() && text[ti].eq_ignore_ascii_case(&c) {
                 like_match_impl(text, pattern, ti + 1, pi + 1)
             } else {
                 false

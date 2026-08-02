@@ -378,6 +378,7 @@ pub(crate) fn write_key(key: &[u8], commit_ts: u64) -> Vec<u8> {
 /// 构造同一 original_key 的所有数据记录范围
 ///
 /// 返回 (start, end)，覆盖 `DATA_PREFIX || key || 任意 start_ts`。
+#[allow(dead_code)]
 pub(crate) fn data_prefix_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut start = Vec::with_capacity(1 + key.len());
     start.push(DATA_PREFIX);

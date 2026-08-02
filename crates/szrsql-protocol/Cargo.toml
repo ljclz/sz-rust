@@ -21,6 +21,8 @@ szrsql-cdc = { workspace = true }
 szrsql-optimizer = { workspace = true }
 szrsql-replication = { workspace = true }
 szrsql-security = { workspace = true }
+# P1-12：运维监控（查询统计 pg_stat_statements + 慢查询日志）
+szrsql-ops = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }

@@ -132,6 +132,7 @@ pub struct TdsServer {
     /// 连接 ID 计数器
     connection_id_counter: AtomicI32,
     /// 跨会话共享的表存储（None = 独立存储，不与其他协议共享）
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// 跨会话共享的锁管理器
     lock_manager: Option<Arc<szrsql_tx::lock::LockManager>>,

@@ -424,6 +424,7 @@ impl DistRuntime {
     ///
     /// # 返回
     /// 有序的 (key, value) 列表
+    #[allow(clippy::type_complexity)]
     pub fn scan(&self, range: &KeyRange) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DistRuntimeError> {
         let shard_ids = self.multi_raft.router.route_range(range);
         let mut results = Vec::new();
@@ -505,6 +506,7 @@ impl DistRuntime {
     /// 从指定分片范围扫描（不经路由）
     ///
     /// 返回该分片内 `range` 范围内的所有 (key, value) 对（已排序）。
+    #[allow(clippy::type_complexity)]
     pub fn scan_shard(
         &self,
         shard_id: ShardId,

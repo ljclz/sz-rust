@@ -262,7 +262,7 @@ impl SqliteHeader {
 
         // 读取文本编码
         let text_encoding = u32::from_be_bytes([bytes[56], bytes[57], bytes[58], bytes[59]]);
-        if !matches!(text_encoding, 1 | 2 | 3) {
+        if !matches!(text_encoding, 1..=3) {
             return Err(SqliteFormatError::InvalidTextEncoding(text_encoding));
         }
 

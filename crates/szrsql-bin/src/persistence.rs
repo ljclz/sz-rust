@@ -135,6 +135,7 @@ fn rebuild_pk_index_if_needed(table: &mut InMemoryTable) {
 /// 获取 shared_tables 的读锁，遍历每张表获取写锁（为了序列化一致性），
 /// 序列化为 JSON 后原子写入临时文件，再重命名为目标文件（避免写入中途崩溃导致数据损坏）。
 #[allow(dead_code)]
+#[allow(clippy::type_complexity)]
 pub async fn save_snapshot(
     shared_tables: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
     data_dir: &Path,
@@ -265,6 +266,7 @@ pub fn spawn_periodic_incremental_save(
 /// - `shared_tables`：共享表存储
 /// - `data_dir`：快照文件目录
 /// - `tracker`：脏表跟踪器
+#[allow(clippy::type_complexity)]
 pub async fn save_incremental_snapshot(
     shared_tables: &Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
     data_dir: &Path,
@@ -418,7 +420,7 @@ pub fn apply_wal_table_data(
                 if let Some((table_name, table)) = decode_table_data(&record.data) {
                     pending
                         .entry(record.tx_id)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((table_name, table));
                 }
             }
@@ -515,6 +517,7 @@ pub async fn apply_wal_row_level(
 
     // 按 tx_id 缓冲的行级变更（tx_id → Vec<(op_type, table_id, row_id, new_payload)>)
     // 仅缓冲没有 TableData 快照的事务（有快照的事务跳过，避免重复应用）
+    #[allow(clippy::type_complexity)]
     let mut pending: StdHashMap<u32, Vec<(WalOpType, u32, usize, Vec<u8>)>> = StdHashMap::new();
     let mut applied_count = 0usize;
 

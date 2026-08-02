@@ -121,6 +121,7 @@ pub struct OracleServer {
     /// 连接 ID 计数器
     connection_id_counter: AtomicI32,
     /// 跨会话共享的表存储（None = 独立存储，不与其他协议共享）
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// 跨会话共享的锁管理器
     lock_manager: Option<Arc<szrsql_tx::lock::LockManager>>,
@@ -383,7 +384,7 @@ fn extract_sql_from_ttc_payload(payload: &[u8]) -> Option<String> {
                         break;
                     }
                     // 可打印 ASCII 或常见空白：接受
-                    if b >= 0x20 && b < 0x7F || b == b'\n' || b == b'\r' || b == b'\t' {
+                    if (0x20..0x7F).contains(&b) || b == b'\n' || b == b'\r' || b == b'\t' {
                         end += 1;
                     } else if b >= 0x80 {
                         // UTF-8 多字节字符首字节（0x80..=0xFF）：
@@ -448,7 +449,7 @@ fn format_results(
                 }
                 // 数据行
                 for row in rows {
-                    let cells: Vec<String> = row.iter().map(|v| format_value(v)).collect();
+                    let cells: Vec<String> = row.iter().map(format_value).collect();
                     output.push_str(&cells.join(" | "));
                     output.push('\n');
                 }

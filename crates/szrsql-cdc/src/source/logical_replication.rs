@@ -83,7 +83,7 @@ use parking_lot::Mutex;
 /// - 标识 WAL 位置
 /// - 作为 replication slot 的消费位点
 /// - 断点续传的依据
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Lsn(pub u64);
 
 impl Lsn {
@@ -135,12 +135,6 @@ impl Lsn {
 impl std::fmt::Display for Lsn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_pg_string())
-    }
-}
-
-impl Default for Lsn {
-    fn default() -> Self {
-        Self(0)
     }
 }
 
@@ -470,7 +464,7 @@ fn parse_column_value(bytes: &[u8], type_oid: u32) -> Result<SzValue, SourceErro
 
 /// 解码十六进制字符串为字节
 fn decode_hex(hex: &str) -> Result<Vec<u8>, SourceError> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err(SourceError::Internal(format!(
             "hex string length not even: {}",
             hex.len()
@@ -1677,7 +1671,7 @@ impl SourceConnector for LogicalReplicationSource {
         // 将 PG Row 转为 DecodedRow（按列名 + 推断类型）
         let decoded_rows: Vec<DecodedRow> = rows
             .iter()
-            .map(|pg_row| pg_row_to_decoded(pg_row))
+            .map(pg_row_to_decoded)
             .collect::<Result<Vec<_>, _>>()?;
 
         let total = decoded_rows.len() as u64;
@@ -1788,7 +1782,7 @@ fn quote_ident(name: &str) -> String {
 /// Unix 纪元：1970-01-01 00:00:00 UTC
 /// 两者相差 10957 天 = 946684800 秒 = 946684800000000 微秒
 fn pg_ts_to_unix_millis(pg_ts_micros: u64) -> u64 {
-    const PG_EPOCH_TO_UNIX_MICROS: u64 = 946684800_000_000;
+    const PG_EPOCH_TO_UNIX_MICROS: u64 = 946_684_800_000_000;
     // PG 微秒 → Unix 毫秒
     pg_ts_micros.saturating_add(PG_EPOCH_TO_UNIX_MICROS) / 1000
 }
@@ -2464,9 +2458,9 @@ mod tests {
     fn pg_ts_to_unix_millis_correct() {
         // PG 纪元 2000-01-01 00:00:00 UTC = Unix 946684800 秒
         // PG ts = 0 → Unix millis = 946684800000
-        assert_eq!(pg_ts_to_unix_millis(0), 946684800_000);
+        assert_eq!(pg_ts_to_unix_millis(0), 946_684_800_000);
         // PG ts = 1000 微秒 → Unix millis = 946684800000 + 1
-        assert_eq!(pg_ts_to_unix_millis(1000), 946684800_001);
+        assert_eq!(pg_ts_to_unix_millis(1000), 946_684_800_001);
     }
 
     #[test]

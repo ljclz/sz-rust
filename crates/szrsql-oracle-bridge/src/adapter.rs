@@ -879,9 +879,9 @@ fn execute_insert_select(
 fn parse_select_clause(select_stmt: &str) -> Result<(Vec<String>, String), AdapterError> {
     let stmt = select_stmt.trim();
     // 去掉前导 SELECT（大小写不敏感）
-    let after_select = if stmt.to_uppercase().starts_with("SELECT ") {
-        &stmt[7..]
-    } else if stmt.to_uppercase().starts_with("SELECT\t") {
+    let after_select = if stmt.to_uppercase().starts_with("SELECT ")
+        || stmt.to_uppercase().starts_with("SELECT\t")
+    {
         &stmt[7..]
     } else {
         return Err(AdapterError::SqlParse(format!(

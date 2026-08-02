@@ -81,10 +81,10 @@ const DEFAULT_KEEPALIVE_INTERVAL_MS: u64 = 10_000;
 /// - `"database"` — 逻辑复制模式（当前不支持，降级为物理）
 /// - 不存在或 `"false"` — 普通模式
 pub fn is_replication_mode(params: &std::collections::HashMap<String, String>) -> bool {
-    match params.get("replication").map(|s| s.as_str()) {
-        Some("true") | Some("on") | Some("1") | Some("database") => true,
-        _ => false,
-    }
+    matches!(
+        params.get("replication").map(|s| s.as_str()),
+        Some("true") | Some("on") | Some("1") | Some("database")
+    )
 }
 
 // =====================================================================

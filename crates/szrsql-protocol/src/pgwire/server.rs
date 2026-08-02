@@ -293,11 +293,13 @@ impl Drop for NotifyCleanupGuard {
 /// 与 `NotifyCleanupGuard` 类似，确保连接因任何原因退出时
 /// （正常 Terminate、客户端断开、协议错误）都从注册表移除 PID，避免内存泄漏。
 struct CancelRegistryGuard {
+    #[allow(clippy::type_complexity)]
     registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
     pid: i32,
 }
 
 impl CancelRegistryGuard {
+    #[allow(clippy::type_complexity)]
     fn new(
         registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
         pid: i32,
@@ -341,6 +343,7 @@ pub struct PgwireServer {
     ///
     /// 所有 session 共享同一份表数据，CREATE TABLE 注册到共享存储，
     /// 其他 session 可见。未启用时（None），每个 session 持有私有表副本。
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// ADV-CONC-1：跨会话共享的行锁管理器（多线程并发支持）。
     ///
@@ -390,6 +393,7 @@ pub struct PgwireServer {
     /// - 命中注入特征 → 返回 ERROR，不执行
     /// - 命中禁止命令 → 返回 ERROR，不执行
     /// - 不在白名单 → 返回 ERROR，不执行
+    ///
     /// 未启用时（None）跳过安全检查（旧行为，用于测试兼容）。
     security_firewall: Option<Arc<tokio::sync::Mutex<szrsql_security::firewall::SqlFirewall>>>,
     /// OPT-12：跨会话共享的审计日志（不可变 append-only + SHA-256 哈希链）。
@@ -397,6 +401,7 @@ pub struct PgwireServer {
     /// 启用后，每个 session 的 `handle_query` 在执行 SQL 后记录审计事件：
     /// - 事件包含 SQL 文本、执行结果（成功/失败）、客户端信息
     /// - 哈希链保证日志不可篡改
+    ///
     /// 未启用时（None）跳过审计记录（旧行为，用于测试兼容）。
     audit_log: Option<Arc<tokio::sync::Mutex<szrsql_security::audit::AuditLog>>>,
     /// P0-1：跨会话共享的 TDE 透明页级加密引擎（AES-256-CTR）。
@@ -448,6 +453,7 @@ pub struct PgwireServer {
     /// 每个连接在建立时注册 `Arc<Notify>`，主循环在等待消息时通过
     /// `tokio::select!` 监听取消信号；收到信号后发送 ErrorResponse + ReadyForQuery。
     /// 连接断开时自动注销。未启用时（None）取消端点返回 503。
+    #[allow(clippy::type_complexity)]
     cancel_registry: Option<Arc<std::sync::Mutex<HashMap<i32, Arc<tokio::sync::Notify>>>>>,
     /// P2-2.2：跨会话共享的流复制主库实例。
     ///

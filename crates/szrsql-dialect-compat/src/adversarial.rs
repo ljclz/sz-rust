@@ -247,6 +247,7 @@ impl AdversarialTest {
     //  1. SQL 注入测试
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_sql_injection() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // 经典 OR 注入（合法语法但应被解析器识别为单一 SELECT）
@@ -384,6 +385,7 @@ impl AdversarialTest {
     //  3. 多语句注入
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_multi_statement() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // 多语句（解析层支持，但应被协议层 allow_multi_statement 控制）
@@ -424,6 +426,7 @@ impl AdversarialTest {
     //  4. 方言混淆
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_dialect_confusion() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // MySQL 反引号 + PG 双引号混合
@@ -664,6 +667,7 @@ impl AdversarialTest {
     //  8. 时间边界
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_time_boundary() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // 最小日期
@@ -722,6 +726,7 @@ impl AdversarialTest {
     //  9. JSON 边界
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_json_boundary() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // 空对象
@@ -777,6 +782,7 @@ impl AdversarialTest {
     //  10. 错误恢复
     // -----------------------------------------------------------------
 
+    #[allow(clippy::vec_init_then_push)]
     fn test_error_recovery() -> Vec<AdversarialTestResult> {
         let mut v = Vec::new();
         // 完全无效 SQL

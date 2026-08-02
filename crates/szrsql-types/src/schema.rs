@@ -952,10 +952,9 @@ mod tests {
     fn schema_eq_ignores_primary_key_explicit() {
         // primary_key_explicit 不参与比较
         let s1 = make_baseline_schema();
-        let mut s2 = make_baseline_schema();
         // 通过反射设置不可行（无反射），改为序列化 → 反序列化（serde skip 会丢失该字段）
         let json = serde_json::to_string(&s1).expect("serialize");
-        s2 = serde_json::from_str(&json).expect("deserialize");
+        let s2: Schema = serde_json::from_str(&json).expect("deserialize");
         // primary_key_explicit 默认为 false，但 s1 可能是 true（finalize_primary_key 调用过）
         assert_eq!(s1, s2);
     }

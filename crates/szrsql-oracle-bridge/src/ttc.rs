@@ -293,7 +293,7 @@ fn encode_number_from_str(s: &str) -> Vec<u8> {
     };
 
     let mut result = Vec::new();
-    result.push(exp_byte as u8);
+    result.push(exp_byte);
 
     // 尾数仅包含有效数字（剥离前导零），用于 base-100 分组
     let mantissa_digits: String = all_digits.chars().skip_while(|c| *c == '0').collect();

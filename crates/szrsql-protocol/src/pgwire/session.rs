@@ -389,6 +389,7 @@ pub struct ExecutorService {
     /// - `Some`：CREATE TABLE 注册到共享存储，所有 session 可见同一张表
     ///
     /// 由 `PgwireServer` 在会话创建时通过 [`with_shared_tables`] 注入。
+    #[allow(clippy::type_complexity)]
     shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
     /// ADV-CONC-1：跨会话共享的行锁管理器（多线程并发支持）。
     ///
@@ -485,6 +486,17 @@ pub struct ExecutorService {
     /// 注意：此处使用 `std::sync::Mutex`（而非 tokio::sync::Mutex），因为
     /// 表达式求值是同步的（`ExprEvaluator::eval`），不能 await。
     plpgsql_registry: Option<Arc<std::sync::Mutex<szrsql_sql::plpgsql_interp::FunctionRegistry>>>,
+    /// P1-12：查询统计收集器（pg_stat_statements 风格）。
+    ///
+    /// 注入后，每条 SQL 执行完毕时记录归一化 SQL、耗时、返回行数，
+    /// 供 `pg_stat_statements` 系统视图查询。未注入时不收集统计。
+    query_stats_collector:
+        Option<Arc<std::sync::Mutex<szrsql_ops::query_stats::QueryStatsCollector>>>,
+    /// P1-12：慢查询日志器（阈值可配置，默认 1000ms）。
+    ///
+    /// 注入后，执行耗时超过阈值的 SQL 会自动写入慢查询日志（tracing::warn），
+    /// 包含归一化 SQL、实际耗时、用户、数据库等信息。未注入时不记录。
+    slow_query_logger: Option<Arc<std::sync::Mutex<szrsql_ops::slow_query::SlowQueryLogger>>>,
 }
 
 /// P2-2.1：分布式事务状态（显式事务期间的 Percolator 2PC 累积器）。
@@ -540,6 +552,8 @@ impl ExecutorService {
             node_id: 1,
             replication_primary: None,
             plpgsql_registry: None,
+            query_stats_collector: None,
+            slow_query_logger: None,
         }
     }
 
@@ -750,6 +764,40 @@ impl ExecutorService {
         self
     }
 
+    /// P1-12：注入查询统计收集器，启用 pg_stat_statements 风格的查询统计。
+    ///
+    /// 注入后，每条 SQL 执行完毕时自动记录：
+    /// - 归一化 SQL（常量替换为 `?`，相同模板的查询聚合）
+    /// - 执行耗时（毫秒）
+    /// - 返回行数
+    ///
+    /// 统计结果可通过 `pg_stat_statements` 系统视图查询。
+    ///
+    /// # 参数
+    /// - `collector`：共享统计收集器（由 `PgwireServer` 持有，多会话共享）
+    pub fn with_query_stats(
+        mut self,
+        collector: Arc<std::sync::Mutex<szrsql_ops::query_stats::QueryStatsCollector>>,
+    ) -> Self {
+        self.query_stats_collector = Some(collector);
+        self
+    }
+
+    /// P1-12：注入慢查询日志器，启用慢查询自动记录。
+    ///
+    /// 注入后，执行耗时超过配置阈值的 SQL 会自动通过 `tracing::warn` 输出慢查询日志，
+    /// 包含归一化 SQL、实际耗时、用户、数据库、扫描行数等信息。
+    ///
+    /// # 参数
+    /// - `logger`：共享慢查询日志器（由 `PgwireServer` 持有，多会话共享）
+    pub fn with_slow_query(
+        mut self,
+        logger: Arc<std::sync::Mutex<szrsql_ops::slow_query::SlowQueryLogger>>,
+    ) -> Self {
+        self.slow_query_logger = Some(logger);
+        self
+    }
+
     /// P1-2：注入跨会话共享的脏表跟踪器，启用增量快照机制。
     ///
     /// 注入后，事务 COMMIT 成功后会调用 `tracker.mark_dirty_many` 标记该事务
@@ -779,6 +827,98 @@ impl ExecutorService {
     ) -> Self {
         self.statistics_store = Some(store);
         self
+    }
+
+    // =================================================================
+    // P1-12：查询统计与慢查询记录
+    // =================================================================
+
+    /// 记录单条 SQL 的执行指标（查询统计 + 慢查询日志）。
+    ///
+    /// 在 `execute_sql` 中每条语句执行完毕后调用。
+    /// 仅记录数据查询语句（SELECT/INSERT/UPDATE/DELETE），跳过 DDL（CREATE/ALTER/DROP 等）
+    /// 和事务控制语句（BEGIN/COMMIT/ROLLBACK），与 `pg_stat_statements` 的行为一致。
+    /// - 若注入了 `query_stats_collector`，记录归一化 SQL + 耗时 + 返回行数
+    /// - 若注入了 `slow_query_logger` 且耗时超过阈值，输出慢查询日志
+    fn record_query_metrics(
+        &self,
+        sql: &str,
+        elapsed_ms: u64,
+        result: &Result<QueryResult, SessionError>,
+    ) {
+        // 仅记录数据查询语句（跳过 DDL / 事务控制 / 空语句）
+        let trimmed = sql.trim();
+        let is_data_query = trimmed
+            .split_whitespace()
+            .next()
+            .map(|first_word| {
+                let w = first_word.to_ascii_uppercase();
+                w == "SELECT"
+                    || w == "INSERT"
+                    || w == "UPDATE"
+                    || w == "DELETE"
+                    || w == "WITH" // CTE 查询
+                    || w == "VALUES"
+                    || w == "TABLE" // TABLE tbl（PG 简写）
+            })
+            .unwrap_or(false);
+        if !is_data_query {
+            return;
+        }
+
+        // 计算返回行数（仅成功查询）
+        let row_count = match result {
+            Ok(QueryResult::ResultSet { rows, .. }) => rows.len() as u64,
+            _ => 0,
+        };
+
+        // 查询统计收集（pg_stat_statements 风格）
+        if let Some(collector_arc) = &self.query_stats_collector {
+            // 使用阻塞锁（std::sync::Mutex）因为记录操作是同步的，不涉及 await
+            if let Ok(mut collector) = collector_arc.lock() {
+                collector.record_query(sql, elapsed_ms as f64, row_count);
+            }
+        }
+
+        // 慢查询日志
+        if let Some(logger_arc) = &self.slow_query_logger {
+            // 先读取阈值（短暂加锁后立即释放，避免后续重入死锁）
+            let threshold_ms = if let Ok(logger) = logger_arc.lock() {
+                logger.threshold_ms()
+            } else {
+                return;
+            };
+            if elapsed_ms >= threshold_ms {
+                let normalized = szrsql_ops::slow_query::normalize_sql(sql);
+                let mut entry = szrsql_ops::slow_query::SlowQueryEntry::new(
+                    0, // query_id（0 表示单次记录，由 logger 内部递增）
+                    sql,
+                    elapsed_ms,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    "szrsql", // 当前用户（单用户模式）
+                    &self.database_name,
+                );
+                entry.rows_returned = row_count;
+                // 输出结构化慢查询日志
+                tracing::warn!(
+                    target: "szrsql_slow_query",
+                    sql = sql,
+                    normalized = normalized.as_str(),
+                    duration_ms = elapsed_ms,
+                    threshold_ms = threshold_ms,
+                    database = self.database_name,
+                    rows_returned = row_count,
+                    "slow query detected"
+                );
+                // 记录到 logger 的内部缓冲区（供 pg_slow_queries 视图查询）
+                if let Ok(mut logger_mut) = logger_arc.lock() {
+                    logger_mut.log(entry);
+                }
+            }
+        }
     }
 
     /// Phase 4.7：返回当前数据库名（用于系统表查询）。
@@ -947,7 +1087,14 @@ impl ExecutorService {
 
         let mut results = Vec::with_capacity(statements.len());
         for stmt in statements {
+            // P1-12：记录每条语句的执行耗时
+            let start = std::time::Instant::now();
             let result = self.execute_statement(stmt).await;
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+
+            // P1-12：注入查询统计和慢查询记录
+            self.record_query_metrics(trimmed, elapsed_ms, &result);
+
             // 失败事务：出错后标记为 InFailedTransaction，后续语句直接报错
             if let Err(ref e) = result {
                 if self.txn_state == TransactionState::InTransaction {
@@ -1610,7 +1757,7 @@ impl ExecutorService {
     /// 1. **无 WAL 模式**（`wal_writer` 为 None）：直接清除快照，兼容旧行为
     /// 2. **有 WAL 模式**：
     ///    a. **P0-1 修复**：遍历事务期间修改过的表，将每张表的全量数据序列化为
-    ///       `WalOpType::TableData` 记录写入 WAL（用于崩溃恢复）
+    ///    `WalOpType::TableData` 记录写入 WAL（用于崩溃恢复）
     ///    b. 写入 `WalOpType::Commit` 记录（携带 `txn_id`）
     ///    c. 调用 `flush()`（fsync）强制刷盘
     ///    d. fsync 成功 → 清除快照，返回 Ok（可安全 ACK 客户端）
@@ -1828,7 +1975,7 @@ impl ExecutorService {
             if !mutations.is_empty() {
                 if let Some(dist_rt) = &self.dist_runtime {
                     let mut rt = dist_rt.write();
-                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
+                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut rt);
                     if let Err(e) = txn.prewrite_all(&mutations, dist_state.start_ts) {
                         tracing::warn!(
                             start_ts = dist_state.start_ts,
@@ -1954,7 +2101,7 @@ impl ExecutorService {
             if !mutations.is_empty() {
                 if let Some(dist_rt) = &self.dist_runtime {
                     let mut rt = dist_rt.write();
-                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut *rt);
+                    let mut txn = szrsql_dist::dist_txn::DistTxnClient::new(&mut rt);
                     if let Err(e) = txn.rollback(&mutations, dist_state.start_ts) {
                         tracing::warn!(
                             start_ts = dist_state.start_ts,
@@ -3575,7 +3722,7 @@ impl ExecutorService {
         let mut all_arcs: Vec<Arc<Mutex<InMemoryTable>>> = self.tables.values().cloned().collect();
         if let Some(shared) = &self.shared_tables {
             let guard = shared.read().await;
-            for (_, v) in guard.iter() {
+            for v in guard.values() {
                 if !all_arcs.iter().any(|a| Arc::ptr_eq(a, v)) {
                     all_arcs.push(v.clone());
                 }
@@ -3798,7 +3945,7 @@ impl ExecutorService {
     /// # 返回
     ///
     /// - `QueryResult::DdlComplete { tag: "TRUNCATE TABLE" }`
-
+    ///
     /// 从列 DEFAULT 表达式中提取 `nextval('seq_name')` 对应的序列名
     fn col_default_sequence(default: &Option<Expr>) -> Option<TableName> {
         match default {
@@ -6299,5 +6446,261 @@ mod tests {
             1,
             "shared storage should contain exactly 1 table"
         );
+    }
+
+    // =================================================================
+    // P1-11：物化视图端到端验证（execute_materialized_view_scan 全路径）
+    // =================================================================
+
+    /// P1-11-T1：CREATE MATERIALIZED VIEW WITH DATA 创建时立即填充，
+    /// SELECT 通过 execute_materialized_view_scan 返回物化数据。
+    #[tokio::test]
+    async fn test_p1_11_mv_create_with_data_then_select_returns_materialized_rows() {
+        let mut svc = ExecutorService::new();
+
+        // 1. 创建基表
+        let r = svc
+            .execute_sql("CREATE TABLE mv_base (id BIGINT, val TEXT)")
+            .await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+
+        // 2. 插入初始数据
+        let r = svc
+            .execute_sql("INSERT INTO mv_base (id, val) VALUES (1, 'alpha'), (2, 'beta')")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+
+        // 3. 创建物化视图（默认 WITH DATA，创建时立即填充）
+        let r = svc
+            .execute_sql(
+                "CREATE MATERIALIZED VIEW mv_alpha AS SELECT id, val FROM mv_base WHERE id <= 2",
+            )
+            .await;
+        assert!(
+            r[0].is_ok(),
+            "CREATE MATERIALIZED VIEW should succeed: {:?}",
+            &r[0]
+        );
+
+        // 4. SELECT 物化视图 → 应通过 execute_materialized_view_scan 返回物化数据
+        let r = svc.execute_sql("SELECT * FROM mv_alpha ORDER BY id").await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 2, "MV should return 2 materialized rows");
+                assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(1));
+                assert_eq!(rows[1][0], szrsql_types::value::Value::Int64(2));
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    /// P1-11-T2：基表新增数据后，物化视图不立即反映（需 REFRESH）。
+    /// 验证 MV 的快照隔离语义。
+    #[tokio::test]
+    async fn test_p1_11_mv_not_reflect_base_changes_until_refresh() {
+        let mut svc = ExecutorService::new();
+
+        // 1. 创建基表 + 插入数据
+        let r = svc
+            .execute_sql("CREATE TABLE mv_base2 (id BIGINT, val TEXT)")
+            .await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        let r = svc
+            .execute_sql("INSERT INTO mv_base2 (id, val) VALUES (1, 'one')")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+
+        // 2. 创建物化视图
+        let r = svc
+            .execute_sql("CREATE MATERIALIZED VIEW mv_b2 AS SELECT * FROM mv_base2")
+            .await;
+        assert!(r[0].is_ok(), "CREATE MV should succeed: {:?}", &r[0]);
+
+        // 3. 基表新增一行
+        let r = svc
+            .execute_sql("INSERT INTO mv_base2 (id, val) VALUES (2, 'two')")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+
+        // 4. 物化视图仍只返回 1 行（REFRESH 前的快照）
+        let r = svc.execute_sql("SELECT * FROM mv_b2 ORDER BY id").await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(
+                    rows.len(),
+                    1,
+                    "MV should still return 1 row (stale snapshot before REFRESH)"
+                );
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+
+        // 5. REFRESH 后应看到 2 行
+        let r = svc.execute_sql("REFRESH MATERIALIZED VIEW mv_b2").await;
+        assert!(
+            r[0].is_ok(),
+            "REFRESH MATERIALIZED VIEW should succeed: {:?}",
+            &r[0]
+        );
+
+        let r = svc.execute_sql("SELECT * FROM mv_b2 ORDER BY id").await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 2, "MV should return 2 rows after REFRESH");
+                assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(1));
+                assert_eq!(rows[1][0], szrsql_types::value::Value::Int64(2));
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    /// P1-11-T3：物化视图包含聚合结果，SELECT 返回聚合后的物化行。
+    #[tokio::test]
+    async fn test_p1_11_mv_aggregation_materialized() {
+        let mut svc = ExecutorService::new();
+
+        // 1. 创建基表 + 插入多行
+        let r = svc
+            .execute_sql("CREATE TABLE mv_agg_src (grp TEXT, val BIGINT)")
+            .await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        let r = svc
+            .execute_sql(
+                "INSERT INTO mv_agg_src (grp, val) VALUES \
+                 ('a', 10), ('a', 20), ('b', 30), ('b', 40)",
+            )
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+
+        // 2. 创建聚合物化视图
+        let r = svc
+            .execute_sql(
+                "CREATE MATERIALIZED VIEW mv_agg AS \
+                 SELECT grp, SUM(val) AS total FROM mv_agg_src GROUP BY grp",
+            )
+            .await;
+        assert!(
+            r[0].is_ok(),
+            "CREATE MATERIALIZED VIEW with aggregation should succeed: {:?}",
+            &r[0]
+        );
+
+        // 3. SELECT 物化视图 → 应返回聚合后的 2 行
+        let r = svc
+            .execute_sql("SELECT grp, total FROM mv_agg ORDER BY grp")
+            .await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 2, "MV should return 2 aggregated rows");
+                assert_eq!(rows[0][0], szrsql_types::value::Value::Text("a".into()));
+                assert_eq!(rows[0][1], szrsql_types::value::Value::Int64(30)); // 10 + 20
+                assert_eq!(rows[1][0], szrsql_types::value::Value::Text("b".into()));
+                assert_eq!(rows[1][1], szrsql_types::value::Value::Int64(70)); // 30 + 40
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+
+        // 4. 基表新增数据，MV 不立即反映
+        let r = svc
+            .execute_sql("INSERT INTO mv_agg_src (grp, val) VALUES ('a', 100)")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+
+        let r = svc
+            .execute_sql("SELECT grp, total FROM mv_agg WHERE grp = 'a'")
+            .await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 1, "MV should still show stale aggregate");
+                assert_eq!(rows[0][1], szrsql_types::value::Value::Int64(30)); // still 30, not 130
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    // =================================================================
+    // P1-12：慢查询/统计注入验证
+    // =================================================================
+
+    /// P1-12-T1：注入 QueryStatsCollector 后，SQL 执行完毕自动记录统计。
+    /// 验证归一化 SQL 聚合：两条不同常量的查询归一化后合并为一条统计。
+    #[tokio::test]
+    async fn test_p1_12_query_stats_collector_records_and_normalizes() {
+        use szrsql_ops::query_stats::QueryStatsCollector;
+
+        let collector = Arc::new(std::sync::Mutex::new(QueryStatsCollector::new()));
+        let mut svc = ExecutorService::new().with_query_stats(collector.clone());
+
+        // 创建基表
+        let r = svc
+            .execute_sql("CREATE TABLE qs_t (id BIGINT, name TEXT)")
+            .await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+
+        // 执行两条归一化后相同的查询
+        let r1 = svc.execute_sql("SELECT * FROM qs_t WHERE id = 1").await;
+        assert!(r1[0].is_ok(), "SELECT 1 should succeed");
+        let r2 = svc.execute_sql("SELECT * FROM qs_t WHERE id = 2").await;
+        assert!(r2[0].is_ok(), "SELECT 2 should succeed");
+
+        // 验证统计被记录（2 次调用，归一化为同一条查询）
+        let guard = collector.lock().unwrap();
+        assert_eq!(
+            guard.total_calls(),
+            2,
+            "total_calls should be 2 (2 SELECTs executed)"
+        );
+        assert_eq!(
+            guard.query_count(),
+            1,
+            "query_count should be 1 (both normalized to same template)"
+        );
+    }
+
+    /// P1-12-T2：注入 SlowQueryLogger（阈值 1ms）后，所有查询均被视为慢查询。
+    /// 验证慢查询被记录到 logger 内部缓冲区。
+    #[tokio::test]
+    async fn test_p1_12_slow_query_logger_records_over_threshold() {
+        use szrsql_ops::slow_query::{SlowQueryConfig, SlowQueryLogger};
+
+        // 阈值 0ms：确保内存查询（耗时 < 1ms）也能被记录
+        let config = SlowQueryConfig::new().with_threshold_ms(0);
+        let logger = Arc::new(std::sync::Mutex::new(SlowQueryLogger::with_config(config)));
+        let mut svc = ExecutorService::new().with_slow_query(logger.clone());
+
+        // 创建基表
+        let r = svc.execute_sql("CREATE TABLE sq_t (id BIGINT)").await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+
+        // 执行一条查询（耗时几乎必然 > 1ms）
+        let r = svc.execute_sql("SELECT * FROM sq_t").await;
+        assert!(r[0].is_ok(), "SELECT should succeed");
+
+        // 验证慢查询被记录
+        let guard = logger.lock().unwrap();
+        assert!(
+            guard.total_logged() >= 1,
+            "at least 1 slow query should be logged (got {})",
+            guard.total_logged()
+        );
+        assert!(
+            guard.entries().len() >= 1,
+            "entries buffer should contain at least 1 entry"
+        );
+        // 验证记录的 SQL 包含我们的查询
+        let has_our_query = guard.entries().iter().any(|e| e.sql_text.contains("sq_t"));
+        assert!(has_our_query, "slow query entry should reference sq_t");
+    }
+
+    /// P1-12-T3：未注入 ops 模块时，SQL 执行正常（退化为旧行为）。
+    #[tokio::test]
+    async fn test_p1_12_no_ops_injection_fallback() {
+        let mut svc = ExecutorService::new();
+
+        let r = svc.execute_sql("CREATE TABLE no_ops_t (id BIGINT)").await;
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed without ops");
+
+        let r = svc.execute_sql("SELECT * FROM no_ops_t").await;
+        assert!(r[0].is_ok(), "SELECT should succeed without ops");
     }
 }

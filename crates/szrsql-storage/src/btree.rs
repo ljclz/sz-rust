@@ -615,7 +615,7 @@ pub fn decode_i64_key(key: &[u8]) -> Result<i64, BTreeError> {
 /// - NaN → 全 1（排最大，便于索引查找时跳过）
 /// - 负数 → 按位取反（使 -∞ < … < -0 按字典序递增）
 /// - 正数（含 +0）→ 翻转符号位（使 +0 < +∞ 按字典序递增）
-/// 最终结果：-∞ … -0.0 < +0.0 … +∞ < NaN
+///   最终结果（从小到大）：负无穷到负零、正零到正无穷、NaN 最大
 pub fn encode_f64_key(v: f64) -> Vec<u8> {
     if v.is_nan() {
         return vec![0xFF; 8];

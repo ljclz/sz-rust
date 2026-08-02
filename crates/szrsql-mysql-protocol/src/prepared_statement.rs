@@ -395,7 +395,7 @@ impl StmtExecuteCommand {
         }
 
         // NULL bitmap：(num_params + 7) / 8 字节
-        let bitmap_len = ((num_params as usize) + 7) / 8;
+        let bitmap_len = (num_params as usize).div_ceil(8);
         if buf.len() < bitmap_len {
             return Err(StmtExecError::BitmapTruncated);
         }
@@ -797,7 +797,7 @@ fn decode_binary_value(
 /// 行格式：header(0x00) + NULL bitmap + 非 NULL 列值
 pub fn encode_binary_row(values: &[Value]) -> Vec<u8> {
     let num_cols = values.len();
-    let bitmap_len = (num_cols + 7) / 8;
+    let bitmap_len = num_cols.div_ceil(8);
     let mut buf = Vec::with_capacity(1 + bitmap_len + num_cols * 8);
     // header
     buf.push(0x00);

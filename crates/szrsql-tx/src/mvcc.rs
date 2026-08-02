@@ -1032,8 +1032,8 @@ impl MvccManager {
             xmin,
             xmax,
             txn_id,
-            &*committed_guard,
-            &*aborted_guard,
+            &committed_guard,
+            &aborted_guard,
             &parent_map,
         )
     }

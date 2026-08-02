@@ -1356,7 +1356,7 @@ impl InMemoryTable {
     ///
     /// **限制**：
     /// - 仅支持 Int64 类型主键（其他类型记录 warn 并不启用）
-    /// P1-7：启用 B+Tree 主键索引（支持 Int64 / Float64 / Text / 复合主键）
+    /// - P1-7：启用 B+Tree 主键索引（支持 Int64 / Float64 / Text / 复合主键）
     ///
     /// **参数**：`column_indices` — 主键列在 schema 中的索引列表。
     /// - 单列主键：传 `&[col_idx]`
@@ -2232,7 +2232,7 @@ impl InMemoryTable {
             .into_iter()
             .flatten();
         for (key, value) in cursor {
-            let tuple_id = decode_tuple_id_key(&key) as u32;
+            let tuple_id = decode_tuple_id_key(&key);
             // 跳过已删除行（tombstone 过滤）
             if self.deleted.contains(&tuple_id) {
                 continue;

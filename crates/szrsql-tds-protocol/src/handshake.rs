@@ -531,7 +531,7 @@ impl Login7 {
         let offsets_table_start = 36;
         const FIELDS_COUNT: usize = 9;
         let mut field_offsets: [(usize, usize); FIELDS_COUNT] = [(0, 0); FIELDS_COUNT];
-        for i in 0..FIELDS_COUNT {
+        for (i, item) in field_offsets.iter_mut().enumerate() {
             let pos = offsets_table_start + i * 4;
             if pos + 4 > payload.len() {
                 return Err(HandshakeError::Protocol(
@@ -540,7 +540,7 @@ impl Login7 {
             }
             let offset = u16::from_be_bytes([payload[pos], payload[pos + 1]]) as usize;
             let char_len = u16::from_be_bytes([payload[pos + 2], payload[pos + 3]]) as usize;
-            field_offsets[i] = (offset, char_len * 2); // 字符 → 字节
+            *item = (offset, char_len * 2); // 字符 → 字节
         }
 
         // ClientID（6 字节）

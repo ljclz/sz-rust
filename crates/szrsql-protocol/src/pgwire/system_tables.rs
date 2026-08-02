@@ -1584,7 +1584,7 @@ fn materialize_system_table_factor(
                 Ok(QueryResult::ResultSet { columns, rows, .. }) => {
                     // 应用列别名（如果指定）
                     let col_names: Vec<String> = match &alias.column_aliases {
-                        Some(aliases) => aliases.iter().map(|s| s.clone()).collect(),
+                        Some(aliases) => aliases.to_vec(),
                         None => columns.iter().map(|c| c.name.clone()).collect(),
                     };
                     Some((col_names, rows))
@@ -1980,7 +1980,7 @@ fn execute_system_catalog_join(
 
         // 生成聚合行
         let mut agg_rows: Vec<Vec<Value>> = Vec::with_capacity(groups.len());
-        for (_, group_rows) in &groups {
+        for group_rows in groups.values() {
             let first_row = group_rows.first().cloned().unwrap_or_default();
             let mut new_row: Vec<Value> = Vec::new();
             for item in &select.projection {
@@ -2534,7 +2534,7 @@ fn project_join_columns(
             return Ok((result_columns, projected_rows));
         }
         // 纯 * —— 返回所有列
-        let projected_rows: Vec<Vec<Value>> = rows.iter().map(|r| r.clone()).collect();
+        let projected_rows: Vec<Vec<Value>> = rows.to_vec();
         return Ok((all_columns, projected_rows));
     }
 
@@ -3192,7 +3192,7 @@ fn project_columns(
 
     if has_wildcard && projection.len() == 1 {
         // 纯通配符 —— 返回所有列
-        let projected_rows: Vec<Vec<Value>> = rows.iter().map(|r| r.clone()).collect();
+        let projected_rows: Vec<Vec<Value>> = rows.to_vec();
         return Ok((all_columns, projected_rows));
     }
 
