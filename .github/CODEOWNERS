@@ -1,22 +1,23 @@
 # CODEOWNERS — 自动指派代码审查人
 # 格式: <路径模式> <GitHub 用户名/@团队>
+# P3-9 修复：增加备用维护者 @szzmj1980，消除 bus factor = 1 风险
 
-# 核心框架
-/packages/sz-rust-core/       @ljclz
-/packages/sz-rust-macros/     @ljclz
+# 核心框架（主维护者 + 备用维护者）
+/packages/sz-rust-core/       @ljclz @szzmj1980
+/packages/sz-rust-macros/     @ljclz @szzmj1980
 
 # 应用层
-/packages/sz-rust-sz300/      @ljclz
+/packages/sz-rust-sz300/      @ljclz @szzmj1980
 
 # 基础设施
-/packages/sz-rust-observability/ @ljclz
-/packages/sz-rust-tracing/    @ljclz
+/packages/sz-rust-observability/ @ljclz @szzmj1980
+/packages/sz-rust-tracing/    @ljclz @szzmj1980
 
 # CI/CD
-/.github/workflows/           @ljclz
-/Dockerfile                   @ljclz
-/docker-compose.yml           @ljclz
-/deploy/                      @ljclz
+/.github/workflows/           @ljclz @szzmj1980
+/Dockerfile                   @ljclz @szzmj1980
+/docker-compose.yml           @ljclz @szzmj1980
+/deploy/                      @ljclz @szzmj1980
 
 # 默认
-*                             @ljclz
+*                             @ljclz @szzmj1980

@@ -373,8 +373,8 @@ mod tests {
     use http_body_util::BodyExt;
     use std::sync::Arc;
     use std::time::Duration;
-    use sz_orm_limit::SlidingWindowRateLimiter;
-    use sz_orm_tracing::SzTracer;
+    use crate::orm::SlidingWindowRateLimiter;
+    use crate::orm::SzTracer;
     use tower::ServiceExt;
 
     // ====================================================================
@@ -406,8 +406,8 @@ mod tests {
     }
 
     // 引入 trait 以便 make_trace_config / make_rate_limit_config 编译
-    use sz_orm_limit::RateLimiter;
-    use sz_orm_tracing::Tracer;
+    use crate::orm::RateLimiter;
+    use crate::orm::Tracer;
 
     // ====================================================================
     // 构造函数

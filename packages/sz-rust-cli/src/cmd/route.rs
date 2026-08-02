@@ -36,16 +36,21 @@ pub fn execute_route_list(format: &str) -> Result<(), CliError> {
 
 /// 路由信息
 #[derive(Debug, Clone)]
-struct RouteInfo {
-    method: &'static str,
-    path: &'static str,
-    app: &'static str,
-    controller: &'static str,
-    action: &'static str,
+pub struct RouteInfo {
+    /// HTTP 方法（GET/POST/PUT/DELETE 等）
+    pub method: &'static str,
+    /// 路由路径（如 `/api/user/list`）
+    pub path: &'static str,
+    /// 所属应用（如 `api`、`admin`）
+    pub app: &'static str,
+    /// 控制器名（如 `User`）
+    pub controller: &'static str,
+    /// 方法名（如 `list`）
+    pub action: &'static str,
 }
 
 /// 收集预定义路由
-fn collect_routes() -> Vec<RouteInfo> {
+pub fn collect_routes() -> Vec<RouteInfo> {
     vec![
         RouteInfo {
             method: "GET",

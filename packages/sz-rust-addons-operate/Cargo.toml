@@ -18,11 +18,15 @@ serde_json.workspace = true
 chrono.workspace = true
 tracing.workspace = true
 axum.workspace = true
-sz-orm-core.workspace = true
 sz-rust-core.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+md-5 = { workspace = true }
+hex.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
+http-body-util.workspace = true
 
 [lib]
 name = "sz_rust_addons_operate"

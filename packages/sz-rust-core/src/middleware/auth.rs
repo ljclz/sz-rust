@@ -44,7 +44,7 @@
 //!
 //! - 签发人：`https://mall.ljclz.shop`
 //! - 接收人：`https://mall.ljclz.shop`
-//! - 密钥：`shengzhuang`
+//! - 密钥：通过 `SZ_JWT_SECRET` 环境变量提供（P1-SEC-09：不再硬编码）
 //! - 有效期：30 天（`3600 * 24 * 30` 秒）
 //! - 算法：HS256
 //! - 自定义 claim：`user_id`
@@ -90,7 +90,7 @@ use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use sz_orm_auth::jwt::{JwtClaims, JwtEncoder};
+use crate::orm::jwt::{JwtClaims, JwtEncoder};
 
 use crate::error::{BaseException, ErrorCode};
 
@@ -115,11 +115,25 @@ pub const DEFAULT_ISSUER: &str = "https://mall.ljclz.shop";
 /// 生产环境必须通过 `SZ_JWT_SECRET` 环境变量提供密钥。
 /// `AuthConfig::default()` 会优先从 `SZ_JWT_SECRET` 环境变量读取；
 /// 仅在 `cfg(test)` 下回退到此常量以保持测试兼容性。
+///
+/// ## P1-SEC-09 修复说明
+///
+/// 旧版在 `cfg(test)` 下硬编码了 PHP JWT 密钥 `"shengzhuang"`，
+/// 该字符串会被编译进所有测试二进制文件。若测试二进制泄漏，JWT 密钥即已知。
+/// 修复方案：测试模式下改为运行时随机生成密钥（OsRng），不再包含任何硬编码秘密。
 #[cfg(test)]
-pub const DEFAULT_SECRET: &str = "shengzhuang";
+pub fn default_secret() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    // 生成 64 字符十六进制随机密钥，每次测试运行唯一
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
 
-/// 生产环境占位符（非测试构建下 `DEFAULT_SECRET` 不可用）
-#[cfg(not(test))]
+/// 生产环境占位符（任何构建下均为此值，不携带实际密钥）
+///
+/// 测试模式下 `AuthConfig::default()` 通过 `default_secret()` 运行时生成随机密钥，
+/// 不使用此常量作为实际密钥。此常量仅用于文档和断言目的。
 pub const DEFAULT_SECRET: &str = "<must-set-SZ_JWT_SECRET-env>";
 
 /// PHP JWT 默认有效期（秒）（对齐 `app\common\service\jwt\Token::$_config['expire'] = 3600 * 24 * 30`）
@@ -128,7 +142,12 @@ pub const DEFAULT_EXPIRATION: u64 = 3600 * 24 * 30;
 /// Auth 中间件配置
 ///
 /// 对齐 PHP `addons\BaseController` + `app\common\service\jwt\Token` 的配置。
-#[derive(Debug, Clone)]
+///
+/// ## P1-SEC-12 安全说明
+///
+/// `Debug` 手动实现：`secret` 字段始终脱敏为 `"[REDACTED]"`，
+/// 防止 `{:?}` 格式化时将密钥泄漏到日志或 panic 信息中。
+#[derive(Clone)]
 pub struct AuthConfig {
     /// JWT 密钥（PHP `Token::$_config['sign']`）
     pub secret: String,
@@ -142,14 +161,25 @@ pub struct AuthConfig {
     pub allow_all_action: Vec<String>,
 }
 
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("secret", &"[REDACTED]")
+            .field("issuer", &self.issuer)
+            .field("expiration", &self.expiration)
+            .field("allow_all_action", &self.allow_all_action)
+            .finish()
+    }
+}
+
 impl Default for AuthConfig {
     fn default() -> Self {
         // 生产环境：优先从环境变量读取 JWT 密钥
-        // 测试环境：回退到 DEFAULT_SECRET 常量（PHP 原始值）以保持测试兼容
+        // 测试环境：运行时随机生成密钥（P1-SEC-09：不再硬编码任何秘密值）
         let secret = std::env::var("SZ_JWT_SECRET").unwrap_or_else(|_| {
             #[cfg(test)]
             {
-                DEFAULT_SECRET.to_string()
+                default_secret()
             }
             #[cfg(not(test))]
             {
@@ -669,7 +699,9 @@ mod tests {
     fn test_auth_config_default_matches_php() {
         // 对齐 PHP `Token::$_config` 默认值
         let config = AuthConfig::default();
-        assert_eq!(config.secret, "shengzhuang");
+        // P1-SEC-09: 测试模式下 secret 为运行时随机生成（不再硬编码 "shengzhuang"）
+        // 验证其长度符合 OsRng 32 字节 → 64 hex 字符的预期
+        assert_eq!(config.secret.len(), 64, "测试模式 secret 应为 64 字符随机密钥");
         assert_eq!(config.issuer, "https://mall.ljclz.shop");
         assert_eq!(config.expiration, 3600 * 24 * 30);
         // 对齐 PHP `BaseController::$allowAllAction`
@@ -706,7 +738,8 @@ mod tests {
     fn test_auth_default_constants_match_php() {
         // 对齐 PHP `Token::$_config` 常量
         assert_eq!(DEFAULT_ISSUER, "https://mall.ljclz.shop");
-        assert_eq!(DEFAULT_SECRET, "shengzhuang");
+        // P1-SEC-09: 生产占位符不再是实际密钥值
+        assert_eq!(DEFAULT_SECRET, "<must-set-SZ_JWT_SECRET-env>");
         assert_eq!(DEFAULT_EXPIRATION, 3600 * 24 * 30);
     }
 
@@ -1059,9 +1092,9 @@ mod tests {
     #[tokio::test]
     async fn test_auth_middleware_rejects_token_signed_with_default_secret_when_custom_configured()
     {
-        // 自定义密钥后，用默认密钥签发的 token 应被拒绝
+        // 自定义密钥后，用不同密钥签发的 token 应被拒绝
         let config = AuthConfig::default().with_secret("custom-secret");
-        let token = make_test_token("shengzhuang", &config.issuer, 1, 3600);
+        let token = make_test_token("wrong-secret", &config.issuer, 1, 3600);
         let app = build_app(config);
         let resp = app
             .oneshot(make_request_with_auth("GET", "/protected", &token))
@@ -1125,12 +1158,12 @@ mod tests {
     fn test_php_jwt_config_matches_rust() {
         // PHP `Token::$_config`
         let php_issuer = "https://mall.ljclz.shop";
-        let php_secret = "shengzhuang";
         let php_expire = 3600 * 24 * 30;
 
         // Rust 默认常量
         assert_eq!(php_issuer, DEFAULT_ISSUER);
-        assert_eq!(php_secret, DEFAULT_SECRET);
         assert_eq!(php_expire, DEFAULT_EXPIRATION);
+        // P1-SEC-09: DEFAULT_SECRET 在生产构建中为占位符，不再是硬编码密钥
+        assert_eq!(DEFAULT_SECRET, "<must-set-SZ_JWT_SECRET-env>");
     }
 }

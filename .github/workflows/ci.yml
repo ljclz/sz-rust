@@ -198,3 +198,43 @@ jobs:
         run: cargo install cargo-machete --locked
       - name: Run cargo-machete
         run: cargo machete --workspace
+
+  # 门禁 12：DB 集成测试（P1-TEST-02）
+  # 启动真实 MySQL 9.6 + PostgreSQL 18，运行 #[ignore] 的 DB 集成测试
+  # 覆盖：连接池 / 事务原子性 / SAVEPOINT / SQL 注入防护 / 业务 schema CRUD
+  db-integration:
+    name: DB Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9.6
+        env:
+          MYSQL_ROOT_PASSWORD: test123
+          MYSQL_DATABASE: sz_orm_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -ptest123"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test123
+          POSTGRES_DB: sz_orm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run DB integration tests (ignored)
+        run: cargo test --package sz-rust-sz300 --test db_integration_test -- --ignored --test-threads=1

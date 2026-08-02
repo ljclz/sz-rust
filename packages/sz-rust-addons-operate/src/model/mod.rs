@@ -39,7 +39,7 @@ pub use store::Store;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use sz_orm_core::repository::EntityAttributes;
+use sz_rust_core::orm::repository::EntityAttributes;
 
 /// 为模型实现 `EntityAttributes` trait（委托给 `ModelExt::get_column_value`）
 ///
@@ -55,13 +55,13 @@ use sz_orm_core::repository::EntityAttributes;
 macro_rules! impl_entity_attributes {
     ($model:ty) => {
         impl EntityAttributes for $model {
-            fn get_attribute(&self, field: &str) -> Option<sz_orm_core::Value> {
+            fn get_attribute(&self, field: &str) -> Option<sz_rust_core::orm::Value> {
                 if field == "id" {
                     // 主键别名：返回主键值（用于 InMemoryRepository::key_of）
-                    use sz_orm_core::Model;
-                    Some(sz_orm_core::Value::I64(self.pk()))
+                    use sz_rust_core::orm::Model;
+                    Some(sz_rust_core::orm::Value::I64(self.pk()))
                 } else {
-                    <Self as sz_orm_core::ModelExt>::get_column_value(self, field)
+                    <Self as sz_rust_core::orm::ModelExt>::get_column_value(self, field)
                 }
             }
         }
@@ -80,54 +80,101 @@ impl_entity_attributes!(level::Level);
 impl_entity_attributes!(rentarea::Rentarea);
 impl_entity_attributes!(store::Store);
 
-/// 业务模型共享的元数据补全宏
+/// 真实 RelationLoader 实现宏 — H-1 修复
 ///
-/// 5 个模型都需要实现 `RelationLoader`，且当前关联关系尚未实现，
-/// 统一返回空实现。完整接入关联关系后移除。
+/// 为业务模型实现真实的关联数据加载能力：
+/// - `get_relation(name)`: 从 `self.relations` HashMap 读取已加载的关联数据
+/// - `set_relation_data(name, data)`: 将关联数据写入 `self.relations` HashMap
+/// - `get_relation_fk_value(fk_name)`: 从 `self.data_map()` 读取外键字段的字符串值
 ///
-/// **注意**：宏内使用完全限定路径 `sz_orm_core::RelationLoader` 和 `sz_orm_core::Value`，
-/// 避免在调用点（如 `customer.rs`）依赖 trait/类型已导入。
+/// ## 使用要求
 ///
-/// ## `from_value` 共享行为说明
+/// 模型必须满足以下条件：
+/// 1. 拥有 `relations: HashMap<String, sz_rust_core::orm::Value>` 字段
+/// 2. 实现 `sz_rust_core::model::Accessor` trait（提供 `data_map()` 方法）
 ///
-/// 5 个业务模型的 `ModelExt::from_value` 实现采用相同模式：
+/// ## 外键值提取策略
+///
+/// `get_relation_fk_value` 通过 `Accessor::data_map()` 获取字段值，
+/// 将 JSON Value 转为字符串：
+/// - `Null` → 空字符串（表示无外键关联）
+/// - `String(s)` → s（直接返回字符串值）
+/// - `Number(n)` → n.to_string()（数字转字符串）
+/// - `Bool(b)` → b.to_string()
+/// - 其他 → JSON 序列化字符串
+///
+/// 这与 sz-orm-core 的 `BelongsTo` 关系期望一致：
+/// 空字符串表示无关联，非空字符串用于 SQL 查询。
+///
+/// ## 示例
 ///
 /// ```ignore
-/// fn from_value(&mut self, map: HashMap<String, sz_orm_core::Value>) {
-///     for (k, v) in map {
-///         let json_val = match v {
-///             sz_orm_core::Value::I64(i) => json!(i),
-///             sz_orm_core::Value::I32(i) => json!(i),
-///             sz_orm_core::Value::F64(f) => json!(f),
-///             sz_orm_core::Value::String(s) => json!(s),
-///             sz_orm_core::Value::Array(_) => json!(null),  // 防御性：业务字段均为标量
-///             other => serde_json::to_value(&other).unwrap_or(json!(null)),
-///         };
-///         self.data.insert(k, json_val);
-///     }
+/// pub struct Customer {
+///     data: HashMap<String, Value>,
+///     get_cache: HashMap<String, Value>,
+///     append_state: AppendState,
+///     relations: HashMap<String, sz_rust_core::orm::Value>,  // 新增字段
 /// }
-/// ```
 ///
-/// **`Value::Array(_) => json!(null)` 防御性处理说明**：
-/// 5 个业务模型（Customer/Contract/Rentarea/Dept/Category）的所有字段均为标量
-/// （i64/f64/String），数据库 schema 中不存在数组类型字段。
-/// 若 `from_value` 收到 `Value::Array`，说明上游传入非法数据，
-/// 统一映射为 `null`（避免 panic，由后续 `get_column_value` 的 `as_i64`/`as_f64`/`as_str` 返回 `None` 兜底）。
-macro_rules! impl_empty_relation_loader {
+/// impl_relation_loader!(Customer);
+/// ```
+macro_rules! impl_relation_loader {
     ($model:ty) => {
-        impl sz_orm_core::RelationLoader for $model {
-            fn get_relation(&self, _name: &str) -> Option<&sz_orm_core::Value> {
-                None
+        impl sz_rust_core::orm::RelationLoader for $model {
+            /// 获取已加载的关联数据
+            ///
+            /// # 参数
+            ///
+            /// - `name`: 关联名称（如 "rentarea", "logs", "customer"）
+            ///
+            /// # 返回
+            ///
+            /// - `Some(&Value)`: 已加载的关联数据
+            /// - `None`: 关联未加载
+            fn get_relation(&self, name: &str) -> Option<&sz_rust_core::orm::Value> {
+                self.relations.get(name)
             }
-            fn set_relation_data(&mut self, _name: &str, _data: sz_orm_core::Value) {}
-            fn get_relation_fk_value(&self, _fk_name: &str) -> String {
-                String::new()
+
+            /// 写入已加载的关联数据
+            ///
+            /// # 参数
+            ///
+            /// - `name`: 关联名称
+            /// - `data`: 关联数据（ORM Value 类型）
+            fn set_relation_data(&mut self, name: &str, data: sz_rust_core::orm::Value) {
+                self.relations.insert(name.to_string(), data);
+            }
+
+            /// 获取关系对应的外键值
+            ///
+            /// 从 `self.data_map()` 读取指定外键字段的值并转为字符串。
+            /// 空字符串表示无外键关联（`BelongsTo` 关系会跳过查询）。
+            ///
+            /// # 参数
+            ///
+            /// - `fk_name`: 外键字段名（如 "customer_id", "contract_id", "dept_id"）
+            ///
+            /// # 返回
+            ///
+            /// 外键值的字符串表示，字段不存在或为 null 时返回空字符串
+            fn get_relation_fk_value(&self, fk_name: &str) -> String {
+                use sz_rust_core::model::Accessor;
+                self.data_map()
+                    .get(fk_name)
+                    .map(|v| match v {
+                        serde_json::Value::Null => String::new(),
+                        serde_json::Value::String(s) => s.clone(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Bool(b) => b.to_string(),
+                        other => other.to_string(),
+                    })
+                    .unwrap_or_default()
             }
         }
     };
 }
 
-pub(crate) use impl_empty_relation_loader;
+pub(crate) use impl_relation_loader;
 
 /// 业务模型共享工具：从 HashMap 取 i64
 pub(crate) fn get_i64(data: &HashMap<String, Value>, key: &str) -> Option<i64> {

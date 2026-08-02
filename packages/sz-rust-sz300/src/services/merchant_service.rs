@@ -46,35 +46,44 @@ impl MerchantService {
     pub async fn list(pool: &Pool, page: i64, page_size: i64) -> Result<MerchantPage, String> {
         let offset = (page - 1).max(0) * page_size;
 
-        let mut conn = pool.acquire().await.map_err(|e| {
-            tracing::error!(error = %e, "商户列表获取 DB 连接失败");
-            "数据库连接失败".to_string()
-        })?;
-
-        // 总数查询
-        let count_sql = "SELECT COUNT(*) as total FROM merchant";
-        let count_rows = conn.query(count_sql).await.map_err(|e| {
-            tracing::error!(error = %e, "商户列表 COUNT 查询失败");
-            "查询失败".to_string()
-        })?;
-        let total: i64 = count_rows
-            .first()
-            .and_then(|row| row.get("total"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
-        // 列表查询 — LIMIT/OFFSET 参数化
-        let list_sql = "SELECT * FROM merchant ORDER BY merchant_id DESC LIMIT ? OFFSET ?";
-        let list_params = [Value::I64(page_size), Value::I64(offset)];
-        let rows = conn
-            .query_with_params(list_sql, &list_params)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "商户列表查询失败");
-                "查询失败".to_string()
+        // P1-SEC-06: 外部 IO 超时保护（默认 5s）
+        sz_rust_core::runtime::spawn::with_timeout(async {
+            let mut conn = pool.acquire().await.map_err(|e| {
+                tracing::error!(error = %e, "商户列表获取 DB 连接失败");
+                "数据库连接失败".to_string()
             })?;
 
-        Ok(MerchantPage { list: rows, total })
+            // 总数查询
+            let count_sql = "SELECT COUNT(*) as total FROM merchant";
+            let count_rows = conn.query(count_sql).await.map_err(|e| {
+                tracing::error!(error = %e, "商户列表 COUNT 查询失败");
+                "查询失败".to_string()
+            })?;
+            let total: i64 = count_rows
+                .first()
+                .and_then(|row| row.get("total"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+
+            // 列表查询 — LIMIT/OFFSET 参数化
+            let list_sql = "SELECT merchant_id, merchant_name, status, created_at FROM merchant ORDER BY merchant_id DESC LIMIT ? OFFSET ?";
+            let list_params = [Value::I64(page_size), Value::I64(offset)];
+            let rows = conn
+                .query_with_params(list_sql, &list_params)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "商户列表查询失败");
+                    "查询失败".to_string()
+                })?;
+
+            Ok(MerchantPage { list: rows, total })
+        })
+        .await
+        .map_err(|_| {
+            tracing::error!("商户列表查询超时（>5s）");
+            "服务暂时不可用".to_string()
+        })?
+        .map_err(|e| e)
     }
 
     /// 根据 merchant_id 查询单个商户

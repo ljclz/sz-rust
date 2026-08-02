@@ -184,11 +184,33 @@ fn capitalize_first(s: &str) -> String {
 ///     .post("/echo", |Json(v): Json<serde_json::Value>| async move { Json(v) })
 ///     .build();
 /// ```
-pub struct RouterBuilder {
-    inner: Router,
+/// 路由构建器（泛型状态支持）
+///
+/// `S` 为应用共享状态类型，由首次注册的路由 handler 推断。
+/// 当 handler 使用 `axum::extract::State<S>` 时，`S` 自动确定为该状态类型。
+///
+/// ## 用法
+///
+/// ```rust,ignore
+/// // 无状态路由
+/// let router = RouterBuilder::new()
+///     .get("/ping", ping_handler)
+///     .build();
+///
+/// // 有状态路由（S 由 handler 推断为 AppState）
+/// let router = RouterBuilder::new()
+///     .get("/items", list_items)  // list_items 使用 State<AppState>
+///     .with_state(AppState::default())
+///     .build();
+/// ```
+pub struct RouterBuilder<S = ()> {
+    inner: Router<S>,
 }
 
-impl RouterBuilder {
+impl<S> RouterBuilder<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
     /// 创建空的 RouterBuilder
     pub fn new() -> Self {
         Self {
@@ -197,14 +219,32 @@ impl RouterBuilder {
     }
 
     /// 从已有 Router 起步
-    pub fn with_router(router: Router) -> Self {
-        Self { inner: router }
+    pub fn with_router(inner: Router<S>) -> Self {
+        Self { inner }
+    }
+
+    /// 注入应用状态并转换状态类型
+    ///
+    /// 当注册的 handler 使用了 `axum::extract::State<S>` 时调用，
+    /// 将 `RouterBuilder<S>` 转换为 `RouterBuilder<S2>`（通常 `S2 = S`）。
+    ///
+    /// ## 用法
+    ///
+    /// ```rust,ignore
+    /// let builder = RouterBuilder::new()
+    ///     .get("/items", list_items)
+    ///     .with_state(AppState { db: pool });
+    /// ```
+    pub fn with_state<S2>(self, state: S) -> RouterBuilder<S2> {
+        RouterBuilder {
+            inner: self.inner.with_state(state),
+        }
     }
 
     /// 注册 GET 路由
     pub fn get<H, T>(self, path: &str, handler: H) -> Self
     where
-        H: axum::handler::Handler<T, ()>,
+        H: axum::handler::Handler<T, S>,
         T: 'static,
     {
         Self {
@@ -215,7 +255,7 @@ impl RouterBuilder {
     /// 注册 POST 路由
     pub fn post<H, T>(self, path: &str, handler: H) -> Self
     where
-        H: axum::handler::Handler<T, ()>,
+        H: axum::handler::Handler<T, S>,
         T: 'static,
     {
         Self {
@@ -226,7 +266,7 @@ impl RouterBuilder {
     /// 注册 PUT 路由
     pub fn put<H, T>(self, path: &str, handler: H) -> Self
     where
-        H: axum::handler::Handler<T, ()>,
+        H: axum::handler::Handler<T, S>,
         T: 'static,
     {
         Self {
@@ -237,11 +277,35 @@ impl RouterBuilder {
     /// 注册 DELETE 路由
     pub fn delete<H, T>(self, path: &str, handler: H) -> Self
     where
-        H: axum::handler::Handler<T, ()>,
+        H: axum::handler::Handler<T, S>,
         T: 'static,
     {
         Self {
             inner: self.inner.route(path, route_delete(handler)),
+        }
+    }
+
+    /// 注册 WebSocket 路由（原生框架集成，无需独立端口）
+    ///
+    /// 在主 HTTP 端口上处理 WebSocket 升级请求（如 `GET /ws/chat`）。
+    /// 对齐 PHP Workerman `websocket://` 协议，但复用 HTTP 端口。
+    ///
+    /// ## 用法
+    ///
+    /// ```ignore
+    /// use sz_rust_core::router::RouterBuilder;
+    /// use sz_rust_core::websocket_route::EchoWsHandler;
+    ///
+    /// let router = RouterBuilder::new()
+    ///     .ws("/ws/echo", EchoWsHandler::new())
+    ///     .build();
+    /// ```
+    pub fn ws<H: crate::websocket_route::WsHandler>(self, path: &str, handler: H) -> Self {
+        let mr: axum::routing::MethodRouter<()> =
+            crate::websocket_route::ws_handler(handler);
+        let mr_s: axum::routing::MethodRouter<S> = mr.with_state(());
+        Self {
+            inner: self.inner.route(path, mr_s),
         }
     }
 
@@ -263,14 +327,14 @@ impl RouterBuilder {
     }
 
     /// 合并另一个 Router
-    pub fn merge(self, other: Router) -> Self {
+    pub fn merge(self, other: Router<S>) -> Self {
         Self {
             inner: self.inner.merge(other),
         }
     }
 
     /// 构建最终的 axum::Router
-    pub fn build(self) -> Router {
+    pub fn build(self) -> Router<S> {
         self.inner
     }
 }

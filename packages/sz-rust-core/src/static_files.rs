@@ -297,6 +297,15 @@ pub fn is_path_safe(path: &Path, root: &Path) -> bool {
     canonical_path.starts_with(&canonical_root)
 }
 
+/// 检查路径是否包含 `..` 组件（路径遍历特征）
+///
+/// P1-PATH-01 防御性检查：即使调用方遗漏 `is_path_safe` 校验，
+/// `serve_file` / `serve_file_with_cache` 自身也拒绝包含父目录跳转的路径。
+fn has_traversal_component(path: &Path) -> bool {
+    use std::path::Component;
+    path.components().any(|c| matches!(c, Component::ParentDir))
+}
+
 /// 格式化 HTTP 日期（对齐 PHP `date('D, d M Y H:i:s', $time) . ' GMT'`）
 ///
 /// PHP 使用服务器时区，但 Last-Modified 头必须用 GMT。
@@ -384,18 +393,24 @@ fn secs_to_date_time(secs: u64) -> (u64, u64, u64, u64, u64, u64, u64) {
 /// - 304 Not Modified — `If-Modified-Since` 匹配
 /// - 404 Not Found — 文件不存在
 /// - 416 Range Not Satisfiable — Range 超出文件大小
-pub fn serve_file(path: &Path, headers: &axum::http::HeaderMap) -> axum::response::Response {
+pub async fn serve_file(path: &Path, headers: &axum::http::HeaderMap) -> axum::response::Response {
     use axum::body::Body;
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
+
+    // P1-PATH-01: 防御性路径遍历检查
+    // 即使调用方遗漏 is_path_safe 校验，也拒绝包含 .. 的路径
+    if has_traversal_component(path) {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
 
     // 1. 检查文件存在
     if !path.is_file() {
         return (StatusCode::NOT_FOUND, "File not found").into_response();
     }
 
-    // 2. 读取文件元数据
-    let metadata = match std::fs::metadata(path) {
+    // 2. 读取文件元数据（P1-IO-02：使用 tokio::fs 避免阻塞 async 运行时）
+    let metadata = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(_) => {
             return (
@@ -431,8 +446,8 @@ pub fn serve_file(path: &Path, headers: &axum::http::HeaderMap) -> axum::respons
         .clone()
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
-    // 5. 读取文件内容
-    let content = match std::fs::read(path) {
+    // 5. 读取文件内容（P1-IO-02：使用 tokio::fs 避免阻塞 async 运行时）
+    let content = match tokio::fs::read(path).await {
         Ok(c) => c,
         Err(_) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response()
@@ -536,7 +551,7 @@ pub fn serve_file(path: &Path, headers: &axum::http::HeaderMap) -> axum::respons
 /// # 返回
 /// - 200/206/304 — 文件响应
 /// - 404 — 文件不存在或路径不安全
-pub fn static_handler(
+pub async fn static_handler(
     root: &Path,
     uri_path: &str,
     headers: &axum::http::HeaderMap,
@@ -562,7 +577,7 @@ pub fn static_handler(
     }
 
     // 5. 调用 serve_file
-    serve_file(&file_path, headers)
+    serve_file(&file_path, headers).await
 }
 
 /// 简单的 percent-decode 实现（对齐 PHP `urldecode`）
@@ -838,7 +853,7 @@ pub fn extract_version_hash(path: &str) -> Option<(String, String)> {
 /// - 304 Not Modified — `If-Modified-Since` 或 `If-None-Match` 匹配
 /// - 404 Not Found — 文件不存在
 /// - 416 Range Not Satisfiable — Range 超出文件大小
-pub fn serve_file_with_cache(
+pub async fn serve_file_with_cache(
     path: &Path,
     headers: &axum::http::HeaderMap,
     cache_config: Option<&CacheControlConfig>,
@@ -847,13 +862,18 @@ pub fn serve_file_with_cache(
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
 
+    // P1-PATH-01: 防御性路径遍历检查
+    if has_traversal_component(path) {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+
     // 1. 检查文件存在
     if !path.is_file() {
         return (StatusCode::NOT_FOUND, "File not found").into_response();
     }
 
-    // 2. 读取文件元数据
-    let metadata = match std::fs::metadata(path) {
+    // 2. 读取文件元数据（P1-IO-02：使用 tokio::fs 避免阻塞 async 运行时）
+    let metadata = match tokio::fs::metadata(path).await {
         Ok(m) => m,
         Err(_) => {
             return (
@@ -943,8 +963,8 @@ pub fn serve_file_with_cache(
         .clone()
         .unwrap_or_else(|| "application/octet-stream".to_string());
 
-    // 7. 读取文件内容
-    let content = match std::fs::read(path) {
+    // 7. 读取文件内容（P1-IO-02：使用 tokio::fs 避免阻塞 async 运行时）
+    let content = match tokio::fs::read(path).await {
         Ok(c) => c,
         Err(_) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file").into_response()
@@ -1636,7 +1656,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -1649,7 +1669,7 @@ mod tests {
         let file_path = dir.path().join("nonexistent.txt");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1659,7 +1679,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         let ct = resp
             .headers()
             .get("content-type")
@@ -1675,7 +1695,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         let lm = resp.headers().get("last-modified");
         assert!(lm.is_some(), "Last-Modified header should be set");
         let lm_str = lm.unwrap().to_str().unwrap();
@@ -1688,7 +1708,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         let ar = resp
             .headers()
             .get("accept-ranges")
@@ -1705,7 +1725,7 @@ mod tests {
 
         // 第一次请求获取 Last-Modified
         let headers1 = axum::http::HeaderMap::new();
-        let resp1 = serve_file(&file_path, &headers1);
+        let resp1 = serve_file(&file_path, &headers1).await;
         let last_modified = resp1
             .headers()
             .get("last-modified")
@@ -1720,7 +1740,7 @@ mod tests {
             axum::http::header::IF_MODIFIED_SINCE,
             axum::http::HeaderValue::from_str(&last_modified).unwrap(),
         );
-        let resp2 = serve_file(&file_path, &headers2);
+        let resp2 = serve_file(&file_path, &headers2).await;
         assert_eq!(resp2.status(), StatusCode::NOT_MODIFIED);
 
         let bytes = resp2.into_body().collect().await.unwrap().to_bytes();
@@ -1737,7 +1757,7 @@ mod tests {
             axum::http::header::IF_MODIFIED_SINCE,
             axum::http::HeaderValue::from_static("Mon, 01 Jan 2000 00:00:00 GMT"),
         );
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
@@ -1758,7 +1778,7 @@ mod tests {
             axum::http::HeaderValue::from_static("bytes=5-9"),
         );
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
 
         let cr = resp
@@ -1793,7 +1813,7 @@ mod tests {
             axum::http::HeaderValue::from_static("bytes=10-"),
         );
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
 
         let cr = resp
@@ -1820,7 +1840,7 @@ mod tests {
             axum::http::HeaderValue::from_static("bytes=-5"),
         );
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
 
         let cr = resp
@@ -1847,7 +1867,7 @@ mod tests {
             axum::http::HeaderValue::from_static("bytes=100-200"),
         );
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
 
         let cr = resp
@@ -1872,7 +1892,7 @@ mod tests {
             axum::http::HeaderValue::from_static("0-499"),
         );
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         // 非法格式忽略 Range，返回完整文件
         assert_eq!(resp.status(), StatusCode::OK);
 
@@ -1889,7 +1909,7 @@ mod tests {
         let dir = create_test_dir();
         let headers = axum::http::HeaderMap::new();
 
-        let resp = static_handler(dir.path(), "/style.css", &headers);
+        let resp = static_handler(dir.path(), "/style.css", &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -1901,7 +1921,7 @@ mod tests {
         let dir = create_test_dir();
         let headers = axum::http::HeaderMap::new();
 
-        let resp = static_handler(dir.path(), "/js/app.js", &headers);
+        let resp = static_handler(dir.path(), "/js/app.js", &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -1913,7 +1933,7 @@ mod tests {
         let dir = create_test_dir();
         let headers = axum::http::HeaderMap::new();
 
-        let resp = static_handler(dir.path(), "/nonexistent.txt", &headers);
+        let resp = static_handler(dir.path(), "/nonexistent.txt", &headers).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1926,10 +1946,72 @@ mod tests {
         fs::write(&sensitive, "secret").unwrap();
 
         let headers = axum::http::HeaderMap::new();
-        let resp = static_handler(root, "/../secret.txt", &headers);
+        let resp = static_handler(root, "/../secret.txt", &headers).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
         let _ = fs::remove_file(&sensitive);
+    }
+
+    // ====================================================================
+    // P1-PATH-01: serve_file / serve_file_with_cache 防御性路径遍历检查
+    // ====================================================================
+
+    #[tokio::test]
+    async fn test_p1_path_01_serve_file_rejects_parent_dir_component() {
+        // 即使目标文件实际存在，包含 .. 的路径也应被拒绝
+        let dir = create_test_dir();
+        // 构造一个包含 .. 但实际指向有效文件的路径
+        let file_path = dir.path().join("subdir/../style.css");
+        // 先确保文件存在（subdir/style.css 不存在，但 style.css 在根目录）
+        // 这里 .. 解析后指向 style.css，但 serve_file 应在解析前拒绝
+        let headers = axum::http::HeaderMap::new();
+        let resp = serve_file(&file_path, &headers).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "P1-PATH-01: serve_file 应拒绝包含 .. 组件的路径，即使解析后文件存在"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p1_path_01_serve_file_with_cache_rejects_parent_dir_component() {
+        let dir = create_test_dir();
+        let file_path = dir.path().join("subdir/../style.css");
+        let headers = axum::http::HeaderMap::new();
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "P1-PATH-01: serve_file_with_cache 应拒绝包含 .. 组件的路径"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p1_path_01_serve_file_allows_clean_path() {
+        // 确保正常路径不受影响
+        let dir = create_test_dir();
+        let file_path = dir.path().join("style.css");
+        let headers = axum::http::HeaderMap::new();
+        let resp = serve_file(&file_path, &headers).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "P1-PATH-01: 不含 .. 的正常路径应正常工作"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p1_path_01_serve_file_rejects_deep_traversal() {
+        // 多层 .. 也应被拒绝
+        let dir = create_test_dir();
+        let file_path = dir.path().join("a/../../b/../../etc/passwd");
+        let headers = axum::http::HeaderMap::new();
+        let resp = serve_file(&file_path, &headers).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "P1-PATH-01: 多层 .. 路径应被拒绝"
+        );
     }
 
     #[tokio::test]
@@ -1938,7 +2020,7 @@ mod tests {
         let headers = axum::http::HeaderMap::new();
 
         // 带 query string 的请求
-        let resp = static_handler(dir.path(), "/style.css?v=123", &headers);
+        let resp = static_handler(dir.path(), "/style.css?v=123", &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -1953,7 +2035,7 @@ mod tests {
 
         let headers = axum::http::HeaderMap::new();
         // %20 = 空格
-        let resp = static_handler(dir.path(), "/my%20file.css", &headers);
+        let resp = static_handler(dir.path(), "/my%20file.css", &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -2012,7 +2094,7 @@ mod tests {
         fs::write(&file_path, "unknown content").unwrap();
 
         let headers = axum::http::HeaderMap::new();
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         // 未知 MIME 类型应设置 Content-Disposition
@@ -2038,7 +2120,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file(&file_path, &headers);
+        let resp = serve_file(&file_path, &headers).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         // 已知 MIME 类型不应设置 Content-Disposition
@@ -2371,7 +2453,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let cc = resp.headers().get("cache-control");
@@ -2392,7 +2474,7 @@ mod tests {
         let headers = axum::http::HeaderMap::new();
         let config = CacheControlConfig::new().with_public().with_max_age(3600);
 
-        let resp = serve_file_with_cache(&file_path, &headers, Some(&config));
+        let resp = serve_file_with_cache(&file_path, &headers, Some(&config)).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let cc = resp
@@ -2411,7 +2493,7 @@ mod tests {
         let file_path = dir.path().join("style.css");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let etag = resp.headers().get("etag").unwrap().to_str().unwrap();
@@ -2429,7 +2511,7 @@ mod tests {
 
         // 第一次请求获取 ETag
         let headers1 = axum::http::HeaderMap::new();
-        let resp1 = serve_file_with_cache(&file_path, &headers1, None);
+        let resp1 = serve_file_with_cache(&file_path, &headers1, None).await;
         let etag = resp1
             .headers()
             .get("etag")
@@ -2444,7 +2526,7 @@ mod tests {
             axum::http::header::IF_NONE_MATCH,
             axum::http::HeaderValue::from_str(&etag).unwrap(),
         );
-        let resp2 = serve_file_with_cache(&file_path, &headers2, None);
+        let resp2 = serve_file_with_cache(&file_path, &headers2, None).await;
         assert_eq!(resp2.status(), StatusCode::NOT_MODIFIED);
 
         // 304 应包含 ETag
@@ -2473,7 +2555,7 @@ mod tests {
             axum::http::header::IF_NONE_MATCH,
             axum::http::HeaderValue::from_static("*"),
         );
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
     }
 
@@ -2488,7 +2570,7 @@ mod tests {
             axum::http::header::IF_NONE_MATCH,
             axum::http::HeaderValue::from_static("W/\"0-0\""),
         );
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
@@ -2501,7 +2583,7 @@ mod tests {
         // 先获取 ETag
         let headers1 = axum::http::HeaderMap::new();
         let config = CacheControlConfig::new().with_public().with_max_age(3600);
-        let resp1 = serve_file_with_cache(&file_path, &headers1, Some(&config));
+        let resp1 = serve_file_with_cache(&file_path, &headers1, Some(&config)).await;
         let etag = resp1
             .headers()
             .get("etag")
@@ -2516,7 +2598,7 @@ mod tests {
             axum::http::header::IF_NONE_MATCH,
             axum::http::HeaderValue::from_str(&etag).unwrap(),
         );
-        let resp2 = serve_file_with_cache(&file_path, &headers2, Some(&config));
+        let resp2 = serve_file_with_cache(&file_path, &headers2, Some(&config)).await;
         assert_eq!(resp2.status(), StatusCode::NOT_MODIFIED);
 
         let cc = resp2
@@ -2536,7 +2618,7 @@ mod tests {
 
         // 先获取 Last-Modified
         let headers1 = axum::http::HeaderMap::new();
-        let resp1 = serve_file_with_cache(&file_path, &headers1, None);
+        let resp1 = serve_file_with_cache(&file_path, &headers1, None).await;
         let last_modified = resp1
             .headers()
             .get("last-modified")
@@ -2551,7 +2633,7 @@ mod tests {
             axum::http::header::IF_MODIFIED_SINCE,
             axum::http::HeaderValue::from_str(&last_modified).unwrap(),
         );
-        let resp2 = serve_file_with_cache(&file_path, &headers2, None);
+        let resp2 = serve_file_with_cache(&file_path, &headers2, None).await;
         assert_eq!(resp2.status(), StatusCode::NOT_MODIFIED);
     }
 
@@ -2564,7 +2646,7 @@ mod tests {
 
         // 获取正确的 Last-Modified
         let headers1 = axum::http::HeaderMap::new();
-        let resp1 = serve_file_with_cache(&file_path, &headers1, None);
+        let resp1 = serve_file_with_cache(&file_path, &headers1, None).await;
         let last_modified = resp1
             .headers()
             .get("last-modified")
@@ -2584,7 +2666,7 @@ mod tests {
             axum::http::header::IF_MODIFIED_SINCE,
             axum::http::HeaderValue::from_str(&last_modified).unwrap(),
         );
-        let resp2 = serve_file_with_cache(&file_path, &headers2, None);
+        let resp2 = serve_file_with_cache(&file_path, &headers2, None).await;
         assert_eq!(
             resp2.status(),
             StatusCode::OK,
@@ -2598,7 +2680,7 @@ mod tests {
         let file_path = dir.path().join("nonexistent.txt");
         let headers = axum::http::HeaderMap::new();
 
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
@@ -2616,7 +2698,7 @@ mod tests {
         );
 
         let config = CacheControlConfig::new().with_max_age(3600);
-        let resp = serve_file_with_cache(&file_path, &headers, Some(&config));
+        let resp = serve_file_with_cache(&file_path, &headers, Some(&config)).await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
 
         let cr = resp
@@ -2659,7 +2741,7 @@ mod tests {
             axum::http::HeaderValue::from_static("bytes=100-200"),
         );
 
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
 
         let cr = resp
@@ -2679,7 +2761,7 @@ mod tests {
         fs::write(&file_path, b"unknown content").unwrap();
 
         let headers = axum::http::HeaderMap::new();
-        let resp = serve_file_with_cache(&file_path, &headers, None);
+        let resp = serve_file_with_cache(&file_path, &headers, None).await;
         assert_eq!(resp.status(), StatusCode::OK);
 
         let cd = resp

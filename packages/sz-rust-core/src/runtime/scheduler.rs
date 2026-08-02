@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-use sz_orm_scheduler::{CronScheduler, JobHandler, ScheduledTask, Scheduler, SchedulerError};
+use crate::orm::{CronScheduler, JobHandler, ScheduledTask, Scheduler, SchedulerError};
 
 /// 调度器运行时配置
 #[derive(Debug, Clone)]

@@ -32,14 +32,32 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::Value as OrmValue;
-use sz_orm_core::{Model as _, ModelExt as _};
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::Value as OrmValue;
+use sz_rust_core::orm::{Model as _, ModelExt as _};
 
-use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
-use crate::model::{Contract, Customer};
+use crate::controller::common::{
+    fetch_list_as_json, get_app_id, get_i64_param, get_str_param, parse_form_data,
+};
+use crate::model::{Category, Contract, Customer, Dept, Level};
+
+/// 从环境变量读取银行信息（H-4 修复：移除硬编码生产银行账号）
+///
+/// 环境变量：
+/// - `BANK_NAME`：银行名称（默认 "ccb"）
+/// - `BANK_CARD`：银行账号（默认空字符串）
+/// - `BANK_ACCOUNT`：银行账户（默认空字符串）
+///
+/// 生产环境通过环境变量注入真实值，源码中不再包含敏感数据。
+fn bank_info_from_config() -> Value {
+    json!({
+        "bank_name": std::env::var("BANK_NAME").unwrap_or_else(|_| "ccb".to_string()),
+        "bank_card": std::env::var("BANK_CARD").unwrap_or_default(),
+        "bank_account": std::env::var("BANK_ACCOUNT").unwrap_or_default(),
+    })
+}
 
 /// Customer 控制器 — 对齐 PHP `Customer` 控制器
 pub struct CustomerController;
@@ -69,17 +87,32 @@ impl CustomerController {
     /// }
     /// ```
     #[tracing::instrument(skip_all)]
-    pub async fn base(&self, req: Request<Body>) -> Response {
-        let _param = match self.post_data(req).await {
+    pub async fn base(
+        &self,
+        req: Request<Body>,
+        dept_repo: &dyn Repository<Dept, Key = OrmValue>,
+        cat_repo: &dyn Repository<Category, Key = OrmValue>,
+        level_repo: &dyn Repository<Level, Key = OrmValue>,
+    ) -> Response {
+        let param = match self.post_data(req).await {
             Ok(p) => p,
             Err(e) => return self.render_error(format!("参数解析失败: {e}"), json!({}), 0),
         };
-        // PHP 整合部门/分类/等级/状态等基础数据，Rust 端返回基础结构，
-        // 业务层（apps/oapc）可注入具体 Repository 补全 deptList/catList/levelList。
+        let app_id = get_app_id(&param);
+
+        // H-2 修复：从 Repository 查询真实数据（对齐 PHP Dept::getLightList / Category::getAll / Level::getAll）
+        let conditions = [
+            WhereCondition::new("app_id", WhereOp::Eq, OrmValue::I64(app_id)),
+            WhereCondition::new("is_delete", WhereOp::Eq, OrmValue::I64(0)),
+        ];
+        let dept_list = fetch_list_as_json(dept_repo, &conditions);
+        let cat_list = fetch_list_as_json(cat_repo, &conditions);
+        let level_list = fetch_list_as_json(level_repo, &conditions);
+
         let result = json!({
-            "deptList": [],
-            "catList": [],
-            "levelList": [],
+            "deptList": dept_list,
+            "catList": cat_list,
+            "levelList": level_list,
             "statusList": [
                 {"code": 0, "name": "禁用"},
                 {"code": 1, "name": "启用"}
@@ -92,11 +125,7 @@ impl CustomerController {
                 {"code": 0, "name": "未同步"},
                 {"code": 1, "name": "已同步"}
             ],
-            "bankInfo": {
-                "bank_name": "ccb",
-                "bank_card": "105011773995373",
-                "bank_account": "090378126"
-            }
+            "bankInfo": bank_info_from_config()
         });
         self.render_success("", json!({"result": result}))
     }
@@ -517,21 +546,21 @@ impl CustomerController {
             ));
         }
 
-        let mut items: Vec<Value> = match repo.find_by(&conditions) {
+        // keyword 单字段 LIKE 下推到 Repository（对齐 PHP `customer_name LIKE '%keyword%'`）
+        let or_filter: Vec<WhereCondition> = if keyword.is_empty() {
+            Vec::new()
+        } else {
+            vec![WhereCondition::new(
+                "customer_name",
+                WhereOp::Like,
+                OrmValue::String(format!("%{}%", keyword.trim())),
+            )]
+        };
+
+        let mut items: Vec<Value> = match repo.find_by_with_or_filter(&conditions, &or_filter) {
             Ok(list) => list.into_iter().map(|c| c.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // keyword 模糊匹配（简化：仅 customer_name）
-        if !keyword.is_empty() {
-            let kw = keyword.trim().to_lowercase();
-            items.retain(|item| {
-                item.get("customer_name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_lowercase().contains(&kw))
-                    .unwrap_or(false)
-            });
-        }
 
         // PHP 按 create_time desc 排序（简化：按 customer_id desc）
         items.sort_by(|a, b| {
@@ -787,7 +816,7 @@ impl CustomerController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_customer(id: i64, name: &str, app_id: i64, dept_id: i64) -> Customer {
         Customer::new()
@@ -949,5 +978,129 @@ mod tests {
         let repo = make_repo();
         let result = CustomerController::get_list(&repo, &json!({"app_id": 10001}), "list");
         assert!(result["list"].is_array());
+    }
+
+    // ========================================================================
+    // 失败路径测试 — 覆盖控制器错误响应分支
+    // ========================================================================
+
+    use http_body_util::BodyExt;
+
+    fn build_json_request(body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn parse_response(resp: Response) -> Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn test_edit_returns_error_when_customer_id_missing() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "{\"customer_name\":\"test\"}"}));
+        let resp = ctrl.edit(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "customer_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_edit_returns_error_when_customer_not_found() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "customer_id": 999,
+            "formData": "{\"customer_name\":\"test\"}"
+        }));
+        let resp = ctrl.edit(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_del_returns_error_when_customer_id_missing() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.del(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "customer_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_del_returns_error_when_customer_not_found() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"customer_id": 999}));
+        let resp = ctrl.del(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_returns_error_when_customer_id_missing() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.cancel(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "customer_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_returns_error_when_customer_not_found() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"customer_id": 999}));
+        let resp = ctrl.cancel(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_select_dept_list_returns_error_when_dept_id_missing() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"app_id": 10001}));
+        let resp = ctrl.select_dept_list(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "dept_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_bind_returns_error_when_customer_id_missing() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "{\"rentarea_ids\":\"1,2\"}"}));
+        let resp = ctrl.bind(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "customer_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_bind_returns_error_when_customer_not_found() {
+        let ctrl = CustomerController;
+        let repo = make_repo();
+        let req = build_json_request(
+            json!({"formData": "{\"customer_id\":999,\"rentarea_ids\":\"1,2\"}"}),
+        );
+        let resp = ctrl.bind(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
     }
 }

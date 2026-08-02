@@ -23,11 +23,11 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::ModelExt as _;
-use sz_orm_core::Value as OrmValue;
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::ModelExt as _;
+use sz_rust_core::orm::Value as OrmValue;
 
 use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
 use crate::model::ContractLog;
@@ -168,21 +168,19 @@ impl ContractLogController {
                 OrmValue::I64(log_type),
             ));
         }
+        // stat_day 字符串精确匹配下推到 Repository（对齐 PHP `where stat_day=?`）
+        if let Some(stat_day) = get_str_param(param, "stat_day") {
+            conditions.push(WhereCondition::new(
+                "stat_day",
+                WhereOp::Eq,
+                OrmValue::String(stat_day),
+            ));
+        }
 
         let mut items: Vec<Value> = match repo.find_by(&conditions) {
             Ok(list) => list.into_iter().map(|c| c.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // stat_day 过滤（字符串相等）
-        if let Some(stat_day) = get_str_param(param, "stat_day") {
-            items.retain(|item| {
-                item.get("stat_day")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == stat_day)
-                    .unwrap_or(false)
-            });
-        }
 
         // PHP 按 create_time desc 排序（简化：按 log_id desc）
         items.sort_by(|a, b| {
@@ -234,7 +232,7 @@ impl ContractLogController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_log(id: i64, contract_id: i64, app_id: i64) -> ContractLog {
         ContractLog::new()
@@ -327,5 +325,51 @@ mod tests {
         let list_len = list_result["list"].as_array().unwrap().len();
         let export_len = export_result["list"].as_array().unwrap().len();
         assert!(export_len >= list_len);
+    }
+
+    // ========================================================================
+    // 失败路径测试 — 覆盖控制器错误响应分支
+    // ========================================================================
+
+    use http_body_util::BodyExt;
+
+    fn build_json_request(body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn parse_response(resp: Response) -> Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn test_add_returns_error_when_formdata_missing() {
+        let ctrl = ContractLogController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"contract_id": 300}));
+        let resp = ctrl.add(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "formData 字段缺失");
+    }
+
+    #[tokio::test]
+    async fn test_add_returns_error_when_formdata_invalid_json() {
+        let ctrl = ContractLogController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "not-valid-json"}));
+        let resp = ctrl.add(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert!(
+            body["msg"].as_str().unwrap().contains("formData"),
+            "msg 应包含 formData 相关错误信息，实际：{}",
+            body["msg"]
+        );
     }
 }

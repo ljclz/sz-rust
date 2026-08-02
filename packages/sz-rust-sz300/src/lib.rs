@@ -28,6 +28,8 @@ pub mod db;
 pub mod middleware;
 /// 数据模型（对齐 PHP model）
 pub mod models;
+/// OpenAPI 规范构建与 API 文档端点
+pub mod openapi;
 /// 路由注册
 pub mod router;
 /// 业务服务层（MQTT、认证、文件等）

@@ -33,3 +33,13 @@ alwaysApply: true
 
 11. **PR 必须附带 framework 模块的 Skill 检查记录**：修改 framework 触发对应 Skills。AI 不得跳过。
 12. **人类审查保留地**：中间件核心（Framework）的代码必须标记 `@REVIEW_REQUIRED`。
+
+## 🔍 审计合规（生死线）
+
+13. **审计结论必须附带可验证的代码证据**：
+    - ❌ 禁止：`已修复`、`应该没问题`、`参见其他文档`
+    - ✅ 必须：`[src/middleware/auth.rs:127](file:///.../auth.rs#L127) 已修复，cargo test 输出：43 passed`
+    - 每条结论必须有 `file:line` 证据，且该文件行必须真实存在
+    - 修复后必须运行 `cargo test` 并附输出，禁止未验证即标记 ✅
+    - 多项修复必须逐项验证，禁止批量声称"全部通过"
+    - 违反本条视为审计无效，必须重新执行

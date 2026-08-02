@@ -57,25 +57,66 @@ use crate::validate::Validate;
 
 /// JWT 配置（运行时从环境变量读取）
 ///
-/// 安全约束：`JwtConfig` 未派生 `Serialize`/`Deserialize`，密钥绝不会
-/// 出现在序列化输出中。未来若需派生 `Serialize`，必须为 `secret` 字段
-/// 添加 `#[serde(skip_serializing)]` 防止日志/响应泄露。
-#[derive(Debug, Clone, Default)]
+/// ## 安全约束
+///
+/// - `JwtConfig` 未派生 `Serialize`/`Deserialize`，密钥绝不会出现在序列化输出中。
+/// - `Debug` 手动实现：`secret` 字段始终脱敏为 `"[REDACTED]"`，
+///   防止 `{:?}` 格式化时将密钥泄漏到日志或 panic 信息中（P1-SEC-12）。
+/// - 未来若需派生 `Serialize`，必须为 `secret` 字段添加
+///   `#[serde(skip_serializing)]` 防止日志/响应泄露。
+#[derive(Clone, Default)]
 struct JwtConfig {
     /// 签名密钥（对应 PHP `$_config['id']`，Lcobucci 用作 HMAC 密钥）
     secret: String,
     /// 签发人（对应 PHP `$_config['issuer']`）
     issuer: String,
+    /// 接收人（对应 PHP `$_config['permitted_for']`）— P1-SEC-10 新增
+    ///
+    /// 为空时跳过 aud 验证（向后兼容旧 token）；非空时要求 token 的 `aud` 字段匹配。
+    audience: String,
+}
+
+impl std::fmt::Debug for JwtConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JwtConfig")
+            .field("secret", &"[REDACTED]")
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .finish()
+    }
 }
 
 /// 全局 JWT 配置实例（启动时从环境变量读取一次）
 ///
-/// - `SZ_JWT_SECRET`：签名密钥（必填，空字符串表示禁用 JWT 验证）
+/// - `SZ_JWT_SECRET`：签名密钥（**必填且不可为空**，未设置或为空时 panic，阻止服务启动）
 /// - `SZ_JWT_ISSUER`：签发人（可选，空字符串表示跳过 iss 验证）
-static JWT_CONFIG: Lazy<JwtConfig> = Lazy::new(|| JwtConfig {
-    secret: std::env::var("SZ_JWT_SECRET").unwrap_or_default(),
-    issuer: std::env::var("SZ_JWT_ISSUER").unwrap_or_default(),
+///
+/// 安全铁律（P0-SEC-02）：密钥为空时静默回退等同于禁用认证，攻击者可伪造任意 token。
+/// 此处与 `AuthConfig` 的 `missing_key => panic!` 行为保持一致，
+/// 统一为"密钥缺失即拒绝启动"，消除两套 JWT 配置的行为不一致风险。
+static JWT_CONFIG: Lazy<Option<JwtConfig>> = Lazy::new(|| {
+    let secret = std::env::var("SZ_JWT_SECRET").ok()?;
+    // 空字符串视为未配置（与安全铁律一致：空密钥 = 无密钥）
+    if secret.is_empty() {
+        return None;
+    }
+    Some(JwtConfig {
+        secret,
+        issuer: std::env::var("SZ_JWT_ISSUER").unwrap_or_default(),
+        // P1-SEC-10：从环境变量读取 audience，未设置时为空（跳过 aud 验证）
+        audience: std::env::var("SZ_JWT_AUDIENCE").unwrap_or_default(),
+    })
 });
+
+/// 启动时校验 JWT 配置（生产环境必须在 `main()` 中调用）
+///
+/// 若 `SZ_JWT_SECRET` 未设置则 panic，阻止服务启动，防止认证形同虚设。
+/// 测试环境中可跳过此校验（`JWT_CONFIG` 为 `None` 时 `get_token` 返回 `Ok(None)`）。
+pub fn validate_jwt_config() {
+    if JWT_CONFIG.is_none() {
+        panic!("SZ_JWT_SECRET 环境变量未设置 — 生产环境必须通过环境变量提供 JWT 密钥");
+    }
+}
 
 /// 去除 Authorization header 中的 Bearer 前缀
 ///
@@ -148,7 +189,15 @@ fn verify_token_with_config(
         }
     }
 
-    // 6. 提取 user_id
+    // 6. 验证 aud 字段（P1-SEC-10：仅当配置了 audience 时）
+    if !config.audience.is_empty() {
+        match &claims.aud {
+            Some(aud) if aud == &config.audience => { /* 通过 */ }
+            _ => return Ok(None),
+        }
+    }
+
+    // 7. 提取 user_id
     let user_id = match claims.user_id {
         Some(id) => id,
         None => return Ok(None),
@@ -604,7 +653,11 @@ pub trait AddonsBaseController: BaseController {
     fn get_token(&self, authorization: Option<&str>) -> Result<Option<UserInfo>, String> {
         // 委托给 verify_token_with_config，使用全局 JWT_CONFIG
         // 抽取独立函数便于单元测试注入不同配置（避免 once_cell 一次性初始化限制）
-        verify_token_with_config(authorization, &JWT_CONFIG)
+        // JWT_CONFIG 为 None 时（未配置 SZ_JWT_SECRET）跳过验证，返回 Ok(None)
+        match JWT_CONFIG.as_ref() {
+            Some(config) => verify_token_with_config(authorization, config),
+            None => Ok(None),
+        }
     }
 }
 
@@ -1275,7 +1328,7 @@ mod tests {
         let req = make_json_request(r#"{"name":"alice","age":30}"#, None);
         let data = ctrl.post_data(req).await.unwrap();
 
-        // 3. 验证（占位实现总返回 Ok）
+        // 3. 验证（validate() 已实现 require/integer/gt 等规则）
         let rules = [("name", "require"), ("age", "require|integer|gt:0")];
         let messages: [(&str, &str); 0] = [];
         ctrl.validate(&data, &rules, &messages).unwrap();
@@ -1471,8 +1524,8 @@ mod tests {
 
     #[test]
     fn test_addons_get_token_default_returns_none() {
-        // 未配置 SZ_JWT_SECRET 环境变量时，验证失败应返回 Ok(None)
-        // 注：测试运行时不应假定环境变量已设置
+        // 未配置 SZ_JWT_SECRET 环境变量时，JWT_CONFIG 为 None，验证跳过返回 Ok(None)
+        // 注：生产环境通过 `validate_jwt_config()` 在启动时校验，测试环境允许跳过
         let ctrl = MockAddonsController;
         let result = ctrl.get_token(Some("Bearer xxx.yyy.zzz"));
         assert!(result.is_ok());
@@ -1548,7 +1601,8 @@ mod tests {
     fn test_get_token_valid_jwt_returns_user_info() {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
-            issuer: String::new(), // 不验证 iss
+            issuer: String::new(), // 不验证 iss,
+            audience: String::new(),
         };
 
         // 签发一个有效 token
@@ -1576,6 +1630,7 @@ mod tests {
         let config = JwtConfig {
             secret: "correct-secret".to_string(),
             issuer: String::new(),
+            audience: String::new(),
         };
 
         // 用错误密钥签发 token
@@ -1599,6 +1654,7 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
+            audience: String::new(),
         };
 
         let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
@@ -1622,6 +1678,7 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
+            audience: String::new(),
         };
 
         let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
@@ -1645,6 +1702,7 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: "https://expected-issuer.com".to_string(),
+            audience: String::new(),
         };
 
         let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
@@ -1670,6 +1728,7 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: "https://mall.ljclz.shop".to_string(),
+            audience: String::new(),
         };
 
         let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
@@ -1706,6 +1765,7 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
+            audience: String::new(),
         };
 
         let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
@@ -1902,5 +1962,174 @@ mod tests {
         assert_eq!(info.route_uri, "/test/action");
         assert!(ctrl.check_login("/passport/login", false).is_ok());
         assert!(ctrl.get_token(None).unwrap().is_none());
+    }
+
+    // ========================================================================
+    // P0-SEC-02：JWT 密钥空字符串处理（认证绕过防护）
+    // ========================================================================
+
+    /// P0-SEC-02 回归测试：空密钥配置下 verify_token_with_config 必须返回 Ok(None)
+    ///
+    /// 安全铁律：空密钥 = 无密钥 = 禁用 JWT 验证。绝不能以空密钥尝试解码 token
+    /// （某些 JWT 库在空密钥下会接受 alg=none 的伪造 token，导致认证绕过）。
+    #[test]
+    fn test_p0_sec_02_empty_secret_returns_none_not_accept_token() {
+        let config = JwtConfig {
+            secret: String::new(), // 空密钥
+            issuer: String::new(),
+            audience: String::new(),
+        };
+
+        // 即使传入看似有效的 token，空密钥下也必须拒绝验证（返回 None）
+        let result = verify_token_with_config(Some("any.token.here"), &config);
+        assert!(
+            result.is_ok(),
+            "空密钥不应导致 panic 或 Err（应优雅降级为 None）"
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "P0-SEC-02: 空密钥时必须返回 None，绝不能接受任何 token"
+        );
+    }
+
+    /// P0-SEC-02 回归测试：空密钥下即使传入 alg=none 的伪造 token 也必须拒绝
+    ///
+    /// alg=none 攻击：某些 JWT 实现在密钥为空时会接受 header 中 alg=none 的 token。
+    /// 此测试确保我们的实现不会落入此陷阱。
+    #[test]
+    fn test_p0_sec_02_rejects_alg_none_token_with_empty_secret() {
+        let config = JwtConfig::default(); // 空密钥
+
+        // 构造一个 alg=none 的伪造 JWT（header: {"alg":"none","typ":"JWT"}）
+        // base64url({"alg":"none","typ":"JWT"}) = eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0
+        // base64url({"user_id":1,"username":"hacker","iat":0,"exp":9999999999})
+        //   = eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImhhY2tlciIsImlhdCI6MCwiZXhwIjo5OTk5OTk5OTk5fQ
+        let alg_none_token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.\
+            eyJ1c2VyX2lkIjoxLCJ1c2VybmFtZSI6ImhhY2tlciIsImlhdCI6MCwiZXhwIjo5OTk5OTk5OTk5fQ.";
+
+        let result = verify_token_with_config(Some(&alg_none_token), &config);
+        assert!(
+            result.is_ok(),
+            "空密钥下不应 panic"
+        );
+        assert_eq!(
+            result.unwrap(),
+            None,
+            "P0-SEC-02: 空密钥下 alg=none 伪造 token 必须被拒绝（返回 None）"
+        );
+    }
+
+    // ========================================================================
+    // P1-SEC-10：JWT Audience (aud) 验证
+    // ========================================================================
+
+    /// P1-SEC-10 回归测试：配置了 audience 时，token 的 aud 不匹配应拒绝
+    #[test]
+    fn test_p1_sec_10_rejects_token_with_wrong_audience() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+            audience: "https://my-app.com".to_string(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp)
+            .with_user_id(42)
+            .with_audience("https://other-app.com");
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&token), &config);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None, "P1-SEC-10: aud 不匹配的 token 必须被拒绝");
+    }
+
+    /// P1-SEC-10 回归测试：配置了 audience 时，token 的 aud 匹配应通过
+    #[test]
+    fn test_p1_sec_10_accepts_token_with_matching_audience() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+            audience: "https://my-app.com".to_string(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp)
+            .with_user_id(42)
+            .with_audience("https://my-app.com");
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&token), &config);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some(), "aud 匹配的 token 应通过验证");
+    }
+
+    /// P1-SEC-10 回归测试：未配置 audience 时，跳过 aud 验证（向后兼容）
+    #[test]
+    fn test_p1_sec_10_skips_audience_check_when_not_configured() {
+        let config = JwtConfig {
+            secret: "test-secret".to_string(),
+            issuer: String::new(),
+            audience: String::new(),
+        };
+
+        let encoder = sz_orm_auth::jwt::JwtEncoder::new(&config.secret);
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_orm_auth::jwt::JwtClaims::new("user123", exp)
+            .with_user_id(42);
+        let token = encoder.encode(&claims).unwrap();
+
+        let result = verify_token_with_config(Some(&token), &config);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some(), "未配置 audience 时应跳过 aud 验证");
+    }
+
+    // ========================================================================
+    // P1-SEC-12：JwtConfig Debug 实现不泄漏 secret
+    // ========================================================================
+
+    /// P1-SEC-12 回归测试：JwtConfig 的 Debug 输出必须脱敏 secret 字段
+    ///
+    /// 若 JwtConfig 使用派生 Debug，secret 字段会以明文出现在日志和 panic 信息中。
+    /// 手动实现的 Debug 应将 secret 替换为 "[REDACTED]"。
+    #[test]
+    fn test_p1_sec_12_jwt_config_debug_redacts_secret() {
+        let config = JwtConfig {
+            secret: "super-secret-key-12345".to_string(),
+            issuer: "https://example.com".to_string(),
+            audience: String::new(),
+        };
+
+        let debug_output = format!("{:?}", config);
+
+        // secret 绝不能出现在 Debug 输出中
+        assert!(
+            !debug_output.contains("super-secret-key-12345"),
+            "P1-SEC-12: JwtConfig::Debug 泄漏了 secret 字段: {debug_output}"
+        );
+        // 必须包含脱敏标记
+        assert!(
+            debug_output.contains("[REDACTED]"),
+            "P1-SEC-12: JwtConfig::Debug 应包含 [REDACTED] 标记: {debug_output}"
+        );
+        // issuer 可以正常显示
+        assert!(
+            debug_output.contains("https://example.com"),
+            "issuer 字段应正常显示: {debug_output}"
+        );
     }
 }

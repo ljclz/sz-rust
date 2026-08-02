@@ -10,7 +10,8 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use serde_json::{json, Value};
-use sz_rust_core::orm::{Credentials, JwtAuthenticator};
+use sz_rust_core::orm::auth::Credentials;
+use sz_rust_core::orm::JwtAuthenticator;
 
 // ─── 辅助函数 ───────────────────────────────────────────────────────────────
 

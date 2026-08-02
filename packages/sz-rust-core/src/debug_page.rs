@@ -19,6 +19,8 @@
 
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -552,6 +554,238 @@ fn sanitize_headers(headers: &HeaderMap) -> HashMap<String, String> {
 }
 
 // ============================================================================
+// 数据库查询展示（对齐 PHP Whoops 的 SQL 查询面板）
+// ============================================================================
+
+/// 数据库查询调用位置 — 用于编辑器跳转
+///
+/// 对齐 PHP Whoops 的 `Frame`：记录 SQL 执行的调用位置，
+/// 可通过 [`editor_url`] 生成 IDE 跳转链接。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DbQueryLocation {
+    /// 文件路径（绝对路径）
+    pub file: String,
+    /// 行号（1-based）
+    pub line: u32,
+    /// 函数名
+    pub function: Option<String>,
+}
+
+/// 数据库查询记录 — 对齐 PHP Whoops 的 SQL 查询展示
+///
+/// 包含 SQL 语句、绑定参数、执行时间、调用栈等信息，
+/// 由 [`DbQueryCollector`] 收集，[`render_db_queries_html`] 渲染。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DbQuery {
+    /// SQL 语句
+    pub sql: String,
+    /// 绑定参数
+    pub bindings: Vec<serde_json::Value>,
+    /// 执行时间（毫秒）
+    pub duration_ms: u64,
+    /// 调用栈（文件:行号）
+    pub backtrace: Vec<DbQueryLocation>,
+    /// 查询类型（select/insert/update/delete）
+    pub query_type: String,
+    /// 数据库连接名
+    pub connection: String,
+}
+
+/// 数据库查询收集器 — 线程安全的查询记录存储
+///
+/// 对齐 PHP `DB::listen()` 全局监听器：在开发环境收集所有 SQL 查询，
+/// 用于调试页展示。生产环境通过 [`DbQueryCollector::set_enabled`] 关闭。
+#[derive(Debug, Default)]
+pub struct DbQueryCollector {
+    /// 查询记录列表
+    queries: Mutex<Vec<DbQuery>>,
+    /// 是否启用收集
+    enabled: Mutex<bool>,
+}
+
+impl DbQueryCollector {
+    /// 创建新的查询收集器（默认禁用）
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 是否启用收集
+    pub fn enabled(&self) -> bool {
+        *self.enabled.lock()
+    }
+
+    /// 设置启用状态
+    pub fn set_enabled(&self, enabled: bool) {
+        *self.enabled.lock() = enabled;
+    }
+
+    /// 添加查询记录（仅在启用时生效）
+    pub fn add_query(&self, query: DbQuery) {
+        if self.enabled() {
+            self.queries.lock().push(query);
+        }
+    }
+
+    /// 获取所有查询的快照
+    pub fn queries(&self) -> Vec<DbQuery> {
+        self.queries.lock().clone()
+    }
+
+    /// 总执行时间（毫秒）
+    pub fn total_duration_ms(&self) -> u64 {
+        self.queries.lock().iter().map(|q| q.duration_ms).sum()
+    }
+
+    /// 清空记录
+    pub fn clear(&self) {
+        self.queries.lock().clear();
+    }
+
+    /// 查询数量
+    pub fn count(&self) -> usize {
+        self.queries.lock().len()
+    }
+}
+
+/// 全局数据库查询收集器（对齐 PHP `DB::listen()` 全局监听器）
+///
+/// 启动时默认禁用，业务层在开发环境调用
+/// `GLOBAL_DB_QUERY_COLLECTOR.set_enabled(true)` 开启收集。
+pub static GLOBAL_DB_QUERY_COLLECTOR: Lazy<DbQueryCollector> = Lazy::new(DbQueryCollector::new);
+
+// ============================================================================
+// 编辑器跳转
+// ============================================================================
+
+/// 编辑器类型 — 对齐 PHP Whoops 的 editor 配置
+///
+/// 用于 [`editor_url`] 生成 IDE 跳转链接，点击调试页中的文件位置可直接打开 IDE。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Editor {
+    /// VS Code
+    VsCode,
+    /// PhpStorm
+    PhpStorm,
+    /// Sublime Text
+    Sublime,
+    /// Atom
+    Atom,
+    /// IDE 通用协议
+    Ide,
+}
+
+/// 生成编辑器跳转 URL
+///
+/// # 参数
+///
+/// - `editor`：编辑器类型
+/// - `file`：文件路径（绝对路径）
+/// - `line`：行号
+///
+/// # URL 格式
+///
+/// - [`Editor::VsCode`]：`vscode://file/{file}:{line}`
+/// - [`Editor::PhpStorm`]：`phpstorm://open?file={file}&line={line}`
+/// - [`Editor::Sublime`]：`subl://open?url=file://{file}&line={line}`
+/// - [`Editor::Atom`]：`atom://core/open/file?filename={file}&line={line}`
+/// - [`Editor::Ide`]：`idea://open?file={file}&line={line}`
+pub fn editor_url(editor: Editor, file: &str, line: u32) -> String {
+    match editor {
+        Editor::VsCode => format!("vscode://file/{}:{}", file, line),
+        Editor::PhpStorm => format!("phpstorm://open?file={}&line={}", file, line),
+        Editor::Sublime => format!("subl://open?url=file://{}&line={}", file, line),
+        Editor::Atom => format!("atom://core/open/file?filename={}&line={}", file, line),
+        Editor::Ide => format!("idea://open?file={}&line={}", file, line),
+    }
+}
+
+/// 渲染数据库查询列表为 HTML 片段
+///
+/// 返回可直接嵌入调试页的 HTML 片段。若 `queries` 为空，返回空字符串。
+///
+/// # 安全约束
+///
+/// - 所有用户输入（SQL、文件路径、参数值）经 `html_escape` 转义，防 XSS
+/// - 编辑器 URL 中的 `&` 转义为 `&amp;`（HTML 属性要求）
+pub fn render_db_queries_html(queries: &[DbQuery], editor: Editor) -> String {
+    if queries.is_empty() {
+        return String::new();
+    }
+
+    let mut html = String::new();
+    html.push_str("<div class=\"section\">\n");
+    html.push_str("  <div class=\"section-title\">Database Queries (");
+    html.push_str(&queries.len().to_string());
+    html.push_str(")</div>\n");
+    html.push_str("  <div class=\"section-body\">\n");
+
+    for (idx, query) in queries.iter().enumerate() {
+        html.push_str(&render_db_query_html(query, idx + 1, editor));
+    }
+
+    html.push_str("  </div>\n</div>\n");
+    html
+}
+
+/// 渲染单个数据库查询为 HTML 片段
+fn render_db_query_html(query: &DbQuery, index: usize, editor: Editor) -> String {
+    let sql = html_escape(&query.sql);
+    let query_type = html_escape(&query.query_type);
+    let connection = html_escape(&query.connection);
+
+    let mut html = format!(
+        r#"    <div class="db-query" style="border-bottom: 1px solid #eee; padding: 12px 0;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="color: #d23f31; font-family: 'Fira Code', monospace; font-size: 13px; font-weight: 600;">#{index} {query_type}</span>
+        <span style="color: #888; font-family: 'Fira Code', monospace; font-size: 12px;">{connection} &bull; {duration}ms</span>
+      </div>
+      <div style="background: #1e1e1e; color: #d4d4d4; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin-bottom: 8px;">{sql}</div>
+"#,
+        index = index,
+        query_type = query_type,
+        connection = connection,
+        duration = query.duration_ms,
+        sql = sql
+    );
+
+    // 绑定参数
+    if !query.bindings.is_empty() {
+        html.push_str("      <div style=\"margin-bottom: 8px;\">\n");
+        for (i, binding) in query.bindings.iter().enumerate() {
+            html.push_str(&format!(
+                "        <span style=\"display: inline-block; background: #f5f5f5; border-radius: 3px; padding: 2px 8px; margin-right: 4px; font-family: 'Fira Code', monospace; font-size: 12px;\">{}: {}</span>\n",
+                i + 1,
+                html_escape(&binding.to_string())
+            ));
+        }
+        html.push_str("      </div>\n");
+    }
+
+    // 调用栈（含编辑器跳转链接）
+    if !query.backtrace.is_empty() {
+        html.push_str(
+            "      <div style=\"font-family: 'Fira Code', monospace; font-size: 12px;\">\n",
+        );
+        for loc in &query.backtrace {
+            let url = html_escape(&editor_url(editor, &loc.file, loc.line));
+            let location = html_escape(&format!("{}:{}", loc.file, loc.line));
+            let func = match &loc.function {
+                Some(f) => html_escape(f),
+                None => "<anonymous>".to_string(),
+            };
+            html.push_str(&format!(
+                "        <a href=\"{}\" style=\"color: #4a90d9; text-decoration: none; display: block; padding: 2px 0;\">{} ({})</a>\n",
+                url, location, func
+            ));
+        }
+        html.push_str("      </div>\n");
+    }
+
+    html.push_str("    </div>\n");
+    html
+}
+
+// ============================================================================
 // 测试
 // ============================================================================
 
@@ -918,5 +1152,288 @@ mod tests {
         assert!(!error.stack.is_empty());
         assert_eq!(error.stack[0].line, 3);
         assert!(!error.stack[0].source_lines.is_empty());
+    }
+
+    // --------------------------------------------------------------------
+    // DbQueryLocation / DbQuery 序列化
+    // --------------------------------------------------------------------
+
+    #[test]
+    fn test_db_query_location_serialize() {
+        let loc = DbQueryLocation {
+            file: "/path/to/file.rs".to_string(),
+            line: 42,
+            function: Some("query_users".to_string()),
+        };
+        let json = serde_json::to_value(&loc).unwrap();
+        assert_eq!(json["file"], "/path/to/file.rs");
+        assert_eq!(json["line"], 42);
+        assert_eq!(json["function"], "query_users");
+    }
+
+    #[test]
+    fn test_db_query_serialize() {
+        let query = DbQuery {
+            sql: "SELECT * FROM users WHERE id = ?".to_string(),
+            bindings: vec![serde_json::json!(1)],
+            duration_ms: 15,
+            backtrace: vec![DbQueryLocation {
+                file: "src/db.rs".to_string(),
+                line: 100,
+                function: Some("find_user".to_string()),
+            }],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        };
+        let json = serde_json::to_value(&query).unwrap();
+        assert_eq!(json["sql"], "SELECT * FROM users WHERE id = ?");
+        assert_eq!(json["bindings"][0], 1);
+        assert_eq!(json["duration_ms"], 15);
+        assert_eq!(json["backtrace"][0]["file"], "src/db.rs");
+        assert_eq!(json["backtrace"][0]["line"], 100);
+        assert_eq!(json["query_type"], "select");
+        assert_eq!(json["connection"], "mysql");
+    }
+
+    // --------------------------------------------------------------------
+    // DbQueryCollector
+    // --------------------------------------------------------------------
+
+    #[test]
+    fn test_db_query_collector_new() {
+        let collector = DbQueryCollector::new();
+        assert!(!collector.enabled());
+        assert_eq!(collector.count(), 0);
+        assert!(collector.queries().is_empty());
+        assert_eq!(collector.total_duration_ms(), 0);
+    }
+
+    #[test]
+    fn test_db_query_collector_add_query() {
+        let collector = DbQueryCollector::new();
+        collector.set_enabled(true);
+
+        let query = DbQuery {
+            sql: "SELECT * FROM users".to_string(),
+            bindings: vec![serde_json::json!(1)],
+            duration_ms: 10,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        };
+        collector.add_query(query);
+        assert_eq!(collector.count(), 1);
+
+        // 禁用后 add_query 应为 no-op
+        collector.set_enabled(false);
+        collector.add_query(DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 5,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        assert_eq!(collector.count(), 1);
+    }
+
+    #[test]
+    fn test_db_query_collector_enabled() {
+        let collector = DbQueryCollector::new();
+        assert!(!collector.enabled());
+        collector.set_enabled(true);
+        assert!(collector.enabled());
+        collector.set_enabled(false);
+        assert!(!collector.enabled());
+    }
+
+    #[test]
+    fn test_db_query_collector_total_duration() {
+        let collector = DbQueryCollector::new();
+        collector.set_enabled(true);
+        collector.add_query(DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 10,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        collector.add_query(DbQuery {
+            sql: "SELECT 2".to_string(),
+            bindings: vec![],
+            duration_ms: 25,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        assert_eq!(collector.total_duration_ms(), 35);
+    }
+
+    #[test]
+    fn test_db_query_collector_clear() {
+        let collector = DbQueryCollector::new();
+        collector.set_enabled(true);
+        collector.add_query(DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 10,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        assert_eq!(collector.count(), 1);
+        collector.clear();
+        assert_eq!(collector.count(), 0);
+        assert_eq!(collector.total_duration_ms(), 0);
+    }
+
+    #[test]
+    fn test_db_query_collector_count() {
+        let collector = DbQueryCollector::new();
+        collector.set_enabled(true);
+        assert_eq!(collector.count(), 0);
+        collector.add_query(DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 1,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        assert_eq!(collector.count(), 1);
+        collector.add_query(DbQuery {
+            sql: "SELECT 2".to_string(),
+            bindings: vec![],
+            duration_ms: 2,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        });
+        assert_eq!(collector.count(), 2);
+    }
+
+    // --------------------------------------------------------------------
+    // editor_url
+    // --------------------------------------------------------------------
+
+    #[test]
+    fn test_editor_url_vscode() {
+        let url = editor_url(Editor::VsCode, "/path/to/file.rs", 42);
+        assert_eq!(url, "vscode://file//path/to/file.rs:42");
+    }
+
+    #[test]
+    fn test_editor_url_phpstorm() {
+        let url = editor_url(Editor::PhpStorm, "/path/to/file.rs", 10);
+        assert_eq!(url, "phpstorm://open?file=/path/to/file.rs&line=10");
+    }
+
+    #[test]
+    fn test_editor_url_sublime() {
+        let url = editor_url(Editor::Sublime, "/path/to/file.rs", 5);
+        assert_eq!(url, "subl://open?url=file:///path/to/file.rs&line=5");
+    }
+
+    #[test]
+    fn test_editor_url_atom() {
+        let url = editor_url(Editor::Atom, "/path/to/file.rs", 15);
+        assert_eq!(
+            url,
+            "atom://core/open/file?filename=/path/to/file.rs&line=15"
+        );
+    }
+
+    #[test]
+    fn test_editor_url_ide() {
+        let url = editor_url(Editor::Ide, "/path/to/file.rs", 20);
+        assert_eq!(url, "idea://open?file=/path/to/file.rs&line=20");
+    }
+
+    // --------------------------------------------------------------------
+    // render_db_queries_html
+    // --------------------------------------------------------------------
+
+    #[test]
+    fn test_render_db_queries_html_empty() {
+        let queries: Vec<DbQuery> = vec![];
+        let html = render_db_queries_html(&queries, Editor::VsCode);
+        assert!(html.is_empty());
+    }
+
+    #[test]
+    fn test_render_db_queries_html_with_queries() {
+        let queries = vec![DbQuery {
+            sql: "SELECT * FROM users WHERE id = ?".to_string(),
+            bindings: vec![serde_json::json!(1)],
+            duration_ms: 15,
+            backtrace: vec![DbQueryLocation {
+                file: "src/db.rs".to_string(),
+                line: 100,
+                function: Some("find_user".to_string()),
+            }],
+            query_type: "select".to_string(),
+            connection: "mysql".to_string(),
+        }];
+        let html = render_db_queries_html(&queries, Editor::VsCode);
+
+        assert!(html.contains("Database Queries (1)"));
+        assert!(html.contains("SELECT * FROM users WHERE id = ?"));
+        assert!(html.contains("#1 select"));
+        assert!(html.contains("mysql"));
+        assert!(html.contains("15ms"));
+        assert!(html.contains("src/db.rs:100"));
+        assert!(html.contains("find_user"));
+    }
+
+    #[test]
+    fn test_render_db_queries_html_contains_editor_link() {
+        let queries = vec![DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 1,
+            backtrace: vec![DbQueryLocation {
+                file: "/app/src/main.rs".to_string(),
+                line: 42,
+                function: Some("main".to_string()),
+            }],
+            query_type: "select".to_string(),
+            connection: "default".to_string(),
+        }];
+        let html = render_db_queries_html(&queries, Editor::VsCode);
+
+        // 应包含编辑器跳转链接
+        assert!(html.contains("href=\""));
+        assert!(html.contains("vscode://file//app/src/main.rs:42"));
+    }
+
+    // --------------------------------------------------------------------
+    // GLOBAL_DB_QUERY_COLLECTOR
+    // --------------------------------------------------------------------
+
+    #[test]
+    fn test_global_db_query_collector() {
+        // 保存原始状态
+        let was_enabled = GLOBAL_DB_QUERY_COLLECTOR.enabled();
+
+        // 清空并验证
+        GLOBAL_DB_QUERY_COLLECTOR.clear();
+        assert_eq!(GLOBAL_DB_QUERY_COLLECTOR.count(), 0);
+
+        // 启用并添加查询
+        GLOBAL_DB_QUERY_COLLECTOR.set_enabled(true);
+        GLOBAL_DB_QUERY_COLLECTOR.add_query(DbQuery {
+            sql: "SELECT 1".to_string(),
+            bindings: vec![],
+            duration_ms: 1,
+            backtrace: vec![],
+            query_type: "select".to_string(),
+            connection: "default".to_string(),
+        });
+        assert_eq!(GLOBAL_DB_QUERY_COLLECTOR.count(), 1);
+
+        // 清理：恢复原始状态
+        GLOBAL_DB_QUERY_COLLECTOR.clear();
+        GLOBAL_DB_QUERY_COLLECTOR.set_enabled(was_enabled);
     }
 }

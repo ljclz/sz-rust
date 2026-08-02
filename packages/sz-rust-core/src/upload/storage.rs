@@ -156,7 +156,7 @@ impl StorageEngineKind {
 /// ```
 ///
 /// Rust 端统一为一个结构体，不同引擎使用不同字段。
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct EngineConfig {
     /// 存储桶名称（对齐 PHP `bucket`）
     pub bucket: String,
@@ -178,6 +178,23 @@ pub struct EngineConfig {
     pub access_key: String,
     /// 本地存储基础路径（对齐 PHP `WEB_PATH`）
     pub base_path: String,
+}
+
+impl std::fmt::Debug for EngineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineConfig")
+            .field("bucket", &self.bucket)
+            .field("region", &self.region)
+            .field("endpoint", &self.endpoint)
+            .field("domain", &self.domain)
+            .field("access_key_id", &self.access_key_id)
+            .field("access_key_secret", &"[REDACTED]")
+            .field("secret_id", &"[REDACTED]")
+            .field("secret_key", &"[REDACTED]")
+            .field("access_key", &"[REDACTED]")
+            .field("base_path", &self.base_path)
+            .finish()
+    }
 }
 
 impl EngineConfig {

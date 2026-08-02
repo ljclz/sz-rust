@@ -15,10 +15,16 @@ pub async fn init_pool(config: &crate::config::AppConfig) -> anyhow::Result<Pool
         config.database.database,
     );
 
-    let sqlx_pool = MySqlPoolHandle::connect(&conn_str).await?;
-    let factory = SqlxMySqlConnectionFactory::new(Arc::new(sqlx_pool));
+    // SQLx 池 max_connections=20：与下方 sz-orm Pool max_size(20) 对齐。
+    // 修复两层池容量不匹配缺陷（SQLx 默认 10 < max_size 20，并发 acquire 第 11 个起超时）
+    let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+        .max_connections(20)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .connect(&conn_str)
+        .await?;
+    let factory = SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
 
-    let mut pool_cfg = PoolConfigBuilder::new().max_size(20).min_idle(2).build()?;
+    let mut pool_cfg = PoolConfigBuilder::new().max_size(20).min_idle(10).build()?;
     pool_cfg.connection_timeout = std::time::Duration::from_secs(10);
 
     let pool = Pool::new(pool_cfg, Arc::new(factory))?;
@@ -35,7 +41,8 @@ pub async fn init_pg_pool(config: &crate::config::PgDatabaseConfig) -> anyhow::R
     let sqlx_pool = PgPoolHandle::connect(&conn_str).await?;
     let factory = SqlxPgConnectionFactory::new(Arc::new(sqlx_pool));
 
-    let mut pool_cfg = PoolConfigBuilder::new().max_size(10).min_idle(1).build()?;
+    // P3-7：min_idle 提升至 max_size 的 50%，避免突发流量下冷连接建立延迟
+    let mut pool_cfg = PoolConfigBuilder::new().max_size(10).min_idle(5).build()?;
     pool_cfg.connection_timeout = std::time::Duration::from_secs(10);
 
     let pool = Pool::new(pool_cfg, Arc::new(factory))?;

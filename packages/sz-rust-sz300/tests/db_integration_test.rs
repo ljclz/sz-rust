@@ -105,9 +105,9 @@ async fn test_mysql_pool_init_and_query() {
 
     let pool = db::init_pool(&cfg).await.expect("MySQL 连接池初始化失败");
 
-    // 验证连接池配置：db.rs 中 max_size=20, min_idle=2
+    // 验证连接池配置：db.rs 中 max_size=20, min_idle=10（P3-7：50% 预热）
     assert_eq!(pool.config().max_size, 20, "MySQL max_size 应为 20");
-    assert_eq!(pool.config().min_idle, 2, "MySQL min_idle 应为 2");
+    assert_eq!(pool.config().min_idle, 10, "MySQL min_idle 应为 10");
 
     // 测试基本查询
     let mut conn = pool.acquire().await.expect("获取 MySQL 连接失败");
@@ -134,9 +134,9 @@ async fn test_pg_pool_init_and_query() {
         .await
         .expect("PG 连接池初始化失败");
 
-    // 验证连接池配置：db.rs 中 max_size=10, min_idle=1
+    // 验证连接池配置：db.rs 中 max_size=10, min_idle=5（P3-7：50% 预热）
     assert_eq!(pool.config().max_size, 10, "PG max_size 应为 10");
-    assert_eq!(pool.config().min_idle, 1, "PG min_idle 应为 1");
+    assert_eq!(pool.config().min_idle, 5, "PG min_idle 应为 5");
 
     let mut conn = pool.acquire().await.expect("获取 PG 连接失败");
     let rows = conn
@@ -405,4 +405,535 @@ async fn test_mysql_product_service_like_injection_protection() {
         .ok();
     pool.close_all().await;
     println!("✅ MySQL 商品服务 LIKE/分页参数化查询注入防护验证通过");
+}
+
+// ============================================================================
+// P0 补齐：真实 DB 集成验证（2026-08-01）
+// 缺口：事务原子性 / savepoint / 连接池并发 / 真实业务 schema 关联 CRUD
+// ============================================================================
+
+/// MySQL 事务原子性验证 —— commit 生效 / rollback 回滚
+///
+/// 通过 sz-orm `Connection` trait 的 begin_transaction/commit/rollback 真实驱动 MySQL 事务：
+/// 1. 事务内 INSERT + commit → 数据持久可见
+/// 2. 事务内 INSERT + rollback → 数据不可见（表行数不变）
+/// 3. 验证事务期间同连接查询能看到未提交数据（会话内可见性）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mysql_transaction_commit_rollback() {
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
+
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+
+    conn.execute("DROP TABLE IF EXISTS sz300_tx_test")
+        .await
+        .ok();
+    conn.execute(
+        "CREATE TABLE sz300_tx_test (id INT AUTO_INCREMENT PRIMARY KEY, val VARCHAR(50) NOT NULL)",
+    )
+    .await
+    .expect("建表失败");
+
+    // ── 场景 1：commit 后数据持久可见 ──
+    conn.begin_transaction().await.expect("开启事务失败");
+    conn.execute("INSERT INTO sz300_tx_test (val) VALUES ('committed')")
+        .await
+        .expect("事务内插入失败");
+    // 事务内同连接应能看到未提交数据
+    let rows = conn
+        .query("SELECT val FROM sz300_tx_test WHERE val = 'committed'")
+        .await
+        .expect("事务内查询失败");
+    assert_eq!(rows.len(), 1, "事务内应看到未提交数据（会话内可见性）");
+    conn.commit().await.expect("提交事务失败");
+
+    let rows = conn
+        .query("SELECT val FROM sz300_tx_test WHERE val = 'committed'")
+        .await
+        .expect("commit 后查询失败");
+    assert_eq!(rows.len(), 1, "commit 后数据应持久可见");
+
+    // ── 场景 2：rollback 后数据不可见 ──
+    conn.begin_transaction().await.expect("开启事务失败");
+    conn.execute("INSERT INTO sz300_tx_test (val) VALUES ('rolled_back')")
+        .await
+        .expect("事务内插入失败");
+    conn.rollback().await.expect("回滚事务失败");
+
+    let rows = conn
+        .query("SELECT val FROM sz300_tx_test WHERE val = 'rolled_back'")
+        .await
+        .expect("rollback 后查询失败");
+    assert_eq!(rows.len(), 0, "rollback 后数据不应存在");
+
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM sz300_tx_test")
+        .await
+        .expect("计数查询失败");
+    let cnt = rows[0]
+        .get("cnt")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 cnt 字段");
+    assert_eq!(cnt, 1, "rollback 后表内应只剩 committed 一行");
+
+    // ── 场景 3：未提交即 drop 连接，数据不落库 ──
+    {
+        let mut c2 = pool.acquire().await.expect("获取连接失败");
+        c2.begin_transaction().await.expect("开启事务失败");
+        c2.execute("INSERT INTO sz300_tx_test (val) VALUES ('dropped')")
+            .await
+            .expect("事务内插入失败");
+        // 不 commit 直接 drop：PooledConnection 归还连接，事务回滚
+    }
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM sz300_tx_test")
+        .await
+        .expect("计数查询失败");
+    let cnt = rows[0]
+        .get("cnt")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 cnt 字段");
+    assert_eq!(cnt, 1, "未提交即断开的事务应自动回滚");
+
+    conn.execute("DROP TABLE IF EXISTS sz300_tx_test")
+        .await
+        .ok();
+    pool.close_all().await;
+    println!("✅ MySQL 事务原子性验证通过：commit 生效 / rollback 回滚 / 断连自动回滚");
+}
+
+/// MySQL SAVEPOINT 部分回滚验证
+///
+/// 验证事务内 savepoint 只回滚到标记点，保留标记点前的写入：
+/// 1. INSERT 'keep' → SAVEPOINT sp1 → INSERT 'discard' → ROLLBACK TO sp1
+/// 2. commit 后 'keep' 存在、'discard' 不存在
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mysql_transaction_savepoint() {
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
+
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+
+    conn.execute("DROP TABLE IF EXISTS sz300_sp_test")
+        .await
+        .ok();
+    conn.execute(
+        "CREATE TABLE sz300_sp_test (id INT AUTO_INCREMENT PRIMARY KEY, val VARCHAR(50) NOT NULL)",
+    )
+    .await
+    .expect("建表失败");
+
+    conn.begin_transaction().await.expect("开启事务失败");
+    conn.execute("INSERT INTO sz300_sp_test (val) VALUES ('keep')")
+        .await
+        .expect("插入 keep 失败");
+    conn.execute("SAVEPOINT sp1")
+        .await
+        .expect("建立 savepoint 失败");
+    conn.execute("INSERT INTO sz300_sp_test (val) VALUES ('discard')")
+        .await
+        .expect("插入 discard 失败");
+    conn.execute("ROLLBACK TO SAVEPOINT sp1")
+        .await
+        .expect("回滚到 savepoint 失败");
+    conn.commit().await.expect("提交事务失败");
+
+    let rows = conn
+        .query("SELECT val FROM sz300_sp_test ORDER BY id")
+        .await
+        .expect("查询失败");
+    let vals: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("val").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    assert_eq!(
+        vals,
+        vec!["keep"],
+        "savepoint 后应只保留 'keep'，实际: {:?}",
+        vals
+    );
+
+    conn.execute("DROP TABLE IF EXISTS sz300_sp_test")
+        .await
+        .ok();
+    pool.close_all().await;
+    println!("✅ MySQL SAVEPOINT 部分回滚验证通过");
+}
+
+/// MySQL 连接池并发压力验证 —— 20 并发任务 × 每任务 5 轮 CRUD
+///
+/// 验证 max_size=20 连接池在并发竞争下的行为：
+/// 1. 20 个并发任务同时 acquire，全部应成功（无死锁、无超时）
+/// 2. 每任务独立行做 INSERT → SELECT → UPDATE → DELETE 循环
+/// 3. 所有任务完成后，表内应无残留（每任务删除自己的行）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn test_mysql_pool_concurrency_stress() {
+    use futures::future::join_all;
+    use std::sync::Arc;
+    use sz_rust_core::orm::Value;
+
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
+
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+
+    // 初始化并发测试表
+    {
+        let mut conn = pool.acquire().await.expect("获取连接失败");
+        conn.execute("DROP TABLE IF EXISTS sz300_conc_test")
+            .await
+            .ok();
+        conn.execute(
+            "CREATE TABLE sz300_conc_test (\
+                id INT AUTO_INCREMENT PRIMARY KEY,\
+                task_id INT NOT NULL,\
+                round INT NOT NULL,\
+                val VARCHAR(50) NOT NULL,\
+                UNIQUE KEY uk_task_round (task_id, round)\
+            )",
+        )
+        .await
+        .expect("建表失败");
+    }
+
+    const TASKS: usize = 20;
+    const ROUNDS: usize = 5;
+
+    let tasks: Vec<_> = (0..TASKS)
+        .map(|task_id| {
+            let pool = Arc::clone(&pool);
+            async move {
+                // 每任务独立连接做 5 轮 CRUD；外部 timeout 兜底防死锁
+                tokio::time::timeout(std::time::Duration::from_secs(20), async move {
+                    for round in 0..ROUNDS {
+                        let mut conn = pool.acquire().await.expect("并发获取连接失败");
+                        let val = format!("task{task_id}_r{round}");
+
+                        // INSERT
+                        let affected = conn
+                            .execute_with_params(
+                                "INSERT INTO sz300_conc_test (task_id, round, val) VALUES (?, ?, ?)",
+                                &[
+                                    Value::I64(task_id as i64),
+                                    Value::I64(round as i64),
+                                    Value::String(val.clone()),
+                                ],
+                            )
+                            .await
+                            .expect("并发插入失败");
+                        assert_eq!(affected, 1, "INSERT 应影响 1 行");
+
+                        // SELECT 回读
+                        let rows = conn
+                            .query_with_params(
+                                "SELECT val FROM sz300_conc_test WHERE task_id = ? AND round = ?",
+                                &[Value::I64(task_id as i64), Value::I64(round as i64)],
+                            )
+                            .await
+                            .expect("并发查询失败");
+                        assert_eq!(rows.len(), 1, "应读回 1 行");
+                        let got = rows[0]
+                            .get("val")
+                            .and_then(|v| v.as_str())
+                            .expect("应包含 val 字段");
+                        assert_eq!(got, val, "读回值应一致");
+
+                        // UPDATE
+                        let updated_val = format!("{val}_upd");
+                        let affected = conn
+                            .execute_with_params(
+                                "UPDATE sz300_conc_test SET val = ? WHERE task_id = ? AND round = ?",
+                                &[
+                                    Value::String(updated_val.clone()),
+                                    Value::I64(task_id as i64),
+                                    Value::I64(round as i64),
+                                ],
+                            )
+                            .await
+                            .expect("并发更新失败");
+                        assert_eq!(affected, 1, "UPDATE 应影响 1 行");
+
+                        // DELETE
+                        let affected = conn
+                            .execute_with_params(
+                                "DELETE FROM sz300_conc_test WHERE task_id = ? AND round = ?",
+                                &[Value::I64(task_id as i64), Value::I64(round as i64)],
+                            )
+                            .await
+                            .expect("并发删除失败");
+                        assert_eq!(affected, 1, "DELETE 应影响 1 行");
+                    }
+                    Ok::<(), anyhow::Error>(())
+                })
+                .await
+                .expect("并发任务超时（连接池可能死锁）")
+                .expect("并发任务执行失败");
+            }
+        })
+        .collect();
+
+    join_all(tasks).await;
+
+    // 验证无残留：表应为空
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM sz300_conc_test")
+        .await
+        .expect("计数查询失败");
+    let cnt = rows[0]
+        .get("cnt")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 cnt 字段");
+    assert_eq!(
+        cnt, 0,
+        "20 并发 × 5 轮 CRUD 后表应无残留，实际残留 {cnt} 行"
+    );
+
+    conn.execute("DROP TABLE IF EXISTS sz300_conc_test")
+        .await
+        .ok();
+    pool.close_all().await;
+    println!("✅ MySQL 连接池并发压力验证通过：{TASKS} 并发 × {ROUNDS} 轮 CRUD 无死锁、无残留");
+}
+
+/// MySQL 真实业务 schema 关联 CRUD 验证
+///
+/// 按 `migrations/001_init.sql` 真实表结构（market / merchant / good）验证：
+/// 1. 三表建表 → 插入市场 → 插入商户 → 插入商品
+/// 2. 关联 JOIN 查询：商品 + 商户 + 市场名称一次取回
+/// 3. 参数化 UPDATE / DELETE 链式操作
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mysql_business_schema_crud() {
+    use sz_rust_core::orm::Value;
+
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
+
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+
+    // 清理并重建三张业务表（对齐 001_init.sql 结构）
+    conn.execute("DROP TABLE IF EXISTS sz300_it_good")
+        .await
+        .ok();
+    conn.execute("DROP TABLE IF EXISTS sz300_it_merchant")
+        .await
+        .ok();
+    conn.execute("DROP TABLE IF EXISTS sz300_it_market")
+        .await
+        .ok();
+
+    conn.execute(
+        "CREATE TABLE sz300_it_market (\
+            market_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            name VARCHAR(100) NOT NULL,\
+            status TINYINT DEFAULT 1,\
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建市场表失败");
+
+    conn.execute(
+        "CREATE TABLE sz300_it_merchant (\
+            merchant_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            market_id INT UNSIGNED NOT NULL,\
+            name VARCHAR(100) NOT NULL,\
+            stall_no VARCHAR(50) DEFAULT '',\
+            status TINYINT DEFAULT 1,\
+            INDEX idx_market (market_id)\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建商户表失败");
+
+    conn.execute(
+        "CREATE TABLE sz300_it_good (\
+            good_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            merchant_id INT UNSIGNED NOT NULL,\
+            cat_id INT UNSIGNED DEFAULT 0,\
+            name VARCHAR(100) NOT NULL,\
+            barcode VARCHAR(50) DEFAULT '',\
+            price INT UNSIGNED NOT NULL,\
+            status TINYINT DEFAULT 1,\
+            INDEX idx_merchant (merchant_id)\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建商品表失败");
+
+    // ── 1. 主键回填：插入市场/商户/商品 ──
+    conn.execute("INSERT INTO sz300_it_market (name) VALUES ('鲜视达市场')")
+        .await
+        .expect("插入市场失败");
+    let rows = conn
+        .query("SELECT LAST_INSERT_ID() AS id")
+        .await
+        .expect("查询自增 ID 失败");
+    let market_id = rows[0]
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 id 字段");
+
+    conn.execute_with_params(
+        "INSERT INTO sz300_it_merchant (market_id, name, stall_no) VALUES (?, '张记蔬菜', 'A-01')",
+        &[Value::I64(market_id)],
+    )
+    .await
+    .expect("插入商户失败");
+    let rows = conn
+        .query("SELECT LAST_INSERT_ID() AS id")
+        .await
+        .expect("查询自增 ID 失败");
+    let merchant_id = rows[0]
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 id 字段");
+
+    conn.execute_with_params(
+        "INSERT INTO sz300_it_good (merchant_id, name, barcode, price) VALUES (?, '有机白菜', '6901234567890', 499)",
+        &[Value::I64(merchant_id)],
+    )
+    .await
+    .expect("插入商品失败");
+
+    // ── 2. 三表关联 JOIN 查询 ──
+    let rows = conn
+        .query(
+            "SELECT g.name AS good_name, m.name AS merchant_name, mk.name AS market_name \
+             FROM sz300_it_good g \
+             JOIN sz300_it_merchant m ON g.merchant_id = m.merchant_id \
+             JOIN sz300_it_market mk ON m.market_id = mk.market_id \
+             WHERE g.barcode = '6901234567890'",
+        )
+        .await
+        .expect("关联查询失败");
+    assert_eq!(rows.len(), 1, "三表关联应返回 1 行");
+    let good_name = rows[0]
+        .get("good_name")
+        .and_then(|v| v.as_str())
+        .expect("应包含 good_name");
+    let merchant_name = rows[0]
+        .get("merchant_name")
+        .and_then(|v| v.as_str())
+        .expect("应包含 merchant_name");
+    let market_name = rows[0]
+        .get("market_name")
+        .and_then(|v| v.as_str())
+        .expect("应包含 market_name");
+    assert_eq!(good_name, "有机白菜");
+    assert_eq!(merchant_name, "张记蔬菜");
+    assert_eq!(market_name, "鲜视达市场");
+
+    // ── 3. 参数化 UPDATE / DELETE ──
+    let affected = conn
+        .execute_with_params(
+            "UPDATE sz300_it_good SET price = ?, status = 0 WHERE good_id = ?",
+            &[Value::I64(599), Value::I64(1)],
+        )
+        .await
+        .expect("更新商品失败");
+    assert_eq!(affected, 1, "UPDATE 应影响 1 行");
+
+    let rows = conn
+        .query("SELECT price FROM sz300_it_good WHERE barcode = '6901234567890'")
+        .await
+        .expect("查询失败");
+    let price = rows[0]
+        .get("price")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 price");
+    assert_eq!(price, 599, "价格应更新为 599");
+
+    let affected = conn
+        .execute_with_params(
+            "DELETE FROM sz300_it_good WHERE merchant_id = ?",
+            &[Value::I64(merchant_id)],
+        )
+        .await
+        .expect("删除商品失败");
+    assert_eq!(affected, 1, "DELETE 应影响 1 行");
+
+    // ── 4. 清理 ──
+    conn.execute("DROP TABLE IF EXISTS sz300_it_good")
+        .await
+        .ok();
+    conn.execute("DROP TABLE IF EXISTS sz300_it_merchant")
+        .await
+        .ok();
+    conn.execute("DROP TABLE IF EXISTS sz300_it_market")
+        .await
+        .ok();
+    pool.close_all().await;
+    println!("✅ MySQL 真实业务 schema 关联 CRUD 验证通过：三表 JOIN / 参数化 UPDATE / DELETE");
+}
+
+/// PostgreSQL 事务原子性验证 —— 跨库一致性保障
+///
+/// 与 MySQL 事务测试对齐，验证 PG 侧 begin_transaction/commit/rollback 行为一致：
+/// 1. 事务内 INSERT + commit → 数据持久可见
+/// 2. 事务内 INSERT + rollback → 数据不可见
+#[ignore = "需真实 PostgreSQL 18，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_pg_transaction_commit_rollback() {
+    let pg_cfg = ensure_pg_available().await.expect(
+        "PostgreSQL 不可达，请启动 PG 18 (127.0.0.1:5432, postgres/test123, sz_orm_test 数据库)",
+    );
+
+    let pool = db::init_pg_pool(&pg_cfg)
+        .await
+        .expect("PG 连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+
+    conn.execute("DROP TABLE IF EXISTS sz300_pg_tx_test")
+        .await
+        .ok();
+    conn.execute("CREATE TABLE sz300_pg_tx_test (id SERIAL PRIMARY KEY, val VARCHAR(50) NOT NULL)")
+        .await
+        .expect("建表失败");
+
+    // commit 场景
+    conn.begin_transaction().await.expect("开启事务失败");
+    conn.execute("INSERT INTO sz300_pg_tx_test (val) VALUES ('committed')")
+        .await
+        .expect("事务内插入失败");
+    conn.commit().await.expect("提交事务失败");
+
+    // rollback 场景
+    conn.begin_transaction().await.expect("开启事务失败");
+    conn.execute("INSERT INTO sz300_pg_tx_test (val) VALUES ('rolled_back')")
+        .await
+        .expect("事务内插入失败");
+    conn.rollback().await.expect("回滚事务失败");
+
+    let rows = conn
+        .query("SELECT val FROM sz300_pg_tx_test ORDER BY id")
+        .await
+        .expect("查询失败");
+    let vals: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("val").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    assert_eq!(
+        vals,
+        vec!["committed"],
+        "PG 事务后应只有 committed，实际: {:?}",
+        vals
+    );
+
+    conn.execute("DROP TABLE IF EXISTS sz300_pg_tx_test")
+        .await
+        .ok();
+    pool.close_all().await;
+    println!("✅ PostgreSQL 事务原子性验证通过：commit 生效 / rollback 回滚");
 }

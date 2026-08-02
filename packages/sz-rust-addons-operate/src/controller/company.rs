@@ -26,11 +26,11 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::ModelExt as _;
-use sz_orm_core::Value as OrmValue;
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::ModelExt as _;
+use sz_rust_core::orm::Value as OrmValue;
 
 use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
 use crate::model::Company;
@@ -320,34 +320,41 @@ impl CompanyController {
         let limit = get_i64_param(param, "limit").unwrap_or(0) as usize;
 
         // 查询 is_delete=0 AND app_id=$app_id 的记录
+        // keyword 多字段 OR LIKE 下推到 Repository（对齐 PHP `company_linkman|company_name|company_address LIKE '%keyword%'`）
         let conditions = [
             WhereCondition::new("is_delete", WhereOp::Eq, OrmValue::I64(0)),
             WhereCondition::new("app_id", WhereOp::Eq, OrmValue::I64(app_id)),
         ];
-        let mut items: Vec<Value> = match repo.find_by(&conditions) {
+        let kw_pattern = if keyword.is_empty() {
+            String::new()
+        } else {
+            format!("%{}%", keyword.trim())
+        };
+        let or_filter: Vec<WhereCondition> = if kw_pattern.is_empty() {
+            Vec::new()
+        } else {
+            vec![
+                WhereCondition::new(
+                    "company_linkman",
+                    WhereOp::Like,
+                    OrmValue::String(kw_pattern.clone()),
+                ),
+                WhereCondition::new(
+                    "company_name",
+                    WhereOp::Like,
+                    OrmValue::String(kw_pattern.clone()),
+                ),
+                WhereCondition::new(
+                    "company_address",
+                    WhereOp::Like,
+                    OrmValue::String(kw_pattern),
+                ),
+            ]
+        };
+        let mut items: Vec<Value> = match repo.find_by_with_or_filter(&conditions, &or_filter) {
             Ok(list) => list.into_iter().map(|c| c.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // keyword 过滤（对齐 PHP `company_linkman|company_name|company_address LIKE '%keyword%'`）
-        if !keyword.is_empty() {
-            let kw = keyword.trim();
-            items.retain(|item| {
-                let linkman = item
-                    .get("company_linkman")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let name = item
-                    .get("company_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let address = item
-                    .get("company_address")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                linkman.contains(kw) || name.contains(kw) || address.contains(kw)
-            });
-        }
 
         // 排序（对齐 PHP `sortType='all'` 时 `sort asc`）
         if sort_type == "all" {
@@ -492,7 +499,7 @@ impl CompanyController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     /// 创建测试用 Company
     fn make_company(id: i64, name: &str, app_id: i64) -> Company {

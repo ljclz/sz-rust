@@ -18,11 +18,11 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::ModelExt as _;
-use sz_orm_core::Value as OrmValue;
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::ModelExt as _;
+use sz_rust_core::orm::Value as OrmValue;
 
 use crate::controller::common::{get_app_id, get_i64_param, parse_form_data};
 use crate::model::Level;
@@ -258,7 +258,7 @@ impl LevelController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_level(id: i64, name: &str, app_id: i64) -> Level {
         Level::new()

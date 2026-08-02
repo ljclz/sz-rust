@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 // 重导出 sz-orm-logger 核心类型，方便上层直接使用
-pub use sz_orm_logger::{LogEntry, LogLevel, Logger, LoggerFactory, StructuredLogger};
+pub use crate::orm::logger::{LogEntry, LogLevel, Logger, LoggerFactory, StructuredLogger};
 
 /// 全局日志 facade 单例
 static LOG_FACADE: OnceLock<LogFacade> = OnceLock::new();

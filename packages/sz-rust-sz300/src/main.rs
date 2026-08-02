@@ -21,6 +21,10 @@ async fn main() -> anyhow::Result<()> {
     // 初始化上传目录
     services::file_service::FileService::init().await?;
 
+    // 校验 JWT 配置（SZ_JWT_SECRET 未设置时 panic，阻止启动）
+    // 安全铁律：认证密钥必须配置，否则所有受保护端点可被未授权访问
+    sz_rust_core::controller::validate_jwt_config();
+
     // 加载配置（从环境变量读取，密钥不硬编码）
     let config = config::load_config()?;
 

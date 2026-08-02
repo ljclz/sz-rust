@@ -87,7 +87,7 @@
 // Re-export sz-orm-core::hooks 的所有公开类型
 // ============================================================================
 
-pub use sz_orm_core::hooks::{
+pub use crate::orm::hooks::{
     GlobalScope, HookContext, HookDispatcher, HookEvent, HookFn, HookRegistry, HookResult,
     Hookable, ScopeRegistry, SoftDelete, SoftDeleteScope, TenantModel, TenantScope,
 };
@@ -1497,7 +1497,7 @@ mod tests {
     #[test]
     fn test_hook_registry_short_circuit_on_error() {
         // sz-orm-core 通过 `pub use error::*;` 重导出 DbError
-        use sz_orm_core::DbError;
+        use crate::orm::DbError;
         let registry = HookRegistry::new();
         let called = Arc::new(std::sync::atomic::AtomicU32::new(0));
 

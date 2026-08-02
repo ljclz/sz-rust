@@ -44,11 +44,11 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::Value as OrmValue;
-use sz_orm_core::{Model as _, ModelExt as _};
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::Value as OrmValue;
+use sz_rust_core::orm::{Model as _, ModelExt as _};
 
 use crate::controller::common::{get_app_id, get_i64_param, parse_form_data};
 use crate::model::{Contract, Customer, Rentarea};
@@ -1415,7 +1415,7 @@ impl SyncController {
 mod tests {
     use super::*;
     use serde_json::json;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_rentarea(
         id: i64,

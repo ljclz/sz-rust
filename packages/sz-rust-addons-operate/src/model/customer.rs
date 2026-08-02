@@ -19,11 +19,11 @@
 //!   完整实现在 Repository 层。
 
 use crate::enums::ContractStatusEnum;
-use crate::model::{csv_to_vec_i64, get_i64, impl_empty_relation_loader, vec_i64_to_csv};
+use crate::model::{csv_to_vec_i64, get_i64, impl_relation_loader, vec_i64_to_csv};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, TimestampFields};
 use sz_rust_core::model::{Accessor, AppendState, Appendable, BaseModel, Mutator, MutatorResult};
+use sz_rust_core::orm::{Model, ModelExt, TimestampFields};
 
 /// 客户模型 — 对齐 PHP `addons\operate\model\Customer`
 #[derive(Clone)]
@@ -34,6 +34,8 @@ pub struct Customer {
     get_cache: HashMap<String, Value>,
     /// 动态 append 状态（对齐 PHP `$this->append`）
     append_state: AppendState,
+    /// 已加载的关联数据（H-1 修复：真实 RelationLoader 存储）
+    relations: HashMap<String, sz_rust_core::orm::Value>,
 }
 
 impl Customer {
@@ -43,6 +45,7 @@ impl Customer {
             data: HashMap::new(),
             get_cache: HashMap::new(),
             append_state: AppendState::new(),
+            relations: HashMap::new(),
         }
     }
 
@@ -120,8 +123,8 @@ impl ModelExt for Customer {
         vec!["customer_id"]
     }
 
-    fn get_column_value(&self, column: &str) -> Option<sz_orm_core::Value> {
-        use sz_orm_core::Value as OrmValue;
+    fn get_column_value(&self, column: &str) -> Option<sz_rust_core::orm::Value> {
+        use sz_rust_core::orm::Value as OrmValue;
         let v = self.data.get(column)?;
         match column {
             "customer_id" | "status" | "dept_id" | "cat_id" | "app_id" | "is_delete" => {
@@ -135,13 +138,13 @@ impl ModelExt for Customer {
         }
     }
 
-    fn from_value(&mut self, map: HashMap<String, sz_orm_core::Value>) {
+    fn from_value(&mut self, map: HashMap<String, sz_rust_core::orm::Value>) {
         for (k, v) in map {
             let json_val = match v {
-                sz_orm_core::Value::I64(i) => json!(i),
-                sz_orm_core::Value::I32(i) => json!(i),
-                sz_orm_core::Value::String(s) => json!(s),
-                sz_orm_core::Value::Array(_) => json!(null),
+                sz_rust_core::orm::Value::I64(i) => json!(i),
+                sz_rust_core::orm::Value::I32(i) => json!(i),
+                sz_rust_core::orm::Value::String(s) => json!(s),
+                sz_rust_core::orm::Value::Array(_) => json!(null),
                 other => serde_json::to_value(&other).unwrap_or(json!(null)),
             };
             self.data.insert(k, json_val);
@@ -149,7 +152,7 @@ impl ModelExt for Customer {
     }
 }
 
-impl_empty_relation_loader!(Customer);
+impl_relation_loader!(Customer);
 
 impl BaseModel for Customer {
     fn append() -> Vec<&'static str> {
@@ -211,9 +214,39 @@ impl Accessor for Customer {
                 }
             }
             // PHP getRentareaTextAttr($value, $data): 静态反查 Rentarea 表
-            // 当前无数据库连接，返回空字符串（与 PHP customer_id 为空时一致）
-            // NOTE(Repository 层): 完整实现 Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position')
-            "rentarea_text" => json!(""),
+            //   $rentarea = Rentarea::where(['customer_id'=>..., 'is_delete'=>0])->column('position');
+            //   return $rentarea ? implode('、', $rentarea) : '';
+            //
+            // H-1 修复：从已加载的 "rentareas" 关联数据中提取 position 字段
+            // 若关联未加载（Repository 层未调用 set_relation_data），返回空字符串
+            "rentarea_text" => {
+                let positions: Vec<String> = self
+                    .relations
+                    .get("rentareas")
+                    .and_then(|v| match v {
+                        sz_rust_core::orm::Value::Array(items) => Some(
+                            items
+                                .iter()
+                                .filter_map(|item| match item {
+                                    sz_rust_core::orm::Value::Object(map) => {
+                                        map.get("position").and_then(|p| match p {
+                                            sz_rust_core::orm::Value::String(s) => Some(s.clone()),
+                                            _ => None,
+                                        })
+                                    }
+                                    _ => None,
+                                })
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if positions.is_empty() {
+                    json!("")
+                } else {
+                    json!(positions.join("、"))
+                }
+            }
             _ => Value::Null,
         }
     }

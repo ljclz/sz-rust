@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
 use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
-use sz_rust_core::orm::{Credentials, User};
 
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
@@ -60,18 +60,28 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
     }
 
     let pool = get_pool();
-    let mut conn = pool.acquire().await.map_err(|e| {
-        tracing::error!(error = %e, "认证时获取 DB 连接失败");
-        "服务暂时不可用".to_string()
-    })?;
 
-    // 参数化查询 — 使用 ? 占位符，杜绝 SQL 注入
-    let sql = "SELECT user_id, password_hash as password FROM merchant_user WHERE username = ?";
-    let params = [Value::String(username.to_string())];
-    let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
-        tracing::error!(error = %e, "认证查询用户失败");
+    // P1-SEC-06: 外部 IO 超时保护（默认 5s）— 仅包裹 DB 查询
+    let rows = sz_rust_core::runtime::spawn::with_timeout(async {
+        let mut conn = pool.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, "认证时获取 DB 连接失败");
+            "服务暂时不可用".to_string()
+        })?;
+
+        // 参数化查询 — 使用 ? 占位符，杜绝 SQL 注入
+        let sql = "SELECT user_id, password_hash as password FROM merchant_user WHERE username = ?";
+        let params = [Value::String(username.to_string())];
+        conn.query_with_params(sql, &params).await.map_err(|e| {
+            tracing::error!(error = %e, "认证查询用户失败");
+            "服务暂时不可用".to_string()
+        })
+    })
+    .await
+    .map_err(|_| {
+        tracing::error!("认证查询超时（>5s）");
         "服务暂时不可用".to_string()
-    })?;
+    })?
+    .map_err(|e| e)?;
 
     let row = rows.first().ok_or_else(|| "用户名或密码错误".to_string())?;
 
@@ -104,13 +114,28 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
         return Err("用户名或密码错误".to_string());
     }
 
-    // 更新最后登录时间 — 参数化，避免注入
-    let _ = conn
-        .execute_with_params(
+    // 更新最后登录时间 — 参数化，避免注入（P1-SEC-06: 超时保护）
+    let _ = sz_rust_core::runtime::spawn::with_timeout(async {
+        let mut conn = pool.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, "更新最后登录时间获取连接失败");
+            "服务暂时不可用".to_string()
+        })?;
+        conn.execute_with_params(
             "UPDATE merchant_user SET last_login_at = NOW() WHERE user_id = ?",
             &[Value::I64(user_id)],
         )
-        .await;
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "更新最后登录时间失败");
+            "服务暂时不可用".to_string()
+        })
+    })
+    .await
+    .map_err(|_| {
+        tracing::error!("更新最后登录时间超时（>5s）");
+        "服务暂时不可用".to_string()
+    })
+    .and_then(|r| r);
 
     // 使用 JwtAuthenticator 编码 token — 同步且极快（仅 HS256 哈希）
     let creds = Credentials::new(username, password);

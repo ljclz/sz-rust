@@ -23,5 +23,9 @@ proc-macro = true
 name = "sz_rust_macros"
 path = "src/lib.rs"
 
+[dev-dependencies]
+sz-orm-core.workspace = true
+sz-rust-core.workspace = true
+
 [package.metadata.cargo-machete]
 ignored = ["proc-macro2"]

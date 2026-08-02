@@ -43,15 +43,17 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::ModelExt as _;
-use sz_orm_core::Value as OrmValue;
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Appendable as _;
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::ModelExt as _;
+use sz_rust_core::orm::Value as OrmValue;
 
-use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
-use crate::model::CustomerPay;
+use crate::controller::common::{
+    fetch_list_as_json, get_app_id, get_i64_param, get_str_param, parse_form_data,
+};
+use crate::model::{Category, Customer, CustomerPay, Dept};
 use crate::service::SettledService;
 
 /// CustomerPay 控制器 — 对齐 PHP `CustomerPay` 控制器
@@ -80,19 +82,45 @@ impl CustomerPayController {
     /// }
     /// ```
     #[tracing::instrument(skip_all)]
-    pub async fn base(&self, req: Request<Body>) -> Response {
-        let _param = match self.post_data(req).await {
+    pub async fn base(
+        &self,
+        req: Request<Body>,
+        dept_repo: &dyn Repository<Dept, Key = OrmValue>,
+        customer_repo: &dyn Repository<Customer, Key = OrmValue>,
+        cat_repo: &dyn Repository<Category, Key = OrmValue>,
+    ) -> Response {
+        let param = match self.post_data(req).await {
             Ok(p) => p,
             Err(e) => return self.render_error(format!("参数解析失败: {e}"), json!({}), 0),
         };
-        // PHP 整合多源数据，Rust 端返回基础结构，
-        // 业务层（apps/oapc）可注入具体 Repository 补全 deptList/customerList/catList。
+        let app_id = get_app_id(&param);
+
+        // H-2 修复：从 Repository 查询真实数据（对齐 PHP Dept::getLightList / Customer::selectCatCustomer / Category::getAll）
+        let conditions = [
+            WhereCondition::new("app_id", WhereOp::Eq, OrmValue::I64(app_id)),
+            WhereCondition::new("is_delete", WhereOp::Eq, OrmValue::I64(0)),
+        ];
+        let dept_list = fetch_list_as_json(dept_repo, &conditions);
+        let customer_list = fetch_list_as_json(customer_repo, &conditions);
+        let cat_list = fetch_list_as_json(cat_repo, &conditions);
+
+        // H-2 修复：枚举驱动列表填充真实值（对齐 PHP CustomerSyncTypeEnum::payStatusData / payTypeList）
+        // CustomerPayStatus 枚举：10=未付款, 20=已付款, 30=已退款
+        // PayType 枚举：1=扫码转账, 2=现金支付, 3=转账+现金
         let result = json!({
-            "deptList": [],
-            "customerList": [],
-            "catList": [],
-            "payStatusList": [],
-            "payTypeList": []
+            "deptList": dept_list,
+            "customerList": customer_list,
+            "catList": cat_list,
+            "payStatusList": [
+                {"code": 10, "name": "未付款"},
+                {"code": 20, "name": "已付款"},
+                {"code": 30, "name": "已退款"}
+            ],
+            "payTypeList": [
+                {"code": 1, "name": "扫码转账"},
+                {"code": 2, "name": "现金支付"},
+                {"code": 3, "name": "转账+现金"}
+            ]
         });
         self.render_success("", json!({"result": result}))
     }
@@ -154,7 +182,7 @@ impl CustomerPayController {
             Err(e) => return self.render_error(&e, json!({}), 0),
         };
 
-        match svc.create_order(&data) {
+        match svc.create_order(&data).await {
             Ok(order_detail) => {
                 let order_id = order_detail
                     .get("order_id")
@@ -223,7 +251,7 @@ impl CustomerPayController {
             None => return self.render_error("记录不存在", json!({}), 0),
         };
 
-        match svc.pay_buy(&detail, &data) {
+        match svc.pay_buy(&detail, &data).await {
             Ok(order_detail) => {
                 let order_id = order_detail
                     .get("order_id")
@@ -300,7 +328,7 @@ impl CustomerPayController {
         };
 
         let check_type = get_str_param(&param, "type").unwrap_or_default();
-        let pay_res = match svc.epay_check(&param) {
+        let pay_res = match svc.epay_check(&param).await {
             Ok(r) => r,
             Err(e) => return self.render_error(&e, json!({}), 0),
         };
@@ -374,7 +402,7 @@ impl CustomerPayController {
             return self.render_error("该订单已退款", json!({}), 0);
         }
 
-        match svc.refund(&detail, &param) {
+        match svc.refund(&detail, &param).await {
             Ok(()) => self.render_success("退款成功", json!({})),
             Err(e) => {
                 let msg = if e.is_empty() { "退款失败" } else { &e };
@@ -474,29 +502,26 @@ impl CustomerPayController {
                 OrmValue::I64(pay_type),
             ));
         }
+        // 字符串精确匹配下推到 Repository（对齐 PHP `where pay_source=? AND order_no=?`）
+        if let Some(pay_source) = get_str_param(param, "pay_source") {
+            conditions.push(WhereCondition::new(
+                "pay_source",
+                WhereOp::Eq,
+                OrmValue::String(pay_source),
+            ));
+        }
+        if let Some(order_no) = get_str_param(param, "order_no") {
+            conditions.push(WhereCondition::new(
+                "order_no",
+                WhereOp::Eq,
+                OrmValue::String(order_no),
+            ));
+        }
 
         let mut items: Vec<Value> = match repo.find_by(&conditions) {
             Ok(list) => list.into_iter().map(|m| m.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // 字符串过滤条件（pay_source/order_no）
-        if let Some(pay_source) = get_str_param(param, "pay_source") {
-            items.retain(|item| {
-                item.get("pay_source")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == pay_source)
-                    .unwrap_or(false)
-            });
-        }
-        if let Some(order_no) = get_str_param(param, "order_no") {
-            items.retain(|item| {
-                item.get("order_no")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s == order_no)
-                    .unwrap_or(false)
-            });
-        }
 
         // PHP 按 create_time desc 排序（简化：按 order_id desc）
         items.sort_by(|a, b| {
@@ -684,14 +709,32 @@ impl CustomerPayController {
 mod tests {
     use super::*;
     use crate::service::SettledService;
+    use http_body_util::BodyExt;
     use serde_json::json;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
-    /// 测试用 Mock SettledService
+    /// 构造 JSON POST 请求（对齐控制器 `post_data` 解析逻辑）
+    fn build_json_request(body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// 异步收集响应体并解析为 JSON
+    async fn parse_response(resp: Response) -> Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    /// 测试用 Mock SettledService（成功路径）
     struct TestSettledService;
 
-    impl SettledService for TestSettledService {
-        fn create_order(&self, data: &Value) -> Result<Value, String> {
+    #[async_trait::async_trait]
+impl SettledService for TestSettledService {
+        async fn create_order(&self, data: &Value) -> Result<Value, String> {
             let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
             Ok(json!({
                 "order_id": order_id,
@@ -699,7 +742,7 @@ mod tests {
             }))
         }
 
-        fn pay_buy(&self, detail: &Value, _data: &Value) -> Result<Value, String> {
+        async fn pay_buy(&self, detail: &Value, _data: &Value) -> Result<Value, String> {
             let order_id = detail.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
             Ok(json!({
                 "order_id": order_id,
@@ -707,7 +750,7 @@ mod tests {
             }))
         }
 
-        fn epay_check(&self, param: &Value) -> Result<Value, String> {
+        async fn epay_check(&self, param: &Value) -> Result<Value, String> {
             let bank_name = param
                 .get("bank_name")
                 .and_then(|v| v.as_str())
@@ -721,7 +764,7 @@ mod tests {
             Ok(json!({"msg": "查询成功", "respObj": resp_obj}))
         }
 
-        fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
+        async fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
             Ok(())
         }
     }
@@ -897,33 +940,33 @@ mod tests {
 
     // -------------------- SettledService trait 测试 --------------------
 
-    #[test]
-    fn test_settled_service_create_order_returns_order_detail() {
+#[tokio::test]
+    async fn test_settled_service_create_order_returns_order_detail() {
         let svc = TestSettledService;
-        let result = svc.create_order(&json!({"order_id": 42})).unwrap();
+        let result = svc.create_order(&json!({"order_id": 42})).await.unwrap();
         assert_eq!(result["order_id"], 42);
         assert_eq!(result["pay_res"]["msg"], "success");
     }
 
-    #[test]
-    fn test_settled_service_pay_buy_returns_order_detail() {
+#[tokio::test]
+    async fn test_settled_service_pay_buy_returns_order_detail() {
         let svc = TestSettledService;
-        let result = svc.pay_buy(&json!({"order_id": 10}), &json!({})).unwrap();
+        let result = svc.pay_buy(&json!({"order_id": 10}), &json!({})).await.unwrap();
         assert_eq!(result["order_id"], 10);
         assert_eq!(result["pay_res"]["msg"], "pay_buy_success");
     }
 
-    #[test]
-    fn test_settled_service_epay_check_ccb_returns_y() {
+#[tokio::test]
+    async fn test_settled_service_epay_check_ccb_returns_y() {
         let svc = TestSettledService;
-        let result = svc.epay_check(&json!({"bank_name": "ccb"})).unwrap();
+        let result = svc.epay_check(&json!({"bank_name": "ccb"})).await.unwrap();
         assert_eq!(result["respObj"]["RESULT"], "Y");
     }
 
-    #[test]
-    fn test_settled_service_refund_success() {
+#[tokio::test]
+    async fn test_settled_service_refund_success() {
         let svc = TestSettledService;
-        let result = svc.refund(&json!({"order_id": 1}), &json!({}));
+        let result = svc.refund(&json!({"order_id": 1}), &json!({})).await;
         assert!(result.is_ok());
     }
 
@@ -990,5 +1033,425 @@ mod tests {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
         assert_eq!(pay_status, 30); // 已退款
+    }
+
+    // ========================================================================
+    // T-1/T-2 失败路径测试 — 覆盖控制器 Err 分支（对齐审计报告 P1-5）
+    // ========================================================================
+    //
+    // 审计报告 T-2 指出：`TestSettledService` 永远返回成功，控制器的 `Err(e)` 分支
+    //（如 pay 行 195-203、pay_buy 行 261-269、check 行 331、refund 行 405-409）
+    // 从未被执行。此处通过 `FailingSettledService` 和 `SelectiveFailingSettledService`
+    // 注入失败路径，覆盖控制器错误响应分支。
+
+    /// 全失败 Mock — 所有方法返回 Err（覆盖控制器全失败路径）
+    struct FailingSettledService;
+
+    #[async_trait::async_trait]
+impl SettledService for FailingSettledService {
+        async fn create_order(&self, _data: &Value) -> Result<Value, String> {
+            Err("模拟下单失败：银行 API 不可用".to_string())
+        }
+        async fn pay_buy(&self, _detail: &Value, _data: &Value) -> Result<Value, String> {
+            Err("模拟继续支付失败：订单状态异常".to_string())
+        }
+        async fn epay_check(&self, _param: &Value) -> Result<Value, String> {
+            Err("模拟查询失败：网络超时".to_string())
+        }
+        async fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
+            Err("模拟退款失败：银行拒绝".to_string())
+        }
+    }
+
+    /// 选择性失败 Mock — 通过标志位控制单个方法失败
+    ///
+    /// 用于精细化的失败路径测试（例如仅 `refund` 失败、其他方法成功）。
+    #[derive(Default)]
+    struct SelectiveFailingSettledService {
+        fail_create_order: bool,
+        fail_pay_buy: bool,
+        fail_epay_check: bool,
+        fail_refund: bool,
+    }
+
+    #[async_trait::async_trait]
+impl SettledService for SelectiveFailingSettledService {
+        async fn create_order(&self, data: &Value) -> Result<Value, String> {
+            if self.fail_create_order {
+                return Err("create_order 失败".to_string());
+            }
+            let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
+            Ok(json!({
+                "order_id": order_id,
+                "pay_res": {"msg": "success", "data": []}
+            }))
+        }
+
+        async fn pay_buy(&self, detail: &Value, _data: &Value) -> Result<Value, String> {
+            if self.fail_pay_buy {
+                return Err("pay_buy 失败".to_string());
+            }
+            let order_id = detail.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
+            Ok(json!({
+                "order_id": order_id,
+                "pay_res": {"msg": "success", "data": []}
+            }))
+        }
+
+        async fn epay_check(&self, _param: &Value) -> Result<Value, String> {
+            if self.fail_epay_check {
+                return Err("epay_check 失败".to_string());
+            }
+            Ok(json!({"msg": "查询成功", "respObj": {"RESULT": "Y"}}))
+        }
+
+        async fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
+            if self.fail_refund {
+                return Err("refund 失败".to_string());
+            }
+            Ok(())
+        }
+    }
+
+    // -------------------- pay 方法失败路径测试 --------------------
+
+    #[tokio::test]
+    async fn test_pay_returns_error_when_service_fails() {
+        // T-2: pay 方法 svc.create_order 失败时应返回错误响应
+        let ctrl = CustomerPayController;
+        let req = build_json_request(json!({
+            "formData": "{\"customer_id\":1,\"pay_type\":1}"
+        }));
+        let resp = ctrl.pay(req, &FailingSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0, "失败时 code 应为 0");
+        assert!(
+            body["msg"].as_str().unwrap().contains("模拟下单失败"),
+            "msg 应包含服务层错误信息，实际：{}",
+            body["msg"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pay_returns_error_when_formdata_missing() {
+        // T-2: pay 方法 formData 缺失时应返回错误响应
+        let ctrl = CustomerPayController;
+        let req = build_json_request(json!({"order_id": 1}));
+        let resp = ctrl.pay(req, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0, "formData 缺失时 code 应为 0");
+    }
+
+    #[tokio::test]
+    async fn test_pay_returns_error_when_formdata_invalid_json() {
+        // T-2: pay 方法 formData 非法 JSON 时应返回错误响应
+        let ctrl = CustomerPayController;
+        let req = build_json_request(json!({"formData": "not-a-json-object"}));
+        let resp = ctrl.pay(req, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_pay_success_path_returns_code_1() {
+        // 对比测试：成功路径应返回 code=1（验证测试基础设施正确性）
+        let ctrl = CustomerPayController;
+        let req = build_json_request(json!({
+            "formData": "{\"customer_id\":1,\"pay_type\":1,\"order_id\":42}"
+        }));
+        let resp = ctrl.pay(req, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 1, "成功路径 code 应为 1");
+        assert_eq!(body["data"]["order_id"], 42);
+    }
+
+    // -------------------- pay_buy 方法失败路径测试 --------------------
+
+    #[tokio::test]
+    async fn test_pay_buy_returns_error_when_order_id_missing() {
+        // T-2: pay_buy 方法 order_id 缺失时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "{\"pay_type\":1}"}));
+        let resp = ctrl.pay_buy(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "order_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_pay_buy_returns_error_when_order_not_found() {
+        // T-2: pay_buy 方法订单不存在时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "order_id": 999,
+            "formData": "{\"pay_type\":1}"
+        }));
+        let resp = ctrl.pay_buy(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "记录不存在");
+    }
+
+    #[tokio::test]
+    async fn test_pay_buy_returns_error_when_service_fails() {
+        // T-2: pay_buy 方法 svc.pay_buy 失败时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "order_id": 2,
+            "formData": "{\"pay_type\":1}"
+        }));
+        let resp = ctrl.pay_buy(req, &repo, &FailingSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert!(
+            body["msg"].as_str().unwrap().contains("模拟继续支付失败"),
+            "msg 应包含服务层错误信息，实际：{}",
+            body["msg"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pay_buy_success_path_returns_code_1() {
+        // 对比测试：成功路径应返回 code=1
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "order_id": 2,
+            "formData": "{\"pay_type\":1}"
+        }));
+        let resp = ctrl
+            .pay_buy(req, &repo, &SelectiveFailingSettledService::default())
+            .await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 1, "成功路径 code 应为 1");
+        assert_eq!(body["data"]["order_id"], 2);
+    }
+
+    // -------------------- check 方法失败路径测试 --------------------
+
+    #[tokio::test]
+    async fn test_check_returns_error_when_service_fails() {
+        // T-2: check 方法 svc.epay_check 失败时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "order_no": "ORD001",
+            "bank_name": "ccb",
+            "type": "check"
+        }));
+        let resp = ctrl.check(req, &repo, &FailingSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert!(
+            body["msg"].as_str().unwrap().contains("模拟查询失败"),
+            "msg 应包含服务层错误信息，实际：{}",
+            body["msg"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_success_path_returns_code_1() {
+        // 对比测试：成功路径应返回 code=1
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "order_no": "ORD001",
+            "bank_name": "ccb",
+            "type": "check"
+        }));
+        let resp = ctrl
+            .check(req, &repo, &SelectiveFailingSettledService::default())
+            .await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 1, "成功路径 code 应为 1");
+    }
+
+    // -------------------- refund 方法失败路径测试 --------------------
+
+    #[tokio::test]
+    async fn test_refund_returns_error_when_order_id_missing() {
+        // T-2: refund 方法 order_id 缺失时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.refund(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "order_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_refund_returns_error_when_order_not_found() {
+        // T-2: refund 方法订单不存在时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 999}));
+        let resp = ctrl.refund(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_refund_blocks_unpaid_order() {
+        // T-2: refund 方法 pay_status=10（未付款）应返回错误响应
+        // 对齐 PHP `if ($model['pay_status'] == 10) return $this->renderError('该订单尚未支付');`
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 1}));
+        let resp = ctrl.refund(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "该订单尚未支付");
+    }
+
+    #[tokio::test]
+    async fn test_refund_blocks_already_refunded_order() {
+        // T-2: refund 方法 pay_status=30（已退款）应返回错误响应
+        // 对齐 PHP `if ($model['pay_status'] == 30) return $this->renderError('该订单已退款');`
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 3}));
+        let resp = ctrl.refund(req, &repo, &TestSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "该订单已退款");
+    }
+
+    #[tokio::test]
+    async fn test_refund_returns_error_when_service_fails() {
+        // T-2: refund 方法 svc.refund 失败时应返回错误响应
+        // 使用 pay_status=20（已付款）的订单，确保能通过前置校验进入 svc.refund
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 2}));
+        let resp = ctrl.refund(req, &repo, &FailingSettledService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert!(
+            body["msg"].as_str().unwrap().contains("模拟退款失败"),
+            "msg 应包含服务层错误信息，实际：{}",
+            body["msg"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refund_success_path_returns_code_1() {
+        // 对比测试：成功路径应返回 code=1
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 2}));
+        let resp = ctrl
+            .refund(req, &repo, &SelectiveFailingSettledService::default())
+            .await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 1, "成功路径 code 应为 1");
+    }
+
+    // -------------------- detail 方法失败路径测试 --------------------
+
+    #[tokio::test]
+    async fn test_detail_returns_error_when_order_id_missing() {
+        // T-2: detail 方法 order_id 缺失时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.detail(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "order_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_detail_returns_error_when_order_not_found() {
+        // T-2: detail 方法订单不存在时应返回错误响应
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 999}));
+        let resp = ctrl.detail(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_detail_success_path_returns_code_1() {
+        // 对比测试：成功路径应返回 code=1
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 1}));
+        let resp = ctrl.detail(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 1);
+        assert_eq!(body["data"]["detail"]["order_id"], 1);
+    }
+
+    // -------------------- 空消息回退测试 --------------------
+
+    #[tokio::test]
+    async fn test_pay_returns_default_msg_when_error_empty() {
+        // T-2: 当 svc.create_order 返回空字符串错误时，应使用默认消息"支付订单创建失败"
+        struct EmptyErrorService;
+        #[async_trait::async_trait]
+impl SettledService for EmptyErrorService {
+            async fn create_order(&self, _data: &Value) -> Result<Value, String> {
+                Err(String::new())
+            }
+            async fn pay_buy(&self, _detail: &Value, _data: &Value) -> Result<Value, String> {
+                Err(String::new())
+            }
+            async fn epay_check(&self, _param: &Value) -> Result<Value, String> {
+                Err(String::new())
+            }
+            async fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
+                Err(String::new())
+            }
+        }
+
+        let ctrl = CustomerPayController;
+        let req = build_json_request(json!({
+            "formData": "{\"customer_id\":1,\"pay_type\":1}"
+        }));
+        let resp = ctrl.pay(req, &EmptyErrorService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(
+            body["msg"], "支付订单创建失败",
+            "空错误消息应回退为默认消息"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_refund_returns_default_msg_when_error_empty() {
+        // T-2: 当 svc.refund 返回空字符串错误时，应使用默认消息"退款失败"
+        struct EmptyErrorRefundService;
+        #[async_trait::async_trait]
+impl SettledService for EmptyErrorRefundService {
+            async fn create_order(&self, data: &Value) -> Result<Value, String> {
+                let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                Ok(json!({"order_id": order_id, "pay_res": {"msg": "success"}}))
+            }
+            async fn pay_buy(&self, detail: &Value, _data: &Value) -> Result<Value, String> {
+                let order_id = detail.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                Ok(json!({"order_id": order_id, "pay_res": {"msg": "success"}}))
+            }
+            async fn epay_check(&self, _param: &Value) -> Result<Value, String> {
+                Ok(json!({"msg": "查询成功", "respObj": {"RESULT": "Y"}}))
+            }
+            async fn refund(&self, _detail: &Value, _param: &Value) -> Result<(), String> {
+                Err(String::new())
+            }
+        }
+
+        let ctrl = CustomerPayController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"order_id": 2}));
+        let resp = ctrl.refund(req, &repo, &EmptyErrorRefundService).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "退款失败", "空错误消息应回退为默认消息");
     }
 }

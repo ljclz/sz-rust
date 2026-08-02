@@ -44,11 +44,11 @@
 //! - **关联关系**（personnel/contract/dept/customer belongsTo）→ NOTE(关联模块)
 
 use crate::model::contract::php_price_attr;
-use crate::model::{get_i64, impl_empty_relation_loader};
+use crate::model::{get_i64, impl_relation_loader};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, TimestampFields};
 use sz_rust_core::model::{Accessor, AppendState, Appendable, BaseModel, Mutator, MutatorResult};
+use sz_rust_core::orm::{Model, ModelExt, TimestampFields};
 
 /// 合同变更日志模型 — 对齐 PHP `addons\operate\model\ContractLog`
 #[derive(Clone)]
@@ -59,6 +59,8 @@ pub struct ContractLog {
     get_cache: HashMap<String, Value>,
     /// 动态 append 状态（对齐 PHP `$this->append`）
     append_state: AppendState,
+    /// 已加载的关联数据（H-1 修复：真实 RelationLoader 存储）
+    relations: HashMap<String, sz_rust_core::orm::Value>,
 }
 
 impl ContractLog {
@@ -68,6 +70,7 @@ impl ContractLog {
             data: HashMap::new(),
             get_cache: HashMap::new(),
             append_state: AppendState::new(),
+            relations: HashMap::new(),
         }
     }
 
@@ -180,8 +183,8 @@ impl ModelExt for ContractLog {
         vec!["log_id"]
     }
 
-    fn get_column_value(&self, column: &str) -> Option<sz_orm_core::Value> {
-        use sz_orm_core::Value as OrmValue;
+    fn get_column_value(&self, column: &str) -> Option<sz_rust_core::orm::Value> {
+        use sz_rust_core::orm::Value as OrmValue;
         let v = self.data.get(column)?;
         match column {
             "log_id" | "contract_id" | "uid" | "type" | "customer_id" | "dept_id" | "is_delete"
@@ -197,14 +200,14 @@ impl ModelExt for ContractLog {
         }
     }
 
-    fn from_value(&mut self, map: HashMap<String, sz_orm_core::Value>) {
+    fn from_value(&mut self, map: HashMap<String, sz_rust_core::orm::Value>) {
         for (k, v) in map {
             let json_val = match v {
-                sz_orm_core::Value::I64(i) => json!(i),
-                sz_orm_core::Value::I32(i) => json!(i),
-                sz_orm_core::Value::F64(f) => json!(f),
-                sz_orm_core::Value::String(s) => json!(s),
-                sz_orm_core::Value::Array(_) => json!(null),
+                sz_rust_core::orm::Value::I64(i) => json!(i),
+                sz_rust_core::orm::Value::I32(i) => json!(i),
+                sz_rust_core::orm::Value::F64(f) => json!(f),
+                sz_rust_core::orm::Value::String(s) => json!(s),
+                sz_rust_core::orm::Value::Array(_) => json!(null),
                 other => serde_json::to_value(&other).unwrap_or(json!(null)),
             };
             self.data.insert(k, json_val);
@@ -212,7 +215,7 @@ impl ModelExt for ContractLog {
     }
 }
 
-impl_empty_relation_loader!(ContractLog);
+impl_relation_loader!(ContractLog);
 
 impl BaseModel for ContractLog {
     fn append() -> Vec<&'static str> {

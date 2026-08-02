@@ -1,0 +1,27 @@
+[package]
+name = "sz-rust-addons-erp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust ERP 模板插件 — 商品/供应商/采购管理骨架"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["erp", "sz-rust", "addons", "template"]
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+[lib]
+name = "sz_rust_addons_erp"
+path = "src/lib.rs"

@@ -26,6 +26,7 @@ sz-orm-logger.workspace = true
 sz-orm-macros.workspace = true
 sz-orm-sql-validator.workspace = true
 sz-orm-core.workspace = true
+sz-orm-query-builder.workspace = true
 sz-orm-auth.workspace = true
 sz-orm-limit.workspace = true
 sz-orm-tracing.workspace = true
@@ -59,6 +60,8 @@ rand.workspace = true
 image = { workspace = true }
 imageproc = { workspace = true }
 ab_glyph = { workspace = true }
+# 二维码生成（对齐 PHP endroid/qr-code）
+qrcode = { workspace = true }
 # Swoole/Worker 适配（tokio 替代）
 sz-orm-queue.workspace = true
 sz-orm-mqtt.workspace = true
@@ -66,6 +69,12 @@ sz-orm-websocket = { workspace = true, features = ["server"] }
 sz-orm-scheduler.workspace = true
 tokio-util.workspace = true
 num_cpus.workspace = true
+# H-6 修复：过程宏包提升为正式依赖，使 sz_rust_core::macros 可重导出
+sz-rust-macros.workspace = true
+# H-6 修复：addons 加载器提升为正式依赖，使 sz_rust_core::addons 可重导出
+sz-rust-addons-loader.workspace = true
+# Redis Session 持久化（可选）
+redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -73,7 +82,6 @@ serde_json = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 http-body-util.workspace = true
 rcgen = "0.13"
-sz-rust-macros.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
 chrono = { workspace = true }
 proptest = { workspace = true }
@@ -82,6 +90,8 @@ proptest = { workspace = true }
 default = []
 # 启用真实 MQTT broker（默认 in-memory mock），透传至 sz-orm-mqtt
 real-broker = ["sz-orm-mqtt/real-broker"]
+# 启用 Redis Session 持久化驱动
+redis-session = ["redis"]
 
 [lib]
 name = "sz_rust_core"

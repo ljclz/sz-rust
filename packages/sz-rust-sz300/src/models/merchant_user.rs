@@ -11,7 +11,8 @@ pub struct MerchantUser {
     pub merchant_id: i64,
     /// 登录用户名
     pub username: String,
-    /// 密码哈希值
+    /// 密码哈希值（序列化时自动脱敏，防止通过 API 响应泄漏）
+    #[serde(skip_serializing)]
     pub password: String,
     /// 联系电话
     pub phone: String,
@@ -137,5 +138,65 @@ impl RelationLoader for MerchantUser {
 
     fn get_relation_fk_value(&self, _fk_name: &str) -> String {
         String::new()
+    }
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// P0-SEC-01：password 字段序列化时必须脱敏（不出现在 JSON 响应中）
+    #[test]
+    fn test_p0_sec_01_password_not_in_serialized_json() {
+        let user = MerchantUser {
+            user_id: Some(42),
+            merchant_id: 7,
+            username: "admin".to_string(),
+            password: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G.2I.2I.2I.2I".to_string(),
+            phone: "13800138000".to_string(),
+            role: 1,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+
+        let json = serde_json::to_string(&user).expect("序列化应成功");
+
+        // password 绝不应出现在序列化输出中
+        assert!(
+            !json.contains("password"),
+            "P0-SEC-01: password 字段出现在序列化 JSON 中（安全脱敏失败）: {json}"
+        );
+        assert!(
+            !json.contains("$2b$12"),
+            "P0-SEC-01: bcrypt 哈希泄漏到 JSON 响应中: {json}"
+        );
+
+        // 其他非敏感字段应正常序列化
+        assert!(json.contains("admin"), "username 应出现在 JSON 中");
+        assert!(json.contains("13800138000"), "phone 应出现在 JSON 中");
+    }
+
+    /// P0-SEC-01：password 字段反序列化时仍可正常读取（脱敏仅影响序列化）
+    #[test]
+    fn test_p0_sec_01_password_deserializes_normally() {
+        let json = json!({
+            "user_id": 99,
+            "merchant_id": 1,
+            "username": "testuser",
+            "password": "bcrypt_hash_xyz",
+            "phone": "13900139000",
+            "role": 0
+        });
+
+        let user: MerchantUser = serde_json::from_value(json).expect("反序列化应成功");
+        assert_eq!(user.password, "bcrypt_hash_xyz");
+        assert_eq!(user.username, "testuser");
+        assert_eq!(user.user_id, Some(99));
     }
 }

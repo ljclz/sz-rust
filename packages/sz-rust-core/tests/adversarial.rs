@@ -1222,8 +1222,8 @@ fn adversarial_cookie_options_boundaries() {
 // ============================================================================
 
 /// G1: Cache DML 序列 — set→get→inc→dec→delete→clear→remember
-#[test]
-fn adversarial_cache_dml_sequence() {
+#[tokio::test]
+async fn adversarial_cache_dml_sequence() {
     let driver = MemoryCacheDriver::new();
     let cache = Cache::new();
     cache.register_default(driver);
@@ -1267,14 +1267,16 @@ fn adversarial_cache_dml_sequence() {
     cache.clear().unwrap();
     assert!(!cache.has("after_clear").unwrap());
 
-    // 8. remember
+    // 8. remember（异步，不阻塞 tokio worker）
     let computed = cache
         .remember("computed", None, || "lazy_value".to_string())
+        .await
         .unwrap();
     assert_eq!(computed, "lazy_value".to_string());
     // 再次 remember 应从缓存取
     let cached: String = cache
         .remember("computed", None, || panic!("不应再次调用"))
+        .await
         .unwrap();
     assert_eq!(cached, "lazy_value".to_string());
 }

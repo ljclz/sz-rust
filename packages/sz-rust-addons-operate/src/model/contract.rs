@@ -37,12 +37,12 @@
 //! **不兼容说明**：若需与 PHP 数据库现存量兼容，需在数据迁移层做格式转换。
 
 use crate::enums::ContractStatusEnum;
-use crate::model::{get_i64, impl_empty_relation_loader};
+use crate::model::{get_i64, impl_relation_loader};
 use chrono::NaiveDate;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, TimestampFields};
 use sz_rust_core::model::{Accessor, AppendState, Appendable, BaseModel, Mutator, MutatorResult};
+use sz_rust_core::orm::{Model, ModelExt, TimestampFields};
 
 /// PHP `$value ? (float)$value : 0` 行为复刻
 ///
@@ -106,6 +106,8 @@ pub struct Contract {
     get_cache: HashMap<String, Value>,
     /// 动态 append 状态（对齐 PHP `$this->append`）
     append_state: AppendState,
+    /// 已加载的关联数据（H-1 修复：真实 RelationLoader 存储）
+    relations: HashMap<String, sz_rust_core::orm::Value>,
 }
 
 impl Contract {
@@ -115,6 +117,7 @@ impl Contract {
             data: HashMap::new(),
             get_cache: HashMap::new(),
             append_state: AppendState::new(),
+            relations: HashMap::new(),
         }
     }
 
@@ -230,8 +233,8 @@ impl ModelExt for Contract {
         vec!["contract_id"]
     }
 
-    fn get_column_value(&self, column: &str) -> Option<sz_orm_core::Value> {
-        use sz_orm_core::Value as OrmValue;
+    fn get_column_value(&self, column: &str) -> Option<sz_rust_core::orm::Value> {
+        use sz_rust_core::orm::Value as OrmValue;
         let v = self.data.get(column)?;
         match column {
             "contract_id" | "customer_id" | "dept_id" | "cat_id" | "company_id"
@@ -248,14 +251,14 @@ impl ModelExt for Contract {
         }
     }
 
-    fn from_value(&mut self, map: HashMap<String, sz_orm_core::Value>) {
+    fn from_value(&mut self, map: HashMap<String, sz_rust_core::orm::Value>) {
         for (k, v) in map {
             let json_val = match v {
-                sz_orm_core::Value::I64(i) => json!(i),
-                sz_orm_core::Value::I32(i) => json!(i),
-                sz_orm_core::Value::F64(f) => json!(f),
-                sz_orm_core::Value::String(s) => json!(s),
-                sz_orm_core::Value::Array(_) => json!(null),
+                sz_rust_core::orm::Value::I64(i) => json!(i),
+                sz_rust_core::orm::Value::I32(i) => json!(i),
+                sz_rust_core::orm::Value::F64(f) => json!(f),
+                sz_rust_core::orm::Value::String(s) => json!(s),
+                sz_rust_core::orm::Value::Array(_) => json!(null),
                 other => serde_json::to_value(&other).unwrap_or(json!(null)),
             };
             self.data.insert(k, json_val);
@@ -263,7 +266,7 @@ impl ModelExt for Contract {
     }
 }
 
-impl_empty_relation_loader!(Contract);
+impl_relation_loader!(Contract);
 
 impl BaseModel for Contract {
     fn append() -> Vec<&'static str> {
@@ -440,9 +443,46 @@ impl Accessor for Contract {
 
             // ==================== 虚拟字段访问器 ====================
             // PHP getLogsAttr: ContractLog::getLogs($data['contract_id'])
-            // 当前无数据库连接，返回空数组
-            // NOTE(Repository 层): 完整实现 ContractLog::getLogs
-            "logs" => json!([]),
+            // H-1 修复：从已加载的 "logs" 关联数据中提取日志记录
+            // 若关联未加载（Repository 层未调用 set_relation_data），返回空数组
+            "logs" => {
+                let logs: Vec<Value> = self
+                    .relations
+                    .get("logs")
+                    .and_then(|v| match v {
+                        sz_rust_core::orm::Value::Array(items) => Some(
+                            items
+                                .iter()
+                                .filter_map(|item| {
+                                    match item {
+                                        sz_rust_core::orm::Value::Object(map) => {
+                                            // 将 ORM Value HashMap 转为 serde_json Value Object
+                                            let mut json_map = serde_json::Map::new();
+                                            for (k, val) in map {
+                                                let json_val = match val {
+                                                    sz_rust_core::orm::Value::I64(i) => json!(i),
+                                                    sz_rust_core::orm::Value::I32(i) => json!(i),
+                                                    sz_rust_core::orm::Value::F64(f) => json!(f),
+                                                    sz_rust_core::orm::Value::String(s) => json!(s),
+                                                    sz_rust_core::orm::Value::Bool(b) => json!(b),
+                                                    sz_rust_core::orm::Value::Null => json!(null),
+                                                    other => serde_json::to_value(other)
+                                                        .unwrap_or(json!(null)),
+                                                };
+                                                json_map.insert(k.clone(), json_val);
+                                            }
+                                            Some(Value::Object(json_map))
+                                        }
+                                        _ => None,
+                                    }
+                                })
+                                .collect(),
+                        ),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                Value::Array(logs)
+            }
 
             _ => Value::Null,
         }

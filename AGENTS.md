@@ -33,6 +33,16 @@
 | [sz-rust-framework-di](.trae/skills/sz-rust-framework-di/SKILL.md) | 修改 container | auto |
 | [sz-rust-framework-config](.trae/skills/sz-rust-framework-config/SKILL.md) | 修改 config 或 static 服务 | manual |
 | [sz-rust-framework-load](.trae/skills/sz-rust-framework-load/SKILL.md) | 性能压测 | auto |
+| [sz-rust-test-coverage](.trae/skills/sz-rust-test-coverage/SKILL.md) | 业务代码变更 | auto |
+| [sz-rust-performance-check](.trae/skills/sz-rust-performance-check/SKILL.md) | hot path 变更 | auto |
+| [sz-rust-doc-check](.trae/skills/sz-rust-doc-check/SKILL.md) | pub API 变更 | auto |
+| [sz-rust-migration](.trae/skills/sz-rust-migration/SKILL.md) | schema 变更 | manual |
+| [sz-rust-deploy](.trae/skills/sz-rust-deploy/SKILL.md) | release 分支 | manual |
+| [sz-rust-orm-query](.trae/skills/sz-rust-orm-query/SKILL.md) | repository 变更 | auto |
+| [sz-rust-n-plus-one](.trae/skills/sz-rust-n-plus-one/SKILL.md) | 循环+DB 调用 | auto |
+| [sz-rust-auth-guard](.trae/skills/sz-rust-auth-guard/SKILL.md) | 路由/中间件变更 | auto |
+| [sz-rust-error-handling](.trae/skills/sz-rust-error-handling/SKILL.md) | Result 处理变更 | auto |
+| [sz-rust-ci-cd](.trae/skills/sz-rust-ci-cd/SKILL.md) | CI/Docker 变更 | auto |
 
 `preCommitCheck` 已配置前 4 个 auto Skill 为提交前必跑项。
 

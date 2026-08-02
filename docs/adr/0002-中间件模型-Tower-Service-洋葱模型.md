@@ -50,18 +50,18 @@ Trace → Cors → Log → RateLimit → Auth → [Guard] → Handler
 
 ### 模块结构（10 个子模块）
 
-| 模块 | 内容 | 实现阶段 |
-|------|------|---------|
-| `order` | `MiddlewareKind` 枚举 + `DEFAULT_ORDER` / `PHP_GLOBAL_ORDER` 常量 | Phase 3.1 ✅ |
-| `chain` | `MiddlewareChain` 构建器（顺序定义 + 验证） | Phase 3.1 ✅ |
-| `handler_as_middleware` | Handler=Middleware 双向转换器（对齐 Salvo 设计） | Phase 3.2 ✅ |
-| `cors` | CORS 中间件（基于 `tower-http::cors`，对齐 PHP `app\CrossDomain`） | Phase 1.6 ✅ |
-| `auth` | Auth 中间件（JWT 校验，复用 sz-orm-auth） | Phase 3.3 ✅ |
-| `log` | Log 中间件（请求/响应日志，对齐 PHP `think-logger`） | Phase 3.4 ✅ |
-| `rate_limit` | RateLimit 中间件（复用 sz-orm-limit） | Phase 3.5 ✅ |
-| `trace` | Trace 中间件（W3C TraceContext 传播，复用 sz-orm-tracing） | Phase 3.6 ✅ |
-| `builder` | `MiddlewareBuilder` 链构建器 | Phase 3.12 ✅ |
-| `tower_compat` | `TowerCompat` 包装器（兼容 tower-http Compression/Timeout/TraceLayer） | Phase 3.13 ✅ |
+| 模块 | 内容 | 状态 |
+|------|------|------|
+| `order` | `MiddlewareKind` 枚举 + `DEFAULT_ORDER` / `PHP_GLOBAL_ORDER` 常量 | ✅ 已实现 |
+| `chain` | `MiddlewareChain` 构建器（顺序定义 + 验证） | ✅ 已实现 |
+| `handler_as_middleware` | Handler=Middleware 双向转换器（对齐 Salvo 设计） | ✅ 已实现 |
+| `cors` | CORS 中间件（基于 `tower-http::cors`，对齐 PHP `app\CrossDomain`） | ✅ 已实现 |
+| `auth` | Auth 中间件（JWT 校验，复用 sz-orm-auth） | ✅ 已实现 |
+| `log` | Log 中间件（请求/响应日志，对齐 PHP `think-logger`） | ✅ 已实现 |
+| `rate_limit` | RateLimit 中间件（复用 sz-orm-limit） | ✅ 已实现 |
+| `trace` | Trace 中间件（W3C TraceContext 传播，复用 sz-orm-tracing） | ✅ 已实现 |
+| `builder` | `MiddlewareBuilder` 链构建器 | ✅ 已实现 |
+| `tower_compat` | `TowerCompat` 包装器（兼容 tower-http Compression/Timeout/TraceLayer） | ✅ 已实现 |
 
 ### Handler=Middleware 统一设计
 

@@ -1,4 +1,4 @@
-﻿# SZ-Rust 工程化实践规范
+# SZ-Rust 工程化实践规范
 
 > **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，10 workspace 包，4206 测试）
 > **项目版本**：v0.2.0
@@ -96,7 +96,7 @@ CI 配置中还包含以下扩展 Job：
 |-----|---------|------|
 | `all-features-compile` | 每次 push/PR | 验证所有 feature 组合编译（与门禁 10 对齐） |
 | `benchmark` | push 到 main / PR | criterion 性能基准测试，结果保存到 gh-pages-bench 分支（benchmark.yml） |
-| `soak-smoke` | 每次 push/PR + 每周日 00:00 UTC | 10s 冒烟（push/PR）+ 24h 完整 soak（每周日），timeout 1500 分钟（soak.yml） |
+| `soak-smoke` | 每次 push/PR + 每周日 00:00 UTC | 10s 冒烟（push/PR）+ 6h 完整 soak（每周日），timeout 420 分钟（soak.yml） |
 | `coverage` | push/PR | cargo-tarpaulin 覆盖率（--fail-under 80），上传 Codecov（coverage.yml） |
 | `fuzz` | 手动触发 / 定时 | cargo-fuzz 模糊测试（路由解析、JSON 解析、路径遍历抵抗）（fuzz.yml） |
 | `mcdc` | 手动触发 / 定时 | MC/DC 覆盖率分析（mcdc.yml） |
@@ -308,7 +308,7 @@ SZ-Rust 当前测试数据：
 | **T3 — 集成测试** | 375+ | sz-rust-addons-operate 真实 HTTP 请求 + addon 集成 |
 | **T4 — 属性测试** | 部分建立 | Property-Based Testing（proptest）覆盖路由参数/请求体/钩子不变量 |
 | **T5 — Fuzz 测试** | 已建立 | 模糊测试（路由解析、JSON 解析、multipart 解析、路径遍历抵抗），已配置 fuzz.yml |
-| **T6 — Soak 测试** | 已建立 | 长时稳定性测试（10s 冒烟 + 24h 完整，每周日 00:00 UTC，timeout 1500 分钟，检测内存泄漏/句柄泄漏/性能退化） |
+| **T6 — Soak 测试** | 已建立 | 长时稳定性测试（10s 冒烟 + 6h 完整，每周日 00:00 UTC，timeout 420 分钟，检测内存泄漏/句柄泄漏/性能退化） |
 | **合计** | **4206+** | 覆盖全部 10 个 workspace 包（v4 复评 2026-07-26） |
 
 ### 4.1 T1：单元测试
@@ -347,7 +347,7 @@ SZ-Rust 当前测试数据：
 ### 4.6 T6：Soak 测试
 
 - 短时冒烟（每次 push/PR）：`cargo test --package sz-rust-core --test soak soak_smoke_10s`（已配置 soak.yml）
-- 长时完整（每周日 00:00 UTC）：`cargo test -p sz-rust-core --test soak -- --ignored --nocapture`（已配置 soak.yml，timeout 1500 分钟）
+- 长时完整（每周日 00:00 UTC）：`cargo test -p sz-rust-core --test soak -- --ignored --nocapture`（已配置 soak.yml，timeout 420 分钟）
 - 退化检测标准：
   - RSS 增长 > 50MB → 内存泄漏
   - fd_count 增长 > 10 → 句柄泄漏
@@ -511,7 +511,7 @@ flowchart LR
 > - 项目版本 v0.1.0 → v0.2.0
 > - benchmark/soak/coverage CI Job 已配置（原"待配置"标注作废）
 > - 新增 fuzz.yml / mcdc.yml CI workflow
-> - soak.yml：每周日 00:00 UTC 自动运行 24h soak，timeout 1500 分钟（与 sz-orm 保持一致）
+> - soak.yml：每周日 00:00 UTC 自动运行 6h soak，timeout 420 分钟（与 sz-orm 保持一致）
 > - 新增 6 项核心功能（DI 容器/ORM 迁移集成/调试页/API 版本管理/迁移历史表/缓存预热）
 > - 新增 remember_async 异步缓存方法（消除同步阻塞）
 > - K8s 部署改为不可变 tag（v0.2.0）+ HPA/PDB/NetworkPolicy/securityContext

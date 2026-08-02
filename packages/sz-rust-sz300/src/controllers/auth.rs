@@ -20,10 +20,12 @@ impl SzController for AuthController {}
 /// - `SameSite=Strict`：阻止跨站携带
 /// - `Path=/`：全站可见
 /// - `Max-Age=86400`：24 小时有效（与 JWT 过期时间对齐）
+/// - `Secure`：仅通过 HTTPS 传输（生产环境强制，防止 MITM 截获 CSRF token）
+/// - `HttpOnly=false`：JS 需读取 token 以执行双重提交 Cookie 模式
 fn attach_csrf_cookie(response: &mut Response) {
     let token = generate_token();
     let cookie_value = format!(
-        "{}={}; Path=/; Max-Age=86400; SameSite=Strict; HttpOnly=false",
+        "{}={}; Path=/; Max-Age=86400; SameSite=Strict; Secure; HttpOnly=false",
         CSRF_COOKIE_NAME, token
     );
     if let Ok(value) = cookie_value.parse() {
@@ -183,4 +185,73 @@ pub async fn logout(State(_state): State<AppState>, req: Request<Body>) -> Respo
     let mut resp = ctrl.render_success("已退出登录", json!({}));
     clear_csrf_cookie(&mut resp);
     resp
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P0-SEC-08：CSRF Cookie 必须包含 Secure 标志（防止 MITM 截获）
+    #[test]
+    fn test_p0_sec_08_csrf_cookie_has_secure_flag() {
+        let mut resp = Response::default();
+        attach_csrf_cookie(&mut resp);
+
+        let cookie = resp
+            .headers()
+            .get("set-cookie")
+            .expect("attach_csrf_cookie 必须设置 set-cookie 头");
+
+        let cookie_str = cookie.to_str().expect("cookie 值应为合法 ASCII");
+        assert!(
+            cookie_str.contains("Secure"),
+            "P0-SEC-08: CSRF Cookie 缺少 Secure 标志 — 攻击者可通过 HTTP 截获 CSRF token\nCookie: {cookie_str}"
+        );
+    }
+
+    /// P0-SEC-08：CSRF Cookie 必须包含 SameSite=Strict（阻止跨站携带）
+    #[test]
+    fn test_p0_sec_08_csrf_cookie_has_samesite_strict() {
+        let mut resp = Response::default();
+        attach_csrf_cookie(&mut resp);
+
+        let cookie = resp.headers().get("set-cookie").unwrap();
+        let cookie_str = cookie.to_str().unwrap();
+        assert!(
+            cookie_str.contains("SameSite=Strict"),
+            "CSRF Cookie 缺少 SameSite=Strict 标志\nCookie: {cookie_str}"
+        );
+    }
+
+    /// P0-SEC-08：CSRF Cookie 必须设置 HttpOnly=false（JS 需读取，双重提交 Cookie 模式）
+    #[test]
+    fn test_p0_sec_08_csrf_cookie_http_only_false() {
+        let mut resp = Response::default();
+        attach_csrf_cookie(&mut resp);
+
+        let cookie = resp.headers().get("set-cookie").unwrap();
+        let cookie_str = cookie.to_str().unwrap();
+        assert!(
+            cookie_str.contains("HttpOnly=false"),
+            "CSRF Cookie 应设置 HttpOnly=false（双重提交 Cookie 模式需要 JS 读取）\nCookie: {cookie_str}"
+        );
+    }
+
+    /// 退出登录时应清除 CSRF Cookie（Max-Age=0）
+    #[test]
+    fn test_clear_csrf_cookie_sets_max_age_zero() {
+        let mut resp = Response::default();
+        clear_csrf_cookie(&mut resp);
+
+        let cookie = resp.headers().get("set-cookie").unwrap();
+        let cookie_str = cookie.to_str().unwrap();
+        assert!(
+            cookie_str.contains("Max-Age=0"),
+            "退出登录应清除 CSRF Cookie（Max-Age=0）\nCookie: {cookie_str}"
+        );
+    }
 }

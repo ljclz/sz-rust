@@ -101,6 +101,12 @@ struct ServiceBinding {
     lifetime: Lifetime,
 }
 
+/// 上下文绑定工厂：无参闭包返回任意值（对齐 PHP `give()` 的工厂）
+type ContextBindingFactory = Arc<dyn Fn() -> Box<dyn Any + Send + Sync> + Send + Sync>;
+
+/// 上下文绑定表：key = (消费者 TypeId, 需求 TypeId)，value = 工厂
+type ContextBindingMap = HashMap<(TypeId, TypeId), ContextBindingFactory>;
+
 /// DI 服务容器 — 服务注册/解析/生命周期管理
 ///
 /// 对齐 PHP `app()->bind()/make()/singleton()/instance()/scoped()/alias()`。
@@ -126,6 +132,24 @@ pub struct Container {
     /// 对齐 PHP `app()->alias('name', Service::class)`。
     /// 仅用于调试输出和 `resolve_alias` 反向查找；解析时仍用类型安全的 `make::<T>()`。
     aliases: RwLock<HashMap<String, TypeId>>,
+    /// 标签绑定表（tag → `Vec<TypeId\>`）
+    ///
+    /// 对齐 PHP `app()->tag(['Logger', 'Mailer'], 'reporters')`。
+    /// 通过 `tagged::<T>()` 获取标签下所有类型匹配的实例。
+    tags: RwLock<HashMap<String, Vec<TypeId>>>,
+    /// 上下文绑定表（(消费者 TypeId, 需求 TypeId) → 工厂）
+    ///
+    /// 对齐 PHP `app()->when(PhotoController::class)->needs(Filesystem::class)->give(S3Filesystem::class)`。
+    /// 通过 `make_for::<T, Consumer>()` 为指定消费者解析上下文绑定的服务。
+    context_bindings: RwLock<ContextBindingMap>,
+    /// 循环依赖检测栈：记录当前正在构造中的服务类型链
+    ///
+    /// 用于检测 A → B → C → A 形式的循环依赖。
+    /// 工厂调用期间若发现目标类型已在栈中，立即 panic 并输出完整依赖链。
+    ///
+    /// 存储 `(&'static str, TypeId)` 对：TypeId 用于 O(1) 查找，
+    /// 类型名用于生成可读的错误信息（如 "ServiceA -> ServiceB -> ServiceA"）。
+    constructing: RwLock<Vec<(&'static str, TypeId)>>,
 }
 
 impl Container {
@@ -136,6 +160,9 @@ impl Container {
             instances: RwLock::new(HashMap::new()),
             scoped_instances: RwLock::new(HashMap::new()),
             aliases: RwLock::new(HashMap::new()),
+            tags: RwLock::new(HashMap::new()),
+            context_bindings: RwLock::new(HashMap::new()),
+            constructing: RwLock::new(Vec::new()),
         }
     }
 
@@ -373,7 +400,9 @@ impl Container {
         let binding = guard.get(&type_id)?.clone();
         drop(guard); // 释放读锁后再调用工厂（避免持锁调用用户代码引发死锁/重入）
 
-        let instance = (binding.factory)();
+        // 4. 循环依赖检测 + 工厂调用（共用逻辑，含 make_for）
+        let type_name = std::any::type_name::<T>();
+        let instance = self.check_and_call_factory(type_id, type_name, &binding.factory)?;
 
         match binding.lifetime {
             Lifetime::Singleton => {
@@ -440,12 +469,20 @@ impl Container {
         }
     }
 
-    /// 清空所有服务绑定与缓存（含单例、作用域、别名）
+    /// 清空所有服务绑定与缓存（含单例、作用域、别名、标签、上下文绑定）
     pub fn clear(&self) {
         self.bindings.write().clear();
         self.instances.write().clear();
         self.scoped_instances.write().clear();
         self.aliases.write().clear();
+        self.tags.write().clear();
+        self.context_bindings.write().clear();
+        self.constructing.write().clear();
+    }
+
+    /// 当前构造栈深度（用于调试，正常应为 0）
+    pub fn constructing_depth(&self) -> usize {
+        self.constructing.read().len()
     }
 
     /// 已注册服务数量（不含别名）
@@ -463,6 +500,298 @@ impl Container {
     /// 可用于检测作用域泄漏（如请求结束未调用 `clear_scope`）。
     pub fn active_scope_count(&self) -> usize {
         self.scoped_instances.read().len()
+    }
+
+    // ========================================================================
+    // 标签绑定（对齐 PHP `app()->tag()` / `app()->tagged()`）
+    // ========================================================================
+
+    /// 给类型 T 打标签（对齐 PHP `app()->tag(['Service'], 'tag_name')`）
+    ///
+    /// PHP 用法：
+    /// ```php
+    /// $this->app->tag(['Logger', 'Mailer', 'Notifier'], 'reporters');
+    /// ```
+    ///
+    /// Rust 端由于类型安全，每次调用只能给一个类型打标签。
+    /// 多次调用同一标签名会追加到标签列表。
+    ///
+    /// # 用法
+    ///
+    /// ```ignore
+    /// use sz_rust_core::container::Container;
+    ///
+    /// let container = Container::new();
+    /// container.singleton(|| FileLogger::new());
+    /// container.singleton(|| MailLogger::new());
+    ///
+    /// container.tag::<FileLogger>("reporters");
+    /// container.tag::<MailLogger>("reporters");
+    ///
+    /// let reporters = container.tagged::<FileLogger>("reporters");
+    /// assert_eq!(reporters.len(), 1);
+    /// ```
+    pub fn tag<T: 'static>(&self, tag: impl Into<String>) {
+        let type_id = TypeId::of::<T>();
+        let tag_name = tag.into();
+        self.tags.write().entry(tag_name).or_default().push(type_id);
+    }
+
+    /// 获取标签下所有 T 类型实例（对齐 PHP `app()->tagged('tag_name')`）
+    ///
+    /// 遍历标签下所有 TypeId，对每个匹配 `T` 的 TypeId 调用 `make::<T>()`。
+    ///
+    /// # 返回
+    ///
+    /// 标签下所有类型为 `T` 的服务实例向量。若标签不存在或无匹配类型，返回空向量。
+    pub fn tagged<T: Send + Sync + 'static>(&self, tag: &str) -> Vec<Arc<T>> {
+        let type_ids = match self.tags.read().get(tag) {
+            Some(ids) => ids.clone(),
+            None => return Vec::new(),
+        };
+
+        let target_type_id = TypeId::of::<T>();
+        type_ids
+            .into_iter()
+            .filter(|id| *id == target_type_id)
+            .filter_map(|_| self.make::<T>())
+            .collect()
+    }
+
+    /// 获取标签下所有 TypeId（用于调试）
+    ///
+    /// 返回标签下所有已注册的 TypeId 列表。若标签不存在，返回空向量。
+    pub fn tagged_type_ids(&self, tag: &str) -> Vec<TypeId> {
+        self.tags.read().get(tag).cloned().unwrap_or_default()
+    }
+
+    /// 获取已注册标签列表
+    pub fn tag_names(&self) -> Vec<String> {
+        self.tags.read().keys().cloned().collect()
+    }
+
+    /// 获取标签下已注册的类型数量
+    pub fn tag_count(&self, tag: &str) -> usize {
+        self.tags.read().get(tag).map(|ids| ids.len()).unwrap_or(0)
+    }
+
+    /// 移除指定标签（对齐 PHP `app()->forgetTag('tag_name')`）
+    pub fn forget_tag(&self, tag: &str) {
+        self.tags.write().remove(tag);
+    }
+
+    // ========================================================================
+    // 上下文绑定（对齐 PHP `app()->when()->needs()->give()`）
+    // ========================================================================
+
+    /// 注册上下文绑定（对齐 PHP `app()->when(Consumer)->needs(Need)->give(impl)`）
+    ///
+    /// PHP 用法：
+    /// ```php
+    /// $this->app->when(PhotoController::class)
+    ///     ->needs(Filesystem::class)
+    ///     ->give(function () { return new S3Filesystem(); });
+    /// ```
+    ///
+    /// Rust 端通过泛型参数指定消费者类型 `Consumer`、需求类型 `T`，
+    /// 并提供工厂闭包创建 `T` 实例。
+    ///
+    /// # 用法
+    ///
+    /// ```ignore
+    /// use sz_rust_core::container::Container;
+    ///
+    /// let container = Container::new();
+    ///
+    /// // 为 PhotoController 注入 S3Filesystem 作为 Filesystem
+    /// container.bind_contextual::<PhotoController, Filesystem, _>(|| {
+    ///     S3Filesystem::new()
+    /// });
+    ///
+    /// // 解析：为 PhotoController 创建 Filesystem 实例
+    /// let fs = container.make_for::<Filesystem, PhotoController>();
+    /// ```
+    ///
+    /// # 注意
+    ///
+    /// 上下文绑定不会缓存实例（每次 `make_for` 调用工厂）。
+    pub fn bind_contextual<Consumer: 'static, T: Send + Sync + 'static, F>(&self, factory: F)
+    where
+        F: Fn() -> T + Send + Sync + 'static,
+    {
+        let key = (TypeId::of::<Consumer>(), TypeId::of::<T>());
+        let arc_factory: Arc<dyn Fn() -> Box<dyn Any + Send + Sync> + Send + Sync> =
+            Arc::new(move || Box::new(factory()));
+        self.context_bindings.write().insert(key, arc_factory);
+    }
+
+    /// 为指定消费者解析上下文绑定的服务（对齐 PHP 上下文感知 `make`）
+    ///
+    /// 查找 `(Consumer, T)` 的上下文绑定，若存在则调用工厂返回实例。
+    /// 若不存在上下文绑定，回退到普通 `make::<T>()`。
+    ///
+    /// # 返回
+    ///
+    /// - `Some(Arc<T>)`：找到上下文绑定或普通绑定
+    /// - `None`：既无上下文绑定也无普通绑定
+    pub fn make_for<T: Send + Sync + 'static, Consumer: 'static>(&self) -> Option<Arc<T>> {
+        let key = (TypeId::of::<Consumer>(), TypeId::of::<T>());
+
+        // 1. 检查上下文绑定
+        let factory = {
+            let guard = self.context_bindings.read();
+            guard.get(&key).cloned()
+        };
+
+        if let Some(factory) = factory {
+            // 上下文绑定同样需要循环依赖检测
+            let type_id = TypeId::of::<T>();
+            let type_name = std::any::type_name::<T>();
+            let instance = self.check_and_call_factory(type_id, type_name, &factory);
+            instance.and_then(|inst| Arc::downcast::<T>(Arc::from(inst)).ok())
+        } else {
+            // 2. 回退到普通 make
+            self.make::<T>()
+        }
+    }
+
+    /// 循环依赖检测 + 工厂调用（供 make_with_scope 和 make_for 共用）
+    ///
+    /// 检查目标类型是否已在构造栈中，若是则 panic；
+    /// 否则压栈、调用工厂、弹栈，返回原始工厂输出（`Box<dyn Any + Send + Sync>`）。
+    /// 调用方负责将 `Box` 转为 `Arc` 并按生命周期策略缓存。
+    fn check_and_call_factory(
+        &self,
+        type_id: TypeId,
+        type_name: &'static str,
+        factory: &ServiceFactory,
+    ) -> Option<Box<dyn Any + Send + Sync>> {
+        // 循环依赖检测
+        {
+            let constructing = self.constructing.read();
+            if constructing.iter().any(|(_, tid)| *tid == type_id) {
+                let chain: Vec<&str> = constructing
+                    .iter()
+                    .skip_while(|(_, tid)| *tid != type_id)
+                    .map(|(name, _)| *name)
+                    .chain(std::iter::once(type_name))
+                    .collect();
+                drop(constructing);
+                panic!(
+                    "DI 容器检测到循环依赖: {}",
+                    chain.join(" -> ")
+                );
+            }
+        }
+
+        self.constructing.write().push((type_name, type_id));
+        let instance = factory();
+        self.constructing.write().pop();
+
+        Some(instance)
+    }
+
+    /// 检查指定上下文绑定是否存在
+    pub fn has_contextual<Consumer: 'static, T: 'static>(&self) -> bool {
+        let key = (TypeId::of::<Consumer>(), TypeId::of::<T>());
+        self.context_bindings.read().contains_key(&key)
+    }
+
+    /// 获取上下文绑定数量
+    pub fn contextual_count(&self) -> usize {
+        self.context_bindings.read().len()
+    }
+
+    /// 移除指定上下文绑定
+    pub fn forget_contextual<Consumer: 'static, T: 'static>(&self) {
+        let key = (TypeId::of::<Consumer>(), TypeId::of::<T>());
+        self.context_bindings.write().remove(&key);
+    }
+
+    // ========================================================================
+    // 方法调用 / 自动注入（对齐 PHP `app()->call()` / `app()->invoke()`）
+    // ========================================================================
+
+    /// 调用闭包并自动注入参数 — 对齐 PHP `app()->call($callback, $parameters)`
+    ///
+    /// PHP 的 `app()->call()` 通过反射自动解析方法参数类型并从容器获取实例。
+    /// Rust 是静态类型语言，无法运行时反射，因此通过 `resolver` 闭包手工指定
+    /// 如何从 Container 解析参数。
+    ///
+    /// # 参数
+    ///
+    /// - `resolver`: 参数解析器，接收 `&Container` 引用，返回参数元组
+    /// - `callback`: 业务回调，接收解析后的参数，返回业务结果
+    ///
+    /// # 返回
+    ///
+    /// 业务回调的返回值
+    ///
+    /// # 用法
+    ///
+    /// ```ignore
+    /// use sz_rust_core::container::Container;
+    ///
+    /// struct UserService;
+    /// struct Logger;
+    ///
+    /// let container = Container::new();
+    /// container.singleton(Logger::new);
+    /// container.singleton(UserService::new);
+    ///
+    /// // 自动注入 Logger 和 UserService
+    /// let result: String = container.call_method(
+    ///     |c| (c.make::<Logger>().unwrap(), c.make::<UserService>().unwrap()),
+    ///     |(logger, service)| {
+    ///         format!("called with logger and service")
+    ///     },
+    /// );
+    /// ```
+    pub fn call_method<R, P, F, C>(&self, resolver: C, callback: F) -> R
+    where
+        F: FnOnce(P) -> R,
+        C: FnOnce(&Self) -> P,
+    {
+        let params = resolver(self);
+        callback(params)
+    }
+
+    /// 调用闭包并传入容器引用 — 对齐 PHP `app()->invoke($callback)`
+    ///
+    /// 最灵活的方法调用方式，调用方可以在闭包内自由调用 `make()` 解析依赖。
+    ///
+    /// # 用法
+    ///
+    /// ```ignore
+    /// let result: String = container.invoke(|c| {
+    ///     let logger = c.make::<Logger>().unwrap();
+    ///     let service = c.make::<UserService>().unwrap();
+    ///     format!("called with {:?} and {:?}", logger, service)
+    /// });
+    /// ```
+    pub fn invoke<R, F>(&self, callback: F) -> R
+    where
+        F: FnOnce(&Self) -> R,
+    {
+        callback(self)
+    }
+
+    /// 解析服务，失败时 panic — 用于自动注入场景
+    ///
+    /// 对齐 PHP `app()->make()` 在服务未注册时抛出异常的行为。
+    /// Rust 端通过 panic 模拟，调用方应在确保服务已注册时使用。
+    ///
+    /// # Panics
+    ///
+    /// 当服务未注册时 panic。
+    pub fn make_or_panic<T: Send + Sync + 'static>(&self) -> Arc<T> {
+        match self.make::<T>() {
+            Some(instance) => instance,
+            None => panic!(
+                "无法解析服务: {} — 请确保已通过 bind/singleton/scoped 注册",
+                std::any::type_name::<T>()
+            ),
+        }
     }
 }
 
@@ -654,11 +983,20 @@ impl App {
         self.container.alias::<T>(name);
     }
 
-    /// 解析服务实例（无作用域）
+    /// 解析服务实例（自动感知请求作用域）
     ///
     /// 对齐 PHP `app()->make('key')`。
+    ///
+    /// P1-ARCH-DI-02：若当前线程处于 [`RequestScopeLayer`](crate::middleware::request_scope::RequestScopeLayer)
+    /// 管理的请求中（即 `current_scope_id()` 返回 `Some`），则自动路由到
+    /// `make_with_scope`，使 Scoped 绑定在请求内缓存、请求结束清理。
+    /// 请求外调用则退化为无作用域的 `make`（向后兼容）。
     pub fn make<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
-        self.container.make::<T>()
+        if let Some(scope_id) = crate::middleware::request_scope::current_scope_id() {
+            self.container.make_with_scope::<T>(scope_id)
+        } else {
+            self.container.make::<T>()
+        }
     }
 
     /// 解析服务实例（带作用域 ID）

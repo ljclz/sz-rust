@@ -20,14 +20,16 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::Value as OrmValue;
-use sz_orm_core::{Model as _, ModelExt as _};
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::Value as OrmValue;
+use sz_rust_core::orm::{Model as _, ModelExt as _};
 
-use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
-use crate::model::{Customer, Rentarea};
+use crate::controller::common::{
+    fetch_list_as_json, get_app_id, get_i64_param, get_str_param, parse_form_data,
+};
+use crate::model::{Category, Customer, Dept, Level, Rentarea};
 
 /// Rentarea 控制器 — 对齐 PHP `Rentarea` 控制器
 pub struct RentareaController;
@@ -38,16 +40,53 @@ impl AddonsBaseController for RentareaController {}
 
 impl RentareaController {
     /// 基础数据 — 对齐 PHP `base()`
+    ///
+    /// # PHP 对齐
+    ///
+    /// ```php
+    /// public function base(): Json {
+    ///     $param = $this->postData();
+    ///     $result = [
+    ///         'deptList' => Dept::getLightList(34),
+    ///         'catList' => Category::getAll($param['app_id']),
+    ///         'levelList' => Level::getAll($param['app_id'])
+    ///     ];
+    ///     return $this->renderSuccess('', compact('result'));
+    /// }
+    /// ```
+    ///
+    /// # H-2 修复：业务层注入 Repository
+    ///
+    /// PHP 端通过 `Dept::getLightList(34)` / `Category::getAll` / `Level::getAll` 静态方法
+    /// 直接查询数据库。Rust 端通过 Repository 参数注入，由控制器调用 `find_by` 查询
+    /// `app_id` + `is_delete=0` 的记录，对齐 PHP 行为。
     #[tracing::instrument(skip_all)]
-    pub async fn base(&self, req: Request<Body>) -> Response {
-        let _param = match self.post_data(req).await {
+    pub async fn base(
+        &self,
+        req: Request<Body>,
+        dept_repo: &dyn Repository<Dept, Key = OrmValue>,
+        cat_repo: &dyn Repository<Category, Key = OrmValue>,
+        level_repo: &dyn Repository<Level, Key = OrmValue>,
+    ) -> Response {
+        let param = match self.post_data(req).await {
             Ok(p) => p,
             Err(e) => return self.render_error(format!("参数解析失败: {e}"), json!({}), 0),
         };
+        let app_id = get_app_id(&param);
+
+        // H-2 修复：从 Repository 查询真实数据（对齐 PHP Dept::getLightList / Category::getAll / Level::getAll）
+        let conditions = [
+            WhereCondition::new("app_id", WhereOp::Eq, OrmValue::I64(app_id)),
+            WhereCondition::new("is_delete", WhereOp::Eq, OrmValue::I64(0)),
+        ];
+        let dept_list = fetch_list_as_json(dept_repo, &conditions);
+        let cat_list = fetch_list_as_json(cat_repo, &conditions);
+        let level_list = fetch_list_as_json(level_repo, &conditions);
+
         let result = json!({
-            "deptList": [],
-            "catList": [],
-            "levelList": []
+            "deptList": dept_list,
+            "catList": cat_list,
+            "levelList": level_list
         });
         self.render_success("", json!({"result": result}))
     }
@@ -377,21 +416,21 @@ impl RentareaController {
             ));
         }
 
-        let mut items: Vec<Value> = match repo.find_by(&conditions) {
+        // keyword 单字段 LIKE 下推到 Repository（对齐 PHP `area_name LIKE '%keyword%'`）
+        let or_filter: Vec<WhereCondition> = if keyword.is_empty() {
+            Vec::new()
+        } else {
+            vec![WhereCondition::new(
+                "area_name",
+                WhereOp::Like,
+                OrmValue::String(format!("%{}%", keyword.trim())),
+            )]
+        };
+
+        let mut items: Vec<Value> = match repo.find_by_with_or_filter(&conditions, &or_filter) {
             Ok(list) => list.into_iter().map(|c| c.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // keyword 模糊匹配 area_name
-        if !keyword.is_empty() {
-            let kw = keyword.trim().to_lowercase();
-            items.retain(|item| {
-                item.get("area_name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_lowercase().contains(&kw))
-                    .unwrap_or(false)
-            });
-        }
 
         // PHP 按 rentarea_id desc 排序
         items.sort_by(|a, b| {
@@ -723,7 +762,7 @@ impl RentareaController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_rentarea(id: i64, name: &str, app_id: i64, dept_id: i64, cat_id: i64) -> Rentarea {
         Rentarea::new()
@@ -870,5 +909,130 @@ mod tests {
         let repo = make_repo();
         let result = RentareaController::get_list(&repo, &json!({"app_id": 10001}), "list");
         assert!(result["list"].is_array());
+    }
+
+    // ========================================================================
+    // 失败路径测试 — 覆盖控制器错误响应分支
+    // ========================================================================
+
+    use http_body_util::BodyExt;
+
+    fn build_json_request(body: Value) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    async fn parse_response(resp: Response) -> Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn test_edit_returns_error_when_rentarea_id_missing() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "{\"area_name\":\"test\"}"}));
+        let resp = ctrl.edit(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "rentarea_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_edit_returns_error_when_rentarea_not_found() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "rentarea_id": 999,
+            "formData": "{\"area_name\":\"test\"}"
+        }));
+        let resp = ctrl.edit(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_del_returns_error_when_rentarea_id_missing() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.del(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "rentarea_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_del_returns_error_when_rentarea_not_found() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"rentarea_id": 999}));
+        let resp = ctrl.del(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_returns_error_when_rentarea_id_missing() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({}));
+        let resp = ctrl.cancel(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "rentarea_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_returns_error_when_rentarea_not_found() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"rentarea_id": 999}));
+        let resp = ctrl.cancel(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
+    }
+
+    #[tokio::test]
+    async fn test_select_level_list_returns_error_when_dept_id_missing() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"app_id": 10001}));
+        let resp = ctrl.select_level_list(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "dept_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_bind_returns_error_when_rentarea_id_missing() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({"formData": "{\"customer_id\":1}"}));
+        let resp = ctrl.bind(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "rentarea_id 参数缺失");
+    }
+
+    #[tokio::test]
+    async fn test_bind_returns_error_when_rentarea_not_found() {
+        let ctrl = RentareaController;
+        let repo = make_repo();
+        let req = build_json_request(json!({
+            "rentarea_id": 999,
+            "formData": "{\"customer_id\":1}"
+        }));
+        let resp = ctrl.bind(req, &repo).await;
+        let body = parse_response(resp).await;
+        assert_eq!(body["code"], 0);
+        assert_eq!(body["msg"], "数据不存在");
     }
 }

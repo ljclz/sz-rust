@@ -116,6 +116,29 @@ where
     })
 }
 
+/// 为外部 IO 操作添加默认超时保护（P1-SEC-06）
+///
+/// 默认超时 **5 秒**，对齐项目规则 "任何外部 IO 必须包裹在 `tokio::time::timeout`（默认 5s）中"。
+///
+/// # 用法
+///
+/// ```rust,ignore
+/// let result = with_timeout(async {
+///     pool.acquire().await?.query(sql).await
+/// }).await;
+/// ```
+pub async fn with_timeout<F, T>(future: F) -> Result<T, TimeoutError>
+where
+    F: Future<Output = T>,
+{
+    tokio::time::timeout(DEFAULT_IO_TIMEOUT, future)
+        .await
+        .map_err(|_| TimeoutError)
+}
+
+/// 外部 IO 默认超时（5 秒）
+const DEFAULT_IO_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// 超时错误
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("task timed out")]

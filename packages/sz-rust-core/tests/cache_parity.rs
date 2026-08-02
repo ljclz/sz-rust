@@ -494,8 +494,8 @@ fn test_r5_p7_dec_nonexistent_key() {
 // 组 8：remember 锁机制（PHP bug 复刻）（R5-P8）
 // ============================================================================
 
-#[test]
-fn test_r5_p8_remember_cache_miss() {
+#[tokio::test]
+async fn test_r5_p8_remember_cache_miss() {
     // R5-P8: remember 缓存未命中 — 调用 callback 并写入缓存
     //
     // PHP:
@@ -504,14 +504,14 @@ fn test_r5_p8_remember_cache_miss() {
     //
     // PHP 源码: Driver.php:153-188 remember
     let cache = make_cache();
-    let val: i64 = cache.remember("key", None, || 42).unwrap();
+    let val: i64 = cache.remember("key", None, || 42).await.unwrap();
     assert_eq!(val, 42);
     // 缓存应被写入
     assert_eq!(cache.get::<String>("key").unwrap(), Some("42".to_string()));
 }
 
-#[test]
-fn test_r5_p8_remember_cache_hit() {
+#[tokio::test]
+async fn test_r5_p8_remember_cache_hit() {
     // R5-P8: remember 缓存命中 — 不调用 callback
     //
     // PHP:
@@ -520,25 +520,25 @@ fn test_r5_p8_remember_cache_hit() {
     //   // 'existing' (不调用 callback)
     let cache = make_cache();
     cache.set("key", "existing", None).unwrap();
-    let val: String = cache.remember("key", None, || "new".to_string()).unwrap();
+    let val: String = cache.remember("key", None, || "new".to_string()).await.unwrap();
     assert_eq!(val, "existing");
 }
 
-#[test]
-fn test_r5_p8_remember_lock_released() {
+#[tokio::test]
+async fn test_r5_p8_remember_lock_released() {
     // R5-P8: remember 完成后锁应被释放
     //
     // PHP 源码: Driver.php:182-184
     //   $this->delete($name . '_lock');  // finally 块释放锁
     let cache = make_cache();
-    let val: i64 = cache.remember("key", None, || 42).unwrap();
+    let val: i64 = cache.remember("key", None, || 42).await.unwrap();
     assert_eq!(val, 42);
     // 锁应被释放（PHP bug: 锁无 TTL，但正常流程会释放）
     assert!(!cache.has("key_lock").unwrap());
 }
 
-#[test]
-fn test_r5_p8_remember_lock_key_naming() {
+#[tokio::test]
+async fn test_r5_p8_remember_lock_key_naming() {
     // R5-P8: remember 锁 key 命名为 {name}_lock
     //
     // PHP 源码: Driver.php:160
@@ -547,7 +547,7 @@ fn test_r5_p8_remember_lock_key_naming() {
     // 注意：由于 remember 在缓存命中时不创建锁，需要验证未命中场景
     // 这里通过验证缓存未命中后锁被正确创建和释放来间接验证
     let cache = make_cache();
-    let val: i64 = cache.remember("mykey", None, || 100).unwrap();
+    let val: i64 = cache.remember("mykey", None, || 100).await.unwrap();
     assert_eq!(val, 100);
     // 锁应被释放
     assert!(!cache.has("mykey_lock").unwrap());

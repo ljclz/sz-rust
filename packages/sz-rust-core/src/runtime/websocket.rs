@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use sz_orm_websocket::{DefaultWebSocketHandler, WebSocketHandler, WsError, WsServer};
+use crate::orm::{DefaultWebSocketHandler, WebSocketHandler, WsError, WsServer};
 
 /// WebSocket 运行时配置
 #[derive(Debug, Clone)]

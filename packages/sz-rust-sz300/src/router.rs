@@ -1,5 +1,6 @@
 use crate::controllers::{auth, device, file, file_serve, health, merchant, order, product};
 use crate::middleware::auth_middleware;
+use crate::openapi;
 use crate::state::AppState;
 use axum::{middleware, routing::get, routing::post, Router};
 use sz_rust_core::middleware::cors::cors_layer;
@@ -18,6 +19,9 @@ pub const PUBLIC_PATHS: &[&str] = &[
     "/metrics",
     "/api/v1/auth/login",
     "/api/v1/auth/refresh",
+    "/api-docs",
+    "/api-docs/redoc",
+    "/api-docs/openapi.json",
 ];
 
 /// 判断路径是否在公开白名单中（精确匹配，避免前缀绕过）
@@ -39,6 +43,10 @@ pub fn is_public_path(path: &str) -> bool {
 /// cors_layer 最后注册（最外层）。
 pub fn create_router(state: AppState) -> Router {
     Router::new()
+        // API 文档（Swagger UI / Redoc / OpenAPI JSON）
+        .route("/api-docs", get(openapi::swagger_ui))
+        .route("/api-docs/redoc", get(openapi::redoc))
+        .route("/api-docs/openapi.json", get(openapi::openapi_json))
         // 健康检查 + 可观测性
         .route("/health", get(health::check))
         .route("/health/ready", get(health::readiness))

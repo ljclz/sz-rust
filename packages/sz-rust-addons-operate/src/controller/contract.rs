@@ -21,14 +21,16 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::{json, Value};
-use sz_orm_core::repository::{Repository, WhereCondition, WhereOp};
-use sz_orm_core::ModelExt as _;
-use sz_orm_core::Value as OrmValue;
 use sz_rust_core::controller::{AddonsBaseController, BaseController, SzController};
 use sz_rust_core::model::Mutator as _;
+use sz_rust_core::orm::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_core::orm::ModelExt as _;
+use sz_rust_core::orm::Value as OrmValue;
 
-use crate::controller::common::{get_app_id, get_i64_param, get_str_param, parse_form_data};
-use crate::model::Contract;
+use crate::controller::common::{
+    fetch_list_as_json, get_app_id, get_i64_param, get_str_param, parse_form_data,
+};
+use crate::model::{Category, Company, Contract, Customer, Dept};
 
 /// Contract 控制器 — 对齐 PHP `Contract` 控制器
 pub struct ContractController;
@@ -39,26 +41,85 @@ impl AddonsBaseController for ContractController {}
 
 impl ContractController {
     /// 基础数据 — 对齐 PHP `base()`
+    ///
+    /// # PHP 对齐
+    ///
+    /// ```php
+    /// public function base(): Json {
+    ///     $param = $this->postData();
+    ///     $result = [
+    ///         'payStatusList' => ContractStatusEnum::payStatusData(),
+    ///         'payTypeList' => ContractStatusEnum::payTypeData(),
+    ///         'contractStatusList' => ContractStatusEnum::contractStatusData(),
+    ///         'signingList' => ContractStatusEnum::signingData(),
+    ///         'companyList' => Company::getAll($param['app_id']),
+    ///         'deptList' => Dept::getLightList(34),
+    ///         'customerList' => Customer::selectCatCustomer(...),
+    ///         'catList' => Category::getAll($param['app_id'])
+    ///     ];
+    ///     return $this->renderSuccess('', compact('result'));
+    /// }
+    /// ```
+    ///
+    /// # H-2 修复：业务层注入 Repository + 枚举驱动列表填充真实值
+    ///
+    /// - DB 驱动列表（companyList/deptList/customerList/catList）：通过 Repository 参数注入
+    /// - 枚举驱动列表（payStatusList/payTypeList/signingList）：填充真实枚举值
     #[tracing::instrument(skip_all)]
-    pub async fn base(&self, req: Request<Body>) -> Response {
-        let _param = match self.post_data(req).await {
+    pub async fn base(
+        &self,
+        req: Request<Body>,
+        company_repo: &dyn Repository<Company, Key = OrmValue>,
+        dept_repo: &dyn Repository<Dept, Key = OrmValue>,
+        customer_repo: &dyn Repository<Customer, Key = OrmValue>,
+        cat_repo: &dyn Repository<Category, Key = OrmValue>,
+    ) -> Response {
+        let param = match self.post_data(req).await {
             Ok(p) => p,
             Err(e) => return self.render_error(format!("参数解析失败: {e}"), json!({}), 0),
         };
+        let app_id = get_app_id(&param);
+
+        // H-2 修复：从 Repository 查询真实数据（对齐 PHP Company::getAll / Dept::getLightList / Customer::selectCatCustomer / Category::getAll）
+        let conditions = [
+            WhereCondition::new("app_id", WhereOp::Eq, OrmValue::I64(app_id)),
+            WhereCondition::new("is_delete", WhereOp::Eq, OrmValue::I64(0)),
+        ];
+        let company_list = fetch_list_as_json(company_repo, &conditions);
+        let dept_list = fetch_list_as_json(dept_repo, &conditions);
+        let customer_list = fetch_list_as_json(customer_repo, &conditions);
+        let cat_list = fetch_list_as_json(cat_repo, &conditions);
+
+        // H-2 修复：枚举驱动列表填充真实值（对齐 PHP ContractStatusEnum 静态方法）
+        // PayStatus 枚举：1=待缴费, 2=已缴费, 3=缴费中
+        // PayType 枚举：1=扫码转账, 2=现金支付, 3=转账+现金
+        // SigningStatus 枚举：1=待签约, 2=已签约, 3=已解约
         let result = json!({
-            "payStatusList": [],
-            "payTypeList": [],
+            "payStatusList": [
+                {"code": 1, "name": "待缴费"},
+                {"code": 2, "name": "已缴费"},
+                {"code": 3, "name": "缴费中"}
+            ],
+            "payTypeList": [
+                {"code": 1, "name": "扫码转账"},
+                {"code": 2, "name": "现金支付"},
+                {"code": 3, "name": "转账+现金"}
+            ],
             "contractStatusList": [
                 {"code": 0, "name": "待生效"},
                 {"code": 1, "name": "生效中"},
                 {"code": 2, "name": "已到期"},
                 {"code": 3, "name": "已终止"}
             ],
-            "signingList": [],
-            "companyList": [],
-            "deptList": [],
-            "customerList": [],
-            "catList": []
+            "signingList": [
+                {"code": 1, "name": "待签约"},
+                {"code": 2, "name": "已签约"},
+                {"code": 3, "name": "已解约"}
+            ],
+            "companyList": company_list,
+            "deptList": dept_list,
+            "customerList": customer_list,
+            "catList": cat_list
         });
         self.render_success("", json!({"result": result}))
     }
@@ -383,21 +444,21 @@ impl ContractController {
             ));
         }
 
-        let mut items: Vec<Value> = match repo.find_by(&conditions) {
+        // keyword 单字段 LIKE 下推到 Repository（对齐 PHP `contract_name LIKE '%keyword%'`）
+        let or_filter: Vec<WhereCondition> = if keyword.is_empty() {
+            Vec::new()
+        } else {
+            vec![WhereCondition::new(
+                "contract_name",
+                WhereOp::Like,
+                OrmValue::String(format!("%{}%", keyword.trim())),
+            )]
+        };
+
+        let mut items: Vec<Value> = match repo.find_by_with_or_filter(&conditions, &or_filter) {
             Ok(list) => list.into_iter().map(|c| c.to_json()).collect(),
             Err(_) => return json!({"list": []}),
         };
-
-        // keyword 模糊匹配 contract_name
-        if !keyword.is_empty() {
-            let kw = keyword.trim().to_lowercase();
-            items.retain(|item| {
-                item.get("contract_name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_lowercase().contains(&kw))
-                    .unwrap_or(false)
-            });
-        }
 
         // PHP 按 create_time desc, contract_id desc 排序（简化：按 contract_id desc）
         items.sort_by(|a, b| {
@@ -617,7 +678,7 @@ impl ContractController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::repository::InMemoryRepository;
+    use sz_rust_core::orm::repository::InMemoryRepository;
 
     fn make_contract(id: i64, name: &str, app_id: i64, customer_id: i64) -> Contract {
         Contract::new()

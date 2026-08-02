@@ -108,7 +108,7 @@
 //! 端到端关联加载由 sz-orm-core 内部实现，sz-rust 端通过 SQL 片段构造器验证 SQL 生成对齐 PHP。
 
 // re-export sz-orm-core find_with_related 公开类型
-pub use sz_orm_core::find_with_related::{
+pub use crate::orm::find_with_related::{
     find_with_related_eager_sql, find_with_related_join, find_with_related_subquery,
     inspect_relation, FindWithRelated, WithRelation as FindWithRelation,
 };
@@ -665,11 +665,11 @@ mod tests {
             &'a str,
             &'a str,
             bool,
-        ) -> FindWithRelated<'a>;
+        ) -> Result<FindWithRelated<'a>, sz_orm_core::DbError>;
         type _AssertEagerSqlFn =
-            fn(&dyn sz_orm_core::Dialect, &str, &str, &str, Option<&str>) -> (String, String);
+            fn(&dyn sz_orm_core::Dialect, &str, &str, &str, Option<&str>) -> Result<(String, String), sz_orm_core::DbError>;
         type _AssertSubqueryFn =
-            fn(&dyn sz_orm_core::Dialect, &str, &str, &str, &str, Option<&str>) -> String;
+            fn(&dyn sz_orm_core::Dialect, &str, &str, &str, &str, Option<&str>) -> Result<String, sz_orm_core::DbError>;
 
         const _: () = {
             let _join: _AssertJoinFn = find_with_related_join;
