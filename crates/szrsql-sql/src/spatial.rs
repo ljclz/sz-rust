@@ -443,6 +443,11 @@ impl SridGeometry {
     pub fn set_srid(&mut self, srid: u32) {
         self.srid = srid;
     }
+
+    /// 序列化为 WKT 文本（与 `st_as_text` 等价，供程序化 API 使用）
+    pub fn to_wkt(&self) -> String {
+        st_as_text(self)
+    }
 }
 
 // =====================================================================

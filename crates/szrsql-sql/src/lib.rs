@@ -119,6 +119,8 @@ mod set_op_tests;
 #[cfg(test)]
 mod show_set_tests;
 #[cfg(test)]
+mod spatial_sql_tests;
+#[cfg(test)]
 mod temp_table_tests;
 #[cfg(test)]
 mod trigger_tests;

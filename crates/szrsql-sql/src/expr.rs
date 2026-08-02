@@ -66,6 +66,9 @@ pub enum EvalError {
     /// 正则表达式错误
     #[error("invalid regex pattern: {0}")]
     InvalidRegex(String),
+    /// 其他错误（用于扩展函数如空间函数）
+    #[error("{0}")]
+    Other(String),
 }
 
 // =====================================================================
@@ -2480,6 +2483,337 @@ impl ExprEvaluator {
                     Value::Null => Ok(Value::Null),
                     other => Err(EvalError::TypeMismatch {
                         expected: "numeric",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            // P2-19：空间函数（PostGIS 风格 ST_* 函数，几何体以 WKT Text 存储）
+            "st_point" => {
+                if arg_vals.len() == 2 {
+                    let (x, y) = match (&arg_vals[0], &arg_vals[1]) {
+                        (Value::Int64(a), Value::Int64(b)) => (*a as f64, *b as f64),
+                        (Value::Float64(a), Value::Float64(b)) => (*a, *b),
+                        (Value::Int64(a), Value::Float64(b)) => (*a as f64, *b),
+                        (Value::Float64(a), Value::Int64(b)) => (*a, *b as f64),
+                        (Value::Null, _) | (_, Value::Null) => return Ok(Value::Null),
+                        _other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "numeric, numeric",
+                                actual: "value",
+                            })
+                        }
+                    };
+                    Ok(Value::Text(crate::spatial::st_point(x, y).to_wkt()))
+                } else if arg_vals.len() == 3 {
+                    let (x, y) = match (&arg_vals[0], &arg_vals[1]) {
+                        (Value::Int64(a), Value::Int64(b)) => (*a as f64, *b as f64),
+                        (Value::Float64(a), Value::Float64(b)) => (*a, *b),
+                        (Value::Int64(a), Value::Float64(b)) => (*a as f64, *b),
+                        (Value::Float64(a), Value::Int64(b)) => (*a, *b as f64),
+                        (Value::Null, _) | (_, Value::Null) => return Ok(Value::Null),
+                        _other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "numeric, numeric",
+                                actual: "value",
+                            })
+                        }
+                    };
+                    let srid = match &arg_vals[2] {
+                        Value::Int64(n) => *n as u32,
+                        Value::Null => return Ok(Value::Null),
+                        other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "integer",
+                                actual: value_type_name(other),
+                            })
+                        }
+                    };
+                    Ok(Value::Text(
+                        crate::spatial::st_point_with_srid(x, y, srid).to_wkt(),
+                    ))
+                } else {
+                    Err(EvalError::InvalidFunctionArgs(format!(
+                        "st_point expects 2 or 3 args, got {}",
+                        arg_vals.len()
+                    )))
+                }
+            }
+            "st_geomfromtext" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => Ok(Value::Text(g.to_wkt())),
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_x" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => match crate::spatial::st_x(&g) {
+                            Ok(v) => Ok(Value::Float64(v)),
+                            Err(e) => Err(EvalError::Other(e.to_string())),
+                        },
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_y" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => match crate::spatial::st_y(&g) {
+                            Ok(v) => Ok(Value::Float64(v)),
+                            Err(e) => Err(EvalError::Other(e.to_string())),
+                        },
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_srid" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => Ok(Value::Int64(crate::spatial::st_srid(&g) as i64)),
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_setsrid" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let srid = match &arg_vals[1] {
+                    Value::Int64(n) => *n as u32,
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "integer",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => {
+                            let g2 = crate::spatial::st_set_srid(g, srid);
+                            Ok(Value::Text(g2.to_wkt()))
+                        }
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_distance" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let g1 = match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let g2 = match &arg_vals[1] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match crate::spatial::st_distance(&g1, &g2) {
+                    Ok(d) => Ok(Value::Float64(d)),
+                    Err(e) => Err(EvalError::Other(e.to_string())),
+                }
+            }
+            "st_within" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let g1 = match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let g2 = match &arg_vals[1] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match crate::spatial::st_within(&g1, &g2) {
+                    Ok(b) => Ok(Value::Bool(b)),
+                    Err(e) => Err(EvalError::Other(e.to_string())),
+                }
+            }
+            "st_contains" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let g1 = match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let g2 = match &arg_vals[1] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match crate::spatial::st_contains(&g1, &g2) {
+                    Ok(b) => Ok(Value::Bool(b)),
+                    Err(e) => Err(EvalError::Other(e.to_string())),
+                }
+            }
+            "st_intersects" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let g1 = match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let g2 = match &arg_vals[1] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => g,
+                        Err(e) => return Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match crate::spatial::st_intersects(&g1, &g2) {
+                    Ok(b) => Ok(Value::Bool(b)),
+                    Err(e) => Err(EvalError::Other(e.to_string())),
+                }
+            }
+            "st_area" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => Ok(Value::Float64(crate::spatial::st_area(&g))),
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_length" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => Ok(Value::Float64(crate::spatial::st_length(&g))),
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_astext" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => Ok(Value::Text(crate::spatial::st_as_text(&g))),
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "st_envelope" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Text(wkt) => match crate::spatial::st_geom_from_text(wkt) {
+                        Ok(g) => match crate::spatial::st_envelope(&g) {
+                            Some(env) => Ok(Value::Text(env.to_wkt())),
+                            None => Ok(Value::Null),
+                        },
+                        Err(e) => Err(EvalError::Other(e.to_string())),
+                    },
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
                         actual: value_type_name(other),
                     }),
                 }
