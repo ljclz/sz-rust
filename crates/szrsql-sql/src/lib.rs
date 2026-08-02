@@ -93,6 +93,8 @@ mod merge_tests;
 #[cfg(test)]
 mod mvcc_integration_tests;
 #[cfg(test)]
+mod paged_storage_mvcc_tests;
+#[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
 mod plan_tests;

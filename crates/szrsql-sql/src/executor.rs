@@ -1716,6 +1716,17 @@ impl InMemoryTable {
     ///
     /// **幂等性**：重复调用会覆盖现有分页数据（按 page_id 覆盖写）。
     /// **注意**：不清空 rows，rows 仍作为热数据缓存保留。
+    /// P1-6：将 rows 分页写入 paged_storage（不清空 rows，作为持久化镜像）
+    ///
+    /// **页面格式（v2，含 MVCC 元数据）**：
+    /// - page 0（header）：`[8 字节 LE total_rows][8 字节 LE data_page_count][1 字节 flags]`
+    ///   - flags bit 0 = 1 表示存储了 xmin/xmax/deleted 元数据
+    /// - page 1..N（data）：每行格式为
+    ///   `[4 字节 LE row_len][4 字节 LE xmin][4 字节 LE xmax][1 字节 deleted][row_bytes]`
+    ///
+    /// **与 v1 的区别**：
+    /// - v1 跳过 xmax==MAX 的已删除行，且不存储 xmin/xmax
+    /// - v2 存储所有行（含 tombstone），恢复时可完整重建 MVCC 状态
     pub fn spill_to_paged_storage(&self) -> Result<(), ExecutionError> {
         let pool = self.paged_storage.as_ref().ok_or_else(|| {
             ExecutionError::Storage(
@@ -1723,53 +1734,76 @@ impl InMemoryTable {
             )
         })?;
 
-        // 遍历 B+Tree，解码所有行数据（跳过已删除）
-        let mut row_bytes_list: Vec<Vec<u8>> = Vec::new();
+        // 遍历 B+Tree，解码所有行数据（含已删除的 tombstone 行）
+        // 每行存储：(xmin, xmax, row_bytes)
+        #[derive(Clone)]
+        struct SpillEntry {
+            xmin: u32,
+            xmax: u32,
+            deleted: bool,
+            row_bytes: Vec<u8>,
+        }
+        let mut entries: Vec<SpillEntry> = Vec::new();
         let cursor = self
             .btree
             .cursor(Bound::Unbounded, Bound::Unbounded)
             .map_err(|e| ExecutionError::Storage(format!("spill: cursor open failed: {e}")))?;
         for (_key, value) in cursor {
-            let (_xmin, xmax, row) = btree_value_codec::decode(&value).map_err(|e| {
+            let (xmin, xmax, row) = btree_value_codec::decode(&value).map_err(|e| {
                 ExecutionError::Storage(format!("spill: decode btree value failed: {e}"))
             })?;
-            if xmax == u32::MAX {
-                continue; // 已删除，跳过
-            }
+            let deleted = xmax == u32::MAX;
             let bytes = serde_json::to_vec(&row).map_err(|e| {
                 ExecutionError::Storage(format!("spill: serialize row failed: {e}"))
             })?;
-            row_bytes_list.push(bytes);
+            entries.push(SpillEntry {
+                xmin,
+                xmax,
+                deleted,
+                row_bytes: bytes,
+            });
         }
 
-        let total_rows = row_bytes_list.len();
+        let total_rows = entries.len();
         tracing::debug!(table = %self.name, total_rows, "spill_to_paged_storage: starting");
 
         // 按 data 页组织：每页存储尽可能多的行
+        // 每行开销 = 4(row_len) + 4(xmin) + 4(xmax) + 1(deleted) + row_bytes.len()
+        const ROW_META_SIZE: usize = 4 + 4 + 4 + 1; // 13 bytes
         let mut data_pages: Vec<Vec<u8>> = Vec::new();
         let mut current_body: Vec<u8> = Vec::with_capacity(BODY_SIZE);
-        for row_bytes in &row_bytes_list {
-            let needed = 4 + row_bytes.len();
+        for entry in &entries {
+            let needed = ROW_META_SIZE + entry.row_bytes.len();
             // 当前页非空且放不下此行 → 封页开新页
             if !current_body.is_empty() && current_body.len() + needed > BODY_SIZE {
                 data_pages.push(std::mem::take(&mut current_body));
                 current_body = Vec::with_capacity(BODY_SIZE);
             }
-            // 写入 [4 字节 LE row_len][row_bytes]
-            current_body.extend_from_slice(&(row_bytes.len() as u32).to_le_bytes());
-            current_body.extend_from_slice(row_bytes);
+            // 写入 [4 字节 LE row_len][4 字节 LE xmin][4 字节 LE xmax][1 字节 deleted][row_bytes]
+            current_body.extend_from_slice(&(entry.row_bytes.len() as u32).to_le_bytes());
+            current_body.extend_from_slice(&entry.xmin.to_le_bytes());
+            current_body.extend_from_slice(&entry.xmax.to_le_bytes());
+            current_body.push(if entry.deleted {
+                1u8
+            } else {
+                0u8
+            });
+            current_body.extend_from_slice(&entry.row_bytes);
         }
         if !current_body.is_empty() {
             data_pages.push(current_body);
         }
         let data_page_count = data_pages.len();
 
-        // page 0：header 页 — body = [8 字节 LE total_rows][8 字节 LE data_page_count]
+        // page 0：header 页
+        // body = [8 字节 LE total_rows][8 字节 LE data_page_count][1 字节 flags]
+        // flags bit 0 = 1 表示含 MVCC 元数据（v2 格式）
         let mut header_page =
             szrsql_storage::page::Page::new(0, szrsql_storage::page::PageType::Data);
-        let mut header_body = Vec::with_capacity(16);
+        let mut header_body = Vec::with_capacity(17);
         header_body.extend_from_slice(&(total_rows as u64).to_le_bytes());
         header_body.extend_from_slice(&(data_page_count as u64).to_le_bytes());
+        header_body.push(1u8); // flags: bit 0 = MVCC present
         header_page
             .append_body(&header_body)
             .map_err(|e| ExecutionError::Storage(format!("spill: header append failed: {e}")))?;
@@ -1797,22 +1831,23 @@ impl InMemoryTable {
             .map_err(|e| ExecutionError::Storage(format!("spill: flush_all failed: {e}")))?;
         tracing::info!(
             table = %self.name, total_rows, data_page_count,
-            "P1-1: spill_to_paged_storage completed"
+            "P1-6: spill_to_paged_storage completed (v2 with MVCC metadata)"
         );
         Ok(())
     }
 
-    /// P1-1：从 paged_storage 读取所有页重建 rows
+    /// P1-6：从 paged_storage 读取所有页重建 rows（含 MVCC 元数据）
     ///
     /// **流程**：
-    /// 1. 读取 page 0（header）— 解析 total_rows 和 data_page_count
-    /// 2. 读取 page 1..(1+data_page_count)（data）— 按页解析每行
-    /// 3. 用读取的行替换 self.rows
+    /// 1. 读取 page 0（header）— 解析 total_rows、data_page_count 和 flags
+    /// 2. flags bit 0 = 1 时为 v2 格式，每行含 xmin/xmax/deleted 元数据
+    /// 3. flags = 0 或 header < 17 字节时回退到 v1 格式（无 MVCC 元数据）
+    /// 4. 读取 page 1..(1+data_page_count)（data）— 按页解析每行
+    /// 5. 重建 B+Tree，还原 xmin/xmax 向量及 deleted 集合
     ///
-    /// **注意**：重建后 deleted/xmin/xmax 会被重置（paged_storage 不存储版本元数据）：
-    /// - deleted 清空
-    /// - xmin/xmax 重置为 0（长度对齐 rows）
+    /// **注意**：
     /// - pk_index 不重建（需调用方重新 `enable_btree_pk()`）
+    /// - v1 格式回退时 xmin/xmax 重置为 0、deleted 清空（与原行为一致）
     pub fn restore_from_paged_storage(&mut self) -> Result<(), ExecutionError> {
         let pool = self.paged_storage.as_ref().ok_or_else(|| {
             ExecutionError::Storage(
@@ -1824,23 +1859,52 @@ impl InMemoryTable {
         let header_page = pool.read_page(0).map_err(|e| {
             ExecutionError::Storage(format!("restore: read header page failed: {e}"))
         })?;
-        let header_body = header_page.read_body(0, 16).map_err(|e| {
+        let header_body = header_page.read_body(0, 17).map_err(|e| {
             ExecutionError::Storage(format!("restore: header body read failed: {e}"))
         })?;
-        if header_body.len() < 16 {
+
+        // 检测格式版本：v2 header >= 17 字节且 flags bit 0 = 1
+        let (total_rows, data_page_count, has_mvcc) = if header_body.len() >= 17 {
+            let mut arr8 = [0u8; 8];
+            arr8.copy_from_slice(&header_body[..8]);
+            let total = u64::from_le_bytes(arr8) as usize;
+            arr8.copy_from_slice(&header_body[8..16]);
+            let pages = u64::from_le_bytes(arr8) as usize;
+            let flags = header_body[16];
+            (total, pages, (flags & 1) != 0)
+        } else if header_body.len() >= 16 {
+            // v1 格式：无 flags 字节
+            let mut arr8 = [0u8; 8];
+            arr8.copy_from_slice(&header_body[..8]);
+            let total = u64::from_le_bytes(arr8) as usize;
+            arr8.copy_from_slice(&header_body[8..16]);
+            let pages = u64::from_le_bytes(arr8) as usize;
+            (total, pages, false)
+        } else {
             return Err(ExecutionError::Storage(format!(
-                "restore: header body too short: {} < 16",
+                "restore: header body too short: {}",
                 header_body.len()
             )));
-        }
-        let mut arr8 = [0u8; 8];
-        arr8.copy_from_slice(&header_body[..8]);
-        let total_rows = u64::from_le_bytes(arr8) as usize;
-        arr8.copy_from_slice(&header_body[8..16]);
-        let data_page_count = u64::from_le_bytes(arr8) as usize;
+        };
+
+        // 每行存储结构（v2）：
+        // [4 字节 row_len][4 字节 xmin][4 字节 xmax][1 字节 deleted][row_bytes]
+        // v1 格式：[4 字节 row_len][row_bytes]
+        let row_meta_size = if has_mvcc {
+            4 + 4 + 4 + 1
+        } else {
+            4
+        };
 
         // 逐页读取 data 页，解析每行
-        let mut restored_rows: Vec<Row> = Vec::with_capacity(total_rows);
+        #[derive(Clone)]
+        struct RestoredEntry {
+            row: Row,
+            xmin: u32,
+            xmax: u32,
+            deleted: bool,
+        }
+        let mut restored: Vec<RestoredEntry> = Vec::with_capacity(total_rows);
         for page_idx in 0..data_page_count {
             let page_id = (page_idx + 1) as u32;
             let page = pool.read_page(page_id).map_err(|e| {
@@ -1856,13 +1920,45 @@ impl InMemoryTable {
                     "restore: data page {page_id} body read failed: {e}"
                 ))
             })?;
-            // 按 [4 字节 row_len][row_bytes] 解析
             let mut offset = 0usize;
-            while offset + 4 <= body.len() && restored_rows.len() < total_rows {
+            while offset + row_meta_size <= body.len() && restored.len() < total_rows {
                 let mut arr4 = [0u8; 4];
                 arr4.copy_from_slice(&body[offset..offset + 4]);
                 let row_len = u32::from_le_bytes(arr4) as usize;
                 offset += 4;
+
+                let (xmin, xmax, deleted) = if has_mvcc {
+                    // 读取 xmin
+                    if offset + 4 > body.len() {
+                        return Err(ExecutionError::Storage(format!(
+                            "restore: xmin truncated at page {page_id} offset {offset}"
+                        )));
+                    }
+                    arr4.copy_from_slice(&body[offset..offset + 4]);
+                    let xmin = u32::from_le_bytes(arr4);
+                    offset += 4;
+                    // 读取 xmax
+                    if offset + 4 > body.len() {
+                        return Err(ExecutionError::Storage(format!(
+                            "restore: xmax truncated at page {page_id} offset {offset}"
+                        )));
+                    }
+                    arr4.copy_from_slice(&body[offset..offset + 4]);
+                    let xmax = u32::from_le_bytes(arr4);
+                    offset += 4;
+                    // 读取 deleted 标志
+                    if offset + 1 > body.len() {
+                        return Err(ExecutionError::Storage(format!(
+                            "restore: deleted flag truncated at page {page_id} offset {offset}"
+                        )));
+                    }
+                    let deleted = body[offset] != 0;
+                    offset += 1;
+                    (xmin, xmax, deleted)
+                } else {
+                    (0, 0, false)
+                };
+
                 if offset + row_len > body.len() {
                     return Err(ExecutionError::Storage(format!(
                         "restore: row data truncated at page {page_id} offset {offset}, need {row_len} have {}",
@@ -1875,35 +1971,44 @@ impl InMemoryTable {
                         "restore: deserialize row at page {page_id} offset {offset} failed: {e}"
                     ))
                     })?;
-                restored_rows.push(row);
+                restored.push(RestoredEntry {
+                    row,
+                    xmin,
+                    xmax,
+                    deleted,
+                });
                 offset += row_len;
             }
         }
 
-        if restored_rows.len() != total_rows {
+        if restored.len() != total_rows {
             return Err(ExecutionError::Storage(format!(
                 "restore: row count mismatch: expected {total_rows} got {}",
-                restored_rows.len()
+                restored.len()
             )));
         }
 
-        // 重建 B+Tree：清空并重新插入所有行
+        // 重建 B+Tree：清空并重新插入所有行（含 MVCC 元数据）
         self.btree = szrsql_storage::btree::BTree::with_default_order();
         self.next_tuple_id = 0;
         self.deleted.clear();
         self.row_cache.clear();
-        for row in restored_rows {
+        for entry in restored {
             let tuple_id = self.next_tuple_id;
             self.next_tuple_id += 1;
             let key = encode_tuple_id_key(tuple_id);
-            let value = btree_value_codec::encode(0, 0, &row);
+            let value = btree_value_codec::encode(entry.xmin, entry.xmax, &entry.row);
             self.btree.insert(key, value).map_err(|e| {
                 ExecutionError::Storage(format!("restore: btree insert failed: {e}"))
             })?;
+            // 恢复 deleted 集合（tombstone 行）
+            if entry.deleted {
+                self.deleted.insert(tuple_id);
+            }
         }
         tracing::info!(
-            table = %self.name, total_rows, data_page_count,
-            "P1-1: restore_from_paged_storage completed"
+            table = %self.name, total_rows, data_page_count, has_mvcc,
+            "P1-6: restore_from_paged_storage completed"
         );
         Ok(())
     }
@@ -1982,6 +2087,27 @@ impl InMemoryTable {
     /// 反映存储引擎的物理条目数，用于需要区分活跃行与 tombstone 的场景。
     pub fn total_row_count(&self) -> usize {
         self.btree.len()
+    }
+
+    /// P1-6：查询指定 tuple_id 的 MVCC 版本元数据（xmin, xmax）
+    ///
+    /// 用于验证分页恢复后 MVCC 元数据的完整性。
+    /// 返回 None 表示该 tuple_id 不存在于 B+Tree 中。
+    pub fn row_version(&self, tuple_id: usize) -> Option<(u32, u32)> {
+        let key = encode_tuple_id_key(tuple_id as u32);
+        match self.btree.search(&key) {
+            Ok(Some(value)) => btree_value_codec::decode(&value)
+                .map(|(xmin, xmax, _)| (xmin, xmax))
+                .ok(),
+            _ => None,
+        }
+    }
+
+    /// P1-6：查询指定 row_id 是否为 tombstone（已删除）
+    ///
+    /// 用于验证分页恢复后 deleted 集合的完整性。
+    pub fn is_deleted(&self, row_id: usize) -> bool {
+        self.deleted.contains(&(row_id as u32))
     }
 
     /// 取表名 — 用于持久化时作为 HashMap key
