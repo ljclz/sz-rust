@@ -100,11 +100,20 @@ pub fn origin_matches_domain(origin: &str, domain: &str) -> bool {
 ///
 /// 使用 [`origin_matches_domain`] 做精确后缀匹配，避免 PHP 原版 `strpos` 子串匹配
 /// 被 `evil-example.com` 等恶意域名绕过。
+///
+/// ## P1-SEC-11 修复说明
+///
+/// 旧版在 `cookie_domain` 为空时返回 `true`（允许所有 origin）且同时设置
+/// `allow_credentials(true)`。浏览器对"反射具体 origin + credentials"的组合
+/// 会放行带凭据的跨域请求，等同于对凭据请求禁用 CORS 保护。
+/// 修复：空 `cookie_domain` 时不允许任何 origin（严格白名单模式），
+/// 仅当 origin 命中白名单时才回显并携带 credentials。
 pub fn cors_layer_with_origin(cookie_domain: &str) -> CorsLayer {
     let cookie_domain = cookie_domain.to_string();
     let allow_origin = AllowOrigin::predicate(move |origin, _| {
+        // P1-SEC-11: 空 cookie_domain 不再等价于通配（防止 credentials 泄漏）
         if cookie_domain.is_empty() {
-            return true; // 空字符串等价于通配
+            return false; // 未配置白名单时拒绝所有跨域请求
         }
         match origin.to_str() {
             Ok(origin_str) => origin_matches_domain(origin_str, &cookie_domain),
@@ -319,15 +328,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_cors_with_origin_empty_domain_allows_all() {
-        // 空字符串 cookie_domain 等价于 cors_layer()
+        // P1-SEC-11: 空字符串 cookie_domain 不再等价于通配（防止 credentials 泄漏）
+        // 未配置白名单时应拒绝所有跨域请求
         let router = make_router(cors_layer_with_origin(""));
         let resp = send_request(router, "GET", "/api", Some("https://anything.com")).await;
 
         let allow_origin = resp
             .headers()
-            .get("access-control-allow-origin")
-            .expect("missing Access-Control-Allow-Origin");
-        assert_eq!(allow_origin, "https://anything.com");
+            .get("access-control-allow-origin");
+        assert!(
+            allow_origin.is_none(),
+            "P1-SEC-11: 空 cookie_domain 应拒绝所有 origin（不再回显）"
+        );
     }
 
     #[tokio::test]
@@ -678,5 +690,75 @@ mod tests {
                 "invalid header name: {name}"
             );
         }
+    }
+
+    // ========================================================================
+    // P1-SEC-11：空 cookie_domain 时不反射 origin + credentials
+    // ========================================================================
+
+    /// P1-SEC-11 回归测试：cookie_domain 为空时，任意 origin 请求不应获得
+    /// Access-Control-Allow-Origin 响应头（防止 credentials 泄漏）
+    #[tokio::test]
+    async fn test_p1_sec_11_empty_cookie_domain_rejects_all_origins() {
+        let layer = cors_layer_with_origin(""); // 空白名单
+        let router = make_router(layer);
+
+        // 恶意站点发起的跨域请求
+        let resp = send_request(router, "GET", "/api", Some("https://evil.com")).await;
+        let allow_origin = resp.headers().get("access-control-allow-origin");
+
+        assert!(
+            allow_origin.is_none(),
+            "P1-SEC-11: 空 cookie_domain 时不应回显任何 origin（否则 credentials 可被恶意站点利用）\n\
+             实际返回: {:?}",
+            allow_origin
+        );
+    }
+
+    /// P1-SEC-11 回归测试：cookie_domain 配置后，白名单内 origin 应通过
+    #[tokio::test]
+    async fn test_p1_sec_11_whitelisted_origin_allowed() {
+        let layer = cors_layer_with_origin("example.com");
+        let router = make_router(layer);
+
+        let resp = send_request(router, "GET", "/api", Some("https://example.com")).await;
+        let allow_origin = resp.headers().get("access-control-allow-origin");
+
+        assert!(
+            allow_origin.is_some(),
+            "P1-SEC-11: 白名单内的 origin 应被允许"
+        );
+        assert_eq!(
+            allow_origin.unwrap().to_str().unwrap(),
+            "https://example.com"
+        );
+    }
+
+    /// P1-SEC-11 回归测试：子域名匹配（*.example.com）应通过
+    #[tokio::test]
+    async fn test_p1_sec_11_subdomain_match_allowed() {
+        let layer = cors_layer_with_origin("example.com");
+        let router = make_router(layer);
+
+        let resp = send_request(router, "GET", "/api", Some("https://api.example.com")).await;
+        let allow_origin = resp.headers().get("access-control-allow-origin");
+
+        assert!(allow_origin.is_some(), "子域名应匹配白名单");
+        assert_eq!(allow_origin.unwrap().to_str().unwrap(), "https://api.example.com");
+    }
+
+    /// P1-SEC-11 回归测试：恶意子域名绕过（evil-example.com）应被拒绝
+    #[tokio::test]
+    async fn test_p1_sec_11_evil_subdomain_rejected() {
+        let layer = cors_layer_with_origin("example.com");
+        let router = make_router(layer);
+
+        let resp = send_request(router, "GET", "/api", Some("https://evil-example.com")).await;
+        let allow_origin = resp.headers().get("access-control-allow-origin");
+
+        assert!(
+            allow_origin.is_none(),
+            "P1-SEC-11: evil-example.com 不应匹配 example.com 白名单（后缀匹配防护）"
+        );
     }
 }

@@ -17,6 +17,9 @@
 //! ```
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use sz_rust_core::container::Container;
+use sz_rust_core::middleware::chain::MiddlewareChain;
+use sz_rust_core::middleware::order::MiddlewareKind;
 use sz_rust_core::router::parse_path;
 use sz_rust_core::routing::{HandlerRef, HttpMethod, RouteConfig, RouteRule};
 
@@ -188,11 +191,97 @@ fn bench_json_serialization(c: &mut Criterion) {
     group.finish();
 }
 
+// ============================================================================
+// 基准测试组 4：middleware_chain — 中间件链构建与操作
+// ============================================================================
+
+fn bench_middleware_chain(c: &mut Criterion) {
+    let mut group = c.benchmark_group("middleware_chain");
+
+    group.bench_function("default_chain", |b| {
+        b.iter(|| MiddlewareChain::default_chain())
+    });
+
+    group.bench_function("push_5", |b| {
+        b.iter(|| {
+            MiddlewareChain::new()
+                .push(MiddlewareKind::Trace)
+                .push(MiddlewareKind::Cors)
+                .push(MiddlewareKind::Log)
+                .push(MiddlewareKind::RateLimit)
+                .push(MiddlewareKind::Auth)
+        })
+    });
+
+    let chain = MiddlewareChain::default_chain();
+    group.bench_function("service_builder_order", |b| {
+        b.iter(|| chain.service_builder_order())
+    });
+
+    group.bench_function("remove_from_auth", |b| {
+        b.iter(|| chain.clone().remove_from(MiddlewareKind::Auth))
+    });
+
+    group.bench_function("has_duplicates", |b| b.iter(|| chain.has_duplicates()));
+
+    group.bench_function("contains_auth", |b| {
+        b.iter(|| chain.contains(MiddlewareKind::Auth))
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试组 5：di_container — DI 容器注册与解析
+// ============================================================================
+
+fn bench_di_container(c: &mut Criterion) {
+    struct TestService;
+    struct DepService;
+
+    let mut group = c.benchmark_group("di_container");
+
+    group.bench_function("bind_and_make_transient", |b| {
+        let c = Container::new();
+        c.bind::<TestService, _>(|| TestService);
+        b.iter(|| {
+            let _ = c.make::<TestService>();
+        })
+    });
+
+    group.bench_function("singleton_reuse", |b| {
+        let c = Container::new();
+        c.singleton::<TestService, _>(|| TestService);
+        b.iter(|| {
+            let _ = c.make::<TestService>();
+        })
+    });
+
+    group.bench_function("scoped_make", |b| {
+        let c = Container::new();
+        c.scoped::<TestService, _>(|| TestService);
+        b.iter(|| {
+            let _ = c.make_with_scope::<TestService>(1);
+        })
+    });
+
+    group.bench_function("make_missing", |b| {
+        let c = Container::new();
+        b.iter(|| {
+            let _ = c.make::<DepService>();
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_path,
     bench_handler_ref_parse,
     bench_route_config,
     bench_json_serialization,
+    bench_middleware_chain,
+    bench_di_container,
 );
 criterion_main!(benches);

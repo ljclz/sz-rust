@@ -144,7 +144,7 @@ impl UserController {
         let name = data["name"].as_str().unwrap_or("").to_string();
         let age = data["age"].as_i64().unwrap_or(0) as i32;
 
-        // 手动校验（框架 validate() 为占位实现，完整支持 30+ 规则）
+        // 手动校验（也可使用框架 validate()，此处演示手动校验）
         if name.is_empty() {
             return ctrl.render_error("用户名不能为空", json!({"field": "name"}), 0);
         }

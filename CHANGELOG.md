@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### 新增
+- **sz-rust-addons-crm**：CRM 模板插件（联系人/线索/商机管理，15 个 REST 端点）
+- **sz-rust-addons-erp**：ERP 模板插件（商品/供应商/采购单管理，16 个 REST 端点）
+- **sz-rust-addons-ecommerce**：电商模板插件（订单/订单项/购物车管理，13 个 REST 端点）
+- **RouterBuilder 泛型状态支持**：`RouterBuilder<S>` 支持 `axum::extract::State<S>`，addon 可通过闭包捕获状态注册路由
+- **CLI `make:middleware` 命令**：`sz-rust-cli make middleware <name>` 生成中间件骨架
+- **10 个新增 .trae/skills/**：test-coverage、performance-check、doc-check、migration、deploy、orm-query、n-plus-one、auth-guard、error-handling、ci-cd
+
+### 变更
 - sz300 集成可观测性模块（sz-rust-observability）：Prometheus /metrics 端点 + MetricsRegistry 注入 AppState
 - sz300 readiness 探针（/health/ready 端点 + DB 健康检查 + 503 状态码）
 - sz300 优雅关闭（with_graceful_shutdown 支持 Ctrl+C + SIGTERM）
@@ -49,12 +57,12 @@
 - **ADR-012 分布式追踪架构决策**：W3C TraceContext 标准、OTLP exporter 路径、legacy header 兼容策略
 - **missing_docs 严格检查**：CI doc job 启用 `RUSTDOCFLAGS: "-D warnings -D missing_docs"`，所有公开 API 必须有文档注释
 - **首次性能基线数据**：`docs/benchmarks/baseline-v0.1.0.md` 记录 criterion 基线，后续版本以此为回归参照
-- **24 小时 soak test**：`soak.yml` workflow，每周日 00:00 UTC 自动执行，60 秒指标采样，1500 分钟超时
+- **6 小时 soak test**：`soak.yml` workflow，每周日 00:00 UTC 自动执行，60 秒指标采样，420 分钟超时
 - **cargo-tarpaulin 覆盖率**：`coverage.yml` workflow，统计代码覆盖率并上传 Codecov
 - **模糊测试套件**：`sz-rust-core/tests/fuzz.rs`，7 个 fuzz 用例 × 1000 次迭代（parse_path / HandlerRef / route_config / ApiResponse / ErrorCode / AppConfig / Validate），使用自定义 xorshift64 PRNG，不依赖 cargo-fuzz
 - **fuzz CI workflow**：`fuzz.yml`，push/PR + 每周六 00:00 UTC + workflow_dispatch 触发，支持 `FUZZ_ITERATIONS` 环境变量自定义迭代次数
 - **cargo-deny 依赖审计**：`deny.toml` 配置（许可证白名单 MIT/Apache-2.0/BSD/ISC/Zlib，黑名单 GPL/AGPL/EUPL；RUSTSEC 漏洞检查；重复依赖警告；来源限制仅 crates.io）
-- **PHP 迁移指南补充 5 章节**：第 11 章缓存系统迁移（Phase 6）/ 第 12 章文件上传迁移（Phase 5）/ 第 13 章视图模板迁移（Phase 7）/ 第 14 章可观测性迁移（v0.2.0 新增）/ 第 15 章分布式追踪迁移（v0.2.0 新增）
+- **PHP 迁移指南补充 5 章节**：第 11 章缓存系统迁移 / 第 12 章文件上传迁移 / 第 13 章视图模板迁移 / 第 14 章可观测性迁移（v0.2.0 新增）/ 第 15 章分布式追踪迁移（v0.2.0 新增）
 
 ### 变更
 - **workspace.package.version**：`0.1.0` → `0.2.0`

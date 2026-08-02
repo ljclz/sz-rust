@@ -10,9 +10,9 @@
 //! cargo test --package sz-rust-core --test soak soak_web_framework_steady_state -- --ignored --nocapture
 //! ```
 //!
-//! ## 周末长时验证（24h）
+//! ## 周末长时验证（6h）
 //! ```bash
-//! SOAK_DURATION=24h cargo test --package sz-rust-core --test soak soak_web_framework_steady_state -- --ignored --nocapture
+//! SOAK_DURATION=6h cargo test --package sz-rust-core --test soak soak_web_framework_steady_state -- --ignored --nocapture
 //! ```
 //!
 //! ## 自定义时长
@@ -53,7 +53,7 @@ use sz_rust_core::routing::HandlerRef;
 
 /// 完整 Soak Test：长时间运行路由解析 + JSON 序列化
 ///
-/// 默认 60 秒（CI 验证），可通过 `SOAK_DURATION` 环境变量延长至 24h。
+/// 默认 60 秒（CI 验证），可通过 `SOAK_DURATION` 环境变量延长至 6h。
 ///
 /// # Worker 操作
 ///
@@ -63,7 +63,7 @@ use sz_rust_core::routing::HandlerRef;
 /// 3. `ApiResponse::success` + `to_json_string` 序列化 JSON 响应
 /// 4. 记录操作延迟和计数
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "soak test 需显式 --ignored 启动；默认 60s，24h 任务 SOAK_DURATION=24h"]
+#[ignore = "soak test 需显式 --ignored 启动；默认 60s，6h 任务 SOAK_DURATION=6h"]
 async fn soak_web_framework_steady_state() {
     let duration = parse_duration_from_args();
     let sample_interval = Duration::from_secs(if duration.as_secs() >= 3600 {

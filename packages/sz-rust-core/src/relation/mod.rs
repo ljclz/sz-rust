@@ -85,10 +85,13 @@
 //! sz-rust 端通过 SQL 片段构造器验证 SQL 生成对齐 PHP 行为。
 
 // re-export sz-orm-core 关联类型（pub use model::* 已在 sz-orm-core::lib.rs 完成）
-pub use sz_orm_core::{
+// NOTE: WithRelation is excluded from the facade root (ambiguous glob re-export in
+// sz-orm-core under Rust 1.96+); re-export it directly from the find_with_related submodule.
+pub use crate::orm::{
     BelongsTo, BelongsToMany, HasMany, HasOne, MorphMany, MorphTo, Relation, RelationAccess,
-    RelationError, RelationLoader, WithRelation,
+    RelationError, RelationLoader,
 };
+pub use crate::orm::find_with_related::WithRelation;
 
 pub mod belongs_to;
 pub mod belongs_to_many;

@@ -32,7 +32,6 @@ use axum::body::Body;
 use axum::http::{HeaderName, Method, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use rand::RngCore;
 
 /// CSRF Cookie 名称
 pub const CSRF_COOKIE_NAME: &str = "csrf_token";
@@ -71,10 +70,12 @@ pub fn is_public_path(path: &str, public_paths: &[&str]) -> bool {
 
 /// 生成 32 字节随机 CSRF token（Base64 编码，44 字符）
 ///
-/// 使用 `rand::RngCore::fill_bytes` 生成密码学安全的随机字节。
+/// 安全约束：使用 `rand::rngs::OsRng`（操作系统级密码学安全 RNG），
+/// 确保 CSRF token 不可预测，防止令牌伪造攻击。
 pub fn generate_token() -> String {
+    use rand::RngCore;
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
     base64_encode(&bytes)
 }
 

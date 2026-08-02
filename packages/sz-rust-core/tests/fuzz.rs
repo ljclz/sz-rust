@@ -24,6 +24,9 @@
 //! | `fuzz_error_code_conversion` | `error::ErrorCode::from` / `BaseException::new` | 随机 i32 不 panic |
 //! | `fuzz_config_parse_safety` | `serde_yml::from_str::<AppConfig>` | 随机 YAML 配置不 panic |
 //! | `fuzz_validate_rules` | `validate::Validate::check_rule` | 随机规则不 panic |
+//! | `fuzz_cookie_jar_safety` | `cookie::CookieJar` | 随机 Cookie 名/值/选项不 panic |
+//! | `fuzz_middleware_chain_safety` | `middleware::MiddlewareChain` | 随机中间件链操作不 panic |
+//! | `fuzz_event_dispatcher_safety` | `event::EventDispatcher` | 随机事件触发/监听不 panic |
 //!
 //! ## 安全约束
 //!
@@ -35,8 +38,13 @@ mod common;
 
 use common::fuzz::Rng;
 use serde_json::{Map, Value};
+use std::sync::Arc;
 use sz_rust_core::config::AppConfig;
+use sz_rust_core::cookie::{CookieJar, CookieOptions};
 use sz_rust_core::error::{BaseException, ErrorCode};
+use sz_rust_core::event::{ClosureListener, EventDispatcher, EventError, Listener};
+use sz_rust_core::middleware::chain::MiddlewareChain;
+use sz_rust_core::middleware::order::MiddlewareKind;
 use sz_rust_core::response::ApiResponse;
 use sz_rust_core::router::parse_path;
 use sz_rust_core::routing::{load_routes_from_yaml_str, HandlerRef};
@@ -386,6 +394,230 @@ fn fuzz_validate_rules_safety() {
     );
     data.insert("age".to_string(), Value::Number(rng.next_i64().into()));
     let _ = validate.check(&Value::Object(data));
+}
+
+/// Fuzz 测试：`cookie::CookieJar` 在随机 Cookie 名/值/选项下不 panic
+///
+/// `CookieJar` 设计为安全的 Cookie 管理容器。本测试验证：
+/// - 随机字符串作为 Cookie 名/值不 panic
+/// - 随机 `CookieOptions`（含极端 expire、特殊字符 path/domain/samesite）不 panic
+/// - `get` / `set` / `delete` / `forever` 组合操作不 panic
+#[test]
+fn fuzz_cookie_jar_safety() {
+    let mut rng = Rng::new(20260730);
+
+    for _ in 0..FUZZ_ITERATIONS {
+        let name_len = rng.next_usize(50);
+        let value_len = rng.next_usize(200);
+        let name = rng.next_string(name_len);
+        let value = rng.next_string(value_len);
+
+        // 随机构造 CookieOptions（含特殊字符和极端值）
+        // 注意：拆分长度生成与字符串生成，避免同时可变借用 rng
+        let path_len = rng.next_usize(20);
+        let domain_len = rng.next_usize(20);
+        let samesite_len = rng.next_usize(10);
+        let options = CookieOptions {
+            expire: rng.next_i64(),
+            path: rng.next_string(path_len),
+            domain: rng.next_string(domain_len),
+            secure: rng.next_bool(),
+            httponly: rng.next_bool(),
+            samesite: rng.next_string(samesite_len),
+        };
+
+        // set + get + delete 组合操作不 panic
+        let jar = CookieJar::new().set(&name, &value, options.clone());
+        let _ = jar.get(&name);
+        let _ = jar.get_with_default(&name, "default");
+        let _ = jar.has(&name);
+
+        // forever（长过期）+ delete 组合
+        let jar = CookieJar::new().forever(&name, &value, options.clone());
+        let _ = jar.delete(&name, options.clone());
+
+        // with_config 构造路径
+        let jar = CookieJar::with_config(options);
+        let _ = jar.config();
+        let _ = jar.get_response_cookies();
+    }
+
+    // 边界值：空名/值、超长名/值
+    let boundary_names: Vec<String> = vec![
+        "".to_string(),
+        " ".to_string(),
+        "name=value".to_string(),
+        "name; path=/".to_string(),
+        "\x00".to_string(),
+        "a".repeat(1000),
+    ];
+    let boundary_values: Vec<String> = vec![
+        "".to_string(),
+        " ".to_string(),
+        "value; malicious".to_string(),
+        "\x00\x01\x02".to_string(),
+        "a".repeat(2000),
+    ];
+    for name in &boundary_names {
+        for value in &boundary_values {
+            let options = CookieOptions::with_expire(0);
+            let jar = CookieJar::new().set(name, value, options);
+            let _ = jar.get(name);
+            let _ = jar.has(name);
+        }
+    }
+}
+
+/// Fuzz 测试：`middleware::MiddlewareChain` 在随机中间件链操作下不 panic
+///
+/// `MiddlewareChain` 设计为安全的中间件链构建器。本测试验证：
+/// - 随机 `push` / `insert` / `remove` 序列不 panic
+/// - 越界 `insert` / `remove` 索引返回错误而非 panic
+/// - `remove_kind` / `remove_from` / `contains` / `position` 查询不 panic
+#[test]
+fn fuzz_middleware_chain_safety() {
+    let mut rng = Rng::new(20260731);
+
+    let all_kinds = [
+        MiddlewareKind::Trace,
+        MiddlewareKind::Cors,
+        MiddlewareKind::Log,
+        MiddlewareKind::RateLimit,
+        MiddlewareKind::Auth,
+    ];
+
+    for _ in 0..FUZZ_ITERATIONS {
+        let mut chain = MiddlewareChain::new();
+
+        // 随机 push 序列
+        let push_count = rng.next_usize(20);
+        for _ in 0..push_count {
+            let kind = all_kinds[rng.next_usize(all_kinds.len())];
+            chain = chain.push(kind);
+        }
+
+        // 随机 insert（含越界索引）
+        // 注意：insert(mut self, ...) 消耗 self 并返回 Result<Self, String>，
+        // 失败时 self 丢失，故需用 clone 保留原链，仅在成功时替换
+        let insert_count = rng.next_usize(10);
+        for _ in 0..insert_count {
+            let kind = all_kinds[rng.next_usize(all_kinds.len())];
+            let index = rng.next_usize(push_count + insert_count + 5);
+            // 仅在索引合法时调用 insert，避免消耗 chain 后丢失
+            // 先 clone 备份，insert 失败时用 backup 恢复
+            if index <= chain.len() {
+                let backup = chain.clone();
+                chain = chain.insert(index, kind).unwrap_or(backup);
+            }
+        }
+
+        // 随机 remove（含越界索引）
+        let remove_count = rng.next_usize(10);
+        for _ in 0..remove_count {
+            let index = rng.next_usize(push_count + insert_count + 5);
+            let _ = chain.remove(index);
+        }
+
+        // 查询操作不 panic
+        let query_count = rng.next_usize(10);
+        for _ in 0..query_count {
+            let kind = all_kinds[rng.next_usize(all_kinds.len())];
+            let _ = chain.contains(kind);
+            let _ = chain.position(kind);
+        }
+
+        // remove_kind / remove_from 批量操作
+        let kind = all_kinds[rng.next_usize(all_kinds.len())];
+        let _ = chain.remove_kind(kind);
+        let _ = chain.remove_from(kind);
+
+        // 不变量检查
+        let _ = chain.len();
+        let _ = chain.is_empty();
+        let _ = chain.has_duplicates();
+        let _ = chain.order();
+        let _ = chain.service_builder_order();
+    }
+
+    // 边界值：空链操作
+    // 注意：empty_chain 需声明为 mut，因为 remove 是 &mut self；
+    // insert 消耗 self，需通过 clone 保留原链用于后续断言
+    let mut empty_chain = MiddlewareChain::new();
+    assert!(empty_chain.is_empty());
+    // insert 越界应失败，且不消耗原链（用 clone 保护）
+    assert!(empty_chain.clone().insert(1, MiddlewareKind::Auth).is_err());
+    // insert 合法位置应成功
+    let updated = empty_chain.clone().insert(0, MiddlewareKind::Auth);
+    assert!(updated.is_ok());
+    // remove 越界返回 None
+    assert!(empty_chain.remove(999).is_none());
+}
+
+/// Fuzz 测试：`event::EventDispatcher` 在随机事件触发/监听下不 panic
+///
+/// `EventDispatcher` 设计为安全的事件系统。本测试验证：
+/// - 随机事件名注册/触发不 panic
+/// - 随机 `listen` / `remove` / `has_listener` 序列不 panic
+/// - `listener_count` 查询不 panic
+#[test]
+fn fuzz_event_dispatcher_safety() {
+    let mut rng = Rng::new(20260801);
+
+    for _ in 0..FUZZ_ITERATIONS {
+        let dispatcher = EventDispatcher::new();
+
+        // 随机事件名注册监听器
+        let event_count = rng.next_usize(10);
+        for _ in 0..event_count {
+            let event_name_len = rng.next_usize(30);
+            let event_name = rng.next_string(event_name_len);
+            let first = rng.next_bool();
+
+            // ClosureListener 包装随机闭包（仅记录触发，不 panic）
+            let listener: Arc<dyn Listener> = Arc::new(ClosureListener::new(
+                move |_params: &Value| -> Result<Value, EventError> { Ok(Value::Null) },
+            ));
+            dispatcher.listen(&event_name, listener, first);
+        }
+
+        // 随机触发事件（不 panic）
+        let trigger_count = rng.next_usize(5);
+        for _ in 0..trigger_count {
+            let event_name_len = rng.next_usize(30);
+            let event_name = rng.next_string(event_name_len);
+            let params_len = rng.next_usize(50);
+            let params = Value::String(rng.next_string(params_len));
+            let once = rng.next_bool();
+            let _ = dispatcher.trigger(&event_name, &params, once);
+        }
+
+        // 查询操作
+        let query_count = rng.next_usize(10);
+        for _ in 0..query_count {
+            let event_name_len = rng.next_usize(30);
+            let event_name = rng.next_string(event_name_len);
+            let _ = dispatcher.has_listener(&event_name);
+            let _ = dispatcher.listener_count(&event_name);
+        }
+
+        // 随机 remove
+        let remove_count = rng.next_usize(5);
+        for _ in 0..remove_count {
+            let event_name_len = rng.next_usize(30);
+            let event_name = rng.next_string(event_name_len);
+            dispatcher.remove(&event_name);
+        }
+    }
+
+    // 边界值：空事件名、超长事件名
+    let dispatcher = EventDispatcher::new();
+    let listener: Arc<dyn Listener> =
+        Arc::new(ClosureListener::new(|_params: &Value| Ok(Value::Null)));
+    dispatcher.listen("", listener.clone(), false);
+    dispatcher.listen(&"a".repeat(1000), listener.clone(), false);
+    let _ = dispatcher.trigger("", &Value::Null, false);
+    let _ = dispatcher.trigger(&"a".repeat(1000), &Value::Null, false);
+    let _ = dispatcher.listener_count("");
 }
 
 // ===== 辅助函数 =====

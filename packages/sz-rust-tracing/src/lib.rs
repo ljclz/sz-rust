@@ -1,14 +1,19 @@
 //! # SZ-Rust Tracing — 链路追踪
 //!
-//! 提供分布式链路追踪的 Span/Tracer 抽象，支持 OTLP exporter 上报，
+//! 提供分布式链路追踪的 Span/Tracer 抽象，支持 W3C TraceContext 传播，
 //! 用于跨服务调用链的采集与可视化。
+//!
+//! ## OTLP 导出
+//!
+//! OTLP exporter 已统一由 `sz-rust-observability` 包提供（支持 gRPC/HTTP 双协议、
+//! 环境变量配置、资源属性），本包专注于 Span/Tracer 核心抽象与 W3C 传播。
 //!
 //! ## 主要类型
 //!
 //! - [`Span`] — 单个追踪片段
-//! - [`Tracer`] — 追踪器与导出器抽象
+//! - [`Tracer`] — 追踪器抽象
 //! - [`SzTracer`] — 默认实现，支持 W3C TraceContext 传播
-//! - [`OtelTracer`] — SzTracer 的兼容包装器
+//! - [`InMemoryTracer`] — SzTracer 的兼容包装器（内存存储）
 //!
 //! ## W3C TraceContext
 //!
@@ -381,18 +386,20 @@ impl SzTracer {
 
 /// SzTracer 的兼容包装器，暴露与 OpenTelemetry SDK 一致的 [`Tracer`] 接口。
 ///
+/// M-4 修复：类型已从 `OtelTracer` 重命名为 `InMemoryTracer`，以准确反映其实现本质。
+///
 /// 该类型并非真正的 OpenTelemetry 实现：
 /// - 不会将 Span 导出到 OTLP / Jaeger / Zipkin collector
 /// - 已实现 W3C TraceContext `traceparent` header 传播
 /// - 不执行采样、baggage 传播或跨 `async` 边界的上下文提取
 ///
-/// 适用于已有代码期望一个 "otel 风格" tracer 名称、但实际由 SzTracer 支撑的场景。
+/// 适用于已有代码期望一个 "otel 风格" tracer 接口、但实际由 SzTracer 支撑的场景。
 /// 生产级跨服务分布式追踪请依赖真正的 `opentelemetry` SDK。
-pub struct OtelTracer {
+pub struct InMemoryTracer {
     tracer: SzTracer,
 }
 
-impl OtelTracer {
+impl InMemoryTracer {
     /// 创建一个包装指定服务名的 [`SzTracer`]。
     pub fn new(service_name: impl Into<String>) -> Self {
         Self {
@@ -406,7 +413,7 @@ impl OtelTracer {
     }
 }
 
-impl Tracer for OtelTracer {
+impl Tracer for InMemoryTracer {
     fn start_span(&self, operation_name: &str) -> Span {
         self.tracer.start_span(operation_name)
     }
@@ -423,6 +430,16 @@ impl Tracer for OtelTracer {
         self.tracer.extract(headers)
     }
 }
+
+/// M-4 修复：`OtelTracer` 的向后兼容别名。
+///
+/// 该名称具有误导性（暗示真正的 OpenTelemetry 实现），已重命名为 [`InMemoryTracer`]。
+/// 新代码请使用 [`InMemoryTracer`]。
+#[deprecated(
+    since = "0.2.1",
+    note = "M-4 修复：类型名具有误导性，请使用 InMemoryTracer"
+)]
+pub type OtelTracer = InMemoryTracer;
 
 /// 返回当前 UNIX epoch 毫秒时间戳。
 fn current_timestamp() -> i64 {
@@ -449,9 +466,6 @@ pub enum TracingError {
     InvalidTraceId(String),
     /// 内部错误（如锁中毒）。
     Internal(String),
-    /// OTLP exporter 初始化失败（feature = "otlp"）。
-    #[cfg(feature = "otlp")]
-    OtlpInitFailed(String),
 }
 
 impl std::fmt::Display for TracingError {
@@ -460,8 +474,6 @@ impl std::fmt::Display for TracingError {
             TracingError::SpanNotFound(id) => write!(f, "Span not found: {}", id),
             TracingError::InvalidTraceId(id) => write!(f, "Invalid trace id: {}", id),
             TracingError::Internal(msg) => write!(f, "Tracing internal error: {}", msg),
-            #[cfg(feature = "otlp")]
-            TracingError::OtlpInitFailed(msg) => write!(f, "OTLP init failed: {}", msg),
         }
     }
 }
@@ -474,115 +486,6 @@ impl serde::Serialize for TracingError {
         S: serde::Serializer,
     {
         serializer.serialize_str(&self.to_string())
-    }
-}
-
-// ============================================================================
-// OTLP Exporter（feature = "otlp"）
-// ============================================================================
-
-/// OTLP exporter 配置。
-///
-/// 用于将 SZ-Rust tracing 的 Span 通过 OpenTelemetry OTLP 协议导出到 Collector。
-///
-/// # 示例
-///
-/// ```no_run
-/// # #[cfg(feature = "otlp")] {
-/// use sz_rust_tracing::OtlpConfig;
-///
-/// let config = OtlpConfig {
-///     endpoint: "http://localhost:4317".to_string(),
-///     service_name: "sz-rust-app".to_string(),
-///     timeout_ms: 5000,
-/// };
-/// # }
-/// ```
-#[cfg(feature = "otlp")]
-#[derive(Debug, Clone)]
-pub struct OtlpConfig {
-    /// OTLP gRPC endpoint（如 `http://localhost:4317`）。
-    pub endpoint: String,
-    /// 服务名（出现在 trace 的 service.name 标签）。
-    pub service_name: String,
-    /// 导出超时（毫秒）。
-    pub timeout_ms: u64,
-}
-
-#[cfg(feature = "otlp")]
-impl Default for OtlpConfig {
-    fn default() -> Self {
-        Self {
-            endpoint: "http://localhost:4317".to_string(),
-            service_name: "sz-rust".to_string(),
-            timeout_ms: 5000,
-        }
-    }
-}
-
-/// 初始化 OTLP exporter。
-///
-/// 将 SZ-Rust 的 tracing 接入 OpenTelemetry，使 Span 自动导出到 Collector。
-///
-/// # 错误
-///
-/// - [`TracingError::OtlpInitFailed`]：初始化失败
-///
-/// # 示例
-///
-/// ```no_run
-/// # #[cfg(feature = "otlp")] {
-/// # let rt = tokio::runtime::Runtime::new().unwrap();
-/// # rt.block_on(async {
-/// use sz_rust_tracing::{init_otlp_exporter, OtlpConfig};
-///
-/// let _guard = init_otlp_exporter(OtlpConfig::default()).await.unwrap();
-/// // 此后通过 `Tracer` 上报的 Span 将自动导出到 OTLP Collector
-/// # });
-/// # }
-/// ```
-#[cfg(feature = "otlp")]
-pub async fn init_otlp_exporter(config: OtlpConfig) -> Result<OtlpGuard, TracingError> {
-    use opentelemetry_otlp::{SpanExporter, WithExportConfig};
-    use opentelemetry_sdk::resource::Resource;
-    use opentelemetry_sdk::runtime::Tokio;
-    use opentelemetry_sdk::trace::TracerProvider;
-    use std::time::Duration;
-
-    let exporter = SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(config.endpoint.clone())
-        .with_timeout(Duration::from_millis(config.timeout_ms))
-        .build()
-        .map_err(|e| TracingError::OtlpInitFailed(format!("exporter build: {e}")))?;
-
-    let provider = TracerProvider::builder()
-        .with_batch_exporter(exporter, Tokio)
-        .with_resource(Resource::new_with_defaults([opentelemetry::KeyValue::new(
-            "service.name",
-            config.service_name.clone(),
-        )]))
-        .build();
-
-    // 设置为全局 provider
-    opentelemetry::global::set_tracer_provider(provider.clone());
-
-    Ok(OtlpGuard { provider })
-}
-
-/// OTLP exporter 守卫。
-///
-/// drop 时优雅关闭 exporter，确保所有 Span 已导出。
-#[cfg(feature = "otlp")]
-pub struct OtlpGuard {
-    provider: opentelemetry_sdk::trace::TracerProvider,
-}
-
-#[cfg(feature = "otlp")]
-impl Drop for OtlpGuard {
-    fn drop(&mut self) {
-        // 优雅关闭：未发送的 span 会被丢弃（不阻塞）
-        let _ = self.provider.shutdown();
     }
 }
 
@@ -914,8 +817,8 @@ mod tests {
     }
 
     #[test]
-    fn test_otel_tracer_delegates_to_inner() {
-        let tracer = OtelTracer::new("svc");
+    fn test_in_memory_tracer_delegates_to_inner() {
+        let tracer = InMemoryTracer::new("svc");
         assert!(tracer.inner().get_spans().is_empty());
 
         let span = tracer.start_span("op");
@@ -929,8 +832,8 @@ mod tests {
     }
 
     #[test]
-    fn test_otel_tracer_inject_extract_roundtrip() {
-        let tracer = OtelTracer::new("svc");
+    fn test_in_memory_tracer_inject_extract_roundtrip() {
+        let tracer = InMemoryTracer::new("svc");
         let original = tracer.start_span("roundtrip");
         let headers = tracer.inject(&original);
 
@@ -947,8 +850,8 @@ mod tests {
     }
 
     #[test]
-    fn test_otel_tracer_preserves_parent_id_through_roundtrip() {
-        let tracer = OtelTracer::new("svc");
+    fn test_in_memory_tracer_preserves_parent_id_through_roundtrip() {
+        let tracer = InMemoryTracer::new("svc");
         let parent = tracer.start_span("parent");
         let child = tracer
             .start_span("child")

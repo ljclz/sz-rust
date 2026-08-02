@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "SZ-Rust Tracing Extension - Distributed tracing with OpenTelemetry support"
+description = "SZ-Rust Tracing Extension - Distributed tracing with W3C TraceContext"
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
@@ -14,27 +14,11 @@ exclude = ["docs/**"]
 
 [features]
 default = []
-# 启用 OTLP exporter，将 Span 导出到 OpenTelemetry Collector
-# 使用：cargo build --features otlp
-otlp = [
-    "dep:opentelemetry",
-    "dep:opentelemetry-otlp",
-    "dep:opentelemetry_sdk",
-    "dep:tokio",
-]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-# OTLP exporter 依赖（可选）
-opentelemetry = { version = "0.27", optional = true }
-opentelemetry-otlp = { version = "0.27", optional = true, features = ["tokio"] }
-opentelemetry_sdk = { version = "0.27", optional = true, features = ["rt-tokio"] }
-tokio = { workspace = true, optional = true }
 
 [lib]
 name = "sz_rust_tracing"
 path = "src/lib.rs"
-
-[package.metadata.cargo-machete]
-ignored = ["tokio"]

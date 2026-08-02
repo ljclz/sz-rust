@@ -1,8 +1,10 @@
 # SZ-Rust Soak Test — 长时稳定性测试
 #
 # 调度策略：
-#   - 每周日 00:00 UTC（北京时间 08:00）自动运行 24h 完整 soak
+#   - 每周日 00:00 UTC（北京时间 08:00）自动运行 6h 完整 soak
 #   - 支持手动触发（workflow_dispatch），可自定义时长
+#
+# 注：GitHub Actions 托管 runner 单 job 上限 6h，不再支持 24h，故从 24h 改为 6h
 #
 # 参考：sz-orm 的 soak.yml（保持结构一致性）
 
@@ -14,21 +16,22 @@ on:
   workflow_dispatch:
     inputs:
       soak_duration:
-        description: 'Soak 时长（如 1h, 6h, 24h）'
+        description: 'Soak 时长（如 30m, 1h, 6h）'
         required: false
         default: '1h'
         type: string
 
-# 防止并发运行
+# P3-2 修复：soak 与 soak-smoke 使用独立并发组，避免互相取消
+# 之前共用 workflow 级 concurrency group 导致 push 时两 job 互相 cancel
 concurrency:
-  group: soak-test
+  group: soak-${{ github.event_name }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   soak:
     name: Soak Test (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 1500  # 25 小时（24h soak + 1h 缓冲）
+    timeout-minutes: 120  # 2 小时（1h soak + 1h 缓冲；P3-2：避免 6h 超时被 GitHub 强制取消）
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +50,8 @@ jobs:
           if [ -n "${{ github.event.inputs.soak_duration }}" ]; then
             echo "value=${{ github.event.inputs.soak_duration }}" >> $GITHUB_OUTPUT
           else
-            echo "value=24h" >> $GITHUB_OUTPUT
+            # P3-2：scheduled 默认 1h（GitHub hosted runner 硬上限 6h，6h 易超时被取消）
+            echo "value=1h" >> $GITHUB_OUTPUT
           fi
 
       - name: Run Soak Test

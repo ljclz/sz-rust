@@ -19,7 +19,12 @@
 //!
 //! 通过 OpenTelemetry OTLP 协议将 traces 导出到 Collector。
 //!
-//! ## 4. SLO 燃烧率
+//! ## 4. 直接导出器（Jaeger / Zipkin）
+//!
+//! 通过 Jaeger Collector HTTP API 或 Zipkin v2 API 直接导出 spans，
+//! 不依赖 OpenTelemetry SDK，详见 [`exporters`] 模块。
+//!
+//! ## 5. SLO 燃烧率
 //!
 //! 基于 Google SRE Workbook 第 5 章的 4 窗口多燃烧率告警策略
 //! （Page 1h/5m + Ticket 6h/30m），详见 [`slo`] 模块。
@@ -64,6 +69,13 @@ pub mod slo;
 #[cfg(feature = "otlp")]
 pub mod otlp;
 
+/// 直接导出器（Jaeger / Zipkin），默认启用，不依赖 OpenTelemetry SDK
+pub mod exporters;
+
+pub use exporters::{
+    JaegerExporter, MemoryTraceHttpTransport, TraceExportError, TraceHttpTransport, TraceLog,
+    TraceSpan, ZipkinExporter,
+};
 pub use slo::{SloBurnRate, SloConfig, SloMonitor};
 
 /// 指标类型

@@ -25,7 +25,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use sz_orm_queue::MessageQueue;
+use crate::orm::MessageQueue;
 
 /// 队列消费者错误
 #[derive(Debug, Clone, thiserror::Error)]
@@ -222,7 +222,7 @@ impl QueueRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_queue::{InMemoryQueue, Message, MessageQueue};
+    use crate::orm::{InMemoryQueue, Message, MessageQueue};
 
     /// 测试用消费者：记录所有处理过的消息 payload
     struct RecordingConsumer {

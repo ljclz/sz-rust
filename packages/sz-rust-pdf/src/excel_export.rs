@@ -356,12 +356,14 @@ impl<'a> Worksheet<'a> {
 
     /// 设置单元格格式（对齐 PHP `$sheet->getStyle('A1')->applyFromArray([...])`）
     ///
-    /// 当前仅支持 bold 格式，业务代码未使用复杂样式。
+    /// M-1 修复：调用 `rust_xlsxwriter::Worksheet::set_cell_format` 真实应用格式到单元格。
+    /// 支持所有 `Format` 属性（bold/italic/font_size/font_color/background_color/border 等）。
+    ///
+    /// 若目标单元格尚未写入值，Excel 会创建一个空单元格并应用格式。
     pub fn set_cell_format(&mut self, reference: &str, format: &Format) -> Result<(), PdfError> {
         let (row, col) = parse_a1(reference)?;
-        // rust_xlsxwriter 的 write_with_format 要求同时写入值，这里仅设置列宽/行高样式
-        // 业务实际未使用单元格级格式，仅保留 API 占位
-        let _ = (row, col, format);
+        // M-1 修复：真实调用 rust_xlsxwriter 的 set_cell_format，将格式应用到指定单元格
+        self.sheet.set_cell_format(row, col, format)?;
         Ok(())
     }
 }
@@ -651,6 +653,87 @@ mod tests {
         sheet
             .set_cell_value_explicit("A2", "202109010001", CellType::String)
             .unwrap();
+    }
+
+    // ------------------------------------------------------------------------
+    // M-1 修复：set_cell_format 真实格式设置测试
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_m1_set_cell_format_bold_on_written_cell() {
+        // 先写入值，再设置 bold 格式 — 应成功
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value("A1", "标题").unwrap();
+        let bold = Format::new().set_bold();
+        let result = sheet.set_cell_format("A1", &bold);
+        assert!(result.is_ok(), "set_cell_format 应成功: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_m1_set_cell_format_on_empty_cell() {
+        // 对空单元格设置格式也应成功（rust_xlsxwriter 会创建空单元格并应用格式）
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        let fmt = Format::new().set_background_color(rust_xlsxwriter::Color::RGB(0xFF0000));
+        let result = sheet.set_cell_format("B2", &fmt);
+        assert!(
+            result.is_ok(),
+            "set_cell_format 对空单元格应成功: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_m1_set_cell_format_multiple_attributes() {
+        // 多属性格式：bold + italic + font_size + font_color
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value("A1", "复杂格式").unwrap();
+        let fmt = Format::new()
+            .set_bold()
+            .set_italic()
+            .set_font_size(14)
+            .set_font_color(rust_xlsxwriter::Color::RGB(0x0000FF));
+        let result = sheet.set_cell_format("A1", &fmt);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_m1_set_cell_format_invalid_reference_returns_error() {
+        // 非法 A1 引用应返回错误
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        let fmt = Format::new().set_bold();
+        assert!(sheet.set_cell_format("INVALID", &fmt).is_err());
+    }
+
+    #[test]
+    fn test_m1_set_cell_format_out_of_range_returns_error() {
+        // 超出工作表范围的引用应返回错误
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        let fmt = Format::new().set_bold();
+        // 行号超出 u32 范围
+        assert!(sheet.set_cell_format("A999999999999", &fmt).is_err());
+    }
+
+    #[test]
+    fn test_m1_set_cell_format_persists_across_multiple_cells() {
+        // 对多个单元格设置不同格式
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value("A1", "加粗").unwrap();
+        sheet.set_cell_value("A2", "斜体").unwrap();
+        sheet.set_cell_value("A3", "红色").unwrap();
+
+        let bold = Format::new().set_bold();
+        let italic = Format::new().set_italic();
+        let red_font = Format::new().set_font_color(rust_xlsxwriter::Color::RGB(0xFF0000));
+
+        assert!(sheet.set_cell_format("A1", &bold).is_ok());
+        assert!(sheet.set_cell_format("A2", &italic).is_ok());
+        assert!(sheet.set_cell_format("A3", &red_font).is_ok());
     }
 
     // ------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v0.2.0**（2026-07-23）— 新增可观测性、分布式追踪、模糊测试、覆盖率、soak test、CI 门禁增强
+**当前版本：v0.2.1**（2026-07-30）— 新增可观测性、分布式追踪、模糊测试、覆盖率、soak test、CI 门禁增强
 
 ---
 
@@ -109,7 +109,7 @@ cargo run -p sz-rust-examples --bin crud_demo
 | `auto_multi_app` | `sz_rust_core::multi_app` | 按 URI 前缀分发子应用 |
 | `think-swoole` SSL | `sz_rust_core::h2` | HTTP/2 + TLS（rustls） |
 | `think-logger` | `sz_rust_core::log::LogFacade` | tracing 集成 |
-| `compact()` | `sz_rust_core::macros` | 过程宏 |
+| `compact()` | `sz-rust-macros` | 过程宏（独立包，非 `sz_rust_core::macros` 占位模块） |
 | `config/app.php` / `database.php` | `sz_rust_core::config::AppConfig` | YAML 配置加载 |
 | `app()` 容器 | `sz_rust_core::container::App` | 应用容器 |
 | `BaseException` | `sz_rust_core::error::ErrorCode` | 标准错误码 |
@@ -167,10 +167,10 @@ sz-rust/                          # workspace 根目录
 | Workflow | 触发条件 | 职责 |
 |----------|---------|------|
 | `ci.yml` | push/PR | fmt / check / clippy / test / doc(missing_docs) / audit / feature-matrix / unused-deps / **deny(cargo-deny)** |
-| `soak.yml` | 每周日 00:00 UTC + workflow_dispatch | 24 小时 soak test，60 秒指标采样，1500 分钟超时 |
+| `soak.yml` | 每周日 00:00 UTC + workflow_dispatch | 6 小时 soak test，60 秒指标采样，420 分钟超时 |
 | `coverage.yml` | push/PR | cargo-tarpaulin 覆盖率统计 + Codecov 上传 |
 | `benchmark.yml` | push main / PR | criterion 性能基准测试 + gh-pages-bench 分支保存 |
-| `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 7 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
+| `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 10 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
 
 **cargo-deny 审计维度**（`deny.toml`）：
 - 许可证白名单：MIT / Apache-2.0 / BSD / ISC / Zlib

@@ -6,6 +6,9 @@ members = [
     "packages/sz-rust-examples",
     "packages/sz-rust-addons-loader",
     "packages/sz-rust-addons-operate",
+    "packages/sz-rust-addons-crm",
+    "packages/sz-rust-addons-erp",
+    "packages/sz-rust-addons-ecommerce",
     "packages/sz-rust-pdf",
     "packages/sz-rust-cli",
     "packages/sz-rust-tracing",
@@ -14,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -24,6 +27,12 @@ repository = "https://github.com/ljclz/sz-rust"
 homepage = "https://github.com/ljclz/sz-rust"
 keywords = ["web", "framework", "thinkphp", "axum", "orm"]
 categories = ["web-programming", "web-programming::http-server"]
+
+# P1-SAFETY-01：禁止不安全代码
+# 所有 workspace 成员包默认 forbid unsafe_code；
+# 若个别包确需 unsafe（如 FFI、手动内存管理），在其 Cargo.toml 中单独 allow。
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [workspace.dependencies]
 # 异步运行时
@@ -46,6 +55,7 @@ http-body-util = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yml = "0.0.12"
+toml = "0.8"
 
 # 日志与追踪
 tracing = "0.1"
@@ -86,6 +96,9 @@ image = "0.25"
 imageproc = "0.25"
 ab_glyph = "0.2"
 
+# 二维码生成（对齐 PHP endroid/qr-code）
+qrcode = "0.14"
+
 # Excel/PDF 处理（对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
 rust_xlsxwriter = "0.79"
 calamine = { version = "0.36", features = ["dates"] }
@@ -105,29 +118,30 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 proptest = "1"
 
 # 内部依赖（SZ-ORM 全家桶，path + version 双重指定：本地开发用 path，crates.io 发布用 version）
-sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.0.0" }
-sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.0.0" }
-sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage", version = "1.0.0" }
-sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue", version = "1.0.0" }
-sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt", version = "1.0.0" }
-sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket", version = "1.0.0" }
-sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler", version = "1.0.0" }
-sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing", version = "1.0.0" }
-sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger", version = "1.0.0" }
-sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit", version = "1.0.0" }
-sz-orm-config = { path = "../sz-orm/packages/sz-orm-config", version = "1.0.0" }
-sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.0.0" }
-sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator", version = "1.0.0" }
-sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx", version = "1.0.0" }
+sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.2.2" }
+sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.2.2" }
+sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage", version = "1.2.2" }
+sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue", version = "1.2.2" }
+sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt", version = "1.2.2" }
+sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket", version = "1.2.2" }
+sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler", version = "1.2.2" }
+sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing", version = "1.2.2" }
+sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger", version = "1.2.2" }
+sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit", version = "1.2.2" }
+sz-orm-config = { path = "../sz-orm/packages/sz-orm-config", version = "1.2.2" }
+sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.2.2" }
+sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator", version = "1.2.2" }
+sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx", version = "1.2.2" }
+sz-orm-query-builder = { path = "../sz-orm/packages/sz-orm-query-builder", version = "1.2.2" }
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "0.2.0", path = "packages/sz-rust-core" }
-sz-rust-macros = { version = "0.2.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-loader = { version = "0.2.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-pdf = { version = "0.2.0", path = "packages/sz-rust-pdf" }
-sz-rust-tracing = { version = "0.2.0", path = "packages/sz-rust-tracing" }
-sz-rust-observability = { version = "0.2.0", path = "packages/sz-rust-observability" }
-sz-rust-cli = { version = "0.2.0", path = "packages/sz-rust-cli" }
+sz-rust-core = { version = "0.3.0", path = "packages/sz-rust-core" }
+sz-rust-macros = { version = "0.3.0", path = "packages/sz-rust-macros" }
+sz-rust-addons-loader = { version = "0.3.0", path = "packages/sz-rust-addons-loader" }
+sz-rust-pdf = { version = "0.3.0", path = "packages/sz-rust-pdf" }
+sz-rust-tracing = { version = "0.3.0", path = "packages/sz-rust-tracing" }
+sz-rust-observability = { version = "0.3.0", path = "packages/sz-rust-observability" }
+sz-rust-cli = { version = "0.3.0", path = "packages/sz-rust-cli" }
 
 # 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }

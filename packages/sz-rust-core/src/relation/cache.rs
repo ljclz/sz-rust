@@ -156,11 +156,11 @@
 //! 缓存行为对齐 PHP。
 
 // re-export sz-orm-core l2_cache 类型
-pub use sz_orm_core::l2_cache::{CacheKey, CacheKeyKind, L2Cache, L2CacheStats};
+pub use crate::orm::l2_cache::{CacheKey, CacheKeyKind, L2Cache, L2CacheStats};
 
 use std::collections::HashMap;
 use std::time::Duration;
-use sz_orm_core::Value;
+use crate::orm::Value;
 
 // ============================================================================
 // WithCacheConfig — PHP [$key, $expire, $tag] 三元组
@@ -609,7 +609,7 @@ pub fn php_relation_cache_delete(cache: &L2Cache, key: &CacheKey) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sz_orm_core::Value;
+    use crate::orm::Value;
 
     // ====================================================================
     // 组 1：WithCacheConfig 结构体（5 个测试）

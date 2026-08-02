@@ -191,11 +191,15 @@ mod tests {
 
     #[test]
     fn test_execute_cache_clear_no_store_nonexistent() {
-        // 当 runtime/cache 不存在时，execute_cache_clear 应返回 Ok
-        // 注意：此测试依赖工作目录中不存在 runtime/cache
-        // 在 CI/测试环境中通常满足此条件
+        // 当 runtime/cache 不存在时，execute_cache_clear 应返回 Ok。
+        // 该命令操作进程级工作目录，必须持有全局互斥锁并隔离到临时目录，
+        // 避免与 make/optimize 模块的 set_current_dir 测试并行竞态。
+        let _lock = super::super::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
         let result = execute_cache_clear(None);
-        // 如果 runtime/cache 不存在，返回 Ok；如果存在，也返回 Ok
+        std::env::set_current_dir(&original).unwrap();
         assert!(result.is_ok());
     }
 

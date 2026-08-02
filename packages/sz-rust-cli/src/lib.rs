@@ -84,10 +84,18 @@ mod tests {
     }
 
     #[test]
-    fn test_run_version_flag() {
-        // --version 由 clap 处理后退出（clap 内部调用 exit，测试中会 panic）
-        // 因此这里只验证 --help 不影响 run 逻辑
+    fn test_run_cache_clear_command() {
+        // 通过 run() 分发执行 cache:clear 命令。
+        // cache:clear 读写进程级工作目录下的 runtime/cache，
+        // 必须持有全局互斥锁并隔离到临时目录，避免与 make/optimize
+        // 模块的 set_current_dir 测试并行竞态。
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().expect("tempdir failed");
+        let original = std::env::current_dir().expect("current_dir failed");
+        std::env::set_current_dir(temp.path()).expect("set_current_dir failed");
         let result = run(vec!["sz-rust", "cache:clear"]);
+        let restore = std::env::set_current_dir(&original);
+        assert!(restore.is_ok(), "恢复工作目录失败");
         assert!(result.is_ok());
     }
 }

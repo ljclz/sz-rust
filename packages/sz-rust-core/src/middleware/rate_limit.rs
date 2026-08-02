@@ -88,7 +88,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sz_orm_limit::RateLimiter;
+use crate::orm::RateLimiter;
 
 use crate::middleware::auth::AuthenticatedUser;
 

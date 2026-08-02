@@ -169,6 +169,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -449,6 +458,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "backon"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
+dependencies = [
+ "fastrand",
 ]
 
 [[package]]
@@ -851,6 +869,20 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "combine"
+version = "4.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "compression-codecs"
@@ -1309,6 +1341,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
+ "libz-sys",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -2099,6 +2132,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -2239,6 +2281,17 @@ checksum = "3302702afa434ffa30847a83305f0a69d6abd74293b6554c18ec85c7ef30c980"
 dependencies = [
  "anyhow",
  "version_check",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -2941,7 +2994,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit",
+ "toml_edit 0.25.13+spec-1.1.0",
 ]
 
 [[package]]
@@ -3070,6 +3123,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+dependencies = [
+ "image",
 ]
 
 [[package]]
@@ -3390,6 +3452,32 @@ name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
+
+[[package]]
+name = "redis"
+version = "0.27.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09d8f99a4090c89cc489a94833c901ead69bfbf3877b4867d5482e321ee875bc"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "backon",
+ "bytes",
+ "combine",
+ "futures",
+ "futures-util",
+ "itertools 0.13.0",
+ "itoa",
+ "num-bigint",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "socket2 0.5.10",
+ "tokio",
+ "tokio-util",
+ "url",
+]
 
 [[package]]
 name = "redox_syscall"
@@ -3811,6 +3899,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3858,6 +3955,12 @@ dependencies = [
  "cpufeatures 0.3.0",
  "digest 0.11.3",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -4272,11 +4375,13 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-auth"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "base64",
  "hmac 0.12.1",
+ "parking_lot",
+ "rand 0.8.7",
  "serde",
  "serde_json",
  "sha1 0.10.7",
@@ -4288,16 +4393,21 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "bytes",
  "chrono",
  "crossbeam-queue",
  "futures",
+ "parking_lot",
  "serde",
  "serde_json",
  "sz-orm-macros",
+ "sz-orm-migration",
+ "sz-orm-model",
+ "sz-orm-pool",
+ "sz-orm-query",
  "sz-orm-sql-validator",
  "thiserror 2.0.19",
  "tokio",
@@ -4306,7 +4416,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-limit"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4314,16 +4424,17 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-logger"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "chrono",
+ "parking_lot",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "sz-orm-macros"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4331,8 +4442,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-orm-migration"
+version = "1.2.2"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sz-orm-model",
+ "sz-orm-pool",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sz-orm-model"
+version = "1.2.2"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
 name = "sz-orm-mqtt"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -4343,8 +4486,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-orm-pool"
+version = "1.2.2"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "crossbeam-queue",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sz-orm-model",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sz-orm-query"
+version = "1.2.2"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sz-orm-macros",
+ "sz-orm-model",
+ "sz-orm-sql-validator",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sz-orm-query-builder"
+version = "1.2.2"
+dependencies = [
+ "sz-orm-core",
+]
+
+[[package]]
 name = "sz-orm-queue"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -4356,7 +4543,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-scheduler"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4368,7 +4555,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sql-validator"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "regex",
  "thiserror 2.0.19",
@@ -4376,11 +4563,12 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-stream",
  "async-trait",
  "futures",
+ "parking_lot",
  "rust_decimal",
  "sqlx",
  "sz-orm-core",
@@ -4389,7 +4577,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-storage"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -4400,18 +4588,20 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "chrono",
+ "parking_lot",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "sz-orm-websocket"
-version = "1.0.0"
+version = "1.2.2"
 dependencies = [
  "async-trait",
+ "flate2",
  "futures-util",
  "serde",
  "serde_json",
@@ -4421,8 +4611,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-addons-crm"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sz-rust-addons-ecommerce"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sz-rust-addons-erp"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-addons-loader"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "parking_lot",
  "regex",
@@ -4436,13 +4668,17 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-operate"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.9",
  "chrono",
+ "hex",
+ "http-body-util",
+ "md-5 0.10.6",
+ "reqwest",
  "serde",
  "serde_json",
- "sz-orm-core",
  "sz-rust-core",
  "tokio",
  "tracing",
@@ -4450,22 +4686,24 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
+ "serde",
  "serde_json",
- "sz-orm-core",
- "sz-orm-scheduler",
+ "serde_yml",
+ "sz-orm-sqlx",
  "sz-rust-core",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "toml",
 ]
 
 [[package]]
 name = "sz-rust-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -4487,8 +4725,10 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "proptest",
+ "qrcode",
  "rand 0.8.7",
  "rcgen",
+ "redis",
  "regex",
  "rustls-pemfile",
  "serde",
@@ -4502,12 +4742,14 @@ dependencies = [
  "sz-orm-logger",
  "sz-orm-macros",
  "sz-orm-mqtt",
+ "sz-orm-query-builder",
  "sz-orm-queue",
  "sz-orm-scheduler",
  "sz-orm-sql-validator",
  "sz-orm-storage",
  "sz-orm-tracing",
  "sz-orm-websocket",
+ "sz-rust-addons-loader",
  "sz-rust-macros",
  "tempfile",
  "thiserror 2.0.19",
@@ -4521,7 +4763,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-examples"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "axum 0.8.9",
  "http",
@@ -4538,17 +4780,19 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-macros"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_json",
  "syn 2.0.119",
+ "sz-orm-core",
+ "sz-rust-core",
 ]
 
 [[package]]
 name = "sz-rust-observability"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4568,7 +4812,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pdf"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "calamine",
  "chrono",
@@ -4584,7 +4828,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-sz300"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -4592,8 +4836,11 @@ dependencies = [
  "bcrypt",
  "chrono",
  "criterion",
+ "futures",
+ "once_cell",
  "serde",
  "serde_json",
+ "sqlx",
  "sz-orm-sqlx",
  "sz-rust-core",
  "sz-rust-observability",
@@ -4605,14 +4852,10 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-tracing"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -4860,6 +5103,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime 0.6.11",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4870,14 +5134,28 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde",
+ "serde_spanned",
+ "toml_datetime 0.6.11",
+ "toml_write",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.25.13+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6975367e4d2ef766d86af01ffad14b622fecc8d4357a998fbc4deb6e9bacaf9b"
 dependencies = [
  "indexmap 2.14.0",
- "toml_datetime",
+ "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
- "winnow",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -4886,8 +5164,14 @@ version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
- "winnow",
+ "winnow 1.0.4",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tonic"
@@ -5567,6 +5851,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

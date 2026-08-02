@@ -25,7 +25,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use sz_orm_mqtt::{MqttConfig, MqttError, MqttPlugin, QoS};
+use crate::orm::{MqttConfig, MqttError, MqttPlugin, QoS};
 
 /// MQTT 运行时配置
 #[derive(Debug, Clone)]

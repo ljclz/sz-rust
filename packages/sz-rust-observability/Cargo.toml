@@ -13,7 +13,8 @@ categories.workspace = true
 exclude = ["docs/**"]
 
 [features]
-default = []
+default = ["otlp"]
+# P1-TEST-01：otlp 测试默认启用，避免 23 个测试被静默跳过
 # 启用 Prometheus exporter（暴露 /metrics HTTP 端点）
 prometheus = ["dep:hyper", "dep:http-body-util"]
 # 启用 OTLP gRPC exporter（导出 traces 到 OpenTelemetry Collector，端口 4317）

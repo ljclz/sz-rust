@@ -65,7 +65,7 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
-use sz_orm_core::{Model, ModelExt, RelationLoader};
+use crate::orm::{Model, ModelExt, RelationLoader};
 
 /// BaseModel trait — 对齐 PHP `app\common\model\szoa\BaseModel`
 ///
@@ -543,8 +543,8 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::HashMap;
-    use sz_orm_core::Value as OrmValue;
-    use sz_orm_core::{Model, ModelExt, RelationLoader, TimestampFields};
+    use crate::orm::Value as OrmValue;
+    use crate::orm::{Model, ModelExt, RelationLoader, TimestampFields};
 
     // ====================================================================
     // Mock 模型：无 append 字段

@@ -110,7 +110,7 @@ cargo run -p sz-rust-examples --bin quick_start
 | `addons/` | `sz-rust-addons-loader` (Cargo feature) | 插件机制 |
 | `think-logger` | `sz_rust_core::log::LogFacade` | 日志 |
 | think-orm Model 钩子 | `sz_rust_core::hooks::HookDispatcher` | 16 事件钩子 |
-| `compact()` | `sz_rust_core::macros::compact!` | 宏（Phase 2） |
+| `compact()` | `sz_rust_core::macros::compact!` | 宏 |
 | `app()` 容器 | `sz_rust_core::container::App` | 应用容器 |
 
 完整对标表见 `README.md` 第 89-116 行 "与 ThinkPHP 8 对标表"。
@@ -218,7 +218,7 @@ impl CustomerController {
 | `batch_validate(&self) -> bool` | `protected bool $batchValidate = false` | 返回 `false` |
 | `middlewares(&self) -> Vec<String>` | `protected array $middleware = []` | 返回空 Vec |
 | `initialize(&self)` | `protected function initialize() {}` | 空实现 |
-| `validate(&self, data, rules, messages) -> Result<(), String>` | `protected function validate(...)` | 占位实现（Phase 5 完整实现） |
+| `validate(&self, data, rules, messages) -> Result<(), String>` | `protected function validate(...)` | 已实现（批量模式 + 自定义消息） |
 
 ---
 
@@ -731,7 +731,7 @@ fn to_json_with_append(&self) -> Value {
 
 ---
 
-## 11. 缓存系统迁移（Phase 6）
+## 11. 缓存系统迁移
 
 ### 11.1 PHP `think\facade\Cache` → Rust `sz_rust_core::cache::Cache`
 
@@ -801,7 +801,7 @@ let data: i64 = cache.remember("expensive_query", 300, || {
 
 ---
 
-## 12. 文件上传迁移（Phase 5）
+## 12. 文件上传迁移
 
 ### 12.1 PHP `think\File` → Rust `sz_rust_core::upload`
 
@@ -845,7 +845,7 @@ PHP 文件上传对齐 Rust upload 模块（见 `upload.rs` 模块文档）：
 
 ---
 
-## 13. 视图模板迁移（Phase 7）
+## 13. 视图模板迁移
 
 ### 13.1 PHP `think\View` → Rust `sz_rust_core::view`
 

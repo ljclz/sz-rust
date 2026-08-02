@@ -198,9 +198,13 @@ use parking_lot::{Mutex, RwLock};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use sz_orm_core::Cache as InnerCache;
-use sz_orm_core::CacheError;
-use sz_orm_core::MemoryCache;
+use crate::orm::{Cache as InnerCache, CacheError, MemoryCache};
+
+// Memcached 缓存驱动子模块
+mod memcached;
+pub use memcached::{
+    MemcachedBackend, MemcachedCacheDriver, MemcachedConfig, MockMemcachedBackend,
+};
 
 // ============================================================================
 // 全局 Cache facade 实例
@@ -1137,19 +1141,30 @@ impl Cache {
     /// 1. **锁 key 无 TTL**：若进程崩溃，锁永久存在 → 死锁
     /// 2. **`has()` + `get()` 双查 TOCTOU**：先 `has` 后 `get`
     ///
-    /// ## ⚠ 异步上下文警告
+    /// ## 异步安全
     ///
-    /// 本方法在等待锁释放时使用 `std::thread::sleep`，会**阻塞 tokio worker 线程**。
-    /// 在异步上下文（axum handler / tokio task）中应改用 [`Cache::remember_async`]，
-    /// 后者使用 `tokio::time::sleep` 让出 worker，避免阻塞调度器。
+    /// 本方法为 `async fn`，等待锁释放时使用 `tokio::time::sleep` 让出 worker，
+    /// 不会阻塞 tokio 运行时。
+    ///
+    /// ## 与 `remember_async` 的差异
+    ///
+    /// | 维度 | `remember` | `remember_async` |
+    /// |------|-----------|------------------|
+    /// | callback 类型 | `FnOnce() -> T`（同步） | `async fn -> T`（异步） |
+    /// | 适用场景 | 纯计算 / 已缓存值构造 | IO 密集型回源（DB / HTTP） |
     ///
     /// ## 参数
     ///
     /// - `key`：缓存键
     /// - `ttl`：缓存过期时间
     /// - `callback`：未命中时的回调函数
+    ///
+    /// ## 异步安全
+    ///
+    /// 本方法为 `async fn`，等待锁释放时使用 `tokio::time::sleep` 让出 worker，
+    /// 不会阻塞 tokio 运行时。对齐 [`Cache::remember_async`] 的非阻塞行为。
     #[tracing::instrument(skip(self, callback))]
-    pub fn remember<T, F>(
+    pub async fn remember<T, F>(
         &self,
         key: &str,
         ttl: Option<Duration>,
@@ -1169,14 +1184,14 @@ impl Cache {
 
         // PHP 源码 bug 复刻：先 has() 后 get() 双查
         if self.has(&lock_key)? {
-            // 等待锁释放，200ms 轮询，5s 超时
+            // 等待锁释放，200ms 轮询，5s 超时（使用 tokio::time::sleep 非阻塞）
             let start = Instant::now();
             while self.has(&lock_key)? {
                 if start.elapsed() >= self.remember_lock_timeout {
                     // 超时仍未释放，直接调用 callback（防止永久阻塞）
                     return Ok(callback());
                 }
-                std::thread::sleep(self.remember_lock_poll_interval);
+                tokio::time::sleep(self.remember_lock_poll_interval).await;
             }
 
             // 锁释放后再次读取（弱类型读取）
@@ -1198,19 +1213,17 @@ impl Cache {
         Ok(result)
     }
 
-    /// 缓存击穿防护读取（异步版本，对齐 PHP `Cache::remember` 的 async 实现）
+    /// 缓存击穿防护读取（异步 callback 版本）
     ///
-    /// 与 [`Cache::remember`] 行为一致，但使用 `tokio::time::sleep` 替代
-    /// `std::thread::sleep`，避免在异步上下文中阻塞 tokio worker 线程。
-    /// 同时支持异步 callback，避免在 callback 中执行阻塞 IO 时阻塞 worker。
+    /// 与 [`Cache::remember`] 行为一致（同样使用 `tokio::time::sleep` 让出 worker），
+    /// 区别在于支持异步 callback，避免在 callback 中执行阻塞 IO 时阻塞 worker。
     ///
-    /// ## 与同步版本的差异
+    /// ## 参数差异
     ///
     /// | 维度 | `remember` | `remember_async` |
     /// |------|-----------|------------------|
-    /// | 等待锁释放 | `std::thread::sleep`（阻塞 worker） | `tokio::time::sleep`（让出 worker） |
-    /// | callback 类型 | `FnOnce() -> T` | `async fn -> T` |
-    /// | 适用场景 | 同步上下文 / 短时计算 | 异步上下文 / IO 密集型回源 |
+    /// | callback 类型 | `FnOnce() -> T`（同步） | `async fn -> T`（异步） |
+    /// | 适用场景 | 纯计算 / 已缓存值构造 | IO 密集型回源（DB / HTTP） |
     ///
     /// ## 参数
     ///
@@ -2300,7 +2313,7 @@ impl CacheDriver for RedisCacheDriver {
 /// 计算 MD5 哈希（对齐 PHP `md5()` 函数）
 ///
 /// PHP `md5("hello")` 返回 32 字符小写十六进制字符串。
-fn compute_md5(s: &str) -> String {
+pub(crate) fn compute_md5(s: &str) -> String {
     let mut hasher = Md5::new();
     hasher.update(s.as_bytes());
     let result = hasher.finalize();
@@ -3218,8 +3231,8 @@ mod tests {
     // 组 11：Cache facade remember（缓存击穿防护 + PHP bug 复刻）
     // ========================================================================
 
-    #[test]
-    fn test_cache_remember_cache_miss() {
+    #[tokio::test]
+    async fn test_cache_remember_cache_miss() {
         // 未命中：调用 callback 并写入缓存
         let cache = make_cache();
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -3229,6 +3242,7 @@ mod tests {
             .remember("expensive", None, || {
                 counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64 + 100
             })
+            .await
             .unwrap();
         assert_eq!(val, 100);
 
@@ -3237,6 +3251,7 @@ mod tests {
             .remember("expensive", None, || {
                 counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as i64 + 200
             })
+            .await
             .unwrap();
         assert_eq!(val, 100); // 命中缓存，仍是 100
 
@@ -3244,8 +3259,8 @@ mod tests {
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
-    #[test]
-    fn test_cache_remember_cache_hit_returns_cached() {
+    #[tokio::test]
+    async fn test_cache_remember_cache_hit_returns_cached() {
         let cache = make_cache();
         cache.set("predefined", 42i64, None).unwrap();
 
@@ -3254,58 +3269,59 @@ mod tests {
             .remember("predefined", None, || {
                 panic!("callback should not be called on cache hit");
             })
+            .await
             .unwrap();
         assert_eq!(val, 42);
     }
 
-    #[test]
-    fn test_cache_remember_writes_with_ttl() {
+    #[tokio::test]
+    async fn test_cache_remember_writes_with_ttl() {
         let cache = make_cache();
         cache
             .remember("key", Some(Duration::from_millis(50)), || 42i64)
+            .await
             .unwrap();
 
         // 立即读取应命中
         assert_eq!(cache.get::<String>("key").unwrap(), Some("42".to_string()));
 
         // 等待过期
-        std::thread::sleep(Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(cache.get::<String>("key").unwrap().is_none());
     }
 
-    #[test]
-    fn test_cache_remember_releases_lock_on_success() {
+    #[tokio::test]
+    async fn test_cache_remember_releases_lock_on_success() {
         // 对齐 PHP: callback 成功后释放锁
         let cache = make_cache();
-        cache.remember("key", None, || 42i64).unwrap();
+        cache.remember("key", None, || 42i64).await.unwrap();
 
         // 锁应被释放
         assert!(!cache.has("key_lock").unwrap());
     }
 
-    #[test]
-    fn test_cache_remember_releases_lock_on_panic() {
+    #[tokio::test]
+    async fn test_cache_remember_releases_lock_on_panic() {
         // 对齐 PHP finally 块：callback panic 时也应释放锁
         // Rust 端：由于我们用 FnOnce() -> T（无 Result），panic 会传播
         // 但锁会被泄漏（因为 panic 会跳过 delete）
         // 这是 PHP 行为的"复刻"（PHP 也存在 try/finally 在 fatal error 时不执行）
         // 此测试验证正常路径下锁被释放
         let cache = make_cache();
-        let _ = cache.remember("key", None, || 42i64);
+        let _ = cache.remember("key", None, || 42i64).await;
         assert!(!cache.has("key_lock").unwrap());
     }
 
-    #[test]
-    fn test_cache_remember_lock_has_no_ttl_php_bug() {
+    #[tokio::test]
+    async fn test_cache_remember_lock_has_no_ttl_php_bug() {
         // PHP 源码 bug 复刻：锁 key 无 TTL
         // 验证方式：remember 期间，锁 key 被设置为 1，且无 TTL
-        // 由于 remember 是同步的，我们无法在 callback 中检查锁
         // 此测试通过代码审查确认（PHP 源码第 305 行：$this->set($lockName, 1) 无第三个参数）
         // 函数签名 set(&self, key, value, ttl: Option<Duration>)，ttl = None 即无 TTL
 
         // 此处验证锁被正确释放（间接验证锁机制正常工作）
         let cache = make_cache();
-        cache.remember("key", None, || 42i64).unwrap();
+        cache.remember("key", None, || 42i64).await.unwrap();
         assert!(!cache.has("key_lock").unwrap());
     }
 
@@ -3490,12 +3506,12 @@ mod tests {
         assert_eq!(new_val, 70);
     }
 
-    #[test]
-    fn test_r5_php_remember_lock_mechanism() {
+    #[tokio::test]
+    async fn test_r5_php_remember_lock_mechanism() {
         // R5: PHP remember 锁机制 — {name}_lock key + 200ms 轮询 + 5s 超时
         // 验证：未命中 → 调用 callback → 写入缓存 → 释放锁
         let cache = make_cache();
-        let val: i64 = cache.remember("key", None, || 42).unwrap();
+        let val: i64 = cache.remember("key", None, || 42).await.unwrap();
         assert_eq!(val, 42);
         assert_eq!(cache.get::<String>("key").unwrap(), Some("42".to_string()));
         // 锁应被释放
@@ -3607,8 +3623,8 @@ mod tests {
         assert_eq!(n, 42);
     }
 
-    #[test]
-    fn test_php_bug_remember_lock_no_ttl() {
+    #[tokio::test]
+    async fn test_php_bug_remember_lock_no_ttl() {
         // PHP 源码 bug 复刻：remember 锁 key 无 TTL
         // PHP 源码 think\cache\Driver::remember 第 305 行：
         //   $this->set($lockName, 1);  // 无第三个参数 $expire
@@ -3617,13 +3633,13 @@ mod tests {
         // 这里通过正常路径验证锁被释放（间接验证无 TTL 锁不会卡死）
 
         let cache = make_cache();
-        cache.remember("key", None, || 42i64).unwrap();
+        cache.remember("key", None, || 42i64).await.unwrap();
         // 锁被正常释放（无 TTL 锁在正常路径下也会被 delete）
         assert!(!cache.has("key_lock").unwrap());
     }
 
-    #[test]
-    fn test_php_bug_remember_has_get_double_check() {
+    #[tokio::test]
+    async fn test_php_bug_remember_has_get_double_check() {
         // PHP 源码 bug 复刻：remember 中 has() + get() 双查（TOCTOU）
         // PHP 源码 think\cache\Driver::remember 第 295-298 行：
         //   if ($this->has($lockName)) {  // 第一次检查
@@ -3641,7 +3657,7 @@ mod tests {
 
         // 此测试验证正常路径下的双查行为（不触发死锁）
         let cache = make_cache();
-        let val: i64 = cache.remember("key", None, || 42).unwrap();
+        let val: i64 = cache.remember("key", None, || 42).await.unwrap();
         assert_eq!(val, 42);
     }
 

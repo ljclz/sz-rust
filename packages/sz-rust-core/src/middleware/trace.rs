@@ -58,7 +58,7 @@ use axum::response::Response;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use sz_orm_tracing::{Span, Tracer};
+use crate::orm::{Span, Tracer};
 
 /// Trace 中间件配置
 #[derive(Clone)]

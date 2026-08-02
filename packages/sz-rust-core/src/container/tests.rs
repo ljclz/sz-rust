@@ -634,3 +634,644 @@ fn test_container_alias_does_not_affect_make() {
     assert!(container.is_alias("my_str"));
     assert!(container.make::<String>().is_none());
 }
+
+// ========================================================================
+// 标签绑定测试（对齐 PHP `app()->tag()` / `app()->tagged()`）
+// ========================================================================
+
+/// 测试用：日志类型
+#[derive(Debug, PartialEq)]
+struct FileLogger {
+    level: u8,
+}
+
+impl FileLogger {
+    fn new() -> Self {
+        Self { level: 1 }
+    }
+}
+
+/// 测试用：邮件类型
+#[derive(Debug, PartialEq)]
+struct MailLogger {
+    level: u8,
+}
+
+impl MailLogger {
+    fn new() -> Self {
+        Self { level: 2 }
+    }
+}
+
+/// 测试 tag 给类型打标签，tagged 返回该标签下的实例
+#[test]
+fn test_container_tag_and_tagged() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.singleton(MailLogger::new);
+
+    // 给 FileLogger 打 "reporters" 标签
+    container.tag::<FileLogger>("reporters");
+
+    let reporters = container.tagged::<FileLogger>("reporters");
+    assert_eq!(reporters.len(), 1);
+    assert_eq!(reporters[0].level, 1);
+}
+
+/// 测试同一标签下追加多个同类型实例
+#[test]
+fn test_container_tag_multiple_same_type() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+
+    // 同一类型多次打同一标签
+    container.tag::<FileLogger>("reporters");
+    container.tag::<FileLogger>("reporters");
+    container.tag::<FileLogger>("reporters");
+
+    // tagged 会返回多个实例（每个 TypeId 调用一次 make）
+    // 但由于同一 TypeId 多次 push 到标签列表，且 singleton 每次返回同一实例
+    let reporters = container.tagged::<FileLogger>("reporters");
+    assert_eq!(reporters.len(), 3);
+    // 全部为同一单例实例
+    assert!(Arc::ptr_eq(&reporters[0], &reporters[1]));
+    assert!(Arc::ptr_eq(&reporters[1], &reporters[2]));
+}
+
+/// 测试不同标签独立工作
+#[test]
+fn test_container_tag_different_tags() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.singleton(MailLogger::new);
+
+    container.tag::<FileLogger>("file_reporters");
+    container.tag::<MailLogger>("mail_reporters");
+
+    assert_eq!(container.tagged::<FileLogger>("file_reporters").len(), 1);
+    assert_eq!(container.tagged::<MailLogger>("mail_reporters").len(), 1);
+
+    // 交叉查询：FileLogger 不在 mail_reporters 标签下
+    assert_eq!(container.tagged::<FileLogger>("mail_reporters").len(), 0);
+    assert_eq!(container.tagged::<MailLogger>("file_reporters").len(), 0);
+}
+
+/// 测试 tagged 获取不存在的标签返回空向量
+#[test]
+fn test_container_tagged_nonexistent_tag() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+
+    let reporters = container.tagged::<FileLogger>("nonexistent");
+    assert!(reporters.is_empty());
+}
+
+/// 测试 tagged 获取标签下未注册类型的实例返回空向量
+#[test]
+fn test_container_tagged_unregistered_type() {
+    let container = Container::new();
+    // 不注册 FileLogger 服务，但给 FileLogger 打标签
+    container.tag::<FileLogger>("reporters");
+
+    // tagged 应返回空（make::<FileLogger>() 返回 None）
+    let reporters = container.tagged::<FileLogger>("reporters");
+    assert!(reporters.is_empty());
+}
+
+/// 测试 tag_count 返回标签下已注册类型数量
+#[test]
+fn test_container_tag_count() {
+    let container = Container::new();
+
+    // 不存在的标签：count = 0
+    assert_eq!(container.tag_count("nonexistent"), 0);
+
+    container.tag::<FileLogger>("reporters");
+    container.tag::<MailLogger>("reporters");
+
+    assert_eq!(container.tag_count("reporters"), 2);
+}
+
+/// 测试 tag_names 返回所有已注册标签
+#[test]
+fn test_container_tag_names() {
+    let container = Container::new();
+    assert!(container.tag_names().is_empty());
+
+    container.tag::<FileLogger>("reporters");
+    container.tag::<MailLogger>("notifiers");
+
+    let mut names = container.tag_names();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["notifiers".to_string(), "reporters".to_string()]
+    );
+}
+
+/// 测试 tagged_type_ids 返回标签下的所有 TypeId
+#[test]
+fn test_container_tagged_type_ids() {
+    let container = Container::new();
+    container.tag::<FileLogger>("reporters");
+    container.tag::<MailLogger>("reporters");
+
+    let type_ids = container.tagged_type_ids("reporters");
+    assert_eq!(type_ids.len(), 2);
+    assert!(type_ids.contains(&TypeId::of::<FileLogger>()));
+    assert!(type_ids.contains(&TypeId::of::<MailLogger>()));
+
+    // 不存在的标签返回空
+    assert!(container.tagged_type_ids("nonexistent").is_empty());
+}
+
+/// 测试 forget_tag 移除整个标签
+#[test]
+fn test_container_forget_tag() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.tag::<FileLogger>("reporters");
+
+    assert_eq!(container.tag_count("reporters"), 1);
+
+    container.forget_tag("reporters");
+
+    assert_eq!(container.tag_count("reporters"), 0);
+    assert!(container.tagged::<FileLogger>("reporters").is_empty());
+    assert!(!container.tag_names().contains(&"reporters".to_string()));
+}
+
+/// 测试 clear 清空所有标签
+#[test]
+fn test_container_clear_clears_tags() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.tag::<FileLogger>("reporters");
+    container.tag::<FileLogger>("notifiers");
+
+    assert!(!container.tag_names().is_empty());
+
+    container.clear();
+
+    assert!(container.tag_names().is_empty());
+    assert_eq!(container.tag_count("reporters"), 0);
+}
+
+// ========================================================================
+// 上下文绑定测试（对齐 PHP `app()->when()->needs()->give()`）
+// ========================================================================
+
+// 注：因 trait object 与泛型 T 的 downcast 冲突，上下文绑定测试用具体类型而非 trait
+
+/// 测试用：PhotoController 消费者
+struct PhotoController;
+
+/// 测试用：VideoController 消费者
+struct VideoController;
+
+/// 测试 bind_contextual 注册上下文绑定
+#[test]
+fn test_container_bind_contextual() {
+    let container = Container::new();
+
+    // 为 PhotoController 注册上下文绑定：返回 "s3" 字符串
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+
+    // 检查上下文绑定存在
+    assert!(container.has_contextual::<PhotoController, String>());
+    assert!(!container.has_contextual::<VideoController, String>());
+
+    // 解析：为 PhotoController 返回上下文绑定的实例
+    let fs = container
+        .make_for::<String, PhotoController>()
+        .expect("应为 PhotoController 解析上下文绑定");
+    assert_eq!(&*fs, "s3");
+}
+
+/// 测试 make_for 无上下文绑定时回退到普通 make
+#[test]
+fn test_container_make_for_fallback() {
+    let container = Container::new();
+
+    // 注册普通单例
+    container.singleton(|| "default".to_string());
+
+    // 无上下文绑定：回退到普通 make
+    let result = container
+        .make_for::<String, PhotoController>()
+        .expect("应回退到普通 make");
+    assert_eq!(&*result, "default");
+}
+
+/// 测试 make_for 既无上下文绑定也无普通绑定返回 None
+#[test]
+fn test_container_make_for_no_binding() {
+    let container = Container::new();
+
+    let result = container.make_for::<String, PhotoController>();
+    assert!(result.is_none());
+}
+
+/// 测试不同消费者获得不同的上下文绑定
+#[test]
+fn test_container_contextual_different_consumers() {
+    let container = Container::new();
+
+    // PhotoController 获得 "s3"
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+    // VideoController 获得 "local"
+    container.bind_contextual::<VideoController, String, _>(|| "local".to_string());
+
+    let photo_fs = container
+        .make_for::<String, PhotoController>()
+        .expect("PhotoController 应解析");
+    let video_fs = container
+        .make_for::<String, VideoController>()
+        .expect("VideoController 应解析");
+
+    assert_eq!(&*photo_fs, "s3");
+    assert_eq!(&*video_fs, "local");
+}
+
+/// 测试 contextual_count 返回上下文绑定数量
+#[test]
+fn test_container_contextual_count() {
+    let container = Container::new();
+    assert_eq!(container.contextual_count(), 0);
+
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+    assert_eq!(container.contextual_count(), 1);
+
+    container.bind_contextual::<VideoController, String, _>(|| "local".to_string());
+    assert_eq!(container.contextual_count(), 2);
+
+    // 覆盖已有绑定：数量不变
+    container.bind_contextual::<PhotoController, String, _>(|| "azure".to_string());
+    assert_eq!(container.contextual_count(), 2);
+}
+
+/// 测试 forget_contextual 移除指定上下文绑定
+#[test]
+fn test_container_forget_contextual() {
+    let container = Container::new();
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+    assert!(container.has_contextual::<PhotoController, String>());
+
+    container.forget_contextual::<PhotoController, String>();
+    assert!(!container.has_contextual::<PhotoController, String>());
+
+    // forget 后 make_for 回退到普通 make（无普通绑定则返回 None）
+    assert!(container.make_for::<String, PhotoController>().is_none());
+}
+
+/// 测试 clear 清空所有上下文绑定
+#[test]
+fn test_container_clear_clears_contextual() {
+    let container = Container::new();
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+    container.bind_contextual::<VideoController, String, _>(|| "local".to_string());
+    assert_eq!(container.contextual_count(), 2);
+
+    container.clear();
+
+    assert_eq!(container.contextual_count(), 0);
+    assert!(!container.has_contextual::<PhotoController, String>());
+    assert!(!container.has_contextual::<VideoController, String>());
+}
+
+/// 测试上下文绑定与标签绑定共存
+#[test]
+fn test_container_tag_and_contextual_coexist() {
+    let container = Container::new();
+    container.singleton(|| "default".to_string());
+
+    // 同时使用标签和上下文绑定
+    container.tag::<String>("text_services");
+    container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
+
+    // 标签查询正常
+    let tagged = container.tagged::<String>("text_services");
+    assert_eq!(tagged.len(), 1);
+    assert_eq!(&*tagged[0], "default");
+
+    // 上下文查询正常
+    let contextual = container
+        .make_for::<String, PhotoController>()
+        .expect("上下文绑定应正常工作");
+    assert_eq!(&*contextual, "s3");
+}
+
+// ========================================================================
+// 方法调用 / 自动注入测试（对齐 PHP `app()->call()` / `app()->invoke()`）
+// ========================================================================
+
+/// 测试 call_method 基本方法调用（单依赖）
+#[test]
+fn test_container_call_method_basic() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+
+    let result: u8 =
+        container.call_method(|c| c.make::<FileLogger>().unwrap(), |logger| logger.level);
+
+    assert_eq!(result, 1);
+}
+
+/// 测试 call_method 带多个依赖的方法调用
+#[test]
+fn test_container_call_method_with_dependencies() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.singleton(MailLogger::new);
+
+    let result: String = container.call_method(
+        |c| {
+            (
+                c.make::<FileLogger>().unwrap(),
+                c.make::<MailLogger>().unwrap(),
+            )
+        },
+        |(file_logger, mail_logger)| {
+            format!("file={}, mail={}", file_logger.level, mail_logger.level)
+        },
+    );
+
+    assert_eq!(result, "file=1, mail=2");
+}
+
+/// 测试 call_method 返回值（不同类型）
+#[test]
+fn test_container_call_method_return_value() {
+    let container = Container::new();
+    container.singleton(TestService::new);
+
+    let result: i32 = container.call_method(
+        |c| c.make::<TestService>().unwrap(),
+        |service| service.value * 2,
+    );
+
+    assert_eq!(result, 84);
+}
+
+/// 测试 invoke 基本方法调用
+#[test]
+fn test_container_invoke_basic() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+
+    let result: u8 = container.invoke(|c| c.make::<FileLogger>().unwrap().level);
+
+    assert_eq!(result, 1);
+}
+
+/// 测试 invoke 带多个依赖
+#[test]
+fn test_container_invoke_with_multiple_deps() {
+    let container = Container::new();
+    container.singleton(FileLogger::new);
+    container.singleton(MailLogger::new);
+    container.singleton(TestService::new);
+
+    let result: String = container.invoke(|c| {
+        let file_logger = c.make::<FileLogger>().unwrap();
+        let mail_logger = c.make::<MailLogger>().unwrap();
+        let service = c.make::<TestService>().unwrap();
+        format!(
+            "file={}, mail={}, service={}",
+            file_logger.level, mail_logger.level, service.value
+        )
+    });
+
+    assert_eq!(result, "file=1, mail=2, service=42");
+}
+
+/// 测试 make_or_panic 成功解析已注册服务
+#[test]
+fn test_container_make_or_panic_success() {
+    let container = Container::new();
+    container.singleton(TestService::new);
+
+    let service = container.make_or_panic::<TestService>();
+    assert_eq!(service.value, 42);
+
+    // 多次调用返回同一单例
+    let service2 = container.make_or_panic::<TestService>();
+    assert!(Arc::ptr_eq(&service, &service2));
+}
+
+/// 测试 make_or_panic 在服务未注册时 panic
+#[test]
+#[should_panic(expected = "无法解析服务")]
+fn test_container_make_or_panic_panic() {
+    let container = Container::new();
+    // TestService 未注册，应 panic
+    let _ = container.make_or_panic::<TestService>();
+}
+
+/// 测试 call_method 无依赖的方法调用
+#[test]
+fn test_container_call_method_no_dependencies() {
+    let container = Container::new();
+
+    let result: String = container.call_method(|_| (), |_| String::from("no dependencies needed"));
+
+    assert_eq!(result, "no dependencies needed");
+}
+
+// ========================================================================
+// 循环依赖检测测试（P0-ARCH-01）
+// ========================================================================
+
+/// 测试：构造栈在正常解析后应为空（无泄漏）
+#[test]
+fn test_container_constructing_stack_cleared_after_make() {
+    let container = Container::new();
+    container.singleton(TestService::new);
+
+    assert_eq!(container.constructing_depth(), 0);
+    let _svc = container.make::<TestService>();
+    assert_eq!(container.constructing_depth(), 0);
+}
+
+/// 测试：非循环依赖正常工作（A -> B，B 无依赖）
+///
+/// 验证循环检测不误杀正常的依赖链。
+#[test]
+fn test_container_non_circular_dependency_works() {
+    use std::sync::Arc;
+
+    #[derive(Debug, PartialEq)]
+    struct Inner {
+        value: i32,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct Outer {
+        inner: Arc<Inner>,
+    }
+
+    let container = Container::new();
+
+    // Inner 无依赖
+    container.singleton(|| Inner { value: 42 });
+    // Outer 依赖 Inner（非循环）
+    let c = Arc::new(container);
+    let c_outer = c.clone();
+    c.singleton(move || {
+        let inner = c_outer.make::<Inner>().expect("Inner 应能解析");
+        Outer { inner }
+    });
+
+    let outer = c.make::<Outer>().expect("Outer 应能解析");
+    assert_eq!(outer.inner.value, 42);
+    // 解析后构造栈应为空
+    assert_eq!(c.constructing_depth(), 0);
+}
+
+/// 测试：间接循环依赖 A -> B -> A
+///
+/// 场景：ServiceA 依赖 ServiceB，ServiceB 依赖 ServiceA，
+/// 形成 A -> B -> A 的间接循环。
+#[test]
+#[should_panic(expected = "DI 容器检测到循环依赖")]
+fn test_container_circular_indirect_a_b_a() {
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct ServiceA(Arc<ServiceB>);
+
+    #[derive(Debug)]
+    struct ServiceB(Arc<ServiceA>);
+
+    let container = Container::new();
+    let c = Arc::new(container);
+
+    let c_b = c.clone();
+    c.singleton(move || {
+        ServiceA(c_b.make::<ServiceB>().expect("ServiceB 应能解析"))
+    });
+
+    let c_a = c.clone();
+    c.singleton(move || {
+        ServiceB(c_a.make::<ServiceA>().expect("ServiceA 应能解析"))
+    });
+
+    // 触发解析，应检测到循环依赖
+    let _ = c.make::<ServiceA>();
+}
+
+/// 测试：长链循环依赖 A -> B -> C -> A
+///
+/// 验证循环检测能正确报告完整依赖链。
+#[test]
+#[should_panic(expected = "DI 容器检测到循环依赖")]
+fn test_container_circular_long_chain() {
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct NodeA(Arc<NodeB>);
+    #[derive(Debug)]
+    struct NodeB(Arc<NodeC>);
+    #[derive(Debug)]
+    struct NodeC(Arc<NodeA>);
+
+    let container = Container::new();
+    let c = Arc::new(container);
+
+    let c_b = c.clone();
+    c.singleton(move || NodeA(c_b.make::<NodeB>().expect("NodeB")));
+
+    let c_c = c.clone();
+    c.singleton(move || NodeB(c_c.make::<NodeC>().expect("NodeC")));
+
+    let c_a = c.clone();
+    c.singleton(move || NodeC(c_a.make::<NodeA>().expect("NodeA")));
+
+    let _ = c.make::<NodeA>();
+}
+
+/// 测试：循环依赖错误信息包含完整依赖链
+///
+/// 通过 panic 的 expected 前缀验证错误消息格式。
+/// 注：type_name 返回模块全路径，故 expected 使用完整路径。
+#[test]
+#[should_panic(expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX")]
+fn test_container_circular_error_message_contains_chain() {
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct NodeX(Arc<NodeY>);
+    #[derive(Debug)]
+    struct NodeY(Arc<NodeX>);
+
+    let container = Container::new();
+    let c = Arc::new(container);
+
+    let c_y = c.clone();
+    c.singleton(move || NodeX(c_y.make::<NodeY>().expect("NodeY")));
+
+    let c_x = c.clone();
+    c.singleton(move || NodeY(c_x.make::<NodeX>().expect("NodeX")));
+
+    let _ = c.make::<NodeX>();
+}
+
+// ============================================================================
+// P1-TEST-03：App 未测公共函数补充
+// ============================================================================
+
+/// App::has_service — 检查服务是否已注册
+#[test]
+fn test_app_has_service_registered() {
+    let app = App::new(AppConfig::default());
+    app.singleton(|| "hello".to_string());
+    assert!(app.has_service::<String>());
+}
+
+#[test]
+fn test_app_has_service_not_registered() {
+    let app = App::new(AppConfig::default());
+    assert!(!app.has_service::<String>());
+}
+
+/// App::make_with_scope — 从指定作用域获取实例
+#[test]
+fn test_app_make_with_scope_existing() {
+    #[derive(Debug)]
+    struct ScopedVal(i32);
+
+    let app = App::new(AppConfig::default());
+    app.scoped(|| ScopedVal(42));
+
+    let scope_id = 1;
+    let instance = app.make_with_scope::<ScopedVal>(scope_id);
+    // 首次获取会创建（scoped 生命周期）
+    assert!(instance.is_some());
+    assert_eq!(instance.unwrap().0, 42);
+}
+
+#[test]
+fn test_app_make_with_scope_unregistered() {
+    let app = App::new(AppConfig::default());
+    let result = app.make_with_scope::<String>(1);
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_app_make_with_scope_returns_cached() {
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct Counter(Arc<std::sync::atomic::AtomicUsize>);
+
+    let app = App::new(AppConfig::default());
+    let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let c2 = counter.clone();
+    app.scoped(move || Counter(c2.clone()));
+
+    let scope_id = 7;
+    // 同 scope_id 多次获取应返回同一实例
+    let first = app.make_with_scope::<Counter>(scope_id).unwrap();
+    let second = app.make_with_scope::<Counter>(scope_id).unwrap();
+    assert!(Arc::ptr_eq(&first.0, &second.0));
+}

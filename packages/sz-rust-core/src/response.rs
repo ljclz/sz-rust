@@ -482,6 +482,109 @@ impl IntoResponse for JsonResponse {
     }
 }
 
+// ============================================================================
+// JSONP 响应 — 对齐 PHP `jsonp()` 返回类型
+//
+// JSONP（JSON with Padding）用于跨域请求，通过 <script> 标签加载。
+// 响应格式：`callbackName({...});`
+// Content-Type: application/javascript; charset=utf-8
+//
+// ## 安全说明
+//
+// - 回调函数名校验：仅允许 `[a-zA-Z0-9_.]` 字符，防止 XSS 注入
+// - 对齐 PHP `Response::create($data, 'jsonp')` 行为
+// ============================================================================
+
+/// 回调函数名校验正则（仅允许字母、数字、下划线、点）
+const JSONP_CALLBACK_PATTERN: &str = r"^[a-zA-Z_][a-zA-Z0-9_.]*$";
+
+/// 校验 JSONP 回调函数名是否合法
+///
+/// 仅允许 `[a-zA-Z_][a-zA-Z0-9_.]*` 格式，防止 XSS 注入。
+///
+/// # 参数
+///
+/// - `callback`：回调函数名
+///
+/// # 返回
+///
+/// - `true`：合法
+/// - `false`：非法（包含特殊字符或为空）
+pub fn is_valid_jsonp_callback(callback: &str) -> bool {
+    if callback.is_empty() || callback.len() > 128 {
+        return false;
+    }
+    regex::Regex::new(JSONP_CALLBACK_PATTERN)
+        .map(|re| re.is_match(callback))
+        .unwrap_or(false)
+}
+
+/// 构建 JSONP 响应（对齐 PHP `json()` + `'jsonp'` 类型）
+///
+/// 将数据序列化为 JSON，包裹在回调函数调用中：`callback({...});`
+/// Content-Type 为 `application/javascript; charset=utf-8`。
+///
+/// # 安全说明
+///
+/// 回调函数名会经过校验（[`is_valid_jsonp_callback`]），非法名称将返回 400 错误。
+///
+/// # 参数
+///
+/// - `callback`：回调函数名（如 `handleResponse`）
+/// - `data`：要返回的数据
+///
+/// # 返回
+///
+/// `Response`，HTTP 200，Content-Type: application/javascript; charset=utf-8
+#[tracing::instrument(skip(data))]
+pub fn respond_jsonp(callback: &str, data: &Value) -> Response {
+    if !is_valid_jsonp_callback(callback) {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "Invalid JSONP callback name".to_string(),
+        )
+            .into_response();
+    }
+
+    let json_str = data.to_string();
+    let body = format!("{callback}({json_str});");
+
+    (
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        body,
+    )
+        .into_response()
+}
+
+/// JSONP 响应包装器
+///
+/// 由于 Rust 孤儿规则限制，无法直接为 `(String, Value)` 实现 `IntoResponse`。
+/// 本 newtype 包装回调函数名和数据，使其可以直接作为 axum handler 返回值。
+///
+/// # 用法
+///
+/// ```ignore
+/// use sz_rust_core::response::JsonpResponse;
+/// use serde_json::json;
+///
+/// async fn handler(callback: String) -> JsonpResponse {
+///     JsonpResponse(callback, json!({"id": 1, "name": "alice"}))
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct JsonpResponse(pub String, pub Value);
+
+impl IntoResponse for JsonpResponse {
+    fn into_response(self) -> Response {
+        respond_jsonp(&self.0, &self.1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1727,5 +1830,242 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert_eq!(body, r#"{"code":1,"msg":"ok","data":{"id":1}}"#);
+    }
+
+    // ====================================================================
+    // JSONP 响应测试
+    //
+    // 对齐 PHP `Response::create($data, 'jsonp')` 行为：
+    // - 响应格式：`callbackName({...});`
+    // - Content-Type: application/javascript; charset=utf-8
+    // - 回调函数名校验：仅允许 `[a-zA-Z_][a-zA-Z0-9_.]*`，防止 XSS 注入
+    // ====================================================================
+
+    // ---------- is_valid_jsonp_callback 校验测试 ----------
+
+    #[test]
+    fn test_is_valid_jsonp_callback_simple_name() {
+        assert!(is_valid_jsonp_callback("handleResponse"));
+        assert!(is_valid_jsonp_callback("cb"));
+        assert!(is_valid_jsonp_callback("a"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_with_underscore() {
+        assert!(is_valid_jsonp_callback("handle_response"));
+        assert!(is_valid_jsonp_callback("_cb"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_with_dot() {
+        assert!(is_valid_jsonp_callback("module.callback"));
+        assert!(is_valid_jsonp_callback("app.module.handle"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_with_digits() {
+        assert!(is_valid_jsonp_callback("cb1"));
+        assert!(is_valid_jsonp_callback("handle123"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_empty_is_invalid() {
+        assert!(!is_valid_jsonp_callback(""));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_starting_with_digit_is_invalid() {
+        // 首字符必须是字母或下划线
+        assert!(!is_valid_jsonp_callback("1callback"));
+        assert!(!is_valid_jsonp_callback("9cb"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_with_special_chars_is_invalid() {
+        // XSS 注入防御：禁止特殊字符
+        assert!(!is_valid_jsonp_callback("alert(1)"));
+        assert!(!is_valid_jsonp_callback("<script>"));
+        assert!(!is_valid_jsonp_callback("cb;evil()"));
+        assert!(!is_valid_jsonp_callback("cb'"));
+        assert!(!is_valid_jsonp_callback("cb\""));
+        assert!(!is_valid_jsonp_callback("cb-"));
+        assert!(!is_valid_jsonp_callback("cb+"));
+        assert!(!is_valid_jsonp_callback("cb space"));
+    }
+
+    #[test]
+    fn test_is_valid_jsonp_callback_too_long_is_invalid() {
+        // 超过 128 字符的回调名视为非法（防止缓冲区攻击）
+        let long_name = "a".repeat(129);
+        assert!(!is_valid_jsonp_callback(&long_name));
+        // 刚好 128 字符是合法的
+        let max_name = "a".repeat(128);
+        assert!(is_valid_jsonp_callback(&max_name));
+    }
+
+    // ---------- respond_jsonp 响应构建测试 ----------
+
+    #[tokio::test]
+    async fn test_respond_jsonp_basic_format() {
+        let data = serde_json::json!({"id": 1, "name": "alice"});
+        let resp = respond_jsonp("handleResponse", &data);
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/javascript; charset=utf-8"
+        );
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        // 格式：callbackName({...});
+        assert!(body.starts_with("handleResponse("));
+        assert!(body.ends_with(");"));
+        // 内部数据为合法 JSON
+        let json_str = &body["handleResponse(".len()..body.len() - ");".len()];
+        let json: Value = serde_json::from_str(json_str).unwrap();
+        assert_eq!(json["id"], 1);
+        assert_eq!(json["name"], "alice");
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_with_array_data() {
+        let data = serde_json::json!([1, 2, 3]);
+        let resp = respond_jsonp("cb", &data);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(body, "cb([1,2,3]);");
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_with_string_data() {
+        let data = Value::String("hello".to_string());
+        let resp = respond_jsonp("cb", &data);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        // 字符串序列化为带引号的 JSON
+        assert_eq!(body, r#"cb("hello");"#);
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_with_null_data() {
+        let resp = respond_jsonp("cb", &Value::Null);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(body, "cb(null);");
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_with_empty_object() {
+        let data = serde_json::json!({});
+        let resp = respond_jsonp("cb", &data);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(body, "cb({});");
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_invalid_callback_returns_400() {
+        let data = serde_json::json!({"id": 1});
+        let resp = respond_jsonp("alert(1)", &data);
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(body, "Invalid JSONP callback name");
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_empty_callback_returns_400() {
+        let data = serde_json::json!({"id": 1});
+        let resp = respond_jsonp("", &data);
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_respond_jsonp_xss_injection_blocked() {
+        // 模拟 XSS 注入尝试：通过回调名注入脚本
+        let data = serde_json::json!({"id": 1});
+        let malicious_names = vec![
+            "<script>alert(1)</script>",
+            "cb;</script><script>alert(1)",
+            "cb'+alert(1)+'",
+            "cb\";alert(1);\"",
+        ];
+
+        for name in malicious_names {
+            let resp = respond_jsonp(name, &data);
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "恶意回调名必须被拒绝: {name}"
+            );
+        }
+    }
+
+    // ---------- JsonpResponse 包装器测试 ----------
+
+    #[tokio::test]
+    async fn test_jsonp_response_wrapper_basic() {
+        async fn handler() -> JsonpResponse {
+            JsonpResponse("handleResponse".to_string(), serde_json::json!({"id": 1}))
+        }
+
+        let router = axum::Router::new().route("/", axum::routing::get(handler));
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/javascript; charset=utf-8"
+        );
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let body = String::from_utf8(bytes.to_vec()).unwrap();
+        assert_eq!(body, r#"handleResponse({"id":1});"#);
+    }
+
+    #[tokio::test]
+    async fn test_jsonp_response_wrapper_invalid_callback() {
+        async fn handler() -> JsonpResponse {
+            // 非法回调名
+            JsonpResponse("1invalid".to_string(), serde_json::json!({}))
+        }
+
+        let router = axum::Router::new().route("/", axum::routing::get(handler));
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_jsonp_response_clone_debug() {
+        let resp = JsonpResponse("cb".to_string(), serde_json::json!({"id": 1}));
+        let cloned = resp.clone();
+        assert_eq!(cloned.0, "cb");
+        assert_eq!(cloned.1["id"], 1);
+
+        let debug = format!("{resp:?}");
+        assert!(debug.contains("JsonpResponse"));
     }
 }

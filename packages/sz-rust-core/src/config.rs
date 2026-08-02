@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// 配置错误
@@ -462,6 +463,203 @@ fn load_section<T: DeserializeOwned + Default>(path: &Path, default: T) -> Resul
 }
 
 // ============================================================================
+// 配置热重载 — ConfigWatcher
+// ============================================================================
+
+/// 配置热重载观察器
+///
+/// 在后台定时轮询配置文件修改时间，检测到变化时自动重新加载配置。
+/// 对齐 PHP `think-swoole` 的热重载机制，无需重启服务即可更新配置。
+///
+/// ## 设计
+///
+/// - 使用 `Arc<RwLock<AppConfig\>>` 共享配置，读无锁、写互斥
+/// - 轮询间隔默认 5 秒（可配置），通过 `tokio::time::interval` 实现
+/// - 比较文件修改时间（mtime），避免频繁的文件读取
+/// - 配置重载失败时保留旧配置，记录错误日志
+///
+/// ## 用法
+///
+/// ```ignore
+/// use sz_rust_core::config::{AppConfig, ConfigWatcher};
+/// use std::sync::Arc;
+/// use parking_lot::RwLock;
+///
+/// let config = AppConfig::load_from_dir("config/").unwrap();
+/// let shared = Arc::new(RwLock::new(config));
+/// let watcher = ConfigWatcher::new("config/", shared.clone());
+///
+/// // 启动后台监听（spawn 到 tokio runtime）
+/// let handle = watcher.start();
+///
+/// // 读取最新配置（热重载后自动生效）
+/// let current = shared.read().clone();
+///
+/// // 停止监听
+/// handle.stop();
+/// ```
+pub struct ConfigWatcher {
+    /// 配置目录路径
+    config_dir: std::path::PathBuf,
+    /// 共享配置（`Arc<RwLock<AppConfig\>>`）
+    shared_config: Arc<parking_lot::RwLock<AppConfig>>,
+    /// 轮询间隔（秒）
+    poll_interval_secs: u64,
+    /// 上次各文件的修改时间戳
+    last_mtimes: parking_lot::RwLock<HashMap<String, std::time::SystemTime>>,
+}
+
+/// 热重载句柄，用于停止后台监听
+pub struct ConfigWatcherHandle {
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl ConfigWatcherHandle {
+    /// 停止配置监听
+    pub fn stop(&self) {
+        self.cancel.cancel();
+    }
+}
+
+impl ConfigWatcher {
+    /// 创建配置热重载观察器
+    ///
+    /// # 参数
+    ///
+    /// - `config_dir`：配置文件目录
+    /// - `shared_config`：共享配置（通过 `Arc<RwLock<AppConfig>>` 分享给业务层）
+    pub fn new(
+        config_dir: impl Into<std::path::PathBuf>,
+        shared_config: Arc<parking_lot::RwLock<AppConfig>>,
+    ) -> Self {
+        Self {
+            config_dir: config_dir.into(),
+            shared_config,
+            poll_interval_secs: 5,
+            last_mtimes: parking_lot::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// 设置轮询间隔（秒）
+    #[must_use]
+    pub fn with_poll_interval(mut self, secs: u64) -> Self {
+        self.poll_interval_secs = secs;
+        self
+    }
+
+    /// 初始化：记录当前所有配置文件的 mtime
+    fn init_mtimes(&self) {
+        let files = self.config_files();
+        let mut mtimes = self.last_mtimes.write();
+        for file in &files {
+            if let Ok(meta) = std::fs::metadata(file) {
+                if let Ok(mtime) = meta.modified() {
+                    mtimes.insert(file.display().to_string(), mtime);
+                }
+            }
+        }
+    }
+
+    /// 获取所有配置文件路径
+    fn config_files(&self) -> Vec<std::path::PathBuf> {
+        let names = [
+            "app.yml",
+            "database.yml",
+            "cache.yml",
+            "addons.yml",
+            "log.yml",
+            "server.yml",
+        ];
+        names.iter().map(|n| self.config_dir.join(n)).collect()
+    }
+
+    /// 检测配置文件是否有变化
+    ///
+    /// 比较当前 mtime 与上次记录的 mtime，任一文件变化则返回 true。
+    fn has_changes(&self) -> bool {
+        let files = self.config_files();
+        let mtimes = self.last_mtimes.read();
+        for file in &files {
+            if let Ok(meta) = std::fs::metadata(file) {
+                if let Ok(mtime) = meta.modified() {
+                    let key = file.display().to_string();
+                    if let Some(last) = mtimes.get(&key) {
+                        if last != &mtime {
+                            return true;
+                        }
+                    } else {
+                        // 新文件
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// 更新 mtime 记录
+    fn update_mtimes(&self) {
+        let files = self.config_files();
+        let mut mtimes = self.last_mtimes.write();
+        for file in &files {
+            if let Ok(meta) = std::fs::metadata(file) {
+                if let Ok(mtime) = meta.modified() {
+                    mtimes.insert(file.display().to_string(), mtime);
+                }
+            }
+        }
+    }
+
+    /// 启动后台配置监听
+    ///
+    /// 返回 [`ConfigWatcherHandle`]，调用 `stop()` 可停止监听。
+    pub fn start(self) -> ConfigWatcherHandle {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+
+        // 初始化 mtime 记录
+        self.init_mtimes();
+
+        let config_dir = self.config_dir.clone();
+        let shared_config = self.shared_config.clone();
+        let poll_interval = std::time::Duration::from_secs(self.poll_interval_secs);
+        let watcher = self;
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(poll_interval);
+            ticker.tick().await; // 跳过首次立即触发
+
+            loop {
+                tokio::select! {
+                    _ = cancel_clone.cancelled() => {
+                        tracing::info!("配置热重载监听已停止");
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        if watcher.has_changes() {
+                            tracing::info!("检测到配置文件变化，正在重新加载...");
+                            match AppConfig::load_from_dir(&config_dir) {
+                                Ok(new_config) => {
+                                    *shared_config.write() = new_config;
+                                    watcher.update_mtimes();
+                                    tracing::info!("配置热重载完成");
+                                }
+                                Err(e) => {
+                                    tracing::error!("配置热重载失败，保留旧配置: {e}");
+                                    watcher.update_mtimes();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        ConfigWatcherHandle { cancel }
+    }
+}
+
+// ============================================================================
 // 单元测试
 // ============================================================================
 
@@ -821,5 +1019,107 @@ app_map:
         // 无效 YAML 应该返回错误（或被 serde 宽容处理）
         // 这里只验证不 panic
         let _ = result;
+    }
+
+    // ========================================================================
+    // ConfigWatcher 测试
+    // ========================================================================
+
+    #[test]
+    fn test_config_watcher_has_changes_false_on_init() {
+        let dir = std::env::temp_dir().join("sz_rust_watcher_test_init");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("app.yml"), "default_app: test\n").unwrap();
+
+        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let shared = Arc::new(parking_lot::RwLock::new(config));
+        let watcher = ConfigWatcher::new(&dir, shared);
+
+        // 初始化 mtime
+        watcher.init_mtimes();
+
+        // 刚初始化，无变化
+        assert!(!watcher.has_changes());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_config_watcher_detects_file_modification() {
+        let dir = std::env::temp_dir().join("sz_rust_watcher_test_modify");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("app.yml"), "default_app: before\n").unwrap();
+
+        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let shared = Arc::new(parking_lot::RwLock::new(config));
+        let watcher = ConfigWatcher::new(&dir, shared);
+
+        watcher.init_mtimes();
+        assert!(!watcher.has_changes());
+
+        // 等待一小段时间确保 mtime 不同
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(dir.join("app.yml"), "default_app: after\n").unwrap();
+
+        // 应检测到变化
+        assert!(watcher.has_changes());
+
+        // 更新 mtime 后不再检测到变化
+        watcher.update_mtimes();
+        assert!(!watcher.has_changes());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_config_watcher_detects_new_file() {
+        let dir = std::env::temp_dir().join("sz_rust_watcher_test_new");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let shared = Arc::new(parking_lot::RwLock::new(config));
+        let watcher = ConfigWatcher::new(&dir, shared);
+
+        watcher.init_mtimes();
+
+        // 创建新配置文件
+        std::fs::write(dir.join("app.yml"), "default_app: new\n").unwrap();
+
+        // 应检测到新文件
+        assert!(watcher.has_changes());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_config_watcher_hot_reload() {
+        let dir = std::env::temp_dir().join("sz_rust_watcher_test_hot");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("app.yml"), "default_app: before\n").unwrap();
+
+        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let shared = Arc::new(parking_lot::RwLock::new(config));
+        let watcher = ConfigWatcher::new(&dir, shared.clone()).with_poll_interval(1); // 1 秒轮询
+
+        let handle = watcher.start();
+
+        // 等待一秒确保 watcher 已初始化
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // 修改配置文件
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::fs::write(dir.join("app.yml"), "default_app: hot_reloaded\n").unwrap();
+
+        // 等待 watcher 轮询检测到变化
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        // 验证配置已热重载
+        let current = shared.read().clone();
+        assert_eq!(current.app.default_app, "hot_reloaded");
+
+        handle.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
