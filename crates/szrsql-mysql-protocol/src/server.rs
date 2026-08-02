@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
 use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
 use szrsql_protocol::pgwire::InMemoryTable;
+use szrsql_sql::executor::TableStorage;
 use szrsql_types::value::Value;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
@@ -401,6 +402,36 @@ impl Connection {
         }
     }
 
+    /// P1-9：从共享表 schema 推导数据库列表
+    ///
+    /// 遍历 shared_tables 中每张表的 schema.name，提取 schema 部分作为数据库名。
+    /// 无 schema 前缀的表归入 "szrsql" 默认库。返回排序去重后的列表。
+    /// 若 shared_tables 未启用则返回空 Vec（调用方回退到 allowed_databases）。
+    async fn derive_databases(&self) -> Vec<String> {
+        let mut dbs: Vec<String> = Vec::new();
+        if let Some(st) = &self.shared_tables {
+            let guard = st.read().await;
+            for (key, table_arc) in guard.iter() {
+                let table_guard = table_arc.lock().await;
+                let qn = table_guard.schema().name.qualified_name();
+                drop(table_guard);
+                if let Some((sch, _tbl)) = qn.split_once('.') {
+                    let sch = sch.to_string();
+                    if !dbs.contains(&sch) {
+                        dbs.push(sch);
+                    }
+                } else if !key.contains('.') {
+                    let def = "szrsql".to_string();
+                    if !dbs.contains(&def) {
+                        dbs.push(def);
+                    }
+                }
+            }
+        }
+        dbs.sort();
+        dbs
+    }
+
     async fn handle_query(
         &mut self,
         stream: &mut TcpStream,
@@ -411,6 +442,9 @@ impl Connection {
             self.send_ok(stream, &OkPacket::simple()).await?;
             return Ok(());
         }
+
+        // P1-9：从共享表 schema 推导数据库列表（allowed_databases 为空时生效）
+        let derived = self.derive_databases().await;
 
         // Navicat 等客户端会发送分号分隔的多语句（multi-statement），
         // 例如：`SHOW VARIABLES LIKE 'a'; SHOW VARIABLES LIKE 'b'; SELECT ...`
@@ -501,6 +535,7 @@ impl Connection {
                 stmt,
                 self.current_db.as_deref(),
                 &self.config.allowed_databases,
+                &derived,
             );
             tracing::info!(conn_id = self.conn_id, raw_sql = %stmt, normalized_sql = %normalized_sql, "MySQL query received");
             let mut executor = self.executor.lock().await;
@@ -570,9 +605,20 @@ impl Connection {
         stream: &mut TcpStream,
         database: &str,
     ) -> Result<(), MysqlServerError> {
-        if !self.config.allowed_databases.is_empty()
-            && !self.config.allowed_databases.iter().any(|d| d == database)
-        {
+        // P1-9：优先使用 allowed_databases 配置；若为空则从 shared_tables 推导允许列表
+        let derived = self.derive_databases().await;
+        let allowed: Vec<&str> = if !self.config.allowed_databases.is_empty() {
+            self.config
+                .allowed_databases
+                .iter()
+                .map(|s| s.as_str())
+                .collect()
+        } else if !derived.is_empty() {
+            derived.iter().map(|s| s.as_str()).collect()
+        } else {
+            Vec::new()
+        };
+        if !allowed.is_empty() && !allowed.iter().any(|d| d.eq_ignore_ascii_case(database)) {
             let err = ErrPacket::new(
                 error_codes::BAD_DB,
                 sql_states::GENERAL,
@@ -645,10 +691,13 @@ impl Connection {
         stream: &mut TcpStream,
         sql: &str,
     ) -> Result<(), MysqlServerError> {
+        // P1-9：从共享表 schema 推导数据库列表（allowed_databases 为空时生效）
+        let derived = self.derive_databases().await;
         let normalized = normalize_mysql_sql(
             sql,
             self.current_db.as_deref(),
             &self.config.allowed_databases,
+            &derived,
         );
         let stmt_id = self.prepared_statements.prepare(normalized.clone());
         let num_params = self
@@ -1218,6 +1267,8 @@ fn normalize_mysql_sql(
     sql: &str,
     current_db: Option<&str>,
     allowed_databases: &[String],
+    // P1-9：从共享表 schema 推导出的数据库列表（空表示未启用或未推导）
+    derived_databases: &[String],
 ) -> String {
     let trimmed = sql.trim();
 
@@ -1282,22 +1333,24 @@ fn normalize_mysql_sql(
         return "SELECT '2026-07-28 00:00:00' AS now".to_string();
     }
 
-    // 4. SHOW DATABASES → 返回所有可用数据库（从 allowed_databases 配置获取）
+    // 4. SHOW DATABASES → 返回所有可用数据库
+    // P1-9：优先使用 allowed_databases 配置；若为空则从 shared_tables schema 推导
     if result_upper == "SHOW DATABASES" || result_upper.starts_with("SHOW DATABASES ") {
-        // 使用 allowed_databases 配置，若为空则默认返回 information_schema
-        let dbs: Vec<&str> = if allowed_databases.is_empty() {
-            vec!["information_schema"]
+        let dbs: Vec<&str> = if !allowed_databases.is_empty() {
+            allowed_databases.iter().map(|s| s.as_str()).collect()
+        } else if !derived_databases.is_empty() {
+            derived_databases.iter().map(|s| s.as_str()).collect()
         } else {
-            // 确保始终包含 information_schema
-            let mut dbs: Vec<&str> = allowed_databases.iter().map(|s| s.as_str()).collect();
-            if !dbs
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case("information_schema"))
-            {
-                dbs.push("information_schema");
-            }
-            dbs
+            vec!["information_schema"]
         };
+        // 确保始终包含 information_schema
+        let mut dbs = dbs;
+        if !dbs
+            .iter()
+            .any(|d| d.eq_ignore_ascii_case("information_schema"))
+        {
+            dbs.push("information_schema");
+        }
         let parts: Vec<String> = dbs
             .iter()
             .map(|db| format!("SELECT '{}' AS Database", db))
@@ -1466,21 +1519,25 @@ fn normalize_mysql_sql(
     if result_upper.contains("INFORMATION_SCHEMA.COLUMNS") {
         return "SELECT '' AS column_name".to_string();
     }
-    // INFORMATION_SCHEMA.SCHEMATA → 返回所有数据库（从 allowed_databases 配置获取）
+    // INFORMATION_SCHEMA.SCHEMATA → 返回所有数据库
+    // P1-9：优先使用 allowed_databases 配置；若为空则从 shared_tables schema 推导
     // Navicat 查询：SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA
     if result_upper.contains("INFORMATION_SCHEMA.SCHEMATA") {
-        let dbs: Vec<&str> = if allowed_databases.is_empty() {
-            vec!["information_schema"]
+        let dbs: Vec<&str> = if !allowed_databases.is_empty() {
+            allowed_databases.iter().map(|s| s.as_str()).collect()
+        } else if !derived_databases.is_empty() {
+            derived_databases.iter().map(|s| s.as_str()).collect()
         } else {
-            let mut dbs: Vec<&str> = allowed_databases.iter().map(|s| s.as_str()).collect();
-            if !dbs
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case("information_schema"))
-            {
-                dbs.push("information_schema");
-            }
-            dbs
+            vec!["information_schema"]
         };
+        // 确保始终包含 information_schema
+        let mut dbs = dbs;
+        if !dbs
+            .iter()
+            .any(|d| d.eq_ignore_ascii_case("information_schema"))
+        {
+            dbs.push("information_schema");
+        }
         let parts: Vec<String> = dbs
             .iter()
             .map(|db| {
@@ -2047,5 +2104,67 @@ mod tests {
         let (code, state) = map_executor_error(&err);
         assert_eq!(code, 1064);
         assert_eq!(&state, b"42000");
+    }
+}
+
+#[cfg(test)]
+mod p1_9_tests {
+    use super::normalize_mysql_sql;
+
+    #[test]
+    fn test_p1_9_show_databases_uses_derived_when_allowed_empty() {
+        let derived = vec!["information_schema".to_string(), "szrsql".to_string()];
+        let result = normalize_mysql_sql("SHOW DATABASES", None, &[], &derived);
+        // 应包含 szrsql（推导出的库）
+        assert!(
+            result.contains("szrsql"),
+            "expected derived db 'szrsql' in: {}",
+            result
+        );
+        assert!(
+            result.contains("information_schema"),
+            "expected information_schema in: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_p1_9_show_databases_prefers_allowed_over_derived() {
+        let allowed = vec!["mydb".to_string()];
+        let derived = vec!["szrsql".to_string()];
+        let result = normalize_mysql_sql("SHOW DATABASES", None, &allowed, &derived);
+        // 优先使用 allowed_databases
+        assert!(
+            result.contains("mydb"),
+            "expected allowed db 'mydb' in: {}",
+            result
+        );
+        assert!(
+            !result.contains("szrsql"),
+            "should not include derived when allowed is set: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_p1_9_show_databases_fallback_to_information_schema() {
+        let result = normalize_mysql_sql("SHOW DATABASES", None, &[], &[]);
+        assert_eq!(result, "SELECT 'information_schema' AS Database");
+    }
+
+    #[test]
+    fn test_p1_9_schemata_uses_derived_when_allowed_empty() {
+        let derived = vec!["szrsql".to_string()];
+        let result = normalize_mysql_sql(
+            "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA",
+            None,
+            &[],
+            &derived,
+        );
+        assert!(
+            result.contains("szrsql"),
+            "expected derived db in SCHEMATA: {}",
+            result
+        );
     }
 }
