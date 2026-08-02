@@ -651,6 +651,7 @@ mod tests {
                     custom_type_name: None,
                     generated: None,
                     comment: None,
+                    auto_increment: false,
                 },
                 crate::ast::ColumnDefinition {
                     name: "name".into(),
@@ -665,6 +666,7 @@ mod tests {
                     custom_type_name: None,
                     generated: None,
                     comment: None,
+                    auto_increment: false,
                 },
                 crate::ast::ColumnDefinition {
                     name: "age".into(),
@@ -679,6 +681,7 @@ mod tests {
                     custom_type_name: None,
                     generated: None,
                     comment: None,
+                    auto_increment: false,
                 },
             ],
         };

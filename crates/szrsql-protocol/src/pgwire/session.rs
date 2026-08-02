@@ -332,6 +332,10 @@ pub struct ExecutorService {
     /// CREATE MATERIALIZED VIEW 时创建空存储表，REFRESH 时填充数据，
     /// MaterializedViewScan 执行时注册到 Executor 供扫描读取。
     materialized_view_tables: HashMap<String, Arc<Mutex<InMemoryTable>>>,
+    /// P2-15：列存表集合（表名小写 → ColumnarTable）— HTAP 路由执行时注册到 Executor
+    ///
+    /// 由 `register_columnar_table()` 注册，查询路径自动注入到 Executor。
+    columnar_tables: HashMap<String, std::sync::Arc<szrsql_storage::columnar::ColumnarTable>>,
     /// 预处理语句存储（Phase 3.26，SQL PREPARE/EXECUTE 语句使用）
     prepared_store: PreparedStatementStore,
     /// 会话状态（SET 变量、字符集等 Phase 3.34）
@@ -521,6 +525,7 @@ impl ExecutorService {
             temp_store: TempTableStore::new(),
             sequence_store: InMemorySequenceStore::new(),
             materialized_view_tables: HashMap::new(),
+            columnar_tables: HashMap::new(),
             prepared_store: PreparedStatementStore::new(),
             session_state: SessionState::new(),
             transaction_history: TransactionHistory::new(),
@@ -1276,6 +1281,10 @@ impl ExecutorService {
                 // P2-2: 索引选择（SELECT WHERE 走 B-Tree 索引而非全表扫描）
                 let optimized =
                     szrsql_optimizer::rule::IndexSelection::new(&catalog_clone).apply(optimized);
+                // P2-15: HTAP 列存路由 — 表有列存副本时将 Scan 改写为 ColumnarScan，
+                // 使聚合查询走列存 batch-mode SIMD 快速路径
+                let optimized = szrsql_optimizer::rule::HtapColumnarRewrite::new(&catalog_clone)
+                    .apply(optimized);
                 // P2-3: 公共子表达式消除
                 let optimized =
                     szrsql_optimizer::rule::CommonSubexpressionElimination::apply(optimized);
@@ -1428,6 +1437,9 @@ impl ExecutorService {
                 szrsql_optimizer::rule::SubqueryFlattening::new(&planner).apply(optimized);
             let optimized =
                 szrsql_optimizer::rule::IndexSelection::new(&catalog_clone).apply(optimized);
+            // P2-15: HTAP 列存路由
+            let optimized =
+                szrsql_optimizer::rule::HtapColumnarRewrite::new(&catalog_clone).apply(optimized);
             let optimized =
                 szrsql_optimizer::rule::CommonSubexpressionElimination::apply(optimized);
             let optimized = if let Some(inner) = stats_store_inner {
@@ -2167,6 +2179,7 @@ impl ExecutorService {
         match plan {
             // SELECT-family：使用 Executor::execute
             LogicalPlan::Scan { .. }
+            | LogicalPlan::ColumnarScan { .. }
             | LogicalPlan::IndexScan { .. }
             | LogicalPlan::Projection { .. }
             | LogicalPlan::Filter { .. }
@@ -2698,6 +2711,30 @@ impl ExecutorService {
     // -----------------------------------------------------------------
     //  SELECT-family 执行
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    //  P2-15：列存表注册
+    // -----------------------------------------------------------------
+
+    /// P2-15：注册列存表
+    ///
+    /// 将 `ColumnarTable` 注册到会话级集合，供查询路径自动注入到 Executor。
+    /// 同时更新 catalog 的列存标记，使优化器 `HtapColumnarRewrite` 规则
+    /// 能将 `Scan` 改写为 `ColumnarScan`。
+    pub fn register_columnar_table(
+        &mut self,
+        name: &str,
+        table: std::sync::Arc<szrsql_storage::columnar::ColumnarTable>,
+    ) {
+        self.columnar_tables.insert(name.to_lowercase(), table);
+        self.catalog.register_columnar_table(name);
+    }
+
+    /// P2-15：取消注册列存表
+    pub fn unregister_columnar_table(&mut self, name: &str) {
+        self.columnar_tables.remove(&name.to_lowercase());
+        self.catalog.unregister_columnar_table(name);
+    }
 }
 
 // =====================================================================
@@ -2825,6 +2862,12 @@ impl ExecutorService {
         // P0-6：注册物化视图存储表
         for ((name, _), guard) in mv_arcs.iter().zip(mv_guards.iter()) {
             executor.register_materialized_view_store(name, &**guard);
+        }
+        // P2-15：注册被引用表的列存副本（HTAP 路由）
+        for (name, table) in &self.columnar_tables {
+            if referenced.contains(name) {
+                executor.register_columnar_table(name, table);
+            }
         }
 
         // 执行
@@ -4917,6 +4960,7 @@ impl Default for ExecutorService {
 fn derive_output_columns(plan: &LogicalPlan, rows: &[Vec<Value>]) -> Vec<ResultColumn> {
     match plan {
         LogicalPlan::Scan { schema, .. }
+        | LogicalPlan::ColumnarScan { schema, .. }
         | LogicalPlan::IndexScan { schema, .. }
         | LogicalPlan::MaterializedViewScan { schema, .. } => schema
             .columns
@@ -5037,6 +5081,7 @@ fn derive_output_columns(plan: &LogicalPlan, rows: &[Vec<Value>]) -> Vec<ResultC
 fn derive_input_schema(plan: &LogicalPlan) -> Vec<szrsql_sql::ast::ColumnDefinition> {
     match plan {
         LogicalPlan::Scan { schema, .. }
+        | LogicalPlan::ColumnarScan { schema, .. }
         | LogicalPlan::IndexScan { schema, .. }
         | LogicalPlan::MaterializedViewScan { schema, .. } => schema.columns.clone(),
         // P0-VIEW 修复：Projection 节点需从投影表达式推导列类型，

@@ -3719,6 +3719,164 @@ fn leaf_schema(plan: &LogicalPlan) -> szrsql_sql::plan::TableSchema {
     }
 }
 
+// =====================================================================
+//  HtapColumnarRewrite — P2-15 HTAP 列存路由
+// =====================================================================
+
+/// HTAP 列存重写规则。
+///
+/// 当 Catalog 报告某表存在列存副本（`has_columnar_store == true`）时，
+/// 将该表的 `Scan` 节点替换为 `ColumnarScan`，使执行器走列存 batch-mode 路径：
+///
+/// - 纯聚合查询（Aggregate 无 GROUP BY / HAVING）→ 列存 SIMD 快速路径，
+///   跳过行材料化，直接在 `ColumnarBatch` 上计算 SUM/AVG/COUNT/MIN/MAX
+/// - 其他查询 → 列存全表扫描 + 行材料化（与 `execute_scan` 回退路径等价，
+///   但显式走列存，避免行存查找开销）
+///
+/// DML 节点（Insert/Update/Delete/Replace）不递归，保证其内部 Scan
+/// 仍走行存 MVCC 可见性路径。
+pub struct HtapColumnarRewrite<'a> {
+    catalog: &'a dyn szrsql_sql::plan::Catalog,
+}
+
+impl<'a> HtapColumnarRewrite<'a> {
+    /// 创建列存重写规则应用器
+    pub fn new(catalog: &'a dyn szrsql_sql::plan::Catalog) -> Self {
+        Self { catalog }
+    }
+
+    /// 应用列存重写规则
+    pub fn apply(&self, plan: LogicalPlan) -> LogicalPlan {
+        self.apply_recursive(plan)
+    }
+
+    fn apply_recursive(&self, plan: LogicalPlan) -> LogicalPlan {
+        match plan {
+            LogicalPlan::Filter { predicate, input } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Filter {
+                    predicate,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Projection {
+                exprs,
+                output_names,
+                input,
+            } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Projection {
+                    exprs,
+                    output_names,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Join {
+                join_type,
+                condition,
+                left,
+                right,
+            } => {
+                let left = self.apply_recursive(*left);
+                let right = self.apply_recursive(*right);
+                LogicalPlan::Join {
+                    join_type,
+                    condition,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
+            LogicalPlan::Aggregate {
+                group_exprs,
+                aggregates,
+                having,
+                input,
+            } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Aggregate {
+                    group_exprs,
+                    aggregates,
+                    having,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Window {
+                window_funcs,
+                input,
+            } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Window {
+                    window_funcs,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Sort { order_by, input } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Sort {
+                    order_by,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Limit {
+                limit,
+                offset,
+                input,
+            } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Limit {
+                    limit,
+                    offset,
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::Distinct { input } => {
+                let input = self.apply_recursive(*input);
+                LogicalPlan::Distinct {
+                    input: Box::new(input),
+                }
+            }
+            LogicalPlan::SetOp {
+                left,
+                right,
+                op,
+                quantifier,
+            } => {
+                let left = self.apply_recursive(*left);
+                let right = self.apply_recursive(*right);
+                LogicalPlan::SetOp {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    op,
+                    quantifier,
+                }
+            }
+            LogicalPlan::Scan {
+                table,
+                alias,
+                schema,
+            } => {
+                // HTAP 路由决策：表有列存副本 → 走 ColumnarScan
+                if self.catalog.has_columnar_store(&table) {
+                    LogicalPlan::ColumnarScan {
+                        table,
+                        alias,
+                        schema,
+                    }
+                } else {
+                    LogicalPlan::Scan {
+                        table,
+                        alias,
+                        schema,
+                    }
+                }
+            }
+            // IndexScan / MaterializedViewScan / Empty / Dual / Shared / MemoRef 不变
+            // DML（Insert/Update/Delete/Replace）不递归：保证内部 Scan 走行存 MVCC 路径
+            other => other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod cse_tests {
     use super::*;
@@ -4324,5 +4482,168 @@ mod cse_tests {
         assert_eq!(id_counts.remove(&2), Some(2), "id=2 应出现 2 次");
         assert_eq!(id_counts.remove(&3), Some(2), "id=3 应出现 2 次");
         assert!(id_counts.is_empty(), "不应有其他 id：{:?}", id_counts);
+    }
+}
+
+// =====================================================================
+//  HtapColumnarRewrite 端到端测试 — P2-15
+// =====================================================================
+
+#[cfg(test)]
+mod htap_rewrite_tests {
+    use super::HtapColumnarRewrite;
+    use szrsql_sql::ast::{ColumnDefinition, TableName};
+    use szrsql_sql::executor::Executor;
+    use szrsql_sql::parser::parse_sql;
+    use szrsql_sql::plan::LogicalPlan;
+    use szrsql_sql::plan::{InMemoryCatalog, Planner, TableSchema};
+    use szrsql_storage::columnar::{
+        ColumnSchema, ColumnSpec, ColumnVector, ColumnarBatch, ColumnarTable, ColumnarType,
+        NullBitmap,
+    };
+    use szrsql_types::value::{ColumnType, Value};
+
+    /// 验证 `HtapColumnarRewrite` 将列存表的 `Scan` 改写为 `ColumnarScan`，
+    /// 并通过执行器产出正确聚合结果。
+    #[test]
+    fn test_htap_rewrite_columnar_scan_and_aggregate() {
+        // 1. 建 catalog + 表 schema
+        let mut catalog = InMemoryCatalog::new();
+        let schema = TableSchema {
+            name: TableName::new("sensor_data"),
+            columns: vec![
+                ColumnDefinition::new("id", ColumnType::Int64),
+                ColumnDefinition::new("value", ColumnType::Int64),
+                ColumnDefinition::new("score", ColumnType::Float64),
+            ],
+        };
+        catalog.add_table(schema.clone());
+
+        // 2. 构造列存表并填充 100 行
+        let col_schema = ColumnSchema::from_columns(vec![
+            ColumnSpec::new("id", ColumnarType::Int64),
+            ColumnSpec::new("value", ColumnarType::Int64),
+            ColumnSpec::new("score", ColumnarType::Float64),
+        ]);
+        let mut col_table = ColumnarTable::new("sensor_data", col_schema.clone());
+        let n = 100usize;
+        let ids: Vec<i64> = (1..=n as i64).collect();
+        let values: Vec<i64> = (1..=n as i64).map(|i| i * 10).collect();
+        let scores: Vec<f64> = (0..n).map(|i| (i as f64) * 1.5).collect();
+        let batch = ColumnarBatch::from_columns(
+            col_schema,
+            vec![
+                ColumnVector::Int64 {
+                    data: ids,
+                    null_bitmap: NullBitmap::new(n),
+                },
+                ColumnVector::Int64 {
+                    data: values,
+                    null_bitmap: NullBitmap::new(n),
+                },
+                ColumnVector::Float64 {
+                    data: scores,
+                    null_bitmap: NullBitmap::new(n),
+                },
+            ],
+        )
+        .unwrap();
+        col_table.append_batch(batch).unwrap();
+
+        // 3. 注册列存标记
+        catalog.register_columnar_table("sensor_data");
+
+        // 4. 规划查询
+        let planner = Planner::new(&catalog);
+        let stmts = parse_sql("SELECT SUM(value), AVG(score) FROM sensor_data").unwrap();
+        let raw_plan = planner
+            .plan_statement(stmts.into_iter().next().unwrap())
+            .unwrap();
+
+        // 5. 原始计划：Projection { Aggregate { Scan } }
+        assert!(
+            matches!(
+                &raw_plan,
+                LogicalPlan::Projection { input, .. }
+                    if matches!(input.as_ref(), LogicalPlan::Aggregate { input, .. }
+                        if matches!(input.as_ref(), LogicalPlan::Scan { .. }))
+            ),
+            "raw plan should be Projection{{Aggregate{{Scan}}}}, got: {:?}",
+            raw_plan
+        );
+
+        // 6. 应用 HTAP 列存重写
+        let rewritten = HtapColumnarRewrite::new(&catalog).apply(raw_plan);
+
+        // 7. 重写后：Projection { Aggregate { ColumnarScan } }
+        assert!(
+            matches!(
+                &rewritten,
+                LogicalPlan::Projection { input, .. }
+                    if matches!(input.as_ref(), LogicalPlan::Aggregate { input, .. }
+                        if matches!(input.as_ref(), LogicalPlan::ColumnarScan { .. }))
+            ),
+            "rewritten plan should be Projection{{Aggregate{{ColumnarScan}}}}, got: {:?}",
+            rewritten
+        );
+
+        // 8. 执行重写计划
+        let mut exec = Executor::new()
+            .with_catalog(&catalog)
+            .with_sql_functions_from_catalog(&catalog);
+        exec.register_columnar_table("sensor_data", &col_table);
+        let rows = exec.execute(&rewritten).unwrap();
+
+        assert_eq!(rows.len(), 1, "聚合结果应为 1 行");
+        assert_eq!(rows[0].len(), 2, "应有 2 个聚合列");
+
+        // SUM(value) = 10 * (1+2+...+100) = 50500
+        assert_eq!(rows[0][0], Value::Int64(50_500));
+
+        // AVG(score) = 1.5 * (0+1+...+99) / 100 = 74.25
+        if let Value::Float64(avg) = rows[0][1] {
+            assert!(
+                (avg - 74.25).abs() < 1e-9,
+                "AVG(score) 应为 74.25，实际 {}",
+                avg
+            );
+        } else {
+            panic!("AVG(score) 应为 Float64，实际 {:?}", rows[0][1]);
+        }
+    }
+
+    /// 未注册列存的表不应被改写
+    #[test]
+    fn test_htap_rewrite_skips_non_columnar_table() {
+        let mut catalog = InMemoryCatalog::new();
+        // 表必须在 catalog 中，否则 plan_statement 报 TableNotFound
+        catalog.add_table(TableSchema {
+            name: TableName::new("sensor_data"),
+            columns: vec![ColumnDefinition::new("id", ColumnType::Int64)],
+        });
+
+        let planner = Planner::new(&catalog);
+        let stmts = parse_sql("SELECT * FROM sensor_data").unwrap();
+        let raw_plan = planner
+            .plan_statement(stmts.into_iter().next().unwrap())
+            .unwrap();
+
+        let rewritten = HtapColumnarRewrite::new(&catalog).apply(raw_plan);
+        // 非列存表：内层 Scan 不应被改写为 ColumnarScan
+        // （planner 可能在外层包 Projection，检查最内层叶子节点即可）
+        fn has_columnar_scan(plan: &LogicalPlan) -> bool {
+            match plan {
+                LogicalPlan::ColumnarScan { .. } => true,
+                LogicalPlan::Projection { input, .. }
+                | LogicalPlan::Filter { input, .. }
+                | LogicalPlan::Aggregate { input, .. } => has_columnar_scan(input),
+                _ => false,
+            }
+        }
+        assert!(
+            !has_columnar_scan(&rewritten),
+            "非列存表不应出现 ColumnarScan，got: {:?}",
+            rewritten
+        );
     }
 }

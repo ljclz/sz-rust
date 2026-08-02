@@ -283,6 +283,15 @@ pub trait Catalog {
         None
     }
 
+    /// P2-15：表是否存在列存副本 — HTAP 路由决策依据
+    ///
+    /// 默认实现返回 false（不支持列存）。
+    /// 优化器规则 `HtapColumnarRewrite` 据此将 `Scan` 改写为 `ColumnarScan`，
+    /// 使聚合查询走列存 batch-mode SIMD 快速路径。
+    fn has_columnar_store(&self, _table: &TableName) -> bool {
+        false
+    }
+
     /// 视图是否存在 — Phase 6.15
     ///
     /// 默认实现返回 false（不支持视图）。
@@ -441,6 +450,10 @@ pub struct InMemoryCatalog {
     comments: HashMap<String, String>,
     /// 函数定义（函数名小写 → 函数定义列表，支持重载）— Phase 6.5（P0-5 修复）
     functions: HashMap<String, Vec<FunctionDefinition>>,
+    /// P2-15：列存表集合（表名小写）— HTAP 路由决策依据
+    ///
+    /// 由 `register_columnar_table()` 注册，`has_columnar_store()` 查询。
+    columnar_tables: std::collections::HashSet<String>,
 }
 
 impl InMemoryCatalog {
@@ -458,6 +471,7 @@ impl InMemoryCatalog {
             views: HashMap::new(),
             comments: HashMap::new(),
             functions: HashMap::new(),
+            columnar_tables: std::collections::HashSet::new(),
         }
     }
 
@@ -1061,6 +1075,21 @@ impl InMemoryCatalog {
 
         Ok(())
     }
+
+    /// P2-15：注册列存表 — HTAP 路由决策依据
+    ///
+    /// 调用方（如 `CREATE COLUMNAR TABLE` 或测试代码）在建表后调用此方法，
+    /// 将表名注册到 catalog 的列存集合中。优化器规则 `HtapColumnarRewrite`
+    /// 通过 `Catalog::has_columnar_store()` 查询此集合，决定是否将 `Scan`
+    /// 改写为 `ColumnarScan`。
+    pub fn register_columnar_table(&mut self, name: &str) {
+        self.columnar_tables.insert(name.to_lowercase());
+    }
+
+    /// P2-15：取消注册列存表
+    pub fn unregister_columnar_table(&mut self, name: &str) {
+        self.columnar_tables.remove(&name.to_lowercase());
+    }
 }
 
 impl Catalog for InMemoryCatalog {
@@ -1208,6 +1237,10 @@ impl Catalog for InMemoryCatalog {
     fn list_views(&self) -> Vec<TableName> {
         self.views.values().map(|v| v.name.clone()).collect()
     }
+
+    fn has_columnar_store(&self, table: &TableName) -> bool {
+        self.columnar_tables.contains(&table.name.to_lowercase())
+    }
 }
 
 // =====================================================================
@@ -1224,6 +1257,24 @@ pub enum LogicalPlan {
         /// 表别名
         alias: Option<String>,
         /// 表 Schema（执行器/优化器使用）
+        schema: TableSchema,
+    },
+    /// 列存扫描 — P2-15 向量化执行引擎
+    ///
+    /// 由优化器在检测到 OLAP 特征（聚合 / 大范围扫描 / 多列投影）时，
+    /// 将 `Scan` 替换为 `ColumnarScan`，使执行器走列存快速路径。
+    ///
+    /// 列存表由调用方通过 `Executor::register_columnar_table` 注册；
+    /// 执行器按表名查找 `ColumnarTable`，读取 `ColumnarBatch` 并物化为 `Vec<Row>`。
+    ///
+    /// 当 `Aggregate` 的直接输入为 `ColumnarScan` 且无 GROUP BY / 过滤时，
+    /// 执行器进一步走 `ColumnarTable::aggregate()` 的 batch-mode SIMD 快速路径。
+    ColumnarScan {
+        /// 表名
+        table: TableName,
+        /// 表别名
+        alias: Option<String>,
+        /// 表 Schema（执行器使用）
         schema: TableSchema,
     },
     /// 索引扫描 — Phase 5.7
@@ -1809,7 +1860,9 @@ impl LogicalPlan {
             names.insert(n.name.to_lowercase());
         };
         match self {
-            LogicalPlan::Scan { table, .. } | LogicalPlan::IndexScan { table, .. } => {
+            LogicalPlan::Scan { table, .. }
+            | LogicalPlan::IndexScan { table, .. }
+            | LogicalPlan::ColumnarScan { table, .. } => {
                 push_name(names, table);
             }
             LogicalPlan::Insert { table, .. } | LogicalPlan::Replace { table, .. } => {
@@ -3278,7 +3331,7 @@ fn expr_contains_aggregate(expr: &Expr) -> bool {
 fn is_aggregate_function(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
-        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg"
+        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg" | "group_concat"
     )
 }
 
@@ -3536,7 +3589,8 @@ pub fn plan_schema(plan: &LogicalPlan) -> TableSchema {
     match plan {
         LogicalPlan::Scan { schema, .. }
         | LogicalPlan::IndexScan { schema, .. }
-        | LogicalPlan::MaterializedViewScan { schema, .. } => schema.clone(),
+        | LogicalPlan::MaterializedViewScan { schema, .. }
+        | LogicalPlan::ColumnarScan { schema, .. } => schema.clone(),
         LogicalPlan::Projection {
             exprs,
             output_names,
@@ -3739,6 +3793,9 @@ fn format_plan_impl(plan: &LogicalPlan, indent: usize, buf: &mut String) {
     match plan {
         LogicalPlan::Scan { table, .. } => {
             buf.push_str(&format!("{pad}SeqScan: {}\n", table.name));
+        }
+        LogicalPlan::ColumnarScan { table, .. } => {
+            buf.push_str(&format!("{pad}ColumnarScan: {}\n", table.name));
         }
         LogicalPlan::MaterializedViewScan { name, .. } => {
             buf.push_str(&format!("{pad}MaterializedViewScan: {}\n", name.name));
@@ -3963,6 +4020,7 @@ fn apply_column_aliases(
             custom_type_name: col.custom_type_name.clone(),
             generated: col.generated.clone(),
             comment: col.comment.clone(),
+            auto_increment: false,
         })
         .collect();
     TableSchema {

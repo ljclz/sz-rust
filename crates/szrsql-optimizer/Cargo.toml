@@ -20,3 +20,5 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+# P2-15：HTAP 列存重写规则端到端测试（构造 ColumnarTable）
+szrsql-storage = { workspace = true }

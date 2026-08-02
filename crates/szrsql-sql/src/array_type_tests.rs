@@ -634,6 +634,109 @@ fn test_string_agg_empty_group_returns_null() {
 }
 
 // =====================================================================
+//  P2-16.4: GROUP_CONCAT 聚合测试
+// =====================================================================
+
+#[test]
+fn test_group_concat_basic() {
+    let mut catalog = InMemoryCatalog::new();
+    let create_plan = plan_sql("CREATE TABLE t (name TEXT)", &catalog);
+    catalog.register_from_create_plan(&create_plan).unwrap();
+    let schema = catalog.get_table(&TableName::new("t")).unwrap();
+    let mut table = InMemoryTable::new(schema);
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    for s in ["alice", "bob", "carol"] {
+        let p = plan_sql(&format!("INSERT INTO t VALUES ('{s}')"), &catalog);
+        exec.execute_insert(&p, &mut table).unwrap();
+    }
+    exec.register_table(&table);
+
+    // SELECT GROUP_CONCAT(name) FROM t
+    let plan = plan_sql("SELECT GROUP_CONCAT(name) FROM t", &catalog);
+    let result = exec.execute(&plan).unwrap();
+    assert_eq!(result[0][0], Value::Text("alice,bob,carol".into()));
+}
+
+#[test]
+fn test_group_concat_with_nulls() {
+    let mut catalog = InMemoryCatalog::new();
+    let create_plan = plan_sql("CREATE TABLE t (name TEXT)", &catalog);
+    catalog.register_from_create_plan(&create_plan).unwrap();
+    let schema = catalog.get_table(&TableName::new("t")).unwrap();
+    let mut table = InMemoryTable::new(schema);
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    for s in ["a", "b"] {
+        let p = plan_sql(&format!("INSERT INTO t VALUES ('{s}')"), &catalog);
+        exec.execute_insert(&p, &mut table).unwrap();
+    }
+    let p = plan_sql("INSERT INTO t VALUES (NULL)", &catalog);
+    exec.execute_insert(&p, &mut table).unwrap();
+    exec.register_table(&table);
+
+    let plan = plan_sql("SELECT GROUP_CONCAT(name) FROM t", &catalog);
+    let result = exec.execute(&plan).unwrap();
+    assert_eq!(result[0][0], Value::Text("a,b".into()));
+}
+
+#[test]
+fn test_group_concat_empty_returns_null() {
+    let mut catalog = InMemoryCatalog::new();
+    let create_plan = plan_sql("CREATE TABLE t (name TEXT)", &catalog);
+    catalog.register_from_create_plan(&create_plan).unwrap();
+    let schema = catalog.get_table(&TableName::new("t")).unwrap();
+    let table = InMemoryTable::new(schema);
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&table);
+    let plan = plan_sql("SELECT GROUP_CONCAT(name) FROM t", &catalog);
+    let result = exec.execute(&plan).unwrap();
+    assert_eq!(result[0][0], Value::Null);
+}
+
+#[test]
+fn test_group_concat_with_group_by() {
+    let mut catalog = InMemoryCatalog::new();
+    let create_plan = plan_sql("CREATE TABLE t (dept TEXT, name TEXT)", &catalog);
+    catalog.register_from_create_plan(&create_plan).unwrap();
+    let schema = catalog.get_table(&TableName::new("t")).unwrap();
+    let mut table = InMemoryTable::new(schema);
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    for (dept, name) in [("HR", "alice"), ("HR", "bob"), ("IT", "carol")] {
+        let p = plan_sql(
+            &format!("INSERT INTO t VALUES ('{dept}', '{name}')"),
+            &catalog,
+        );
+        exec.execute_insert(&p, &mut table).unwrap();
+    }
+    exec.register_table(&table);
+
+    // SELECT dept, GROUP_CONCAT(name) FROM t GROUP BY dept
+    let plan = plan_sql(
+        "SELECT dept, GROUP_CONCAT(name) FROM t GROUP BY dept",
+        &catalog,
+    );
+    let result = exec.execute(&plan).unwrap();
+    // 两行：HR→alice,bob；IT→carol（顺序不保证，按排序后比较）
+    assert_eq!(result.len(), 2);
+    let mut rows: Vec<_> = result
+        .iter()
+        .map(|r| (r[0].clone(), r[1].clone()))
+        .collect();
+    rows.sort_by(|a, b| format!("{:?}", a.0).cmp(&format!("{:?}", b.0)));
+    assert_eq!(
+        rows[0],
+        (Value::Text("HR".into()), Value::Text("alice,bob".into()))
+    );
+    assert_eq!(
+        rows[1],
+        (Value::Text("IT".into()), Value::Text("carol".into()))
+    );
+}
+
+// =====================================================================
 //  端到端测试（2） — 进度表验证场景
 // =====================================================================
 

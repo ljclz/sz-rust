@@ -1290,6 +1290,11 @@ pub struct ColumnDefinition {
     /// 由 `COMMENT ON COLUMN <table>.<column> IS '...'` 设置。
     /// 仅用于元数据展示，不影响查询语义。
     pub comment: Option<String>,
+    /// AUTO_INCREMENT 标记 — P2-16.3
+    ///
+    /// MySQL `AUTO_INCREMENT` 列选项。当前仅作解析记录，
+    /// 真正的自增语义（INSERT 时自动填充序列值）留待后续阶段实现。
+    pub auto_increment: bool,
 }
 
 /// 生成列定义 — Phase 6.18
@@ -1321,6 +1326,7 @@ impl ColumnDefinition {
             custom_type_name: None,
             generated: None,
             comment: None,
+            auto_increment: false,
         }
     }
 }

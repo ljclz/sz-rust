@@ -3600,6 +3600,12 @@ pub struct Executor<'a> {
     /// 由调用方通过 `register_materialized_view_store` 注册。
     /// `MaterializedViewScan` 计划节点执行时按名查找。
     materialized_view_stores: HashMap<String, &'a dyn TableStorage>,
+    /// P2-15：列存表引用注册表（向量化执行引擎）
+    ///
+    /// Key: 表名（小写）；Value: `ColumnarTable` 引用。
+    /// 由调用方通过 `register_columnar_table` 注册。
+    /// `ColumnarScan` 计划节点执行时按名查找，走 batch-mode SIMD 快速路径。
+    columnar_tables: HashMap<String, &'a szrsql_storage::columnar::ColumnarTable>,
     /// UDF 注册表（`Arc` 共享所有权）— P0-SQL-8 修复
     ///
     /// 由调用方通过 `with_udf_registry` 绑定。绑定后，`Executor::execute` 入口
@@ -3894,6 +3900,7 @@ impl<'a> Executor<'a> {
             cte_scopes: RefCell::new(Vec::new()),
             trigger_registry: None,
             materialized_view_stores: HashMap::new(),
+            columnar_tables: HashMap::new(),
             udf_registry: None,
             sql_functions: None,
             mvcc: None,
@@ -3930,6 +3937,27 @@ impl<'a> Executor<'a> {
         self.materialized_view_stores
             .get(&name.to_lowercase())
             .copied()
+    }
+
+    /// P2-15：注册列存表
+    ///
+    /// 将 `ColumnarTable` 注册到执行器，供 `ColumnarScan` 计划节点执行时按名查找。
+    /// Key 为表名（小写）。优化器在检测到 OLAP 特征时将 `Scan` 替换为 `ColumnarScan`，
+    /// 执行器通过此注册表找到对应的列存表走 batch-mode SIMD 快速路径。
+    pub fn register_columnar_table(
+        &mut self,
+        name: &str,
+        table: &'a szrsql_storage::columnar::ColumnarTable,
+    ) {
+        self.columnar_tables.insert(name.to_lowercase(), table);
+    }
+
+    /// P2-15：按表名查找列存表引用
+    fn lookup_columnar_table(
+        &self,
+        name: &str,
+    ) -> Option<&'a szrsql_storage::columnar::ColumnarTable> {
+        self.columnar_tables.get(&name.to_lowercase()).copied()
     }
 
     /// 注册索引 — Phase 5.7
@@ -7015,7 +7043,8 @@ impl<'a> Executor<'a> {
         table_data: &mut TableDataMap,
     ) -> Result<(), ExecutionError> {
         match plan {
-            LogicalPlan::Scan { table, schema, .. } => {
+            LogicalPlan::Scan { table, schema, .. }
+            | LogicalPlan::ColumnarScan { table, schema, .. } => {
                 let key = table.name.to_lowercase();
                 if let std::collections::hash_map::Entry::Vacant(e) = table_data.entry(key) {
                     let rows = self.execute_scan(table, schema)?;
@@ -7059,6 +7088,11 @@ impl<'a> Executor<'a> {
                 schema,
                 alias: _,
             } => self.execute_scan(table, schema),
+            LogicalPlan::ColumnarScan {
+                table,
+                schema,
+                alias: _,
+            } => self.execute_columnar_scan(table, schema),
             LogicalPlan::IndexScan {
                 table,
                 schema,
@@ -7141,9 +7175,24 @@ impl<'a> Executor<'a> {
         table: &TableName,
         _schema: &TableSchema,
     ) -> Result<Vec<Row>, ExecutionError> {
-        let storage = self
-            .lookup_table(&table.name)
-            .ok_or_else(|| ExecutionError::TableNotFound(table.qualified_name()))?;
+        // P2-15：优先查找行存表；若未找到但表已注册为列存表，则物化列存批次为行。
+        // 这使得仅注册列存表的 OLAP 场景也能被 `Scan` 计划正确执行（planner 当前
+        // 不产生 `ColumnarScan`，需优化器规则后才切换）。
+        if let Some(storage) = self.lookup_table(&table.name) {
+            return self.scan_from_row_store(table, storage);
+        }
+        if let Some(col_table) = self.lookup_columnar_table(&table.name) {
+            return self.scan_from_columnar_store(col_table);
+        }
+        Err(ExecutionError::TableNotFound(table.qualified_name()))
+    }
+
+    /// 从行存表扫描（含 MVCC 可见性过滤）
+    fn scan_from_row_store(
+        &self,
+        table: &TableName,
+        storage: &dyn TableStorage,
+    ) -> Result<Vec<Row>, ExecutionError> {
         // P0-TX-1 Phase B/C：MVCC 可见性过滤
         //
         // 当 MVCC 管理器已注入且当前有活跃事务（txn_id != 0）时：
@@ -7184,6 +7233,23 @@ impl<'a> Executor<'a> {
         Ok(storage.scan_iter().collect())
     }
 
+    /// 从列存表物化行（P2-15 行存扫描降级路径）
+    ///
+    /// 当表仅注册为列存（无行存副本）时，`execute_scan` 回退到此方法：
+    /// 遍历所有 `ColumnarBatch`，调用 `batch_to_rows()` 将列向量按行展开。
+    /// 列存快照为只读，不支持 MVCC 可见性过滤。
+    fn scan_from_columnar_store(
+        &self,
+        col_table: &szrsql_storage::columnar::ColumnarTable,
+    ) -> Result<Vec<Row>, ExecutionError> {
+        let mut result = Vec::with_capacity(col_table.row_count());
+        for batch in col_table.batches() {
+            let rows = batch_to_rows(batch)?;
+            result.extend(rows);
+        }
+        Ok(result)
+    }
+
     // -----------------------------------------------------------------
     //  MaterializedViewScan — Phase 6.15
     // -----------------------------------------------------------------
@@ -7197,6 +7263,146 @@ impl<'a> Executor<'a> {
             .lookup_materialized_view_store(&name.name)
             .ok_or_else(|| ExecutionError::TableNotFound(name.qualified_name()))?;
         Ok(storage.scan_iter().collect())
+    }
+
+    // -----------------------------------------------------------------
+    //  ColumnarScan — P2-15 向量化执行引擎
+    // -----------------------------------------------------------------
+
+    /// 执行列存扫描
+    ///
+    /// 从 `columnar_tables` 注册表按名查找 `ColumnarTable`，
+    /// 遍历所有 `ColumnarBatch`，将每批列向量物化为 `Vec<Row>`。
+    ///
+    /// 列存批处理路径：
+    /// 1. 按表名查找已注册的 `ColumnarTable`
+    /// 2. 遍历每个 `ColumnarBatch`（默认 1024 行/批）
+    /// 3. 调用 `batch_to_rows()` 将列向量按行展开为 `Row`
+    /// 4. 返回全部物化行
+    ///
+    /// 注意：列存表为只读快照（OLAP 场景），不支持 MVCC 可见性过滤。
+    /// 需要 MVCC 语义时仍走行存 `execute_scan` 路径。
+    fn execute_columnar_scan(
+        &self,
+        table: &TableName,
+        _schema: &TableSchema,
+    ) -> Result<Vec<Row>, ExecutionError> {
+        let col_table = self
+            .lookup_columnar_table(&table.name)
+            .ok_or_else(|| ExecutionError::TableNotFound(table.qualified_name()))?;
+
+        let mut result = Vec::with_capacity(col_table.row_count());
+        for batch in col_table.batches() {
+            let rows = batch_to_rows(batch)?;
+            result.extend(rows);
+        }
+        Ok(result)
+    }
+
+    // -----------------------------------------------------------------
+    //  P2-15：列存聚合快速路径
+    // -----------------------------------------------------------------
+
+    /// 尝试列存 batch-mode 聚合快速路径
+    ///
+    /// 前置条件（调用方已校验）：无 GROUP BY、无 HAVING、无 DISTINCT。
+    ///
+    /// 对每个聚合函数：
+    /// - `COUNT(*)` → `table.row_count()`
+    /// - `COUNT(col)` / `SUM` / `AVG` / `MIN` / `MAX` →
+    ///   按列名查找列存 schema 中的列，调用 `ColumnarTable::aggregate()`
+    ///   （batch-mode SIMD 处理）
+    ///
+    /// 若任一聚合函数的参数不是简单列引用，或列名在列存 schema 中找不到，
+    /// 返回 `Ok(None)` 表示退化到行存路径。
+    fn try_columnar_aggregate(
+        &self,
+        table: &TableName,
+        _schema: &TableSchema,
+        aggregates: &[AggregateExpr],
+    ) -> Result<Option<Vec<Row>>, ExecutionError> {
+        use szrsql_storage::columnar::{AggregateResult, AggregateType};
+
+        let col_table = match self.lookup_columnar_table(&table.name) {
+            Some(t) => t,
+            None => return Ok(None), // 未注册列存表，退化行存
+        };
+
+        // 收集每个聚合对应的列名（COUNT(*) 记为 None）
+        let mut col_names: Vec<Option<String>> = Vec::with_capacity(aggregates.len());
+        let mut agg_types: Vec<AggregateType> = Vec::with_capacity(aggregates.len());
+
+        for agg in aggregates {
+            let func = agg.func_name.to_lowercase();
+            let agg_type = match func.as_str() {
+                "count" => AggregateType::Count,
+                "sum" => AggregateType::Sum,
+                "avg" => AggregateType::Avg,
+                "min" => AggregateType::Min,
+                "max" => AggregateType::Max,
+                _ => return Ok(None), // 不支持的聚合函数，退化行存
+            };
+
+            let col_name = if agg.args.is_empty() {
+                // COUNT(*)
+                if func != "count" {
+                    return Ok(None);
+                }
+                None
+            } else if let Expr::Identifier(parts) = &agg.args[0] {
+                // 仅支持简单列引用 COUNT(col) / SUM(col) 等
+                Some(parts.last().cloned().unwrap_or_default())
+            } else {
+                return Ok(None); // 复杂表达式，退化行存
+            };
+
+            col_names.push(col_name);
+            agg_types.push(agg_type);
+        }
+
+        // 执行 batch-mode 聚合
+        let mut agg_values: Vec<Value> = Vec::with_capacity(aggregates.len());
+        for i in 0..aggregates.len() {
+            let col_name_opt = &col_names[i];
+            let agg_type = agg_types[i];
+
+            let result = match (col_name_opt, agg_type) {
+                (None, AggregateType::Count) => {
+                    // COUNT(*) = 总行数
+                    AggregateResult::Count(col_table.row_count() as u64)
+                }
+                (Some(col_name), _) => {
+                    let cs = col_table.schema();
+                    match cs.index_of(col_name) {
+                        Some(idx) => {
+                            let spec = cs
+                                .columns()
+                                .get(idx)
+                                .ok_or_else(|| ExecutionError::ColumnNotFound(col_name.clone()))?;
+                            col_table.aggregate(agg_type, &spec.name).map_err(|e| {
+                                ExecutionError::Unsupported(format!(
+                                    "columnar aggregate failed on {col_name}: {e}"
+                                ))
+                            })?
+                        }
+                        None => return Ok(None), // 列不在列存 schema 中，退化行存
+                    }
+                }
+                _ => return Ok(None),
+            };
+
+            let value = match (result, agg_type) {
+                (AggregateResult::Empty, _) => Value::Null,
+                (AggregateResult::Int64(n), AggregateType::Avg) => Value::Float64(n as f64),
+                (AggregateResult::Int64(n), _) => Value::Int64(n),
+                (AggregateResult::Float64(f), _) => Value::Float64(f),
+                (AggregateResult::Count(c), _) => Value::Int64(c as i64),
+            };
+            agg_values.push(value);
+        }
+
+        // 输出单行聚合结果
+        Ok(Some(vec![agg_values]))
     }
 
     // -----------------------------------------------------------------
@@ -7949,6 +8155,7 @@ impl<'a> Executor<'a> {
         match plan {
             LogicalPlan::Scan { .. } => true,
             LogicalPlan::IndexScan { .. } => true,
+            LogicalPlan::ColumnarScan { .. } => true,
             LogicalPlan::Filter { input, .. } => self.is_simple_plan(input),
             LogicalPlan::Projection { input, .. } => self.is_simple_plan(input),
             LogicalPlan::Limit { input, .. } => self.is_simple_plan(input),
@@ -8214,6 +8421,16 @@ impl<'a> Executor<'a> {
         having: &Option<Expr>,
         input: &LogicalPlan,
     ) -> Result<Vec<Row>, ExecutionError> {
+        // P2-15 列存快速路径：无 GROUP BY、无 HAVING、直接列存扫描时，
+        // 绕过行存物化，直接调用 `ColumnarTable::aggregate()` 的 batch-mode SIMD 聚合。
+        if group_exprs.is_empty() && having.is_none() && !aggregates.iter().any(|a| a.distinct) {
+            if let LogicalPlan::ColumnarScan { table, schema, .. } = input {
+                if let Some(rows) = self.try_columnar_aggregate(table, schema, aggregates)? {
+                    return Ok(rows);
+                }
+            }
+        }
+
         let input_rows = self.execute(input)?;
         let input_schema = input_schema(input)?;
         let group_count = group_exprs.len();
@@ -9981,6 +10198,7 @@ impl<'a> Executor<'a> {
         match &inner_plan {
             LogicalPlan::Scan { .. }
             | LogicalPlan::IndexScan { .. }
+            | LogicalPlan::ColumnarScan { .. }
             | LogicalPlan::MaterializedViewScan { .. }
             | LogicalPlan::Filter { .. }
             | LogicalPlan::Projection { .. }
@@ -10701,6 +10919,7 @@ fn aggregate_output_schema(
 fn compute_empty_aggregate(agg: &AggregateExpr) -> Value {
     match agg.func_name.to_lowercase().as_str() {
         "count" => Value::Int64(0),
+        // GROUP_CONCAT 空组返回 NULL（MySQL 语义）
         _ => Value::Null,
     }
 }
@@ -10892,6 +11111,31 @@ fn compute_aggregate(
                 return Ok(Value::Null);
             }
             Ok(Value::Text(parts.join(&delimiter_str)))
+        }
+        // P2-16.4: GROUP_CONCAT(expr) — MySQL 字符串聚合
+        // MySQL 语义：
+        // - 默认分隔符为逗号 ","
+        // - 忽略 NULL 值
+        // - 空组或全 NULL → NULL
+        // - 支持 DISTINCT（去重后拼接）
+        // 注：`SEPARATOR` 子句（GROUP_CONCAT(expr SEPARATOR ';')）需要 sqlparser
+        // 扩展支持，当前仅实现默认逗号分隔。
+        "group_concat" => {
+            let parts: Vec<String> = values
+                .iter()
+                .filter(|v| !matches!(v, Value::Null))
+                .filter_map(|v| match v {
+                    Value::Text(s) => Some(s.clone()),
+                    Value::Int64(n) => Some(n.to_string()),
+                    Value::Float64(f) => Some(f.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    _ => None,
+                })
+                .collect();
+            if parts.is_empty() {
+                return Ok(Value::Null);
+            }
+            Ok(Value::Text(parts.join(",")))
         }
         other => Err(ExecutionError::Unsupported(format!(
             "aggregate function `{other}`"
@@ -11898,7 +12142,7 @@ impl LowercaseStr for String {
 fn is_aggregate_fn(name: &str) -> bool {
     matches!(
         name.to_lowercase().as_str(),
-        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg"
+        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg" | "group_concat"
     )
 }
 
@@ -12210,7 +12454,8 @@ fn input_schema(plan: &LogicalPlan) -> Result<TableSchema, ExecutionError> {
     match plan {
         LogicalPlan::Scan { schema, alias, .. }
         | LogicalPlan::IndexScan { schema, alias, .. }
-        | LogicalPlan::MaterializedViewScan { schema, alias, .. } => {
+        | LogicalPlan::MaterializedViewScan { schema, alias, .. }
+        | LogicalPlan::ColumnarScan { schema, alias, .. } => {
             // 若有别名（如 `FROM employees e`），用别名作为 schema 名
             // — 使 SELF JOIN `e1.id = e2.id` 的限定名查找正确路由
             if let Some(alias_name) = alias {
@@ -13189,4 +13434,67 @@ fn substitute_parameters_in_expr(expr: Expr, parameters: &[Value]) -> Result<Exp
             },
         }),
     }
+}
+
+// =====================================================================
+//  P2-15：列存 Batch → 行 物化
+// =====================================================================
+
+/// 将 `ColumnarBatch` 物化为 `Vec<Row>`
+///
+/// 按行号遍历所有列向量，将每行的列值拼成一行 `Row`。
+/// null 位图为 NULL 的列输出 `Value::Null`。
+fn batch_to_rows(
+    batch: &szrsql_storage::columnar::ColumnarBatch,
+) -> Result<Vec<Row>, ExecutionError> {
+    use szrsql_storage::columnar::ColumnVector;
+
+    let schema = batch.schema();
+    let row_count = batch.row_count();
+    let col_count = schema.len();
+    let mut rows = Vec::with_capacity(row_count);
+
+    for row_idx in 0..row_count {
+        let mut row = Vec::with_capacity(col_count);
+        for col_idx in 0..col_count {
+            let col = batch.column(col_idx).ok_or_else(|| {
+                ExecutionError::InvalidArgument(format!(
+                    "columnar batch missing column {col_idx} at row {row_idx}"
+                ))
+            })?;
+            let value = match col {
+                ColumnVector::Int64 { data, null_bitmap } => {
+                    if null_bitmap.is_null(row_idx) {
+                        Value::Null
+                    } else {
+                        Value::Int64(data[row_idx])
+                    }
+                }
+                ColumnVector::Float64 { data, null_bitmap } => {
+                    if null_bitmap.is_null(row_idx) {
+                        Value::Null
+                    } else {
+                        Value::Float64(data[row_idx])
+                    }
+                }
+                ColumnVector::Text { data, null_bitmap } => {
+                    if null_bitmap.is_null(row_idx) {
+                        Value::Null
+                    } else {
+                        Value::Text(data[row_idx].clone())
+                    }
+                }
+                ColumnVector::Bool { data, null_bitmap } => {
+                    if null_bitmap.is_null(row_idx) {
+                        Value::Null
+                    } else {
+                        Value::Bool(data[row_idx])
+                    }
+                }
+            };
+            row.push(value);
+        }
+        rows.push(row);
+    }
+    Ok(rows)
 }

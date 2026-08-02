@@ -45,6 +45,50 @@ pub const WAL_MIN_SIZE: usize = WAL_HEADER_SIZE + WAL_TRAILER_SIZE; // 25
 pub const WAL_MAX_DATA_LEN: usize = 16 * 1024 * 1024; // 16 MB
 
 // =====================================================================
+//  PageEncryptor — 页加密抽象（供 TDE 等实现）
+// =====================================================================
+
+/// 页数据加密器 trait。
+///
+/// 用于在 WAL 写入路径中对 Full Page Image（FPI）记录的页数据进行加密，
+/// 实现透明数据加密（TDE）的写入路径完整性。
+///
+/// # 设计说明
+///
+/// - `szrsql-tx` 不能直接依赖 `szrsql-security`（会形成循环依赖），
+///   因此通过 trait 抽象加密能力，由上层（`szrsql-bin`）注入具体实现。
+/// - 实现方（如 `TdePageEncryptor`）负责线程安全（内部使用 `Mutex` 等）。
+/// - 加密在 `WalWriter::append` 路径中、checksum 计算之前完成，
+///   确保 checksum 覆盖加密后的数据。
+///
+/// # 实现示例
+///
+/// ```ignore
+/// use szrsql_security::tde::{TdeEngine, TdePageEncryptor};
+/// let mut tde = TdeEngine::new();
+/// tde.enable(&key).unwrap();
+/// let encryptor = TdePageEncryptor::new(tde);
+/// let writer = WalWriter::create_new(path)?.with_encryptor(Arc::new(encryptor));
+/// ```
+pub trait PageEncryptor: Send + Sync + std::fmt::Debug {
+    /// 加密页数据。
+    ///
+    /// - `page_id`：页 ID，用于派生页级 IV（确保同明文不同页产生不同密文）
+    /// - `plaintext`：原始页数据
+    ///
+    /// 返回密文。实现方应保证：相同明文 + 相同 page_id → 确定性密文
+    ///（便于崩溃恢复时重放），相同明文 + 不同 page_id → 不同密文。
+    fn encrypt(&self, page_id: u32, plaintext: &[u8]) -> std::io::Result<Vec<u8>>;
+}
+
+// 无加密的默认实现（用于未启用 TDE 的场景）
+impl PageEncryptor for () {
+    fn encrypt(&self, _page_id: u32, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
+        Ok(plaintext.to_vec())
+    }
+}
+
+// =====================================================================
 //  WalOpType — WAL 记录操作类型
 // =====================================================================
 
@@ -511,6 +555,8 @@ pub struct WalWriter {
     current_lsn: std::sync::atomic::AtomicU64,
     /// WAL 文件路径
     path: std::path::PathBuf,
+    /// 页加密器（TDE 启用时设置，用于加密 FPI 记录的页数据）
+    encryptor: Option<Arc<dyn PageEncryptor>>,
 }
 
 impl WalWriter {
@@ -540,6 +586,7 @@ impl WalWriter {
             file: Mutex::new(file),
             current_lsn: std::sync::atomic::AtomicU64::new(recovered_lsn),
             path,
+            encryptor: None,
         })
     }
 
@@ -549,6 +596,24 @@ impl WalWriter {
         // 若文件存在，截断
         std::fs::File::create(&path).map_err(|e| WalError::IoError(e.to_string()))?;
         Self::open(path)
+    }
+
+    /// 设置页加密器并返回自身（builder 模式）。
+    ///
+    /// 通常在 `szrsql-bin` 启动时调用，将 TDE 加密器注入 WAL 写入路径：
+    ///
+    /// ```ignore
+    /// let writer = WalWriter::open(path)?
+    ///     .with_encryptor(Arc::new(TdePageEncryptor::new(tde_engine)));
+    /// ```
+    pub fn with_encryptor(mut self, encryptor: Arc<dyn PageEncryptor>) -> Self {
+        self.encryptor = Some(encryptor);
+        self
+    }
+
+    /// 获取页加密器引用（用于调试/测试）
+    pub fn has_encryptor(&self) -> bool {
+        self.encryptor.is_some()
     }
 
     /// 追加一条 WAL 记录，返回分配的 LSN
@@ -562,6 +627,20 @@ impl WalWriter {
             .current_lsn
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         record.lsn = lsn;
+
+        // P2-17：TDE 写入路径 — FPI 记录数据加密
+        // 加密在 checksum 计算之前完成，确保 checksum 覆盖密文
+        if record.op_type == WalOpType::FullPageImage {
+            if let Some(ref enc) = self.encryptor {
+                let page_id = record.page_id;
+                let plaintext = std::mem::take(&mut record.data);
+                record.data = enc.encrypt(page_id, &plaintext).map_err(|e| {
+                    warn!(lsn, page_id, error = %e, "FPI encryption failed");
+                    WalError::IoError(e.to_string())
+                })?;
+            }
+        }
+
         record.update_checksum();
 
         let encoded = record.encode();
@@ -590,6 +669,19 @@ impl WalWriter {
         let mut file = self.file.lock();
         for (i, mut record) in records.into_iter().enumerate() {
             record.lsn = start_lsn + i as u64;
+
+            // P2-17：TDE 写入路径 — 批量写入中同样加密 FPI 数据
+            if record.op_type == WalOpType::FullPageImage {
+                if let Some(ref enc) = self.encryptor {
+                    let page_id = record.page_id;
+                    let plaintext = std::mem::take(&mut record.data);
+                    record.data = enc.encrypt(page_id, &plaintext).map_err(|e| {
+                        warn!(start_lsn, offset = i, page_id, error = %e, "FPI batch encryption failed");
+                        WalError::IoError(e.to_string())
+                    })?;
+                }
+            }
+
             record.update_checksum();
             let encoded = record.encode();
             file.write_all(&encoded).map_err(|e| {
@@ -4939,6 +5031,126 @@ mod tests {
 
         // EOF
         assert!(reader.read_next().unwrap().is_none());
+
+        std::fs::remove_file(&temp).ok();
+    }
+
+    // =================================================================
+    //  P2-17：WalWriter FPI 加密路径集成测试
+    // =================================================================
+
+    /// 测试用加密器：XOR 每个字节与 page_id 的低字节（仅用于测试，非生产加密）
+    #[derive(Debug)]
+    struct TestPageEncryptor;
+
+    impl PageEncryptor for TestPageEncryptor {
+        fn encrypt(&self, page_id: u32, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
+            let key = (page_id & 0xFF) as u8;
+            Ok(plaintext.iter().map(|b| b ^ key).collect())
+        }
+    }
+
+    #[test]
+    fn test_p2_17_fpi_encryption_path() {
+        // 验证标准：WalWriter 设置 encryptor 后，FPI 记录的 data 在落盘前被加密
+        let temp = std::env::temp_dir().join(format!("szrsql_wal_fpi_test_{}", std::process::id()));
+        let writer = WalWriter::create_new(&temp)
+            .unwrap()
+            .with_encryptor(Arc::new(TestPageEncryptor));
+
+        assert!(writer.has_encryptor(), "encryptor should be set");
+
+        // 写入一条 FPI 记录（page_id=42，data=全 0xAB）
+        let page_data = vec![0xABu8; 64];
+        let record = WalRecord::new(0, 1, WalOpType::FullPageImage, 42, page_data.clone());
+        let lsn = writer.append(record).unwrap();
+
+        // 刷盘后读取原始文件内容
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 直接读文件，验证 data 已被加密（XOR with 42 = 0x2A）
+        let raw = std::fs::read(&temp).unwrap();
+        // 找到 data 部分：header(21) 之后是 data，data_len = 64
+        assert!(raw.len() >= WAL_HEADER_SIZE + 64 + WAL_TRAILER_SIZE);
+        let data_len = u32::from_le_bytes(raw[17..21].try_into().unwrap()) as usize;
+        assert_eq!(data_len, 64);
+
+        let on_disk_data = &raw[WAL_HEADER_SIZE..WAL_HEADER_SIZE + data_len];
+        // 加密后：0xAB XOR 0x2A = 0x81
+        assert!(
+            on_disk_data.iter().all(|b| *b == 0x81),
+            "FPI data should be XOR-encrypted (expected 0x81, got {:02X})",
+            on_disk_data[0]
+        );
+
+        // 验证 checksum 覆盖的是加密后的数据（而非明文）
+        let mut rec = WalRecord::decode(&mut &raw[..]).unwrap();
+        rec.update_checksum();
+        // 重新解码后 checksum 应与文件中一致（因为 checksum 基于密文计算）
+        let file_rec = WalRecord::decode(&mut &raw[..]).unwrap();
+        assert_eq!(
+            rec.checksum, file_rec.checksum,
+            "checksum should cover encrypted data"
+        );
+        assert_eq!(
+            file_rec.data,
+            vec![0x81u8; 64],
+            "decoded data should be ciphertext"
+        );
+
+        std::fs::remove_file(&temp).ok();
+    }
+
+    #[test]
+    fn test_p2_17_fpi_no_encryptor_passthrough() {
+        // 验证：未设置 encryptor 时，FPI 数据原样落盘（不加密）
+        let temp =
+            std::env::temp_dir().join(format!("szrsql_wal_fpi_plain_{}", std::process::id()));
+        let writer = WalWriter::create_new(&temp).unwrap();
+        assert!(!writer.has_encryptor());
+
+        let page_data = vec![0xCDu8; 32];
+        let record = WalRecord::new(0, 1, WalOpType::FullPageImage, 7, page_data.clone());
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        let raw = std::fs::read(&temp).unwrap();
+        let data_len = u32::from_le_bytes(raw[17..21].try_into().unwrap()) as usize;
+        let on_disk_data = &raw[WAL_HEADER_SIZE..WAL_HEADER_SIZE + data_len];
+        // 无加密器 → 明文落盘
+        assert_eq!(
+            on_disk_data, &page_data,
+            "FPI data should be plaintext without encryptor"
+        );
+
+        std::fs::remove_file(&temp).ok();
+    }
+
+    #[test]
+    fn test_p2_17_non_fpi_records_not_encrypted() {
+        // 验证：encryptor 设置后，非 FPI 记录（Insert/Update/Delete）不受影响
+        let temp =
+            std::env::temp_dir().join(format!("szrsql_wal_fpi_nonfpi_{}", std::process::id()));
+        let writer = WalWriter::create_new(&temp)
+            .unwrap()
+            .with_encryptor(Arc::new(TestPageEncryptor));
+
+        let insert_data = b"insert_payload".to_vec();
+        let record = WalRecord::new(0, 1, WalOpType::Insert, 5, insert_data.clone());
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        let raw = std::fs::read(&temp).unwrap();
+        let data_len = u32::from_le_bytes(raw[17..21].try_into().unwrap()) as usize;
+        let on_disk_data = &raw[WAL_HEADER_SIZE..WAL_HEADER_SIZE + data_len];
+        // Insert 记录不应被加密
+        assert_eq!(
+            on_disk_data, &insert_data,
+            "non-FPI records should not be encrypted"
+        );
 
         std::fs::remove_file(&temp).ok();
     }

@@ -23,6 +23,8 @@ szrsql-replication = { workspace = true }
 szrsql-security = { workspace = true }
 # P1-12：运维监控（查询统计 pg_stat_statements + 慢查询日志）
 szrsql-ops = { workspace = true }
+# P2-15：列存表引用（HTAP 路由执行时注册到 Executor）
+szrsql-storage = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 serde = { workspace = true }

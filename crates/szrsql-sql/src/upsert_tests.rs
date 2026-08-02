@@ -182,10 +182,30 @@ fn test_upsert_parser_05_on_constraint_unsupported() {
 }
 
 #[test]
-fn test_upsert_parser_06_on_duplicate_key_update_unsupported() {
-    // PG 方言下不解析 ON DUPLICATE KEY UPDATE，应报错
-    let result = parse_one("INSERT INTO t VALUES (1, 'a') ON DUPLICATE KEY UPDATE name = 'b'");
-    assert!(result.is_err());
+fn test_upsert_parser_06_on_duplicate_key_update_supported() {
+    // P2-16.2: MySQL `ON DUPLICATE KEY UPDATE` 现在被解析为 OnConflict::DoUpdate
+    // conflict_columns = None（不指定冲突列，由执行器按主键/UNIQUE 判定）
+    let stmt = parse_one("INSERT INTO t VALUES (1, 'a') ON DUPLICATE KEY UPDATE name = 'b'")
+        .expect("ON DUPLICATE KEY UPDATE should parse");
+    match stmt {
+        Statement::Insert {
+            on_conflict:
+                Some(OnConflict::DoUpdate {
+                    conflict_columns,
+                    assignments,
+                    ..
+                }),
+            ..
+        } => {
+            assert!(
+                conflict_columns.is_none(),
+                "expected no conflict columns for DUPLICATE KEY"
+            );
+            assert_eq!(assignments.len(), 1);
+            assert_eq!(assignments[0].column, "name");
+        }
+        other => panic!("expected Insert with DoUpdate, got {other:?}"),
+    }
 }
 
 // =====================================================================

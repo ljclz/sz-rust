@@ -2930,6 +2930,7 @@ dependencies = [
  "serde",
  "serde_json",
  "szrsql-sql",
+ "szrsql-storage",
  "szrsql-types",
  "thiserror 2.0.18",
 ]
@@ -2989,6 +2990,7 @@ dependencies = [
  "szrsql-replication",
  "szrsql-security",
  "szrsql-sql",
+ "szrsql-storage",
  "szrsql-tx",
  "szrsql-types",
  "thiserror 2.0.18",

@@ -34,7 +34,9 @@ use sqlparser::ast::{
     WindowFrameUnits as SpWindowFrameUnits, WindowSpec as SpWindowSpec, WindowType as SpWindowType,
 };
 use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::keywords::Keyword;
 use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::Token;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
 use szrsql_types::value::{ColumnType, Value};
@@ -2959,8 +2961,18 @@ fn apply_column_option(
             );
             def.generated = Some(GeneratedColumn { expr, stored: true });
         }
+        ColumnOption::DialectSpecific(tokens) => {
+            // P2-16.3: MySQL `AUTO_INCREMENT` 列选项（由 sqlparser 解析为 DialectSpecific）
+            let is_auto_inc = tokens
+                .iter()
+                .any(|t| matches!(t, Token::Word(w) if w.keyword == Keyword::AUTO_INCREMENT));
+            if is_auto_inc {
+                def.auto_increment = true;
+            }
+            // 其他方言特定选项暂不支持
+        }
         _ => {
-            // 其他列选项（Identity / DialectSpecific 等）暂不支持
+            // 其他列选项（Identity / Comment / Options 等）暂不支持
         }
     }
     Ok(())
@@ -4355,9 +4367,20 @@ fn convert_on_insert(on: Option<OnInsert>) -> Result<Option<OnConflict>, ParseEr
             };
             Ok(Some(result))
         }
-        Some(OnInsert::DuplicateKeyUpdate(_)) => Err(ParseError::Unsupported(
-            "ON DUPLICATE KEY UPDATE not supported (use ON CONFLICT)".into(),
-        )),
+        Some(OnInsert::DuplicateKeyUpdate(assignments)) => {
+            // P2-16.2: MySQL `ON DUPLICATE KEY UPDATE` 语义转换
+            // MySQL 在任意 UNIQUE/PRIMARY KEY 冲突时触发，不指定具体冲突列。
+            // 映射为 OnConflict::DoUpdate { conflict_columns: None, .. }
+            let assigns = assignments
+                .iter()
+                .map(convert_assignment)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(OnConflict::DoUpdate {
+                conflict_columns: None,
+                assignments: assigns,
+                where_clause: None,
+            }))
+        }
         // OnInsert 标记为 non-exhaustive，必须保留通配分支
         other => Err(ParseError::Unsupported(format!(
             "unsupported OnInsert variant: {other:?}"

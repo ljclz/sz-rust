@@ -320,6 +320,21 @@ struct Args {
     replica_of: Option<String>,
 }
 
+/// P2-17：为 WalWriter FPI 加密路径创建默认 TDE 引擎实例。
+///
+/// 使用与 server_builder TDE 引擎相同的默认主密钥（0xA1 × 32），
+/// 确保 WAL 中加密的 FPI 数据可由运行时 TdeEngine 正确解密。
+///
+/// 注意：此函数与 server_builder 中的 TDE 初始化使用相同密钥，
+/// 但持有独立的 TdeEngine 实例（TdeEngine 非 Clone）。
+/// 生产环境应统一从 KMS/环境变量加载主密钥。
+fn default_tde_engine_for_wal() -> szrsql_security::tde::TdeEngine {
+    let mut tde = szrsql_security::tde::TdeEngine::new();
+    let default_key = [0xA1u8; 32];
+    let _ = tde.enable(&default_key);
+    tde
+}
+
 fn main() -> anyhow::Result<()> {
     // 初始化 tracing 日志
     tracing_subscriber::fmt()
@@ -633,11 +648,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
         // P0-TX-2 修复：用 open（追加模式）而非 create_new（截断）打开 WAL
+        // P2-17：将 TDE 加密器注入 WAL 写入路径，FPI 记录落盘前自动加密
         match szrsql_tx::wal::WalWriter::open(wal_path) {
             Ok(writer) => {
+                let writer = writer.with_encryptor(std::sync::Arc::new(
+                    szrsql_security::tde::TdePageEncryptor::new(default_tde_engine_for_wal()),
+                ));
                 tracing::info!(
                     wal_path = %wal_path.display(),
-                    "WAL writer opened (append mode), log-then-commit transaction model enabled"
+                    "WAL writer opened (append mode, FPI TDE encryption enabled), log-then-commit transaction model enabled"
                 );
                 Some(Arc::new(writer))
             }

@@ -55,6 +55,8 @@ mod array_type_tests;
 #[cfg(test)]
 mod check_constraint_tests;
 #[cfg(test)]
+mod columnar_exec_tests;
+#[cfg(test)]
 mod cte_tests;
 #[cfg(test)]
 mod enum_type_tests;

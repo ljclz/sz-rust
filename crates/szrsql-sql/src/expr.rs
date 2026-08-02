@@ -2325,6 +2325,165 @@ impl ExprEvaluator {
                 let bucket_start = ts_us.div_euclid(bucket_us) * bucket_us;
                 Ok(Value::Timestamp(bucket_start))
             }
+            // P2-16.1: MySQL 兼容函数 — 新增函数与别名
+            // 注：length() 已由 "length" | "char_length" | "character_length" 分支处理（line ~1659）
+            // MySQL IFNULL(a, b) — coalesce 的两参数别名
+            "ifnull" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                if !matches!(&arg_vals[0], Value::Null) {
+                    Ok(arg_vals[0].clone())
+                } else {
+                    Ok(arg_vals[1].clone())
+                }
+            }
+            // MySQL IF(cond, true_val, false_val) — 三元条件表达式
+            // cond 为布尔时按真假选择；cond 为数值时非零为真（MySQL 语义）
+            "if" => {
+                check_arg_count(&fname, &arg_vals, 3)?;
+                let cond = match &arg_vals[0] {
+                    Value::Bool(b) => *b,
+                    Value::Int64(n) => *n != 0,
+                    Value::Float64(f) => *f != 0.0,
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "boolean/numeric",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                Ok(if cond {
+                    arg_vals[1].clone()
+                } else {
+                    arg_vals[2].clone()
+                })
+            }
+            // MySQL CURDATE() — 当前日期的午夜时间戳
+            "curdate" => {
+                check_arg_count(&fname, &arg_vals, 0)?;
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let now_us = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_micros() as i64)
+                    .unwrap_or(0);
+                let secs = now_us / 1_000_000;
+                let day_us = (secs / 86_400) * 86_400 * 1_000_000;
+                Ok(Value::Timestamp(day_us))
+            }
+            // MySQL CURTIME() — 当前时间（微秒精度的 TIME 值）
+            // 以自午夜起的微秒数返回（0..86_400_000_000），便于 TIME 类型处理
+            "curtime" => {
+                check_arg_count(&fname, &arg_vals, 0)?;
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let now_us = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_micros() as i64)
+                    .unwrap_or(0);
+                let day_us = 86_400_000_000_i64;
+                Ok(Value::Int64(now_us.rem_euclid(day_us)))
+            }
+            // MySQL CONCAT_WS(sep, a, b, ...) — 用分隔符拼接，跳过 NULL
+            "concat_ws" => {
+                if arg_vals.len() < 2 {
+                    return Err(EvalError::InvalidFunctionArgs(format!(
+                        "concat_ws requires at least 2 args (sep + 1 value), got {}",
+                        arg_vals.len()
+                    )));
+                }
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(sep) => {
+                        let mut result = String::new();
+                        let mut first = true;
+                        for v in &arg_vals[1..] {
+                            if matches!(v, Value::Null) {
+                                continue;
+                            }
+                            if !first {
+                                result.push_str(sep);
+                            }
+                            result.push_str(&value_to_string(v));
+                            first = false;
+                        }
+                        Ok(Value::Text(result))
+                    }
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text separator",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            // MySQL DATE_FORMAT(ts, fmt) — 将时间戳按格式字符串输出
+            // 支持的格式符：%Y 年 %m 月 %d 日 %H 时 %i 分 %s 秒（简化子集）
+            "date_format" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let ts = match &arg_vals[0] {
+                    Value::Timestamp(us) => *us,
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "timestamp",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let fmt = match &arg_vals[1] {
+                    Value::Text(s) => s.clone(),
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text format",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                Ok(Value::Text(format_date_mysql(ts, &fmt)))
+            }
+            // MySQL UNIX_TIMESTAMP() — 当前 UTC 秒数（无参数）
+            // MySQL UNIX_TIMESTAMP(date) — 将日期转为秒数（1 参数）
+            "unix_timestamp" => {
+                if arg_vals.is_empty() {
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let secs = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    Ok(Value::Int64(secs))
+                } else if arg_vals.len() == 1 {
+                    match &arg_vals[0] {
+                        Value::Timestamp(us) => Ok(Value::Int64(*us / 1_000_000)),
+                        Value::Text(s) => match parse_date_string(s) {
+                            Some(us) => Ok(Value::Int64(us / 1_000_000)),
+                            None => Err(EvalError::Unsupported(format!(
+                                "unix_timestamp: cannot parse date string '{s}'"
+                            ))),
+                        },
+                        Value::Null => Ok(Value::Null),
+                        other => Err(EvalError::TypeMismatch {
+                            expected: "timestamp/text",
+                            actual: value_type_name(other),
+                        }),
+                    }
+                } else {
+                    Err(EvalError::InvalidFunctionArgs(format!(
+                        "unix_timestamp expects 0 or 1 args, got {}",
+                        arg_vals.len()
+                    )))
+                }
+            }
+            // MySQL FROM_UNIXTIME(secs) — 秒数转为时间戳
+            "from_unixtime" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Int64(s) => Ok(Value::Timestamp(*s * 1_000_000)),
+                    Value::Float64(s) => Ok(Value::Timestamp((*s * 1_000_000.0) as i64)),
+                    Value::Null => Ok(Value::Null),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "numeric",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -2341,6 +2500,156 @@ impl ExprEvaluator {
 // =====================================================================
 //  辅助函数
 // =====================================================================
+
+/// 将 Value 转为字符串表示（用于 concat_ws 等拼接函数）。
+fn value_to_string(v: &Value) -> String {
+    match v {
+        Value::Text(s) => s.clone(),
+        Value::Int64(n) => n.to_string(),
+        Value::Float64(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+        Value::Timestamp(us) => format_timestamp_iso(*us),
+        other => format!("{:?}", other),
+    }
+}
+
+/// 将微秒时间戳格式化为 ISO 风格字符串（内联，避免跨 crate 依赖私有函数）。
+fn format_timestamp_iso(us: i64) -> String {
+    let secs = us.div_euclid(1_000_000);
+    let sub_us = us.rem_euclid(1_000_000) as u32;
+    let days = secs.div_euclid(86_400);
+    let day_secs = secs.rem_euclid(86_400) as u32;
+    let hour = day_secs / 3600;
+    let minute = (day_secs % 3600) / 60;
+    let second = day_secs % 60;
+    let (year, month, day) = days_from_epoch(days as i32);
+    if sub_us == 0 {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            year, month, day, hour, minute, second
+        )
+    } else {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
+            year, month, day, hour, minute, second, sub_us
+        )
+    }
+}
+
+/// 简化的日期计算：i64 天数 → (year, month, day)。
+fn days_from_epoch(days: i32) -> (i32, u32, u32) {
+    // 基于 proleptic Gregorian 的简化算法
+    let z = days + 719_468_i32;
+    let era = (if z >= 0 {
+        z
+    } else {
+        z - 15_245
+    })
+    .div_euclid(146_097) as i64;
+    let doe = z as i64 - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 {
+        mp + 3
+    } else {
+        mp - 9
+    };
+    let yr = if m <= 2 {
+        y + 1
+    } else {
+        y
+    };
+    (yr as i32, m as u32, d as u32)
+}
+
+/// MySQL 风格的日期格式化：将微秒时间戳按格式字符串输出。
+/// 支持的格式符：%Y(年) %m(月) %d(日) %H(时) %i(分) %s(秒)。
+fn format_date_mysql(us: i64, fmt: &str) -> String {
+    let secs = us.div_euclid(1_000_000);
+    let day_secs = secs.rem_euclid(86_400) as u32;
+    let days = secs.div_euclid(86_400);
+    let hour = day_secs / 3600;
+    let minute = (day_secs % 3600) / 60;
+    let second = day_secs % 60;
+    let (year, month, day) = days_from_epoch(days as i32);
+
+    let mut result = String::with_capacity(fmt.len() + 8);
+    let mut chars = fmt.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.peek() {
+                Some('Y') => {
+                    chars.next();
+                    result.push_str(&format!("{:04}", year));
+                }
+                Some('m') => {
+                    chars.next();
+                    result.push_str(&format!("{:02}", month));
+                }
+                Some('d') => {
+                    chars.next();
+                    result.push_str(&format!("{:02}", day));
+                }
+                Some('H') => {
+                    chars.next();
+                    result.push_str(&format!("{:02}", hour));
+                }
+                Some('i') => {
+                    chars.next();
+                    result.push_str(&format!("{:02}", minute));
+                }
+                Some('s') => {
+                    chars.next();
+                    result.push_str(&format!("{:02}", second));
+                }
+                Some('%') => {
+                    chars.next();
+                    result.push('%');
+                }
+                Some(other) => {
+                    result.push('%');
+                    result.push(*other);
+                    chars.next();
+                }
+                None => result.push('%'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// 尝试解析常见日期字符串为微秒时间戳。
+fn parse_date_string(s: &str) -> Option<i64> {
+    // 支持 "YYYY-MM-DD" 和 "YYYY-MM-DD HH:MM:SS" 格式
+    let s = s.trim();
+    if s.len() >= 10 {
+        let y: i64 = s[0..4].parse().ok()?;
+        let m: u32 = s[5..7].parse().ok()?;
+        let d: u32 = s[8..10].parse().ok()?;
+        let mut secs = 0_i64;
+        if s.len() >= 19 {
+            let h: u32 = s[11..13].parse().ok()?;
+            let mi: u32 = s[14..16].parse().ok()?;
+            let se: u32 = s[17..19].parse().ok()?;
+            secs = (h as i64) * 3600 + (mi as i64) * 60 + (se as i64);
+        }
+        // 粗略天数→秒数（忽略闰年等，近似计算）
+        let days = (y - 1970) * 365
+            + ((y - 1969) / 4)
+            + [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][(m - 1) as usize] as i64
+            + d as i64
+            - 1;
+        Some((days * 86_400 + secs) * 1_000_000)
+    } else {
+        None
+    }
+}
 
 fn check_arg_count(fname: &str, args: &[Value], expected: usize) -> Result<(), EvalError> {
     if args.len() != expected {
@@ -2436,7 +2745,7 @@ fn tsquery_contains_term(q: &TsQuery, term: &str) -> bool {
 fn is_aggregate_function(name: &str) -> bool {
     matches!(
         name,
-        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg"
+        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg" | "group_concat"
     )
 }
 
@@ -2851,5 +3160,236 @@ mod tests {
         };
         let err = ExprEvaluator::eval(&expr, &ctx).unwrap_err();
         assert!(matches!(err, EvalError::FunctionNotFound(_)));
+    }
+
+    // =================================================================
+    // P2-16.1: MySQL 兼容函数测试
+    // =================================================================
+
+    #[test]
+    fn test_mysql_ifnull() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "ifnull".into(),
+            args: vec![Expr::Literal(Value::Null), Expr::Literal(Value::Int64(42))],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Int64(42));
+        let e2 = Expr::Function {
+            name: "ifnull".into(),
+            args: vec![
+                Expr::Literal(Value::Int64(7)),
+                Expr::Literal(Value::Int64(42)),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e2, &ctx).unwrap(), Value::Int64(7));
+    }
+
+    #[test]
+    fn test_mysql_if() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "if".into(),
+            args: vec![
+                Expr::Literal(Value::Bool(true)),
+                Expr::Literal(Value::Int64(1)),
+                Expr::Literal(Value::Int64(2)),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Int64(1));
+        let e2 = Expr::Function {
+            name: "if".into(),
+            args: vec![
+                Expr::Literal(Value::Bool(false)),
+                Expr::Literal(Value::Int64(1)),
+                Expr::Literal(Value::Int64(2)),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e2, &ctx).unwrap(), Value::Int64(2));
+        let e3 = Expr::Function {
+            name: "if".into(),
+            args: vec![
+                Expr::Literal(Value::Int64(0)),
+                Expr::Literal(Value::Text("a".into())),
+                Expr::Literal(Value::Text("b".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e3, &ctx).unwrap(),
+            Value::Text("b".into())
+        );
+        let e4 = Expr::Function {
+            name: "if".into(),
+            args: vec![
+                Expr::Literal(Value::Int64(1)),
+                Expr::Literal(Value::Text("a".into())),
+                Expr::Literal(Value::Text("b".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e4, &ctx).unwrap(),
+            Value::Text("a".into())
+        );
+    }
+
+    #[test]
+    fn test_mysql_curdate() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "curdate".into(),
+            args: vec![],
+            distinct: false,
+        };
+        let val = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert!(matches!(val, Value::Timestamp(_)));
+        if let Value::Timestamp(us) = val {
+            assert_eq!(us % 86_400_000_000, 0, "curdate should be midnight UTC");
+        }
+    }
+
+    #[test]
+    fn test_mysql_curtime() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "curtime".into(),
+            args: vec![],
+            distinct: false,
+        };
+        let val = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert!(matches!(val, Value::Int64(_)));
+        if let Value::Int64(us) = val {
+            assert!(us >= 0 && us < 86_400_000_000);
+        }
+    }
+
+    #[test]
+    fn test_mysql_concat_ws() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "concat_ws".into(),
+            args: vec![
+                Expr::Literal(Value::Text(",".into())),
+                Expr::Literal(Value::Text("a".into())),
+                Expr::Literal(Value::Text("b".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Text("a,b".into())
+        );
+        // NULL 值被跳过
+        let e2 = Expr::Function {
+            name: "concat_ws".into(),
+            args: vec![
+                Expr::Literal(Value::Text("-".into())),
+                Expr::Literal(Value::Text("x".into())),
+                Expr::Literal(Value::Null),
+                Expr::Literal(Value::Text("y".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e2, &ctx).unwrap(),
+            Value::Text("x-y".into())
+        );
+        // NULL 分隔符 → NULL
+        let e3 = Expr::Function {
+            name: "concat_ws".into(),
+            args: vec![
+                Expr::Literal(Value::Null),
+                Expr::Literal(Value::Text("a".into())),
+            ],
+            distinct: false,
+        };
+        assert!(matches!(
+            ExprEvaluator::eval(&e3, &ctx).unwrap(),
+            Value::Null
+        ));
+    }
+
+    #[test]
+    fn test_mysql_date_format() {
+        let ctx = EmptyContext;
+        // 2024-06-15 14:30:45 UTC = 1718461845000000 µs
+        let ts = 1_718_461_845_000_000_i64;
+        let e = Expr::Function {
+            name: "date_format".into(),
+            args: vec![
+                Expr::Literal(Value::Timestamp(ts)),
+                Expr::Literal(Value::Text("%Y-%m-%d %H:%i:%s".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Text("2024-06-15 14:30:45".into())
+        );
+        let e2 = Expr::Function {
+            name: "date_format".into(),
+            args: vec![
+                Expr::Literal(Value::Timestamp(ts)),
+                Expr::Literal(Value::Text("%Y/%m/%d".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e2, &ctx).unwrap(),
+            Value::Text("2024/06/15".into())
+        );
+    }
+
+    #[test]
+    fn test_mysql_unix_timestamp() {
+        let ctx = EmptyContext;
+        // 0-arg: current time in seconds
+        let e = Expr::Function {
+            name: "unix_timestamp".into(),
+            args: vec![],
+            distinct: false,
+        };
+        let val = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert!(matches!(val, Value::Int64(_)));
+        // 1-arg timestamp
+        let e2 = Expr::Function {
+            name: "unix_timestamp".into(),
+            args: vec![Expr::Literal(Value::Timestamp(1_718_461_845_000_000_i64))],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e2, &ctx).unwrap(),
+            Value::Int64(1_718_461_845)
+        );
+    }
+
+    #[test]
+    fn test_mysql_from_unixtime() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "from_unixtime".into(),
+            args: vec![Expr::Literal(Value::Int64(1_718_461_845))],
+            distinct: false,
+        };
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Timestamp(1_718_461_845_000_000_i64)
+        );
+    }
+
+    #[test]
+    fn test_mysql_length_alias() {
+        // length() 已由 "length" | "char_length" | "character_length" 分支处理
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "length".into(),
+            args: vec![Expr::Literal(Value::Text("hello".into()))],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Int64(5));
     }
 }

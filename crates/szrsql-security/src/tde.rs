@@ -601,6 +601,66 @@ impl TdeEngine {
 }
 
 // =====================================================================
+//  TdePageEncryptor — WalWriter FPI 加密路径集成（P2-17）
+// =====================================================================
+
+/// TDE 页加密器：将 `TdeEngine` 适配为 `szrsql_tx::wal::PageEncryptor` trait。
+///
+/// 用于在 `WalWriter::append` 路径中对 Full Page Image（FPI）记录的页数据
+/// 进行透明加密，实现 TDE 写入路径的完整性。
+///
+/// # 线程安全
+///
+/// `TdeEngine::encrypt_page` 需要 `&mut self`，本类型通过内部 `Mutex`
+/// 实现 `Sync`，可安全地在多线程 WAL 写入场景下共享（`Arc<TdePageEncryptor>`）。
+///
+/// # 用法
+///
+/// ```ignore
+/// use szrsql_security::tde::{TdeEngine, TdePageEncryptor};
+/// let mut tde = TdeEngine::new();
+/// tde.enable(&master_key).unwrap();
+/// let encryptor = Arc::new(TdePageEncryptor::new(tde));
+/// let writer = WalWriter::open(path)?
+///     .with_encryptor(encryptor);
+/// ```
+#[derive(Debug)]
+pub struct TdePageEncryptor {
+    inner: std::sync::Mutex<TdeEngine>,
+}
+
+impl TdePageEncryptor {
+    /// 从已启用 TDE 的 `TdeEngine` 创建加密器。
+    pub fn new(engine: TdeEngine) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(engine),
+        }
+    }
+
+    /// 获取底层 `TdeEngine` 的不可变引用（用于查询状态/统计）。
+    pub fn engine(
+        &self,
+    ) -> Result<
+        std::sync::MutexGuard<'_, TdeEngine>,
+        std::sync::PoisonError<std::sync::MutexGuard<'_, TdeEngine>>,
+    > {
+        self.inner.lock()
+    }
+}
+
+impl szrsql_tx::wal::PageEncryptor for TdePageEncryptor {
+    fn encrypt(&self, page_id: u32, plaintext: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut engine = self
+            .inner
+            .lock()
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        engine
+            .encrypt_page(page_id as u64, plaintext)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+    }
+}
+
+// =====================================================================
 //  辅助函数
 // =====================================================================
 
@@ -1727,5 +1787,70 @@ mod tests {
             let decrypted = engine.decrypt_page(*page_id, ciphertext).unwrap();
             assert_eq!(&decrypted, plaintext);
         }
+    }
+
+    // =================================================================
+    //  P2-17：TdePageEncryptor — WalWriter FPI 加密路径集成
+    // =================================================================
+
+    #[test]
+    fn test_p2_17_page_encryptor_encrypts_fpi_data() {
+        // 验证标准：TdePageEncryptor 作为 PageEncryptor trait 实现，
+        // 对 FPI 页数据加密后，密文可通过 TdeEngine 正确解密。
+        let mut tde = TdeEngine::new();
+        tde.enable(&[42u8; AES_256_KEY_LEN]).unwrap();
+        let encryptor = TdePageEncryptor::new(tde);
+
+        let page_id: u32 = 100;
+        let plaintext = vec![0xABu8; 8192]; // 模拟 8KB 数据页
+
+        // 通过 trait 接口加密
+        let ciphertext = <TdePageEncryptor as szrsql_tx::wal::PageEncryptor>::encrypt(
+            &encryptor, page_id, &plaintext,
+        )
+        .expect("encrypt should succeed");
+
+        // 密文长度 > 明文（含 magic + key_version 头）
+        assert!(ciphertext.len() > plaintext.len());
+
+        // 用底层引擎解密验证正确性
+        let mut engine = encryptor.engine().unwrap();
+        let decrypted = engine.decrypt_page(page_id as u64, &ciphertext).unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_p2_17_page_encryptor_different_pages_different_ciphertext() {
+        // 验证：相同明文 + 不同 page_id → 不同密文（IV 绑定 page_id）
+        let mut tde = TdeEngine::new();
+        tde.enable(&[7u8; AES_256_KEY_LEN]).unwrap();
+        let encryptor = TdePageEncryptor::new(tde);
+
+        let plaintext = b"same page content".to_vec();
+        let ct1 =
+            <TdePageEncryptor as szrsql_tx::wal::PageEncryptor>::encrypt(&encryptor, 1, &plaintext)
+                .unwrap();
+        let ct2 =
+            <TdePageEncryptor as szrsql_tx::wal::PageEncryptor>::encrypt(&encryptor, 2, &plaintext)
+                .unwrap();
+
+        assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_p2_17_page_encryptor_empty_page() {
+        // 边界：空页数据加密/解密
+        let mut tde = TdeEngine::new();
+        tde.enable(&[1u8; AES_256_KEY_LEN]).unwrap();
+        let encryptor = TdePageEncryptor::new(tde);
+
+        let ciphertext =
+            <TdePageEncryptor as szrsql_tx::wal::PageEncryptor>::encrypt(&encryptor, 0, &[])
+                .unwrap();
+        assert_eq!(ciphertext.len(), 5); // magic(4) + key_version(1)
+
+        let mut engine = encryptor.engine().unwrap();
+        let decrypted = engine.decrypt_page(0, &ciphertext).unwrap();
+        assert!(decrypted.is_empty());
     }
 }
