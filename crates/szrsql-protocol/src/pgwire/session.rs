@@ -6170,4 +6170,90 @@ mod tests {
             other => panic!("expected ResultSet, got {other:?}"),
         }
     }
+
+    /// P0-5（BUG-1）：跨协议共享表存储一致性
+    ///
+    /// TDS/Oracle/pgwire/MySQL 四个协议的 ExecutorService 注入同一份
+    /// shared_tables（main.rs 已注入），本测试验证：
+    /// 1. 会话 A（模拟 PG 协议）CREATE + INSERT → 写入共享存储
+    /// 2. 会话 B（模拟 TDS/Oracle 协议，独立 ExecutorService 但注入同一 shared_tables）
+    ///    SELECT 能看到 A 写入的数据
+    /// 3. 会话 B INSERT → 会话 A SELECT 也能看到
+    #[tokio::test]
+    async fn test_p0_5_cross_protocol_shared_tables_consistency() {
+        use std::sync::atomic::AtomicU32;
+
+        // 共享存储（main.rs 中三个协议共用同一实例）
+        let shared_tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let lock_manager = Arc::new(szrsql_tx::lock::LockManager::new());
+        let txn_counter = Arc::new(AtomicU32::new(0));
+
+        // 会话 A：模拟 PG 协议会话
+        let mut svc_a = ExecutorService::new()
+            .with_shared_tables(shared_tables.clone())
+            .with_lock_manager(lock_manager.clone())
+            .with_shared_txn_counter(txn_counter.clone());
+
+        // 会话 B：模拟 TDS/Oracle 协议会话（独立 ExecutorService，同一共享存储）
+        let mut svc_b = ExecutorService::new()
+            .with_shared_tables(shared_tables.clone())
+            .with_lock_manager(lock_manager.clone())
+            .with_shared_txn_counter(txn_counter.clone());
+
+        // 1. 会话 A：CREATE TABLE + INSERT（TDS/Oracle 会话的 catalog 同步应看到表）
+        let r = svc_a
+            .execute_sql("CREATE TABLE cross_proto_t (id BIGINT, name TEXT)")
+            .await;
+        assert!(r[0].is_ok(), "CREATE should succeed in session A");
+
+        let r = svc_a
+            .execute_sql("INSERT INTO cross_proto_t (id, name) VALUES (1, 'pg-writer')")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed in session A");
+
+        // 2. 会话 B（模拟 TDS/Oracle）：SELECT 应看到 A 写入的行
+        let r = svc_b.execute_sql("SELECT * FROM cross_proto_t").await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(
+                    rows.len(),
+                    1,
+                    "session B should see 1 row written by session A"
+                );
+                assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(1));
+                assert_eq!(
+                    rows[0][1],
+                    szrsql_types::value::Value::Text("pg-writer".into())
+                );
+            }
+            other => panic!("session B SELECT failed: {other:?}"),
+        }
+
+        // 3. 会话 B INSERT → 会话 A SELECT 也应看到（双向一致性）
+        let r = svc_b
+            .execute_sql("INSERT INTO cross_proto_t (id, name) VALUES (2, 'tds-writer')")
+            .await;
+        assert!(r[0].is_ok(), "INSERT should succeed in session B");
+
+        let r = svc_a
+            .execute_sql("SELECT * FROM cross_proto_t ORDER BY id")
+            .await;
+        match &r[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 2, "session A should see 2 rows (bidirectional)");
+                assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(1));
+                assert_eq!(rows[1][0], szrsql_types::value::Value::Int64(2));
+            }
+            other => panic!("session A SELECT failed: {other:?}"),
+        }
+
+        // 4. 共享存储中实际只有一张表（同一份数据，无副本）
+        let guard = shared_tables.read().await;
+        assert_eq!(
+            guard.len(),
+            1,
+            "shared storage should contain exactly 1 table"
+        );
+    }
 }
