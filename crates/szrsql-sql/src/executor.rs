@@ -3704,6 +3704,11 @@ pub struct Executor<'a> {
     ///
     /// 0 表示无活跃事务（autocommit 模式，不获取行级锁）。
     row_lock_txn_id: u32,
+    /// P2-18：并行执行行数阈值。
+    ///
+    /// 当扫描/排序/聚合的输入行数 ≥ 此阈值时，使用 rayon 多线程并行执行。
+    /// 默认值 10_000；设为 0 则始终串行执行（用于测试可预测性）。
+    parallel_threshold: usize,
 }
 
 // =====================================================================
@@ -3915,6 +3920,8 @@ impl<'a> Executor<'a> {
             row_lock_manager: None,
             row_lock_txn_id: 0,
             plpgsql_registry: None,
+            // P2-18：默认 10K 行阈值触发并行执行
+            parallel_threshold: 10_000,
         }
     }
 
@@ -4208,6 +4215,15 @@ impl<'a> Executor<'a> {
     ) -> Self {
         self.row_lock_manager = Some(lm);
         self.row_lock_txn_id = txn_id;
+        self
+    }
+
+    /// P2-18：设置并行执行行数阈值。
+    ///
+    /// 当扫描/排序/聚合的输入行数 ≥ 此阈值时，使用 rayon 多线程并行执行。
+    /// 默认值 10_000；设为 0 则始终串行执行（用于测试可预测性）。
+    pub fn with_parallel_threshold(mut self, threshold: usize) -> Self {
+        self.parallel_threshold = threshold;
         self
     }
 
@@ -8186,14 +8202,32 @@ impl<'a> Executor<'a> {
         // 预计算每行的排序键，避免在比较函数中重复求值
         // paired[i] = (keys[i], row[i])
         let mut paired: Vec<(Vec<Value>, Row)> = Vec::with_capacity(rows.len());
-        for row in rows {
-            let ctx = ExecRowContext::new(&schema, &row);
-            let mut row_keys = Vec::with_capacity(order_by.len());
-            for ob in order_by {
-                let v = ExprEvaluator::eval(&ob.expr, &ctx)?;
-                row_keys.push(v);
+
+        // P2-18：行数 ≥ 阈值时并行计算排序键
+        if rows.len() >= self.parallel_threshold && self.parallel_threshold > 0 {
+            use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+            paired = rows
+                .par_iter()
+                .map(|row| {
+                    let ctx = ExecRowContext::new(&schema, row);
+                    let mut row_keys = Vec::with_capacity(order_by.len());
+                    for ob in order_by {
+                        let v = ExprEvaluator::eval(&ob.expr, &ctx).unwrap();
+                        row_keys.push(v);
+                    }
+                    (row_keys, row.clone())
+                })
+                .collect();
+        } else {
+            for row in rows {
+                let ctx = ExecRowContext::new(&schema, &row);
+                let mut row_keys = Vec::with_capacity(order_by.len());
+                for ob in order_by {
+                    let v = ExprEvaluator::eval(&ob.expr, &ctx)?;
+                    row_keys.push(v);
+                }
+                paired.push((row_keys, row));
             }
-            paired.push((row_keys, row));
         }
 
         // 稳定排序（sort_by 保证稳定性）
@@ -8481,41 +8515,86 @@ impl<'a> Executor<'a> {
             result_rows.push(out_row);
         }
 
-        for key in &group_keys_order {
-            let group_rows = groups.get(key).unwrap();
-            let key_values = group_key_values.get(key).unwrap();
+        // P2-18：分组数 ≥ 阈值时并行计算每组聚合值
+        let input_schema_for_closure = input_schema.clone();
+        let aggregates_for_closure = aggregates.to_vec();
+        if group_keys_order.len() >= self.parallel_threshold && self.parallel_threshold > 0 {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            let agg_results: Vec<(String, Vec<Value>)> = group_keys_order
+                .into_par_iter()
+                .map(|key| {
+                    let group_rows = groups.get(&key).unwrap();
+                    let mut agg_values = Vec::with_capacity(agg_count);
+                    for agg in &aggregates_for_closure {
+                        let v =
+                            compute_aggregate(agg, group_rows, &input_schema_for_closure).unwrap();
+                        agg_values.push(v);
+                    }
+                    (key, agg_values)
+                })
+                .collect();
+            for (key, agg_values) in agg_results {
+                let key_values = group_key_values.get(&key).unwrap();
+                let mut out_row = Vec::with_capacity(group_count + agg_count);
+                out_row.extend(key_values.iter().cloned());
+                out_row.extend(agg_values.iter().cloned());
 
-            // 计算每个聚合
-            let mut agg_values: Vec<Value> = Vec::with_capacity(agg_count);
-            for agg in aggregates {
-                let v = compute_aggregate(agg, group_rows, &input_schema)?;
-                agg_values.push(v);
-            }
-
-            // 构造输出行 = [group_values..., agg_values...]
-            let mut out_row = Vec::with_capacity(group_count + agg_count);
-            out_row.extend(key_values.iter().cloned());
-            out_row.extend(agg_values.iter().cloned());
-
-            // HAVING 过滤
-            if let Some(having_expr) = having {
-                let schema = aggregate_output_schema(group_exprs, aggregates)?;
-                let ctx = ExecRowContext::new(&schema, &out_row);
-                let substituted =
-                    substitute_aggregates(having_expr, aggregates, &out_row, group_count);
-                match ExprEvaluator::eval(&substituted, &ctx)? {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) | Value::Null => continue,
-                    other => {
-                        return Err(ExecutionError::EvalError(format!(
-                            "HAVING predicate must evaluate to bool, got {:?}",
-                            other
-                        )));
+                // HAVING 过滤
+                if let Some(having_expr) = having {
+                    let schema = aggregate_output_schema(group_exprs, aggregates)?;
+                    let ctx = ExecRowContext::new(&schema, &out_row);
+                    let substituted =
+                        substitute_aggregates(having_expr, aggregates, &out_row, group_count);
+                    match ExprEvaluator::eval(&substituted, &ctx)? {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) | Value::Null => continue,
+                        other => {
+                            return Err(ExecutionError::EvalError(format!(
+                                "HAVING predicate must evaluate to bool, got {:?}",
+                                other
+                            )));
+                        }
                     }
                 }
+                result_rows.push(out_row);
             }
+        } else {
+            for key in &group_keys_order {
+                let group_rows = groups.get(key).unwrap();
+                let key_values = group_key_values.get(key).unwrap();
 
-            result_rows.push(out_row);
+                // 计算每个聚合
+                let mut agg_values: Vec<Value> = Vec::with_capacity(agg_count);
+                for agg in aggregates {
+                    let v = compute_aggregate(agg, group_rows, &input_schema)?;
+                    agg_values.push(v);
+                }
+
+                // 构造输出行 = [group_values..., agg_values...]
+                let mut out_row = Vec::with_capacity(group_count + agg_count);
+                out_row.extend(key_values.iter().cloned());
+                out_row.extend(agg_values.iter().cloned());
+
+                // HAVING 过滤
+                if let Some(having_expr) = having {
+                    let schema = aggregate_output_schema(group_exprs, aggregates)?;
+                    let ctx = ExecRowContext::new(&schema, &out_row);
+                    let substituted =
+                        substitute_aggregates(having_expr, aggregates, &out_row, group_count);
+                    match ExprEvaluator::eval(&substituted, &ctx)? {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) | Value::Null => continue,
+                        other => {
+                            return Err(ExecutionError::EvalError(format!(
+                                "HAVING predicate must evaluate to bool, got {:?}",
+                                other
+                            )));
+                        }
+                    }
+                }
+
+                result_rows.push(out_row);
+            }
         }
 
         Ok(result_rows)

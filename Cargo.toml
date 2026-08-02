@@ -87,6 +87,9 @@ sqlparser = "0.53"
 # P0-6：Mutex 中毒修复（parking_lot 无中毒语义，避免 .unwrap() 级联 panic）
 parking_lot = "0.12"
 
+# P2-18：查询并行化（多线程并行扫描/排序/聚合）
+rayon = "1.10"
+
 # 正则表达式（用于 LIKE 模式匹配）
 regex = "1"
 

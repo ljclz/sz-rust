@@ -97,6 +97,8 @@ mod mvcc_integration_tests;
 #[cfg(test)]
 mod paged_storage_mvcc_tests;
 #[cfg(test)]
+mod parallel_exec_tests;
+#[cfg(test)]
 mod parser_tests;
 #[cfg(test)]
 mod plan_tests;
