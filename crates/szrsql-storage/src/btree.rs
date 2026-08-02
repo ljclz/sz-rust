@@ -609,6 +609,63 @@ pub fn decode_i64_key(key: &[u8]) -> Result<i64, BTreeError> {
     Ok((u ^ (1u64 << 63)) as i64)
 }
 
+/// P1-7：将 f64 编码为可比较的字节串（用于 B-Tree key）
+///
+/// 算法（IEEE 754 有序编码）：
+/// - NaN → 全 1（排最大，便于索引查找时跳过）
+/// - 负数 → 按位取反（使 -∞ < … < -0 按字典序递增）
+/// - 正数（含 +0）→ 翻转符号位（使 +0 < +∞ 按字典序递增）
+/// 最终结果：-∞ … -0.0 < +0.0 … +∞ < NaN
+pub fn encode_f64_key(v: f64) -> Vec<u8> {
+    if v.is_nan() {
+        return vec![0xFF; 8];
+    }
+    let bits = v.to_bits();
+    let encoded = if bits & (1u64 << 63) != 0 {
+        // 负数：按位取反，使字典序与数值序一致
+        !bits
+    } else {
+        // 正数（含 +0）：翻转符号位
+        bits ^ (1u64 << 63)
+    };
+    encoded.to_be_bytes().to_vec()
+}
+
+/// 将有序编码字节串解码为 f64（`encode_f64_key` 的逆操作）
+pub fn decode_f64_key(key: &[u8]) -> Result<f64, BTreeError> {
+    if key.len() != 8 {
+        return Err(BTreeError::KeyTooLarge {
+            len: key.len(),
+            max: 8,
+        });
+    }
+    let arr: [u8; 8] = key.try_into().unwrap();
+    let encoded = u64::from_be_bytes(arr);
+    if encoded == 0xFFFFFFFFFFFFFFFF {
+        return Ok(f64::NAN);
+    }
+    let bits = if encoded & (1u64 << 63) != 0 {
+        // 正数区：翻转符号位还原
+        encoded ^ (1u64 << 63)
+    } else {
+        // 负数区：按位取反还原
+        !encoded
+    };
+    Ok(f64::from_bits(bits))
+}
+
+/// P1-7：将字符串编码为可比较的字节串（用于 B-Tree key）
+///
+/// 格式：`[4 字节 big-endian len][UTF-8 bytes]`
+/// 长度前缀确保 "ab" < "abc"（无前缀歧义），UTF-8 自身字典序即 Unicode 码点序。
+pub fn encode_str_key(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut buf = Vec::with_capacity(4 + bytes.len());
+    buf.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    buf.extend_from_slice(bytes);
+    buf
+}
+
 /// 比较两个 key 字节串（字典序）
 pub fn compare_keys(a: &[u8], b: &[u8]) -> Ordering {
     a.cmp(b)

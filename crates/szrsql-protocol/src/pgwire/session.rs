@@ -3141,9 +3141,10 @@ impl ExecutorService {
         } = plan
         {
             // 1. 检查列级 PRIMARY KEY 约束（col INT PRIMARY KEY）
+            // P1-7：支持 Int64/Float64/Text，enable_btree_pk 自行校验类型
             for (idx, col) in columns.iter().enumerate() {
-                if col.primary_key && col.data_type == szrsql_types::value::ColumnType::Int64 {
-                    table.enable_btree_pk(idx);
+                if col.primary_key {
+                    table.enable_btree_pk(&[idx]);
                     tracing::debug!(
                         table = %table_name,
                         pk_column = %col.name,
@@ -3152,7 +3153,8 @@ impl ExecutorService {
                     break;
                 }
             }
-            // 2. 若列级未命中，检查表级 PRIMARY KEY 约束（PRIMARY KEY (col)）
+            // 2. 若列级未命中，检查表级 PRIMARY KEY 约束（PRIMARY KEY (col1, col2, ...)）
+            // P1-7：支持复合主键（多列）
             if !table.has_btree_pk() {
                 if let Some(TableConstraint::PrimaryKey {
                     columns: pk_cols, ..
@@ -3160,20 +3162,19 @@ impl ExecutorService {
                     .iter()
                     .find(|c| matches!(c, TableConstraint::PrimaryKey { .. }))
                 {
-                    if pk_cols.len() == 1 {
-                        if let Some(pk_col_name) = pk_cols.first() {
-                            if let Some(idx) = columns.iter().position(|c| &c.name == pk_col_name) {
-                                if columns[idx].data_type == szrsql_types::value::ColumnType::Int64
-                                {
-                                    table.enable_btree_pk(idx);
-                                    tracing::debug!(
-                                        table = %table_name,
-                                        pk_column = %pk_col_name,
-                                        "Auto-enabled B+Tree PK index (table-level constraint)"
-                                    );
-                                }
-                            }
-                        }
+                    let pk_indices: Vec<usize> = pk_cols
+                        .iter()
+                        .filter_map(|pk_col_name| {
+                            columns.iter().position(|c| &c.name == pk_col_name)
+                        })
+                        .collect();
+                    if !pk_indices.is_empty() {
+                        table.enable_btree_pk(&pk_indices);
+                        tracing::debug!(
+                            table = %table_name,
+                            pk_columns = ?pk_cols,
+                            "Auto-enabled B+Tree PK index (table-level constraint)"
+                        );
                     }
                 }
             }

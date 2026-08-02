@@ -2985,7 +2985,7 @@ fn test_p0_store_1_btree_pk_insert_and_lookup() {
     assert!(!table.has_btree_pk(), "默认未启用 B+Tree");
 
     // 启用 B+Tree 主键索引（id 列，index=0）
-    table.enable_btree_pk(0);
+    table.enable_btree_pk(&[0]);
     assert!(table.has_btree_pk(), "启用后应返回 true");
 
     // INSERT 3 行
@@ -2993,11 +2993,23 @@ fn test_p0_store_1_btree_pk_insert_and_lookup() {
     table.insert(vec![Value::Int64(20), Value::Text("bob".into())]);
     table.insert(vec![Value::Int64(30), Value::Text("carol".into())]);
 
-    // pk_lookup 验证 — BTree 被实际调用
-    assert_eq!(table.pk_lookup(10), Some(0), "id=10 → row_id=0");
-    assert_eq!(table.pk_lookup(20), Some(1), "id=20 → row_id=1");
-    assert_eq!(table.pk_lookup(30), Some(2), "id=30 → row_id=2");
-    assert_eq!(table.pk_lookup(40), None, "id=40 不存在");
+    // pk_lookup 验证 — BTree 被实际调用（P1-7：传入 &Value）
+    assert_eq!(
+        table.pk_lookup(&Value::Int64(10)),
+        Some(0),
+        "id=10 → row_id=0"
+    );
+    assert_eq!(
+        table.pk_lookup(&Value::Int64(20)),
+        Some(1),
+        "id=20 → row_id=1"
+    );
+    assert_eq!(
+        table.pk_lookup(&Value::Int64(30)),
+        Some(2),
+        "id=30 → row_id=2"
+    );
+    assert_eq!(table.pk_lookup(&Value::Int64(40)), None, "id=40 不存在");
 
     // pk_lookup 返回的 row_id 与 get_row 一致
     let row = table.get_row(1).unwrap();
@@ -3013,27 +3025,131 @@ fn test_p0_store_1_btree_pk_disabled_returns_none() {
 
     assert!(!table.has_btree_pk());
     assert_eq!(
-        table.pk_lookup(10),
+        table.pk_lookup(&Value::Int64(10)),
         None,
         "未启用 B+Tree 时 pk_lookup 返回 None"
     );
 }
 
-/// P0-STORE-1：enable_btree_pk 对非 Int64 列不启用（记录 warn）
+/// P1-7：enable_btree_pk 支持 Text 列（P0 仅支持 Int64）
 #[test]
-fn test_p0_store_1_btree_pk_rejects_non_int64() {
+fn test_p1_7_btree_pk_supports_text() {
     let mut table = InMemoryTable::with_columns(
         "users",
         vec![("name", ColumnType::Text), ("age", ColumnType::Int64)],
     );
 
-    // 尝试对 Text 列（index=0）启用 B+Tree — 应被拒绝
-    table.enable_btree_pk(0);
-    assert!(!table.has_btree_pk(), "Text 列不应启用 B+Tree");
+    // P1-7：Text 列现在支持 B+Tree 主键索引
+    table.enable_btree_pk(&[0]);
+    assert!(table.has_btree_pk(), "Text 列应启用 B+Tree (P1-7)");
 
-    // 对 Int64 列（index=1）启用 — 应成功
-    table.enable_btree_pk(1);
-    assert!(table.has_btree_pk(), "Int64 列应启用 B+Tree");
+    // 点查 Text 主键
+    table.insert(vec![Value::Text("alice".into()), Value::Int64(30)]);
+    table.insert(vec![Value::Text("bob".into()), Value::Int64(25)]);
+    assert_eq!(table.pk_lookup(&Value::Text("alice".into())), Some(0));
+    assert_eq!(table.pk_lookup(&Value::Text("bob".into())), Some(1));
+    assert_eq!(table.pk_lookup(&Value::Text("nobody".into())), None);
+}
+
+/// P1-7：enable_btree_pk 对不支持的类型（如 Bool）仍拒绝
+#[test]
+fn test_p1_7_btree_pk_rejects_unsupported_type() {
+    let mut table = InMemoryTable::with_columns(
+        "users",
+        vec![("active", ColumnType::Bool), ("name", ColumnType::Text)],
+    );
+
+    // Bool 列不支持 B+Tree 主键索引
+    table.enable_btree_pk(&[0]);
+    assert!(!table.has_btree_pk(), "Bool 列不应启用 B+Tree");
+
+    // Text 列应成功
+    table.enable_btree_pk(&[1]);
+    assert!(table.has_btree_pk(), "Text 列应启用 B+Tree");
+}
+
+/// P1-7：Float64 主键支持 B+Tree 索引
+#[test]
+fn test_p1_7_btree_pk_supports_float64() {
+    let mut table = InMemoryTable::with_columns(
+        "measurements",
+        vec![
+            ("reading", ColumnType::Float64),
+            ("sensor", ColumnType::Text),
+        ],
+    );
+
+    table.enable_btree_pk(&[0]);
+    assert!(table.has_btree_pk(), "Float64 列应启用 B+Tree (P1-7)");
+
+    table.insert(vec![Value::Float64(3.14), Value::Text("s1".into())]);
+    table.insert(vec![Value::Float64(2.71), Value::Text("s2".into())]);
+    table.insert(vec![Value::Float64(-1.5), Value::Text("s3".into())]);
+
+    assert_eq!(table.pk_lookup(&Value::Float64(3.14)), Some(0));
+    assert_eq!(table.pk_lookup(&Value::Float64(2.71)), Some(1));
+    assert_eq!(table.pk_lookup(&Value::Float64(-1.5)), Some(2));
+    assert_eq!(table.pk_lookup(&Value::Float64(9.99)), None);
+}
+
+/// P1-7：复合主键（Int64 + Text）支持 B+Tree 索引
+#[test]
+fn test_p1_7_btree_pk_composite_int_text() {
+    let mut table = InMemoryTable::with_columns(
+        "orders",
+        vec![
+            ("tenant_id", ColumnType::Int64),
+            ("order_no", ColumnType::Text),
+            ("amount", ColumnType::Int64),
+        ],
+    );
+
+    // 复合主键 (tenant_id, order_no)
+    table.enable_btree_pk(&[0, 1]);
+    assert!(table.has_btree_pk(), "复合主键应启用 B+Tree");
+    assert_eq!(table.pk_column_indices(), &[0, 1]);
+
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("A001".into()),
+        Value::Int64(100),
+    ]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("A002".into()),
+        Value::Int64(200),
+    ]);
+    table.insert(vec![
+        Value::Int64(2),
+        Value::Text("B001".into()),
+        Value::Int64(300),
+    ]);
+
+    // 复合主键不支持 pk_lookup（需全键构造，当前仅支持单列点查）
+    assert_eq!(table.pk_lookup(&Value::Int64(1)), None);
+
+    // 但全表扫描结果正确
+    let rows: Vec<Vec<Value>> = table.scan_iter().collect();
+    assert_eq!(rows.len(), 3);
+}
+
+/// P1-7：Float64 有序编码验证（负数 < 正数，NaN 最大）
+#[test]
+fn test_p1_7_float64_key_ordering() {
+    use szrsql_storage::btree::{compare_keys, encode_f64_key};
+
+    let k_neg = encode_f64_key(-1.0);
+    let k_zero = encode_f64_key(0.0);
+    let k_pos = encode_f64_key(1.0);
+    let k_nan = encode_f64_key(f64::NAN);
+
+    // -1.0 < 0.0 < 1.0 < NaN（字典序）
+    assert!(compare_keys(&k_neg, &k_zero) == std::cmp::Ordering::Less);
+    assert!(compare_keys(&k_zero, &k_pos) == std::cmp::Ordering::Less);
+    assert!(compare_keys(&k_pos, &k_nan) == std::cmp::Ordering::Less);
+
+    // 同值编码一致
+    assert_eq!(encode_f64_key(3.14), encode_f64_key(3.14));
 }
 
 /// P0-STORE-1：B+Tree 索引与 SeqScan 结果一致（数据完整性）
@@ -3044,7 +3160,7 @@ fn test_p0_store_1_btree_pk_scan_consistency() {
     let mut table_with_btree = make_pk_table("users");
     let mut table_without_btree = make_pk_table("users");
 
-    table_with_btree.enable_btree_pk(0);
+    table_with_btree.enable_btree_pk(&[0]);
 
     // 两表插入相同数据
     for (id, name) in [(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")] {
@@ -3065,15 +3181,15 @@ fn test_p0_store_1_btree_pk_scan_consistency() {
         table_without_btree.row_count()
     );
 
-    // pk_lookup 验证 BTree 确实工作
+    // pk_lookup 验证 BTree 确实工作（P1-7：传入 &Value）
     for id in 1..=5 {
         assert!(
-            table_with_btree.pk_lookup(id).is_some(),
+            table_with_btree.pk_lookup(&Value::Int64(id)).is_some(),
             "id={} 应在 BTree 中",
             id
         );
         assert!(
-            table_without_btree.pk_lookup(id).is_none(),
+            table_without_btree.pk_lookup(&Value::Int64(id)).is_none(),
             "未启用 BTree 应返回 None"
         );
     }

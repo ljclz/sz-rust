@@ -122,12 +122,9 @@ fn rebuild_pk_index_if_needed(table: &mut InMemoryTable) {
         .filter(|(_, c)| c.primary_key)
         .map(|(i, _)| i)
         .collect();
-    if pk_cols.len() == 1 {
-        let col_idx = pk_cols[0];
-        let col = &table.schema().columns[col_idx];
-        if col.data_type == szrsql_types::value::ColumnType::Int64 {
-            table.enable_btree_pk(col_idx);
-        }
+    if !pk_cols.is_empty() {
+        // P1-7：enable_btree_pk 自行校验类型（Int64/Float64/Text），不支持的类型会打印 warning 并忽略
+        table.enable_btree_pk(&pk_cols);
     }
 }
 

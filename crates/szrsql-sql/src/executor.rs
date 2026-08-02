@@ -869,11 +869,12 @@ pub fn resolve_sequences_in_plan(
 ///
 /// 描述主键列的等值或范围访问条件，用于 B+Tree 索引优化。
 #[derive(Debug, Clone)]
+/// P1-7：主键访问模式（支持 Int64 / Float64 / Text）
 enum PkAccess {
     /// 等值查询：`pk = literal`
-    Point(i64),
+    Point(Value),
     /// 范围查询：`pk >= low AND pk < high`
-    Range(i64, i64),
+    Range(Value, Value),
 }
 
 /// 表存储抽象 — 上层执行器通过此 trait 访问表数据
@@ -918,19 +919,20 @@ pub trait TableStorage: Sync {
         None
     }
 
-    /// P0-STORE 阶段 1：通过主键值快速点查完整行（O(log n)）
+    /// P1-7：通过主键值快速点查完整行（O(log n)）
     ///
     /// 默认实现返回 `None`（未启用 B+Tree），调用方应退化为全表扫描 + 过滤。
     /// 支持 B+Tree 主键索引的存储后端（如 `InMemoryTable`）覆盖此方法。
-    fn pk_point_lookup(&self, _key: i64) -> Option<Row> {
+    /// `key` 类型须与主键列类型一致（Int64 / Float64 / Text）。
+    fn pk_point_lookup(&self, _key: &Value) -> Option<Row> {
         None
     }
 
-    /// P0-STORE 阶段 1：通过主键值范围查询多行（O(log n + k)）
+    /// P1-7：通过主键值范围查询多行（O(log n + k)）
     ///
     /// 返回主键值在 [low, high) 范围内的所有行（升序）。
     /// 默认实现返回 `None`（未启用 B+Tree），调用方应退化为全表扫描 + 过滤。
-    fn pk_range_lookup(&self, _low: i64, _high: i64) -> Option<Vec<Row>> {
+    fn pk_range_lookup(&self, _low: &Value, _high: &Value) -> Option<Vec<Row>> {
         None
     }
 }
@@ -1000,6 +1002,65 @@ fn decode_tuple_id_key(key: &[u8]) -> u32 {
     }
 }
 
+/// P1-7：根据 ColumnType 将 Value 编码为 B+Tree 可比较键字节
+///
+/// 返回 None 表示类型不匹配（如期望 Int64 但实际为 Text）。
+fn encode_pk_value(val: &Value, col_type: &szrsql_types::value::ColumnType) -> Option<Vec<u8>> {
+    match col_type {
+        szrsql_types::value::ColumnType::Int64 => match val {
+            Value::Int64(v) => Some(szrsql_storage::btree::encode_i64_key(*v)),
+            _ => None,
+        },
+        szrsql_types::value::ColumnType::Float64 => match val {
+            Value::Float64(v) => Some(szrsql_storage::btree::encode_f64_key(*v)),
+            _ => None,
+        },
+        szrsql_types::value::ColumnType::Text => match val {
+            Value::Text(s) => Some(szrsql_storage::btree::encode_str_key(s)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// P1-7：f64 向指定方向移动到下一个可表示值（`next_after` 的手动实现）
+///
+/// `direction` > 0.0 时向 +∞ 移动，< 0.0 时向 -∞ 移动。
+/// 用于 Rust 版本早于 1.82（`f64::next_after` 尚未稳定）时的兼容实现。
+fn f64_next_after(f: f64, direction: f64) -> f64 {
+    if f.is_nan() {
+        return f;
+    }
+    let bits = f.to_bits();
+    let next_bits = if (direction > 0.0 && f >= 0.0) || (direction < 0.0 && f < 0.0) {
+        bits.wrapping_add(1)
+    } else {
+        bits.wrapping_sub(1)
+    };
+    f64::from_bits(next_bits)
+}
+
+/// P1-7：将 Value 字面量编码为 PK 索引键（用于点查/范围查询）
+///
+/// 若 `expected_type` 为 None 则根据 Value 自身类型推断编码方式。
+fn encode_pk_lookup_key(
+    val: &Value,
+    expected_type: Option<&szrsql_types::value::ColumnType>,
+) -> Option<Vec<u8>> {
+    match expected_type {
+        Some(t) => encode_pk_value(val, t),
+        None => {
+            // 无类型信息时按 Value 变体推断
+            match val {
+                Value::Int64(v) => Some(szrsql_storage::btree::encode_i64_key(*v)),
+                Value::Float64(v) => Some(szrsql_storage::btree::encode_f64_key(*v)),
+                Value::Text(s) => Some(szrsql_storage::btree::encode_str_key(s)),
+                _ => None,
+            }
+        }
+    }
+}
+
 /// 简单内存表 — 用于功能测试
 ///
 /// 所有行存储在 B+Tree 叶节点中（由 BufferPool 管理页面），row_id 即为插入时的 tuple_id。
@@ -1034,8 +1095,16 @@ pub struct InMemoryTable {
     row_cache: std::collections::HashMap<u32, Row>,
     /// P0-4：行缓存上限（默认 10_000）
     row_cache_max: usize,
-    /// P0-4：主键列在 schema 中的索引位置（pk_index 启用时有效）
+    /// P0-4 / P1-7：主键列在 schema 中的索引位置（pk_index 启用时有效）
+    ///
+    /// P1-7 前仅支持单列 Int64 主键（`pk_column_idx`）；
+    /// P1-7 后支持多列复合主键（`pk_column_indices`），`pk_column_idx` 保留为
+    /// 单列兼容视图（`pk_column_indices.first()`）。
     pk_column_idx: Option<usize>,
+    /// P1-7：主键列索引列表（支持复合主键，单列时与 `pk_column_idx` 一致）
+    pk_column_indices: Vec<usize>,
+    /// P1-7：主键各列的类型（与 `pk_column_indices` 等长）
+    pk_types: Vec<szrsql_types::value::ColumnType>,
     /// P0-STORE-2：可选的 BufferPool 持久化后端
     persistence: Option<std::sync::Arc<szrsql_storage::buffer::BufferPool>>,
     /// P1-1：分页存储主路径
@@ -1162,6 +1231,8 @@ impl InMemoryTable {
             row_cache: std::collections::HashMap::new(),
             row_cache_max: 10_000,
             pk_column_idx: None,
+            pk_column_indices: Vec::new(),
+            pk_types: Vec::new(),
             persistence: None,
             paged_storage: None,
             spill_threshold: 100_000,
@@ -1263,62 +1334,121 @@ impl InMemoryTable {
     ///
     /// **限制**：
     /// - 仅支持 Int64 类型主键（其他类型记录 warn 并不启用）
-    pub fn enable_btree_pk(&mut self, column_idx: usize) {
-        if column_idx >= self.schema.columns.len() {
-            tracing::warn!(
-                column_idx,
-                "enable_btree_pk: column_idx out of range, ignored"
-            );
+    /// P1-7：启用 B+Tree 主键索引（支持 Int64 / Float64 / Text / 复合主键）
+    ///
+    /// **参数**：`column_indices` — 主键列在 schema 中的索引列表。
+    /// - 单列主键：传 `&[col_idx]`
+    /// - 复合主键：传 `&[col_idx_1, col_idx_2, ...]`，按列顺序拼接编码
+    ///
+    /// **支持的列类型**：Int64（符号翻转大端）、Float64（IEEE 754 有序编码）、Text（长度前缀 UTF-8）。
+    /// 遇到不支持的类型时打印 warning 并忽略（不启用索引）。
+    ///
+    /// **流程**：
+    /// 1. 校验所有列索引在范围内且类型受支持
+    /// 2. 创建二级 B+Tree PK 索引
+    /// 3. 遍历主 B+Tree 所有活跃行，按类型编码主键值并回填索引
+    /// 4. 复合主键：各列编码结果按顺序拼接为复合 key
+    pub fn enable_btree_pk(&mut self, column_indices: &[usize]) {
+        if column_indices.is_empty() {
+            tracing::warn!("enable_btree_pk: empty column_indices, ignored");
             return;
         }
-        let col = &self.schema.columns[column_idx];
-        if col.data_type != szrsql_types::value::ColumnType::Int64 {
-            tracing::warn!(column_idx, data_type = ?col.data_type, "enable_btree_pk: only Int64 supported, ignored");
-            return;
+        // 校验所有列索引在范围内且类型受支持
+        let mut pk_types: Vec<szrsql_types::value::ColumnType> =
+            Vec::with_capacity(column_indices.len());
+        for &col_idx in column_indices {
+            if col_idx >= self.schema.columns.len() {
+                tracing::warn!(col_idx, "enable_btree_pk: column_idx out of range, ignored");
+                return;
+            }
+            let col = &self.schema.columns[col_idx];
+            let t = &col.data_type;
+            match t {
+                szrsql_types::value::ColumnType::Int64
+                | szrsql_types::value::ColumnType::Float64
+                | szrsql_types::value::ColumnType::Text => {
+                    pk_types.push(t.clone());
+                }
+                _ => {
+                    tracing::warn!(
+                        col_idx, data_type = ?t,
+                        "enable_btree_pk: unsupported PK type (supported: Int64, Float64, Text), ignored"
+                    );
+                    return;
+                }
+            }
         }
+
         // 创建二级 PK 索引并回填已有数据
         let mut btree = szrsql_storage::btree::BTree::with_default_order();
         let mut backfilled = 0usize;
         let mut skipped_deleted = 0usize;
-        let mut skipped_non_int64 = 0usize;
+        let mut skipped_type = 0usize;
         // 遍历 B+Tree 主存储的所有活跃行
         for (tuple_id, row) in self.scan_with_ids() {
             if self.deleted.contains(&(tuple_id as u32)) {
                 skipped_deleted += 1;
                 continue;
             }
-            match row.get(column_idx) {
-                Some(Value::Int64(v)) => {
-                    let pk_bytes = szrsql_storage::btree::encode_i64_key(*v);
-                    // PK 索引值：tuple_id 编码为 8B big-endian（与主存储键格式一致）
-                    if let Err(e) = btree.insert(pk_bytes, encode_tuple_id_key(tuple_id as u32)) {
-                        tracing::warn!(tuple_id, error = ?e, "enable_btree_pk: BTree insert failed during backfill");
-                    } else {
-                        backfilled += 1;
+            // 按列顺序拼接编码（复合主键 = 各列编码串联）
+            let mut pk_bytes = Vec::new();
+            let mut ok = true;
+            for (col_idx, col_type) in column_indices.iter().zip(pk_types.iter()) {
+                let val = match row.get(*col_idx) {
+                    Some(v) => v,
+                    None => {
+                        ok = false;
+                        break;
+                    }
+                };
+                match encode_pk_value(val, col_type) {
+                    Some(bytes) => pk_bytes.extend(bytes),
+                    None => {
+                        skipped_type += 1;
+                        ok = false;
+                        break;
                     }
                 }
-                _ => {
-                    skipped_non_int64 += 1;
-                }
+            }
+            if !ok {
+                continue;
+            }
+            if let Err(e) = btree.insert(pk_bytes, encode_tuple_id_key(tuple_id as u32)) {
+                tracing::warn!(tuple_id, error = ?e, "enable_btree_pk: BTree insert failed during backfill");
+            } else {
+                backfilled += 1;
             }
         }
         self.pk_index = Some(btree);
-        self.pk_column_idx = Some(column_idx);
+        self.pk_column_indices = column_indices.to_vec();
+        self.pk_types = pk_types;
+        self.pk_column_idx = self.pk_column_indices.first().copied();
         tracing::info!(
-            column_idx,
+            indices = ?column_indices,
+            types = ?self.pk_types,
             backfilled,
             skipped_deleted,
-            skipped_non_int64,
-            "B+Tree PK index enabled (P0-4 primary storage)"
+            skipped_type,
+            "B+Tree PK index enabled (P1-7 multi-type)"
         );
     }
 
-    /// P0-4：通过主键值快速点查 tuple_id（O(log n)）
+    /// P1-7：通过主键值快速点查 tuple_id（O(log n)）
     ///
-    /// **返回**：`Some(tuple_id)` 找到；`None` 未找到或 BTree 未启用
-    pub fn pk_lookup(&self, key: i64) -> Option<usize> {
+    /// **返回**：`Some(tuple_id)` 找到；`None` 未找到、BTree 未启用或类型不匹配。
+    ///
+    /// **参数**：`key` — 主键值（Int64 / Float64 / Text），编码时参考 `pk_types`。
+    /// 若 `key` 类型与主键列类型不匹配则返回 None（而非 panic）。
+    pub fn pk_lookup(&self, key: &Value) -> Option<usize> {
         let btree = self.pk_index.as_ref()?;
-        let encoded = szrsql_storage::btree::encode_i64_key(key);
+        // 单列主键：按 pk_types[0] 编码；复合主键点查不支持（需全键匹配）
+        let encoded = if self.pk_types.len() == 1 {
+            encode_pk_lookup_key(key, self.pk_types.first())?
+        } else {
+            // 复合主键：仅当 key 是单值且类型匹配第一列时才能做部分点查
+            // 保守起见：复合主键不支持 pk_lookup（需全键，由调用方构造复合 key）
+            return None;
+        };
         match btree.search(&encoded) {
             Ok(Some(value)) => {
                 // value 是 encode_tuple_id_key(tuple_id)（4B big-endian）
@@ -1341,15 +1471,23 @@ impl InMemoryTable {
         self.pk_index.is_some()
     }
 
-    /// P0-STORE 阶段 1：获取主键列索引（若已启用 B+Tree 主键索引）
+    /// P1-7：获取主键列索引（若已启用 B+Tree 主键索引）
+    ///
+    /// 返回第一个主键列索引（兼容旧版单列语义）。
+    /// 复合主键请使用 `pk_column_indices()`。
     pub fn pk_column_idx(&self) -> Option<usize> {
         self.pk_column_idx
     }
 
-    /// P0-4：通过主键值快速点查完整行（O(log n)）
+    /// P1-7：获取所有主键列索引（单列或复合主键均适用）
+    pub fn pk_column_indices(&self) -> &[usize] {
+        &self.pk_column_indices
+    }
+
+    /// P1-7：通过主键值快速点查完整行（O(log n)）
     ///
     /// 若 B+Tree 主键索引已启用，通过二级索引定位 tuple_id，再从主 B+Tree 读取行。
-    pub fn pk_point_lookup(&self, key: i64) -> Option<Row> {
+    pub fn pk_point_lookup(&self, key: &Value) -> Option<Row> {
         let tuple_id = self.pk_lookup(key)?;
         if self.deleted.contains(&(tuple_id as u32)) {
             return None;
@@ -1357,13 +1495,17 @@ impl InMemoryTable {
         self.get_row(tuple_id)
     }
 
-    /// P0-4：通过主键值范围查询多行（O(log n + k)）
+    /// P1-7：通过主键值范围查询多行（O(log n + k)）
     ///
-    /// 返回主键值在 [low, high) 范围内的所有行（升序）。
-    pub fn pk_range_lookup(&self, low: i64, high: i64) -> Option<Vec<Row>> {
+    /// 返回主键值在 `[low, high)` 范围内的所有行（升序）。
+    /// 仅支持单列主键；复合主键返回 None。
+    pub fn pk_range_lookup(&self, low: &Value, high: &Value) -> Option<Vec<Row>> {
+        if self.pk_types.len() != 1 {
+            return None; // 复合主键不支持范围查询
+        }
         let btree = self.pk_index.as_ref()?;
-        let low_bytes = szrsql_storage::btree::encode_i64_key(low);
-        let high_bytes = szrsql_storage::btree::encode_i64_key(high);
+        let low_bytes = encode_pk_lookup_key(low, self.pk_types.first())?;
+        let high_bytes = encode_pk_lookup_key(high, self.pk_types.first())?;
         let pairs = btree
             .range_scan(
                 std::ops::Bound::Included(&low_bytes[..]),
@@ -1372,9 +1514,6 @@ impl InMemoryTable {
             .ok()?;
         let mut result = Vec::with_capacity(pairs.len());
         for (_key, value) in pairs {
-            if value.len() != 8 {
-                continue;
-            }
             let tuple_id = decode_tuple_id_key(&value) as usize;
             if self.deleted.contains(&(tuple_id as u32)) {
                 continue;
@@ -1386,15 +1525,17 @@ impl InMemoryTable {
         Some(result)
     }
 
-    /// P0-STORE-1：从行中提取主键并编码为 Vec<u8>
+    /// P1-7：从行中提取主键并编码为 Vec<u8>（支持 Int64 / Float64 / Text / 复合主键）
     fn extract_pk_bytes(&self, row: &Row) -> Option<Vec<u8>> {
-        let col_idx = self.pk_column_idx?;
-        let pk_val = row.get(col_idx)?;
-        if let Value::Int64(v) = pk_val {
-            Some(szrsql_storage::btree::encode_i64_key(*v))
-        } else {
-            None
+        if self.pk_column_indices.is_empty() {
+            return None;
         }
+        let mut pk_bytes = Vec::new();
+        for (col_idx, col_type) in self.pk_column_indices.iter().zip(self.pk_types.iter()) {
+            let val = row.get(*col_idx)?;
+            pk_bytes.extend(encode_pk_value(val, col_type)?);
+        }
+        Some(pk_bytes)
     }
 
     /// P0-4：同步更新二级 B+Tree 主键索引
@@ -2336,13 +2477,13 @@ impl TableStorage for InMemoryTable {
         InMemoryTable::pk_column_idx(self)
     }
 
-    /// P0-STORE 阶段 1：主键点查（委托给 InMemoryTable::pk_point_lookup）
-    fn pk_point_lookup(&self, key: i64) -> Option<Row> {
+    /// P1-7：主键点查（委托给 InMemoryTable::pk_point_lookup）
+    fn pk_point_lookup(&self, key: &Value) -> Option<Row> {
         InMemoryTable::pk_point_lookup(self, key)
     }
 
-    /// P0-STORE 阶段 1：主键范围查询（委托给 InMemoryTable::pk_range_lookup）
-    fn pk_range_lookup(&self, low: i64, high: i64) -> Option<Vec<Row>> {
+    /// P1-7：主键范围查询（委托给 InMemoryTable::pk_range_lookup）
+    fn pk_range_lookup(&self, low: &Value, high: &Value) -> Option<Vec<Row>> {
         InMemoryTable::pk_range_lookup(self, low, high)
     }
 }
@@ -4634,7 +4775,7 @@ impl<'a> Executor<'a> {
 
         match pk_access {
             PkAccess::Point(key) => {
-                let row = storage.pk_point_lookup(key);
+                let row = storage.pk_point_lookup(&key);
                 let mut result = Vec::new();
                 if let Some(row) = row {
                     // MVCC 可见性检查
@@ -4657,7 +4798,7 @@ impl<'a> Executor<'a> {
                 Ok(Some(result))
             }
             PkAccess::Range(low, high) => {
-                let rows = match storage.pk_range_lookup(low, high) {
+                let rows = match storage.pk_range_lookup(&low, &high) {
                     Some(r) => r,
                     None => return Ok(None),
                 };
@@ -4678,23 +4819,23 @@ impl<'a> Executor<'a> {
         }
     }
 
-    /// P0-STORE 阶段 1：从谓词中提取主键访问条件
+    /// P1-7：从谓词中提取主键访问条件（支持 Int64 / Float64 / Text）
     ///
     /// 识别 `pk = literal`、`pk > literal`、`pk BETWEEN low AND high` 等模式。
-    /// 返回 `None` 表示谓词不含可优化的主键条件。
+    /// 返回 `None` 表示谓词不含可优化的主键条件或字面量类型不受支持。
     fn extract_pk_access(&self, predicate: &Expr, pk_col_name: &str) -> Option<PkAccess> {
         match predicate {
             Expr::BinaryOp { left, op, right } => {
                 // 尝试 left = pk_col, right = literal
                 if let (Some(pk_side), Some(literal_side)) = (
                     self.expr_is_pk_column(left, pk_col_name),
-                    self.expr_as_i64_literal(right),
+                    self.expr_as_value_literal(right),
                 ) {
                     return Some(self.binary_op_to_pk_access(pk_side, op, literal_side));
                 }
                 // 尝试 left = literal, right = pk_col（操作数反转）
                 if let (Some(literal_side), Some(pk_side)) = (
-                    self.expr_as_i64_literal(left),
+                    self.expr_as_value_literal(left),
                     self.expr_is_pk_column(right, pk_col_name),
                 ) {
                     // 反转操作符：a < b 等价于 b > a
@@ -4726,9 +4867,23 @@ impl<'a> Executor<'a> {
                 negated: false,
             } => {
                 if self.expr_is_pk_column(expr, pk_col_name).is_some() {
-                    let low_val = self.expr_as_i64_literal(low)?;
-                    let high_val = self.expr_as_i64_literal(high)?;
-                    return Some(PkAccess::Range(low_val, high_val + 1));
+                    let low_val = self.expr_as_value_literal(low)?;
+                    let high_val = self.expr_as_value_literal(high)?;
+                    // BETWEEN low AND high → [low, high+1)
+                    // 对 Int64 做 +1；对 Float64 用 bit-level next_after；对 Text 用追加 0x00 字节
+                    let high_excl = match (&low_val, &high_val) {
+                        (Value::Int64(hi), Value::Int64(_)) => Value::Int64(hi.wrapping_add(1)),
+                        (Value::Float64(hi), Value::Float64(_)) => {
+                            Value::Float64(f64_next_after(*hi, 1.0))
+                        }
+                        (Value::Text(hi), Value::Text(_)) => {
+                            let mut s = hi.clone();
+                            s.push('\0'); // 追加最小字符使 hi < hi+ε
+                            Value::Text(s)
+                        }
+                        _ => return None,
+                    };
+                    return Some(PkAccess::Range(low_val, high_excl));
                 }
                 None
             }
@@ -4754,31 +4909,89 @@ impl<'a> Executor<'a> {
         }
     }
 
-    /// 尝试将表达式解析为 i64 字面量
-    fn expr_as_i64_literal(&self, expr: &Expr) -> Option<i64> {
+    /// P1-7：尝试将表达式解析为 Value 字面量（支持 Int64 / Float64 / Text）
+    fn expr_as_value_literal(&self, expr: &Expr) -> Option<Value> {
         match expr {
-            Expr::Literal(Value::Int64(n)) => Some(*n),
+            Expr::Literal(v) => match v {
+                Value::Int64(n) => Some(Value::Int64(*n)),
+                Value::Float64(n) => Some(Value::Float64(*n)),
+                Value::Text(s) => Some(Value::Text(s.clone())),
+                _ => None,
+            },
             Expr::Cast { expr, data_type } => {
-                // CAST(literal AS BIGINT) 等场景
-                if matches!(data_type, ColumnType::Int64) {
-                    self.expr_as_i64_literal(expr)
-                } else {
-                    None
+                // 仅透传同类型 CAST（如 CAST(x AS BIGINT) 当 x 已是 Int64 字面量）
+                let inner = self.expr_as_value_literal(expr)?;
+                match (data_type, &inner) {
+                    (ColumnType::Int64, Value::Int64(_)) => Some(inner),
+                    (ColumnType::Float64, Value::Float64(_)) => Some(inner),
+                    (ColumnType::Text, Value::Text(_)) => Some(inner),
+                    _ => None,
                 }
             }
             _ => None,
         }
     }
 
-    /// 将二元操作符 + 字面量转换为 PkAccess
-    fn binary_op_to_pk_access(&self, _pk_side: (), op: &BinaryOp, literal: i64) -> PkAccess {
+    /// P1-7：将二元操作符 + Value 字面量转换为 PkAccess
+    ///
+    /// 范围边界语义：Int64 用 ±1 偏移，Float64 用 bit-level next_after，Text 用追加 0x00 字节。
+    fn binary_op_to_pk_access(&self, _pk_side: (), op: &BinaryOp, literal: Value) -> PkAccess {
         match op {
             BinaryOp::Eq => PkAccess::Point(literal),
-            BinaryOp::Gt => PkAccess::Range(literal + 1, i64::MAX),
-            BinaryOp::GtEq => PkAccess::Range(literal, i64::MAX),
-            BinaryOp::Lt => PkAccess::Range(i64::MIN, literal),
-            BinaryOp::LtEq => PkAccess::Range(i64::MIN, literal + 1),
+            BinaryOp::Gt => PkAccess::Range(self.value_add_one(&literal), self.value_max(&literal)),
+            BinaryOp::GtEq => PkAccess::Range(literal.clone(), self.value_max(&literal)),
+            BinaryOp::Lt => PkAccess::Range(self.value_min(&literal), self.value_sub_one(&literal)),
+            BinaryOp::LtEq => PkAccess::Range(self.value_min(&literal), literal.clone()),
             _ => PkAccess::Point(literal), // 保守退化为点查
+        }
+    }
+
+    /// P1-7：返回该类型的最小值（用于范围查询下界）
+    fn value_min(&self, v: &Value) -> Value {
+        match v {
+            Value::Int64(_) => Value::Int64(i64::MIN),
+            Value::Float64(_) => Value::Float64(f64::NEG_INFINITY),
+            Value::Text(_) => Value::Text(String::new()),
+            _ => v.clone(),
+        }
+    }
+
+    /// P1-7：返回该类型的最大值（用于范围查询上界）
+    fn value_max(&self, v: &Value) -> Value {
+        match v {
+            Value::Int64(_) => Value::Int64(i64::MAX),
+            Value::Float64(_) => Value::Float64(f64::INFINITY),
+            Value::Text(_) => Value::Text("\u{FFFF}".repeat(64)), // 足够大的上界
+            _ => v.clone(),
+        }
+    }
+
+    /// P1-7：对 Value 做 +1（用于 `> literal` → 下界 = literal+1）
+    fn value_add_one(&self, v: &Value) -> Value {
+        match v {
+            Value::Int64(n) => Value::Int64(n.wrapping_add(1)),
+            Value::Float64(f) => Value::Float64(f64_next_after(*f, 1.0)),
+            Value::Text(s) => {
+                let mut s = s.clone();
+                s.push('\0');
+                Value::Text(s)
+            }
+            _ => v.clone(),
+        }
+    }
+
+    /// P1-7：对 Value 做 -1（用于 `< literal` → 上界 = literal-1，排他）
+    fn value_sub_one(&self, v: &Value) -> Value {
+        match v {
+            Value::Int64(n) => Value::Int64(n.wrapping_sub(1)),
+            Value::Float64(f) => Value::Float64(f64_next_after(*f, -1.0)),
+            Value::Text(s) => {
+                // 移除最后一个字符（保守近似）
+                let mut s = s.clone();
+                s.pop();
+                Value::Text(s)
+            }
+            _ => v.clone(),
         }
     }
 
