@@ -298,14 +298,14 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，基于 axum 0.8 + sz-or
 
 ### P2 — 功能增强
 
-| 方向 | 说明 |
-|------|------|
-| **Addon 热加载** | 当前 addon 为编译期注册，探索运行时动态加载（`libloading`） |
-| **OpenAPI 完善** | 自动生成完整 Swagger UI，覆盖所有 addon 路由 |
-| **GraphQL 集成** | 通过 sz-orm-graphql 提供 GraphQL 端点 |
-| **gRPC 支持** | 通过 sz-orm-grpc 提供 gRPC 服务 |
-| **多租户支持** | 在 Model 层增加 tenant_id 自动过滤 |
-| **API 版本化增强** | 支持 URL 路径版本（`/v1/`, `/v2/`）和 Header 版本 |
+| 方向 | 说明 | 状态 |
+|------|------|------|
+| **Addon 热加载** | 探索运行时动态加载（`libloading`），`sz-rust-core::runtime::hot_reload`（feature `hot-reload`） | ✅ 已实现（探索性实现，编译期注册仍为主路径） |
+| **OpenAPI 完善** | 自动扫描路由生成完整 spec，`routes_to_spec` / `spec_from_route_config` 自动识别 path 参数、派生 tag、合并中间件信息 | ✅ 已实现 |
+| **GraphQL 集成** | 通过 sz-orm-graphql 提供 GraphQL 端点，`sz-rust-core::orm::graphql` facade（feature `graphql`） | ✅ 已实现 |
+| **gRPC 支持** | 通过 sz-orm-grpc 提供 gRPC 服务，`sz-rust-core::orm::grpc` facade（feature `grpc`） | ✅ 已实现 |
+| **多租户支持** | Model 层 tenant_id 自动过滤，`sz-rust-core::multi_tenant`（TenantContext / TenantAware / TenantRepository / tenant_middleware） | ✅ 已实现 |
+| **API 版本化增强** | 支持 URL 路径版本（`/v1/`, `/v2/`）和 Header 版本 | ✅ 已实现 |
 
 ### P3 — 生态建设
 
@@ -323,7 +323,7 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，基于 axum 0.8 + sz-or
 
 | 指标 | 状态 |
 |------|------|
-| `unsafe_code` | `forbid`（全 workspace） |
+| `unsafe_code` | `deny`（全 workspace；`hot-reload` FFI 模块按模块级 `allow` 豁免，符合「unsafe 仅用于 FFI」铁律） |
 | 关键依赖版本 | axum 0.8, tower 0.5, tokio 1.40, serde 1, chrono 0.4 |
 | sz-orm 依赖 | 15 个子包全部 1.2.2，path + version 双指定 |
 | TLS | rustls（无 OpenSSL 依赖） |
