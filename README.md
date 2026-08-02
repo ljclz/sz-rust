@@ -2,7 +2,7 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v0.2.1**（2026-07-30）— 新增可观测性、分布式追踪、模糊测试、覆盖率、soak test、CI 门禁增强
+**当前版本：v0.3.0**（2026-08-02）— addons 生态（CRM/ERP/电商模板）+ RouterBuilder 泛型状态 + 10 个新 Skills + sz-orm 1.2.2
 
 ---
 
