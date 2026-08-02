@@ -54,11 +54,7 @@ pub fn encode_value(value: &szrsql_types::value::Value) -> (u8, Vec<u8>, bool) {
         Value::Blob(b) => (11, b.clone(), true),
         Value::Json(j) => (12, serde_json::to_vec(j).unwrap_or_default(), true),
         // Decimal, Array, Enum, Range, TsVector, TsQuery → JSON 序列化
-        other => (
-            255,
-            serde_json::to_vec(other).unwrap_or_default(),
-            true,
-        ),
+        other => (255, serde_json::to_vec(other).unwrap_or_default(), true),
     }
 }
 
@@ -90,9 +86,7 @@ pub fn decode_value(tag: u8, data: &[u8]) -> szrsql_types::value::Value {
             let j: serde_json::Value = serde_json::from_slice(data).unwrap_or_default();
             Value::Json(j)
         }
-        255 => {
-            serde_json::from_slice(data).unwrap_or(Value::Null)
-        }
+        255 => serde_json::from_slice(data).unwrap_or(Value::Null),
         _ => Value::Null,
     }
 }
@@ -105,9 +99,8 @@ pub fn decode_value(tag: u8, data: &[u8]) -> szrsql_types::value::Value {
 /// - var_offsets: 变长列在 var_data 中的 (offset, length)
 pub fn row_to_tuple(row: &[szrsql_types::value::Value], xmin: u32) -> TupleSlot {
     let col_count = row.len() as u16;
-    let mut tuple = TupleSlot::new(xmin, col_count).unwrap_or_else(|_| {
-        TupleSlot::new(xmin, 0).unwrap()
-    });
+    let mut tuple =
+        TupleSlot::new(xmin, col_count).unwrap_or_else(|_| TupleSlot::new(xmin, 0).unwrap());
 
     let mut fixed = Vec::with_capacity(row.len() * 9);
     for value in row {
@@ -208,6 +201,9 @@ pub enum HeapError {
 ///
 /// 每个 heap page 存储多个 TupleSlot，通过 BufferPool 管理页面缓存。
 /// row_id 编码为 `(page_index << 16) | slot_id`，支持直接定位。
+/// 版本扫描结果：row_id, 行数据, xmin, xmax
+pub type VersionedRow = (usize, Vec<szrsql_types::value::Value>, u32, u32);
+
 pub struct HeapTable {
     /// 表名
     name: String,
@@ -302,7 +298,10 @@ impl HeapTable {
     }
 
     /// 通过 row_id 读取一行
-    pub fn get_row(&self, row_id: usize) -> Result<Option<Vec<szrsql_types::value::Value>>, HeapError> {
+    pub fn get_row(
+        &self,
+        row_id: usize,
+    ) -> Result<Option<Vec<szrsql_types::value::Value>>, HeapError> {
         let page_index = row_id >> 16;
         let slot_id = (row_id & 0xFFFF) as u16;
 
@@ -383,9 +382,7 @@ impl HeapTable {
     }
 
     /// 获取所有活跃行的 xmin/xmax 版本信息（MVCC 用）
-    pub fn scan_with_versions(
-        &self,
-    ) -> Result<Vec<(usize, Vec<szrsql_types::value::Value>, u32, u32)>, HeapError> {
+    pub fn scan_with_versions(&self) -> Result<Vec<VersionedRow>, HeapError> {
         let mut results = Vec::new();
         for (page_index, &page_id) in self.page_ids.iter().enumerate() {
             let page = self.buffer_pool.read_page(page_id)?;
@@ -460,10 +457,14 @@ mod tests {
 
     #[test]
     fn row_encode_decode_float_date() {
-        let row = vec![Value::Float64(3.14), Value::Date(19000), Value::Timestamp(1_700_000_000)];
+        let row = vec![
+            Value::Float64(std::f64::consts::PI),
+            Value::Date(19000),
+            Value::Timestamp(1_700_000_000),
+        ];
         let tuple = row_to_tuple(&row, 1);
         let decoded = tuple_to_row(&tuple);
-        assert_eq!(decoded[0], Value::Float64(3.14));
+        assert_eq!(decoded[0], Value::Float64(std::f64::consts::PI));
         assert_eq!(decoded[1], Value::Date(19000));
         assert_eq!(decoded[2], Value::Timestamp(1_700_000_000));
     }
@@ -472,7 +473,11 @@ mod tests {
     fn heap_table_insert_and_get() {
         let pool = make_pool();
         let mut table = HeapTable::new("test", 3, pool);
-        let row = vec![Value::Int64(1), Value::Text("alice".into()), Value::Bool(true)];
+        let row = vec![
+            Value::Int64(1),
+            Value::Text("alice".into()),
+            Value::Bool(true),
+        ];
         let row_id = table.insert_row(&row, 1).unwrap();
         assert_eq!(table.row_count(), 1);
 

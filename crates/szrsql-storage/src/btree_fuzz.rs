@@ -15,7 +15,9 @@
 
 use crate::btree::BTree;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use std::thread;
 
 // =====================================================================
@@ -81,14 +83,14 @@ fn phase_014_fuzz_insert_1m_keys_in_order_strictly_increasing() {
         unique_keys.insert(rng.next_u64());
     }
     let keys: Vec<u64> = unique_keys.into_iter().collect();
-    let key_set: HashSet<u64> = keys.iter().copied().collect();
+    let key_set: HashSet<u64> = keys.iter().cloned().collect();
     assert_eq!(keys.len(), total);
     assert_eq!(key_set.len(), total);
 
     // 乱序插入 B-Tree
     let mut bt = BTree::with_default_order();
     for (idx, &k) in keys.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u32)
+        bt.insert(encode_u64_key(k), vec![(idx % 65536) as u8])
             .expect("insert should not fail");
     }
 
@@ -157,7 +159,7 @@ fn phase_014_fuzz_upsert_mixed_no_growth() {
     // 插入 base_count 个 key
     let mut bt = BTree::with_default_order();
     for (idx, &k) in keys.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u32)
+        bt.insert(encode_u64_key(k), vec![(idx % 65536) as u8])
             .expect("insert should not fail");
     }
     let nodes_before = bt.node_count();
@@ -165,16 +167,17 @@ fn phase_014_fuzz_upsert_mixed_no_growth() {
     assert_eq!(pairs_before.len(), base_count);
 
     // 记录每个 key 的初始 tuple_id
-    let mut expected_tid: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    let mut expected_tid: std::collections::HashMap<u64, Vec<u8>> =
+        std::collections::HashMap::new();
     for (idx, &k) in keys.iter().enumerate() {
-        expected_tid.insert(k, (idx % 65536) as u32);
+        expected_tid.insert(k, vec![(idx % 65536) as u8]);
     }
 
     // 随机 upsert：选择已存在的 key，更新 tuple_id
     for _ in 0..upsert_count {
         let k = keys[rng.next_u64_below(keys.len() as u64) as usize];
-        let new_tid = (rng.next_u64() % 65536) as u32;
-        bt.insert(encode_u64_key(k), new_tid)
+        let new_tid = vec![(rng.next_u64() % 256) as u8];
+        bt.insert(encode_u64_key(k), new_tid.clone())
             .expect("upsert should not fail");
         expected_tid.insert(k, new_tid);
     }
@@ -205,12 +208,12 @@ fn phase_014_fuzz_upsert_mixed_no_growth() {
     }
 
     // 每个 key 的 tuple_id 应为最后一次 upsert 的值
-    for (&k, &expected) in &expected_tid {
+    for (&k, expected) in &expected_tid {
         let found = bt.search(&encode_u64_key(k)).unwrap();
         assert_eq!(
             found,
-            Some(expected),
-            "key {} tuple_id mismatch: expected {}, got {:?}",
+            Some(expected.clone()),
+            "key {} tuple_id mismatch: expected {:?}, got {:?}",
             k,
             expected,
             found
@@ -236,7 +239,8 @@ fn phase_014_fuzz_multi_round_insert_invariants() {
 
     let mut bt = BTree::with_default_order();
     for (idx, &k) in keys1_vec.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u32).unwrap();
+        bt.insert(encode_u64_key(k), vec![(idx % 65536) as u8])
+            .unwrap();
     }
 
     // 验证第 1 轮
@@ -262,7 +266,8 @@ fn phase_014_fuzz_multi_round_insert_invariants() {
     let keys2_vec: Vec<u64> = keys2.into_iter().collect();
 
     for (idx, &k) in keys2_vec.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u32).unwrap();
+        bt.insert(encode_u64_key(k), vec![(idx % 65536) as u8])
+            .unwrap();
     }
 
     // 验证第 2 轮：合并后的 key 集合
@@ -333,9 +338,9 @@ fn phase_014_concurrent_8_threads_insert_1m_keys_no_loss() {
 
             let keys_vec: Vec<u64> = local_keys.into_iter().collect();
             for (idx, &k) in keys_vec.iter().enumerate() {
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 guard
-                    .insert(encode_u64_key(k), (idx % 65536) as u32)
+                    .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
                     .expect("insert should not fail");
             }
             keys_vec
@@ -358,7 +363,7 @@ fn phase_014_concurrent_8_threads_insert_1m_keys_no_loss() {
     );
 
     // 验证：所有 1M key 都应能被 search 找到（无数据丢失）
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt
         .in_order_leaf_traverse()
         .expect("traverse should not fail");
@@ -414,9 +419,9 @@ fn phase_014_concurrent_4_threads_insert_and_upsert() {
             let base = (tid as u64) * (per_thread as u64);
             let keys: Vec<u64> = (0..per_thread).map(|i| base + i as u64).collect();
             for (idx, &k) in keys.iter().enumerate() {
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 guard
-                    .insert(encode_u64_key(k), (idx % 65536) as u32)
+                    .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
                     .unwrap();
             }
             keys
@@ -430,7 +435,7 @@ fn phase_014_concurrent_4_threads_insert_and_upsert() {
 
     // 验证第 1 阶段
     {
-        let bt = bt.lock().unwrap();
+        let bt = bt.lock();
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(pairs.len(), threads * per_thread);
         for &k in &all_keys {
@@ -446,8 +451,8 @@ fn phase_014_concurrent_4_threads_insert_and_upsert() {
             let base = (tid as u64) * (per_thread as u64);
             let keys: Vec<u64> = (0..per_thread).map(|i| base + i as u64).collect();
             for &k in &keys {
-                let mut guard = bt.lock().unwrap();
-                guard.insert(encode_u64_key(k), 65535).unwrap();
+                let mut guard = bt.lock();
+                guard.insert(encode_u64_key(k), vec![255u8]).unwrap();
             }
         }));
     }
@@ -457,7 +462,7 @@ fn phase_014_concurrent_4_threads_insert_and_upsert() {
 
     // 验证第 2 阶段：key 数量不变，tuple_id 全部更新为 65535
     {
-        let bt = bt.lock().unwrap();
+        let bt = bt.lock();
         let pairs = bt.in_order_leaf_traverse().unwrap();
         assert_eq!(
             pairs.len(),
@@ -467,7 +472,7 @@ fn phase_014_concurrent_4_threads_insert_and_upsert() {
         for &k in &all_keys {
             assert_eq!(
                 bt.search(&encode_u64_key(k)).unwrap(),
-                Some(65535),
+                Some(vec![255u8]),
                 "key {} tuple_id not updated",
                 k
             );
@@ -491,9 +496,9 @@ fn phase_014_concurrent_8_threads_small_order_frequent_splits() {
             let base = (tid as u64) * (per_thread as u64);
             let keys: Vec<u64> = (0..per_thread).map(|i| base + i as u64).collect();
             for (idx, &k) in keys.iter().enumerate() {
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 guard
-                    .insert(encode_u64_key(k), (idx % 65536) as u32)
+                    .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
                     .unwrap();
             }
         }));
@@ -503,7 +508,7 @@ fn phase_014_concurrent_8_threads_small_order_frequent_splits() {
     }
 
     // 验证
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt.in_order_leaf_traverse().unwrap();
     assert_eq!(pairs.len(), threads * per_thread);
 
@@ -580,7 +585,7 @@ fn phase_016_fuzz_point_lookup_vs_btreemap() {
 
     let mut rng = XorShift64::new(0x0160_1601_6016_0160);
     let mut bt = BTree::with_default_order();
-    let mut reference: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut reference: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
     let mut inserted_keys: Vec<Vec<u8>> = Vec::with_capacity(N);
     // 用 HashSet 做 O(1) 去重判断，避免 O(N) 线性查找导致 O(N²) 总复杂度
     let mut inserted_set: HashSet<Vec<u8>> = HashSet::with_capacity(N);
@@ -595,10 +600,10 @@ fn phase_016_fuzz_point_lookup_vs_btreemap() {
             _ => i64::MIN + (rng.next_u64() as i64).abs() / 2, // 接近 MIN
         };
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = (i % 65536) as u32;
+        let tuple_id = vec![(i % 65536) as u8];
 
         // upsert 语义：若 key 已存在则更新
-        bt.insert(key_bytes.clone(), tuple_id).unwrap();
+        bt.insert(key_bytes.clone(), tuple_id.clone()).unwrap();
         reference.insert(key_bytes.clone(), tuple_id);
 
         // 记录已插入 key（用于生成命中查询）
@@ -632,7 +637,7 @@ fn phase_016_fuzz_point_lookup_vs_btreemap() {
     let mut mismatch_count = 0usize;
     for (i, qkey) in query_keys.iter().enumerate() {
         let bt_result = bt.search(qkey).unwrap();
-        let ref_result = reference.get(qkey).copied();
+        let ref_result = reference.get(qkey).cloned();
         if bt_result != ref_result {
             mismatch_count += 1;
             if mismatch_count <= 5 {
@@ -681,7 +686,7 @@ fn phase_016_fuzz_range_scan_vs_btreemap() {
 
     let mut rng = XorShift64::new(0x0160_1602_6016_0160);
     let mut bt = BTree::with_default_order();
-    let mut reference: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut reference: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
 
     // 1. 插入 N 个随机 i64 key
     for i in 0..N {
@@ -692,8 +697,8 @@ fn phase_016_fuzz_range_scan_vs_btreemap() {
             _ => i64::MIN + (rng.next_u64() as i64).abs() / 4,
         };
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = (i % 65536) as u32;
-        bt.insert(key_bytes.clone(), tuple_id).unwrap();
+        let tuple_id = vec![(i % 65536) as u8];
+        bt.insert(key_bytes.clone(), tuple_id.clone()).unwrap();
         reference.insert(key_bytes, tuple_id);
     }
 
@@ -705,7 +710,7 @@ fn phase_016_fuzz_range_scan_vs_btreemap() {
         let upper = gen_random_bound(&mut rng, 0..5_000);
 
         // BTree 范围扫描（物化一次，作为真值侧——BTree 是被测对象）
-        let bt_result: Vec<(Vec<u8>, u32)> = bt
+        let bt_result: Vec<(Vec<u8>, Vec<u8>)> = bt
             .range_scan(bound_vec_to_ref(&lower), bound_vec_to_ref(&upper))
             .unwrap();
 
@@ -811,7 +816,7 @@ fn phase_016_fuzz_mixed_i64_keys_point_lookup() {
 
     let mut rng = XorShift64::new(0x0160_1603_6016_0160);
     let mut bt = BTree::with_default_order();
-    let mut reference: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut reference: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
 
     // 生成混合 key 集合
     let special_keys: Vec<i64> = vec![
@@ -840,8 +845,8 @@ fn phase_016_fuzz_mixed_i64_keys_point_lookup() {
             }
         };
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = i as u32;
-        bt.insert(key_bytes.clone(), tuple_id).unwrap();
+        let tuple_id = vec![i as u8];
+        bt.insert(key_bytes.clone(), tuple_id.clone()).unwrap();
         reference.insert(key_bytes, tuple_id);
     }
 
@@ -859,7 +864,7 @@ fn phase_016_fuzz_mixed_i64_keys_point_lookup() {
         };
         let query_bytes = encode_i64_key(query_i64);
         let bt_result = bt.search(&query_bytes).unwrap();
-        let ref_result = reference.get(&query_bytes).copied();
+        let ref_result = reference.get(&query_bytes).cloned();
         if bt_result != ref_result {
             mismatch_count += 1;
             if mismatch_count <= 5 {
@@ -907,14 +912,14 @@ fn phase_016_fuzz_range_scan_with_limit_vs_reference() {
 
     let mut rng = XorShift64::new(0x0160_1604_6016_0160);
     let mut bt = BTree::with_default_order();
-    let mut reference: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut reference: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
 
     // 1. 插入 N 个随机 key
     for i in 0..N {
         let key_i64 = (rng.next_u64() as i64).rem_euclid(100_000);
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = i as u32;
-        bt.insert(key_bytes.clone(), tuple_id).unwrap();
+        let tuple_id = vec![i as u8];
+        bt.insert(key_bytes.clone(), tuple_id.clone()).unwrap();
         reference.insert(key_bytes, tuple_id);
     }
 
@@ -936,14 +941,14 @@ fn phase_016_fuzz_range_scan_with_limit_vs_reference() {
 
         // 参考实现：全扫描后取前 limit 个
         // 注意：BTreeMap::range 在 lower > upper 时会 panic，需用 catch_unwind
-        let ref_full: Vec<(Vec<u8>, u32)> = std::panic::catch_unwind(|| {
+        let ref_full: Vec<(Vec<u8>, Vec<u8>)> = std::panic::catch_unwind(|| {
             reference
                 .range::<[u8], _>((bound_vec_to_ref(&lower), bound_vec_to_ref(&upper)))
-                .map(|(k, v)| (k.clone(), *v))
+                .map(|(k, v)| (k.clone(), v.clone()))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default(); // panic 时视为空结果（与 BTree 行为一致）
-        let ref_result: Vec<(Vec<u8>, u32)> = ref_full.into_iter().take(limit).collect();
+        let ref_result: Vec<(Vec<u8>, Vec<u8>)> = ref_full.into_iter().take(limit).collect();
 
         if bt_result != ref_result {
             mismatch_count += 1;
@@ -1018,15 +1023,17 @@ fn phase_018_concurrent_10_threads_mixed_insert_delete_10k_ops_each() {
                     let k =
                         candidate_keys[rng.next_u64_below(candidate_keys.len() as u64) as usize];
                     let tuple_id = ((op_idx + tid * 100) % 65536) as u32;
-                    let mut guard = bt.lock().unwrap();
-                    guard.insert(encode_u64_key(k), tuple_id).unwrap();
+                    let mut guard = bt.lock();
+                    guard
+                        .insert(encode_u64_key(k), vec![tuple_id as u8])
+                        .unwrap();
                     drop(guard);
                     live_keys.insert(k);
                 } else {
                     // 从 live_keys 随机选一个删除
-                    let live_vec: Vec<u64> = live_keys.iter().copied().collect();
+                    let live_vec: Vec<u64> = live_keys.iter().cloned().collect();
                     let k = live_vec[rng.next_u64_below(live_vec.len() as u64) as usize];
-                    let mut guard = bt.lock().unwrap();
+                    let mut guard = bt.lock();
                     let deleted = guard.delete(&encode_u64_key(k)).unwrap();
                     drop(guard);
                     assert!(
@@ -1055,7 +1062,7 @@ fn phase_018_concurrent_10_threads_mixed_insert_delete_10k_ops_each() {
     }
 
     // 验证：BTree 内容 == 汇总的存活 key 集合
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt.in_order_leaf_traverse().unwrap();
     assert_eq!(
         pairs.len(),
@@ -1119,18 +1126,18 @@ fn phase_018_single_key_repeated_insert_delete_100k() {
     let iterations = 100_000usize;
 
     for i in 0..iterations {
-        let tuple_id = (i % 65536) as u32;
+        let tuple_id = vec![(i % 65536) as u8];
 
         // 1. 插入
-        bt.insert(key_bytes.clone(), tuple_id)
+        bt.insert(key_bytes.clone(), tuple_id.clone())
             .expect("insert should not fail");
 
         // 2. 立即 search → 应命中且 tuple_id 为最新值
         let found = bt.search(&key_bytes).unwrap();
         assert_eq!(
             found,
-            Some(tuple_id),
-            "after insert at iter {}, search should return Some({}), got {:?}",
+            Some(tuple_id.clone()),
+            "after insert at iter {}, search should return Some({:?}), got {:?}",
             i,
             tuple_id,
             found
@@ -1196,7 +1203,7 @@ fn phase_018_fuzz_mixed_ops_vs_btreemap_reference() {
 
     let mut rng = XorShift64::new(0x0180_1801_6018_0180);
     let mut bt = BTree::new(16); // 较小 order 触发更频繁的分裂/合并
-    let mut reference: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
+    let mut reference: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
     let mut live_keys: HashSet<Vec<u8>> = HashSet::new();
 
     let mut mismatch_count = 0usize;
@@ -1205,13 +1212,13 @@ fn phase_018_fuzz_mixed_ops_vs_btreemap_reference() {
         // 从有界值域随机选 key
         let key_i64 = (rng.next_u64() as i64).rem_euclid(KEY_RANGE);
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = (op_idx % 65536) as u32;
+        let tuple_id = vec![(op_idx % 65536) as u8];
 
         // 50% insert / 50% delete
         let do_insert = rng.next_u64_below(2) == 0;
 
         if do_insert {
-            bt.insert(key_bytes.clone(), tuple_id).unwrap();
+            bt.insert(key_bytes.clone(), tuple_id.clone()).unwrap();
             reference.insert(key_bytes.clone(), tuple_id);
             live_keys.insert(key_bytes.clone());
         } else {
@@ -1241,7 +1248,7 @@ fn phase_018_fuzz_mixed_ops_vs_btreemap_reference() {
         // 每 10K 次操作抽样验证 search 行为一致
         if op_idx % 10_000 == 0 && op_idx > 0 {
             let bt_search = bt.search(&key_bytes).unwrap();
-            let ref_search = reference.get(&key_bytes).copied();
+            let ref_search = reference.get(&key_bytes).cloned();
             if bt_search != ref_search {
                 mismatch_count += 1;
                 if mismatch_count <= 5 {
@@ -1262,7 +1269,10 @@ fn phase_018_fuzz_mixed_ops_vs_btreemap_reference() {
 
     // 最终一致性：BTree 中序遍历 == BTreeMap 迭代 == live_keys
     let bt_pairs = bt.in_order_leaf_traverse().unwrap();
-    let ref_pairs: Vec<(Vec<u8>, u32)> = reference.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let ref_pairs: Vec<(Vec<u8>, Vec<u8>)> = reference
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
 
     assert_eq!(
         bt_pairs.len(),
@@ -1288,7 +1298,7 @@ fn phase_018_fuzz_mixed_ops_vs_btreemap_reference() {
         );
         assert_eq!(
             bt_item.1, ref_item.1,
-            "tuple_id mismatch at [{}] (key {:?}): bt={}, ref={}",
+            "tuple_id mismatch at [{}] (key {:?}): bt={:?}, ref={:?}",
             i, bt_item.0, bt_item.1, ref_item.1
         );
     }
@@ -1339,7 +1349,7 @@ fn phase_018_multi_round_insert_delete_reinsert_cycle() {
             // 随机生成 key（可能与已存活 key 重叠 → 走 upsert 路径）
             let k = rng.next_u64();
             let tuple_id = ((round * INSERT_N + i) % 65536) as u32;
-            bt.insert(encode_u64_key(k), tuple_id).unwrap();
+            bt.insert(encode_u64_key(k), vec![tuple_id as u8]).unwrap();
             if live_keys.insert(k) {
                 inserted_this_round.push(k);
             }
@@ -1374,7 +1384,7 @@ fn phase_018_multi_round_insert_delete_reinsert_cycle() {
         }
 
         // === 阶段 2：删除 DELETE_N 个 key ===
-        let live_vec: Vec<u64> = live_keys.iter().copied().collect();
+        let live_vec: Vec<u64> = live_keys.iter().cloned().collect();
         let mut deleted_this_round: Vec<u64> = Vec::with_capacity(DELETE_N);
         for _ in 0..DELETE_N.min(live_vec.len()) {
             let idx = rng.next_u64_below(live_vec.len() as u64) as usize;
@@ -1431,7 +1441,7 @@ fn phase_018_multi_round_insert_delete_reinsert_cycle() {
                 rng.next_u64()
             };
             let tuple_id = ((round * INSERT_N + i + 500) % 65536) as u32;
-            bt.insert(encode_u64_key(k), tuple_id).unwrap();
+            bt.insert(encode_u64_key(k), vec![tuple_id as u8]).unwrap();
             live_keys.insert(k);
         }
 
@@ -1506,7 +1516,8 @@ fn phase_018_multi_round_full_insert_delete_no_space_leak() {
         }
         let keys_vec: Vec<u64> = keys.into_iter().collect();
         for (i, &k) in keys_vec.iter().enumerate() {
-            bt.insert(encode_u64_key(k), (i % 65536) as u32).unwrap();
+            bt.insert(encode_u64_key(k), vec![(i % 65536) as u8])
+                .unwrap();
         }
 
         // 验证插入后非空
@@ -1593,7 +1604,7 @@ fn phase_018_interleaved_insert_delete_invariants_maintained() {
     for i in 0..INITIAL_N {
         let key_i64 = (i as i64) % KEY_RANGE; // 部分重叠，触发 upsert
         let key_bytes = encode_i64_key(key_i64);
-        let tuple_id = (i % 65536) as u32;
+        let tuple_id = vec![(i % 65536) as u8];
         bt.insert(key_bytes.clone(), tuple_id).unwrap();
         live_keys.insert(key_bytes);
     }
@@ -1625,7 +1636,7 @@ fn phase_018_interleaved_insert_delete_invariants_maintained() {
         let do_insert = rng.next_u64_below(2) == 0;
 
         if do_insert {
-            let tuple_id = (op_idx % 65536) as u32;
+            let tuple_id = vec![(op_idx % 65536) as u8];
             bt.insert(key_bytes.clone(), tuple_id).unwrap();
             live_keys.insert(key_bytes);
         } else {
@@ -1775,7 +1786,7 @@ fn m1_fuzz_large_random_ops_no_crash() {
         match op_kind {
             0..=2 => {
                 // insert (30%)
-                let tuple_id = (op_idx % 65536) as u32;
+                let tuple_id = vec![(op_idx % 65536) as u8];
                 bt.insert(key_bytes.clone(), tuple_id).expect("insert");
                 live_keys.insert(key_bytes);
             }

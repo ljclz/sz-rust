@@ -26,7 +26,9 @@
 
 use crate::btree::{BTree, BTreeError, BTREE_DEFAULT_ORDER};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use std::thread;
 
 // =====================================================================
@@ -106,9 +108,9 @@ fn defect_01_concurrent_split_no_data_loss_basic() {
 
             let keys_vec: Vec<u64> = local_keys.into_iter().collect();
             for (idx, &k) in keys_vec.iter().enumerate() {
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 guard
-                    .insert(encode_u64_key(k), (idx % 65536) as u32)
+                    .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
                     .expect("insert should not fail");
             }
             keys_vec
@@ -126,7 +128,7 @@ fn defect_01_concurrent_split_no_data_loss_basic() {
     assert_eq!(all_keys.len(), threads * per_thread);
 
     // 验证：所有 key 都能被 search 到（无数据丢失）
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     assert_eq!(pairs.len(), threads * per_thread, "data loss detected");
 
@@ -170,9 +172,9 @@ fn defect_01_concurrent_split_no_data_loss_minimal_order() {
             }
             let keys_vec: Vec<u64> = local_keys.into_iter().collect();
             for (idx, &k) in keys_vec.iter().enumerate() {
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 guard
-                    .insert(encode_u64_key(k), (idx % 65536) as u32)
+                    .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
                     .expect("insert");
             }
             keys_vec
@@ -187,7 +189,7 @@ fn defect_01_concurrent_split_no_data_loss_minimal_order() {
     }
     assert_eq!(all_keys.len(), threads * per_thread);
 
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     assert_eq!(pairs.len(), threads * per_thread, "data loss at order=3");
     assert!(bt.validate_all_nodes().is_ok(), "invalid at order=3");
@@ -215,23 +217,23 @@ fn defect_02_null_key_index_consistency_basic() {
     let mut bt = BTree::with_default_order();
 
     // 插入空 key
-    bt.insert(Vec::new(), 42).expect("insert empty key");
+    bt.insert(Vec::new(), vec![42u8]).expect("insert empty key");
     // 搜索空 key 应找到 tuple_id=42
     assert_eq!(
         bt.search(&[]).expect("search"),
-        Some(42),
+        Some(vec![42u8]),
         "empty key not found"
     );
 
     // 插入非空 key 混合
     for v in 1..=100i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("insert");
+        bt.insert(encode_i64_key(v), vec![v as u8]).expect("insert");
     }
 
     // 空 key 仍应可搜索
     assert_eq!(
         bt.search(&[]).expect("search"),
-        Some(42),
+        Some(vec![42u8]),
         "empty key lost after mixed insert"
     );
 
@@ -246,7 +248,7 @@ fn defect_02_null_key_index_consistency_basic() {
         pairs[0].0.is_empty(),
         "first key should be empty (lexicographically smallest)"
     );
-    assert_eq!(pairs[0].1, 42, "empty key tuple_id mismatch");
+    assert_eq!(pairs[0].1, vec![42u8], "empty key tuple_id mismatch");
 
     // 严格递增（空 key < 任何非空 key）
     for i in 1..pairs.len() {
@@ -286,23 +288,24 @@ fn defect_02_null_key_index_consistency_upsert_and_split() {
 
     // 多次插入空 key（upsert 语义：应只保留最后一个 tuple_id）
     for tid in 1..=10u32 {
-        bt.insert(Vec::new(), tid).expect("insert empty key");
+        bt.insert(Vec::new(), vec![tid as u8])
+            .expect("insert empty key");
     }
     assert_eq!(
         bt.search(&[]).expect("search"),
-        Some(10),
+        Some(vec![10u8]),
         "empty key upsert failed"
     );
 
     // 插入大量非空 key 触发分裂
     for v in 1..=200i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("insert");
+        bt.insert(encode_i64_key(v), vec![v as u8]).expect("insert");
     }
 
     // 空 key 仍应是 tuple_id=10
     assert_eq!(
         bt.search(&[]).expect("search"),
-        Some(10),
+        Some(vec![10u8]),
         "empty key tuple_id changed after split"
     );
 
@@ -310,7 +313,11 @@ fn defect_02_null_key_index_consistency_upsert_and_split() {
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     assert_eq!(pairs.len(), 201, "expected 201 keys");
     assert!(pairs[0].0.is_empty(), "first key should be empty");
-    assert_eq!(pairs[0].1, 10, "empty key tuple_id mismatch after split");
+    assert_eq!(
+        pairs[0].1,
+        vec![10u8],
+        "empty key tuple_id mismatch after split"
+    );
 
     // 严格递增
     for i in 1..pairs.len() {
@@ -340,13 +347,13 @@ fn defect_03_unique_index_duplication_basic() {
 
     // 串行插入同一 key 100 次，每次不同 tuple_id
     for tid in 1..=100u32 {
-        bt.insert(key.clone(), tid).expect("insert");
+        bt.insert(key.clone(), vec![tid as u8]).expect("insert");
     }
 
     // search 应返回最后一个 tuple_id
     assert_eq!(
         bt.search(&key).expect("search"),
-        Some(100),
+        Some(vec![100u8]),
         "tuple_id not updated"
     );
 
@@ -354,16 +361,16 @@ fn defect_03_unique_index_duplication_basic() {
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     assert_eq!(pairs.len(), 1, "duplicate key detected: {}", pairs.len());
     assert_eq!(pairs[0].0, key);
-    assert_eq!(pairs[0].1, 100);
+    assert_eq!(pairs[0].1, vec![100u8]);
 
     // 混合插入其他 key 后再 upsert 原 key
     for v in 1..=50i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("insert");
+        bt.insert(encode_i64_key(v), vec![v as u8]).expect("insert");
     }
-    bt.insert(key.clone(), 999).expect("upsert");
+    bt.insert(key.clone(), vec![231u8]).expect("upsert");
     assert_eq!(
         bt.search(&key).expect("search"),
-        Some(999),
+        Some(vec![231u8]),
         "upsert after mixed insert failed"
     );
 
@@ -390,8 +397,10 @@ fn defect_03_unique_index_duplication_concurrent_upsert() {
         handles.push(thread::spawn(move || {
             for i in 0..per_thread {
                 let tuple_id = ((tid * per_thread + i) % 65536) as u32;
-                let mut guard = bt.lock().unwrap();
-                guard.insert(key_clone.clone(), tuple_id).expect("insert");
+                let mut guard = bt.lock();
+                guard
+                    .insert(key_clone.clone(), vec![tuple_id as u8])
+                    .expect("insert");
             }
         }));
     }
@@ -400,7 +409,7 @@ fn defect_03_unique_index_duplication_concurrent_upsert() {
     }
 
     // 验证：中序遍历应只有 1 个条目（key, 最后写入的 tuple_id）
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     assert_eq!(
         pairs.len(),
@@ -433,7 +442,7 @@ fn defect_04_stale_separator_search_basic() {
 
     // 插入 1..=200，触发多次分裂，产生多层 internal 节点
     for v in 1..=200i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("insert");
+        bt.insert(encode_i64_key(v), vec![v as u8]).expect("insert");
     }
     assert!(
         bt.height() >= 2,
@@ -481,7 +490,7 @@ fn defect_04_stale_separator_search_all_deleted() {
 
     // 插入 1..=100
     for v in 1..=100i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("insert");
+        bt.insert(encode_i64_key(v), vec![v as u8]).expect("insert");
     }
 
     // 删除全部
@@ -494,7 +503,7 @@ fn defect_04_stale_separator_search_all_deleted() {
     }
 
     // 搜索任意已删除 key 都应返回 None
-    for v in [1, 25, 50, 75, 100].iter().copied() {
+    for v in [1, 25, 50, 75, 100].iter().cloned() {
         assert_eq!(
             bt.search(&encode_i64_key(v)).expect("search"),
             None,
@@ -505,12 +514,13 @@ fn defect_04_stale_separator_search_all_deleted() {
 
     // 重新插入应正常工作
     for v in 1..=50i64 {
-        bt.insert(encode_i64_key(v), v as u32).expect("reinsert");
+        bt.insert(encode_i64_key(v), vec![v as u8])
+            .expect("reinsert");
     }
     for v in 1..=50i64 {
         assert_eq!(
             bt.search(&encode_i64_key(v)).expect("search"),
-            Some(v as u32),
+            Some(vec![v as u8]),
             "reinserted key {} not found",
             v
         );
@@ -537,9 +547,11 @@ fn defect_05_concurrent_mixed_ops_invariants() {
 
     // 预填充 1000 个 key
     {
-        let mut guard = bt.lock().unwrap();
+        let mut guard = bt.lock();
         for v in 0..1000i64 {
-            guard.insert(encode_i64_key(v), v as u32).expect("prefill");
+            guard
+                .insert(encode_i64_key(v), vec![v as u8])
+                .expect("prefill");
         }
     }
 
@@ -552,12 +564,12 @@ fn defect_05_concurrent_mixed_ops_invariants() {
             for _ in 0..ops_per_thread {
                 let v = (rng.next_u64() % 100_000) as i64;
                 let op = rng.next_u64_below(3);
-                let mut guard = bt.lock().unwrap();
+                let mut guard = bt.lock();
                 match op {
                     0 => {
                         // insert
                         guard
-                            .insert(encode_i64_key(v), (v % 65536) as u32)
+                            .insert(encode_i64_key(v), vec![(v % 65536) as u8])
                             .expect("insert");
                         local_inserted.insert(v);
                     }
@@ -586,7 +598,7 @@ fn defect_05_concurrent_mixed_ops_invariants() {
     }
 
     // 关键验证：树结构不变量始终成立（即使有并发混合操作）
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     assert!(
         bt.validate_all_nodes().is_ok(),
         "invariants broken by concurrent mixed ops"
@@ -621,8 +633,10 @@ fn defect_05_concurrent_mixed_ops_insert_delete_same_keys() {
         for round in 0..3 {
             for v in 0..key_count {
                 bt_a.lock()
-                    .unwrap()
-                    .insert(encode_i64_key(v), ((round * key_count + v) % 65536) as u32)
+                    .insert(
+                        encode_i64_key(v),
+                        vec![((round * key_count + v) % 65536) as u8],
+                    )
                     .expect("insert");
             }
         }
@@ -631,7 +645,7 @@ fn defect_05_concurrent_mixed_ops_insert_delete_same_keys() {
     let h_b = thread::spawn(move || {
         for _ in 0..3 {
             for v in 0..key_count {
-                let _ = bt_b.lock().unwrap().delete(&encode_i64_key(v));
+                let _ = bt_b.lock().delete(&encode_i64_key(v));
             }
         }
     });
@@ -639,7 +653,7 @@ fn defect_05_concurrent_mixed_ops_insert_delete_same_keys() {
     let h_c = thread::spawn(move || {
         for _ in 0..3 {
             for v in 0..key_count {
-                let _ = bt_c.lock().unwrap().search(&encode_i64_key(v));
+                let _ = bt_c.lock().search(&encode_i64_key(v));
             }
         }
     });
@@ -649,7 +663,7 @@ fn defect_05_concurrent_mixed_ops_insert_delete_same_keys() {
     h_c.join().expect("thread C");
 
     // 最终状态自洽：validate 通过 + 中序遍历严格递增
-    let bt = bt.lock().unwrap();
+    let bt = bt.lock();
     assert!(bt.validate_all_nodes().is_ok(), "invariants broken");
     let pairs = bt.in_order_leaf_traverse().expect("traverse");
     for i in 1..pairs.len() {
@@ -677,15 +691,15 @@ fn defect_05_concurrent_mixed_ops_insert_delete_same_keys() {
 fn defect_06_bulk_load_equivalence_basic() {
     // 生成 5000 个已排序的 i64 key
     let keys: Vec<i64> = (1..=5_000).collect();
-    let items: Vec<(Vec<u8>, u32)> = keys
+    let items: Vec<(Vec<u8>, Vec<u8>)> = keys
         .iter()
-        .map(|&v| (encode_i64_key(v), v as u32))
+        .map(|&v| (encode_i64_key(v), vec![v as u8]))
         .collect();
 
     // 树 A: 逐条 insert
     let mut bt_a = BTree::with_default_order();
     for (k, tid) in &items {
-        bt_a.insert(k.clone(), *tid).expect("insert");
+        bt_a.insert(k.clone(), tid.clone()).expect("insert");
     }
 
     // 树 B: bulk_load
@@ -718,7 +732,7 @@ fn defect_06_bulk_load_equivalence_basic() {
 fn defect_06_bulk_load_equivalence_edge_cases() {
     // 边界 1: bulk_load 空输入应返回 Err(BulkLoadEmpty)
     let mut bt_empty = BTree::with_default_order();
-    let empty: Vec<(Vec<u8>, u32)> = Vec::new();
+    let empty: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     let result = bt_empty.bulk_load(empty);
     assert!(
         matches!(result, Err(BTreeError::BulkLoadEmpty)),
@@ -727,23 +741,25 @@ fn defect_06_bulk_load_equivalence_edge_cases() {
 
     // 边界 2: bulk_load 单元素
     let mut bt_one = BTree::with_default_order();
-    let single = vec![(encode_i64_key(42), 42u32)];
+    let single = vec![(encode_i64_key(42), vec![42u8])];
     bt_one.bulk_load(single).expect("bulk_load single");
     assert_eq!(
         bt_one.search(&encode_i64_key(42)).expect("search"),
-        Some(42)
+        Some(vec![42u8])
     );
     assert!(bt_one.validate_all_nodes().is_ok());
 
     // 边界 3: bulk_load 后再 insert 应正常工作
     let mut bt_mixed = BTree::with_default_order();
-    let initial: Vec<(Vec<u8>, u32)> = (1..=100).map(|v| (encode_i64_key(v), v as u32)).collect();
+    let initial: Vec<(Vec<u8>, Vec<u8>)> = (1..=100)
+        .map(|v| (encode_i64_key(v), vec![v as u8]))
+        .collect();
     bt_mixed.bulk_load(initial).expect("bulk_load");
 
     // 再 insert 101..=200
     for v in 101..=200i64 {
         bt_mixed
-            .insert(encode_i64_key(v), v as u32)
+            .insert(encode_i64_key(v), vec![v as u8])
             .expect("insert after bulk_load");
     }
 
@@ -751,7 +767,7 @@ fn defect_06_bulk_load_equivalence_edge_cases() {
     for v in 1..=200i64 {
         assert_eq!(
             bt_mixed.search(&encode_i64_key(v)).expect("search"),
-            Some(v as u32),
+            Some(vec![v as u8]),
             "key {} not found after bulk_load + insert",
             v
         );
@@ -761,8 +777,8 @@ fn defect_06_bulk_load_equivalence_edge_cases() {
     // 边界 4: bulk_load 未排序输入应返回 Err(BulkLoadNotSorted)
     let mut bt_unsorted = BTree::with_default_order();
     let unsorted = vec![
-        (encode_i64_key(10), 10u32),
-        (encode_i64_key(5), 5u32), // 乱序
+        (encode_i64_key(10), vec![10u8]),
+        (encode_i64_key(5), vec![5u8]), // 乱序
     ];
     let result = bt_unsorted.bulk_load(unsorted);
     assert!(
@@ -790,7 +806,7 @@ fn m1_milestone_all_defects_summary_large_scale() {
     assert_eq!(keys.len(), total);
 
     for (idx, &v) in keys.iter().enumerate() {
-        bt.insert(encode_i64_key(v), (idx % 65536) as u32)
+        bt.insert(encode_i64_key(v), vec![(idx % 65536) as u8])
             .expect("insert");
     }
 

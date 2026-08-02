@@ -11,7 +11,7 @@
 //! 因长期未实现真实 SSTable/compaction 已移除，避免误导用户。
 //! 未来如需 LSM 引擎，应实现完整的 SSTable + compaction + bloom filter 后再加入。
 
-use crate::btree::BTree;
+use crate::btree::{BTree, BTreeEntry};
 use std::ops::Bound;
 
 // =====================================================================
@@ -44,8 +44,8 @@ pub trait IndexAdapter: Send + Sync {
     ///
     /// 若 key 已存在则更新 value，否则插入新条目。
     ///
-    /// P9-1：value 从 u16 扩容为 u32，支持大表索引。
-    fn insert(&mut self, key: &[u8], value: u32) -> Result<(), KvAdapterError>;
+    /// P0-4：value 从 u32 扩展为 Vec<u8>，支持存储任意行数据。
+    fn insert(&mut self, key: &[u8], value: Vec<u8>) -> Result<(), KvAdapterError>;
 
     /// 删除 key
     ///
@@ -55,7 +55,7 @@ pub trait IndexAdapter: Send + Sync {
     /// 点查
     ///
     /// 返回 `Some(value)` 表示命中，`None` 表示未命中。
-    fn get(&self, key: &[u8]) -> Result<Option<u32>, KvAdapterError>;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, KvAdapterError>;
 
     /// 范围扫描 [lower, upper]
     ///
@@ -65,7 +65,7 @@ pub trait IndexAdapter: Send + Sync {
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
-    ) -> Result<Vec<(Vec<u8>, u32)>, KvAdapterError>;
+    ) -> Result<Vec<BTreeEntry>, KvAdapterError>;
 
     /// 范围扫描（带 LIMIT 截断）
     ///
@@ -75,7 +75,7 @@ pub trait IndexAdapter: Send + Sync {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
         limit: usize,
-    ) -> Result<Vec<(Vec<u8>, u32)>, KvAdapterError>;
+    ) -> Result<Vec<BTreeEntry>, KvAdapterError>;
 
     /// 已存储 key 数量
     fn len(&self) -> Result<usize, KvAdapterError>;
@@ -211,7 +211,7 @@ impl BTreeAdapter {
 }
 
 impl IndexAdapter for BTreeAdapter {
-    fn insert(&mut self, key: &[u8], value: u32) -> Result<(), KvAdapterError> {
+    fn insert(&mut self, key: &[u8], value: Vec<u8>) -> Result<(), KvAdapterError> {
         self.btree
             .insert(key.to_vec(), value)
             .map_err(|e| KvAdapterError::EngineError(e.to_string()))
@@ -223,7 +223,7 @@ impl IndexAdapter for BTreeAdapter {
             .map_err(|e| KvAdapterError::EngineError(e.to_string()))
     }
 
-    fn get(&self, key: &[u8]) -> Result<Option<u32>, KvAdapterError> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, KvAdapterError> {
         self.btree
             .search(key)
             .map_err(|e| KvAdapterError::EngineError(e.to_string()))
@@ -233,7 +233,7 @@ impl IndexAdapter for BTreeAdapter {
         &self,
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
-    ) -> Result<Vec<(Vec<u8>, u32)>, KvAdapterError> {
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, KvAdapterError> {
         self.btree
             .range_scan(lower, upper)
             .map_err(|e| KvAdapterError::EngineError(e.to_string()))
@@ -244,7 +244,7 @@ impl IndexAdapter for BTreeAdapter {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
         limit: usize,
-    ) -> Result<Vec<(Vec<u8>, u32)>, KvAdapterError> {
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, KvAdapterError> {
         self.btree
             .range_scan_with_limit(lower, upper, Some(limit))
             .map_err(|e| KvAdapterError::EngineError(e.to_string()))
@@ -310,13 +310,13 @@ mod tests {
         adapter: &mut dyn IndexAdapter,
         start: i64,
         count: usize,
-    ) -> Vec<(Vec<u8>, u32)> {
+    ) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut pairs = Vec::with_capacity(count);
         for i in 0..count {
             let key_i64 = start + i as i64;
             let key = make_key(key_i64);
-            let value = (i % 65536) as u32;
-            adapter.insert(&key, value).unwrap();
+            let value = vec![(i % 256) as u8];
+            adapter.insert(&key, value.clone()).unwrap();
             pairs.push((key, value));
         }
         pairs
@@ -338,14 +338,14 @@ mod tests {
         assert_eq!(adapter.get(&key).unwrap(), None);
 
         // 插入
-        adapter.insert(&key, 100).unwrap();
+        adapter.insert(&key, vec![100u8]).unwrap();
         assert_eq!(adapter.len().unwrap(), 1);
-        assert_eq!(adapter.get(&key).unwrap(), Some(100));
+        assert_eq!(adapter.get(&key).unwrap(), Some(vec![100u8]));
 
         // upsert 更新
-        adapter.insert(&key, 200).unwrap();
+        adapter.insert(&key, vec![200u8]).unwrap();
         assert_eq!(adapter.len().unwrap(), 1); // 数量不变
-        assert_eq!(adapter.get(&key).unwrap(), Some(200));
+        assert_eq!(adapter.get(&key).unwrap(), Some(vec![200u8]));
 
         // 删除
         let deleted = adapter.delete(&key).unwrap();
@@ -428,8 +428,8 @@ mod tests {
         // 同步插入 1000 个 key
         for i in 0..1000i64 {
             let key = make_key(i);
-            let val = i as u32;
-            adapter.insert(&key, val).unwrap();
+            let val = vec![i as u8];
+            adapter.insert(&key, val.clone()).unwrap();
             bt.insert(key.clone(), val).unwrap();
         }
 
@@ -502,15 +502,15 @@ mod tests {
 
         // 反复 upsert
         for v in 0..10u32 {
-            adapter.insert(&key, v).unwrap();
+            adapter.insert(&key, vec![v as u8]).unwrap();
         }
         assert_eq!(adapter.len().unwrap(), 1); // 仍为 1 个 key
-        assert_eq!(adapter.get(&key).unwrap(), Some(9)); // 最后一次值
+        assert_eq!(adapter.get(&key).unwrap(), Some(vec![9u8])); // 最后一次值
 
         // upsert 不增加 key 数量
         for i in 0..10 {
             let k = make_key(i);
-            adapter.insert(&k, i as u32).unwrap();
+            adapter.insert(&k, vec![i as u8]).unwrap();
         }
         assert_eq!(adapter.len().unwrap(), 11); // 1 (key=123) + 10 (key=0..9)
     }
@@ -615,8 +615,8 @@ mod tests {
 
         // 基本 CRUD 验证
         let key = make_key(42);
-        adapter.insert(&key, 100).unwrap();
-        assert_eq!(adapter.get(&key).unwrap(), Some(100));
+        adapter.insert(&key, vec![100u8]).unwrap();
+        assert_eq!(adapter.get(&key).unwrap(), Some(vec![100u8]));
         assert_eq!(adapter.len().unwrap(), 1);
     }
 
@@ -637,8 +637,8 @@ mod tests {
         // 插入 500 个 key
         for i in 0..500i64 {
             let key = make_key(i);
-            let val = i as u32;
-            adapter.insert(&key, val).unwrap();
+            let val = vec![i as u8];
+            adapter.insert(&key, val.clone()).unwrap();
         }
 
         // 长度
@@ -647,7 +647,7 @@ mod tests {
         // 点查
         for i in 0..500i64 {
             let key = make_key(i);
-            assert_eq!(adapter.get(&key).unwrap(), Some(i as u32));
+            assert_eq!(adapter.get(&key).unwrap(), Some(vec![i as u8]));
         }
 
         // 范围扫描
@@ -670,7 +670,7 @@ mod tests {
             if i % 3 == 0 {
                 assert_eq!(adapter.get(&key).unwrap(), None);
             } else {
-                assert_eq!(adapter.get(&key).unwrap(), Some(i as u32));
+                assert_eq!(adapter.get(&key).unwrap(), Some(vec![i as u8]));
             }
         }
     }
@@ -702,14 +702,14 @@ mod tests {
         // 在所有适配器中插入相同 key
         let key = make_key(42);
         for adapter in adapters.iter_mut() {
-            adapter.insert(&key, 100).unwrap();
+            adapter.insert(&key, vec![100u8]).unwrap();
         }
 
         // 验证每个适配器都能查到
         for (i, adapter) in adapters.iter().enumerate() {
             assert_eq!(
                 adapter.get(&key).unwrap(),
-                Some(100),
+                Some(vec![100u8]),
                 "adapter {} ({}) should find key",
                 i,
                 adapter.engine_name()

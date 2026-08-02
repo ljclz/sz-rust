@@ -183,3 +183,6 @@ __pycache__/
 # === Navicat 回放测试（依赖 tests/golden 基线数据，基线未入库故测试不入库）===
 /tests/replay_navicat.rs
 /tests/golden/
+
+# === AI 工具会话数据 ===
+.zcode/

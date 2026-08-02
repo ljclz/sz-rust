@@ -125,7 +125,10 @@ fn compute_latency_stats(mut samples_ns: Vec<u64>) -> LatencyStats {
 /// M1 基准测试：1M key 装入 B-Tree，预热后执行 10M/100M 次随机点查
 ///
 /// 通过标准：P50 < 10μs (10,000 ns)，P99 < 50μs (50,000 ns)
+/// 注：默认 10M 查询在 debug 模式下需 30~60 分钟，用 `#[ignore]` 标记，
+/// 需在 release 模式显式运行：`cargo test -p szrsql-storage --release btree_bench::m1_bench_point_query_latency -- --nocapture`
 #[test]
+#[ignore = "基准测试：debug 模式 10M 查询耗时过长，需 release 模式显式运行"]
 fn m1_bench_point_query_latency() {
     // 1. 配置参数
     let total_queries: usize = std::env::var("SZRSQL_M1_BENCH_QUERIES")
@@ -162,7 +165,7 @@ fn m1_bench_point_query_latency() {
     let mut bt = BTree::with_default_order();
     let build_start = Instant::now();
     for (idx, &k) in unique_keys.iter().enumerate() {
-        bt.insert(encode_u64_key(k), (idx % 65536) as u32)
+        bt.insert(encode_u64_key(k), vec![(idx % 65536) as u8])
             .expect("insert should not fail");
     }
     let build_elapsed = build_start.elapsed();
@@ -351,7 +354,7 @@ fn m1_bench_insert_throughput() {
     let rand_start = Instant::now();
     for (idx, &k) in keys.iter().enumerate() {
         bt_rand
-            .insert(encode_u64_key(k), (idx % 65536) as u32)
+            .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
             .expect("insert");
     }
     let rand_elapsed = rand_start.elapsed();
@@ -364,7 +367,7 @@ fn m1_bench_insert_throughput() {
     let sorted_start = Instant::now();
     for (idx, &k) in sorted_keys.iter().enumerate() {
         bt_sorted
-            .insert(encode_u64_key(k), (idx % 65536) as u32)
+            .insert(encode_u64_key(k), vec![(idx % 65536) as u8])
             .expect("insert");
     }
     let sorted_elapsed = sorted_start.elapsed();

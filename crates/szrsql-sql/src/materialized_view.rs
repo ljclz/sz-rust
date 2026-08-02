@@ -863,8 +863,8 @@ impl MaterializedViewStore {
         self.storage.row_count()
     }
 
-    /// 获取存储表所有行的引用（含已删除的行）
-    pub fn rows(&self) -> &[Vec<Value>] {
+    /// 获取存储表所有行（含已删除的行）
+    pub fn rows(&self) -> Vec<Vec<Value>> {
         self.storage.rows()
     }
 

@@ -50,7 +50,7 @@ fn assert_statement_variant(sql: &str, dialect: &Dialect, variant_name: &str) {
         Statement::CreateView { .. } => "CreateView",
         Statement::DropTable { .. } => "DropTable",
         Statement::Begin { .. } => "Begin",
-        Statement::Commit { .. } => "Commit",
+        Statement::Commit => "Commit",
         Statement::Rollback { .. } => "Rollback",
         _ => "Other",
     };
@@ -269,13 +269,19 @@ fn test_f8_select_subquery_cross_dialect() {
 fn test_f8_dialect_specific_null_handling() {
     let cases = vec![
         // PG: COALESCE
-        ("SELECT COALESCE(name, 'unknown') FROM users", Dialect::PostgreSQL),
+        (
+            "SELECT COALESCE(name, 'unknown') FROM users",
+            Dialect::PostgreSQL,
+        ),
         // MySQL: IFNULL (实际由 MySqlDialect 解析为 COALESCE 等价)
         ("SELECT IFNULL(name, 'unknown') FROM users", Dialect::MySql),
         // Oracle: NVL → COALESCE
         ("SELECT NVL(name, 'unknown') FROM users", Dialect::Oracle),
         // SQL Server: ISNULL → COALESCE
-        ("SELECT ISNULL(name, 'unknown') FROM users", Dialect::SqlServer),
+        (
+            "SELECT ISNULL(name, 'unknown') FROM users",
+            Dialect::SqlServer,
+        ),
         // SQLite: IFNULL (SQLiteDialect 支持)
         ("SELECT IFNULL(name, 'unknown') FROM users", Dialect::SQLite),
     ];
@@ -304,7 +310,10 @@ fn test_f8_dialect_specific_type_casts() {
         // Oracle: TO_NUMBER / TO_CHAR / TO_DATE
         ("SELECT TO_NUMBER('123') FROM dual", Dialect::Oracle),
         ("SELECT TO_CHAR(123) FROM dual", Dialect::Oracle),
-        ("SELECT TO_DATE('2024-01-01', 'YYYY-MM-DD') FROM dual", Dialect::Oracle),
+        (
+            "SELECT TO_DATE('2024-01-01', 'YYYY-MM-DD') FROM dual",
+            Dialect::Oracle,
+        ),
         // SQL Server: LEN → LENGTH
         ("SELECT LEN(name) FROM users", Dialect::SqlServer),
     ];
@@ -391,7 +400,10 @@ fn test_f8_auto_detect_all_dialects() {
 fn test_f8_identifier_quoting_cross_dialect() {
     let cases = vec![
         // PG: 双引号
-        ("SELECT \"id\", \"name\" FROM \"users\"", Dialect::PostgreSQL),
+        (
+            "SELECT \"id\", \"name\" FROM \"users\"",
+            Dialect::PostgreSQL,
+        ),
         // MySQL: 反引号
         ("SELECT `id`, `name` FROM `users`", Dialect::MySql),
         // SQL Server: 方括号

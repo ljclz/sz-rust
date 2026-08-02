@@ -34,10 +34,10 @@ use crate::ast::*;
 use crate::check_constraint::CheckConstraintValidator;
 use crate::expr::{EvalContext, EvalError, ExprEvaluator};
 use crate::foreign_key::{CascadeOp, ForeignKeyValidator};
-use szrsql_tx::mvcc::MvccManager;
+use crate::iter_exec::build_iter_plan;
 use crate::plan::{
     AggregateExpr, Catalog, CheckConstraint, CteEntry, ForeignKeyConstraint, FunctionDefinition,
-    IndexDefinition, InMemoryCatalog, InsertSourcePlan, LogicalPlan, Planner, ReferencingKey,
+    InMemoryCatalog, IndexDefinition, InsertSourcePlan, LogicalPlan, Planner, ReferencingKey,
     SequenceDefinition, TableSchema, WindowFunctionExpr,
 };
 use crate::trigger::{
@@ -46,9 +46,11 @@ use crate::trigger::{
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
-use szrsql_types::value::{ColumnType, Value};
+use std::ops::Bound;
+use std::sync::{Arc, Mutex};
 use szrsql_storage::page::PAGE_BODY_SIZE as BODY_SIZE;
+use szrsql_tx::mvcc::MvccManager;
+use szrsql_types::value::{ColumnType, Value};
 use thiserror::Error;
 use tracing::{instrument, trace};
 
@@ -117,6 +119,9 @@ pub enum ExecutionError {
     /// P0-STORE-2：存储层错误（BufferPool/Page I/O）
     #[error("storage error: {0}")]
     Storage(String),
+    /// P1-9：行锁冲突（死锁/超时/冲突）
+    #[error("lock conflict: {0}")]
+    LockConflict(String),
 }
 
 impl From<EvalError> for ExecutionError {
@@ -128,9 +133,7 @@ impl From<EvalError> for ExecutionError {
 impl From<crate::plan::PlanError> for ExecutionError {
     fn from(e: crate::plan::PlanError) -> Self {
         match e {
-            crate::plan::PlanError::TableNotFound(name) => {
-                ExecutionError::TableNotFound(name)
-            }
+            crate::plan::PlanError::TableNotFound(name) => ExecutionError::TableNotFound(name),
             other => ExecutionError::InvalidArgument(format!("plan error: {}", other)),
         }
     }
@@ -903,13 +906,8 @@ pub trait TableStorage: Sync {
     ///
     /// **xmin 语义**：插入此行版本的事务 ID（0 = Frozen/系统数据，恒可见）
     /// **xmax 语义**：删除此行版本的事务 ID（0 = 未删除）
-    fn scan_with_versions(
-        &self,
-    ) -> Box<dyn Iterator<Item = (usize, Row, u32, u32)> + Send + '_> {
-        Box::new(
-            self.scan_with_ids()
-                .map(|(id, row)| (id, row, 0u32, 0u32)),
-        )
+    fn scan_with_versions(&self) -> Box<dyn Iterator<Item = (usize, Row, u32, u32)> + Send + '_> {
+        Box::new(self.scan_with_ids().map(|(id, row)| (id, row, 0u32, 0u32)))
     }
 
     /// P0-STORE 阶段 1：主键列索引（若已启用 B+Tree 主键索引）
@@ -938,84 +936,111 @@ pub trait TableStorage: Sync {
 }
 
 // =====================================================================
-//  InMemoryTable — Vec<Row> 后端
+//  InMemoryTable — B+Tree 主存储引擎后端
 // =====================================================================
+
+/// P0-4：B+Tree 叶子节点存储的行数据二进制格式
+///
+/// 编码格式（小端）：
+/// - 偏移 0，4 字节：xmin（u32 LE）— 插入事务 ID（0 = Frozen/系统数据）
+/// - 偏移 4，4 字节：xmax（u32 LE）— 删除事务 ID（0 = 未删除）
+/// - 偏移 8..：serde_json 序列化的 Row（`Vec<Value>`）
+///
+/// 选择 serde_json 而非 bincode 的原因：
+/// - `Value::Json(serde_json::Value)` 变体无法通过 bincode 1.x 往返（已知限制）
+/// - serde_json 对所有 Value 变体均支持，无特例
+/// - 缺点：输出较冗余（约 2-3x bincode），后续可优化为自定义二进制格式
+mod btree_value_codec {
+    use super::Row;
+
+    const XMIN_SIZE: usize = 4;
+    const XMAX_SIZE: usize = 4;
+    const HEADER_SIZE: usize = XMIN_SIZE + XMAX_SIZE; // 8 bytes
+
+    /// 编码 (xmin, xmax, row) 为 B+Tree 叶子节点存储的字节串
+    pub fn encode(xmin: u32, xmax: u32, row: &Row) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(HEADER_SIZE + 64);
+        buf.extend_from_slice(&xmin.to_le_bytes());
+        buf.extend_from_slice(&xmax.to_le_bytes());
+        // serde_json 序列化 Row（Vec<Value>）
+        let row_bytes = serde_json::to_vec(row).unwrap_or_default();
+        buf.extend(row_bytes);
+        buf
+    }
+
+    /// 解码 B+Tree 叶子节点字节串为 (xmin, xmax, row)
+    /// 返回 Err 表示解码失败（数据损坏或格式不匹配）
+    pub fn decode(bytes: &[u8]) -> Result<(u32, u32, Row), String> {
+        if bytes.len() < HEADER_SIZE {
+            return Err(format!(
+                "btree value too short: {} < {}",
+                bytes.len(),
+                HEADER_SIZE
+            ));
+        }
+        let xmin = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let xmax = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let row: Row = serde_json::from_slice(&bytes[HEADER_SIZE..])
+            .map_err(|e| format!("btree value row decode failed: {e}"))?;
+        Ok((xmin, xmax, row))
+    }
+}
+
+/// 将 tuple_id 编码为 B+Tree 键（8 字节 big-endian u32，保持数值序）
+fn encode_tuple_id_key(tuple_id: u32) -> Vec<u8> {
+    tuple_id.to_be_bytes().to_vec()
+}
+
+/// 从 B+Tree 键解码 tuple_id
+fn decode_tuple_id_key(key: &[u8]) -> u32 {
+    if key.len() >= 4 {
+        u32::from_be_bytes([key[0], key[1], key[2], key[3]])
+    } else {
+        0
+    }
+}
 
 /// 简单内存表 — 用于功能测试
 ///
-/// 所有行存储在 `Vec<Row>` 中，row_id 即为 Vec 索引。
-/// 删除采用 tombstone（标记删除）策略：`deleted` 集合记录已删除的 row_id。
+/// 所有行存储在 B+Tree 叶节点中（由 BufferPool 管理页面），row_id 即为插入时的 tuple_id。
+/// 删除采用 tombstone（标记删除）策略：`deleted` 集合记录已删除的 tuple_id。
 ///
-/// P0-TX-1 Phase B：新增 `xmin`/`xmax` 并行数组记录每行的 MVCC 版本元数据，
-/// 供 `MvccManager::is_visible()` 进行事务可见性判断。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// P0-4：B+Tree 从「可选索引」升级为「主存储引擎」，行数据直接存入 B+Tree 叶节点。
+/// Vec<Row> 退化为有界热数据缓存（row_cache），避免重复反序列化。
+/// xmin/xmax MVCC 版本元数据存储在 B+Tree value 的前 8 字节。
+/// 迭代执行器用：表名 → (全量行, 列名)
+type TableDataMap = std::collections::HashMap<String, (Vec<Row>, Vec<String>)>;
+
+#[derive(Debug, Clone)]
 pub struct InMemoryTable {
     /// 表名
     name: String,
     /// 表 Schema
     schema: TableSchema,
-    /// 行数据（含已删除的行，通过 `deleted` 标记）
-    rows: Vec<Row>,
-    /// 已删除的 row_id 集合（tombstone）
-    deleted: HashSet<usize>,
-    /// P0-TX-1 Phase B：每行的插入事务 ID（0 = Frozen/系统数据，与 `rows` 等长）
-    #[serde(default)]
-    xmin: Vec<u32>,
-    /// P0-TX-1 Phase B：每行的删除事务 ID（0 = 未删除，与 `rows` 等长）
-    #[serde(default)]
-    xmax: Vec<u32>,
-    /// P0-STORE-1：可选的 B+Tree 主键索引（szrsql_storage::btree::BTree）
+    /// P0-4：B+Tree 主存储引擎 — 键为 tuple_id（8B big-endian u32），值为序列化行数据（含 xmin/xmax/Row）
     ///
-    /// 启用后（通过 `enable_btree_pk(column_idx)`），INSERT 时同步插入
-    /// (encoded_pk → row_id: u32) 到 BTree，支持通过主键快速点查
-    /// （O(log n) 而非 O(n) 全表扫描）。
-    ///
-    /// **P9-1**：BTree 的 tuple_id 从 u16 扩容为 u32（最大 ~42 亿），
-    /// 移除了 65535 行上限。
-    ///
-    /// None 表示未启用 B+Tree 索引（旧行为，全表扫描）。
-    /// 序列化时跳过（BTree 不实现 Serialize），反序列化后为 None。
-    #[serde(skip)]
+    /// 行数据直接存入 B+Tree 叶节点，由 BufferPool 管理页面，支持冷页逐出。
+    /// Vec<Row> 退化为有界热数据缓存（row_cache）。
+    btree: szrsql_storage::btree::BTree,
+    /// P0-4：二级主键索引（仅对有主键的表启用）
+    /// 映射 encoded_pk → tuple_id（u32，编码为 8B big-endian）
     pk_index: Option<szrsql_storage::btree::BTree>,
-    /// P0-STORE-1：主键列在 schema 中的索引位置（pk_index 启用时有效）
-    #[serde(skip)]
+    /// P0-4：下一个将分配的 tuple_id（单调递增，从 0 开始）
+    next_tuple_id: u32,
+    /// P0-4：已删除的 tuple_id 集合（软删除标记，B+Tree 中 xmax 已置位）
+    deleted: HashSet<u32>,
+    /// P0-4：热数据行缓存（tuple_id → Row），避免重复反序列化
+    /// 有界缓存：超过 row_cache_max 时随机淘汰
+    row_cache: std::collections::HashMap<u32, Row>,
+    /// P0-4：行缓存上限（默认 10_000）
+    row_cache_max: usize,
+    /// P0-4：主键列在 schema 中的索引位置（pk_index 启用时有效）
     pk_column_idx: Option<usize>,
     /// P0-STORE-2：可选的 BufferPool 持久化后端
-    ///
-    /// 启用后（通过 `enable_persistence(path)`），调用 `flush_to_disk()` 将整表
-    /// 序列化字节流分页写入 BufferPool（FilePageWriter 同步刷盘）；
-    /// 重启后通过 `load_from_disk()` 从 BufferPool 读取所有页重建表状态。
-    ///
-    /// **设计权衡**：保留 `Vec<Row>` 内存执行路径不变，BufferPool 仅承担
-    /// 「页面缓存 + 磁盘持久化」职责，避免大范围重写执行路径。
-    /// 真正的「热数据在内存、冷数据在磁盘」分页存储需后续 P1 阶段重构。
-    ///
-    /// None 表示未启用持久化（旧行为，纯内存，重启丢失）。
-    /// 序列化时跳过（BufferPool 不实现 Serialize）。
-    #[serde(skip)]
     persistence: Option<std::sync::Arc<szrsql_storage::buffer::BufferPool>>,
-
-    /// P1-1：分页存储主路径 — 数据按页存储在 BufferPool，Vec<Row> 作为热数据缓存
-    ///
-    /// 启用后（通过 `enable_paged_storage(path)`）：
-    /// - `spill_to_paged_storage()` 将 rows 中的所有行分页写入 paged_storage（作为持久化镜像）
-    /// - `restore_from_paged_storage()` 从 paged_storage 读取所有页重建 rows
-    /// - `auto_spill_if_needed()` 在 insert 后检查行数，超过阈值时自动 spill
-    ///
-    /// **与 persistence 的区别**：
-    /// - persistence：整表序列化字节流分页写入（一次性快照）
-    /// - paged_storage：按行分页存储（支持增量更新和按页读取）
-    ///
-    /// None 表示未启用分页存储（旧行为，纯内存）。
-    /// 序列化时跳过（BufferPool 不实现 Serialize）。
-    #[serde(skip)]
+    /// P1-1：分页存储主路径
     paged_storage: Option<std::sync::Arc<szrsql_storage::buffer::BufferPool>>,
-
-    /// P1-1：自动 spill 阈值（行数超过此值时自动 spill 到 paged_storage）
-    ///
-    /// 默认 100_000 行。可通过 `set_spill_threshold()` 调整。
-    /// 仅在 `paged_storage` 启用后生效。
-    #[serde(skip)]
+    /// P1-1：自动 spill 阈值
     spill_threshold: usize,
 }
 
@@ -1032,21 +1057,114 @@ pub struct PagedStorageInfo {
     pub threshold: usize,
 }
 
+/// 全行可变句柄（P0-4）：DerefMut 修改 + Drop 时回写 B+Tree
+///
+/// 保持旧版 `&mut Vec<Row>` 的语义：调用方修改行内容后无需显式写回，
+/// guard 析构时自动将修改后的行重新编码写入 B+Tree（保留 xmin/xmax）。
+pub struct RowsMutGuard<'a> {
+    table: &'a mut InMemoryTable,
+    rows: Vec<Row>,
+    /// 每行原始 (xmin, xmax)，与 rows 一一对应
+    versions: Vec<(u32, u32)>,
+}
+
+impl std::ops::Deref for RowsMutGuard<'_> {
+    type Target = Vec<Row>;
+    fn deref(&self) -> &Self::Target {
+        &self.rows
+    }
+}
+
+impl std::ops::DerefMut for RowsMutGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rows
+    }
+}
+
+impl std::ops::Drop for RowsMutGuard<'_> {
+    fn drop(&mut self) {
+        // 回写 B+Tree：重建并插入所有行（保留原始 xmin/xmax）
+        let table = &mut *self.table;
+        table.btree = szrsql_storage::btree::BTree::with_default_order();
+        table.next_tuple_id = 0;
+        table.row_cache.clear();
+        for (i, row) in self.rows.iter().enumerate() {
+            let tuple_id = table.next_tuple_id;
+            table.next_tuple_id += 1;
+            let (xmin, xmax) = self.versions.get(i).copied().unwrap_or((0, 0));
+            let value = btree_value_codec::encode(xmin, xmax, row);
+            let key = encode_tuple_id_key(tuple_id);
+            let _ = table.btree.insert(key, value);
+            table.row_cache.insert(tuple_id, row.clone());
+        }
+    }
+}
+
+// =====================================================================
+//  InMemoryTable 手写序列化（P0-4）
+// =====================================================================
+// B+Tree 主存储（btree/pk_index/row_cache 等）不可直接 serde 序列化，
+// 因此序列化时保存 name/schema/next_tuple_id/deleted + TableSnapshot（行数据），
+// 反序列化时通过 restore() 重建 B+Tree。与 flush_to_disk 的 TableSnapshot 路径一致。
+
+impl serde::Serialize for InMemoryTable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("InMemoryTable", 6)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("schema", &self.schema)?;
+        state.serialize_field("next_tuple_id", &self.next_tuple_id)?;
+        state.serialize_field("deleted", &self.deleted)?;
+        state.serialize_field("pk_column_idx", &self.pk_column_idx)?;
+        state.serialize_field("snapshot", &self.snapshot())?;
+        state.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for InMemoryTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // 中间结构：只承载序列化字段（兼容旧格式：next_tuple_id/deleted 可选）
+        #[derive(serde::Deserialize)]
+        struct RawTable {
+            name: String,
+            schema: TableSchema,
+            #[serde(default)]
+            next_tuple_id: u32,
+            #[serde(default)]
+            deleted: HashSet<u32>,
+            #[serde(default)]
+            pk_column_idx: Option<usize>,
+            snapshot: TableSnapshot,
+        }
+
+        let raw = RawTable::deserialize(deserializer)?;
+        let mut table = InMemoryTable::new(raw.schema);
+        table.name = raw.name;
+        table.next_tuple_id = raw.next_tuple_id;
+        table.deleted = raw.deleted;
+        table.pk_column_idx = raw.pk_column_idx;
+        // 重建 B+Tree（行数据、xmin/xmax、deleted 标记）
+        table.restore(raw.snapshot);
+        Ok(table)
+    }
+}
+
 impl InMemoryTable {
     /// 创建空表
     pub fn new(schema: TableSchema) -> Self {
         Self {
             name: schema.name.name.clone(),
             schema,
-            rows: Vec::new(),
-            deleted: HashSet::new(),
-            xmin: Vec::new(),
-            xmax: Vec::new(),
+            btree: szrsql_storage::btree::BTree::with_default_order(),
             pk_index: None,
+            next_tuple_id: 0,
+            deleted: HashSet::new(),
+            row_cache: std::collections::HashMap::new(),
+            row_cache_max: 10_000,
             pk_column_idx: None,
             persistence: None,
             paged_storage: None,
-            spill_threshold: 100_000, // P1-1：默认 10 万行后自动 spill 到分页存储
+            spill_threshold: 100_000,
         }
     }
 
@@ -1064,53 +1182,68 @@ impl InMemoryTable {
         Self::new(schema)
     }
 
-    /// 插入一行，返回 row_id
+    /// 插入一行，返回 tuple_id（即 row_id）
+    ///
+    /// P0-4：行数据写入 B+Tree 叶节点（xmin=0, xmax=0），同时更新热缓存。
     pub fn insert(&mut self, row: Row) -> usize {
-        let id = self.rows.len();
-        // P0-STORE-1：push 前提取主键编码（避免 row 被 move）
-        let pk_bytes = self.extract_pk_bytes(&row);
-        self.rows.push(row);
-        self.xmin.push(0); // 默认 Frozen（无 MVCC 上下文时插入）
-        self.xmax.push(0); // 未删除
-        // P0-STORE-1：同步更新 B+Tree 主键索引
-        self.update_pk_index(id, pk_bytes);
-        id
+        self.insert_with_xmin(row, 0)
     }
 
-    /// P0-TX-1 Phase B：插入一行并设置 xmin（MVCC 版本元数据）
+    /// P0-TX-1 Phase B / P0-4：插入一行并设置 xmin（MVCC 版本元数据）
     ///
-    /// 由 Executor 在事务内 INSERT 时调用，xmin 设为当前事务 ID，
-    /// 使该行对其他并发事务在当前事务提交前不可见。
+    /// 由 Executor 在事务内 INSERT 时调用。行数据（含 xmin/xmax/Row）序列化后
+    /// 直接存入 B+Tree 叶节点，tuple_id 单调递增。
     pub fn insert_with_xmin(&mut self, row: Row, xmin: u32) -> usize {
-        let id = self.rows.len();
-        // P0-STORE-1：push 前提取主键编码
+        let tuple_id = self.next_tuple_id;
+        self.next_tuple_id += 1;
+
+        // 提取主键编码（在 row 被 move 前）
         let pk_bytes = self.extract_pk_bytes(&row);
-        self.rows.push(row);
-        self.xmin.push(xmin);
-        self.xmax.push(0); // 未删除
-        // P0-STORE-1：同步更新 B+Tree 主键索引
-        self.update_pk_index(id, pk_bytes);
-        id
+
+        // 序列化行数据并写入 B+Tree
+        let value = btree_value_codec::encode(xmin, 0, &row);
+        let key = encode_tuple_id_key(tuple_id);
+        if let Err(e) = self.btree.insert(key, value) {
+            tracing::warn!(tuple_id, error = ?e, "insert_with_xmin: BTree insert failed");
+        }
+
+        // 更新热缓存
+        self.maybe_cache_row(tuple_id, row);
+
+        // 同步更新二级主键索引
+        self.update_pk_index(tuple_id as usize, pk_bytes);
+
+        tuple_id as usize
     }
 
-    /// P0-STORE-1：启用 B+Tree 主键索引
+    /// 将行加入热缓存（有界，超出上限时随机淘汰）
+    fn maybe_cache_row(&mut self, tuple_id: u32, row: Row) {
+        if self.row_cache.len() >= self.row_cache_max {
+            // 随机淘汰一个条目（简单 LRU 替代方案）
+            if let Some((&evict_key, _)) = self.row_cache.iter().next() {
+                self.row_cache.remove(&evict_key);
+            }
+        }
+        self.row_cache.insert(tuple_id, row);
+    }
+
+    /// P0-4：启用 B+Tree 主键索引
     ///
-    /// 启用后，后续 INSERT 会同步更新 B+Tree（encoded_pk → row_id: u32）。
+    /// 启用后，后续 INSERT 会同步更新二级 PK 索引（encoded_pk → tuple_id）。
     ///
     /// **P0-3 修复**：启用时自动回填已有数据到 BTree。
-    /// 之前仅影响新插入行，重启后索引为空，导致主键查询退化为全表扫描。
-    /// 现在遍历所有现有行，将 (pk_bytes → row_id) 插入 BTree，保证重启后索引立即可用。
+    /// 遍历 B+Tree 主存储中所有活跃行，将 (pk_bytes → tuple_id) 插入二级索引。
     ///
     /// **参数**：`column_idx` 主键列在 schema 中的索引位置（0-based）
     ///
     /// **限制**：
     /// - 仅支持 Int64 类型主键（其他类型记录 warn 并不启用）
-    ///
-    /// **P9-1**：tuple_id 从 u16 扩容为 u32，移除 65535 行上限。
     pub fn enable_btree_pk(&mut self, column_idx: usize) {
-        // 校验 column_idx 有效性和类型
         if column_idx >= self.schema.columns.len() {
-            tracing::warn!(column_idx, "enable_btree_pk: column_idx out of range, ignored");
+            tracing::warn!(
+                column_idx,
+                "enable_btree_pk: column_idx out of range, ignored"
+            );
             return;
         }
         let col = &self.schema.columns[column_idx];
@@ -1118,26 +1251,23 @@ impl InMemoryTable {
             tracing::warn!(column_idx, data_type = ?col.data_type, "enable_btree_pk: only Int64 supported, ignored");
             return;
         }
-        // P0-3 修复：创建 BTree 并回填已有数据
+        // 创建二级 PK 索引并回填已有数据
         let mut btree = szrsql_storage::btree::BTree::with_default_order();
         let mut backfilled = 0usize;
         let mut skipped_deleted = 0usize;
         let mut skipped_non_int64 = 0usize;
-        for (row_id, row) in self.rows.iter().enumerate() {
-            if self.deleted.contains(&row_id) {
+        // 遍历 B+Tree 主存储的所有活跃行
+        for (tuple_id, row) in self.scan_with_ids() {
+            if self.deleted.contains(&(tuple_id as u32)) {
                 skipped_deleted += 1;
                 continue;
             }
-            // P9-1：移除 u16 限制，row_id as u32 可支持 ~42 亿行
             match row.get(column_idx) {
                 Some(Value::Int64(v)) => {
                     let pk_bytes = szrsql_storage::btree::encode_i64_key(*v);
-                    if let Err(e) = btree.insert(pk_bytes, row_id as u32) {
-                        tracing::warn!(
-                            row_id,
-                            error = ?e,
-                            "enable_btree_pk: BTree insert failed during backfill"
-                        );
+                    // PK 索引值：tuple_id 编码为 8B big-endian（与主存储键格式一致）
+                    if let Err(e) = btree.insert(pk_bytes, encode_tuple_id_key(tuple_id as u32)) {
+                        tracing::warn!(tuple_id, error = ?e, "enable_btree_pk: BTree insert failed during backfill");
                     } else {
                         backfilled += 1;
                     }
@@ -1154,18 +1284,25 @@ impl InMemoryTable {
             backfilled,
             skipped_deleted,
             skipped_non_int64,
-            "B+Tree PK index enabled and backfilled with existing rows (P0-3 fix, P9-1 u32)"
+            "B+Tree PK index enabled (P0-4 primary storage)"
         );
     }
 
-    /// P0-STORE-1：通过主键值快速点查 row_id（O(log n)）
+    /// P0-4：通过主键值快速点查 tuple_id（O(log n)）
     ///
-    /// **返回**：`Some(row_id)` 找到；`None` 未找到或 BTree 未启用
+    /// **返回**：`Some(tuple_id)` 找到；`None` 未找到或 BTree 未启用
     pub fn pk_lookup(&self, key: i64) -> Option<usize> {
         let btree = self.pk_index.as_ref()?;
         let encoded = szrsql_storage::btree::encode_i64_key(key);
         match btree.search(&encoded) {
-            Ok(Some(tuple_id)) => Some(tuple_id as usize),
+            Ok(Some(value)) => {
+                // value 是 encode_tuple_id_key(tuple_id)（4B big-endian）
+                if value.len() == 4 {
+                    Some(decode_tuple_id_key(&value) as usize)
+                } else {
+                    None
+                }
+            }
             Ok(None) => None,
             Err(e) => {
                 tracing::warn!(error = ?e, "pk_lookup: BTree search failed");
@@ -1180,34 +1317,24 @@ impl InMemoryTable {
     }
 
     /// P0-STORE 阶段 1：获取主键列索引（若已启用 B+Tree 主键索引）
-    ///
-    /// 返回 `Some(column_idx)` 表示主键列在 schema 中的索引位置，
-    /// `None` 表示未启用 B+Tree 主键索引。
     pub fn pk_column_idx(&self) -> Option<usize> {
         self.pk_column_idx
     }
 
-    /// P0-STORE 阶段 1：通过主键值快速点查完整行（O(log n)）
+    /// P0-4：通过主键值快速点查完整行（O(log n)）
     ///
-    /// 若 B+Tree 主键索引已启用，通过 BTree 搜索定位 row_id，再从 `rows` 读取行。
-    /// 若未启用或键不存在，返回 `None`。
-    ///
-    /// # 性能
-    /// 相比 `scan_iter().find(|r| r[pk_col] == key)` 的 O(n) 全表扫描，
-    /// 此方法为 O(log n)，适用于主键等值查询。
+    /// 若 B+Tree 主键索引已启用，通过二级索引定位 tuple_id，再从主 B+Tree 读取行。
     pub fn pk_point_lookup(&self, key: i64) -> Option<Row> {
-        let row_id = self.pk_lookup(key)?;
-        // 检查是否已删除（tombstone 或 MVCC xmax != 0 且已 finalize）
-        if self.deleted.contains(&row_id) {
+        let tuple_id = self.pk_lookup(key)?;
+        if self.deleted.contains(&(tuple_id as u32)) {
             return None;
         }
-        self.rows.get(row_id).cloned()
+        self.get_row(tuple_id)
     }
 
-    /// P0-STORE 阶段 1：通过主键值范围查询多行（O(log n + k)）
+    /// P0-4：通过主键值范围查询多行（O(log n + k)）
     ///
     /// 返回主键值在 [low, high) 范围内的所有行（升序）。
-    /// 若 B+Tree 未启用，返回 `None`（调用方应退化为全表扫描）。
     pub fn pk_range_lookup(&self, low: i64, high: i64) -> Option<Vec<Row>> {
         let btree = self.pk_index.as_ref()?;
         let low_bytes = szrsql_storage::btree::encode_i64_key(low);
@@ -1219,40 +1346,36 @@ impl InMemoryTable {
             )
             .ok()?;
         let mut result = Vec::with_capacity(pairs.len());
-        for (_key, tuple_id) in pairs {
-            let row_id = tuple_id as usize;
-            if self.deleted.contains(&row_id) {
+        for (_key, value) in pairs {
+            if value.len() != 8 {
                 continue;
             }
-            if let Some(row) = self.rows.get(row_id) {
-                result.push(row.clone());
+            let tuple_id = decode_tuple_id_key(&value) as usize;
+            if self.deleted.contains(&(tuple_id as u32)) {
+                continue;
+            }
+            if let Some(row) = self.get_row(tuple_id) {
+                result.push(row);
             }
         }
         Some(result)
     }
 
     /// P0-STORE-1：从行中提取主键并编码为 Vec<u8>
-    ///
-    /// 仅在 BTree 已启用且主键列为 Int64 类型时返回 Some(bytes)。
-    /// 其他情况返回 None（不影响插入流程）。
     fn extract_pk_bytes(&self, row: &Row) -> Option<Vec<u8>> {
         let col_idx = self.pk_column_idx?;
         let pk_val = row.get(col_idx)?;
         if let Value::Int64(v) = pk_val {
             Some(szrsql_storage::btree::encode_i64_key(*v))
         } else {
-            // 非 Int64 主键，不更新 BTree
             None
         }
     }
 
-    /// P0-STORE-1：同步更新 B+Tree 主键索引
+    /// P0-4：同步更新二级 B+Tree 主键索引
     ///
-    /// 在 INSERT 后调用，将 (pk_bytes → row_id: u32) 插入 BTree。
-    /// 若 pk_bytes 为 None（未启用 BTree 或主键非 Int64），跳过。
-    ///
-    /// P9-1：移除 u16 限制，row_id as u32 可支持 ~42 亿行。
-    fn update_pk_index(&mut self, row_id: usize, pk_bytes: Option<Vec<u8>>) {
+    /// 在 INSERT 后调用，将 (pk_bytes → encode_tuple_id_key(tuple_id)) 插入 BTree。
+    fn update_pk_index(&mut self, tuple_id: usize, pk_bytes: Option<Vec<u8>>) {
         let btree = match self.pk_index.as_mut() {
             Some(b) => b,
             None => return,
@@ -1261,10 +1384,70 @@ impl InMemoryTable {
             Some(b) => b,
             None => return,
         };
-        // P9-1：移除 u16 限制检查，u32 可支持 ~42 亿行
-        if let Err(e) = btree.insert(pk_bytes, row_id as u32) {
+        if let Err(e) = btree.insert(pk_bytes, encode_tuple_id_key(tuple_id as u32)) {
             tracing::warn!(error = ?e, "update_pk_index: BTree insert failed");
         }
+    }
+
+    // -----------------------------------------------------------------
+    //  Phase F-10 / P0-4：在线 DDL 支持
+    // -----------------------------------------------------------------
+
+    /// 取所有行（含已删除的行）的可变引用 — Phase F-10 / P0-4
+    ///
+    /// 用于 ALTER TABLE 数据迁移：ADD COLUMN 追加列值、DROP COLUMN 移除列值、
+    /// ALTER COLUMN TYPE 转换列值。
+    ///
+    /// P0-4：从 B+Tree 解码所有行到临时 Vec，调用方修改后写回 B+Tree。
+    /// 获取全部行的可变句柄（P0-4）
+    ///
+    /// 返回 `RowsMutGuard`：通过 `DerefMut` 修改行，guard 析构时自动回写 B+Tree
+    /// （保留各行原始 xmin/xmax 版本元数据）。语义与旧版 `&mut Vec<Row>` 一致。
+    pub fn rows_mut(&mut self) -> RowsMutGuard<'_> {
+        // 解码 B+Tree 中全部行（含已删除标记的行，与 deleted 集合配合使用）
+        let mut rows = Vec::new();
+        let cursor = match self
+            .btree
+            .cursor(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+        {
+            Ok(c) => c,
+            Err(_) => {
+                return RowsMutGuard {
+                    table: self,
+                    rows,
+                    versions: Vec::new(),
+                }
+            }
+        };
+        let mut versions = Vec::new();
+        for (_key, value) in cursor {
+            if let Ok((xmin, xmax, row)) = btree_value_codec::decode(&value) {
+                versions.push((xmin, xmax));
+                rows.push(row);
+            }
+        }
+        RowsMutGuard {
+            table: self,
+            rows,
+            versions,
+        }
+    }
+
+    /// P0-4：行缓存上限设置
+    pub fn set_row_cache_max(&mut self, max: usize) {
+        self.row_cache_max = max;
+    }
+
+    /// P0-4：行缓存当前大小
+    pub fn row_cache_len(&self) -> usize {
+        self.row_cache.len()
+    }
+
+    /// 替换表 Schema — Phase F-10
+    ///
+    /// 用于 ALTER TABLE 完成后同步存储层的 Schema（catalog 与 storage 各持一份）。
+    pub fn set_schema(&mut self, schema: TableSchema) {
+        self.schema = schema;
     }
 
     // -----------------------------------------------------------------
@@ -1287,7 +1470,10 @@ impl InMemoryTable {
     ///
     /// **幂等性**：重复调用会覆盖现有 persistence（旧 BufferPool 被 drop）。
     /// **错误**：文件无法打开时返回 ExecutionError。
-    pub fn enable_persistence<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<(), ExecutionError> {
+    pub fn enable_persistence<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+    ) -> Result<(), ExecutionError> {
         let path_ref = path.as_ref();
         let writer = szrsql_storage::buffer::FilePageWriter::open(path_ref)
             .map_err(|e| ExecutionError::Storage(format!("open writer failed: {e}")))?;
@@ -1295,9 +1481,7 @@ impl InMemoryTable {
         let loader: std::sync::Arc<dyn szrsql_storage::buffer::PageLoader> =
             match szrsql_storage::buffer::FilePageLoader::open(path_ref) {
                 Ok(l) => std::sync::Arc::new(l),
-                Err(_) => {
-                    std::sync::Arc::new(szrsql_storage::buffer::InMemoryPageLoader::new())
-                }
+                Err(_) => std::sync::Arc::new(szrsql_storage::buffer::InMemoryPageLoader::new()),
             };
         let writer: std::sync::Arc<dyn szrsql_storage::buffer::PageWriter> =
             std::sync::Arc::new(writer);
@@ -1320,40 +1504,48 @@ impl InMemoryTable {
     /// **错误**：序列化失败、BufferPool 写入失败、未启用 persistence 时返回错误。
     pub fn flush_to_disk(&self) -> Result<(), ExecutionError> {
         let pool = self.persistence.as_ref().ok_or_else(|| {
-            ExecutionError::Storage("persistence not enabled, call enable_persistence() first".into())
+            ExecutionError::Storage(
+                "persistence not enabled, call enable_persistence() first".into(),
+            )
         })?;
 
-        // 序列化整表为字节流（用 serde_json 保证可移植性）
-        // 注意：persistence 字段本身是 serde skip，不会递归序列化
-        let serialized = serde_json::to_vec(self)
-            .map_err(|e| ExecutionError::Storage(format!("serialize failed: {e}")))?;
+        // P0-4：B+Tree 是 #[serde(skip)]，不能直接序列化 self。
+        // 改为先取快照（遍历 B+Tree 解码所有行），再序列化快照数据。
+        let snapshot = self.snapshot();
+        let serialized = serde_json::to_vec(&snapshot)
+            .map_err(|e| ExecutionError::Storage(format!("serialize snapshot failed: {e}")))?;
         let total_len = serialized.len();
-        tracing::debug!(table = %self.name, total_len, pages = (total_len + BODY_SIZE - 1) / BODY_SIZE, "flush_to_disk");
+        tracing::debug!(table = %self.name, total_len, pages = total_len.div_ceil(BODY_SIZE), "flush_to_disk");
 
         // page 0：header 页 — body = [8 字节 LE total_len][表名 UTF-8]
-        let mut header_page = szrsql_storage::page::Page::new(0, szrsql_storage::page::PageType::Data);
+        let mut header_page =
+            szrsql_storage::page::Page::new(0, szrsql_storage::page::PageType::Data);
         let mut header_body = Vec::with_capacity(8 + self.name.len());
         header_body.extend_from_slice(&(total_len as u64).to_le_bytes());
         header_body.extend_from_slice(self.name.as_bytes());
-        header_page.append_body(&header_body)
+        header_page
+            .append_body(&header_body)
             .map_err(|e| ExecutionError::Storage(format!("header append failed: {e}")))?;
         header_page.update_checksum();
         pool.put_page(0, header_page)
             .map_err(|e| ExecutionError::Storage(format!("write header page failed: {e}")))?;
 
         // page 1..N：data 页 — body = 序列化字节流分片
-        let total_pages = (total_len + BODY_SIZE - 1) / BODY_SIZE;
+        let total_pages = total_len.div_ceil(BODY_SIZE);
         for page_idx in 0..total_pages {
             let page_id = (page_idx + 1) as u32;
             let start = page_idx * BODY_SIZE;
             let end = std::cmp::min(start + BODY_SIZE, total_len);
             let chunk = &serialized[start..end];
-            let mut page = szrsql_storage::page::Page::new(page_id, szrsql_storage::page::PageType::Data);
-            page.append_body(chunk)
-                .map_err(|e| ExecutionError::Storage(format!("data page {page_id} append failed: {e}")))?;
+            let mut page =
+                szrsql_storage::page::Page::new(page_id, szrsql_storage::page::PageType::Data);
+            page.append_body(chunk).map_err(|e| {
+                ExecutionError::Storage(format!("data page {page_id} append failed: {e}"))
+            })?;
             page.update_checksum();
-            pool.put_page(page_id, page)
-                .map_err(|e| ExecutionError::Storage(format!("write data page {page_id} failed: {e}")))?;
+            pool.put_page(page_id, page).map_err(|e| {
+                ExecutionError::Storage(format!("write data page {page_id} failed: {e}"))
+            })?;
         }
 
         // flush_all 确保所有脏页落盘
@@ -1375,46 +1567,54 @@ impl InMemoryTable {
     /// 需调用方重新 `enable_btree_pk()` 和 `enable_persistence()`。
     pub fn load_from_disk(&mut self) -> Result<(), ExecutionError> {
         let pool = self.persistence.as_ref().ok_or_else(|| {
-            ExecutionError::Storage("persistence not enabled, call enable_persistence() first".into())
+            ExecutionError::Storage(
+                "persistence not enabled, call enable_persistence() first".into(),
+            )
         })?;
 
         // page 0：header
-        let header_page = pool.read_page(0)
+        let header_page = pool
+            .read_page(0)
             .map_err(|e| ExecutionError::Storage(format!("read header page failed: {e}")))?;
-        let header_body = header_page.read_body(0, 8)
+        let header_body = header_page
+            .read_body(0, 8)
             .map_err(|e| ExecutionError::Storage(format!("header body read failed: {e}")))?;
         if header_body.len() < 8 {
             return Err(ExecutionError::Storage(format!(
-                "header body too short: {} < 8", header_body.len()
+                "header body too short: {} < 8",
+                header_body.len()
             )));
         }
         let total_len = u64::from_le_bytes(header_body[..8].try_into().unwrap()) as usize;
 
         // 拼接 data 页字节流
-        let total_pages = (total_len + BODY_SIZE - 1) / BODY_SIZE;
+        let total_pages = total_len.div_ceil(BODY_SIZE);
         let mut serialized = Vec::with_capacity(total_len);
         for page_idx in 0..total_pages {
             let page_id = (page_idx + 1) as u32;
-            let page = pool.read_page(page_id)
-                .map_err(|e| ExecutionError::Storage(format!("read data page {page_id} failed: {e}")))?;
+            let page = pool.read_page(page_id).map_err(|e| {
+                ExecutionError::Storage(format!("read data page {page_id} failed: {e}"))
+            })?;
             // 读取 body 中实际写入的部分（从 offset 0 开始）
-            let body = page.read_body(0, std::cmp::min(BODY_SIZE, total_len - serialized.len()))
-                .map_err(|e| ExecutionError::Storage(format!("data page {page_id} body read failed: {e}")))?;
+            let body = page
+                .read_body(0, std::cmp::min(BODY_SIZE, total_len - serialized.len()))
+                .map_err(|e| {
+                    ExecutionError::Storage(format!("data page {page_id} body read failed: {e}"))
+                })?;
             serialized.extend_from_slice(body);
         }
         if serialized.len() != total_len {
             return Err(ExecutionError::Storage(format!(
-                "data length mismatch: expected {total_len} got {}", serialized.len()
+                "data length mismatch: expected {total_len} got {}",
+                serialized.len()
             )));
         }
 
-        // 反序列化为 InMemoryTable
-        let restored: InMemoryTable = serde_json::from_slice(&serialized)
+        // 反序列化为 TableSnapshot（InMemoryTable 含 #[serde(skip)] 的 B+Tree，不能直接反序列化）
+        let snapshot: TableSnapshot = serde_json::from_slice(&serialized)
             .map_err(|e| ExecutionError::Storage(format!("deserialize failed: {e}")))?;
-        // 保留 persistence（serde skip 后为 None），用调用方的 pool
-        let pool = self.persistence.take();
-        *self = restored;
-        self.persistence = pool;
+        // 用快照重建 B+Tree
+        self.restore(snapshot);
         tracing::info!(table = %self.name, total_len, total_pages, "P0-STORE-2: load_from_disk completed");
         Ok(())
     }
@@ -1445,8 +1645,9 @@ impl InMemoryTable {
         path: P,
     ) -> Result<(), ExecutionError> {
         let path_ref = path.as_ref();
-        let writer = szrsql_storage::buffer::FilePageWriter::open(path_ref)
-            .map_err(|e| ExecutionError::Storage(format!("paged_storage: open writer failed: {e}")))?;
+        let writer = szrsql_storage::buffer::FilePageWriter::open(path_ref).map_err(|e| {
+            ExecutionError::Storage(format!("paged_storage: open writer failed: {e}"))
+        })?;
         // 文件已存在则用 FilePageLoader，否则（首次启用）用 InMemoryPageLoader 占位
         // （首次启用时文件尚未创建，FilePageLoader::open 会失败，退化为内存 loader；
         //   spill 后 flush_all 通过 FilePageWriter 写盘，重启时文件已存在可正常加载）
@@ -1457,8 +1658,10 @@ impl InMemoryTable {
             };
         let writer: std::sync::Arc<dyn szrsql_storage::buffer::PageWriter> =
             std::sync::Arc::new(writer);
-        let pool = szrsql_storage::buffer::BufferPool::with_writer(256, loader, writer)
-            .map_err(|e| ExecutionError::Storage(format!("paged_storage: buffer pool init failed: {e}")))?;
+        let pool =
+            szrsql_storage::buffer::BufferPool::with_writer(256, loader, writer).map_err(|e| {
+                ExecutionError::Storage(format!("paged_storage: buffer pool init failed: {e}"))
+            })?;
         self.paged_storage = Some(std::sync::Arc::new(pool));
         tracing::debug!(table = %self.name, path = ?path_ref, "P1-1: paged_storage enabled");
         Ok(())
@@ -1495,16 +1698,27 @@ impl InMemoryTable {
             )
         })?;
 
-        let total_rows = self.rows.len();
-        tracing::debug!(table = %self.name, total_rows, "spill_to_paged_storage: starting");
-
-        // 预先序列化所有行，便于分页计算
-        let mut row_bytes_list: Vec<Vec<u8>> = Vec::with_capacity(total_rows);
-        for (idx, row) in self.rows.iter().enumerate() {
-            let bytes = serde_json::to_vec(row)
-                .map_err(|e| ExecutionError::Storage(format!("spill: serialize row {idx} failed: {e}")))?;
+        // 遍历 B+Tree，解码所有行数据（跳过已删除）
+        let mut row_bytes_list: Vec<Vec<u8>> = Vec::new();
+        let cursor = self
+            .btree
+            .cursor(Bound::Unbounded, Bound::Unbounded)
+            .map_err(|e| ExecutionError::Storage(format!("spill: cursor open failed: {e}")))?;
+        for (_key, value) in cursor {
+            let (_xmin, xmax, row) = btree_value_codec::decode(&value).map_err(|e| {
+                ExecutionError::Storage(format!("spill: decode btree value failed: {e}"))
+            })?;
+            if xmax == u32::MAX {
+                continue; // 已删除，跳过
+            }
+            let bytes = serde_json::to_vec(&row).map_err(|e| {
+                ExecutionError::Storage(format!("spill: serialize row failed: {e}"))
+            })?;
             row_bytes_list.push(bytes);
         }
+
+        let total_rows = row_bytes_list.len();
+        tracing::debug!(table = %self.name, total_rows, "spill_to_paged_storage: starting");
 
         // 按 data 页组织：每页存储尽可能多的行
         let mut data_pages: Vec<Vec<u8>> = Vec::new();
@@ -1535,8 +1749,9 @@ impl InMemoryTable {
             .append_body(&header_body)
             .map_err(|e| ExecutionError::Storage(format!("spill: header append failed: {e}")))?;
         header_page.update_checksum();
-        pool.put_page(0, header_page)
-            .map_err(|e| ExecutionError::Storage(format!("spill: write header page failed: {e}")))?;
+        pool.put_page(0, header_page).map_err(|e| {
+            ExecutionError::Storage(format!("spill: write header page failed: {e}"))
+        })?;
 
         // page 1..N：data 页
         for (page_idx, body_bytes) in data_pages.iter().enumerate() {
@@ -1581,12 +1796,12 @@ impl InMemoryTable {
         })?;
 
         // page 0：header
-        let header_page = pool
-            .read_page(0)
-            .map_err(|e| ExecutionError::Storage(format!("restore: read header page failed: {e}")))?;
-        let header_body = header_page
-            .read_body(0, 16)
-            .map_err(|e| ExecutionError::Storage(format!("restore: header body read failed: {e}")))?;
+        let header_page = pool.read_page(0).map_err(|e| {
+            ExecutionError::Storage(format!("restore: read header page failed: {e}"))
+        })?;
+        let header_body = header_page.read_body(0, 16).map_err(|e| {
+            ExecutionError::Storage(format!("restore: header body read failed: {e}"))
+        })?;
         if header_body.len() < 16 {
             return Err(ExecutionError::Storage(format!(
                 "restore: header body too short: {} < 16",
@@ -1612,7 +1827,9 @@ impl InMemoryTable {
                 continue;
             }
             let body = page.read_body(0, body_len).map_err(|e| {
-                ExecutionError::Storage(format!("restore: data page {page_id} body read failed: {e}"))
+                ExecutionError::Storage(format!(
+                    "restore: data page {page_id} body read failed: {e}"
+                ))
             })?;
             // 按 [4 字节 row_len][row_bytes] 解析
             let mut offset = 0usize;
@@ -1627,11 +1844,12 @@ impl InMemoryTable {
                         body.len() - offset
                     )));
                 }
-                let row: Row = serde_json::from_slice(&body[offset..offset + row_len]).map_err(|e| {
-                    ExecutionError::Storage(format!(
+                let row: Row =
+                    serde_json::from_slice(&body[offset..offset + row_len]).map_err(|e| {
+                        ExecutionError::Storage(format!(
                         "restore: deserialize row at page {page_id} offset {offset} failed: {e}"
                     ))
-                })?;
+                    })?;
                 restored_rows.push(row);
                 offset += row_len;
             }
@@ -1644,11 +1862,20 @@ impl InMemoryTable {
             )));
         }
 
-        // 用读取的行替换 self.rows，重置版本元数据
-        self.rows = restored_rows;
-        self.deleted = HashSet::new();
-        self.xmin = vec![0u32; self.rows.len()];
-        self.xmax = vec![0u32; self.rows.len()];
+        // 重建 B+Tree：清空并重新插入所有行
+        self.btree = szrsql_storage::btree::BTree::with_default_order();
+        self.next_tuple_id = 0;
+        self.deleted.clear();
+        self.row_cache.clear();
+        for row in restored_rows {
+            let tuple_id = self.next_tuple_id;
+            self.next_tuple_id += 1;
+            let key = encode_tuple_id_key(tuple_id);
+            let value = btree_value_codec::encode(0, 0, &row);
+            self.btree.insert(key, value).map_err(|e| {
+                ExecutionError::Storage(format!("restore: btree insert failed: {e}"))
+            })?;
+        }
         tracing::info!(
             table = %self.name, total_rows, data_page_count,
             "P1-1: restore_from_paged_storage completed"
@@ -1662,7 +1889,7 @@ impl InMemoryTable {
     /// 仅在 paged_storage 已启用且行数超过阈值时触发；
     /// spill 失败仅记录 warning，不影响主路径（rows 仍保留在内存）。
     fn auto_spill_if_needed(&mut self) {
-        if self.paged_storage.is_some() && self.rows.len() > self.spill_threshold {
+        if self.paged_storage.is_some() && self.btree.len() > self.spill_threshold {
             if let Err(e) = self.spill_to_paged_storage() {
                 tracing::warn!(table = %self.name, error = %e, "P1-1: auto spill failed");
             }
@@ -1678,30 +1905,45 @@ impl InMemoryTable {
         let pool = self.paged_storage.as_ref()?;
         Some(PagedStorageInfo {
             page_count: pool.total_len(),
-            row_count: self.rows.len(),
+            row_count: self.btree.len().saturating_sub(self.deleted.len()),
             threshold: self.spill_threshold,
         })
     }
 
-    /// 批量插入多行，返回起始 row_id
+    /// 批量插入多行，返回起始 tuple_id
     pub fn bulk_insert(&mut self, rows: Vec<Row>) -> usize {
-        let start = self.rows.len();
-        let count = rows.len();
-        self.rows.extend(rows);
-        self.xmin.resize(self.rows.len(), 0);
-        self.xmax.resize(self.rows.len(), 0);
-        // 已有的行保持原值，新行默认 0
-        let _ = count;
+        let start = self.next_tuple_id as usize;
+        for row in rows {
+            let tuple_id = self.next_tuple_id;
+            self.next_tuple_id += 1;
+            let key = encode_tuple_id_key(tuple_id);
+            let value = btree_value_codec::encode(0, 0, &row);
+            self.btree.insert(key, value).ok();
+            self.maybe_cache_row(tuple_id, row);
+        }
         // P1-1：批量插入后检查是否需要自动 spill 到分页存储
         self.auto_spill_if_needed();
         start
     }
 
-    /// 取所有行（含已删除的行）的不可变引用 — 供测试断言原始数据
+    /// 取所有行（含已删除的行）— 供测试断言原始数据
     ///
-    /// 注意：返回的 slice 包含已删除的行。如需仅活跃行，请用 `scan_iter()`。
-    pub fn rows(&self) -> &[Row] {
-        &self.rows
+    /// 注意：返回的 Vec 包含已删除的行（xmax = u32::MAX）。
+    /// 如需仅活跃行，请用 `scan_iter()`。
+    pub fn rows(&self) -> Vec<Row> {
+        let mut result = Vec::new();
+        let cursor = self
+            .btree
+            .cursor(Bound::Unbounded, Bound::Unbounded)
+            .ok()
+            .into_iter()
+            .flatten();
+        for (_key, value) in cursor {
+            if let Ok((_xmin, _xmax, row)) = btree_value_codec::decode(&value) {
+                result.push(row);
+            }
+        }
+        result
     }
 
     /// 取表名 — 用于持久化时作为 HashMap key
@@ -1711,112 +1953,114 @@ impl InMemoryTable {
 
     /// P0-TX-1 Phase B：修复旧版快照中缺失的 xmin/xmax 数组
     ///
-    /// 旧版快照（P0-TX-1 Phase B 之前）没有 xmin/xmax 字段，反序列化后为空 Vec。
-    /// 此方法确保 xmin/xmax 长度与 rows 一致，缺失部分补 0（Frozen/未删除）。
+    /// P0-4 后版本信息直接存储在 B+Tree 值中，此方法为兼容保留（无操作）。
     pub fn ensure_version_arrays(&mut self) {
-        if self.xmin.len() < self.rows.len() {
-            self.xmin.resize(self.rows.len(), 0);
-        }
-        if self.xmax.len() < self.rows.len() {
-            self.xmax.resize(self.rows.len(), 0);
-        }
+        // P0-4: 版本信息存储在 B+Tree 值中，无需独立数组
     }
 
-    /// 取所有行（含已删除的行）的可变引用 — Phase F-10
+    /// 按 row_id 标记删除（tombstone）— P0-4
     ///
-    /// 用于 ALTER TABLE 数据迁移：ADD COLUMN 追加列值、DROP COLUMN 移除列值、
-    /// ALTER COLUMN TYPE 转换列值。调用方需对 `deleted` 集合中的行自行处理
-    /// （当前简化：迁移所有行，包括 tombstone 行，因为重建时 deleted 集合仍按 row_id 索引）。
-    pub fn rows_mut(&mut self) -> &mut [Row] {
-        &mut self.rows
-    }
-
-    /// 替换表 Schema — Phase F-10
-    ///
-    /// 用于 ALTER TABLE 完成后同步存储层的 Schema（catalog 与 storage 各持一份）。
-    pub fn set_schema(&mut self, schema: TableSchema) {
-        self.schema = schema;
-    }
-
-    /// 取表 Schema 的不可变引用
-    pub fn schema(&self) -> &TableSchema {
-        &self.schema
-    }
-
-    /// 按 row_id 标记删除（tombstone）— Phase 6.12
-    ///
-    /// 如果 row_id 已被删除或越界，返回 `false`；否则标记删除并返回 `true`。
+    /// 如果 row_id 已被删除或不存在于 B+Tree，返回 `false`；
+    /// 否则标记 deleted 并更新 B+Tree 中该行的 xmax。
     pub fn delete_row(&mut self, row_id: usize) -> bool {
-        if row_id >= self.rows.len() {
+        let tuple_id = row_id as u32;
+        if self.deleted.contains(&tuple_id) {
             return false;
         }
-        if self.deleted.contains(&row_id) {
-            return false;
+        // 检查 B+Tree 中是否存在该行
+        let key = encode_tuple_id_key(tuple_id);
+        match self.btree.search(&key) {
+            Ok(Some(value)) => {
+                // 更新 B+Tree 中的 xmax（标记删除）
+                if let Ok((xmin, _xmax, row)) = btree_value_codec::decode(&value) {
+                    let new_value = btree_value_codec::encode(xmin, u32::MAX, &row);
+                    if let Err(e) = self.btree.insert(key, new_value) {
+                        tracing::warn!(tuple_id, error = ?e, "delete_row: BTree xmax update failed");
+                    }
+                }
+                self.deleted.insert(tuple_id);
+                self.row_cache.remove(&tuple_id);
+                true
+            }
+            _ => false,
         }
-        self.deleted.insert(row_id);
-        true
     }
 
-    /// P0-TX-1 Phase B：按 row_id 标记删除并设置 xmax（MVCC 版本元数据）
+    /// P0-TX-1 Phase B / P0-4：按 row_id 标记删除并设置 xmax（MVCC 版本元数据）
     ///
-    /// 由 Executor 在事务内 DELETE 时调用，xmax 设为当前事务 ID，
-    /// 使该行对当前事务不可见（已删除），但对其他在快照前已开始的并发事务仍可见
-    /// （删除者尚未提交）。同时加入 tombstone 集合保持与旧 scan_iter 兼容。
+    /// 由 Executor 在事务内 DELETE 时调用。xmax 设为当前事务 ID，
+    /// 更新 B+Tree 中该行的 value。不立即加入 deleted 集合（由 COMMIT 时 finalize）。
     pub fn delete_row_with_xmax(&mut self, row_id: usize, xmax: u32) -> bool {
-        if row_id >= self.rows.len() {
+        let tuple_id = row_id as u32;
+        if self.deleted.contains(&tuple_id) {
             return false;
         }
-        if self.deleted.contains(&row_id) {
-            return false;
+        let key = encode_tuple_id_key(tuple_id);
+        match self.btree.search(&key) {
+            Ok(Some(value)) => {
+                if let Ok((xmin, _xmax, row)) = btree_value_codec::decode(&value) {
+                    let new_value = btree_value_codec::encode(xmin, xmax, &row);
+                    if let Err(e) = self.btree.insert(key, new_value) {
+                        tracing::warn!(tuple_id, error = ?e, "delete_row_with_xmax: BTree update failed");
+                    } else {
+                        // 从缓存移除（已脏）
+                        self.row_cache.remove(&tuple_id);
+                        return true;
+                    }
+                }
+                false
+            }
+            _ => false,
         }
-        self.xmax[row_id] = xmax;
-        // 注：不加入 deleted 集合，让 MVCC 可见性判断决定是否可见。
-        // scan_iter 仍通过 xmax != 0 && 已提交 来判断 tombstone。
-        // 但为兼容旧的 scan_iter（不检查 xmax），在事务提交时由 Executor
-        // 将已提交删除的行加入 deleted 集合。
-        true
     }
 
     /// P0-TX-1 Phase B：将已提交删除的行加入 tombstone 集合
     ///
-    /// 由 Executor 在事务 COMMIT 后调用，将 xmax 已设置且对应事务已提交的行
-    /// 加入 `deleted` 集合，使旧的 `scan_iter`（不检查版本元数据）也能正确过滤。
+    /// 由 Executor 在事务 COMMIT 后调用。
     pub fn finalize_deleted_rows(&mut self, deleted_row_ids: &[usize]) {
         for &id in deleted_row_ids {
-            if id < self.rows.len() {
-                self.deleted.insert(id);
-            }
+            self.deleted.insert(id as u32);
         }
     }
 
-    /// 按 row_id 替换行（tombstone 行不可更新）— Phase 6.12
+    /// 按 row_id 替换行（tombstone 行不可更新）— P0-4
     ///
-    /// 如果 row_id 越界或已被标记删除（tombstone），返回 `false`；否则替换行并返回 `true`。
+    /// 从 B+Tree 读取现有值，保留 xmin，写入新行。
     pub fn update_row(&mut self, row_id: usize, row: Row) -> bool {
-        if row_id >= self.rows.len() {
+        let tuple_id = row_id as u32;
+        if self.deleted.contains(&tuple_id) {
             return false;
         }
-        if self.deleted.contains(&row_id) {
-            return false;
+        let key = encode_tuple_id_key(tuple_id);
+        match self.btree.search(&key) {
+            Ok(Some(value)) => {
+                if let Ok((xmin, xmax, _old_row)) = btree_value_codec::decode(&value) {
+                    let new_value = btree_value_codec::encode(xmin, xmax, &row);
+                    if let Err(e) = self.btree.insert(key, new_value) {
+                        tracing::warn!(tuple_id, error = ?e, "update_row: BTree update failed");
+                        false
+                    } else {
+                        // 更新缓存
+                        self.row_cache.insert(tuple_id, row);
+                        true
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
-        self.rows[row_id] = row;
-        true
     }
 
-    /// 清空表数据（保留表结构）— TRUNCATE TABLE
+    /// 清空表数据（保留表结构）— TRUNCATE TABLE — P0-4
     ///
-    /// 等价于 `DELETE FROM table` 但：
-    /// - 不触发触发器
-    /// - 不记录逐行 WAL
-    /// - 通过清空 `rows` 和 `deleted` 集合实现，性能远高于 DELETE
-    /// - 表 Schema 保留，可继续 INSERT
-    ///
-    /// 各方言均支持：PG/MySQL/Oracle/SQL Server/SQLite。
+    /// 重建 B+Tree（丢弃所有节点），重置 next_tuple_id，清空 deleted 和缓存。
     pub fn truncate(&mut self) {
-        self.rows.clear();
+        self.btree = szrsql_storage::btree::BTree::with_default_order();
+        self.next_tuple_id = 0;
         self.deleted.clear();
-        self.xmin.clear();
-        self.xmax.clear();
+        self.row_cache.clear();
+        // pk_index 保留（主键约束仍有效）
     }
 }
 
@@ -1829,73 +2073,98 @@ impl TableStorage for InMemoryTable {
         &self.schema
     }
 
+    /// P0-4：遍历 B+Tree 所有叶子节点，跳过 deleted，解码行数据
     fn scan_iter(&self) -> Box<dyn Iterator<Item = Row> + Send + '_> {
-        Box::new(
-            self.rows
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !self.deleted.contains(i))
-                .map(|(_, row)| row.clone()),
-        )
+        let cursor = match self
+            .btree
+            .cursor(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = ?e, "scan_iter: cursor creation failed");
+                return Box::new(std::iter::empty());
+            }
+        };
+        Box::new(cursor.filter_map(move |(key, value)| {
+            let tuple_id = decode_tuple_id_key(&key);
+            if self.deleted.contains(&tuple_id) {
+                return None;
+            }
+            btree_value_codec::decode(&value)
+                .map(|(_, _, row)| row)
+                .ok()
+        }))
     }
 
+    /// P0-4：遍历 B+Tree，yield (tuple_id as usize, row)
     fn scan_with_ids(&self) -> Box<dyn Iterator<Item = (usize, Row)> + Send + '_> {
-        Box::new(
-            self.rows
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| !self.deleted.contains(i))
-                .map(|(i, row)| (i, row.clone())),
-        )
+        let cursor = match self
+            .btree
+            .cursor(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = ?e, "scan_with_ids: cursor creation failed");
+                return Box::new(std::iter::empty());
+            }
+        };
+        Box::new(cursor.filter_map(move |(key, value)| {
+            let tuple_id = decode_tuple_id_key(&key);
+            if self.deleted.contains(&tuple_id) {
+                return None;
+            }
+            btree_value_codec::decode(&value)
+                .map(|(_, _, row)| (tuple_id as usize, row))
+                .ok()
+        }))
     }
 
+    /// P0-4：B+Tree 条目数 - deleted 数量
     fn row_count(&self) -> usize {
-        self.rows.len() - self.deleted.len()
+        self.btree.len().saturating_sub(self.deleted.len())
     }
 
+    /// P0-4：B+Tree 点查 + 缓存
     fn get_row(&self, row_id: usize) -> Option<Row> {
-        if self.deleted.contains(&row_id) {
+        let tuple_id = row_id as u32;
+        if self.deleted.contains(&tuple_id) {
             return None;
         }
-        self.rows.get(row_id).cloned()
+        // 先查缓存
+        if let Some(row) = self.row_cache.get(&tuple_id) {
+            return Some(row.clone());
+        }
+        // 查 B+Tree
+        let key = encode_tuple_id_key(tuple_id);
+        match self.btree.search(&key) {
+            Ok(Some(value)) => btree_value_codec::decode(&value)
+                .map(|(_, _, row)| row)
+                .ok(),
+            _ => None,
+        }
     }
 
-    /// P0-TX-1 Phase B：返回所有行（含已 tombstone 的）及其 xmin/xmax 版本元数据。
+    /// P0-TX-1 Phase B / P0-4：返回所有行（含已 tombstone 的）及其 xmin/xmax 版本元数据。
     ///
-    /// 注意：此处返回所有行（不过滤 deleted），由 Executor 的 MVCC 可见性判断
-    /// 决定哪些行对当前事务可见。已提交的 tombstone 行（xmax != 0 且删除者已提交）
-    /// 会被 `MvccManager::is_visible()` 判定为不可见。
-    fn scan_with_versions(
-        &self,
-    ) -> Box<dyn Iterator<Item = (usize, Row, u32, u32)> + Send + '_> {
-        // 确保 xmin/xmax 与 rows 等长（防御性：反序列化旧数据可能缺失版本数组）
-        let xmin = if self.xmin.len() < self.rows.len() {
-            let mut v = self.xmin.clone();
-            v.resize(self.rows.len(), 0);
-            v
-        } else {
-            self.xmin.clone()
+    /// 遍历 B+Tree 所有叶子节点（不过滤 deleted），解码 xmin/xmax/row。
+    /// 由 Executor 的 MVCC 可见性判断决定哪些行对当前事务可见。
+    fn scan_with_versions(&self) -> Box<dyn Iterator<Item = (usize, Row, u32, u32)> + Send + '_> {
+        let cursor = match self
+            .btree
+            .cursor(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = ?e, "scan_with_versions: cursor creation failed");
+                return Box::new(std::iter::empty());
+            }
         };
-        let xmax = if self.xmax.len() < self.rows.len() {
-            let mut v = self.xmax.clone();
-            v.resize(self.rows.len(), 0);
-            v
-        } else {
-            self.xmax.clone()
-        };
-        Box::new(
-            self.rows
-                .iter()
-                .cloned()
-                .enumerate()
-                // 排除已 tombstone（deleted 集合）的行 — 这些是旧事务已提交的删除
-                .filter(move |(i, _)| !self.deleted.contains(i))
-                .map(move |(id, row)| {
-                    let xm = xmin.get(id).copied().unwrap_or(0);
-                    let xa = xmax.get(id).copied().unwrap_or(0);
-                    (id, row, xm, xa)
-                }),
-        )
+        Box::new(cursor.filter_map(move |(key, value)| {
+            let tuple_id = decode_tuple_id_key(&key);
+            btree_value_codec::decode(&value)
+                .map(|(xmin, xmax, row)| (tuple_id as usize, row, xmin, xmax))
+                .ok()
+        }))
     }
 
     /// P0-STORE 阶段 1：主键列索引（委托给 InMemoryTable::pk_column_idx）
@@ -2267,7 +2536,7 @@ fn flip_comparison_op(op: &BinaryOp) -> Option<BinaryOp> {
 /// 表快照 — 用于事务回滚（Phase 3.5 简化事务模型）
 ///
 /// 捕获表的完整状态（行数据 + 已删除集合 + MVCC 版本元数据），通过 `MutableTable::restore` 恢复。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableSnapshot {
     /// 行数据副本
     rows: Vec<Row>,
@@ -2373,60 +2642,87 @@ impl MutableTable for InMemoryTable {
     }
 
     fn update_row(&mut self, row_id: usize, row: Row) -> bool {
-        if self.deleted.contains(&row_id) {
-            return false;
-        }
-        if row_id >= self.rows.len() {
-            return false;
-        }
-        self.rows[row_id] = row;
-        true
+        InMemoryTable::update_row(self, row_id, row)
     }
 
     fn delete_row(&mut self, row_id: usize) -> bool {
-        if self.deleted.contains(&row_id) || row_id >= self.rows.len() {
-            return false;
-        }
-        self.deleted.insert(row_id);
-        true
+        InMemoryTable::delete_row(self, row_id)
     }
 
+    /// P0-4：清空所有行（重建 B+Tree，重置 tuple_id 计数）
     fn clear(&mut self) {
-        self.rows.clear();
-        self.deleted.clear();
-        self.xmin.clear();
-        self.xmax.clear();
+        self.truncate()
     }
 
+    /// P0-4：遍历 B+Tree 构建 TableSnapshot（向后兼容）
     fn snapshot(&self) -> TableSnapshot {
-        // 防御性：确保 xmin/xmax 与 rows 等长
-        let xmin = if self.xmin.len() < self.rows.len() {
-            let mut v = self.xmin.clone();
-            v.resize(self.rows.len(), 0);
-            v
-        } else {
-            self.xmin.clone()
+        let mut rows = Vec::new();
+        let mut deleted = HashSet::new();
+        let mut xmin = Vec::new();
+        let mut xmax = Vec::new();
+
+        let cursor = match self
+            .btree
+            .cursor(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = ?e, "snapshot: cursor creation failed");
+                return TableSnapshot::empty();
+            }
         };
-        let xmax = if self.xmax.len() < self.rows.len() {
-            let mut v = self.xmax.clone();
-            v.resize(self.rows.len(), 0);
-            v
-        } else {
-            self.xmax.clone()
-        };
+
+        for (key, value) in cursor {
+            let tuple_id = decode_tuple_id_key(&key) as usize;
+            match btree_value_codec::decode(&value) {
+                Ok((xmn, xmx, row)) => {
+                    if self.deleted.contains(&(tuple_id as u32)) {
+                        deleted.insert(tuple_id);
+                    }
+                    rows.push(row);
+                    xmin.push(xmn);
+                    xmax.push(xmx);
+                }
+                Err(e) => {
+                    tracing::warn!(tuple_id, error = %e, "snapshot: decode failed, skipping");
+                }
+            }
+        }
+
         TableSnapshot {
-            rows: self.rows.clone(),
-            deleted: self.deleted.clone(),
+            rows,
+            deleted,
             xmin,
             xmax,
         }
     }
 
+    /// P0-4：从 TableSnapshot 重建 B+Tree
     fn restore(&mut self, snapshot: TableSnapshot) {
-        self.rows = snapshot.rows;
-        self.deleted = snapshot.deleted;
-        self.xmin = snapshot.xmin;
-        self.xmax = snapshot.xmax;
+        // 重建 B+Tree
+        self.btree = szrsql_storage::btree::BTree::with_default_order();
+        self.next_tuple_id = 0;
+        self.deleted.clear();
+        self.row_cache.clear();
+
+        // 重新插入所有行（保留原始 xmin/xmax）
+        for (i, row) in snapshot.rows.into_iter().enumerate() {
+            let tuple_id = self.next_tuple_id;
+            self.next_tuple_id += 1;
+            let xmin = snapshot.xmin.get(i).copied().unwrap_or(0);
+            let xmax = snapshot.xmax.get(i).copied().unwrap_or(0);
+            let value = btree_value_codec::encode(xmin, xmax, &row);
+            let key = encode_tuple_id_key(tuple_id);
+            if let Err(e) = self.btree.insert(key, value) {
+                tracing::warn!(tuple_id, error = ?e, "restore: BTree insert failed");
+            }
+            self.row_cache.insert(tuple_id, row);
+        }
+
+        // 恢复 deleted 集合
+        for &tuple_id in &snapshot.deleted {
+            self.deleted.insert(tuple_id as u32);
+        }
     }
 
     /// P0-TX-1 Phase B：插入并设置 xmin
@@ -2974,6 +3270,12 @@ pub struct Executor<'a> {
     /// 执行 `CREATE FUNCTION` 创建的 SQL/PLpgSQL 函数体。
     /// None 表示不启用 SQL 函数（表达式求值器对未知函数直接返回 `FunctionNotFound`）。
     sql_functions: Option<HashMap<String, Vec<FunctionDefinition>>>,
+    /// P0-3：PL/pgSQL 函数注册表（跨会话共享）。
+    ///
+    /// 注入后，`execute` 入口会将此注册表设置到 `current_plpgsql_interp` 线程局部，
+    /// 供 `ExprEvaluator` 在调用 `LANGUAGE plpgsql` 函数时通过 `PlPgSqlInterpreter`
+    /// 执行函数体。None 表示不启用 PL/pgSQL 解释器。
+    plpgsql_registry: Option<Arc<Mutex<crate::plpgsql_interp::FunctionRegistry>>>,
     /// P0-TX-1 Phase B：MVCC 事务管理器引用（跨会话共享）。
     ///
     /// 注入后，Scan 节点执行时会按 `current_txn_id` 的快照过滤行可见性，
@@ -3038,6 +3340,18 @@ pub struct Executor<'a> {
     /// 用于 HLC 时间戳和冲突日志中标识写操作来源节点。
     /// 默认为 1（单节点模式）。
     node_id: u64,
+    /// P1-9：行锁管理器（Arc 共享，跨会话共享同一实例）。
+    ///
+    /// 注入后，UPDATE/DELETE 操作在扫描到匹配行后、实际修改前，
+    /// 会通过 LockManager 获取行级 X 锁（资源 ID = row_resource_id(table, row_id)），
+    /// 实现行级冲突检测。若两事务并发修改同一行，后到事务将等待或死锁中止。
+    ///
+    /// None 表示不启用行级锁（退化为表级 Mutex 串行化，旧行为）。
+    row_lock_manager: Option<std::sync::Arc<szrsql_tx::lock::LockManager>>,
+    /// P1-9：行锁所属事务 ID（与 row_lock_manager 配合使用）。
+    ///
+    /// 0 表示无活跃事务（autocommit 模式，不获取行级锁）。
+    row_lock_txn_id: u32,
 }
 
 // =====================================================================
@@ -3146,11 +3460,20 @@ impl SessionState {
     /// 避免客户端因空值进入异常分支。
     pub fn new() -> Self {
         let mut vars: HashMap<String, Value> = HashMap::new();
-        vars.insert("server_version".into(), Value::Text("14.0-szrsql (SzRSQL 1.0.0-rc.2)".into()));
+        vars.insert(
+            "server_version".into(),
+            Value::Text("14.0-szrsql (SzRSQL 1.0.0-rc.2)".into()),
+        );
         vars.insert("server_encoding".into(), Value::Text("UTF8".into()));
         vars.insert("client_encoding".into(), Value::Text("UTF8".into()));
-        vars.insert("transaction_isolation".into(), Value::Text("read committed".into()));
-        vars.insert("standard_conforming_strings".into(), Value::Text("on".into()));
+        vars.insert(
+            "transaction_isolation".into(),
+            Value::Text("read committed".into()),
+        );
+        vars.insert(
+            "standard_conforming_strings".into(),
+            Value::Text("on".into()),
+        );
         vars.insert("integer_datetimes".into(), Value::Text("on".into()));
         vars.insert("timezone".into(), Value::Text("UTC".into()));
         vars.insert("extra_float_digits".into(), Value::Text("3".into()));
@@ -3165,9 +3488,18 @@ impl SessionState {
         vars.insert("max_wal_senders".into(), Value::Text("0".into()));
         vars.insert("hot_standby".into(), Value::Text("off".into()));
         vars.insert("wal_level".into(), Value::Text("replica".into()));
-        vars.insert("data_directory".into(), Value::Text("/var/lib/postgresql/data".into()));
-        vars.insert("hba_file".into(), Value::Text("/var/lib/postgresql/data/pg_hba.conf".into()));
-        vars.insert("ident_file".into(), Value::Text("/var/lib/postgresql/data/pg_ident.conf".into()));
+        vars.insert(
+            "data_directory".into(),
+            Value::Text("/var/lib/postgresql/data".into()),
+        );
+        vars.insert(
+            "hba_file".into(),
+            Value::Text("/var/lib/postgresql/data/pg_hba.conf".into()),
+        );
+        vars.insert(
+            "ident_file".into(),
+            Value::Text("/var/lib/postgresql/data/pg_ident.conf".into()),
+        );
         Self { variables: vars }
     }
 
@@ -3227,6 +3559,9 @@ impl<'a> Executor<'a> {
             hlc_clock: None,
             conflict_log: None,
             node_id: 1,
+            row_lock_manager: None,
+            row_lock_txn_id: 0,
+            plpgsql_registry: None,
         }
     }
 
@@ -3340,10 +3675,7 @@ impl<'a> Executor<'a> {
     }
 
     /// 设置 SQL 函数定义注册表 — P0-FN 修复
-    pub fn set_sql_functions(
-        &mut self,
-        functions: HashMap<String, Vec<FunctionDefinition>>,
-    ) {
+    pub fn set_sql_functions(&mut self, functions: HashMap<String, Vec<FunctionDefinition>>) {
         self.sql_functions = Some(functions);
     }
 
@@ -3414,10 +3746,7 @@ impl<'a> Executor<'a> {
     /// 未绑定时退化为纯单机模式（仅写本地内存表）。
     ///
     /// `handle` 为 `Arc<RwLock<DistRuntime>>`，可跨线程共享。
-    pub fn with_dist_runtime(
-        mut self,
-        handle: szrsql_dist::runtime::DistRuntimeHandle,
-    ) -> Self {
+    pub fn with_dist_runtime(mut self, handle: szrsql_dist::runtime::DistRuntimeHandle) -> Self {
         self.dist_runtime = Some(handle);
         self
     }
@@ -3488,6 +3817,86 @@ impl<'a> Executor<'a> {
     pub fn with_node_id(mut self, node_id: u64) -> Self {
         self.node_id = node_id;
         self
+    }
+
+    /// P1-9：注入行锁管理器（启用行级冲突检测）。
+    ///
+    /// 注入后，UPDATE/DELETE 操作在扫描到匹配行后、实际修改前，
+    /// 会通过 LockManager 获取行级 X 锁，实现行级冲突检测。
+    ///
+    /// # 参数
+    /// - `lm`：共享行锁管理器（`Arc<LockManager>`，由 `PgwireServer` 持有）
+    /// - `txn_id`：当前事务 ID（0 表示 autocommit，不获取行级锁）
+    pub fn with_row_lock_manager(
+        mut self,
+        lm: std::sync::Arc<szrsql_tx::lock::LockManager>,
+        txn_id: u32,
+    ) -> Self {
+        self.row_lock_manager = Some(lm);
+        self.row_lock_txn_id = txn_id;
+        self
+    }
+
+    /// P1-9：计算行级锁资源 ID。
+    ///
+    /// 使用 `(table_hash << 32) | row_id` 编码，高 bit 为 0（区分表级锁高 bit=1）。
+    /// table_hash 使用稳定哈希（DefaultHasher），row_id 为表内行号（0..N）。
+    fn row_resource_id(table_name: &str, row_id: usize) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        table_name.to_lowercase().hash(&mut hasher);
+        let hash = hasher.finish();
+        // 高 bit 为 0（区分表级锁的高 bit=1），取 table_hash 低 31 bit
+        let table_part = hash & 0x7FFF_FFFF;
+        (table_part << 32) | (row_id as u64 & 0xFFFF_FFFF)
+    }
+
+    /// P1-9：对匹配行获取行级 X 锁。
+    ///
+    /// 在 UPDATE/DELETE 扫描到匹配行后、实际修改前调用。
+    /// 若行锁管理器未注入或 txn_id=0，直接返回 Ok（autocommit 模式）。
+    /// 若锁冲突导致死锁，返回 `ExecutionError::LockConflict`。
+    ///
+    /// # 参数
+    /// - `table_name`：目标表名
+    /// - `row_ids`：待加锁的行 ID 列表
+    fn acquire_row_xlocks(
+        &self,
+        table_name: &str,
+        row_ids: &[usize],
+    ) -> Result<(), ExecutionError> {
+        let lm = match &self.row_lock_manager {
+            Some(lm) => lm,
+            None => return Ok(()),
+        };
+        let txn_id = self.row_lock_txn_id;
+        if txn_id == 0 || row_ids.is_empty() {
+            return Ok(());
+        }
+        for &row_id in row_ids {
+            let resource = Self::row_resource_id(table_name, row_id);
+            match lm.lock(
+                txn_id,
+                resource,
+                szrsql_tx::lock::LockMode::Exclusive,
+                std::time::Duration::from_secs(30),
+            ) {
+                Ok(()) => {}
+                Err(szrsql_tx::lock::LockError::Deadlock(aborted_txn_id)) => {
+                    lm.unlock_all(aborted_txn_id);
+                    return Err(ExecutionError::LockConflict(format!(
+                        "row lock deadlock: txn {aborted_txn_id} aborted (table={table_name}, row_id={row_id})"
+                    )));
+                }
+                Err(e) => {
+                    return Err(ExecutionError::LockConflict(format!(
+                        "row lock failed: {e} (table={table_name}, row_id={row_id})"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// P2-1：获取 HLC 时间戳（Multi-Master 因果排序用）。
@@ -3713,12 +4122,7 @@ impl<'a> Executor<'a> {
     ///
     /// 在 `mvcc_insert` 成功插入行后调用，记录新行的字节序列。
     /// 仅 append 到 OS 缓冲区，不 fsync（由 commit_transaction 统一 fsync）。
-    fn append_wal_row_insert(
-        &self,
-        table_name: &str,
-        row_id: usize,
-        new_row: &Row,
-    ) {
+    fn append_wal_row_insert(&self, table_name: &str, row_id: usize, new_row: &Row) {
         if let Some(writer) = &self.wal_writer {
             let table_id = Self::table_name_to_id(table_name);
             let change = szrsql_tx::wal::WalRowChange::for_insert(
@@ -3741,13 +4145,7 @@ impl<'a> Executor<'a> {
     /// P9-2：写入行级 Update WAL 记录（best-effort，失败仅 warn）。
     ///
     /// 在 `execute_update` 成功更新行后调用，记录 old_row + new_row。
-    fn append_wal_row_update(
-        &self,
-        table_name: &str,
-        row_id: usize,
-        old_row: &Row,
-        new_row: &Row,
-    ) {
+    fn append_wal_row_update(&self, table_name: &str, row_id: usize, old_row: &Row, new_row: &Row) {
         if let Some(writer) = &self.wal_writer {
             let table_id = Self::table_name_to_id(table_name);
             let change = szrsql_tx::wal::WalRowChange::for_update(
@@ -3771,12 +4169,7 @@ impl<'a> Executor<'a> {
     /// P9-2：写入行级 Delete WAL 记录（best-effort，失败仅 warn）。
     ///
     /// 在 `execute_delete` 成功删除行后调用，记录 old_row。
-    fn append_wal_row_delete(
-        &self,
-        table_name: &str,
-        row_id: usize,
-        old_row: &Row,
-    ) {
+    fn append_wal_row_delete(&self, table_name: &str, row_id: usize, old_row: &Row) {
         if let Some(writer) = &self.wal_writer {
             let table_id = Self::table_name_to_id(table_name);
             let change = szrsql_tx::wal::WalRowChange::for_delete(
@@ -3797,10 +4190,7 @@ impl<'a> Executor<'a> {
     }
 
     /// P0-DIST-1/2/3：设置分布式运行时句柄（mutable setter）
-    pub fn set_dist_runtime(
-        &mut self,
-        handle: szrsql_dist::runtime::DistRuntimeHandle,
-    ) {
+    pub fn set_dist_runtime(&mut self, handle: szrsql_dist::runtime::DistRuntimeHandle) {
         self.dist_runtime = Some(handle);
     }
 
@@ -3821,12 +4211,7 @@ impl<'a> Executor<'a> {
     ///   保证单语句原子性。
     ///
     /// 写入失败仅记录 warn 日志，不中断 DML 流程（best-effort，与旧版兼容）。
-    fn dist_dual_write(
-        &self,
-        table_name: &str,
-        row_id: usize,
-        row: &Row,
-    ) {
+    fn dist_dual_write(&self, table_name: &str, row_id: usize, row: &Row) {
         use szrsql_dist::dist_txn::DistTxnClient;
         use szrsql_dist::txn::Mutation;
 
@@ -3848,9 +4233,9 @@ impl<'a> Executor<'a> {
 
         // Autocommit：即时 2PC（begin → prewrite → commit）
         let mut rt = handle.write();
-        let mut txn = DistTxnClient::new(&mut *rt);
+        let mut txn = DistTxnClient::new(&mut rt);
         let start_ts = txn.begin();
-        if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
+        if let Err(e) = txn.prewrite_all(std::slice::from_ref(&mutation), start_ts) {
             tracing::warn!(
                 table = table_name,
                 row_id = row_id,
@@ -3897,9 +4282,9 @@ impl<'a> Executor<'a> {
 
         // Autocommit：即时 2PC
         let mut rt = handle.write();
-        let mut txn = DistTxnClient::new(&mut *rt);
+        let mut txn = DistTxnClient::new(&mut rt);
         let start_ts = txn.begin();
-        if let Err(e) = txn.prewrite_all(&[mutation.clone()], start_ts) {
+        if let Err(e) = txn.prewrite_all(std::slice::from_ref(&mutation), start_ts) {
             tracing::warn!(
                 table = table_name,
                 row_id = row_id,
@@ -3922,11 +4307,7 @@ impl<'a> Executor<'a> {
     ///
     /// 返回反序列化后的 `Vec<Value>`，若键不存在或反序列化失败则返回 None。
     /// 用于测试和验证双写一致性。
-    pub fn dist_read(
-        &self,
-        table_name: &str,
-        row_id: usize,
-    ) -> Option<Vec<Value>> {
+    pub fn dist_read(&self, table_name: &str, row_id: usize) -> Option<Vec<Value>> {
         let handle = self.dist_runtime.as_ref()?;
         let key = format!("{}:{}", table_name, row_id);
         let rt = handle.read();
@@ -3965,12 +4346,31 @@ impl<'a> Executor<'a> {
     /// P0-FN-TYPE 修复：改为 pub，供协议层在 `execute()` 返回后、
     /// `derive_output_columns()` 调用前重新设置 guard，确保
     /// `derive_expr_type` 能查询到函数返回类型声明。
-    pub fn sql_functions_guard(
-        &self,
-    ) -> Option<crate::expr::current_sql_functions::SqlFuncGuard> {
+    pub fn sql_functions_guard(&self) -> Option<crate::expr::current_sql_functions::SqlFuncGuard> {
         self.sql_functions
             .as_ref()
             .map(|funcs| crate::expr::current_sql_functions::guard(funcs.clone()))
+    }
+
+    /// P0-3：绑定 PL/pgSQL 函数注册表 — 注入后 `execute` 会将此注册表设置到
+    /// `current_plpgsql_interp` 线程局部，供 `ExprEvaluator` 在调用
+    /// `LANGUAGE plpgsql` 函数时通过 `PlPgSqlInterpreter` 执行函数体。
+    pub fn with_plpgsql_registry(
+        mut self,
+        registry: Arc<Mutex<crate::plpgsql_interp::FunctionRegistry>>,
+    ) -> Self {
+        self.plpgsql_registry = Some(registry);
+        self
+    }
+
+    /// 在当前线程注入 PL/pgSQL 函数注册表（返回 RAII guard）— P0-3 修复
+    ///
+    /// guard 析构时自动清理 thread_local。
+    /// 若 `self.plpgsql_registry` 为 None 则返回 None。
+    pub fn plpgsql_guard(&self) -> Option<crate::expr::current_plpgsql_interp::PlPgGuard> {
+        self.plpgsql_registry
+            .as_ref()
+            .map(|r| crate::expr::current_plpgsql_interp::guard(r.clone()))
     }
 
     /// 按名查表（仅普通表，不含临时表）
@@ -4073,20 +4473,20 @@ impl<'a> Executor<'a> {
                 let mut result = Vec::new();
                 if let Some(row) = row {
                     // MVCC 可见性检查
-                    if mvcc_txn_id != 0 && mvcc.is_some() {
-                        let mvcc = mvcc.unwrap();
-                        // 注册读集合（SSI）
-                        let table_key = table.name.to_lowercase();
-                        let _ = mvcc.register_read(mvcc_txn_id, &table_key);
-                        // 点查结果需要通过 scan_with_versions 验证可见性
-                        // 简化：若 MVCC 启用，退化为全表扫描 + 过滤（保证正确性）
-                        return Ok(None);
+                    if mvcc_txn_id != 0 {
+                        if let Some(mvcc) = mvcc {
+                            // 注册读集合（SSI）
+                            let table_key = table.name.to_lowercase();
+                            let _ = mvcc.register_read(mvcc_txn_id, &table_key);
+                            // 点查结果需要通过 scan_with_versions 验证可见性
+                            // 简化：若 MVCC 启用，退化为全表扫描 + 过滤（保证正确性）
+                            return Ok(None);
+                        }
                     }
                     // 应用完整谓词过滤（可能有其他条件 AND 连接）
                     let ctx = ExecRowContext::new(schema, &row);
-                    match ExprEvaluator::eval(predicate, &ctx)? {
-                        Value::Bool(true) => result.push(row),
-                        _ => {}
+                    if let Value::Bool(true) = ExprEvaluator::eval(predicate, &ctx)? {
+                        result.push(row);
                     }
                 }
                 Ok(Some(result))
@@ -4104,9 +4504,8 @@ impl<'a> Executor<'a> {
                 let mut result = Vec::with_capacity(rows.len());
                 for row in rows {
                     let ctx = ExecRowContext::new(schema, &row);
-                    match ExprEvaluator::eval(predicate, &ctx)? {
-                        Value::Bool(true) => result.push(row),
-                        _ => {}
+                    if let Value::Bool(true) = ExprEvaluator::eval(predicate, &ctx)? {
+                        result.push(row);
                     }
                 }
                 Ok(Some(result))
@@ -4207,12 +4606,7 @@ impl<'a> Executor<'a> {
     }
 
     /// 将二元操作符 + 字面量转换为 PkAccess
-    fn binary_op_to_pk_access(
-        &self,
-        _pk_side: (),
-        op: &BinaryOp,
-        literal: i64,
-    ) -> PkAccess {
+    fn binary_op_to_pk_access(&self, _pk_side: (), op: &BinaryOp, literal: i64) -> PkAccess {
         match op {
             BinaryOp::Eq => PkAccess::Point(literal),
             BinaryOp::Gt => PkAccess::Range(literal + 1, i64::MAX),
@@ -4234,12 +4628,7 @@ impl<'a> Executor<'a> {
     /// 2. 注册 write_set（key = "table_name:row_id"）用于 First-Committer-Wins + SSI
     ///
     /// 未启用时退化为 `insert_row(row)`（旧行为）。
-    fn mvcc_insert(
-        &self,
-        table: &mut dyn MutableTable,
-        row: Row,
-        table_name: &TableName,
-    ) -> usize {
+    fn mvcc_insert(&self, table: &mut dyn MutableTable, row: Row, table_name: &TableName) -> usize {
         if let Some(mvcc) = self.mvcc {
             if self.mvcc_txn_id != 0 {
                 let row_id = table.insert_row_versioned(row.clone(), self.mvcc_txn_id);
@@ -4656,8 +5045,11 @@ impl<'a> Executor<'a> {
                     // 数据迁移：现有行追加 NULL（或 DEFAULT 求值结果）
                     if let Some(table) = table_data.as_mut() {
                         let default_value = Self::eval_default_value(column_def)?;
-                        for row in (*table).rows_mut() {
-                            row.push(default_value.clone());
+                        {
+                            let mut guard = (*table).rows_mut();
+                            for row in guard.iter_mut() {
+                                row.push(default_value.clone());
+                            }
                         }
                     }
                 }
@@ -4672,9 +5064,12 @@ impl<'a> Executor<'a> {
                             schema.columns.remove(i);
                             // 数据迁移：现有行移除该列
                             if let Some(table) = table_data.as_mut() {
-                                for row in (*table).rows_mut() {
-                                    if i < row.len() {
-                                        row.remove(i);
+                                {
+                                    let mut guard = (*table).rows_mut();
+                                    for row in guard.iter_mut() {
+                                        if i < row.len() {
+                                            row.remove(i);
+                                        }
                                     }
                                 }
                             }
@@ -4691,10 +5086,7 @@ impl<'a> Executor<'a> {
                         }
                     }
                 }
-                AlterTableOperation::RenameColumn {
-                    old_name,
-                    new_name,
-                } => {
+                AlterTableOperation::RenameColumn { old_name, new_name } => {
                     let col = schema
                         .columns
                         .iter_mut()
@@ -4740,13 +5132,19 @@ impl<'a> Executor<'a> {
                             .columns
                             .iter()
                             .position(|c| c.name == *col_name)
-                            .ok_or_else(|| ExecutionError::InvalidArgument(format!(
-                                "ALTER COLUMN TYPE: column '{}' not found in table '{}'",
-                                col_name, schema.name.qualified_name()
-                            )))?;
-                        for row in (*table).rows_mut() {
-                            if idx < row.len() {
-                                row[idx] = Self::cast_value(&row[idx], &old_type, data_type)?;
+                            .ok_or_else(|| {
+                                ExecutionError::InvalidArgument(format!(
+                                    "ALTER COLUMN TYPE: column '{}' not found in table '{}'",
+                                    col_name,
+                                    schema.name.qualified_name()
+                                ))
+                            })?;
+                        {
+                            let mut guard = (*table).rows_mut();
+                            for row in guard.iter_mut() {
+                                if idx < row.len() {
+                                    row[idx] = Self::cast_value(&row[idx], &old_type, data_type)?;
+                                }
                             }
                         }
                     }
@@ -5048,7 +5446,14 @@ impl<'a> Executor<'a> {
                 materialized,
                 if_not_exists,
                 or_replace,
-            } => (name, columns, query, *materialized, *if_not_exists, *or_replace),
+            } => (
+                name,
+                columns,
+                query,
+                *materialized,
+                *if_not_exists,
+                *or_replace,
+            ),
             _ => {
                 return Err(ExecutionError::InvalidArgument(format!(
                     "expected CreateView plan, got {:?}",
@@ -5200,7 +5605,10 @@ impl<'a> Executor<'a> {
         };
         // 检查同名索引是否已存在
         let existing = catalog.list_indexes(table);
-        if existing.iter().any(|i| i.name.eq_ignore_ascii_case(&index_name)) {
+        if existing
+            .iter()
+            .any(|i| i.name.eq_ignore_ascii_case(&index_name))
+        {
             if if_not_exists {
                 return Ok(());
             }
@@ -5358,9 +5766,7 @@ impl<'a> Executor<'a> {
         };
         let dropped = catalog
             .drop_function(&name, &parameter_types, if_exists)
-            .map_err(|e| {
-                ExecutionError::InvalidArgument(format!("drop function failed: {e}"))
-            })?;
+            .map_err(|e| ExecutionError::InvalidArgument(format!("drop function failed: {e}")))?;
         if dropped {
             tracing::debug!(function = %name, "dropped function definition");
         }
@@ -6151,6 +6557,68 @@ impl<'a> Executor<'a> {
         })
     }
 
+    /// 迭代器执行逻辑计划（Volcano 模型）
+    ///
+    /// 适用于简单查询（Scan + Filter + Projection + Limit），无需物化中间结果。
+    /// 对于复杂查询（Join/Aggregate/Sort），回退到 execute()。
+    #[instrument(skip(self), fields(plan_type = ?std::mem::discriminant(plan), row_count = tracing::field::Empty))]
+    pub fn execute_iterative(&self, plan: &LogicalPlan) -> Result<Vec<Row>, ExecutionError> {
+        trace!("executing logical plan (iterative)");
+        let _udf_guard = self.thread_udf_guard();
+        let _sql_func_guard = self.sql_functions_guard();
+
+        // 构建迭代器执行树
+        let table_data = self.build_table_data_for_iter(plan)?;
+        let mut iter_plan = build_iter_plan(plan, &table_data);
+
+        // 排空迭代器
+        let mut rows = Vec::new();
+        while let Some(row) = iter_plan.next() {
+            rows.push(row);
+        }
+        Ok(rows)
+    }
+
+    /// 构建迭代器所需的表数据映射
+    fn build_table_data_for_iter(
+        &self,
+        plan: &LogicalPlan,
+    ) -> Result<TableDataMap, ExecutionError> {
+        let mut table_data = std::collections::HashMap::new();
+        self.collect_scan_tables(plan, &mut table_data)?;
+        Ok(table_data)
+    }
+
+    /// 递归收集计划中的表数据
+    fn collect_scan_tables(
+        &self,
+        plan: &LogicalPlan,
+        table_data: &mut TableDataMap,
+    ) -> Result<(), ExecutionError> {
+        match plan {
+            LogicalPlan::Scan { table, schema, .. } => {
+                let key = table.name.to_lowercase();
+                if let std::collections::hash_map::Entry::Vacant(e) = table_data.entry(key) {
+                    let rows = self.execute_scan(table, schema)?;
+                    let names: Vec<String> =
+                        schema.columns.iter().map(|c| c.name.clone()).collect();
+                    e.insert((rows, names));
+                }
+            }
+            LogicalPlan::Filter { input, .. } => self.collect_scan_tables(input, table_data)?,
+            LogicalPlan::Projection { input, .. } => self.collect_scan_tables(input, table_data)?,
+            LogicalPlan::Limit { input, .. } => self.collect_scan_tables(input, table_data)?,
+            LogicalPlan::Sort { input, .. } => self.collect_scan_tables(input, table_data)?,
+            LogicalPlan::Distinct { input } => self.collect_scan_tables(input, table_data)?,
+            LogicalPlan::Join { left, right, .. } => {
+                self.collect_scan_tables(left, table_data)?;
+                self.collect_scan_tables(right, table_data)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// 执行逻辑计划，物化全部结果行
     #[instrument(skip(self), fields(plan_type = ?std::mem::discriminant(plan), row_count = tracing::field::Empty))]
     pub fn execute(&self, plan: &LogicalPlan) -> Result<Vec<Row>, ExecutionError> {
@@ -6163,6 +6631,9 @@ impl<'a> Executor<'a> {
         // 供 ExprEvaluator 在内建函数表和 UDF 注册表未命中时回退查询。
         // guard 析构时自动清理 thread_local，执行完毕后注册表归零。
         let _sql_func_guard = self.sql_functions_guard();
+        // P0-3 修复：在 SQL 执行期间注入 PL/pgSQL 函数注册表到当前线程，
+        // 供 ExprEvaluator 在调用 LANGUAGE plpgsql 函数时通过 PlPgSqlInterpreter 执行。
+        let _plpgsql_guard = self.plpgsql_guard();
         let result = match plan {
             LogicalPlan::Scan {
                 table,
@@ -6285,9 +6756,7 @@ impl<'a> Executor<'a> {
                 let _ = mvcc.register_read(self.mvcc_txn_id, &table_key);
                 let rows: Vec<Row> = storage
                     .scan_with_versions()
-                    .filter(|(_, _, xmin, xmax)| {
-                        mvcc.is_visible(self.mvcc_txn_id, *xmin, *xmax)
-                    })
+                    .filter(|(_, _, xmin, xmax)| mvcc.is_visible(self.mvcc_txn_id, *xmin, *xmax))
                     .map(|(_, row, _, _)| row)
                     .collect();
                 return Ok(rows);
@@ -6763,9 +7232,7 @@ impl<'a> Executor<'a> {
                 // 收集第一列值构造 Literal 列表
                 let list: Vec<Expr> = rows
                     .into_iter()
-                    .filter_map(|row| {
-                        row.into_iter().next().map(Expr::Literal)
-                    })
+                    .filter_map(|row| row.into_iter().next().map(Expr::Literal))
                     .collect();
 
                 Ok(Expr::InList {
@@ -6794,10 +7261,8 @@ impl<'a> Executor<'a> {
                 args,
                 distinct,
             } => {
-                let args: Result<Vec<Expr>, _> = args
-                    .iter()
-                    .map(|a| self.rewrite_in_subqueries(a))
-                    .collect();
+                let args: Result<Vec<Expr>, _> =
+                    args.iter().map(|a| self.rewrite_in_subqueries(a)).collect();
                 Ok(Expr::Function {
                     name: name.clone(),
                     args: args?,
@@ -6848,10 +7313,8 @@ impl<'a> Executor<'a> {
                 negated,
             } => {
                 let expr = Box::new(self.rewrite_in_subqueries(expr)?);
-                let list: Result<Vec<Expr>, _> = list
-                    .iter()
-                    .map(|e| self.rewrite_in_subqueries(e))
-                    .collect();
+                let list: Result<Vec<Expr>, _> =
+                    list.iter().map(|e| self.rewrite_in_subqueries(e)).collect();
                 Ok(Expr::InList {
                     expr,
                     list: list?,
@@ -7005,7 +7468,7 @@ impl<'a> Executor<'a> {
         offset: &Option<Expr>,
         input: &LogicalPlan,
     ) -> Result<Vec<Row>, ExecutionError> {
-        let rows = self.execute(input)?;
+        // 计算 LIMIT 和 OFFSET 值
         let offset_n = match offset {
             Some(expr) => {
                 let v = ExprEvaluator::eval(expr, &crate::expr::RowContext::new())?;
@@ -7038,12 +7501,41 @@ impl<'a> Executor<'a> {
             }
             None => None,
         };
+
+        // 优化：对于简单计划（Scan + Filter + Projection），使用迭代器路径
+        // 避免物化全部中间结果
+        if self.is_simple_plan(input) {
+            if let Ok(rows) = self.execute_iterative(input) {
+                let start = offset_n.min(rows.len());
+                let end = match limit_n {
+                    Some(n) => (start + n).min(rows.len()),
+                    None => rows.len(),
+                };
+                return Ok(rows.into_iter().skip(start).take(end - start).collect());
+            }
+        }
+
+        // 回退：物化全部输入后 skip/take
+        let rows = self.execute(input)?;
         let start = offset_n.min(rows.len());
         let end = match limit_n {
             Some(n) => (start + n).min(rows.len()),
             None => rows.len(),
         };
         Ok(rows.into_iter().skip(start).take(end - start).collect())
+    }
+
+    /// 判断计划是否为简单计划（适合迭代器执行）
+    fn is_simple_plan(&self, plan: &LogicalPlan) -> bool {
+        match plan {
+            LogicalPlan::Scan { .. } => true,
+            LogicalPlan::IndexScan { .. } => true,
+            LogicalPlan::Filter { input, .. } => self.is_simple_plan(input),
+            LogicalPlan::Projection { input, .. } => self.is_simple_plan(input),
+            LogicalPlan::Limit { input, .. } => self.is_simple_plan(input),
+            // Join/Aggregate/Sort 等复杂算子不适合迭代器路径
+            _ => false,
+        }
     }
 
     // -----------------------------------------------------------------
@@ -7930,6 +8422,12 @@ impl<'a> Executor<'a> {
                 .collect()
         };
 
+        // P1-9：行级锁获取 — 在实际修改前锁定所有匹配行，实现行级冲突检测。
+        // 若两事务并发修改同一行，后到事务将等待或死锁中止。
+        // autocommit 模式（txn_id=0）或未注入 row_lock_manager 时跳过（保持兼容）。
+        let matching_row_ids: Vec<usize> = matching.iter().map(|(id, _)| *id).collect();
+        self.acquire_row_xlocks(&table_name.name, &matching_row_ids)?;
+
         // Phase 3.29: 收集 FK 约束（若 catalog 已绑定）
         let fks: Vec<ForeignKeyConstraint> = match self.catalog {
             Some(cat) => cat.get_foreign_keys(table_name),
@@ -8118,6 +8616,12 @@ impl<'a> Executor<'a> {
                 .filter(|(_, row)| row_matches_predicate(schema, row, predicate))
                 .collect()
         };
+
+        // P1-9：行级锁获取 — 在实际删除前锁定所有匹配行，实现行级冲突检测。
+        // 若两事务并发删除同一行，后到事务将等待或死锁中止。
+        // autocommit 模式（txn_id=0）或未注入 row_lock_manager 时跳过（保持兼容）。
+        let matching_row_ids: Vec<usize> = matching.iter().map(|(id, _)| *id).collect();
+        self.acquire_row_xlocks(&table_name.name, &matching_row_ids)?;
 
         // Phase 3.29: 父表侧 FK 校验（RESTRICT/NO ACTION 报错；CASCADE/SET NULL 级联）
         // 这里仅做 RESTRICT 检查；级联操作需调用 `execute_delete_with_cascades`。
@@ -9506,7 +10010,11 @@ fn days_from_civil(year: u32, month: u32, day: u32) -> Option<u64> {
 fn render_create_table_ddl(schema: &TableSchema) -> String {
     let mut cols = Vec::with_capacity(schema.columns.len());
     for col in &schema.columns {
-        let mut s = format!("{} {}", quote_ident_smart(&col.name), column_type_to_sql(&col.data_type));
+        let mut s = format!(
+            "{} {}",
+            quote_ident_smart(&col.name),
+            column_type_to_sql(&col.data_type)
+        );
         if col.not_null {
             s.push_str(" NOT NULL");
         }

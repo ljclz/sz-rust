@@ -3012,7 +3012,11 @@ fn test_p0_store_1_btree_pk_disabled_returns_none() {
     table.insert(vec![Value::Int64(10), Value::Text("alice".into())]);
 
     assert!(!table.has_btree_pk());
-    assert_eq!(table.pk_lookup(10), None, "未启用 B+Tree 时 pk_lookup 返回 None");
+    assert_eq!(
+        table.pk_lookup(10),
+        None,
+        "未启用 B+Tree 时 pk_lookup 返回 None"
+    );
 }
 
 /// P0-STORE-1：enable_btree_pk 对非 Int64 列不启用（记录 warn）
@@ -3056,12 +3060,22 @@ fn test_p0_store_1_btree_pk_scan_consistency() {
     assert_eq!(with_btree.len(), 5);
 
     // row_count 应一致
-    assert_eq!(table_with_btree.row_count(), table_without_btree.row_count());
+    assert_eq!(
+        table_with_btree.row_count(),
+        table_without_btree.row_count()
+    );
 
     // pk_lookup 验证 BTree 确实工作
     for id in 1..=5 {
-        assert!(table_with_btree.pk_lookup(id).is_some(), "id={} 应在 BTree 中", id);
-        assert!(table_without_btree.pk_lookup(id).is_none(), "未启用 BTree 应返回 None");
+        assert!(
+            table_with_btree.pk_lookup(id).is_some(),
+            "id={} 应在 BTree 中",
+            id
+        );
+        assert!(
+            table_without_btree.pk_lookup(id).is_none(),
+            "未启用 BTree 应返回 None"
+        );
     }
 }
 
@@ -3118,9 +3132,16 @@ fn test_p0_store_2_flush_and_load_roundtrip() {
     let rows: Vec<Vec<Value>> = table_b.scan_iter().collect();
     assert_eq!(rows.len(), 2, "scan_iter 应跳过 deleted 行");
     // 活跃行：alice (id=1) 和 carol (id=3)
-    let ids: Vec<i64> = rows.iter().map(|r| {
-        if let Value::Int64(id) = r[0] { id } else { panic!("expected Int64") }
-    }).collect();
+    let ids: Vec<i64> = rows
+        .iter()
+        .map(|r| {
+            if let Value::Int64(id) = r[0] {
+                id
+            } else {
+                panic!("expected Int64")
+            }
+        })
+        .collect();
     assert!(ids.contains(&1), "应包含 alice (id=1)");
     assert!(ids.contains(&3), "应包含 carol (id=3)");
     assert!(!ids.contains(&2), "不应包含已删除的 bob (id=2)");
@@ -3239,21 +3260,17 @@ fn test_p0_dist_end_to_end_kv_and_tso() {
     // 2. KV 写入和读取
     {
         let mut rt = handle.write();
-        rt.put(b"table:t1".to_vec(), b"row_data_1".to_vec()).unwrap();
-        rt.put(b"table:t2".to_vec(), b"row_data_2".to_vec()).unwrap();
+        rt.put(b"table:t1".to_vec(), b"row_data_1".to_vec())
+            .unwrap();
+        rt.put(b"table:t2".to_vec(), b"row_data_2".to_vec())
+            .unwrap();
     }
 
     // 3. 读取验证
     {
         let rt = handle.read();
-        assert_eq!(
-            rt.get(b"table:t1").unwrap(),
-            Some(b"row_data_1".to_vec())
-        );
-        assert_eq!(
-            rt.get(b"table:t2").unwrap(),
-            Some(b"row_data_2".to_vec())
-        );
+        assert_eq!(rt.get(b"table:t1").unwrap(), Some(b"row_data_1".to_vec()));
+        assert_eq!(rt.get(b"table:t2").unwrap(), Some(b"row_data_2".to_vec()));
         assert_eq!(rt.get(b"table:t3").unwrap(), None);
     }
 
@@ -3290,10 +3307,7 @@ fn test_p0_dist_scan_range() {
     // 扫描 [k003, k007)
     {
         let rt = handle.read();
-        let range = szrsql_dist::shard::KeyRange::new(
-            b"k003".to_vec(),
-            b"k007".to_vec(),
-        );
+        let range = szrsql_dist::shard::KeyRange::new(b"k003".to_vec(), b"k007".to_vec());
         let results = rt.scan(&range).unwrap();
         assert_eq!(results.len(), 4, "应扫描到 4 个键 [k003, k004, k005, k006]");
         assert_eq!(results[0].0, b"k003");
@@ -3324,4 +3338,3 @@ fn test_p0_dist_delete() {
         assert_eq!(rt.kv_len().unwrap(), 1);
     }
 }
-

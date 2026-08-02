@@ -6,6 +6,8 @@
 
 use crate::page::{Page, PageError, PageType};
 use tracing::{instrument, trace, warn};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 //  BufferError
@@ -61,19 +63,19 @@ pub trait PageWriter: Send + Sync {
 
 /// 内存页加载器 — 用于测试：从一个 HashMap<page_id, Page> 读取
 pub struct InMemoryPageLoader {
-    pages: std::sync::Mutex<std::collections::HashMap<u32, Page>>,
+    pages: Mutex<std::collections::HashMap<u32, Page>>,
 }
 
 impl InMemoryPageLoader {
     pub fn new() -> Self {
         Self {
-            pages: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pages: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
     /// 插入一个预生成的页
     pub fn insert(&self, page_id: u32, page: Page) {
-        self.pages.lock().unwrap().insert(page_id, page);
+        self.pages.lock().insert(page_id, page);
     }
 
     /// 生成一个空白数据页并插入
@@ -85,7 +87,7 @@ impl InMemoryPageLoader {
 
     /// 获取某页（用于测试断言）
     pub fn get_persisted(&self, page_id: u32) -> Option<Page> {
-        self.pages.lock().unwrap().get(&page_id).cloned()
+        self.pages.lock().get(&page_id).cloned()
     }
 }
 
@@ -97,7 +99,7 @@ impl Default for InMemoryPageLoader {
 
 impl PageLoader for InMemoryPageLoader {
     fn load_page(&self, page_id: u32) -> Result<Page, BufferError> {
-        let pages = self.pages.lock().unwrap();
+        let pages = self.pages.lock();
         pages
             .get(&page_id)
             .cloned()
@@ -110,7 +112,7 @@ impl PageLoader for InMemoryPageLoader {
 /// `crash_flag` 为 true 时，write_page 返回 WriterError 模拟崩溃
 pub struct InMemoryPageWriter {
     /// 持久化存储（模拟磁盘文件）
-    persisted: std::sync::Mutex<std::collections::HashMap<u32, Page>>,
+    persisted: Mutex<std::collections::HashMap<u32, Page>>,
     /// 崩溃标志：true 时所有 write_page 失败
     crash_flag: std::sync::atomic::AtomicBool,
     /// 写入计数（用于测试）
@@ -120,7 +122,7 @@ pub struct InMemoryPageWriter {
 impl InMemoryPageWriter {
     pub fn new() -> Self {
         Self {
-            persisted: std::sync::Mutex::new(std::collections::HashMap::new()),
+            persisted: Mutex::new(std::collections::HashMap::new()),
             crash_flag: std::sync::atomic::AtomicBool::new(false),
             write_count: std::sync::atomic::AtomicU64::new(0),
         }
@@ -145,12 +147,12 @@ impl InMemoryPageWriter {
 
     /// 获取持久化的页（测试断言用）
     pub fn get_persisted(&self, page_id: u32) -> Option<Page> {
-        self.persisted.lock().unwrap().get(&page_id).cloned()
+        self.persisted.lock().get(&page_id).cloned()
     }
 
     /// 持久化页数量
     pub fn len(&self) -> usize {
-        self.persisted.lock().unwrap().len()
+        self.persisted.lock().len()
     }
 
     /// 是否没有持久化页
@@ -167,7 +169,7 @@ impl InMemoryPageWriter {
     ///
     /// 用于崩溃恢复后的校验：扫描所有已恢复到 writer 的页
     pub fn persisted_page_ids(&self) -> Vec<u32> {
-        self.persisted.lock().unwrap().keys().copied().collect()
+        self.persisted.lock().keys().copied().collect()
     }
 }
 
@@ -186,7 +188,6 @@ impl PageWriter for InMemoryPageWriter {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.persisted
             .lock()
-            .unwrap()
             .insert(page.header.page_id, page.clone());
         Ok(())
     }
@@ -251,17 +252,17 @@ pub struct BufferPoolStats {
 
 /// 缓冲池 — 分片 LRU，支持 Pin/Unpin + 脏页刷盘
 pub struct BufferPool {
-    shards: Vec<std::sync::Mutex<BufferPoolShard>>,
+    shards: Vec<Mutex<BufferPoolShard>>,
     /// 实际使用的分片数（<= SHARD_COUNT，小容量时自动缩减）
     shard_count: usize,
     loader: std::sync::Arc<dyn PageLoader>,
     /// 可选的页写入器（Phase 0.10+ 启用）
     writer: std::sync::Arc<dyn PageWriter>,
     /// 可选的 Doublewrite Buffer（Phase 0.11 启用）
-    doublewrite: std::sync::Mutex<Option<DoublewriteBuffer>>,
-    stats: std::sync::Mutex<BufferPoolStats>,
+    doublewrite: Mutex<Option<DoublewriteBuffer>>,
+    stats: Mutex<BufferPoolStats>,
     /// 异步刷盘线程句柄
-    flush_handle: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    flush_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// 异步刷盘停止标志
     flush_stop: std::sync::atomic::AtomicBool,
 }
@@ -297,16 +298,16 @@ impl BufferPool {
         let per_shard = capacity.div_ceil(shard_count);
         let mut shards = Vec::with_capacity(shard_count);
         for _ in 0..shard_count {
-            shards.push(std::sync::Mutex::new(BufferPoolShard::new(per_shard)));
+            shards.push(Mutex::new(BufferPoolShard::new(per_shard)));
         }
         Ok(Self {
             shards,
             shard_count,
             loader,
             writer,
-            doublewrite: std::sync::Mutex::new(None),
-            stats: std::sync::Mutex::new(BufferPoolStats::default()),
-            flush_handle: std::sync::Mutex::new(None),
+            doublewrite: Mutex::new(None),
+            stats: Mutex::new(BufferPoolStats::default()),
+            flush_handle: Mutex::new(None),
             flush_stop: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -319,7 +320,7 @@ impl BufferPool {
         dwb_capacity: usize,
     ) -> Result<Self, BufferError> {
         let pool = Self::with_writer(capacity, loader, writer)?;
-        *pool.doublewrite.lock().unwrap() = Some(DoublewriteBuffer::new(dwb_capacity));
+        *pool.doublewrite.lock() = Some(DoublewriteBuffer::new(dwb_capacity));
         Ok(pool)
     }
 
@@ -337,7 +338,7 @@ impl BufferPool {
 
         // ===== 第一次锁：检查命中 =====
         {
-            let shard_guard = self.shards[shard_idx].lock().unwrap();
+            let shard_guard = self.shards[shard_idx].lock();
             let shard = &*shard_guard;
 
             if let Some(entry) = shard.lookup.get(&page_id) {
@@ -345,12 +346,12 @@ impl BufferPool {
                 let page_clone = entry.page.clone();
                 drop(shard_guard);
 
-                let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+                let mut shard_guard = self.shards[shard_idx].lock();
                 let shard = &mut *shard_guard;
                 shard.lru_list.retain(|&p| p != page_id);
                 shard.lru_list.push_front(page_id);
 
-                self.stats.lock().unwrap().hits += 1;
+                self.stats.lock().hits += 1;
                 tracing::Span::current().record("hit", true);
                 trace!(page_id, hit = true, "buffer pool hit");
                 return Ok(page_clone);
@@ -358,15 +359,19 @@ impl BufferPool {
         }
 
         // 未命中
-        self.stats.lock().unwrap().misses += 1;
+        self.stats.lock().misses += 1;
         tracing::Span::current().record("hit", false);
 
         // ===== 加载页（不持锁）=====
         let page = self.loader.load_page(page_id)?;
-        trace!(page_id, hit = false, "buffer pool miss, loaded from storage");
+        trace!(
+            page_id,
+            hit = false,
+            "buffer pool miss, loaded from storage"
+        );
 
         // ===== 第二次锁：插入 =====
-        let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+        let mut shard_guard = self.shards[shard_idx].lock();
         let shard = &mut *shard_guard;
 
         // 再次检查（可能在 drop 锁期间其他线程已加载）
@@ -396,7 +401,7 @@ impl BufferPool {
     #[instrument(skip(self), fields(page_id))]
     pub fn pin_page(&self, page_id: u32) -> Result<i32, BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+        let mut shard_guard = self.shards[shard_idx].lock();
         let shard = &mut *shard_guard;
 
         // 先检查存在性
@@ -414,7 +419,7 @@ impl BufferPool {
             .pin_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
-        self.stats.lock().unwrap().pin_count += 1;
+        self.stats.lock().pin_count += 1;
         Ok(new_count)
     }
 
@@ -423,7 +428,7 @@ impl BufferPool {
     /// 返回当前 pin_count。若 pin_count 减到 0，该页可被淘汰
     pub fn unpin_page(&self, page_id: u32) -> Result<i32, BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = &*shard_guard;
 
         let entry = shard
@@ -440,14 +445,14 @@ impl BufferPool {
             .pin_count
             .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
             - 1;
-        self.stats.lock().unwrap().unpin_count += 1;
+        self.stats.lock().unpin_count += 1;
         Ok(new_count)
     }
 
     /// 获取某页的 pin_count
     pub fn pin_count(&self, page_id: u32) -> Result<i32, BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = &*shard_guard;
         let entry = shard
             .lookup
@@ -459,7 +464,7 @@ impl BufferPool {
     /// 标记某页为脏页（修改后需刷盘）
     pub fn mark_dirty(&self, page_id: u32) -> Result<(), BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = &*shard_guard;
         let entry = shard
             .lookup
@@ -467,7 +472,7 @@ impl BufferPool {
             .ok_or(BufferError::PageNotFound { page_id })?;
         let was_dirty = entry.dirty.swap(true, std::sync::atomic::Ordering::SeqCst);
         if !was_dirty {
-            self.stats.lock().unwrap().dirty_pages += 1;
+            self.stats.lock().dirty_pages += 1;
         }
         Ok(())
     }
@@ -475,7 +480,7 @@ impl BufferPool {
     /// 检查某页是否为脏页
     pub fn is_dirty(&self, page_id: u32) -> Result<bool, BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = &*shard_guard;
         let entry = shard
             .lookup
@@ -490,7 +495,7 @@ impl BufferPool {
     #[instrument(skip(self, new_page), fields(page_id))]
     pub fn write_page(&self, page_id: u32, new_page: Page) -> Result<(), BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+        let mut shard_guard = self.shards[shard_idx].lock();
         let shard = &mut *shard_guard;
         let entry = shard
             .lookup
@@ -499,7 +504,7 @@ impl BufferPool {
         entry.page = new_page;
         let was_dirty = entry.dirty.swap(true, std::sync::atomic::Ordering::SeqCst);
         if !was_dirty {
-            self.stats.lock().unwrap().dirty_pages += 1;
+            self.stats.lock().dirty_pages += 1;
         }
         Ok(())
     }
@@ -516,13 +521,13 @@ impl BufferPool {
     /// 若无可淘汰页（全部 pinned），返回 NoEvictablePages。
     pub fn put_page(&self, page_id: u32, new_page: Page) -> Result<(), BufferError> {
         let shard_idx = self.shard_for(page_id);
-        let mut shard_guard = self.shards[shard_idx].lock().unwrap();
+        let mut shard_guard = self.shards[shard_idx].lock();
         // 已存在：更新内容 + mark dirty
         if let Some(entry) = shard_guard.lookup.get_mut(&page_id) {
             entry.page = new_page;
             let was_dirty = entry.dirty.swap(true, std::sync::atomic::Ordering::SeqCst);
             if !was_dirty {
-                self.stats.lock().unwrap().dirty_pages += 1;
+                self.stats.lock().dirty_pages += 1;
             }
             // 移到 LRU 前部
             if let Some(pos) = shard_guard.lru_list.iter().position(|&id| id == page_id) {
@@ -534,31 +539,37 @@ impl BufferPool {
         // 不存在：需创建新 entry，先检查容量
         if shard_guard.lookup.len() >= shard_guard.capacity {
             // 尝试淘汰最久未使用且 pin_count=0 的页
-            let evict_candidate = shard_guard.lru_list.iter().rev().find(|&&id| {
-                shard_guard
-                    .lookup
-                    .get(&id)
-                    .map(|e| e.pin_count.load(std::sync::atomic::Ordering::SeqCst) == 0)
-                    .unwrap_or(false)
-            }).copied();
+            let evict_candidate = shard_guard
+                .lru_list
+                .iter()
+                .rev()
+                .find(|&&id| {
+                    shard_guard
+                        .lookup
+                        .get(&id)
+                        .map(|e| e.pin_count.load(std::sync::atomic::Ordering::SeqCst) == 0)
+                        .unwrap_or(false)
+                })
+                .copied();
             let evict_id = match evict_candidate {
                 Some(id) => id,
                 None => return Err(BufferError::NoEvictablePages),
             };
             // 先在短作用域内取出 is_dirty + page_copy，避免长生命周期借用 shard_guard
             // 若 evict_id 不在 lookup 中（异常情况），跳过淘汰逻辑
-            let is_dirty = shard_guard.lookup.get(&evict_id)
+            let is_dirty = shard_guard
+                .lookup
+                .get(&evict_id)
                 .map(|e| e.dirty.load(std::sync::atomic::Ordering::SeqCst))
                 .unwrap_or(false);
-            let page_copy = shard_guard.lookup.get(&evict_id)
-                .map(|e| e.page.clone());
+            let page_copy = shard_guard.lookup.get(&evict_id).map(|e| e.page.clone());
             if is_dirty {
                 if let Some(page_copy) = page_copy {
                     drop(shard_guard);
                     if let Err(e) = self.writer.write_page(&page_copy) {
                         tracing::warn!(error = ?e, page_id = evict_id, "evict flush failed");
                     }
-                    let mut sg = self.shards[shard_idx].lock().unwrap();
+                    let mut sg = self.shards[shard_idx].lock();
                     if let Some(e) = sg.lookup.get_mut(&evict_id) {
                         e.dirty.store(false, std::sync::atomic::Ordering::SeqCst);
                     }
@@ -567,7 +578,7 @@ impl BufferPool {
                         sg.lru_list.remove(pos);
                     }
                     // 重新获取锁以插入新 entry
-                    shard_guard = self.shards[shard_idx].lock().unwrap();
+                    shard_guard = self.shards[shard_idx].lock();
                 }
             } else {
                 shard_guard.lookup.remove(&evict_id);
@@ -581,7 +592,7 @@ impl BufferPool {
         entry.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
         shard_guard.lookup.insert(page_id, entry);
         shard_guard.lru_list.push_front(page_id);
-        self.stats.lock().unwrap().dirty_pages += 1;
+        self.stats.lock().dirty_pages += 1;
         Ok(())
     }
 
@@ -596,7 +607,7 @@ impl BufferPool {
 
         // 1. 收集所有脏页
         for (shard_idx, shard_mutex) in self.shards.iter().enumerate() {
-            let shard_guard = shard_mutex.lock().unwrap();
+            let shard_guard = shard_mutex.lock();
             let shard = &*shard_guard;
             for (&page_id, entry) in shard.lookup.iter() {
                 if entry.dirty.load(std::sync::atomic::Ordering::SeqCst) {
@@ -608,7 +619,7 @@ impl BufferPool {
 
         // 2. 如果启用了 Doublewrite Buffer，先写入 DWB
         {
-            let dwb_guard = self.doublewrite.lock().unwrap();
+            let dwb_guard = self.doublewrite.lock();
             if let Some(dwb) = dwb_guard.as_ref() {
                 if !pages_to_flush.is_empty() {
                     dwb.write_pages(&pages_to_flush)?;
@@ -624,7 +635,7 @@ impl BufferPool {
 
         // 4. 清除 dirty 标志
         for (shard_idx, page_id) in &page_ids_to_clear {
-            let shard_guard = self.shards[*shard_idx].lock().unwrap();
+            let shard_guard = self.shards[*shard_idx].lock();
             let shard = &*shard_guard;
             if let Some(entry) = shard.lookup.get(page_id) {
                 entry
@@ -634,7 +645,7 @@ impl BufferPool {
         }
 
         // 5. 更新统计
-        self.stats.lock().unwrap().flush_count += flushed as u64;
+        self.stats.lock().flush_count += flushed as u64;
 
         Ok(flushed)
     }
@@ -644,7 +655,7 @@ impl BufferPool {
     pub fn flush_page(&self, page_id: u32) -> Result<(), BufferError> {
         let shard_idx = self.shard_for(page_id);
         let page_clone = {
-            let shard_guard = self.shards[shard_idx].lock().unwrap();
+            let shard_guard = self.shards[shard_idx].lock();
             let shard = &*shard_guard;
             let entry = shard
                 .lookup
@@ -658,7 +669,7 @@ impl BufferPool {
 
         // 写入 DWB（如果启用）
         {
-            let dwb_guard = self.doublewrite.lock().unwrap();
+            let dwb_guard = self.doublewrite.lock();
             if let Some(dwb) = dwb_guard.as_ref() {
                 dwb.write_pages(std::slice::from_ref(&page_clone))?;
             }
@@ -668,7 +679,7 @@ impl BufferPool {
         self.writer.write_page(&page_clone)?;
 
         // 清除 dirty 标志
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = &*shard_guard;
         if let Some(entry) = shard.lookup.get(&page_id) {
             entry
@@ -676,7 +687,7 @@ impl BufferPool {
                 .store(false, std::sync::atomic::Ordering::SeqCst);
         }
 
-        self.stats.lock().unwrap().flush_count += 1;
+        self.stats.lock().flush_count += 1;
         Ok(())
     }
 
@@ -687,7 +698,7 @@ impl BufferPool {
         self: &std::sync::Arc<Self>,
         interval_ms: u64,
     ) -> Result<(), BufferError> {
-        let mut handle_guard = self.flush_handle.lock().unwrap();
+        let mut handle_guard = self.flush_handle.lock();
         if handle_guard.is_some() {
             return Err(BufferError::FlushWorkerRunning);
         }
@@ -713,7 +724,7 @@ impl BufferPool {
     pub fn stop_flush_worker(&self) -> Result<(), BufferError> {
         self.flush_stop
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        let mut handle_guard = self.flush_handle.lock().unwrap();
+        let mut handle_guard = self.flush_handle.lock();
         if let Some(handle) = handle_guard.take() {
             // 释放锁再 join 避免死锁
             drop(handle_guard);
@@ -725,7 +736,7 @@ impl BufferPool {
     /// 检查某页是否在缓冲池中
     pub fn contains(&self, page_id: u32) -> bool {
         let shard_idx = self.shard_for(page_id);
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         let shard = shard_guard;
         shard.lookup.contains_key(&page_id)
     }
@@ -734,13 +745,13 @@ impl BufferPool {
     ///
     /// 返回 `MutexGuard<Option<DoublewriteBuffer>>`，调用方通过 `.as_ref()`
     /// 判断是否启用 DWB。未启用 DWB 时（`with_writer` 构造）返回 `None`
-    pub fn lock_doublewrite(&self) -> std::sync::MutexGuard<'_, Option<DoublewriteBuffer>> {
-        self.doublewrite.lock().unwrap()
+    pub fn lock_doublewrite(&self) -> parking_lot::MutexGuard<'_, Option<DoublewriteBuffer>> {
+        self.doublewrite.lock()
     }
 
     /// 获取某分片当前缓存的页数
     pub fn len(&self, shard_idx: usize) -> usize {
-        let shard_guard = self.shards[shard_idx].lock().unwrap();
+        let shard_guard = self.shards[shard_idx].lock();
         shard_guard.lookup.len()
     }
 
@@ -748,14 +759,14 @@ impl BufferPool {
     pub fn total_len(&self) -> usize {
         let mut total = 0;
         for shard in &self.shards {
-            total += shard.lock().unwrap().lookup.len();
+            total += shard.lock().lookup.len();
         }
         total
     }
 
     /// 获取统计信息快照
     pub fn stats(&self) -> BufferPoolStats {
-        *self.stats.lock().unwrap()
+        *self.stats.lock()
     }
 
     /// 淘汰 LRU 尾部第一个 pin_count == 0 的页
@@ -796,12 +807,12 @@ impl BufferPool {
                     return Err(e);
                 }
                 // 同样计入 flush_count 统计（淘汰时的刷盘也是一次 flush）
-                self.stats.lock().unwrap().flush_count += 1;
+                self.stats.lock().flush_count += 1;
             } else {
                 trace!(page_id, "evicting clean page");
             }
         }
-        self.stats.lock().unwrap().evictions += 1;
+        self.stats.lock().evictions += 1;
         Ok(())
     }
 }
@@ -839,7 +850,7 @@ use std::path::Path;
 ///
 /// **线程安全**：内部用 `Mutex<File>` 保护，所有 read+seek 串行化。
 pub struct FilePageLoader {
-    file: std::sync::Mutex<File>,
+    file: Mutex<File>,
 }
 
 impl FilePageLoader {
@@ -852,14 +863,14 @@ impl FilePageLoader {
             .open(path)
             .map_err(|e| BufferError::IoError(format!("open loader failed: {e}")))?;
         Ok(Self {
-            file: std::sync::Mutex::new(file),
+            file: Mutex::new(file),
         })
     }
 }
 
 impl PageLoader for FilePageLoader {
     fn load_page(&self, page_id: u32) -> Result<Page, BufferError> {
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.file.lock();
         let offset = (page_id as u64) * (PAGE_SIZE as u64);
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| BufferError::IoError(format!("seek failed: {e}")))?;
@@ -897,11 +908,15 @@ impl PageLoader for FilePageLoader {
 ///
 /// **线程安全**：内部用 `Mutex<File>` 保护，所有 write+seek+sync 串行化。
 pub struct FilePageWriter {
-    file: std::sync::Mutex<File>,
+    file: Mutex<File>,
 }
 
 impl FilePageWriter {
-    /// 打开或创建文件（读写模式，create=true）
+    /// 打开或创建文件（读写模式，create=true，不截断已有文件）
+    ///
+    /// 注意：`enable_persistence` 对已存在的表文件会复用本函数打开（load 场景），
+    /// 因此**不能** truncate —— 截断会导致重启后旧数据全部丢失。
+    #[allow(clippy::suspicious_open_options)]
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, BufferError> {
         let file = OpenOptions::new()
             .read(true)
@@ -910,14 +925,14 @@ impl FilePageWriter {
             .open(path)
             .map_err(|e| BufferError::IoError(format!("open writer failed: {e}")))?;
         Ok(Self {
-            file: std::sync::Mutex::new(file),
+            file: Mutex::new(file),
         })
     }
 }
 
 impl PageWriter for FilePageWriter {
     fn write_page(&self, page: &Page) -> Result<(), BufferError> {
-        let mut file = self.file.lock().unwrap();
+        let mut file = self.file.lock();
         let offset = (page.header.page_id as u64) * (PAGE_SIZE as u64);
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| BufferError::IoError(format!("seek failed: {e}")))?;
@@ -957,7 +972,7 @@ pub struct DoublewriteBuffer {
     /// DWB 容量（最多缓存多少页）
     capacity: usize,
     /// 双写缓冲区：page_id → DwbEntry
-    pages: std::sync::Mutex<std::collections::HashMap<u32, DwbEntry>>,
+    pages: Mutex<std::collections::HashMap<u32, DwbEntry>>,
     /// 全局序号计数器（FIFO 淘汰用）
     seq_counter: std::sync::atomic::AtomicU64,
     /// 写入计数（累计写入的页数）
@@ -971,7 +986,7 @@ impl DoublewriteBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
-            pages: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pages: Mutex::new(std::collections::HashMap::new()),
             seq_counter: std::sync::atomic::AtomicU64::new(0),
             write_count: std::sync::atomic::AtomicU64::new(0),
             evict_count: std::sync::atomic::AtomicU64::new(0),
@@ -986,7 +1001,7 @@ impl DoublewriteBuffer {
         if pages.is_empty() {
             return Ok(());
         }
-        let mut guard = self.pages.lock().unwrap();
+        let mut guard = self.pages.lock();
 
         // 1. 先分配所有序号（保证同批次序号连续）
         let mut seqs = Vec::with_capacity(pages.len());
@@ -1027,16 +1042,12 @@ impl DoublewriteBuffer {
 
     /// 从 DWB 读取一页（崩溃恢复时使用）
     pub fn get_page(&self, page_id: u32) -> Option<Page> {
-        self.pages
-            .lock()
-            .unwrap()
-            .get(&page_id)
-            .map(|e| e.page.clone())
+        self.pages.lock().get(&page_id).map(|e| e.page.clone())
     }
 
     /// DWB 当前页数
     pub fn len(&self) -> usize {
-        self.pages.lock().unwrap().len()
+        self.pages.lock().len()
     }
 
     /// DWB 是否为空
@@ -1061,12 +1072,12 @@ impl DoublewriteBuffer {
 
     /// 清空 DWB
     pub fn clear(&self) {
-        self.pages.lock().unwrap().clear();
+        self.pages.lock().clear();
     }
 
     /// 获取所有 page_id（按 page_id 升序，崩溃恢复扫描用）
     pub fn page_ids(&self) -> Vec<u32> {
-        let mut ids: Vec<u32> = self.pages.lock().unwrap().keys().copied().collect();
+        let mut ids: Vec<u32> = self.pages.lock().keys().copied().collect();
         ids.sort();
         ids
     }
@@ -1075,7 +1086,7 @@ impl DoublewriteBuffer {
     ///
     /// 返回恢复的页数
     pub fn recover_to_writer(&self, writer: &dyn PageWriter) -> Result<usize, BufferError> {
-        let guard = self.pages.lock().unwrap();
+        let guard = self.pages.lock();
         // 按 page_id 升序排序，保证恢复顺序确定
         let mut entries: Vec<(u32, &DwbEntry)> = guard.iter().map(|(k, v)| (*k, v)).collect();
         entries.sort_by_key(|(k, _)| *k);
@@ -1094,7 +1105,7 @@ impl DoublewriteBuffer {
         &self,
         writer: &dyn PageWriter,
     ) -> Result<(usize, usize), BufferError> {
-        let guard = self.pages.lock().unwrap();
+        let guard = self.pages.lock();
         let mut entries: Vec<(u32, &DwbEntry)> = guard.iter().map(|(k, v)| (*k, v)).collect();
         entries.sort_by_key(|(k, _)| *k);
         let mut recovered = 0usize;
@@ -2034,7 +2045,7 @@ mod tests {
         assert_eq!(writer.write_count(), 3, "should write 3 to writer");
 
         // DWB 应该也包含这 3 页
-        let dwb = pool.doublewrite.lock().unwrap();
+        let dwb = pool.doublewrite.lock();
         let dwb = dwb.as_ref().unwrap();
         assert_eq!(dwb.len(), 3);
         assert_eq!(dwb.write_count(), 3);
@@ -2352,7 +2363,7 @@ mod tests {
 
         // 4. 验证 DWB 中包含了所有 5000 页
         {
-            let dwb_guard = pool.doublewrite.lock().unwrap();
+            let dwb_guard = pool.doublewrite.lock();
             let dwb = dwb_guard.as_ref().expect("DWB should be enabled");
             assert_eq!(
                 dwb.len(),
@@ -2367,7 +2378,7 @@ mod tests {
         // 5. 模拟崩溃恢复：创建新的 writer，从 DWB 恢复
         let new_writer = InMemoryPageWriter::new();
         let recovered_count = {
-            let dwb_guard = pool.doublewrite.lock().unwrap();
+            let dwb_guard = pool.doublewrite.lock();
             let dwb = dwb_guard.as_ref().unwrap();
             dwb.recover_to_writer(&new_writer).unwrap()
         };
@@ -2431,7 +2442,7 @@ mod tests {
         // DWB 是 HashMap，第二次写入 50 页会覆盖第一次的对应条目
         // DWB.len() = 100（50 个被覆盖 + 50 个未修改的保留）
         {
-            let dwb_guard = pool.doublewrite.lock().unwrap();
+            let dwb_guard = pool.doublewrite.lock();
             let dwb = dwb_guard.as_ref().unwrap();
             assert_eq!(dwb.len(), NUM_PAGES as usize);
 

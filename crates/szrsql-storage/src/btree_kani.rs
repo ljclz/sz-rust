@@ -103,7 +103,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys,
             children: Vec::new(),
-            tuple_ids: Vec::new(),
+            values: Vec::new(),
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -179,7 +179,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: keys.clone(),
             children: Vec::new(),
-            tuple_ids: tuple_ids.clone(),
+            values: tuple_ids.clone(),
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -208,11 +208,11 @@ mod kani_proofs {
         // 6. 左右节点 key 严格升序（由 validate 保证）
         // 7. 左右节点 tuple_ids.len() == keys.len()
         kani::assert!(
-            left.tuple_ids.len() == left.keys.len(),
+            left.values.len() == left.keys.len(),
             "left tuple_ids count matches keys"
         );
         kani::assert!(
-            right.tuple_ids.len() == right.keys.len(),
+            right.values.len() == right.keys.len(),
             "right tuple_ids count matches keys"
         );
     }
@@ -240,7 +240,7 @@ mod kani_proofs {
             node_type: NodeType::Internal,
             keys: keys.clone(),
             children: children.clone(),
-            tuple_ids: Vec::new(),
+            values: Vec::new(),
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -289,7 +289,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(42)], // 仅 1 个 key
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -321,7 +321,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: keys.clone(),
             children: Vec::new(),
-            tuple_ids: tuple_ids.clone(),
+            values: tuple_ids.clone(),
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -346,7 +346,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(1)],
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 99, // 不等于 right.page_id
             prev_sibling: 0,
             parent: 0,
@@ -356,7 +356,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(2)],
             children: Vec::new(),
-            tuple_ids: vec![1],
+            values: vec![vec![1u8]],
             next_sibling: 0,
             prev_sibling: 1,
             parent: 0,
@@ -373,7 +373,7 @@ mod kani_proofs {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(1)],
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 2,
             prev_sibling: 0,
             parent: 0,
@@ -383,7 +383,7 @@ mod kani_proofs {
             node_type: NodeType::Internal, // 不同类型
             keys: vec![encode_i64_key(2)],
             children: vec![3, 4],
-            tuple_ids: Vec::new(),
+            values: Vec::new(),
             next_sibling: 0,
             prev_sibling: 1,
             parent: 0,
@@ -441,7 +441,7 @@ mod kani_proofs {
         let v: i64 = kani::any();
         let key = encode_i64_key(v);
         // 先插入
-        if bt.insert(key.clone(), 7).is_ok() {
+        if bt.insert(key.clone(), vec![7u8]).is_ok() {
             // 再删除
             let delete_result = bt.delete(&key).expect("delete should not error");
             kani::assert!(delete_result, "delete returns true for existing key");
@@ -462,7 +462,7 @@ mod kani_proofs {
         let mut bt = BTree::with_default_order();
         let v: i64 = kani::any();
         let key = encode_i64_key(v);
-        let _ = bt.insert(key.clone(), 1);
+        let _ = bt.insert(key.clone(), vec![1u8]);
         let _ = bt.delete(&key);
         // 树仍合法
         kani::assert!(
@@ -561,7 +561,7 @@ mod property_tests {
                 node_type: NodeType::Leaf,
                 keys,
                 children: Vec::new(),
-                tuple_ids: Vec::new(),
+                values: Vec::new(),
                 next_sibling: 0,
                 prev_sibling: 0,
                 parent: 0,
@@ -592,13 +592,13 @@ mod property_tests {
             sorted.sort();
             sorted.dedup();
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
+            let tuple_ids: Vec<Vec<u8>> = (0..keys.len() as u32).map(|i| vec![i as u8]).collect();
             let node = BTreeNode {
                 page_id: 1,
                 node_type: NodeType::Leaf,
                 keys,
                 children: Vec::new(),
-                tuple_ids,
+                values: tuple_ids.clone(),
                 next_sibling: 0,
                 prev_sibling: 0,
                 parent: 0,
@@ -620,14 +620,14 @@ mod property_tests {
                 return Ok(());
             }
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
+            let tuple_ids: Vec<Vec<u8>> = (0..keys.len() as u32).map(|i| vec![i as u8]).collect();
             let n = keys.len();
             let mut node = BTreeNode {
                 page_id: 10,
                 node_type: NodeType::Leaf,
                 keys: keys.clone(),
                 children: Vec::new(),
-                tuple_ids: tuple_ids.clone(),
+                values: tuple_ids.clone(),
                 next_sibling: 0,
                 prev_sibling: 0,
                 parent: 0,
@@ -642,8 +642,8 @@ mod property_tests {
             prop_assert_eq!(left.keys.len() + right.keys.len(), n);
             prop_assert!(left.validate().is_ok());
             prop_assert!(right.validate().is_ok());
-            prop_assert_eq!(left.tuple_ids.len(), left.keys.len());
-            prop_assert_eq!(right.tuple_ids.len(), right.keys.len());
+            prop_assert_eq!(left.values.len(), left.keys.len());
+            prop_assert_eq!(right.values.len(), right.keys.len());
         });
     }
 
@@ -666,7 +666,7 @@ mod property_tests {
                 node_type: NodeType::Internal,
                 keys: keys.clone(),
                 children: children.clone(),
-                tuple_ids: Vec::new(),
+                values: Vec::new(),
                 next_sibling: 0,
                 prev_sibling: 0,
                 parent: 0,
@@ -693,7 +693,7 @@ mod property_tests {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(42)],
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 0,
             prev_sibling: 0,
             parent: 0,
@@ -714,14 +714,14 @@ mod property_tests {
                 return Ok(());
             }
             let keys: Vec<Vec<u8>> = sorted.iter().map(|v| encode_i64_key(*v)).collect();
-            let tuple_ids: Vec<u32> = (0..keys.len() as u32).collect();
+            let tuple_ids: Vec<Vec<u8>> = (0..keys.len() as u32).map(|i| vec![i as u8]).collect();
             let n = keys.len();
             let mut node = BTreeNode {
                 page_id: 10,
                 node_type: NodeType::Leaf,
                 keys: keys.clone(),
                 children: Vec::new(),
-                tuple_ids: tuple_ids.clone(),
+                values: tuple_ids.clone(),
                 next_sibling: 0,
                 prev_sibling: 0,
                 parent: 0,
@@ -745,7 +745,7 @@ mod property_tests {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(1)],
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 99,
             prev_sibling: 0,
             parent: 0,
@@ -755,7 +755,7 @@ mod property_tests {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(2)],
             children: Vec::new(),
-            tuple_ids: vec![1],
+            values: vec![vec![1u8]],
             next_sibling: 0,
             prev_sibling: 1,
             parent: 0,
@@ -771,7 +771,7 @@ mod property_tests {
             node_type: NodeType::Leaf,
             keys: vec![encode_i64_key(1)],
             children: Vec::new(),
-            tuple_ids: vec![0],
+            values: vec![vec![0u8]],
             next_sibling: 2,
             prev_sibling: 0,
             parent: 0,
@@ -781,7 +781,7 @@ mod property_tests {
             node_type: NodeType::Internal,
             keys: vec![encode_i64_key(2)],
             children: vec![3, 4],
-            tuple_ids: Vec::new(),
+            values: Vec::new(),
             next_sibling: 0,
             prev_sibling: 1,
             parent: 0,
@@ -796,7 +796,7 @@ mod property_tests {
         proptest!(|(vals in prop_vec(any::<i64>(), 1..=50))| {
             let mut bt = BTree::with_default_order();
             for v in &vals {
-                let _ = bt.insert(encode_i64_key(*v), 1);
+                let _ = bt.insert(encode_i64_key(*v), vec![1u8]);
             }
             prop_assert!(bt.validate_all_nodes().is_ok());
         });
@@ -809,9 +809,9 @@ mod property_tests {
         proptest!(|(v in any::<i64>())| {
             let mut bt = BTree::with_default_order();
             let key = encode_i64_key(v);
-            if bt.insert(key.clone(), 42).is_ok() {
+            if bt.insert(key.clone(), vec![42u8]).is_ok() {
                 let sr = bt.search(&key).expect("search");
-                prop_assert_eq!(sr, Some(42));
+                prop_assert_eq!(sr, Some(vec![42u8]));
             }
             prop_assert!(bt.validate_all_nodes().is_ok());
         });
@@ -824,7 +824,7 @@ mod property_tests {
         proptest!(|(v in any::<i64>())| {
             let mut bt = BTree::with_default_order();
             let key = encode_i64_key(v);
-            if bt.insert(key.clone(), 7).is_ok() {
+            if bt.insert(key.clone(), vec![7u8]).is_ok() {
                 let dr = bt.delete(&key).expect("delete");
                 prop_assert!(dr);
                 let sr = bt.search(&key).expect("search");
@@ -841,7 +841,7 @@ mod property_tests {
         proptest!(|(v in any::<i64>())| {
             let mut bt = BTree::with_default_order();
             let key = encode_i64_key(v);
-            let _ = bt.insert(key.clone(), 1);
+            let _ = bt.insert(key.clone(), vec![1u8]);
             let _ = bt.delete(&key);
             prop_assert!(bt.validate_all_nodes().is_ok());
             let sr = bt.search(&key).expect("search");
@@ -859,7 +859,7 @@ mod property_tests {
             for (i, v) in ops.iter().enumerate() {
                 let key = encode_i64_key(*v);
                 if i % 2 == 0 {
-                    let _ = bt.insert(key, i as u32);
+                    let _ = bt.insert(key, vec![i as u8]);
                 } else {
                     let _ = bt.delete(&key);
                 }
@@ -879,7 +879,7 @@ mod property_tests {
             for (is_insert, v) in &ops {
                 let key = encode_i64_key(*v);
                 if *is_insert {
-                    if bt.insert(key, 1).is_ok() {
+                    if bt.insert(key, vec![1u8]).is_ok() {
                         inserted.insert(*v);
                     }
                 } else if inserted.contains(v) {

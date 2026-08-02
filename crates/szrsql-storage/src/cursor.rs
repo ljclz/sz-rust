@@ -21,7 +21,7 @@ use std::ops::Bound;
 
 /// B-Tree 范围扫描游标
 ///
-/// 通过 `BTree::cursor(lower, upper)` 创建，实现 `Iterator<Item = (Vec<u8>, u32)>`。
+/// 通过 `BTree::cursor(lower, upper)` 创建，实现 `Iterator<Item = (Vec<u8>, Vec<u8>)>`。
 pub struct BTreeCursor<'a> {
     /// 借用的 BTree（只读）
     btree: &'a BTree,
@@ -113,7 +113,7 @@ impl<'a> BTreeCursor<'a> {
 }
 
 impl<'a> Iterator for BTreeCursor<'a> {
-    type Item = (Vec<u8>, u32);
+    type Item = (Vec<u8>, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.exhausted {
@@ -130,7 +130,7 @@ impl<'a> Iterator for BTreeCursor<'a> {
             return self.next();
         }
         let key = node.keys[self.current_idx].clone();
-        let tuple_id = node.tuple_ids[self.current_idx];
+        let value = node.values[self.current_idx].clone();
         // 前进到下一个位置
         self.current_idx += 1;
         // 若超出当前叶子，下一次 next() 会触发 advance_to_valid 跳页
@@ -150,7 +150,7 @@ impl<'a> Iterator for BTreeCursor<'a> {
                 self.exhausted = true;
             }
         }
-        Some((key, tuple_id))
+        Some((key, value))
     }
 }
 
@@ -178,11 +178,11 @@ mod tests {
     fn cursor_single_key() {
         let bt = {
             let mut b = BTree::new(4);
-            b.insert(make_key(42), 100).unwrap();
+            b.insert(make_key(42), vec![100u8]).unwrap();
             b
         };
         let mut cursor = bt.cursor(Bound::Unbounded, Bound::Unbounded).unwrap();
-        assert_eq!(cursor.next(), Some((make_key(42), 100)));
+        assert_eq!(cursor.next(), Some((make_key(42), vec![100u8])));
         assert!(cursor.next().is_none());
     }
 
@@ -191,16 +191,16 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..50i64 {
-                b.insert(make_key(i), i as u32).unwrap();
+                b.insert(make_key(i), vec![i as u8]).unwrap();
             }
             b
         };
         let cursor = bt.cursor(Bound::Unbounded, Bound::Unbounded).unwrap();
-        let pairs: Vec<(Vec<u8>, u32)> = cursor.collect();
+        let pairs: Vec<(Vec<u8>, Vec<u8>)> = cursor.collect();
         assert_eq!(pairs.len(), 50);
-        for (i, (k, tid)) in pairs.iter().enumerate() {
+        for (i, (k, v)) in pairs.iter().enumerate() {
             assert_eq!(crate::btree::decode_i64_key(k).unwrap(), i as i64);
-            assert_eq!(*tid, i as u32);
+            assert_eq!(v[0], i as u8);
         }
     }
 
@@ -209,7 +209,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..20i64 {
-                b.insert(make_key(i), i as u32).unwrap();
+                b.insert(make_key(i), vec![i as u8]).unwrap();
             }
             b
         };
@@ -227,7 +227,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..20i64 {
-                b.insert(make_key(i), i as u32).unwrap();
+                b.insert(make_key(i), vec![i as u8]).unwrap();
             }
             b
         };
@@ -245,7 +245,7 @@ mod tests {
         let bt = {
             let mut b = BTree::new(4);
             for i in 0..500i64 {
-                b.insert(make_key(i), i as u32).unwrap();
+                b.insert(make_key(i), vec![i as u8]).unwrap();
             }
             b
         };

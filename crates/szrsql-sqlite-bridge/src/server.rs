@@ -28,11 +28,11 @@
 //! server.serve().await?;
 //! ```
 
-use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult, SessionError};
-use szrsql_types::value::Value;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult, SessionError};
+use szrsql_types::value::Value;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -234,10 +234,7 @@ impl Connection {
                 }
             };
 
-            let sql = request
-                .get("sql")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let sql = request.get("sql").and_then(|v| v.as_str()).unwrap_or("");
 
             if sql.is_empty() {
                 let resp = serde_json::json!({"error": "missing 'sql' field"});
@@ -259,18 +256,15 @@ impl Connection {
         let mut executor = self.executor.lock().await;
         let results = executor.execute_sql(sql).await;
 
-        // 单条 SQL 可能产生多个结果（如多语句拼接），取第一个非 Empty
-        for result in results {
+        // 单条 SQL 可能产生多个结果（如多语句拼接），取第一个
+        if let Some(result) = results.into_iter().next() {
             match result {
                 Ok(QueryResult::ResultSet { columns, rows, tag }) => {
-                    let col_names: Vec<&str> =
-                        columns.iter().map(|c| c.name.as_str()).collect();
+                    let col_names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
                     let json_rows: Vec<serde_json::Value> = rows
                         .into_iter()
                         .map(|row| {
-                            serde_json::Value::Array(
-                                row.into_iter().map(value_to_json).collect(),
-                            )
+                            serde_json::Value::Array(row.into_iter().map(value_to_json).collect())
                         })
                         .collect();
                     return serde_json::json!({
@@ -338,9 +332,7 @@ fn value_to_json(v: Value) -> serde_json::Value {
         Value::Decimal(unscaled, scale) => {
             serde_json::Value::String(format!("{unscaled}e-{scale}"))
         }
-        Value::Array(arr) => {
-            serde_json::Value::Array(arr.into_iter().map(value_to_json).collect())
-        }
+        Value::Array(arr) => serde_json::Value::Array(arr.into_iter().map(value_to_json).collect()),
         Value::Enum(s) => serde_json::Value::String(s),
         Value::Range(_) => serde_json::Value::String("[range]".to_string()),
         Value::Json(v) => v,
@@ -409,7 +401,10 @@ mod tests {
 
     #[test]
     fn test_value_to_json_float64() {
-        assert_eq!(value_to_json(Value::Float64(3.14)), serde_json::json!(3.14));
+        assert_eq!(
+            value_to_json(Value::Float64(std::f64::consts::PI)),
+            serde_json::json!(std::f64::consts::PI)
+        );
     }
 
     #[test]

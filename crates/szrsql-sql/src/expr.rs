@@ -113,11 +113,7 @@ pub trait EvalContext {
     /// - `Some(Ok(Value))`：UDF 存在且调用成功
     /// - `Some(Err(EvalError))`：UDF 存在但调用失败
     /// - `None`：UDF 不存在（调用方应回退到 `FunctionNotFound`）
-    fn try_call_udf(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<Result<Value, EvalError>> {
+    fn try_call_udf(&self, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
         // 1. 先查 UDF 注册表（Rust 原生函数）
         let udf_result = current_udf_registry::with(|opt| {
             let reg = opt.as_ref()?;
@@ -137,7 +133,13 @@ pub trait EvalContext {
         current_sql_functions::with(|opt| {
             let funcs = opt.as_ref()?;
             let func_defs = funcs.get(&name.to_lowercase())?;
-            let def = func_defs.iter().find(|f| f.parameters.len() == args.len())?;
+            let def = func_defs
+                .iter()
+                .find(|f| f.parameters.len() == args.len())?;
+            // P0-3 修复：LANGUAGE plpgsql 函数体走 plpgsql_interp 解释器执行
+            if def.language.to_lowercase() == "plpgsql" {
+                return call_plpgsql_function(name, def, args);
+            }
             evaluate_sql_function(def, args)
         })
     }
@@ -190,24 +192,23 @@ fn evaluate_sql_function(
     } else {
         // PL/pgSQL 或 MySQL BEGIN...END：提取 RETURN 后的表达式
         let upper = body.to_uppercase();
+        // clippy question_mark 误报：两个分支搜索不同模式（"RETURN " vs "RETURN"），
+        // 分支 1 未命中时必须继续尝试分支 2，无法用 ? 重写
+        #[allow(clippy::question_mark)]
         if let Some(pos) = upper.find("RETURN ") {
             let after_return = &body[pos + 7..]; // len("RETURN ") = 7
-            // 去掉尾部的 ; END 等
+                                                 // 去掉尾部的 ; END 等
             let end = after_return
                 .to_uppercase()
                 .find("END")
-                .unwrap_or_else(|| {
-                    after_return.find(';').unwrap_or(after_return.len())
-                });
+                .unwrap_or_else(|| after_return.find(';').unwrap_or(after_return.len()));
             after_return[..end].trim()
         } else if let Some(pos) = upper.find("RETURN") {
             let after_return = &body[pos + 6..];
             let end = after_return
                 .to_uppercase()
                 .find("END")
-                .unwrap_or_else(|| {
-                    after_return.find(';').unwrap_or(after_return.len())
-                });
+                .unwrap_or_else(|| after_return.find(';').unwrap_or(after_return.len()));
             after_return[..end].trim()
         } else {
             // 无法解析函数体，返回 None
@@ -228,9 +229,7 @@ fn evaluate_sql_function(
                 // 提取投影表达式
                 if let Some(crate::ast::SelectItem::UnnamedExpr(expr)) = select.projection.first() {
                     // 创建参数上下文求值
-                    let ctx = FunctionArgContext {
-                        params: param_map,
-                    };
+                    let ctx = FunctionArgContext { params: param_map };
                     Some(ExprEvaluator::eval(expr, &ctx))
                 } else {
                     None
@@ -241,6 +240,33 @@ fn evaluate_sql_function(
         }
         Err(_) => None,
     }
+}
+
+/// P0-3 辅助：通过 plpgsql_interp 解释器执行 LANGUAGE plpgsql 函数。
+///
+/// 从 `current_plpgsql_interp` thread_local 获取函数注册表，
+/// 创建 `PlPgSqlInterpreter` 并调用函数。
+fn call_plpgsql_function(
+    name: &str,
+    _def: &crate::plan::FunctionDefinition,
+    args: &[Value],
+) -> Option<Result<Value, EvalError>> {
+    current_plpgsql_interp::with(|opt| {
+        let registry_arc = opt.as_ref()?;
+        let registry = registry_arc
+            .lock()
+            .map_err(|e| EvalError::Unsupported(format!("plpgsql registry lock poisoned: {e}")))
+            .ok()?;
+        let mut interp = crate::plpgsql_interp::PlPgSqlInterpreter::new(&registry);
+        match interp.call(name, args) {
+            Ok(Some(v)) => Some(Ok(v)),
+            Ok(None) => Some(Ok(Value::Null)), // void 函数
+            Err(crate::plpgsql_interp::PlInterpError::FunctionNotFound(_)) => None,
+            Err(e) => Some(Err(EvalError::Unsupported(format!(
+                "plpgsql function '{name}' error: {e}"
+            )))),
+        }
+    })
 }
 
 /// 函数参数求值上下文 — 将函数参数名映射为值
@@ -257,11 +283,7 @@ impl EvalContext for FunctionArgContext {
         }
     }
 
-    fn try_call_udf(
-        &self,
-        name: &str,
-        args: &[Value],
-    ) -> Option<Result<Value, EvalError>> {
+    fn try_call_udf(&self, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
         // 嵌套函数调用：复用默认实现
         current_udf_registry::with(|opt| {
             let reg = opt.as_ref()?;
@@ -414,6 +436,55 @@ pub mod current_sql_functions {
                         *cell.borrow_mut() = None;
                     });
                 }
+            });
+        }
+    }
+}
+
+/// 当前线程绑定的 PL/pgSQL 函数注册表。
+///
+/// `ExprEvaluator::try_call_udf` 在查询 SQL 函数注册表时，若发现函数语言为
+/// `LANGUAGE plpgsql`，则通过此 thread_local 获取 `FunctionRegistry`，
+/// 创建 `PlPgSqlInterpreter` 并执行函数体。
+///
+/// 由 `Executor` 在执行 SQL 期间通过 `current_plpgsql_interp::guard` 维护。
+/// 存储 `Arc<Mutex<FunctionRegistry>>`：Arc 使 guard 可共享，Mutex 提供
+/// `&mut FunctionRegistry`（PlPgSqlInterpreter::call 需要可变引用）。
+pub mod current_plpgsql_interp {
+    use crate::plpgsql_interp::FunctionRegistry;
+    use std::cell::RefCell;
+    use std::sync::{Arc, Mutex};
+
+    thread_local! {
+        static CURRENT: RefCell<Option<Arc<Mutex<FunctionRegistry>>>> =
+            const { RefCell::new(None) };
+    }
+
+    /// 在闭包中访问当前线程的 PL/pgSQL 函数注册表
+    pub fn with<F, R>(f: F) -> R
+    where
+        F: FnOnce(&Option<Arc<Mutex<FunctionRegistry>>>) -> R,
+    {
+        CURRENT.with(|cell| f(&cell.borrow()))
+    }
+
+    /// 设置当前线程的 PL/pgSQL 函数注册表（返回 RAII guard）
+    ///
+    /// guard 析构时自动清理 thread_local。
+    pub fn guard(registry: Arc<Mutex<FunctionRegistry>>) -> PlPgGuard {
+        CURRENT.with(|cell| {
+            *cell.borrow_mut() = Some(registry);
+        });
+        PlPgGuard
+    }
+
+    /// RAII guard — 析构时清理 thread_local PL/pgSQL 注册表
+    pub struct PlPgGuard;
+
+    impl Drop for PlPgGuard {
+        fn drop(&mut self) {
+            CURRENT.with(|cell| {
+                *cell.borrow_mut() = None;
             });
         }
     }
@@ -793,9 +864,8 @@ impl ExprEvaluator {
         }
         let json_val = match l {
             Value::Json(j) => j.clone(),
-            Value::Text(s) => serde_json::from_str(s).map_err(|e| EvalError::CastFailed(format!(
-                "invalid JSON: {e}"
-            )))?,
+            Value::Text(s) => serde_json::from_str(s)
+                .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
             other => {
                 return Err(EvalError::TypeMismatch {
                     expected: "json/text",
@@ -855,9 +925,8 @@ impl ExprEvaluator {
         }
         let mut json_val = match l {
             Value::Json(j) => j.clone(),
-            Value::Text(s) => serde_json::from_str(s).map_err(|e| {
-                EvalError::CastFailed(format!("invalid JSON: {e}"))
-            })?,
+            Value::Text(s) => serde_json::from_str(s)
+                .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
             other => {
                 return Err(EvalError::TypeMismatch {
                     expected: "json/text",
@@ -882,16 +951,29 @@ impl ExprEvaluator {
             // 尝试作为数组索引，否则作为对象键
             json_val = if let Ok(idx) = seg.parse::<i64>() {
                 if idx >= 0 {
-                    json_val.get(idx as usize).cloned().unwrap_or(serde_json::Value::Null)
+                    json_val
+                        .get(idx as usize)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null)
                 } else {
-                    json_val.as_array().and_then(|arr| {
-                        let len = arr.len() as i64;
-                        let real = len + idx;
-                        if real >= 0 { arr.get(real as usize).cloned() } else { None }
-                    }).unwrap_or(serde_json::Value::Null)
+                    json_val
+                        .as_array()
+                        .and_then(|arr| {
+                            let len = arr.len() as i64;
+                            let real = len + idx;
+                            if real >= 0 {
+                                arr.get(real as usize).cloned()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(serde_json::Value::Null)
                 }
             } else {
-                json_val.get(seg).cloned().unwrap_or(serde_json::Value::Null)
+                json_val
+                    .get(seg)
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null)
             };
         }
         if json_val.is_null() {
@@ -921,9 +1003,8 @@ impl ExprEvaluator {
         }
         let l_json = match l {
             Value::Json(j) => j.clone(),
-            Value::Text(s) => serde_json::from_str(s).map_err(|e| {
-                EvalError::CastFailed(format!("invalid JSON: {e}"))
-            })?,
+            Value::Text(s) => serde_json::from_str(s)
+                .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
             other => {
                 return Err(EvalError::TypeMismatch {
                     expected: "json/text",
@@ -933,9 +1014,8 @@ impl ExprEvaluator {
         };
         let r_json = match r {
             Value::Json(j) => j.clone(),
-            Value::Text(s) => serde_json::from_str(s).map_err(|e| {
-                EvalError::CastFailed(format!("invalid JSON: {e}"))
-            })?,
+            Value::Text(s) => serde_json::from_str(s)
+                .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
             other => {
                 return Err(EvalError::TypeMismatch {
                     expected: "json/text",
@@ -1403,7 +1483,11 @@ impl ExprEvaluator {
             (a, b) => a == b,
         };
         // IS DISTINCT FROM：!same；IS NOT DISTINCT FROM：same
-        let result = if not { same } else { !same };
+        let result = if not {
+            same
+        } else {
+            !same
+        };
         Ok(Value::Bool(result))
     }
 
@@ -1428,7 +1512,11 @@ impl ExprEvaluator {
             (Value::Text(s), Value::Text(pat)) => {
                 let regex = similar_to_regex(&pat)?;
                 let matched = regex.is_match(&s);
-                Ok(Value::Bool(if negated { !matched } else { matched }))
+                Ok(Value::Bool(if negated {
+                    !matched
+                } else {
+                    matched
+                }))
             }
             (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
             (other, _) => Err(EvalError::TypeMismatch {
@@ -2215,18 +2303,22 @@ impl ExprEvaluator {
                 check_arg_count("time_bucket", &arg_vals, 2)?;
                 let bucket_str = match &arg_vals[0] {
                     Value::Text(s) => s.as_str(),
-                    other => return Err(EvalError::TypeMismatch {
-                        expected: "text",
-                        actual: value_type_name(other),
-                    }),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text",
+                            actual: value_type_name(other),
+                        })
+                    }
                 };
                 let ts_us = match arg_vals[1] {
                     Value::Timestamp(us) => us,
                     Value::Null => return Ok(Value::Null),
-                    ref other => return Err(EvalError::TypeMismatch {
-                        expected: "timestamp",
-                        actual: value_type_name(other),
-                    }),
+                    ref other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "timestamp",
+                            actual: value_type_name(other),
+                        })
+                    }
                 };
                 let bucket_us = parse_bucket_width(bucket_str)?;
                 // 使用 div_euclid 确保负数时间戳（1970 年前）也能正确对齐
@@ -2284,11 +2376,12 @@ fn parse_bucket_width(s: &str) -> Result<i64, EvalError> {
             "time_bucket bucket_width must be '<number> <unit>', got '{s}'"
         )));
     }
-    let n: i64 = parts[0]
-        .parse()
-        .map_err(|_| EvalError::InvalidFunctionArgs(format!(
-            "time_bucket bucket_width invalid number: '{}'", parts[0]
-        )))?;
+    let n: i64 = parts[0].parse().map_err(|_| {
+        EvalError::InvalidFunctionArgs(format!(
+            "time_bucket bucket_width invalid number: '{}'",
+            parts[0]
+        ))
+    })?;
     let unit = parts[1];
     // 去掉复数 s
     let unit = unit.trim_end_matches('s');
@@ -2305,10 +2398,9 @@ fn parse_bucket_width(s: &str) -> Result<i64, EvalError> {
         ))),
     };
     // 使用 checked_mul 防止溢出（铁律第 4 条）
-    n.checked_mul(multiplier)
-        .ok_or_else(|| EvalError::InvalidFunctionArgs(format!(
-            "time_bucket bucket_width overflow: {n} {unit}"
-        )))
+    n.checked_mul(multiplier).ok_or_else(|| {
+        EvalError::InvalidFunctionArgs(format!("time_bucket bucket_width overflow: {n} {unit}"))
+    })
 }
 
 /// 简单分词器：按 ASCII 空白拆分，小写化，过滤空 token（Phase 3.33）
@@ -2375,14 +2467,12 @@ fn value_type_name(v: &Value) -> &'static str {
 /// - 标量相等：直接比较
 fn json_contains(container: &serde_json::Value, contained: &serde_json::Value) -> bool {
     match (container, contained) {
-        (serde_json::Value::Array(arr_l), serde_json::Value::Array(arr_r)) => {
-            arr_r.iter().all(|r| arr_l.iter().any(|l| json_contains(l, r)))
-        }
-        (serde_json::Value::Object(obj_l), serde_json::Value::Object(obj_r)) => {
-            obj_r.iter().all(|(k, v)| {
-                obj_l.get(k).is_some_and(|l| json_contains(l, v))
-            })
-        }
+        (serde_json::Value::Array(arr_l), serde_json::Value::Array(arr_r)) => arr_r
+            .iter()
+            .all(|r| arr_l.iter().any(|l| json_contains(l, r))),
+        (serde_json::Value::Object(obj_l), serde_json::Value::Object(obj_r)) => obj_r
+            .iter()
+            .all(|(k, v)| obj_l.get(k).is_some_and(|l| json_contains(l, v))),
         _ => container == contained,
     }
 }
@@ -2527,8 +2617,8 @@ fn similar_to_regex(pattern: &str) -> Result<regex::Regex, EvalError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expr::{EvalContext, ExprEvaluator};
     use crate::ast::Expr;
+    use crate::expr::{EvalContext, ExprEvaluator};
 
     /// 简单求值上下文（空行，用于无列引用的函数求值）
     struct EmptyContext;
@@ -2537,7 +2627,9 @@ mod tests {
             Err(EvalError::Unsupported(format!("column not found: {_name}")))
         }
         fn lookup_qualified(&self, table: &str, col: &str) -> Result<Value, EvalError> {
-            Err(EvalError::Unsupported(format!("column not found: {table}.{col}")))
+            Err(EvalError::Unsupported(format!(
+                "column not found: {table}.{col}"
+            )))
         }
     }
 
@@ -2688,7 +2780,13 @@ mod tests {
     /// 测试用 UDF：my_double(x) → x * 2
     struct DoubleUdf;
     impl UdfFunction for DoubleUdf {
-        fn signature(&self) -> (&'static str, &'static [(&'static str, &'static str)], &'static str) {
+        fn signature(
+            &self,
+        ) -> (
+            &'static str,
+            &'static [(&'static str, &'static str)],
+            &'static str,
+        ) {
             ("my_double", &[("x", "integer")], "integer")
         }
         fn call(&self, args: &[Value], _ctx: &UdfContext) -> Result<Value, crate::udf::UdfError> {

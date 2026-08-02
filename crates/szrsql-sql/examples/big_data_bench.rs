@@ -189,9 +189,9 @@ fn bench_update(n: usize) -> f64 {
     let plan = plan_sql("UPDATE users SET age = age + 1", &catalog);
     let exec = Executor::new();
     let start = Instant::now();
-    exec.execute_update(&plan, &mut table).expect("execute failed");
-    let elapsed = start.elapsed().as_secs_f64();
-    elapsed
+    exec.execute_update(&plan, &mut table)
+        .expect("execute failed");
+    start.elapsed().as_secs_f64()
 }
 
 /// 测试 DELETE 全表吞吐
@@ -203,15 +203,16 @@ fn bench_delete(n: usize) -> f64 {
     let plan = plan_sql("DELETE FROM users", &catalog);
     let exec = Executor::new();
     let start = Instant::now();
-    exec.execute_delete(&plan, &mut table).expect("execute failed");
-    let elapsed = start.elapsed().as_secs_f64();
-    elapsed
+    exec.execute_delete(&plan, &mut table)
+        .expect("execute failed");
+    start.elapsed().as_secs_f64()
 }
 
 /// 判断是否应跳过指定规模（用于避免 10M 行测试在低内存机器上 OOM）
 fn should_skip(size: usize) -> bool {
     if size == 10_000_000 {
-        return std::env::var(ENV_SKIP_10M).map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        return std::env::var(ENV_SKIP_10M)
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
     }
     false
@@ -235,7 +236,11 @@ fn main() {
         if should_skip(size) {
             println!(
                 "{:<12} {:<12} {:<12} {:<12} {:<12}",
-                format!("{} 行", format_num(size)), "SKIPPED", "-", "-", "-"
+                format!("{} 行", format_num(size)),
+                "SKIPPED",
+                "-",
+                "-",
+                "-"
             );
             println!();
             continue;
@@ -276,7 +281,10 @@ fn main() {
         if should_skip(size) {
             println!(
                 "{:<12} {:<12} {:<12} {:<12}",
-                format!("{} 行", format_num(size)), "SKIPPED", "-", "-"
+                format!("{} 行", format_num(size)),
+                "SKIPPED",
+                "-",
+                "-"
             );
             println!();
             continue;

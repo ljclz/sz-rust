@@ -8,18 +8,18 @@ use crate::handshake::{
 };
 use crate::packet::{Packet, PacketCodec, PacketError};
 use crate::prepared_statement::{
-    encode_binary_row, substitute_placeholders, PreparedStatementStore, StmtCloseCommand,
-    StmtExecuteCommand, StmtPrepareCommand, StmtResetCommand, StmtSendLongDataCommand,
-    PrepareOkPacket,
+    encode_binary_row, substitute_placeholders, PrepareOkPacket, PreparedStatementStore,
+    StmtCloseCommand, StmtExecuteCommand, StmtPrepareCommand, StmtResetCommand,
+    StmtSendLongDataCommand,
 };
 use crate::result_set::{ColumnDefinition, ResultSetEncoder};
 use crate::types::MysqlType;
-use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
-use szrsql_protocol::pgwire::InMemoryTable;
-use szrsql_types::value::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
+use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
+use szrsql_protocol::pgwire::InMemoryTable;
+use szrsql_types::value::Value;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, RwLock};
@@ -115,7 +115,10 @@ impl MysqlServer {
     }
 
     /// 注入共享表存储（与 PgwireServer 共享同一实例）
-    pub fn with_shared_tables(mut self, tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>) -> Self {
+    pub fn with_shared_tables(
+        mut self,
+        tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    ) -> Self {
         self.shared_tables = Some(tables);
         self
     }
@@ -197,14 +200,20 @@ impl Connection {
 
     async fn handle(&mut self, mut stream: TcpStream) -> Result<(), MysqlServerError> {
         let username = self.do_handshake(&mut stream).await?;
-        tracing::info!("MySQL conn {} authenticated as '{}'", self.conn_id, username);
+        tracing::info!(
+            "MySQL conn {} authenticated as '{}'",
+            self.conn_id,
+            username
+        );
         let idle_timeout = self.config.connection_idle_timeout;
         loop {
             // 连接空闲超时包装：超时后关闭连接，释放 session 资源
             let read_result = if idle_timeout.is_zero() {
                 PacketCodec::read_packet(&mut stream).await
             } else {
-                match tokio::time::timeout(idle_timeout, PacketCodec::read_packet(&mut stream)).await {
+                match tokio::time::timeout(idle_timeout, PacketCodec::read_packet(&mut stream))
+                    .await
+                {
                     Ok(r) => r,
                     Err(_) => {
                         tracing::warn!(
@@ -248,7 +257,8 @@ impl Connection {
                 }
                 Command::StmtPrepare => {
                     let prepare_cmd = StmtPrepareCommand::parse(payload);
-                    self.handle_stmt_prepare(&mut stream, &prepare_cmd.sql).await?;
+                    self.handle_stmt_prepare(&mut stream, &prepare_cmd.sql)
+                        .await?;
                 }
                 Command::StmtExecute => {
                     match self.handle_stmt_execute(&mut stream, payload).await {
@@ -272,7 +282,8 @@ impl Connection {
                 Command::StmtReset => {
                     match StmtResetCommand::parse(payload) {
                         Ok(reset_cmd) => {
-                            if let Some(stmt) = self.prepared_statements.get_mut(reset_cmd.stmt_id) {
+                            if let Some(stmt) = self.prepared_statements.get_mut(reset_cmd.stmt_id)
+                            {
                                 stmt.reset();
                             }
                             // COM_STMT_RESET 响应 OK 包
@@ -390,7 +401,11 @@ impl Connection {
         }
     }
 
-    async fn handle_query(&mut self, stream: &mut TcpStream, sql: &str) -> Result<(), MysqlServerError> {
+    async fn handle_query(
+        &mut self,
+        stream: &mut TcpStream,
+        sql: &str,
+    ) -> Result<(), MysqlServerError> {
         let trimmed = sql.trim();
         if trimmed.is_empty() {
             self.send_ok(stream, &OkPacket::simple()).await?;
@@ -402,7 +417,11 @@ impl Connection {
         // MySQL 协议要求每条语句返回独立的结果集或 OK 包。
         // 这里按分号拆分（忽略字符串字面量内的分号），逐条执行并返回结果。
         let statements = split_sql_statements(trimmed);
-        let non_empty: Vec<&str> = statements.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let non_empty: Vec<&str> = statements
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         let total = non_empty.len();
 
         for (idx, stmt) in non_empty.iter().enumerate() {
@@ -448,10 +467,7 @@ impl Connection {
             // MySQL 中 END 不是独立语句，作为 no-op 处理。
             let stmt_upper = stmt.to_uppercase();
             let trimmed_upper = stmt_upper.trim_end_matches(';').trim();
-            if trimmed_upper == "COMMIT"
-                || trimmed_upper == "ROLLBACK"
-                || trimmed_upper == "END"
-            {
+            if trimmed_upper == "COMMIT" || trimmed_upper == "ROLLBACK" || trimmed_upper == "END" {
                 tracing::info!(
                     conn_id = self.conn_id,
                     raw_sql = %stmt,
@@ -473,14 +489,19 @@ impl Connection {
             let stmt_trimmed = stmt.trim_end_matches(';').trim();
             if stmt_trimmed.to_uppercase().starts_with("SELECT @@") {
                 if let Some((columns, rows)) = build_system_variable_response(stmt_trimmed) {
-                    self.send_result_set_with_flags(stream, &columns, &rows, status_flags).await?;
+                    self.send_result_set_with_flags(stream, &columns, &rows, status_flags)
+                        .await?;
                     continue;
                 }
             }
 
             // MySQL 兼容：把反引号标识符替换成双引号（sqlparser 不支持反引号）
             // 同时把 SET @@SESSION.xxx / SET @@GLOBAL.xxx 替换成 SET SESSION xxx / SET GLOBAL xxx
-            let normalized_sql = normalize_mysql_sql(stmt, self.current_db.as_deref(), &self.config.allowed_databases);
+            let normalized_sql = normalize_mysql_sql(
+                stmt,
+                self.current_db.as_deref(),
+                &self.config.allowed_databases,
+            );
             tracing::info!(conn_id = self.conn_id, raw_sql = %stmt, normalized_sql = %normalized_sql, "MySQL query received");
             let mut executor = self.executor.lock().await;
             let results = executor.execute_sql(&normalized_sql).await;
@@ -488,7 +509,8 @@ impl Connection {
             for result in results {
                 match result {
                     Ok(QueryResult::ResultSet { columns, rows, .. }) => {
-                        self.send_result_set_with_flags(stream, &columns, &rows, status_flags).await?;
+                        self.send_result_set_with_flags(stream, &columns, &rows, status_flags)
+                            .await?;
                     }
                     Ok(QueryResult::AffectedRows { tag }) => {
                         let ok = OkPacket {
@@ -543,7 +565,11 @@ impl Connection {
         Ok(())
     }
 
-    async fn handle_init_db(&mut self, stream: &mut TcpStream, database: &str) -> Result<(), MysqlServerError> {
+    async fn handle_init_db(
+        &mut self,
+        stream: &mut TcpStream,
+        database: &str,
+    ) -> Result<(), MysqlServerError> {
         if !self.config.allowed_databases.is_empty()
             && !self.config.allowed_databases.iter().any(|d| d == database)
         {
@@ -560,7 +586,13 @@ impl Connection {
         Ok(())
     }
 
-    async fn send_result_set_with_flags(&mut self, stream: &mut TcpStream, columns: &[szrsql_protocol::pgwire::session::ResultColumn], rows: &[Vec<szrsql_types::value::Value>], status_flags: u16) -> Result<(), MysqlServerError> {
+    async fn send_result_set_with_flags(
+        &mut self,
+        stream: &mut TcpStream,
+        columns: &[szrsql_protocol::pgwire::session::ResultColumn],
+        rows: &[Vec<szrsql_types::value::Value>],
+        status_flags: u16,
+    ) -> Result<(), MysqlServerError> {
         let col_defs: Vec<ColumnDefinition> = columns
             .iter()
             .map(|c| ColumnDefinition::new(&c.name, MysqlType::from_column_type(&c.column_type)))
@@ -574,14 +606,22 @@ impl Connection {
         Ok(())
     }
 
-    async fn send_ok(&mut self, stream: &mut TcpStream, ok: &OkPacket) -> Result<(), MysqlServerError> {
+    async fn send_ok(
+        &mut self,
+        stream: &mut TcpStream,
+        ok: &OkPacket,
+    ) -> Result<(), MysqlServerError> {
         let packet = Packet::new(self.seq_id, ok.encode())?;
         PacketCodec::write_packet(stream, &packet).await?;
         self.seq_id = self.seq_id.wrapping_add(1);
         Ok(())
     }
 
-    async fn send_err(&mut self, stream: &mut TcpStream, err: &ErrPacket) -> Result<(), MysqlServerError> {
+    async fn send_err(
+        &mut self,
+        stream: &mut TcpStream,
+        err: &ErrPacket,
+    ) -> Result<(), MysqlServerError> {
         let packet = Packet::new(self.seq_id, err.encode())?;
         PacketCodec::write_packet(stream, &packet).await?;
         self.seq_id = self.seq_id.wrapping_add(1);
@@ -605,7 +645,11 @@ impl Connection {
         stream: &mut TcpStream,
         sql: &str,
     ) -> Result<(), MysqlServerError> {
-        let normalized = normalize_mysql_sql(sql, self.current_db.as_deref(), &self.config.allowed_databases);
+        let normalized = normalize_mysql_sql(
+            sql,
+            self.current_db.as_deref(),
+            &self.config.allowed_databases,
+        );
         let stmt_id = self.prepared_statements.prepare(normalized.clone());
         let num_params = self
             .prepared_statements
@@ -840,7 +884,10 @@ impl Connection {
 }
 
 fn parse_affected_rows(tag: &str) -> u64 {
-    tag.split_whitespace().last().and_then(|s| s.parse().ok()).unwrap_or(0)
+    tag.split_whitespace()
+        .last()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 /// 将 executor 错误映射为 MySQL 错误码 + SQLSTATE（项目规则 3 合规）。
@@ -958,7 +1005,10 @@ fn lookup_system_variable(name: &str) -> Option<(SysVarType, &'static str)> {
 /// - sql_mode 返回空字符串 ""，不是 NULL
 fn build_system_variable_response(
     sql: &str,
-) -> Option<(Vec<szrsql_protocol::pgwire::session::ResultColumn>, Vec<Vec<Value>>)> {
+) -> Option<(
+    Vec<szrsql_protocol::pgwire::session::ResultColumn>,
+    Vec<Vec<Value>>,
+)> {
     use szrsql_protocol::pgwire::session::ResultColumn;
     use szrsql_types::value::ColumnType;
 
@@ -987,12 +1037,8 @@ fn build_system_variable_response(
             let n: i64 = value.parse().unwrap_or(0);
             (ColumnType::Int64, Value::Int64(n))
         }
-        SysVarType::String => {
-            (ColumnType::Text, Value::Text(value.to_string()))
-        }
-        SysVarType::EmptyString => {
-            (ColumnType::Text, Value::Text(String::new()))
-        }
+        SysVarType::String => (ColumnType::Text, Value::Text(value.to_string())),
+        SysVarType::EmptyString => (ColumnType::Text, Value::Text(String::new())),
     };
 
     let columns = vec![ResultColumn {
@@ -1016,15 +1062,17 @@ fn build_system_variable_response(
 /// # 示例
 ///
 /// ```
-/// let stmts = split_sql_statements("SELECT 1; SELECT 'a;b'; SELECT 2");
+/// let stmts = szrsql_mysql_protocol::server::split_sql_statements(
+///     "SELECT 1; SELECT 'a;b'; SELECT 2",
+/// );
 /// assert_eq!(stmts, vec!["SELECT 1", "SELECT 'a;b'", "SELECT 2"]);
 /// ```
-fn split_sql_statements(sql: &str) -> Vec<String> {
+pub fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
     let mut in_single_quote = false; // '...'
     let mut in_double_quote = false; // "..."
-    let mut in_backtick = false;     // `...`
+    let mut in_backtick = false; // `...`
     let mut prev_char = '\0';
     // BEGIN...END 嵌套深度（仅在 CREATE FUNCTION/PROCEDURE 上下文中跟踪）
     let mut begin_end_depth: i32 = 0;
@@ -1166,7 +1214,11 @@ fn check_begin_end_keyword(word: &str, depth: &mut i32, current: &str) {
 /// | `SELECT CURRENT_USER()` | `SELECT 'root' AS current_user` | 当前用户 |
 /// | `SELECT CURRENT_USER` | `SELECT 'root' AS current_user` | 当前用户 |
 /// | `SHOW DATABASES` | `SELECT 'njszjt' AS Database` | 列出数据库 |
-fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &[String]) -> String {
+fn normalize_mysql_sql(
+    sql: &str,
+    current_db: Option<&str>,
+    allowed_databases: &[String],
+) -> String {
     let trimmed = sql.trim();
 
     // 空语句
@@ -1238,7 +1290,10 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
         } else {
             // 确保始终包含 information_schema
             let mut dbs: Vec<&str> = allowed_databases.iter().map(|s| s.as_str()).collect();
-            if !dbs.iter().any(|d| d.eq_ignore_ascii_case("information_schema")) {
+            if !dbs
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case("information_schema"))
+            {
                 dbs.push("information_schema");
             }
             dbs
@@ -1310,7 +1365,10 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
         let like_pattern = parse_show_variables_like(&result_upper);
 
         let filtered: Vec<(&str, &str)> = match &like_pattern {
-            Some(pattern) => all_vars.into_iter().filter(|(name, _)| mysql_like_match(name, pattern)).collect(),
+            Some(pattern) => all_vars
+                .into_iter()
+                .filter(|(name, _)| mysql_like_match(name, pattern))
+                .collect(),
             None => all_vars,
         };
 
@@ -1320,7 +1378,13 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
 
         let unions: Vec<String> = filtered
             .iter()
-            .map(|(name, value)| format!("SELECT '{}' AS Variable_name, '{}' AS Value", name.replace("'", "''"), value.replace("'", "''")))
+            .map(|(name, value)| {
+                format!(
+                    "SELECT '{}' AS Variable_name, '{}' AS Value",
+                    name.replace("'", "''"),
+                    value.replace("'", "''")
+                )
+            })
             .collect();
         return unions.join(" UNION ALL ");
     }
@@ -1342,13 +1406,20 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
     }
 
     // 4.9 SHOW CHARSET / SHOW CHARACTER SET → 返回 utf8mb4 字符集
-    if result_upper == "SHOW CHARSET" || result_upper == "SHOW CHARACTER SET" || result_upper.starts_with("SHOW CHARSET ") || result_upper.starts_with("SHOW CHARACTER SET ") {
+    if result_upper == "SHOW CHARSET"
+        || result_upper == "SHOW CHARACTER SET"
+        || result_upper.starts_with("SHOW CHARSET ")
+        || result_upper.starts_with("SHOW CHARACTER SET ")
+    {
         return "SELECT 'utf8mb4' AS Charset, 'utf8mb4 Unicode' AS Description, 'utf8mb4_general_ci' AS \"Default collation\", '4' AS Maxlen UNION ALL SELECT 'utf8' AS Charset, 'UTF-8 Unicode' AS Description, 'utf8_general_ci' AS \"Default collation\", '3' AS Maxlen UNION ALL SELECT 'latin1' AS Charset, 'cp1252 West European' AS Description, 'latin1_swedish_ci' AS \"Default collation\", '1' AS Maxlen UNION ALL SELECT 'binary' AS Charset, 'Binary pseudo charset' AS Description, 'binary' AS \"Default collation\", '1' AS Maxlen".to_string();
     }
 
     // 5. DESC/DESCRIBE/EXPLAIN table → 查询 information_schema.columns
     //    MySQL 的 DESC table 等价于 PostgreSQL 的 SELECT * FROM information_schema.columns WHERE table_name = 'table'
-    if result_upper.starts_with("DESC ") || result_upper.starts_with("DESCRIBE ") || result_upper.starts_with("EXPLAIN ") {
+    if result_upper.starts_with("DESC ")
+        || result_upper.starts_with("DESCRIBE ")
+        || result_upper.starts_with("EXPLAIN ")
+    {
         if let Some(table_name) = parse_describe_table(&result) {
             return format!(
                 "SELECT column_name AS Field, data_type AS Type, is_nullable AS Null, column_key AS Key, column_default AS Default, extra AS Extra FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position",
@@ -1402,7 +1473,10 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
             vec!["information_schema"]
         } else {
             let mut dbs: Vec<&str> = allowed_databases.iter().map(|s| s.as_str()).collect();
-            if !dbs.iter().any(|d| d.eq_ignore_ascii_case("information_schema")) {
+            if !dbs
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case("information_schema"))
+            {
                 dbs.push("information_schema");
             }
             dbs
@@ -1430,7 +1504,9 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
         return "SELECT 'def' AS table_catalog, '' AS table_schema, '' AS table_name, 'BASE TABLE' AS table_type WHERE 1=0".to_string();
     }
     // INFORMATION_SCHEMA.ROUTINES / PARAMETERS → 返回空结果（存储过程，SzRSQL 暂未实现）
-    if result_upper.contains("INFORMATION_SCHEMA.ROUTINES") || result_upper.contains("INFORMATION_SCHEMA.PARAMETERS") {
+    if result_upper.contains("INFORMATION_SCHEMA.ROUTINES")
+        || result_upper.contains("INFORMATION_SCHEMA.PARAMETERS")
+    {
         return "SELECT '' AS routine_name".to_string();
     }
     // INFORMATION_SCHEMA.VIEWS → 返回空结果
@@ -1461,7 +1537,8 @@ fn normalize_mysql_sql(sql: &str, current_db: Option<&str>, allowed_databases: &
     }
 
     // 8. SET 语句归一化
-    if result_upper.starts_with("SET ") || result_upper == "SET" || result_upper.starts_with("SET;") {
+    if result_upper.starts_with("SET ") || result_upper == "SET" || result_upper.starts_with("SET;")
+    {
         return normalize_mysql_set(&result);
     }
 
@@ -1518,10 +1595,7 @@ fn parse_show_columns_table(sql: &str) -> Option<String> {
     };
 
     // 可能包含 FROM db.table 或 LIKE 'pattern' 等，取第一个标识符
-    let table_part = after_from
-        .split_whitespace()
-        .next()
-        .unwrap_or("");
+    let table_part = after_from.split_whitespace().next().unwrap_or("");
 
     // 去掉引号和反引号
     let table_name = table_part
@@ -1765,13 +1839,23 @@ fn normalize_limit_syntax(sql: &str) -> String {
 
             // 验证 before_comma 和 after_comma 都是数字
             if before_comma.chars().all(|c| c.is_ascii_digit())
-                && after_comma.chars().take_while(|c| c.is_ascii_digit()).count() > 0
+                && after_comma
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .count()
+                    > 0
             {
-                let count_part: String = after_comma.chars().take_while(|c| c.is_ascii_digit()).collect();
+                let count_part: String = after_comma
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
                 let offset = before_comma;
                 let before_limit = &sql[..limit_pos + 7];
                 let after_count = &after_limit[comma_pos + 1 + count_part.len()..];
-                return format!("{}{} OFFSET {}{}", before_limit, count_part, offset, after_count);
+                return format!(
+                    "{}{} OFFSET {}{}",
+                    before_limit, count_part, offset, after_count
+                );
             }
         }
     }
@@ -1787,7 +1871,10 @@ fn parse_show_variables_like(sql_upper: &str) -> Option<String> {
     let like_pos = sql_upper.find(" LIKE ")?;
     let after_like = sql_upper[like_pos + 6..].trim();
     // 跳过可能的 WHERE 前缀
-    let after_like = after_like.strip_prefix("WHERE ").unwrap_or(after_like).trim();
+    let after_like = after_like
+        .strip_prefix("WHERE ")
+        .unwrap_or(after_like)
+        .trim();
 
     // 提取引号内的模式
     if after_like.starts_with('\'') {
@@ -1874,7 +1961,10 @@ mod tests {
         assert_eq!(columns.len(), 1);
         assert_eq!(columns[0].name, "autocommit");
         // 列类型必须是 Int64（MySQL type code = LONGLONG=8）
-        assert!(matches!(columns[0].column_type, szrsql_types::value::ColumnType::Int64));
+        assert!(matches!(
+            columns[0].column_type,
+            szrsql_types::value::ColumnType::Int64
+        ));
         // 值必须是 Int64(1)，不是 Text("1")
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].len(), 1);
@@ -1886,7 +1976,10 @@ mod tests {
     fn test_system_variable_sql_mode_returns_empty_string() {
         let (columns, rows) = build_system_variable_response("SELECT @@sql_mode").unwrap();
         assert_eq!(columns[0].name, "sql_mode");
-        assert!(matches!(columns[0].column_type, szrsql_types::value::ColumnType::Text));
+        assert!(matches!(
+            columns[0].column_type,
+            szrsql_types::value::ColumnType::Text
+        ));
         // 值必须是 Text("")，不是 Null
         match &rows[0][0] {
             Value::Text(s) => assert_eq!(s, ""),
@@ -1899,7 +1992,10 @@ mod tests {
     fn test_system_variable_version_returns_text() {
         let (columns, rows) = build_system_variable_response("SELECT @@version").unwrap();
         assert_eq!(columns[0].name, "version");
-        assert!(matches!(columns[0].column_type, szrsql_types::value::ColumnType::Text));
+        assert!(matches!(
+            columns[0].column_type,
+            szrsql_types::value::ColumnType::Text
+        ));
         match &rows[0][0] {
             Value::Text(s) => assert_eq!(s, "8.0.32"),
             other => panic!("expected Text(\"8.0.32\"), got {:?}", other),
@@ -1936,7 +2032,8 @@ mod tests {
     #[test]
     fn test_error_mapping_duplicate_key() {
         use szrsql_protocol::pgwire::session::SessionError;
-        let err = SessionError::Execution("duplicate key value violates unique constraint".to_string());
+        let err =
+            SessionError::Execution("duplicate key value violates unique constraint".to_string());
         let (code, state) = map_executor_error(&err);
         assert_eq!(code, 1062);
         assert_eq!(&state, b"23000");

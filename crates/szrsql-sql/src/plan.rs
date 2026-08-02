@@ -24,7 +24,7 @@ use crate::ast::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use szrsql_types::value::{ColumnType, Value};
+use szrsql_types::value::ColumnType;
 use thiserror::Error;
 
 // =====================================================================
@@ -875,9 +875,7 @@ impl InMemoryCatalog {
                     .parameters
                     .iter()
                     .zip(def.parameters.iter())
-                    .all(|(a, b)| {
-                        a.data_type.trim().eq_ignore_ascii_case(b.data_type.trim())
-                    })
+                    .all(|(a, b)| a.data_type.trim().eq_ignore_ascii_case(b.data_type.trim()))
         });
         if let Some(idx) = conflict_idx {
             if or_replace {
@@ -1075,7 +1073,11 @@ impl Catalog for InMemoryCatalog {
         // Navicat 发送 SELECT * FROM `njszjt`.`soci_article`，
         // 但 szrsql 表存储为 public.njszjt_soci_article
         if let Some(schema) = &name.schema {
-            let fallback = format!("public.{}_{}", schema.to_lowercase(), name.name.to_lowercase());
+            let fallback = format!(
+                "public.{}_{}",
+                schema.to_lowercase(),
+                name.name.to_lowercase()
+            );
             if self.tables.contains_key(&fallback) {
                 return true;
             }
@@ -1101,7 +1103,11 @@ impl Catalog for InMemoryCatalog {
         }
         // MySQL 兼容回退：schema.table → public.schema_table
         if let Some(schema) = &name.schema {
-            let fallback = format!("public.{}_{}", schema.to_lowercase(), name.name.to_lowercase());
+            let fallback = format!(
+                "public.{}_{}",
+                schema.to_lowercase(),
+                name.name.to_lowercase()
+            );
             if let Some(t) = self.tables.get(&fallback) {
                 return Some(t.clone());
             }
@@ -1860,8 +1866,7 @@ impl LogicalPlan {
             | LogicalPlan::Shared { plan: input, .. } => {
                 input.collect_table_names_into(names);
             }
-            LogicalPlan::Join { left, right, .. }
-            | LogicalPlan::SetOp { left, right, .. } => {
+            LogicalPlan::Join { left, right, .. } | LogicalPlan::SetOp { left, right, .. } => {
                 left.collect_table_names_into(names);
                 right.collect_table_names_into(names);
             }
@@ -3257,7 +3262,10 @@ fn expr_contains_aggregate(expr: &Expr) -> bool {
             expr_contains_aggregate(expr) || expr_contains_aggregate(pattern)
         }
         Expr::Substring {
-            expr, from, for_len, ..
+            expr,
+            from,
+            for_len,
+            ..
         } => {
             expr_contains_aggregate(expr)
                 || from.as_ref().is_some_and(|e| expr_contains_aggregate(e))
@@ -3364,7 +3372,10 @@ fn extract_aggregates(expr: &Expr, out: &mut Vec<AggregateExpr>) {
             extract_aggregates(pattern, out);
         }
         Expr::Substring {
-            expr, from, for_len, ..
+            expr,
+            from,
+            for_len,
+            ..
         } => {
             extract_aggregates(expr, out);
             if let Some(e) = from {
@@ -3471,7 +3482,10 @@ fn extract_window_functions(expr: &Expr, out: &mut Vec<WindowFunctionExpr>) {
             extract_window_functions(pattern, out);
         }
         Expr::Substring {
-            expr, from, for_len, ..
+            expr,
+            from,
+            for_len,
+            ..
         } => {
             extract_window_functions(expr, out);
             if let Some(e) = from {

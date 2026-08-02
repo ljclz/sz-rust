@@ -28,12 +28,12 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 // P1-2：DirtyTableTracker 已移至 szrsql-protocol crate（避免循环依赖）
-pub use szrsql_protocol::pgwire::DirtyTableTracker;
-use szrsql_sql::executor::InMemoryTable;
-use szrsql_tx::wal::{WalOpType, WalRecord};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+pub use szrsql_protocol::pgwire::DirtyTableTracker;
+use szrsql_sql::executor::{InMemoryTable, TableStorage};
+use szrsql_tx::wal::{WalOpType, WalRecord};
 use tokio::sync::{Mutex, RwLock};
 
 /// 快照文件格式版本
@@ -73,12 +73,7 @@ pub fn load_snapshot(data_dir: &Path) -> Result<HashMap<String, Arc<Mutex<InMemo
         .with_context(|| format!("failed to read snapshot file: {}", snapshot_path.display()))?;
 
     let snapshot: SnapshotFile = serde_json::from_str(&content)
-        .with_context(|| {
-            format!(
-                "failed to parse snapshot file: {}",
-                snapshot_path.display()
-            )
-        })?;
+        .with_context(|| format!("failed to parse snapshot file: {}", snapshot_path.display()))?;
 
     tracing::info!(
         snapshot_path = %snapshot_path.display(),
@@ -165,12 +160,17 @@ pub async fn save_snapshot(
 
     // 原子写入：先写临时文件，再重命名
     let tmp_path = snapshot_path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(&snapshot)
-        .context("failed to serialize snapshot to JSON")?;
+    let json =
+        serde_json::to_string_pretty(&snapshot).context("failed to serialize snapshot to JSON")?;
     std::fs::write(&tmp_path, json)
         .with_context(|| format!("failed to write temp snapshot file: {}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, &snapshot_path)
-        .with_context(|| format!("failed to rename snapshot file: {} -> {}", tmp_path.display(), snapshot_path.display()))?;
+    std::fs::rename(&tmp_path, &snapshot_path).with_context(|| {
+        format!(
+            "failed to rename snapshot file: {} -> {}",
+            tmp_path.display(),
+            snapshot_path.display()
+        )
+    })?;
 
     tracing::debug!(
         snapshot_path = %snapshot_path.display(),
@@ -196,19 +196,33 @@ pub async fn save_snapshot(
 /// - `data_dir`：快照文件目录
 /// - `interval_secs`：保存间隔（秒）
 /// - `tracker`：脏表跟踪器（与 Session 共享同一实例）
+/// - `backup_notify`：P2-14 备份触发通知（HTTP `/api/v1/backup` 触发即时保存）
 pub fn spawn_periodic_incremental_save(
     shared_tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
     data_dir: PathBuf,
     interval_secs: u64,
     tracker: DirtyTableTracker,
+    backup_notify: Option<Arc<tokio::sync::Notify>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
         loop {
-            interval.tick().await;
-            if let Err(e) =
-                save_incremental_snapshot(&shared_tables, &data_dir, &tracker).await
-            {
+            // P2-14：同时等待周期 tick 与 HTTP 备份触发通知；
+            // 收到通知时立即执行增量快照（而非等下一个周期）。
+            match &backup_notify {
+                Some(notify) => {
+                    tokio::select! {
+                        _ = interval.tick() => {}
+                        _ = notify.notified() => {
+                            tracing::info!("backup triggered via HTTP notify, saving snapshot now");
+                        }
+                    }
+                }
+                None => {
+                    interval.tick().await;
+                }
+            }
+            if let Err(e) = save_incremental_snapshot(&shared_tables, &data_dir, &tracker).await {
                 tracing::warn!(error = %e, "periodic incremental snapshot save failed");
             }
         }
@@ -433,12 +447,19 @@ pub fn apply_wal_table_data(
 /// 格式：u32 LE 表名长度 + 表名 UTF-8 + 表数据 JSON
 fn decode_table_data(data: &[u8]) -> Option<(String, InMemoryTable)> {
     if data.len() < 4 {
-        tracing::warn!(data_len = data.len(), "TableData payload too short for length prefix");
+        tracing::warn!(
+            data_len = data.len(),
+            "TableData payload too short for length prefix"
+        );
         return None;
     }
     let name_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
     if data.len() < 4 + name_len {
-        tracing::warn!(data_len = data.len(), name_len, "TableData payload too short for table name");
+        tracing::warn!(
+            data_len = data.len(),
+            name_len,
+            "TableData payload too short for table name"
+        );
         return None;
     }
     let table_name = match std::str::from_utf8(&data[4..4 + name_len]) {
@@ -514,9 +535,7 @@ mod tests {
     #[tokio::test]
     async fn dirty_tracker_mark_many() {
         let tracker = DirtyTableTracker::new();
-        tracker
-            .mark_dirty_many(["a", "b", "c"])
-            .await;
+        tracker.mark_dirty_many(["a", "b", "c"]).await;
         let dirty = tracker.take_dirty().await;
         assert_eq!(dirty.len(), 3);
     }
@@ -723,10 +742,10 @@ mod tests {
         // 步骤 1：创建初始快照（users 表 1 行，值为 1）
         let shared: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
             Arc::new(RwLock::new(HashMap::new()));
-        shared
-            .write()
-            .await
-            .insert("users".into(), Arc::new(Mutex::new(make_test_table("users", 1))));
+        shared.write().await.insert(
+            "users".into(),
+            Arc::new(Mutex::new(make_test_table("users", 1))),
+        );
         let tracker = DirtyTableTracker::new();
         tracker.mark_dirty("users").await;
         save_incremental_snapshot(&shared, tmp.path(), &tracker)
@@ -818,7 +837,10 @@ mod tests {
             !loaded_tables.contains_key("temp"),
             "Abort 事务的 temp 表不应被应用"
         );
-        assert!(loaded_tables.contains_key("real"), "Commit 事务的 real 表应存在");
+        assert!(
+            loaded_tables.contains_key("real"),
+            "Commit 事务的 real 表应存在"
+        );
         let real_guard = loaded_tables.get("real").unwrap().lock().await;
         assert_eq!(real_guard.rows().len(), 1);
         assert_eq!(real_guard.rows()[0][0], Value::Int64(42));
@@ -961,10 +983,10 @@ mod tests {
         // 步骤 1：创建快照（users 表 1 行）
         let shared: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
             Arc::new(RwLock::new(HashMap::new()));
-        shared
-            .write()
-            .await
-            .insert("users".into(), Arc::new(Mutex::new(make_test_table("users", 1))));
+        shared.write().await.insert(
+            "users".into(),
+            Arc::new(Mutex::new(make_test_table("users", 1))),
+        );
         let tracker = DirtyTableTracker::new();
         tracker.mark_dirty("users").await;
         save_incremental_snapshot(&shared, tmp.path(), &tracker)

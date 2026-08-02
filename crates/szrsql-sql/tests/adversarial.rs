@@ -16,7 +16,7 @@
 
 use szrsql_sql::ast::{escape_ident, is_valid_ident, quote_ident};
 use szrsql_sql::executor::{Executor, InMemoryTable, MutableTable, TableStorage};
-use szrsql_sql::parser::{parse_sql, parse_single_statement};
+use szrsql_sql::parser::{parse_single_statement, parse_sql};
 use szrsql_sql::plan::{InMemoryCatalog, LogicalPlan, Planner};
 use szrsql_types::value::{ColumnType, Value};
 
@@ -46,9 +46,21 @@ fn make_filled_users() -> InMemoryTable {
             ("age", ColumnType::Int64),
         ],
     );
-    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), Value::Int64(30)]);
-    table.insert(vec![Value::Int64(2), Value::Text("bob".into()), Value::Int64(25)]);
-    table.insert(vec![Value::Int64(3), Value::Text("carol".into()), Value::Int64(35)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("alice".into()),
+        Value::Int64(30),
+    ]);
+    table.insert(vec![
+        Value::Int64(2),
+        Value::Text("bob".into()),
+        Value::Int64(25),
+    ]);
+    table.insert(vec![
+        Value::Int64(3),
+        Value::Text("carol".into()),
+        Value::Int64(35),
+    ]);
     table
 }
 
@@ -111,7 +123,11 @@ fn test_adv_sql_002_string_literal_injection() {
     let parsed = parse_sql(&sql);
     assert!(parsed.is_ok(), "escaped literal should parse correctly");
     let stmts = parsed.unwrap();
-    assert_eq!(stmts.len(), 1, "should parse as single statement, not multi-stmt");
+    assert_eq!(
+        stmts.len(),
+        1,
+        "should parse as single statement, not multi-stmt"
+    );
 }
 
 #[test]
@@ -140,80 +156,84 @@ fn test_adv_sql_004_long_sql_input() {
         .stack_size(8 * 1024 * 1024)
         .spawn(|| {
             // ADV-SQL-004: 超长 SQL 输入 + 深度嵌套 OR 链
-    // ADV-BUG-001 已修复：添加 MAX_EXPR_DEPTH=512 递归深度限制 + MAX_SQL_LEN=1MB 长度预检
-    // 现在深度嵌套 OR 链不再栈溢出，而是返回清晰的 ParseError
+            // ADV-BUG-001 已修复：添加 MAX_EXPR_DEPTH=512 递归深度限制 + MAX_SQL_LEN=1MB 长度预检
+            // 现在深度嵌套 OR 链不再栈溢出，而是返回清晰的 ParseError
 
-    // 测试 1：平铺的长 SELECT 列表（不触发深度递归），应正常解析
-    let mut sql = String::from("SELECT ");
-    for i in 0..1000 {
-        if i > 0 {
-            sql.push(',');
-        }
-        sql.push_str(&format!("{}", i));
-    }
-    sql.push_str(" FROM users");
-    let result = parse_sql(&sql);
-    assert!(result.is_ok(), "long flat SELECT list should parse");
+            // 测试 1：平铺的长 SELECT 列表（不触发深度递归），应正常解析
+            let mut sql = String::from("SELECT ");
+            for i in 0..1000 {
+                if i > 0 {
+                    sql.push(',');
+                }
+                sql.push_str(&format!("{}", i));
+            }
+            sql.push_str(" FROM users");
+            let result = parse_sql(&sql);
+            assert!(result.is_ok(), "long flat SELECT list should parse");
 
-    // 测试 2：20 个 OR 链（< MAX_BINARY_OP_CHAIN=256），应正常解析
-    let mut or_sql = String::from("SELECT * FROM users WHERE id = 0");
-    for i in 1..20 {
-        or_sql.push_str(&format!(" OR id = {}", i));
-    }
-    let result = parse_sql(&or_sql);
-    assert!(result.is_ok(), "20 OR chains (< 256) should parse: {:?}", result.err());
+            // 测试 2：20 个 OR 链（< MAX_BINARY_OP_CHAIN=256），应正常解析
+            let mut or_sql = String::from("SELECT * FROM users WHERE id = 0");
+            for i in 1..20 {
+                or_sql.push_str(&format!(" OR id = {}", i));
+            }
+            let result = parse_sql(&or_sql);
+            assert!(
+                result.is_ok(),
+                "20 OR chains (< 256) should parse: {:?}",
+                result.err()
+            );
 
-    // 测试 3：50 个 OR 链（< MAX_BINARY_OP_CHAIN=256），应正常解析
-    // （原 ADV-BUG-001 复现输入为 50 链，在 2MB 栈下会栈溢出；
-    //  现通过预检 + 大栈线程双重防护，50 链可安全解析）
-    let mut deep_or_sql = String::from("SELECT * FROM users WHERE id = 0");
-    for i in 1..50 {
-        deep_or_sql.push_str(&format!(" OR id = {}", i));
-    }
-    let result = parse_sql(&deep_or_sql);
-    assert!(
-        result.is_ok(),
-        "50 OR chains (< 256) should parse successfully: {:?}",
-        result.err()
-    );
+            // 测试 3：50 个 OR 链（< MAX_BINARY_OP_CHAIN=256），应正常解析
+            // （原 ADV-BUG-001 复现输入为 50 链，在 2MB 栈下会栈溢出；
+            //  现通过预检 + 大栈线程双重防护，50 链可安全解析）
+            let mut deep_or_sql = String::from("SELECT * FROM users WHERE id = 0");
+            for i in 1..50 {
+                deep_or_sql.push_str(&format!(" OR id = {}", i));
+            }
+            let result = parse_sql(&deep_or_sql);
+            assert!(
+                result.is_ok(),
+                "50 OR chains (< 256) should parse successfully: {:?}",
+                result.err()
+            );
 
-    // 测试 3b：300 个 OR 链（> MAX_BINARY_OP_CHAIN=256），应被预检拒绝
-    let mut over_or_sql = String::from("SELECT * FROM users WHERE id = 0");
-    for i in 1..300 {
-        over_or_sql.push_str(&format!(" OR id = {}", i));
-    }
-    let result = parse_sql(&over_or_sql);
-    assert!(
-        result.is_err(),
-        "300 OR chains (> 256) should be rejected by MAX_BINARY_OP_CHAIN pre-check"
-    );
-    if let Err(ref e) = result {
-        let msg = format!("{}", e);
-        assert!(
-            msg.contains("OR/AND") || msg.contains("ADV-BUG-001"),
-            "error message should mention OR/AND limit, got: {}",
-            msg
-        );
-    }
+            // 测试 3b：300 个 OR 链（> MAX_BINARY_OP_CHAIN=256），应被预检拒绝
+            let mut over_or_sql = String::from("SELECT * FROM users WHERE id = 0");
+            for i in 1..300 {
+                over_or_sql.push_str(&format!(" OR id = {}", i));
+            }
+            let result = parse_sql(&over_or_sql);
+            assert!(
+                result.is_err(),
+                "300 OR chains (> 256) should be rejected by MAX_BINARY_OP_CHAIN pre-check"
+            );
+            if let Err(ref e) = result {
+                let msg = format!("{}", e);
+                assert!(
+                    msg.contains("OR/AND") || msg.contains("ADV-BUG-001"),
+                    "error message should mention OR/AND limit, got: {}",
+                    msg
+                );
+            }
 
-    // 测试 4：600 个 OR 链（远超 MAX_BINARY_OP_CHAIN=256），应被预检拒绝
-    let mut huge_or_sql = String::from("SELECT * FROM users WHERE id = 0");
-    for i in 1..600 {
-        huge_or_sql.push_str(&format!(" OR id = {}", i));
-    }
-    let result = parse_sql(&huge_or_sql);
-    assert!(
-        result.is_err(),
-        "600 OR chains should be rejected by MAX_BINARY_OP_CHAIN pre-check"
-    );
+            // 测试 4：600 个 OR 链（远超 MAX_BINARY_OP_CHAIN=256），应被预检拒绝
+            let mut huge_or_sql = String::from("SELECT * FROM users WHERE id = 0");
+            for i in 1..600 {
+                huge_or_sql.push_str(&format!(" OR id = {}", i));
+            }
+            let result = parse_sql(&huge_or_sql);
+            assert!(
+                result.is_err(),
+                "600 OR chains should be rejected by MAX_BINARY_OP_CHAIN pre-check"
+            );
 
-    // 测试 5：超过 MAX_SQL_LEN 的超长 SQL，应直接拒绝
-    let huge_sql = format!("SELECT '{}';", "x".repeat(2 * 1024 * 1024));
-    let result = parse_sql(&huge_sql);
-    assert!(
-        result.is_err(),
-        "SQL > 1MB should be rejected by MAX_SQL_LEN pre-check"
-    );
+            // 测试 5：超过 MAX_SQL_LEN 的超长 SQL，应直接拒绝
+            let huge_sql = format!("SELECT '{}';", "x".repeat(2 * 1024 * 1024));
+            let result = parse_sql(&huge_sql);
+            assert!(
+                result.is_err(),
+                "SQL > 1MB should be rejected by MAX_SQL_LEN pre-check"
+            );
         })
         .expect("failed to spawn test thread");
     handle.join().expect("test thread panicked");
@@ -281,7 +301,10 @@ fn test_adv_sql_009_multi_statement_injection() {
 
     // 测试 1：parse_sql 仍接受多语句（兼容性）
     let result = parse_sql("SELECT 1; DROP TABLE users");
-    assert!(result.is_ok(), "parse_sql should accept multi-statement for PG compatibility");
+    assert!(
+        result.is_ok(),
+        "parse_sql should accept multi-statement for PG compatibility"
+    );
     let stmts = result.unwrap();
     assert_eq!(stmts.len(), 2, "should parse 2 statements");
 
@@ -425,7 +448,11 @@ fn test_adv_mem_004_long_string_value() {
         ],
     );
     let long_name = "x".repeat(100_000);
-    table.insert(vec![Value::Int64(1), Value::Text(long_name.clone()), Value::Int64(20)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text(long_name.clone()),
+        Value::Int64(20),
+    ]);
     let mut exec = Executor::new();
     exec.register_table(&table);
     let plan = plan_sql("SELECT * FROM users WHERE id = 1", &catalog);
@@ -479,7 +506,10 @@ fn test_adv_edg_003_max_int() {
     table.insert(vec![Value::Int64(i64::MAX), Value::Text("max".into())]);
     let mut exec = Executor::new();
     exec.register_table(&table);
-    let plan = plan_sql("SELECT * FROM users WHERE id = 9223372036854775807", &catalog);
+    let plan = plan_sql(
+        "SELECT * FROM users WHERE id = 9223372036854775807",
+        &catalog,
+    );
     let result = exec.execute(&plan).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], Value::Int64(i64::MAX));
@@ -496,7 +526,10 @@ fn test_adv_edg_004_min_int() {
     table.insert(vec![Value::Int64(i64::MIN), Value::Text("min".into())]);
     let mut exec = Executor::new();
     exec.register_table(&table);
-    let plan = plan_sql("SELECT * FROM users WHERE id = -9223372036854775808", &catalog);
+    let plan = plan_sql(
+        "SELECT * FROM users WHERE id = -9223372036854775808",
+        &catalog,
+    );
     let result = exec.execute(&plan).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], Value::Int64(i64::MIN));
@@ -532,9 +565,17 @@ fn test_adv_edg_006_null_sorting() {
             ("age", ColumnType::Int64),
         ],
     );
-    table.insert(vec![Value::Int64(1), Value::Text("a".into()), Value::Int64(30)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("a".into()),
+        Value::Int64(30),
+    ]);
     table.insert(vec![Value::Int64(2), Value::Text("b".into()), Value::Null]);
-    table.insert(vec![Value::Int64(3), Value::Text("c".into()), Value::Int64(20)]);
+    table.insert(vec![
+        Value::Int64(3),
+        Value::Text("c".into()),
+        Value::Int64(20),
+    ]);
     let mut exec = Executor::new();
     exec.register_table(&table);
     let plan = plan_sql("SELECT * FROM users ORDER BY age ASC", &catalog);
@@ -626,7 +667,11 @@ fn test_adv_dat_001_transaction_rollback() {
     let mut table = make_filled_users();
     let snapshot = table.snapshot();
     assert_eq!(table.row_count(), 3);
-    table.insert(vec![Value::Int64(4), Value::Text("dave".into()), Value::Int64(40)]);
+    table.insert(vec![
+        Value::Int64(4),
+        Value::Text("dave".into()),
+        Value::Int64(40),
+    ]);
     assert_eq!(table.row_count(), 4);
     table.restore(snapshot);
     assert_eq!(
@@ -646,7 +691,11 @@ fn test_adv_dat_002_delete_then_insert() {
     let exec = Executor::new();
     exec.execute_delete(&plan, &mut table).unwrap();
     assert_eq!(table.row_count(), 0);
-    table.insert(vec![Value::Int64(1), Value::Text("new".into()), Value::Int64(20)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("new".into()),
+        Value::Int64(20),
+    ]);
     assert_eq!(table.row_count(), 1);
 }
 
@@ -681,8 +730,16 @@ fn test_adv_dat_005_count_accuracy() {
     // ADV-DAT-005: COUNT(*) 准确性
     let catalog = make_catalog_users();
     let mut table = make_filled_users();
-    table.insert(vec![Value::Int64(4), Value::Text("dave".into()), Value::Int64(40)]);
-    table.insert(vec![Value::Int64(5), Value::Text("eve".into()), Value::Int64(28)]);
+    table.insert(vec![
+        Value::Int64(4),
+        Value::Text("dave".into()),
+        Value::Int64(40),
+    ]);
+    table.insert(vec![
+        Value::Int64(5),
+        Value::Text("eve".into()),
+        Value::Int64(28),
+    ]);
     let mut exec = Executor::new();
     exec.register_table(&table);
     let plan = plan_sql("SELECT COUNT(*) FROM users", &catalog);
@@ -723,7 +780,11 @@ fn test_adv_dat_008_snapshot_idempotent() {
     // ADV-DAT-008: 同一快照可恢复多次
     let mut table = make_filled_users();
     let snapshot = table.snapshot();
-    table.insert(vec![Value::Int64(100), Value::Text("x".into()), Value::Int64(1)]);
+    table.insert(vec![
+        Value::Int64(100),
+        Value::Text("x".into()),
+        Value::Int64(1),
+    ]);
     assert_eq!(table.row_count(), 4);
     let snap2 = table.snapshot();
     table.restore(snapshot);
@@ -794,9 +855,8 @@ fn test_adv_prt_004_empty_statement() {
     // ADV-PRT-004: 空语句
     let result = parse_sql("");
     // 空语句可以返回空 stmt 列表或错误，关键是不能 panic
-    match result {
-        Ok(stmts) => assert_eq!(stmts.len(), 0, "empty SQL should yield 0 statements"),
-        Err(_) => {}
+    if let Ok(stmts) = result {
+        assert_eq!(stmts.len(), 0, "empty SQL should yield 0 statements");
     }
 }
 
@@ -804,9 +864,8 @@ fn test_adv_prt_004_empty_statement() {
 fn test_adv_prt_005_semicolon_only() {
     // ADV-PRT-005: 仅分号
     let result = parse_sql(";");
-    match result {
-        Ok(stmts) => assert!(stmts.len() <= 1, "semicolon-only should yield 0-1 stmts"),
-        Err(_) => {}
+    if let Ok(stmts) = result {
+        assert!(stmts.len() <= 1, "semicolon-only should yield 0-1 stmts");
     }
 }
 
@@ -896,7 +955,11 @@ fn test_adv_typ_002_mixed_type_insert() {
         ],
     );
     // 直接通过低层 insert 写入混合类型，验证表不崩溃
-    table.insert(vec![Value::Int64(1), Value::Text("a".into()), Value::Int64(10)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("a".into()),
+        Value::Int64(10),
+    ]);
     table.insert(vec![Value::Int64(2), Value::Text("b".into()), Value::Null]);
     assert_eq!(table.row_count(), 2);
 
@@ -945,9 +1008,17 @@ fn test_adv_typ_004_count_star_vs_count_col() {
             ("age", ColumnType::Int64),
         ],
     );
-    table.insert(vec![Value::Int64(1), Value::Text("a".into()), Value::Int64(30)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("a".into()),
+        Value::Int64(30),
+    ]);
     table.insert(vec![Value::Int64(2), Value::Text("b".into()), Value::Null]);
-    table.insert(vec![Value::Int64(3), Value::Text("c".into()), Value::Int64(40)]);
+    table.insert(vec![
+        Value::Int64(3),
+        Value::Text("c".into()),
+        Value::Int64(40),
+    ]);
     let mut exec = Executor::new();
     exec.register_table(&table);
 

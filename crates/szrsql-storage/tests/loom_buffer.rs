@@ -297,8 +297,15 @@ fn loom_pin_unpin_pairing() {
         let c2 = h2.join().unwrap().unwrap();
 
         // 两次 pin 后返回值应为 {1, 2}（顺序未指定）
-        assert!(c1 >= 1 && c2 >= 1, "both pin counts must be >= 1, got c1={c1} c2={c2}");
-        assert_eq!(c1 + c2, 3, "sum of two concurrent pins must be 3 (1+2), got c1={c1} c2={c2}");
+        assert!(
+            c1 >= 1 && c2 >= 1,
+            "both pin counts must be >= 1, got c1={c1} c2={c2}"
+        );
+        assert_eq!(
+            c1 + c2,
+            3,
+            "sum of two concurrent pins must be 3 (1+2), got c1={c1} c2={c2}"
+        );
 
         // 两次 unpin 应回到 0
         let pool3 = pool.clone();
@@ -348,7 +355,10 @@ fn loom_pinned_page_not_evicted() {
 
         // 不变量：page 1 仍在缓冲池中（被 pin 不能被淘汰）
         let shard = pool.shard.lock().unwrap();
-        assert!(shard.lookup.contains_key(&1), "pinned page 1 must not be evicted");
+        assert!(
+            shard.lookup.contains_key(&1),
+            "pinned page 1 must not be evicted"
+        );
     });
 }
 

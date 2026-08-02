@@ -336,12 +336,7 @@ impl UdfRegistry {
     /// 4. 超时检查（`Timeout`）
     /// 5. panic 捕获（`catch_unwind` → `Panic`）
     /// 6. 调用 UDF（返回 `UdfError` 或 `Ok(Value)`）
-    pub fn call(
-        &self,
-        name: &str,
-        args: &[Value],
-        ctx: &UdfContext,
-    ) -> Result<Value, UdfError> {
+    pub fn call(&self, name: &str, args: &[Value], ctx: &UdfContext) -> Result<Value, UdfError> {
         // 1. 查找 UDF
         let func = self
             .functions
@@ -867,7 +862,7 @@ mod tests {
 
         let mut sandbox = UdfSandbox::new();
         // 50ms 应快速完成
-        let result = sandbox.call(&mut registry, "slow_udf", &[Value::Int64(50)]);
+        let result = sandbox.call(&registry, "slow_udf", &[Value::Int64(50)]);
         assert_eq!(result.unwrap(), Value::Int64(50));
         assert_eq!(sandbox.call_count(), 1);
     }
@@ -878,7 +873,7 @@ mod tests {
         registry.register(Arc::new(SlowUdf));
 
         let mut sandbox = UdfSandbox::new().with_timeout(Duration::from_millis(500));
-        let result = sandbox.call(&mut registry, "slow_udf", &[Value::Int64(50)]);
+        let result = sandbox.call(&registry, "slow_udf", &[Value::Int64(50)]);
         assert_eq!(result.unwrap(), Value::Int64(50));
     }
 
@@ -1079,7 +1074,7 @@ mod tests {
 
         for i in 0..10 {
             sandbox
-                .call(&mut registry, "add", &[Value::Int64(i), Value::Int64(i)])
+                .call(&registry, "add", &[Value::Int64(i), Value::Int64(i)])
                 .unwrap();
         }
         assert_eq!(sandbox.call_count(), 10);
@@ -1287,12 +1282,14 @@ mod tests {
     #[test]
     fn test_stress_concurrent_safe() {
         // Stress：多线程并发调用（验证 Send + Sync）
+        // P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+        use parking_lot::Mutex;
         use std::sync::Arc as StdArc;
         use std::thread;
 
         let mut registry = UdfRegistry::new();
         registry.register(Arc::new(AddUdf));
-        let registry = StdArc::new(std::sync::Mutex::new(registry));
+        let registry = StdArc::new(Mutex::new(registry));
 
         let mut handles = Vec::new();
         for _ in 0..4 {
@@ -1300,11 +1297,10 @@ mod tests {
             handles.push(thread::spawn(move || {
                 for i in 0..100 {
                     let ctx = UdfContext::default();
-                    let result = registry.lock().unwrap().call(
-                        "add",
-                        &[Value::Int64(i), Value::Int64(i)],
-                        &ctx,
-                    );
+                    let result =
+                        registry
+                            .lock()
+                            .call("add", &[Value::Int64(i), Value::Int64(i)], &ctx);
                     assert!(result.is_ok());
                 }
             }));

@@ -72,7 +72,7 @@ fn extract_id_val_pairs(rows: &[Vec<Value>]) -> Vec<(i64, i64)> {
 fn find_row_id_by_id(table: &InMemoryTable, target_id: i64) -> Option<usize> {
     table
         .scan_with_ids()
-        .find(|(_, r)| r.get(0) == Some(&Value::Int64(target_id)))
+        .find(|(_, r)| r.first() == Some(&Value::Int64(target_id)))
         .map(|(id, _)| id)
 }
 
@@ -227,7 +227,9 @@ fn phase_c_rc_non_repeatable_read() {
     let t1_id = t1.txn_id;
 
     // T1 第一次 SELECT
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv WHERE id = 1", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -248,7 +250,9 @@ fn phase_c_rc_non_repeatable_read() {
     mvcc.commit_durable(t2_id, |_| Ok(0u64)).unwrap();
 
     // T1 第二次 SELECT（RC 刷新快照后应看到 T2 更新的 val=20）
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv WHERE id = 1", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -288,7 +292,9 @@ fn phase_c_rr_repeatable_read() {
     let t1_id = t1.txn_id;
 
     // T1 第一次 SELECT
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv WHERE id = 1", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -304,7 +310,9 @@ fn phase_c_rr_repeatable_read() {
     mvcc.commit_durable(t2_id, |_| Ok(0u64)).unwrap();
 
     // T1 第二次 SELECT（RR 不刷新快照，仍看到 val=10）
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv WHERE id = 1", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -346,7 +354,9 @@ fn phase_c_serializable_uses_begin_snapshot() {
     let t1_id = t1.txn_id;
 
     // T1 第一次 SELECT
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -360,7 +370,9 @@ fn phase_c_serializable_uses_begin_snapshot() {
     mvcc.commit_durable(t2_id, |_| Ok(0u64)).unwrap();
 
     // T1 第二次 SELECT（Serializable 不刷新快照）
-    let mut exec = Executor::new().with_catalog(&catalog).with_mvcc(&mvcc, t1_id);
+    let mut exec = Executor::new()
+        .with_catalog(&catalog)
+        .with_mvcc(&mvcc, t1_id);
     exec.register_table(&table);
     let plan = plan_sql("SELECT id, val FROM kv", &catalog);
     let rows = exec.execute(&plan).unwrap();
@@ -401,11 +413,7 @@ fn phase_c_autocommit_sees_all_rows() {
     let plan = plan_sql("SELECT id, val FROM kv", &catalog);
     let rows = exec.execute(&plan).unwrap();
     let pairs = extract_id_val_pairs(&rows);
-    assert_eq!(
-        pairs,
-        vec![(1, 10), (2, 20)],
-        "autocommit 模式应看到所有行"
-    );
+    assert_eq!(pairs, vec![(1, 10), (2, 20)], "autocommit 模式应看到所有行");
 
     // autocommit 模式：绑定 MVCC 但 txn_id=0
     let mut exec = Executor::new().with_mvcc(&mvcc, 0);
