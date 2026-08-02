@@ -4786,8 +4786,6 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 2.0.119",
- "sz-orm-core",
- "sz-rust-core",
 ]
 
 [[package]]
