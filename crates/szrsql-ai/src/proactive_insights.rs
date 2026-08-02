@@ -283,10 +283,7 @@ impl InsightRule for CapacityUrgentRule {
                 .with_context("threshold_bytes", &self.threshold_bytes.to_string())
                 .with_context(
                     "confidence",
-                    &format!(
-                        "{:.2}",
-                        snapshot.capacity_confidence.unwrap_or(0.0)
-                    ),
+                    &format!("{:.2}", snapshot.capacity_confidence.unwrap_or(0.0)),
                 ),
         )
     }
@@ -344,10 +341,7 @@ impl InsightRule for ErrorRateHighRule {
             InsightEvent::now(self.rule_id(), severity, msg)
                 .with_context("error_rate", &format!("{:.4}", rate))
                 .with_context("threshold", &format!("{:.4}", self.threshold))
-                .with_context(
-                    "total_query_count",
-                    &snapshot.total_query_count.to_string(),
-                ),
+                .with_context("total_query_count", &snapshot.total_query_count.to_string()),
         )
     }
 }
@@ -391,10 +385,7 @@ impl InsightRule for LockWaitHighRule {
         );
         Some(
             InsightEvent::now(self.rule_id(), severity, msg)
-                .with_context(
-                    "lock_wait_events",
-                    &snapshot.lock_wait_events.to_string(),
-                )
+                .with_context("lock_wait_events", &snapshot.lock_wait_events.to_string())
                 .with_context("threshold", &self.threshold.to_string())
                 .with_context("pending_locks", &snapshot.pending_locks.to_string()),
         )
@@ -797,8 +788,7 @@ mod tests {
 
     #[test]
     fn test_engine_cooldown_dedup() {
-        let mut engine = ProactiveEngine::new()
-            .with_cooldown(Duration::from_millis(100));
+        let mut engine = ProactiveEngine::new().with_cooldown(Duration::from_millis(100));
         engine.register_rule(Box::new(SlowQuerySpikeRule::new(10)));
         let sink = std::sync::Arc::new(InMemorySink::new());
         engine.register_sink(Box::new(InMemorySinkWrapper(sink.clone())));
@@ -818,8 +808,7 @@ mod tests {
 
     #[test]
     fn test_engine_reset_cooldown_forces_fire() {
-        let mut engine = ProactiveEngine::new()
-            .with_cooldown(Duration::from_secs(60));
+        let mut engine = ProactiveEngine::new().with_cooldown(Duration::from_secs(60));
         engine.register_rule(Box::new(SlowQuerySpikeRule::new(10)));
         let sink = std::sync::Arc::new(InMemorySink::new());
         engine.register_sink(Box::new(InMemorySinkWrapper(sink.clone())));
@@ -848,8 +837,7 @@ mod tests {
 
     #[test]
     fn test_engine_clear_history() {
-        let mut engine = ProactiveEngine::new()
-            .with_cooldown(Duration::from_millis(0));
+        let mut engine = ProactiveEngine::new().with_cooldown(Duration::from_millis(0));
         engine.register_rule(Box::new(SlowQuerySpikeRule::new(10)));
         let mut s = make_snapshot();
         s.slow_query_count = 15;
@@ -862,8 +850,7 @@ mod tests {
     #[test]
     fn test_engine_full_workflow() {
         // 端到端：注册规则 + 订阅 + 多轮 tick + 历史查询
-        let mut engine = ProactiveEngine::new()
-            .with_cooldown(Duration::from_millis(0));
+        let mut engine = ProactiveEngine::new().with_cooldown(Duration::from_millis(0));
         engine.register_default_rules();
         let sink = std::sync::Arc::new(InMemorySink::new());
         engine.register_sink(Box::new(InMemorySinkWrapper(sink.clone())));

@@ -144,16 +144,16 @@ fn test_pg_database_returns_current_db() {
     assert_eq!(rows[0].len(), 14);
     assert_eq!(rows[1].len(), 14);
     // template1
-    assert_eq!(rows[0][0], Value::Int64(1));         // oid
+    assert_eq!(rows[0][0], Value::Int64(1)); // oid
     assert_eq!(rows[0][1], Value::Text("template1".into())); // datname
-    assert_eq!(rows[0][6], Value::Bool(true));       // datistemplate
-    assert_eq!(rows[0][7], Value::Bool(false));      // datallowconn
-    assert_eq!(rows[0][9], Value::Int64(1255));      // datlastsysoid
-    // 当前数据库
-    assert_eq!(rows[1][0], Value::Int64(16384));     // oid
+    assert_eq!(rows[0][6], Value::Bool(true)); // datistemplate
+    assert_eq!(rows[0][7], Value::Bool(false)); // datallowconn
+    assert_eq!(rows[0][9], Value::Int64(1255)); // datlastsysoid
+                                                // 当前数据库
+    assert_eq!(rows[1][0], Value::Int64(16384)); // oid
     assert_eq!(rows[1][1], Value::Text("szrsql".into())); // datname
-    assert_eq!(rows[1][6], Value::Bool(false));      // datistemplate
-    assert_eq!(rows[1][7], Value::Bool(true));       // datallowconn
+    assert_eq!(rows[1][6], Value::Bool(false)); // datistemplate
+    assert_eq!(rows[1][7], Value::Bool(true)); // datallowconn
 }
 
 #[test]
@@ -1045,7 +1045,9 @@ fn test_pg_proc_returns_builtin_functions() {
             _ => String::new(),
         })
         .collect();
-    for expected in ["count", "sum", "avg", "min", "max", "now", "length", "lower"] {
+    for expected in [
+        "count", "sum", "avg", "min", "max", "now", "length", "lower",
+    ] {
         assert!(
             func_names.contains(&expected.into()),
             "缺少内置函数: {expected}"
@@ -1117,10 +1119,16 @@ fn test_pg_operator_returns_operators() {
     // OID 从 40000 开始
     assert_eq!(rows[0][0], Value::Int64(40000));
     // 验证 '=' 运算符存在
-    let eq_ops: Vec<_> = rows.iter().filter(|r| r[1] == Value::Text("=".into())).collect();
+    let eq_ops: Vec<_> = rows
+        .iter()
+        .filter(|r| r[1] == Value::Text("=".into()))
+        .collect();
     assert!(!eq_ops.is_empty(), "应包含 = 运算符");
     // 验证算术运算符 '+' 存在
-    let plus_ops: Vec<_> = rows.iter().filter(|r| r[1] == Value::Text("+".into())).collect();
+    let plus_ops: Vec<_> = rows
+        .iter()
+        .filter(|r| r[1] == Value::Text("+".into()))
+        .collect();
     assert!(!plus_ops.is_empty(), "应包含 + 运算符");
     // oprnamespace 应为 public 的 OID (2200)
     assert_eq!(rows[0][2], Value::Int64(2200));
@@ -1150,7 +1158,7 @@ fn test_pg_authid_single_postgres() {
     assert_eq!(PG_AUTHID_COLUMNS.len(), 11);
     assert_eq!(rows[0][0], Value::Int64(10)); // oid
     assert_eq!(rows[0][1], Value::Text("postgres".into())); // rolname
-    // rolreplication 应为 false
+                                                            // rolreplication 应为 false
     assert_eq!(rows[0][7], Value::Bool(false)); // rolreplication
     let schema = pg_authid_schema();
     assert_eq!(schema.name.name, "pg_authid");
@@ -1159,7 +1167,11 @@ fn test_pg_authid_single_postgres() {
 
 #[test]
 fn test_pg_authid_multiple_users() {
-    let users = vec!["admin".to_string(), "reader".to_string(), "writer".to_string()];
+    let users = vec![
+        "admin".to_string(),
+        "reader".to_string(),
+        "writer".to_string(),
+    ];
     let rows = pg_authid(&users);
     assert_eq!(rows.len(), 3);
     // OID 从 10 开始递增
@@ -1197,7 +1209,10 @@ fn test_pg_collation_returns_defaults() {
         "应包含 default 排序规则"
     );
     // C 排序规则的 OID 应为 100
-    let c_row = rows.iter().find(|r| r[1] == Value::Text("C".into())).unwrap();
+    let c_row = rows
+        .iter()
+        .find(|r| r[1] == Value::Text("C".into()))
+        .unwrap();
     assert_eq!(c_row[0], Value::Int64(100));
 }
 

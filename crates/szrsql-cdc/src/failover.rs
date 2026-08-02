@@ -25,7 +25,9 @@ use crate::ChangeEvent;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use szrsql_tx::consumer_offset::{OffsetStore, OffsetStoreError};
 
 // =====================================================================
@@ -148,7 +150,7 @@ impl FailoverConsumer {
             let json = std::fs::read_to_string(&self.processed_path)?;
             let vec: Vec<u64> = serde_json::from_str(&json)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-            let mut processed = self.processed.lock().unwrap();
+            let mut processed = self.processed.lock();
             processed.clear();
             for lsn in vec {
                 processed.insert(lsn);
@@ -159,7 +161,7 @@ impl FailoverConsumer {
 
     /// 持久化 processed 集合到文件（原子写入：tmp + rename）
     pub fn flush_processed(&self) -> Result<(), std::io::Error> {
-        let processed = self.processed.lock().unwrap();
+        let processed = self.processed.lock();
         let mut sorted: Vec<u64> = processed.iter().copied().collect();
         sorted.sort_unstable();
         let json = serde_json::to_string(&sorted)
@@ -246,7 +248,7 @@ impl FailoverConsumer {
 
         // 加入 processed set
         {
-            let mut processed = self.processed.lock().unwrap();
+            let mut processed = self.processed.lock();
             processed.insert(lsn);
         }
         self.total_processed.fetch_add(1, Ordering::SeqCst);
@@ -296,12 +298,12 @@ impl FailoverConsumer {
 
     /// processed set 大小
     pub fn processed_set_size(&self) -> usize {
-        self.processed.lock().unwrap().len()
+        self.processed.lock().len()
     }
 
     /// 检查某个 LSN 是否在 processed set 中
     pub fn is_in_processed_set(&self, lsn: u64) -> bool {
-        self.processed.lock().unwrap().contains(&lsn)
+        self.processed.lock().contains(&lsn)
     }
 
     /// 获取已提交的 LSN

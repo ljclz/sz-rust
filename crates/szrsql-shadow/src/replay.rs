@@ -184,14 +184,18 @@ impl ShadowReplay {
 fn exec_pg(client: &mut postgres::Client, sql: &str) -> Result<Vec<Vec<String>>, String> {
     let trimmed = sql.trim().to_uppercase();
     if trimmed.starts_with("SELECT") {
-        let rows = client.query(sql, &[]).map_err(|e| format!("pg query: {e}"))?;
+        let rows = client
+            .query(sql, &[])
+            .map_err(|e| format!("pg query: {e}"))?;
         let result: Vec<Vec<String>> = rows
             .iter()
             .map(|row| (0..row.len()).map(|i| pg_cell_to_string(row, i)).collect())
             .collect();
         Ok(result)
     } else {
-        client.execute(sql, &[]).map_err(|e| format!("pg execute: {e}"))?;
+        client
+            .execute(sql, &[])
+            .map_err(|e| format!("pg execute: {e}"))?;
         Ok(Vec::new())
     }
 }
@@ -203,11 +207,13 @@ fn pg_cell_to_string(row: &postgres::Row, idx: usize) -> String {
     match *col_type {
         Type::INT8 => {
             let v: Option<i64> = row.get(idx);
-            v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())
+            v.map(|n| n.to_string())
+                .unwrap_or_else(|| "NULL".to_string())
         }
         Type::INT4 => {
             let v: Option<i32> = row.get(idx);
-            v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())
+            v.map(|n| n.to_string())
+                .unwrap_or_else(|| "NULL".to_string())
         }
         Type::TEXT | Type::VARCHAR => {
             let v: Option<String> = row.get(idx);

@@ -194,126 +194,289 @@ impl SqlserverCompat {
     /// 数据类型兼容性测试
     fn test_types() -> Vec<SqlserverCompatResult> {
         vec![
-            Self::check("INT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (id INT)"),
-            Self::check("BIGINT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (id BIGINT)"),
-            Self::check("SMALLINT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (id SMALLINT)"),
-            Self::check("TINYINT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (id TINYINT)"),
-            Self::check("BIT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (flag BIT)"),
-            Self::check("DECIMAL 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price DECIMAL(10, 2))"),
-            Self::check("NUMERIC 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price NUMERIC(10, 2))"),
-            Self::check("MONEY 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price MONEY)"),
-            Self::check("SMALLMONEY 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price SMALLMONEY)"),
-            Self::check("FLOAT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price FLOAT)"),
-            Self::check("REAL 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (price REAL)"),
-            Self::check("VARCHAR 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (name VARCHAR(100))"),
-            Self::check("VARCHAR(MAX) 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (content VARCHAR(MAX))"),
-            Self::check("NVARCHAR 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (name NVARCHAR(100))"),
-            Self::check("NVARCHAR(MAX) 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (content NVARCHAR(MAX))"),
-            Self::check("CHAR 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (code CHAR(10))"),
-            Self::check("NCHAR 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (code NCHAR(10))"),
-            Self::check("TEXT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (content TEXT)"),
-            Self::check("NTEXT 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (content NTEXT)"),
-            Self::check("DATE 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (birthday DATE)"),
-            Self::check("DATETIME 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (created_at DATETIME)"),
-            Self::check("DATETIME2 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (created_at DATETIME2)"),
-            Self::check("SMALLDATETIME 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (created_at SMALLDATETIME)"),
-            Self::check("DATETIMEOFFSET 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (created_at DATETIMEOFFSET)"),
-            Self::check("TIME 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (duration TIME)"),
-            Self::check("UNIQUEIDENTIFIER 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (id UNIQUEIDENTIFIER)"),
-            Self::check("VARBINARY 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (data VARBINARY(100))"),
-            Self::check("IMAGE 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (data IMAGE)"),
-            Self::check("JSON 类型", SqlserverCategory::Type,
-                "CREATE TABLE t (data JSON)"),
+            Self::check(
+                "INT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (id INT)",
+            ),
+            Self::check(
+                "BIGINT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (id BIGINT)",
+            ),
+            Self::check(
+                "SMALLINT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (id SMALLINT)",
+            ),
+            Self::check(
+                "TINYINT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (id TINYINT)",
+            ),
+            Self::check(
+                "BIT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (flag BIT)",
+            ),
+            Self::check(
+                "DECIMAL 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price DECIMAL(10, 2))",
+            ),
+            Self::check(
+                "NUMERIC 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price NUMERIC(10, 2))",
+            ),
+            Self::check(
+                "MONEY 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price MONEY)",
+            ),
+            Self::check(
+                "SMALLMONEY 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price SMALLMONEY)",
+            ),
+            Self::check(
+                "FLOAT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price FLOAT)",
+            ),
+            Self::check(
+                "REAL 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (price REAL)",
+            ),
+            Self::check(
+                "VARCHAR 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (name VARCHAR(100))",
+            ),
+            Self::check(
+                "VARCHAR(MAX) 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (content VARCHAR(MAX))",
+            ),
+            Self::check(
+                "NVARCHAR 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (name NVARCHAR(100))",
+            ),
+            Self::check(
+                "NVARCHAR(MAX) 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (content NVARCHAR(MAX))",
+            ),
+            Self::check(
+                "CHAR 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (code CHAR(10))",
+            ),
+            Self::check(
+                "NCHAR 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (code NCHAR(10))",
+            ),
+            Self::check(
+                "TEXT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (content TEXT)",
+            ),
+            Self::check(
+                "NTEXT 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (content NTEXT)",
+            ),
+            Self::check(
+                "DATE 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (birthday DATE)",
+            ),
+            Self::check(
+                "DATETIME 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (created_at DATETIME)",
+            ),
+            Self::check(
+                "DATETIME2 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (created_at DATETIME2)",
+            ),
+            Self::check(
+                "SMALLDATETIME 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (created_at SMALLDATETIME)",
+            ),
+            Self::check(
+                "DATETIMEOFFSET 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (created_at DATETIMEOFFSET)",
+            ),
+            Self::check(
+                "TIME 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (duration TIME)",
+            ),
+            Self::check(
+                "UNIQUEIDENTIFIER 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (id UNIQUEIDENTIFIER)",
+            ),
+            Self::check(
+                "VARBINARY 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (data VARBINARY(100))",
+            ),
+            Self::check(
+                "IMAGE 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (data IMAGE)",
+            ),
+            Self::check(
+                "JSON 类型",
+                SqlserverCategory::Type,
+                "CREATE TABLE t (data JSON)",
+            ),
         ]
     }
 
     /// 内置函数兼容性测试
     fn test_functions() -> Vec<SqlserverCompatResult> {
         vec![
-            Self::check("GETDATE 函数", SqlserverCategory::Function,
-                "SELECT GETDATE()"),
-            Self::check("GETUTCDATE 函数", SqlserverCategory::Function,
-                "SELECT GETUTCDATE()"),
-            Self::check("SYSDATETIME 函数", SqlserverCategory::Function,
-                "SELECT SYSDATETIME()"),
-            Self::check("SYSDATETIMEOFFSET 函数", SqlserverCategory::Function,
-                "SELECT SYSDATETIMEOFFSET()"),
-            Self::check("ISNULL 函数", SqlserverCategory::Function,
-                "SELECT ISNULL(name, 'unknown') FROM users"),
-            Self::check("COALESCE 函数", SqlserverCategory::Function,
-                "SELECT COALESCE(name, 'unknown') FROM users"),
-            Self::check("LEN 函数", SqlserverCategory::Function,
-                "SELECT LEN(name) FROM users"),
-            Self::check("LEFT 函数", SqlserverCategory::Function,
-                "SELECT LEFT(name, 3) FROM users"),
-            Self::check("RIGHT 函数", SqlserverCategory::Function,
-                "SELECT RIGHT(name, 3) FROM users"),
-            Self::check("CHARINDEX 函数", SqlserverCategory::Function,
-                "SELECT CHARINDEX('a', name) FROM users"),
-            Self::check("SUBSTRING 函数", SqlserverCategory::Function,
-                "SELECT SUBSTRING(name, 1, 3) FROM users"),
-            Self::check("UPPER/LOWER 函数", SqlserverCategory::Function,
-                "SELECT UPPER(name), LOWER(name) FROM users"),
-            Self::check("TRIM 函数", SqlserverCategory::Function,
-                "SELECT TRIM('  hello  ')"),
-            Self::check("CONVERT 函数", SqlserverCategory::Function,
-                "SELECT CONVERT(VARCHAR(10), 123)"),
-            Self::check("CAST 函数", SqlserverCategory::Function,
-                "SELECT CAST('123' AS INT)"),
-            Self::check("DATEADD 函数", SqlserverCategory::Function,
-                "SELECT DATEADD(day, 30, GETDATE())"),
-            Self::check("DATEDIFF 函数", SqlserverCategory::Function,
-                "SELECT DATEDIFF(day, '2024-01-01', '2024-12-31')"),
-            Self::check("DATEPART 函数", SqlserverCategory::Function,
-                "SELECT DATEPART(year, GETDATE())"),
-            Self::check("DATENAME 函数", SqlserverCategory::Function,
-                "SELECT DATENAME(month, GETDATE())"),
-            Self::check("YEAR 函数", SqlserverCategory::Function,
-                "SELECT YEAR(birthday) FROM users"),
-            Self::check("MONTH 函数", SqlserverCategory::Function,
-                "SELECT MONTH(birthday) FROM users"),
-            Self::check("DAY 函数", SqlserverCategory::Function,
-                "SELECT DAY(birthday) FROM users"),
-            Self::check("COUNT 函数", SqlserverCategory::Function,
-                "SELECT COUNT(*) FROM users"),
-            Self::check("SUM/AVG/MAX/MIN 函数", SqlserverCategory::Function,
-                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees"),
-            Self::check("ABS 函数", SqlserverCategory::Function,
-                "SELECT ABS(-5)"),
-            Self::check("ROUND 函数", SqlserverCategory::Function,
-                "SELECT ROUND(3.14159, 2)"),
-            Self::check("CASE WHEN 表达式", SqlserverCategory::Function,
-                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users"),
-            Self::check("NEWID 函数", SqlserverCategory::Function,
-                "SELECT NEWID()"),
+            Self::check(
+                "GETDATE 函数",
+                SqlserverCategory::Function,
+                "SELECT GETDATE()",
+            ),
+            Self::check(
+                "GETUTCDATE 函数",
+                SqlserverCategory::Function,
+                "SELECT GETUTCDATE()",
+            ),
+            Self::check(
+                "SYSDATETIME 函数",
+                SqlserverCategory::Function,
+                "SELECT SYSDATETIME()",
+            ),
+            Self::check(
+                "SYSDATETIMEOFFSET 函数",
+                SqlserverCategory::Function,
+                "SELECT SYSDATETIMEOFFSET()",
+            ),
+            Self::check(
+                "ISNULL 函数",
+                SqlserverCategory::Function,
+                "SELECT ISNULL(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "COALESCE 函数",
+                SqlserverCategory::Function,
+                "SELECT COALESCE(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "LEN 函数",
+                SqlserverCategory::Function,
+                "SELECT LEN(name) FROM users",
+            ),
+            Self::check(
+                "LEFT 函数",
+                SqlserverCategory::Function,
+                "SELECT LEFT(name, 3) FROM users",
+            ),
+            Self::check(
+                "RIGHT 函数",
+                SqlserverCategory::Function,
+                "SELECT RIGHT(name, 3) FROM users",
+            ),
+            Self::check(
+                "CHARINDEX 函数",
+                SqlserverCategory::Function,
+                "SELECT CHARINDEX('a', name) FROM users",
+            ),
+            Self::check(
+                "SUBSTRING 函数",
+                SqlserverCategory::Function,
+                "SELECT SUBSTRING(name, 1, 3) FROM users",
+            ),
+            Self::check(
+                "UPPER/LOWER 函数",
+                SqlserverCategory::Function,
+                "SELECT UPPER(name), LOWER(name) FROM users",
+            ),
+            Self::check(
+                "TRIM 函数",
+                SqlserverCategory::Function,
+                "SELECT TRIM('  hello  ')",
+            ),
+            Self::check(
+                "CONVERT 函数",
+                SqlserverCategory::Function,
+                "SELECT CONVERT(VARCHAR(10), 123)",
+            ),
+            Self::check(
+                "CAST 函数",
+                SqlserverCategory::Function,
+                "SELECT CAST('123' AS INT)",
+            ),
+            Self::check(
+                "DATEADD 函数",
+                SqlserverCategory::Function,
+                "SELECT DATEADD(day, 30, GETDATE())",
+            ),
+            Self::check(
+                "DATEDIFF 函数",
+                SqlserverCategory::Function,
+                "SELECT DATEDIFF(day, '2024-01-01', '2024-12-31')",
+            ),
+            Self::check(
+                "DATEPART 函数",
+                SqlserverCategory::Function,
+                "SELECT DATEPART(year, GETDATE())",
+            ),
+            Self::check(
+                "DATENAME 函数",
+                SqlserverCategory::Function,
+                "SELECT DATENAME(month, GETDATE())",
+            ),
+            Self::check(
+                "YEAR 函数",
+                SqlserverCategory::Function,
+                "SELECT YEAR(birthday) FROM users",
+            ),
+            Self::check(
+                "MONTH 函数",
+                SqlserverCategory::Function,
+                "SELECT MONTH(birthday) FROM users",
+            ),
+            Self::check(
+                "DAY 函数",
+                SqlserverCategory::Function,
+                "SELECT DAY(birthday) FROM users",
+            ),
+            Self::check(
+                "COUNT 函数",
+                SqlserverCategory::Function,
+                "SELECT COUNT(*) FROM users",
+            ),
+            Self::check(
+                "SUM/AVG/MAX/MIN 函数",
+                SqlserverCategory::Function,
+                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees",
+            ),
+            Self::check("ABS 函数", SqlserverCategory::Function, "SELECT ABS(-5)"),
+            Self::check(
+                "ROUND 函数",
+                SqlserverCategory::Function,
+                "SELECT ROUND(3.14159, 2)",
+            ),
+            Self::check(
+                "CASE WHEN 表达式",
+                SqlserverCategory::Function,
+                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users",
+            ),
+            Self::check("NEWID 函数", SqlserverCategory::Function, "SELECT NEWID()"),
         ]
     }
 
@@ -358,26 +521,56 @@ impl SqlserverCompat {
     /// 标识符兼容性测试
     fn test_identifiers() -> Vec<SqlserverCompatResult> {
         vec![
-            Self::check("方括号标识符", SqlserverCategory::Identifier,
-                "SELECT [id], [name] FROM [users]"),
-            Self::check("方括号保留字", SqlserverCategory::Identifier,
-                "SELECT [order], [group] FROM [table]"),
-            Self::check("双引号标识符", SqlserverCategory::Identifier,
-                "SELECT \"id\", \"name\" FROM \"users\""),
-            Self::check("带 schema 前缀", SqlserverCategory::Identifier,
-                "SELECT * FROM dbo.users"),
-            Self::check("带 db.schema.table", SqlserverCategory::Identifier,
-                "SELECT * FROM mydb.dbo.users"),
-            Self::check("别名 AS", SqlserverCategory::Identifier,
-                "SELECT id AS user_id, name AS user_name FROM users"),
-            Self::check("别名省略 AS", SqlserverCategory::Identifier,
-                "SELECT id user_id, name user_name FROM users"),
-            Self::check("表别名", SqlserverCategory::Identifier,
-                "SELECT u.id, u.name FROM users u"),
-            Self::check("限定列名", SqlserverCategory::Identifier,
-                "SELECT users.id, users.name FROM users"),
-            Self::check("列名带下划线", SqlserverCategory::Identifier,
-                "SELECT user_id, first_name, last_name FROM users"),
+            Self::check(
+                "方括号标识符",
+                SqlserverCategory::Identifier,
+                "SELECT [id], [name] FROM [users]",
+            ),
+            Self::check(
+                "方括号保留字",
+                SqlserverCategory::Identifier,
+                "SELECT [order], [group] FROM [table]",
+            ),
+            Self::check(
+                "双引号标识符",
+                SqlserverCategory::Identifier,
+                "SELECT \"id\", \"name\" FROM \"users\"",
+            ),
+            Self::check(
+                "带 schema 前缀",
+                SqlserverCategory::Identifier,
+                "SELECT * FROM dbo.users",
+            ),
+            Self::check(
+                "带 db.schema.table",
+                SqlserverCategory::Identifier,
+                "SELECT * FROM mydb.dbo.users",
+            ),
+            Self::check(
+                "别名 AS",
+                SqlserverCategory::Identifier,
+                "SELECT id AS user_id, name AS user_name FROM users",
+            ),
+            Self::check(
+                "别名省略 AS",
+                SqlserverCategory::Identifier,
+                "SELECT id user_id, name user_name FROM users",
+            ),
+            Self::check(
+                "表别名",
+                SqlserverCategory::Identifier,
+                "SELECT u.id, u.name FROM users u",
+            ),
+            Self::check(
+                "限定列名",
+                SqlserverCategory::Identifier,
+                "SELECT users.id, users.name FROM users",
+            ),
+            Self::check(
+                "列名带下划线",
+                SqlserverCategory::Identifier,
+                "SELECT user_id, first_name, last_name FROM users",
+            ),
         ]
     }
 }
@@ -390,13 +583,19 @@ mod tests {
     fn run_all_returns_nonempty() {
         let results = SqlserverCompat::run_all();
         assert!(!results.is_empty(), "SQL Server 检查项不应为空");
-        assert!(results.len() >= 50, "SQL Server 检查项应至少 50 项，实际: {}", results.len());
+        assert!(
+            results.len() >= 50,
+            "SQL Server 检查项应至少 50 项，实际: {}",
+            results.len()
+        );
     }
 
     #[test]
     fn basic_select_passes() {
         let results = SqlserverCompat::run_all();
-        let select_basic = results.iter().find(|r| r.name == "SELECT 基本语法")
+        let select_basic = results
+            .iter()
+            .find(|r| r.name == "SELECT 基本语法")
             .expect("应包含 SELECT 基本语法 测试");
         assert_eq!(select_basic.status, CompatStatus::Pass);
     }
@@ -404,7 +603,9 @@ mod tests {
     #[test]
     fn top_n_passes() {
         let results = SqlserverCompat::run_all();
-        let top = results.iter().find(|r| r.name == "SELECT TOP N")
+        let top = results
+            .iter()
+            .find(|r| r.name == "SELECT TOP N")
             .expect("应包含 SELECT TOP N 测试");
         assert_eq!(top.status, CompatStatus::Pass);
     }
@@ -412,7 +613,9 @@ mod tests {
     #[test]
     fn isnull_function_passes() {
         let results = SqlserverCompat::run_all();
-        let isnull = results.iter().find(|r| r.name == "ISNULL 函数")
+        let isnull = results
+            .iter()
+            .find(|r| r.name == "ISNULL 函数")
             .expect("应包含 ISNULL 函数测试");
         assert_eq!(isnull.status, CompatStatus::Pass);
     }

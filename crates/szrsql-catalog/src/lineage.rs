@@ -97,11 +97,7 @@ pub struct LineageEdge {
 
 impl LineageEdge {
     /// 构造直接血缘（无转换，常用于视图直接选列）
-    pub fn direct(
-        source: ColumnRef,
-        target: ColumnRef,
-        source_type: EdgeSource,
-    ) -> Self {
+    pub fn direct(source: ColumnRef, target: ColumnRef, source_type: EdgeSource) -> Self {
         Self {
             source,
             target,
@@ -176,10 +172,7 @@ impl LineageStore {
         }
         target_vec.push(edge.clone());
 
-        self.by_source
-            .entry(source_key)
-            .or_default()
-            .push(edge);
+        self.by_source.entry(source_key).or_default().push(edge);
         true
     }
 
@@ -187,20 +180,14 @@ impl LineageStore {
     ///
     /// 返回该表所有列的来源信息。若该表无血缘，返回空 Vec。
     pub fn upstream_of(&self, table: &str) -> Vec<LineageEdge> {
-        self.by_target
-            .get(table)
-            .cloned()
-            .unwrap_or_default()
+        self.by_target.get(table).cloned().unwrap_or_default()
     }
 
     /// 查询某表的**下游**血缘（source.table = table 的所有边）
     ///
     /// 返回该表被哪些下游表引用。若该表无下游，返回空 Vec。
     pub fn downstream_of(&self, table: &str) -> Vec<LineageEdge> {
-        self.by_source
-            .get(table)
-            .cloned()
-            .unwrap_or_default()
+        self.by_source.get(table).cloned().unwrap_or_default()
     }
 
     /// 查询字段级血缘（target = table.column 的所有边）
@@ -284,11 +271,7 @@ mod tests {
     #[test]
     fn test_lineage_idempotent_add() {
         let mut store = LineageStore::new();
-        let edge = LineageEdge::direct(
-            col("a", "x"),
-            col("b", "y"),
-            EdgeSource::View,
-        );
+        let edge = LineageEdge::direct(col("a", "x"), col("b", "y"), EdgeSource::View);
         assert!(store.add_edge(edge.clone()));
         // 重复添加 — 幂等，返回 false
         assert!(!store.add_edge(edge.clone()));
@@ -300,12 +283,8 @@ mod tests {
         let mut store = LineageStore::new();
         // 相同 (source, target, source_type) 但 transform 不同 —
         // 按当前去重策略仍视为同一条边（transform 不参与去重键）
-        let e1 = LineageEdge::with_transform(
-            col("a", "x"), col("b", "y"), "SUM", EdgeSource::Ctas,
-        );
-        let e2 = LineageEdge::with_transform(
-            col("a", "x"), col("b", "y"), "AVG", EdgeSource::Ctas,
-        );
+        let e1 = LineageEdge::with_transform(col("a", "x"), col("b", "y"), "SUM", EdgeSource::Ctas);
+        let e2 = LineageEdge::with_transform(col("a", "x"), col("b", "y"), "AVG", EdgeSource::Ctas);
         assert!(store.add_edge(e1));
         // 同 source/target/source_type — 幂等
         assert!(!store.add_edge(e2));
@@ -317,10 +296,14 @@ mod tests {
         let mut store = LineageStore::new();
         // 同 (source, target) 但 source_type 不同 — 视为两条边
         assert!(store.add_edge(LineageEdge::direct(
-            col("a", "x"), col("b", "y"), EdgeSource::Ctas,
+            col("a", "x"),
+            col("b", "y"),
+            EdgeSource::Ctas,
         )));
         assert!(store.add_edge(LineageEdge::direct(
-            col("a", "x"), col("b", "y"), EdgeSource::View,
+            col("a", "x"),
+            col("b", "y"),
+            EdgeSource::View,
         )));
         assert_eq!(store.len(), 2);
     }
@@ -329,16 +312,19 @@ mod tests {
     fn test_lineage_downstream() {
         let mut store = LineageStore::new();
         store.add_edge(LineageEdge::direct(
-            col("products", "id"), col("orders", "product_id"), EdgeSource::Ctas,
+            col("products", "id"),
+            col("orders", "product_id"),
+            EdgeSource::Ctas,
         ));
         store.add_edge(LineageEdge::direct(
-            col("products", "name"), col("order_items", "product_name"), EdgeSource::View,
+            col("products", "name"),
+            col("order_items", "product_name"),
+            EdgeSource::View,
         ));
 
         let downstream = store.downstream_of("products");
         assert_eq!(downstream.len(), 2);
-        let target_tables: Vec<&str> =
-            downstream.iter().map(|e| e.target.table.as_str()).collect();
+        let target_tables: Vec<&str> = downstream.iter().map(|e| e.target.table.as_str()).collect();
         assert!(target_tables.contains(&"orders"));
         assert!(target_tables.contains(&"order_items"));
     }
@@ -347,12 +333,16 @@ mod tests {
     fn test_lineage_column_level() {
         let mut store = LineageStore::new();
         store.add_edge(LineageEdge::with_transform(
-            col("products", "price"), col("orders", "total_price"),
-            "SUM(price)", EdgeSource::Ctas,
+            col("products", "price"),
+            col("orders", "total_price"),
+            "SUM(price)",
+            EdgeSource::Ctas,
         ));
         store.add_edge(LineageEdge::with_transform(
-            col("products", "tax"), col("orders", "total_tax"),
-            "SUM(tax)", EdgeSource::Ctas,
+            col("products", "tax"),
+            col("orders", "total_tax"),
+            "SUM(tax)",
+            EdgeSource::Ctas,
         ));
 
         let lineage = store.column_lineage("orders", "total_price");
@@ -375,17 +365,24 @@ mod tests {
     fn test_lineage_all_edges_and_tables() {
         let mut store = LineageStore::new();
         store.add_edge(LineageEdge::direct(
-            col("a", "x"), col("b", "y"), EdgeSource::Ctas,
+            col("a", "x"),
+            col("b", "y"),
+            EdgeSource::Ctas,
         ));
         store.add_edge(LineageEdge::direct(
-            col("b", "y"), col("c", "z"), EdgeSource::View,
+            col("b", "y"),
+            col("c", "z"),
+            EdgeSource::View,
         ));
 
         let all = store.all_edges();
         assert_eq!(all.len(), 2);
 
         let tables = store.tables();
-        assert_eq!(tables, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            tables,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
@@ -398,9 +395,7 @@ mod tests {
 
     #[test]
     fn test_lineage_edge_direct_constructor() {
-        let edge = LineageEdge::direct(
-            col("a", "x"), col("b", "y"), EdgeSource::Manual,
-        );
+        let edge = LineageEdge::direct(col("a", "x"), col("b", "y"), EdgeSource::Manual);
         assert_eq!(edge.transform, "direct");
         assert_eq!(edge.source_type, EdgeSource::Manual);
     }
@@ -412,7 +407,9 @@ mod tests {
         assert_eq!(store.len(), 0);
 
         store.add_edge(LineageEdge::direct(
-            col("a", "x"), col("b", "y"), EdgeSource::Ctas,
+            col("a", "x"),
+            col("b", "y"),
+            EdgeSource::Ctas,
         ));
         assert!(!store.is_empty());
         assert_eq!(store.len(), 1);

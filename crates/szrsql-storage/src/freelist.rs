@@ -13,7 +13,8 @@
 //! - 调用方负责只 free 已分配的 page_id（< next_page_id）
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 //  常量
@@ -73,7 +74,7 @@ impl FreeList {
     pub fn allocate(&self) -> Result<u32, FreeListError> {
         // 优先从 free_list 取
         {
-            let mut free = self.free_list.lock().unwrap();
+            let mut free = self.free_list.lock();
             if let Some(page_id) = free.pop() {
                 return Ok(page_id);
             }
@@ -90,7 +91,7 @@ impl FreeList {
     ///
     /// 注：调用方负责保证 page_id 合法且未被重复 free。
     pub fn free(&self, page_id: u32) {
-        let mut free = self.free_list.lock().unwrap();
+        let mut free = self.free_list.lock();
         free.push(page_id);
     }
 
@@ -99,7 +100,7 @@ impl FreeList {
     /// 比逐个 allocate 更高效（减少锁竞争）。
     pub fn allocate_batch(&self, n: usize) -> Result<Vec<u32>, FreeListError> {
         let mut result = Vec::with_capacity(n);
-        let mut free = self.free_list.lock().unwrap();
+        let mut free = self.free_list.lock();
         // 先从 free_list 取
         while result.len() < n {
             if let Some(page_id) = free.pop() {
@@ -119,7 +120,7 @@ impl FreeList {
 
     /// 批量回收 page_ids
     pub fn free_batch(&self, page_ids: &[u32]) {
-        let mut free = self.free_list.lock().unwrap();
+        let mut free = self.free_list.lock();
         free.extend_from_slice(page_ids);
     }
 
@@ -134,7 +135,7 @@ impl FreeList {
 
     /// 当前 free_list 中的回收页数
     pub fn free_count(&self) -> usize {
-        self.free_list.lock().unwrap().len()
+        self.free_list.lock().len()
     }
 
     /// 当前实际占用页数 = total_allocated - free_count

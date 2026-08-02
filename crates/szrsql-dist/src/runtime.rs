@@ -30,7 +30,9 @@
 //! - **迭代 3（后续）**：Percolator 跨分片 2PC，TSO 与 MVCC 协同
 
 use crate::raft::{Index, NodeId, RaftError, RaftNetwork, RaftState, RpcMessage};
-use crate::shard::{KeyRange, KvStateMachine, MultiRaftNode, Shard, ShardCommand, ShardId, ShardRouter};
+use crate::shard::{
+    KeyRange, KvStateMachine, MultiRaftNode, Shard, ShardCommand, ShardId, ShardRouter,
+};
 use crate::txn::TimestampOracle;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -375,7 +377,10 @@ impl DistRuntime {
     /// - Raft propose 失败
     pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), DistRuntimeError> {
         let shard_id = self.route(&key)?;
-        let command = ShardCommand::Put { key: key.clone(), value };
+        let command = ShardCommand::Put {
+            key: key.clone(),
+            value,
+        };
         self.propose(shard_id, command)?;
         // 推进 apply：单节点模式下立即生效
         self.tick(10);
@@ -419,10 +424,7 @@ impl DistRuntime {
     ///
     /// # 返回
     /// 有序的 (key, value) 列表
-    pub fn scan(
-        &self,
-        range: &KeyRange,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DistRuntimeError> {
+    pub fn scan(&self, range: &KeyRange) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DistRuntimeError> {
         let shard_ids = self.multi_raft.router.route_range(range);
         let mut results = Vec::new();
         for sid in shard_ids {
@@ -464,7 +466,10 @@ impl DistRuntime {
         key: Vec<u8>,
         value: Vec<u8>,
     ) -> Result<(), DistRuntimeError> {
-        let command = ShardCommand::Put { key: key.clone(), value };
+        let command = ShardCommand::Put {
+            key: key.clone(),
+            value,
+        };
         self.propose(shard_id, command)?;
         self.tick(10);
         self.sync_state_machine(shard_id);
@@ -519,9 +524,7 @@ impl DistRuntime {
 
     /// 获取指定分片的 Raft 状态
     pub fn shard_raft_state(&self, shard_id: ShardId) -> Option<RaftState> {
-        self.multi_raft
-            .raft_group(shard_id)
-            .map(|r| r.state())
+        self.multi_raft.raft_group(shard_id).map(|r| r.state())
     }
 
     /// 获取指定分片的 Leader 节点 ID（若本节点是 Leader）
@@ -579,11 +582,7 @@ impl DistRuntime {
     /// # 参数
     /// - `shard_id`：消息所属分片
     /// - `msg`：收到的 RPC 消息
-    pub fn handle_message(
-        &mut self,
-        shard_id: ShardId,
-        msg: RpcMessage,
-    ) -> Vec<RpcMessage> {
+    pub fn handle_message(&mut self, shard_id: ShardId, msg: RpcMessage) -> Vec<RpcMessage> {
         self.multi_raft.handle_message(shard_id, msg)
     }
 
@@ -597,15 +596,15 @@ impl DistRuntime {
         value: Vec<u8>,
     ) -> Result<Index, DistRuntimeError> {
         let shard_id = self.route(&key)?;
-        let command = ShardCommand::Put { key: key.clone(), value };
+        let command = ShardCommand::Put {
+            key: key.clone(),
+            value,
+        };
         self.propose(shard_id, command)
     }
 
     /// 仅 propose Delete 命令，不推进 tick/apply（多节点模式使用）
-    pub fn propose_delete_only(
-        &mut self,
-        key: Vec<u8>,
-    ) -> Result<Index, DistRuntimeError> {
+    pub fn propose_delete_only(&mut self, key: Vec<u8>) -> Result<Index, DistRuntimeError> {
         let shard_id = self.route(&key)?;
         let command = ShardCommand::Delete { key: key.clone() };
         self.propose(shard_id, command)
@@ -816,9 +815,11 @@ impl ClusterDriver {
                 }
                 tracing::info!("P8-3 ClusterDriver thread stopped");
             })
-            .map_err(|e| DistRuntimeError::Serialization(format!(
-                "failed to spawn cluster driver thread: {e}"
-            )))?;
+            .map_err(|e| {
+                DistRuntimeError::Serialization(format!(
+                    "failed to spawn cluster driver thread: {e}"
+                ))
+            })?;
 
         self.driver_thread = Some(handle);
         Ok(())
@@ -826,7 +827,8 @@ impl ClusterDriver {
 
     /// 停止驱动线程。
     pub fn stop(&mut self) {
-        self.stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(handle) = self.driver_thread.take() {
             let _ = handle.join();
         }
@@ -858,7 +860,10 @@ mod tests {
         let mut runtime = DistRuntime::new_single_node(1).unwrap();
         runtime.init().unwrap();
         assert_eq!(runtime.node_id(), 1);
-        assert!(!runtime.shard_ids().is_empty(), "should have at least one shard");
+        assert!(
+            !runtime.shard_ids().is_empty(),
+            "should have at least one shard"
+        );
     }
 
     /// P0-DIST-1：单节点 Raft 写入 → apply → 读取
@@ -940,7 +945,11 @@ mod tests {
         // 扫描 [key03, key07)
         let range = KeyRange::new(b"key03".to_vec(), b"key07".to_vec());
         let results = runtime.scan(&range).unwrap();
-        assert_eq!(results.len(), 4, "should scan 4 keys [key03, key04, key05, key06]");
+        assert_eq!(
+            results.len(),
+            4,
+            "should scan 4 keys [key03, key04, key05, key06]"
+        );
         assert_eq!(results[0].0, b"key03");
         assert_eq!(results[3].0, b"key06");
     }
@@ -1013,7 +1022,10 @@ mod tests {
             .unwrap();
 
         // 6. 验证转账后余额
-        assert_eq!(runtime.get(b"account:alice").unwrap(), Some(b"900".to_vec()));
+        assert_eq!(
+            runtime.get(b"account:alice").unwrap(),
+            Some(b"900".to_vec())
+        );
         assert_eq!(runtime.get(b"account:bob").unwrap(), Some(b"2100".to_vec()));
 
         // 7. 提交时间戳
@@ -1032,7 +1044,8 @@ mod tests {
         {
             let mut rt = handle.write();
             rt.init().unwrap();
-            rt.put(b"shared_key".to_vec(), b"shared_value".to_vec()).unwrap();
+            rt.put(b"shared_key".to_vec(), b"shared_value".to_vec())
+                .unwrap();
         }
         // 跨线程读取
         let handle_clone = handle.clone();
@@ -1068,14 +1081,8 @@ mod tests {
         assert_eq!(results[9].0, b"k059");
 
         // 验证随机键
-        assert_eq!(
-            runtime.get(b"k042").unwrap(),
-            Some(b"v042".to_vec())
-        );
-        assert_eq!(
-            runtime.get(b"k099").unwrap(),
-            Some(b"v099".to_vec())
-        );
+        assert_eq!(runtime.get(b"k042").unwrap(), Some(b"v042".to_vec()));
+        assert_eq!(runtime.get(b"k099").unwrap(), Some(b"v099".to_vec()));
         assert_eq!(runtime.get(b"k100").unwrap(), None);
     }
 
@@ -1212,9 +1219,9 @@ mod tests {
         assert_eq!(runtime.shard_count(), 3);
 
         // 写入各分片
-        runtime.put(b"abc".to_vec(), b"s1".to_vec()).unwrap();   // shard 1
-        runtime.put(b"jkl".to_vec(), b"s2".to_vec()).unwrap();   // shard 2
-        runtime.put(b"xyz".to_vec(), b"s3".to_vec()).unwrap();   // shard 3
+        runtime.put(b"abc".to_vec(), b"s1".to_vec()).unwrap(); // shard 1
+        runtime.put(b"jkl".to_vec(), b"s2".to_vec()).unwrap(); // shard 2
+        runtime.put(b"xyz".to_vec(), b"s3".to_vec()).unwrap(); // shard 3
 
         // 验证路由
         assert_eq!(runtime.route(b"abc").unwrap(), 1);
@@ -1310,7 +1317,11 @@ mod tests {
     fn test_multi_shard_batch_consistency() {
         // 键格式为 "k000"-"k099"（4 字节），边界用 "k050"（4 字节）确保正确分割
         let shards = vec![
-            Shard::new(1, KeyRange::new(b"k000".to_vec(), b"k050".to_vec()), vec![1]),
+            Shard::new(
+                1,
+                KeyRange::new(b"k000".to_vec(), b"k050".to_vec()),
+                vec![1],
+            ),
             Shard::new(2, KeyRange::from(b"k050".to_vec()), vec![1]),
         ];
         let mut runtime = DistRuntime::new_multi_shard_single_node(1, shards, 42).unwrap();
@@ -1350,7 +1361,10 @@ mod tests {
         let handle = new_cluster_node_runtime(1, &all_nodes, 42).unwrap();
         let rt = handle.read();
         assert_eq!(rt.node_id(), 1);
-        assert!(!rt.shard_ids().is_empty(), "cluster node should have shards");
+        assert!(
+            !rt.shard_ids().is_empty(),
+            "cluster node should have shards"
+        );
         // 多节点模式不应自动选举为 Leader（init() 才会）
         assert!(!rt.is_initialized());
     }

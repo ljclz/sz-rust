@@ -16,3 +16,5 @@ szrsql-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# P0-6：Mutex/RwLock 中毒修复（parking_lot 无中毒语义，避免 .unwrap() 级联 panic）
+parking_lot = { workspace = true }

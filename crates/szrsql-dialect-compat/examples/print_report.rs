@@ -19,11 +19,71 @@ fn main() {
     output.push_str("---\n");
 
     // 2. 各方言详细结果（按方言分组）
-    append_section(&mut output, "MySQL 兼容性", &format_dialect_results(&report.mysql, |r| (r.name.clone(), r.category_label(), r.sql.clone(), r.status, r.detail.clone())));
-    append_section(&mut output, "Oracle 兼容性", &format_dialect_results(&report.oracle, |r| (r.name.clone(), r.category_label(), r.sql.clone(), r.status, r.detail.clone())));
-    append_section(&mut output, "SQL Server 兼容性", &format_dialect_results(&report.sqlserver, |r| (r.name.clone(), r.category_label(), r.sql.clone(), r.status, r.detail.clone())));
-    append_section(&mut output, "SQLite 兼容性", &format_dialect_results(&report.sqlite, |r| (r.name.clone(), r.category_label(), r.sql.clone(), r.status, r.detail.clone())));
-    append_section(&mut output, "对抗性边界测试", &format_dialect_results(&report.adversarial, |r| (r.name.clone(), r.category_label(), r.sql.clone(), r.status, r.detail.clone())));
+    append_section(
+        &mut output,
+        "MySQL 兼容性",
+        &format_dialect_results(&report.mysql, |r| {
+            (
+                r.name.clone(),
+                r.category_label(),
+                r.sql.clone(),
+                r.status,
+                r.detail.clone(),
+            )
+        }),
+    );
+    append_section(
+        &mut output,
+        "Oracle 兼容性",
+        &format_dialect_results(&report.oracle, |r| {
+            (
+                r.name.clone(),
+                r.category_label(),
+                r.sql.clone(),
+                r.status,
+                r.detail.clone(),
+            )
+        }),
+    );
+    append_section(
+        &mut output,
+        "SQL Server 兼容性",
+        &format_dialect_results(&report.sqlserver, |r| {
+            (
+                r.name.clone(),
+                r.category_label(),
+                r.sql.clone(),
+                r.status,
+                r.detail.clone(),
+            )
+        }),
+    );
+    append_section(
+        &mut output,
+        "SQLite 兼容性",
+        &format_dialect_results(&report.sqlite, |r| {
+            (
+                r.name.clone(),
+                r.category_label(),
+                r.sql.clone(),
+                r.status,
+                r.detail.clone(),
+            )
+        }),
+    );
+    append_section(
+        &mut output,
+        "对抗性边界测试",
+        &format_dialect_results(&report.adversarial, |r| {
+            (
+                r.name.clone(),
+                r.category_label(),
+                r.sql.clone(),
+                r.status,
+                r.detail.clone(),
+            )
+        }),
+    );
 
     // 3. JSON 报告
     output.push_str("\n========== JSON 报告 ==========\n");
@@ -55,37 +115,82 @@ trait CategoryLabel {
 }
 
 impl CategoryLabel for szrsql_dialect_compat::MysqlCompatResult {
-    fn category_label(&self) -> String { format!("{:?}", self.category) }
+    fn category_label(&self) -> String {
+        format!("{:?}", self.category)
+    }
 }
 impl CategoryLabel for szrsql_dialect_compat::OracleCompatResult {
-    fn category_label(&self) -> String { format!("{:?}", self.category) }
+    fn category_label(&self) -> String {
+        format!("{:?}", self.category)
+    }
 }
 impl CategoryLabel for szrsql_dialect_compat::SqlserverCompatResult {
-    fn category_label(&self) -> String { format!("{:?}", self.category) }
+    fn category_label(&self) -> String {
+        format!("{:?}", self.category)
+    }
 }
 impl CategoryLabel for szrsql_dialect_compat::SqliteCompatResult {
-    fn category_label(&self) -> String { format!("{:?}", self.category) }
+    fn category_label(&self) -> String {
+        format!("{:?}", self.category)
+    }
 }
 impl CategoryLabel for szrsql_dialect_compat::AdversarialTestResult {
-    fn category_label(&self) -> String { format!("{:?}", self.category) }
+    fn category_label(&self) -> String {
+        format!("{:?}", self.category)
+    }
 }
 
-fn format_dialect_results<T, F>(results: &[T], mapper: F) -> Vec<(String, String, String, szrsql_dialect_compat::CompatStatus, String)>
+fn format_dialect_results<T, F>(
+    results: &[T],
+    mapper: F,
+) -> Vec<(
+    String,
+    String,
+    String,
+    szrsql_dialect_compat::CompatStatus,
+    String,
+)>
 where
-    F: Fn(&T) -> (String, String, String, szrsql_dialect_compat::CompatStatus, String),
+    F: Fn(
+        &T,
+    ) -> (
+        String,
+        String,
+        String,
+        szrsql_dialect_compat::CompatStatus,
+        String,
+    ),
 {
     results.iter().map(mapper).collect()
 }
 
-fn print_section(title: &str, items: &[(String, String, String, szrsql_dialect_compat::CompatStatus, String)]) {
+fn print_section(
+    title: &str,
+    items: &[(
+        String,
+        String,
+        String,
+        szrsql_dialect_compat::CompatStatus,
+        String,
+    )],
+) {
     println!("\n========== {title} ==========");
     let total = items.len();
     let pass = items.iter().filter(|i| i.3.is_passed()).count();
-    let full = items.iter().filter(|i| i.3 == szrsql_dialect_compat::CompatStatus::Pass).count();
+    let full = items
+        .iter()
+        .filter(|i| i.3 == szrsql_dialect_compat::CompatStatus::Pass)
+        .count();
     println!("小计: {pass}/{total} 通过 (含部分), {full}/{total} 完全通过\n");
     println!("{:<5} {:<40} {:<15} {}", "状态", "名称", "分类", "说明");
     for (name, category, _sql, status, detail) in items {
-        println!("[{:<4}] {:<40} {:<15} {}", status.as_str(), name, category, detail);
+        println!(
+            "[{:<4}] {:<40} {:<15} {}",
+            status.as_str(),
+            name,
+            category,
+            detail
+        );
     }
 }
 
@@ -93,12 +198,21 @@ fn print_section(title: &str, items: &[(String, String, String, szrsql_dialect_c
 fn append_section(
     output: &mut String,
     title: &str,
-    items: &[(String, String, String, szrsql_dialect_compat::CompatStatus, String)],
+    items: &[(
+        String,
+        String,
+        String,
+        szrsql_dialect_compat::CompatStatus,
+        String,
+    )],
 ) {
     output.push_str(&format!("\n========== {title} ==========\n"));
     let total = items.len();
     let pass = items.iter().filter(|i| i.3.is_passed()).count();
-    let full = items.iter().filter(|i| i.3 == szrsql_dialect_compat::CompatStatus::Pass).count();
+    let full = items
+        .iter()
+        .filter(|i| i.3 == szrsql_dialect_compat::CompatStatus::Pass)
+        .count();
     output.push_str(&format!(
         "小计: {pass}/{total} 通过 (含部分), {full}/{total} 完全通过\n\n"
     ));

@@ -25,7 +25,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Mutex, RwLock};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use szrsql_types::schema::{ColumnDef, Schema};
 
 // =====================================================================
@@ -264,12 +265,12 @@ impl SchemaVersionRegistry {
 
     /// 设置默认兼容性级别
     pub fn set_compatibility(&self, level: CompatibilityLevel) {
-        *self.compatibility.lock().unwrap() = level;
+        *self.compatibility.lock() = level;
     }
 
     /// 获取当前默认兼容性级别
     pub fn compatibility(&self) -> CompatibilityLevel {
-        *self.compatibility.lock().unwrap()
+        *self.compatibility.lock()
     }
 
     /// DDL 变更时调用：创建新版本，标记前一版本 end_lsn
@@ -297,7 +298,7 @@ impl SchemaVersionRegistry {
         schema: Schema,
         lsn: u64,
     ) -> Result<u32, SchemaRegistryError> {
-        let mut versions = self.versions.write().unwrap();
+        let mut versions = self.versions.write();
         let entry = versions.entry(table_name.to_string()).or_default();
 
         if let Some(last) = entry.last() {
@@ -343,7 +344,7 @@ impl SchemaVersionRegistry {
     ///
     /// **查询规则**：返回满足 `start_lsn <= lsn < end_lsn` 的版本
     pub fn get_schema_at(&self, table_name: &str, lsn: u64) -> Option<Schema> {
-        let versions = self.versions.read().unwrap();
+        let versions = self.versions.read();
         versions
             .get(table_name)
             .and_then(|v| v.iter().find(|sv| sv.is_valid_at(lsn)))
@@ -352,7 +353,7 @@ impl SchemaVersionRegistry {
 
     /// 按 LSN 查询版本元信息（返回克隆）
     pub fn get_version_at(&self, table_name: &str, lsn: u64) -> Option<SchemaVersion> {
-        let versions = self.versions.read().unwrap();
+        let versions = self.versions.read();
         versions
             .get(table_name)
             .and_then(|v| v.iter().find(|sv| sv.is_valid_at(lsn)))
@@ -361,7 +362,7 @@ impl SchemaVersionRegistry {
 
     /// 获取当前（最新）版本
     pub fn latest_version(&self, table_name: &str) -> Option<SchemaVersion> {
-        let versions = self.versions.read().unwrap();
+        let versions = self.versions.read();
         versions.get(table_name).and_then(|v| v.last().cloned())
     }
 
@@ -372,25 +373,24 @@ impl SchemaVersionRegistry {
 
     /// 列出某表的所有版本（按 start_lsn 升序）
     pub fn list_versions(&self, table_name: &str) -> Vec<SchemaVersion> {
-        let versions = self.versions.read().unwrap();
+        let versions = self.versions.read();
         versions.get(table_name).cloned().unwrap_or_default()
     }
 
     /// 列出所有已注册的表名
     pub fn list_tables(&self) -> Vec<String> {
-        self.versions.read().unwrap().keys().cloned().collect()
+        self.versions.read().keys().cloned().collect()
     }
 
     /// 获取已注册表的数量
     pub fn table_count(&self) -> usize {
-        self.versions.read().unwrap().len()
+        self.versions.read().len()
     }
 
     /// 获取指定表的版本数量
     pub fn version_count(&self, table_name: &str) -> usize {
         self.versions
             .read()
-            .unwrap()
             .get(table_name)
             .map(|v| v.len())
             .unwrap_or(0)
@@ -398,12 +398,7 @@ impl SchemaVersionRegistry {
 
     /// 获取所有表所有版本的总数
     pub fn total_version_count(&self) -> usize {
-        self.versions
-            .read()
-            .unwrap()
-            .values()
-            .map(|v| v.len())
-            .sum()
+        self.versions.read().values().map(|v| v.len()).sum()
     }
 
     /// 计算两个 Schema 之间的差异（便捷封装）

@@ -1,4 +1,4 @@
-﻿//! Soak Test — 长时间稳定性测试
+//! Soak Test — 长时间稳定性测试
 //!
 //! 对应 `docs/全面排查汇总报告.md` P1-4 任务（6h soak test）。
 //!
@@ -148,11 +148,7 @@ fn make_workload_table() -> InMemoryTable {
 /// 执行单次操作，返回 (操作类型, 是否成功)
 ///
 /// 成功 = 操作已应用；失败 = 预期失败（如 DELETE 不存在的行）
-fn execute_op(
-    table: &mut InMemoryTable,
-    rng: &mut XorShift64,
-    next_id: &mut i64,
-) -> (Op, bool) {
+fn execute_op(table: &mut InMemoryTable, rng: &mut XorShift64, next_id: &mut i64) -> (Op, bool) {
     let op = pick_op(rng);
     let ok = match op {
         Op::Select => {
@@ -441,7 +437,11 @@ fn run_soak(duration_secs: u64, label: &str) -> Result<Vec<Sample>, String> {
                 PERF_DEGRADATION_THRESHOLD * 100.0
             ));
         }
-        println!("✅ 性能退化校验通过：degradation={:.2}% ≤ {:.2}%", degradation * 100.0, PERF_DEGRADATION_THRESHOLD * 100.0);
+        println!(
+            "✅ 性能退化校验通过：degradation={:.2}% ≤ {:.2}%",
+            degradation * 100.0,
+            PERF_DEGRADATION_THRESHOLD * 100.0
+        );
     } else {
         println!("⚠️  采样点数 {} < 4，跳过性能退化校验", samples.len());
     }
@@ -468,10 +468,7 @@ fn soak_test_smoke_60s() {
     let samples = run_soak(SMOKE_DURATION_SECS, "smoke-60s").expect("smoke soak test failed");
 
     // 至少应有 1 个采样点
-    assert!(
-        !samples.is_empty(),
-        "至少应有 1 个采样点，但 samples 为空"
-    );
+    assert!(!samples.is_empty(), "至少应有 1 个采样点，但 samples 为空");
 
     // TPS 应为正数
     for s in &samples {
@@ -488,8 +485,7 @@ fn soak_test_smoke_60s() {
 #[test]
 #[ignore = "完整 soak test 需要 6 小时，仅在 CI 周末定时或手动触发时执行"]
 fn soak_test_full_6h() {
-    let samples =
-        run_soak(FULL_DURATION_SECS, "full-6h").expect("full soak test failed");
+    let samples = run_soak(FULL_DURATION_SECS, "full-6h").expect("full soak test failed");
 
     // 至少应有 60 个采样点（6h / 60s = 360 个，但允许降级）
     assert!(
@@ -511,4 +507,3 @@ fn soak_test_full_6h() {
         samples.last().unwrap().tps
     );
 }
-

@@ -164,7 +164,10 @@ fn sr_ext_dt_02_enum_type() {
     let sql_create_enum = "CREATE TYPE color AS ENUM ('red', 'green', 'blue')";
     match parse_pg(sql_create_enum) {
         Ok(n) => println!("  [PG 方言] CREATE TYPE AS ENUM 解析成功：{} 条语句", n),
-        Err(e) => println!("  [PG 方言] CREATE TYPE AS ENUM 解析失败（预期，ENUM 未实现）：{}", e),
+        Err(e) => println!(
+            "  [PG 方言] CREATE TYPE AS ENUM 解析失败（预期，ENUM 未实现）：{}",
+            e
+        ),
     }
 
     // 2.2 解析 ENUM 列
@@ -291,7 +294,10 @@ fn sr_ext_dml_02_merge() {
 
         // 验证结果
         let rows: Vec<postgres::Row> = client
-            .query("SELECT product_id, quantity FROM inventory ORDER BY product_id", &[])
+            .query(
+                "SELECT product_id, quantity FROM inventory ORDER BY product_id",
+                &[],
+            )
             .unwrap_or_default();
         for row in &rows {
             let pid: i32 = row.get(0);
@@ -350,7 +356,8 @@ fn sr_ext_q_02_correlated_subquery() {
     println!("\n=== SR-EXT-Q-02: CORRELATED SUBQUERY ===");
 
     let sql_exists = "SELECT * FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id)";
-    let sql_in = "SELECT * FROM t1 WHERE t1.id IN (SELECT t2.id FROM t2 WHERE t2.val > t1.threshold)";
+    let sql_in =
+        "SELECT * FROM t1 WHERE t1.id IN (SELECT t2.id FROM t2 WHERE t2.val > t1.threshold)";
 
     match parse_pg(sql_exists) {
         Ok(n) => println!("  [PG 方言] EXISTS 相关子查询解析成功：{} 条语句", n),
@@ -371,7 +378,10 @@ fn sr_ext_q_02_correlated_subquery() {
              INSERT INTO t2 VALUES (1, 100), (2, 70), (1, 60);",
         );
         let rows: Vec<postgres::Row> = client
-            .query("SELECT id FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id) ORDER BY id", &[])
+            .query(
+                "SELECT id FROM t1 WHERE EXISTS (SELECT 1 FROM t2 WHERE t2.id = t1.id) ORDER BY id",
+                &[],
+            )
             .unwrap_or_default();
         assert_eq!(rows.len(), 2, "PG 18 EXISTS 应返回 2 行");
         println!("  [PG 18] EXISTS 相关子查询返回 {} 行 ✓", rows.len());
@@ -411,7 +421,8 @@ fn sr_ext_c_01_fk_on_update_cascade() {
         // 更新父表 PK
         let updated = client
             .execute("UPDATE users SET id = 100 WHERE id = 1", &[])
-            .map(|n| n as i64).unwrap_or(-1);
+            .map(|n| n as i64)
+            .unwrap_or(-1);
         assert_eq!(updated, 1, "PG 18 父表应更新 1 行");
         // 验证子表外键被级联更新
         let rows: Vec<postgres::Row> = client
@@ -499,7 +510,10 @@ fn sr_ext_i_02_expression_index() {
 
         // 验证 LOWER 索引可用
         let rows: Vec<postgres::Row> = client
-            .query("SELECT id FROM users WHERE LOWER(email) = 'alice@example.com'", &[])
+            .query(
+                "SELECT id FROM users WHERE LOWER(email) = 'alice@example.com'",
+                &[],
+            )
             .unwrap_or_default();
         assert_eq!(rows.len(), 1, "应能通过 LOWER 索引查到 1 行");
         println!("  [PG 18] LOWER(email) 索引查询返回 1 行 ✓");
@@ -607,8 +621,14 @@ fn sr_ext_sc_01_information_schema() {
                 &[],
             )
             .unwrap_or_default();
-        assert!(!rows.is_empty(), "PG 18 information_schema 应能查到 users 表");
-        println!("  [PG 18] information_schema.tables 返回 {} 行 ✓", rows.len());
+        assert!(
+            !rows.is_empty(),
+            "PG 18 information_schema 应能查到 users 表"
+        );
+        println!(
+            "  [PG 18] information_schema.tables 返回 {} 行 ✓",
+            rows.len()
+        );
 
         let rows: Vec<postgres::Row> = client
             .query(
@@ -699,7 +719,10 @@ fn sr_ext_sp_01_crash_recovery() {
         vec![("id", ColumnType::Int64), ("val", ColumnType::Text)],
     );
     let mut catalog = InMemoryCatalog::new();
-    catalog.add_simple_table("crash_test", vec![("id", ColumnType::Int64), ("val", ColumnType::Text)]);
+    catalog.add_simple_table(
+        "crash_test",
+        vec![("id", ColumnType::Int64), ("val", ColumnType::Text)],
+    );
 
     let mut table = table;
     // 插入 100 行
@@ -723,7 +746,9 @@ fn sr_ext_sp_01_crash_recovery() {
 
     // 4. PG 18 崩溃恢复对比
     if let Some(mut client) = try_pg() {
-        let _ = client.batch_execute("DROP TABLE IF EXISTS crash_test; CREATE TABLE crash_test (id BIGINT, val TEXT);");
+        let _ = client.batch_execute(
+            "DROP TABLE IF EXISTS crash_test; CREATE TABLE crash_test (id BIGINT, val TEXT);",
+        );
         // 插入数据并提交
         for i in 1..=100i64 {
             let sql = format!("INSERT INTO crash_test VALUES ({}, 'v{}')", i, i);
@@ -744,7 +769,9 @@ fn sr_ext_sp_01_crash_recovery() {
         }
     }
 
-    println!("  ✅ SR-EXT-SP-01 完成（WAL 模块存在；InMemoryTable 为内存模式，生产环境使用 WAL 持久化）");
+    println!(
+        "  ✅ SR-EXT-SP-01 完成（WAL 模块存在；InMemoryTable 为内存模式，生产环境使用 WAL 持久化）"
+    );
 }
 
 /// **SR-EXT-SP-02: 远程存储回切验证**
@@ -777,7 +804,10 @@ fn sr_ext_sp_02_remote_storage_failback() {
     // 4. PG 18 对比（PG 18 无远程存储概念，但可对比 WAL 持久化）
     if let Some(mut client) = try_pg() {
         let rows: Vec<postgres::Row> = client
-            .query("SELECT setting FROM pg_settings WHERE name = 'wal_level'", &[])
+            .query(
+                "SELECT setting FROM pg_settings WHERE name = 'wal_level'",
+                &[],
+            )
             .unwrap_or_default();
         if let Some(row) = rows.first() {
             let wal_level: String = row.get(0);
@@ -826,11 +856,12 @@ fn sr_ext_p_01_query_plan_analysis() {
     // PG 18：EXPLAIN（使用独立 schema 避免并行测试状态污染）
     if let Some(mut client) = try_pg() {
         init_pg_schema(&mut client, "sr_ext_p_01");
-        let _ = client.batch_execute(
-            "CREATE TABLE users (id BIGINT, name TEXT, age BIGINT);",
-        );
+        let _ = client.batch_execute("CREATE TABLE users (id BIGINT, name TEXT, age BIGINT);");
         let rows: Vec<postgres::Row> = client
-            .query("EXPLAIN SELECT id, name FROM users WHERE age > 18 ORDER BY id DESC LIMIT 10", &[])
+            .query(
+                "EXPLAIN SELECT id, name FROM users WHERE age > 18 ORDER BY id DESC LIMIT 10",
+                &[],
+            )
             .unwrap_or_default();
         println!("  [PG 18] EXPLAIN 输出 {} 行：", rows.len());
         for row in &rows {
@@ -851,8 +882,8 @@ fn sr_ext_p_01_query_plan_analysis() {
 fn sr_ext_p_02_concurrent_scaling() {
     println!("\n=== SR-EXT-P-02: 并发缩放退化 ===");
 
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
 
     // szrsql 并发 INSERT
@@ -891,7 +922,10 @@ fn sr_ext_p_02_concurrent_scaling() {
     let total = total_ops.load(Ordering::SeqCst);
     let tps = total as f64 / elapsed.as_secs_f64();
 
-    println!("  [szrsql] {} 线程 × {} ops = {} 总操作", num_threads, ops_per_thread, total);
+    println!(
+        "  [szrsql] {} 线程 × {} ops = {} 总操作",
+        num_threads, ops_per_thread, total
+    );
     println!("  [szrsql] 耗时：{:.2?}", elapsed);
     println!("  [szrsql] TPS：{:.0}", tps);
 
@@ -916,7 +950,10 @@ fn sr_ext_p_02_concurrent_scaling() {
                     };
                     for i in 0..ops_per_thread {
                         let id = (thread_id * ops_per_thread + i + 1) as i64;
-                        let sql = format!("INSERT INTO concurrent_test VALUES ({}, 't{}_v{}')", id, thread_id, i);
+                        let sql = format!(
+                            "INSERT INTO concurrent_test VALUES ({}, 't{}_v{}')",
+                            id, thread_id, i
+                        );
                         if client.execute(&sql, &[]).is_ok() {
                             pg_total.fetch_add(1, Ordering::SeqCst);
                         }
@@ -933,7 +970,10 @@ fn sr_ext_p_02_concurrent_scaling() {
         let pg_total = pg_total.load(Ordering::SeqCst);
         let pg_tps = pg_total as f64 / elapsed.as_secs_f64();
 
-        println!("  [PG 18] {} 线程 × {} ops = {} 总操作", num_threads, ops_per_thread, pg_total);
+        println!(
+            "  [PG 18] {} 线程 × {} ops = {} 总操作",
+            num_threads, ops_per_thread, pg_total
+        );
         println!("  [PG 18] 耗时：{:.2?}", elapsed);
         println!("  [PG 18] TPS：{:.0}", pg_tps);
         println!("  [对比] szrsql/PG TPS 比 = {:.2}x", tps / pg_tps.max(1.0));
@@ -982,16 +1022,23 @@ fn sr_ext_p_03_large_data_1m() {
 
     // WHERE 过滤
     let start = Instant::now();
-    let filtered: usize = table.rows().iter().filter(|r| {
-        if let Value::Int64(id) = &r[0] {
-            *id > N as i64 / 2
-        } else {
-            false
-        }
-    }).count();
+    let filtered: usize = table
+        .rows()
+        .iter()
+        .filter(|r| {
+            if let Value::Int64(id) = &r[0] {
+                *id > N as i64 / 2
+            } else {
+                false
+            }
+        })
+        .count();
     let filter_t = start.elapsed();
     assert_eq!(filtered, N / 2, "WHERE id > N/2 应返回 {} 行", N / 2);
-    println!("  [szrsql] WHERE id > N/2 返回 {} 行 ({:.2?})", filtered, filter_t);
+    println!(
+        "  [szrsql] WHERE id > N/2 返回 {} 行 ({:.2?})",
+        filtered, filter_t
+    );
 
     // 内存占用估算
     let mem_mb = (N * (8 + 16)) as f64 / 1024.0 / 1024.0; // i64 + ~16字节 Text
@@ -1037,7 +1084,10 @@ fn sr_ext_p_03_large_data_1m() {
             .unwrap_or_default();
         if let Some(row) = rows.first() {
             let pg_count: i64 = row.get(0);
-            println!("  [PG 18] SELECT COUNT(*) = {} ({:.2?})", pg_count, pg_insert_t);
+            println!(
+                "  [PG 18] SELECT COUNT(*) = {} ({:.2?})",
+                pg_count, pg_insert_t
+            );
         }
 
         println!(
@@ -1077,16 +1127,15 @@ fn sr_ext_dc_01_client_driver_compat() {
             }
 
             // 创建表
-            match client.simple_query("CREATE TABLE IF NOT EXISTS compat_test (id BIGINT, name TEXT)") {
+            match client
+                .simple_query("CREATE TABLE IF NOT EXISTS compat_test (id BIGINT, name TEXT)")
+            {
                 Ok(_) => println!("  [szrsql] CREATE TABLE 成功 ✓"),
                 Err(e) => println!("  [szrsql] CREATE TABLE 失败：{}", e),
             }
 
             // 插入
-            match client.execute(
-                "INSERT INTO compat_test VALUES ($1, $2)",
-                &[&1i64, &"test"],
-            ) {
+            match client.execute("INSERT INTO compat_test VALUES ($1, $2)", &[&1i64, &"test"]) {
                 Ok(n) => println!("  [szrsql] INSERT 影响 {} 行 ✓", n),
                 Err(e) => println!("  [szrsql] INSERT 失败：{}", e),
             }
@@ -1132,10 +1181,14 @@ fn sr_ext_dc_02_tool_compat() {
     // 1. psql 连接测试
     let psql_output = Command::new("psql")
         .args([
-            "-h", "127.0.0.1",
-            "-p", "15432",
-            "-U", "postgres",
-            "-c", "SELECT version();",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "15432",
+            "-U",
+            "postgres",
+            "-c",
+            "SELECT version();",
         ])
         .output();
 
@@ -1157,9 +1210,12 @@ fn sr_ext_dc_02_tool_compat() {
     // 2. pg_dump 测试
     let pg_dump_output = Command::new("pg_dump")
         .args([
-            "-h", "127.0.0.1",
-            "-p", "15432",
-            "-U", "postgres",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "15432",
+            "-U",
+            "postgres",
             "--schema-only",
             "postgres",
         ])
@@ -1187,9 +1243,12 @@ fn sr_ext_dc_02_tool_compat() {
     // 3. pgbench 测试（如果有）
     let pgbench_output = Command::new("pgbench")
         .args([
-            "-h", "127.0.0.1",
-            "-p", "15432",
-            "-U", "postgres",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "15432",
+            "-U",
+            "postgres",
             "-i",
             "postgres",
         ])
@@ -1234,7 +1293,10 @@ fn sr_ext_dc_03_orm_compat() {
 
     // 1. 模拟 Diesel 风格的模式发现
     println!("  [Diesel 模拟] 查询 information_schema.tables ...");
-    match client.query("SELECT table_name FROM information_schema.tables LIMIT 10", &[]) {
+    match client.query(
+        "SELECT table_name FROM information_schema.tables LIMIT 10",
+        &[],
+    ) {
         Ok(rows) => println!("  [Diesel 模拟] 成功，返回 {} 行", rows.len()),
         Err(e) => println!("  [Diesel 模拟] 失败：{}", e),
     }
@@ -1304,11 +1366,18 @@ fn sr_ext_summary_report() {
         ("SR-EXT-P-02", "性能退化", "并发缩放退化检测（ignored）"),
         ("SR-EXT-P-03", "性能退化", "大数据量行为 1M 行（ignored）"),
         ("SR-EXT-DC-01", "向下兼容性", "客户端驱动兼容性（ignored）"),
-        ("SR-EXT-DC-02", "向下兼容性", "工具兼容性 psql/pg_dump（ignored）"),
+        (
+            "SR-EXT-DC-02",
+            "向下兼容性",
+            "工具兼容性 psql/pg_dump（ignored）",
+        ),
         ("SR-EXT-DC-03", "向下兼容性", "ORM 兼容性（ignored）"),
     ];
 
-    println!("{:<15} {:<15} {:<40} {:<10}", "编号", "维度", "项目", "运行方式");
+    println!(
+        "{:<15} {:<15} {:<40} {:<10}",
+        "编号", "维度", "项目", "运行方式"
+    );
     println!("{}", "-".repeat(80));
     for (id, dim, name) in &items {
         let mode = if name.contains("（ignored）") {
@@ -1321,13 +1390,17 @@ fn sr_ext_summary_report() {
     println!();
 
     println!("运行命令：");
-    println!("  cargo test -p szrsql-shadow --test spec_review_extended -- --nocapture --test-threads=1");
+    println!(
+        "  cargo test -p szrsql-shadow --test spec_review_extended -- --nocapture --test-threads=1"
+    );
     println!();
     println!("运行所有（含 ignored）：");
     println!("  cargo test -p szrsql-shadow --test spec_review_extended -- --nocapture --ignored --test-threads=1");
     println!();
     println!("运行单个测试：");
-    println!("  cargo test -p szrsql-shadow --test spec_review_extended -- sr_ext_dt_01 --nocapture");
+    println!(
+        "  cargo test -p szrsql-shadow --test spec_review_extended -- sr_ext_dt_01 --nocapture"
+    );
 
     println!();
     println!("{}", "=".repeat(80));

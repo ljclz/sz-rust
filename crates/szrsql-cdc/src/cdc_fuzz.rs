@@ -25,7 +25,9 @@
 
 use crate::{CdcEngine, CdcEventOp, CdcObserver, CdcObserverManager, ChangeEvent};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 use std::thread;
 use szrsql_tx::wal::{WalObserver, WalOpType, WalRecord};
 
@@ -250,9 +252,7 @@ mod phase_2_5_2 {
         let pool: Arc<RwLock<Vec<Arc<StressObserver>>>> = Arc::new(RwLock::new(Vec::new()));
         // 预填充 10 个 observer 到池中
         for i in 0..10 {
-            pool.write()
-                .unwrap()
-                .push(Arc::new(StressObserver::new(100 + i)));
+            pool.write().push(Arc::new(StressObserver::new(100 + i)));
         }
 
         let barrier = Arc::new(std::sync::Barrier::new(12));
@@ -289,7 +289,7 @@ mod phase_2_5_2 {
                     // 50% 概率从池中取一个 observer 注册，50% 概率从 cdc_mgr 注销一个池中的 observer
                     let should_register = rng.next_bool();
                     if should_register {
-                        let obs = pool.write().unwrap().pop();
+                        let obs = pool.write().pop();
                         if let Some(obs) = obs {
                             cdc_mgr.register(obs.clone());
                             // 短暂活跃后放回池（这里直接保留注册，让注销线程来取）
@@ -297,17 +297,17 @@ mod phase_2_5_2 {
                             std::thread::yield_now();
                             // 实际上我们让 register 后立即 unregister，模拟短生命周期
                             cdc_mgr.unregister(&obs);
-                            pool.write().unwrap().push(obs);
+                            pool.write().push(obs);
                         }
                     } else {
                         // 注销池中一个 observer（但需要先注册才能注销）
                         // 简化：随机取一个 observer 注册再注销
-                        let obs = pool.write().unwrap().pop();
+                        let obs = pool.write().pop();
                         if let Some(obs) = obs {
                             cdc_mgr.register(obs.clone());
                             std::thread::yield_now();
                             cdc_mgr.unregister(&obs);
-                            pool.write().unwrap().push(obs);
+                            pool.write().push(obs);
                         }
                     }
                 }
@@ -331,7 +331,7 @@ mod phase_2_5_2 {
         // 验证：cdc_mgr 最终只剩 3 个固定 observer
         assert_eq!(cdc_mgr.observer_count(), 3);
         // 验证：池中 observer 数量回到 10
-        assert_eq!(pool.read().unwrap().len(), 10);
+        assert_eq!(pool.read().len(), 10);
     }
 
     // -----------------------------------------------------------------

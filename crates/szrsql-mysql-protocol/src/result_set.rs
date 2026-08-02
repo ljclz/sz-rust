@@ -146,10 +146,7 @@ impl ResultSetEncoder {
         buf
     }
 
-    pub fn encode_result_set(
-        columns: &[ColumnDefinition],
-        rows: &[Vec<Value>],
-    ) -> Vec<Vec<u8>> {
+    pub fn encode_result_set(columns: &[ColumnDefinition], rows: &[Vec<Value>]) -> Vec<Vec<u8>> {
         Self::encode_result_set_with_flags(
             columns,
             rows,

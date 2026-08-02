@@ -71,10 +71,7 @@ fn shadow_replay_full_pipeline() {
         skip_sz_errors: true,
     };
     let replay = ShadowReplay::new(config);
-    let columns = vec![
-        ("id", ColumnType::Int64),
-        ("name", ColumnType::Text),
-    ];
+    let columns = vec![("id", ColumnType::Int64), ("name", ColumnType::Text)];
     let results = replay
         .replay_from_jsonl(jsonl_file.path(), "t", columns)
         .expect("replay failed");
@@ -121,7 +118,10 @@ fn shadow_replay_select_only() {
             format!("INSERT INTO t (id, name) VALUES ({i}, '{name}')"),
         ));
     }
-    entries.push(TrafficEntry::new("s1", "SELECT id, name FROM t ORDER BY id"));
+    entries.push(TrafficEntry::new(
+        "s1",
+        "SELECT id, name FROM t ORDER BY id",
+    ));
     entries.push(TrafficEntry::new("s1", "SELECT COUNT(*) FROM t"));
     entries.push(TrafficEntry::new(
         "s1",
@@ -137,10 +137,7 @@ fn shadow_replay_select_only() {
         skip_sz_errors: true,
     };
     let replay = ShadowReplay::new(config);
-    let columns = vec![
-        ("id", ColumnType::Int64),
-        ("name", ColumnType::Text),
-    ];
+    let columns = vec![("id", ColumnType::Int64), ("name", ColumnType::Text)];
     let results = replay
         .replay_from_jsonl(jsonl_file.path(), "t", columns)
         .expect("replay failed");

@@ -15,12 +15,12 @@
 // 兼容旧闭包/非参数化 SQL 方法（P0-2 已废弃，测试仍需验证向后兼容）
 #![allow(deprecated)]
 
+use std::sync::{Arc, Mutex};
 use szrsql_cdc::schema::{ColumnDef, DataType, TableSchema};
 use szrsql_cdc::target::sqlserver::SqlServerWriter;
 use szrsql_cdc::target::{TargetWriter, WriterError};
 use szrsql_cdc::ChangeEvent;
 use szrsql_types::value::Value as SzValue;
-use std::sync::{Arc, Mutex};
 
 // =====================================================================
 // 测试辅助
@@ -49,13 +49,17 @@ fn make_row(id: i64, name: &str, age: i32) -> szrsql_cdc::decoder::DecodedRow {
     }
 }
 
-fn make_collecting_executor() -> (Arc<Mutex<Vec<String>>>, Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>) {
+fn make_collecting_executor() -> (
+    Arc<Mutex<Vec<String>>>,
+    Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>,
+) {
     let sqls = Arc::new(Mutex::new(Vec::<String>::new()));
     let sqls_clone = sqls.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(move |sql| {
-        sqls_clone.lock().unwrap().push(sql.to_string());
-        Ok(())
-    });
+    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+        Arc::new(move |sql| {
+            sqls_clone.lock().unwrap().push(sql.to_string());
+            Ok(())
+        });
     (sqls, executor)
 }
 
@@ -71,15 +75,21 @@ fn sqlserver_end_to_end_insert_update_delete() {
 
     let insert_row = make_row(1, "Alice", 30);
     let insert_event = ChangeEvent::insert(100, 5000, 1, Vec::new(), 1234567890);
-    writer.write_event(&insert_event, &schema, Some(&insert_row)).unwrap();
+    writer
+        .write_event(&insert_event, &schema, Some(&insert_row))
+        .unwrap();
 
     let update_row = make_row(1, "Bob", 25);
     let update_event = ChangeEvent::update(100, 5001, 1, Vec::new(), Vec::new(), 1234567891);
-    writer.write_event(&update_event, &schema, Some(&update_row)).unwrap();
+    writer
+        .write_event(&update_event, &schema, Some(&update_row))
+        .unwrap();
 
     let delete_row = make_row(1, "Bob", 25);
     let delete_event = ChangeEvent::delete(100, 5002, 1, Vec::new(), 1234567892);
-    writer.write_event(&delete_event, &schema, Some(&delete_row)).unwrap();
+    writer
+        .write_event(&delete_event, &schema, Some(&delete_row))
+        .unwrap();
 
     let collected = sqls.lock().unwrap();
     assert_eq!(collected.len(), 3);
@@ -285,10 +295,11 @@ fn sqlserver_health_check_uses_select_1() {
     // SQL Server 健康检查用 SELECT 1（不需要 FROM DUAL）
     let called = Arc::new(Mutex::new(String::new()));
     let called_clone = called.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(move |sql| {
-        *called_clone.lock().unwrap() = sql.to_string();
-        Ok(())
-    });
+    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+        Arc::new(move |sql| {
+            *called_clone.lock().unwrap() = sql.to_string();
+            Ok(())
+        });
     let writer = SqlServerWriter::with_executor("sqlserver://localhost:1433", executor).unwrap();
 
     writer.health_check().unwrap();
@@ -333,9 +344,8 @@ fn sqlserver_execute_ddl_drop_table() {
 
 #[test]
 fn sqlserver_executor_error_propagates() {
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(|_sql| {
-        Err(WriterError::Sql("Invalid object name 'users'".to_string()))
-    });
+    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+        Arc::new(|_sql| Err(WriterError::Sql("Invalid object name 'users'".to_string())));
     let writer = SqlServerWriter::with_executor("sqlserver://localhost:1433", executor).unwrap();
     let schema = make_users_schema();
     let row = make_row(1, "Alice", 30);

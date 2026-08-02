@@ -853,9 +853,7 @@ mod tests {
                 .not_null(true)
                 .primary_key(true),
         );
-        schema.add_column(
-            ColumnDef::new("name", ColumnType::Text).not_null(true),
-        );
+        schema.add_column(ColumnDef::new("name", ColumnType::Text).not_null(true));
         schema.add_column(
             ColumnDef::new(
                 "price",

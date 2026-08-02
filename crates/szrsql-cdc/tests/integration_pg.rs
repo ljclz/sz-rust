@@ -30,10 +30,10 @@
 
 use postgres::NoTls;
 use std::sync::{Arc, Mutex};
+use szrsql_cdc::migration::{DdlGenerator, Dialect};
 use szrsql_cdc::schema::{ColumnDef, DataType, SchemaChangeEvent, SchemaChangeType, TableSchema};
 use szrsql_cdc::target::postgres::PostgresWriter;
 use szrsql_cdc::target::TargetWriter;
-use szrsql_cdc::migration::{DdlGenerator, Dialect};
 
 /// 全局串行锁 — 所有集成测试操作相同的测试表（cdc_test_users 等），
 /// 并发执行会导致表冲突。此锁强制测试串行运行，无需依赖 --test-threads=1。
@@ -81,9 +81,9 @@ impl PgExecutor {
 
     fn query_one(&self, sql: &str) -> Result<String, String> {
         let mut client = self.client.lock().unwrap();
-        let rows = client.query(sql, &[]).map_err(|e| {
-            format!("query failed: {e:?} | sql: {sql}")
-        })?;
+        let rows = client
+            .query(sql, &[])
+            .map_err(|e| format!("query failed: {e:?} | sql: {sql}"))?;
         if rows.is_empty() {
             return Err("no rows".to_string());
         }
@@ -95,9 +95,7 @@ impl PgExecutor {
         } else if let Ok(v) = rows[0].try_get::<_, i32>(0) {
             v.to_string()
         } else {
-            return Err(format!(
-                "unsupported column type at index 0 (sql: {sql})"
-            ));
+            return Err(format!("unsupported column type at index 0 (sql: {sql})"));
         };
         Ok(val)
     }
@@ -137,9 +135,8 @@ fn integration_pg_ddl_create_table() {
         Arc::new({
             let exec = executor.clone();
             move |sql: &str| {
-                exec.execute(sql).map_err(|e| {
-                    szrsql_cdc::target::WriterError::Sql(e)
-                })
+                exec.execute(sql)
+                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
             }
         }),
     )
@@ -162,11 +159,15 @@ fn integration_pg_ddl_create_table() {
     println!("[integration_pg] 执行 DDL: {ddl}");
 
     // 执行 DDL
-    writer.execute_ddl(&ddl).expect("execute_ddl should succeed");
+    writer
+        .execute_ddl(&ddl)
+        .expect("execute_ddl should succeed");
 
     // 验证：查询 pg_catalog 确认表已创建
     let count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';",
+        )
         .expect("query should succeed");
     assert_eq!(count, "1", "cdc_test_users 表应已创建");
 
@@ -190,9 +191,8 @@ fn integration_pg_ddl_drop_table() {
         Arc::new({
             let exec = executor.clone();
             move |sql: &str| {
-                exec.execute(sql).map_err(|e| {
-                    szrsql_cdc::target::WriterError::Sql(e)
-                })
+                exec.execute(sql)
+                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
             }
         }),
     )
@@ -210,11 +210,15 @@ fn integration_pg_ddl_drop_table() {
     };
     let generator = DdlGenerator::new(Dialect::Postgres);
     let create_ddl = generator.generate_create_table(&schema);
-    writer.execute_ddl(&create_ddl).expect("create should succeed");
+    writer
+        .execute_ddl(&create_ddl)
+        .expect("create should succeed");
 
     // 验证表存在
     let count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_orders';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_orders';",
+        )
         .expect("query should succeed");
     assert_eq!(count, "1");
 
@@ -225,7 +229,9 @@ fn integration_pg_ddl_drop_table() {
 
     // 验证表已删除
     let count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_orders';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_orders';",
+        )
         .expect("query should succeed");
     assert_eq!(count, "0", "cdc_test_orders 表应已删除");
 }
@@ -246,9 +252,8 @@ fn integration_pg_ddl_alter_add_column() {
         Arc::new({
             let exec = executor.clone();
             move |sql: &str| {
-                exec.execute(sql).map_err(|e| {
-                    szrsql_cdc::target::WriterError::Sql(e)
-                })
+                exec.execute(sql)
+                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
             }
         }),
     )
@@ -265,11 +270,15 @@ fn integration_pg_ddl_alter_add_column() {
         version: 1,
     };
     let generator = DdlGenerator::new(Dialect::Postgres);
-    writer.execute_ddl(&generator.generate_create_table(&schema_v1)).expect("create should succeed");
+    writer
+        .execute_ddl(&generator.generate_create_table(&schema_v1))
+        .expect("create should succeed");
 
     // 验证初始列数
     let col_count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'cdc_test_alter';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'cdc_test_alter';",
+        )
         .expect("query should succeed");
     assert_eq!(col_count, "2", "初始应有 2 列");
 
@@ -277,11 +286,15 @@ fn integration_pg_ddl_alter_add_column() {
     let new_col = ColumnDef::nullable("email", DataType::Text);
     let alter_ddl = generator.generate_add_column("cdc_test_alter", &new_col);
     println!("[integration_pg] 执行 DDL: {alter_ddl}");
-    writer.execute_ddl(&alter_ddl).expect("alter should succeed");
+    writer
+        .execute_ddl(&alter_ddl)
+        .expect("alter should succeed");
 
     // 验证列数变为 3
     let col_count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'cdc_test_alter';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'cdc_test_alter';",
+        )
         .expect("query should succeed");
     assert_eq!(col_count, "3", "加列后应有 3 列");
 
@@ -312,10 +325,10 @@ fn integration_pg_schema_change_event_e2e() {
     let executor = Arc::new(PgExecutor::new(client));
     cleanup_tables(&executor);
 
-    use szrsql_cdc::task::{ReplicationTask, TaskConfig};
-    use szrsql_cdc::slot::SlotManager;
-    use szrsql_cdc::schema::SchemaRegistry;
     use szrsql_cdc::decoder::RowDecoder;
+    use szrsql_cdc::schema::SchemaRegistry;
+    use szrsql_cdc::slot::SlotManager;
+    use szrsql_cdc::task::{ReplicationTask, TaskConfig};
 
     // 创建 writer（注入真实 PG 执行器）
     let writer: Arc<dyn TargetWriter> = Arc::new(
@@ -324,9 +337,8 @@ fn integration_pg_schema_change_event_e2e() {
             Arc::new({
                 let exec = executor.clone();
                 move |sql: &str| {
-                    exec.execute(sql).map_err(|e| {
-                        szrsql_cdc::target::WriterError::Sql(e)
-                    })
+                    exec.execute(sql)
+                        .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
                 }
             }),
         )
@@ -384,7 +396,9 @@ fn integration_pg_schema_change_event_e2e() {
 
     // 验证 PG 上表已创建
     let count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';",
+        )
         .expect("query should succeed");
     assert_eq!(count, "1", "cdc_test_users 表应已通过 DDL 事件创建");
 
@@ -413,9 +427,8 @@ fn integration_pg_ddl_idempotent() {
         Arc::new({
             let exec = executor.clone();
             move |sql: &str| {
-                exec.execute(sql).map_err(|e| {
-                    szrsql_cdc::target::WriterError::Sql(e)
-                })
+                exec.execute(sql)
+                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
             }
         }),
     )
@@ -424,9 +437,7 @@ fn integration_pg_ddl_idempotent() {
     let schema = TableSchema {
         table_id: 1005,
         table_name: "cdc_test_users".to_string(),
-        columns: vec![
-            ColumnDef::not_null("id", DataType::Int64),
-        ],
+        columns: vec![ColumnDef::not_null("id", DataType::Int64)],
         version: 1,
     };
     let generator = DdlGenerator::new(Dialect::Postgres);
@@ -435,11 +446,15 @@ fn integration_pg_ddl_idempotent() {
     // 第一次执行
     writer.execute_ddl(&ddl).expect("第一次 execute_ddl 应成功");
     // 第二次执行（幂等）
-    writer.execute_ddl(&ddl).expect("第二次 execute_ddl 应幂等成功");
+    writer
+        .execute_ddl(&ddl)
+        .expect("第二次 execute_ddl 应幂等成功");
 
     // 验证表存在
     let count = executor
-        .query_one("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';")
+        .query_one(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'cdc_test_users';",
+        )
         .expect("query should succeed");
     assert_eq!(count, "1");
 
@@ -495,9 +510,8 @@ fn integration_pg_dialect_syntax_correct() {
         Arc::new({
             let exec = executor.clone();
             move |sql: &str| {
-                exec.execute(sql).map_err(|e| {
-                    szrsql_cdc::target::WriterError::Sql(e)
-                })
+                exec.execute(sql)
+                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
             }
         }),
     )

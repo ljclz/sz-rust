@@ -36,11 +36,9 @@ pub mod types;
 
 pub use auth::{AuthError, AuthMode, AuthSession};
 pub use command::{Command, CommandError};
-pub use handshake::{HandshakeError, HandshakeV10, HandshakeResponse41};
+pub use handshake::{HandshakeError, HandshakeResponse41, HandshakeV10};
 pub use packet::{Packet, PacketCodec, PacketError};
-pub use prepared_statement::{
-    PreparedStatement, PreparedStatementStore, StmtId,
-};
+pub use prepared_statement::{PreparedStatement, PreparedStatementStore, StmtId};
 pub use result_set::{ColumnDefinition, ResultSetEncoder};
 pub use server::{MysqlConfig, MysqlServer, MysqlServerError};
 pub use types::MysqlType;

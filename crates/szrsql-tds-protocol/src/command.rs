@@ -181,8 +181,7 @@ impl RpcParam {
         *pos += 1;
 
         // 4) 类型特定字节 + 值长度前缀大小
-        let (type_info, value_len_size) =
-            Self::parse_type_info(type_byte, payload, pos)?;
+        let (type_info, value_len_size) = Self::parse_type_info(type_byte, payload, pos)?;
 
         // 5) 值
         let value = Self::parse_value(value_len_size, payload, pos)?;
@@ -499,9 +498,9 @@ impl RpcCommand {
                 "sp_execute requires at least 1 parameter (handle)".to_string(),
             ));
         }
-        let handle = self.params[0]
-            .as_int()
-            .ok_or_else(|| CommandError::SqlParse("sp_execute handle is not an integer".to_string()))?;
+        let handle = self.params[0].as_int().ok_or_else(|| {
+            CommandError::SqlParse("sp_execute handle is not an integer".to_string())
+        })?;
         let values: Vec<&RpcParam> = if self.params.len() > 1 {
             self.params[1..].iter().collect()
         } else {
@@ -703,10 +702,7 @@ mod tests {
     fn build_nvarchar_param(name: &str, value: &str) -> Vec<u8> {
         let name_units: Vec<u16> = name.encode_utf16().collect();
         let value_units: Vec<u16> = value.encode_utf16().collect();
-        let value_bytes: Vec<u8> = value_units
-            .iter()
-            .flat_map(|u| u.to_le_bytes())
-            .collect();
+        let value_bytes: Vec<u8> = value_units.iter().flat_map(|u| u.to_le_bytes()).collect();
         let mut buf = Vec::new();
         // 名称长度（1B，字符数）
         buf.push(name_units.len() as u8);

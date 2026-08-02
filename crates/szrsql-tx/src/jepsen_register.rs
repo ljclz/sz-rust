@@ -32,7 +32,9 @@ use crate::wal::{WalError, WalOpType, WalReader, WalRecord, WalWriter};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 
 // =====================================================================
 // XorShift64 — 固定种子 PRNG（与 mvcc_fuzz / wal_fuzz / jepsen_bank 同风格）
@@ -183,13 +185,13 @@ impl RegisterStore {
     /// 获取 key 的 Arc<Mutex>（不存在则插入 0）
     fn get_or_create_key(&self, key: &str) -> Arc<Mutex<i64>> {
         {
-            let map = self.data.read().unwrap();
+            let map = self.data.read();
             if let Some(arc) = map.get(key) {
                 return Arc::clone(arc);
             }
         }
         // 双检锁
-        let mut map = self.data.write().unwrap();
+        let mut map = self.data.write();
         map.entry(key.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(0)))
             .clone()
@@ -197,9 +199,9 @@ impl RegisterStore {
 
     /// 读取 key 的当前值（不存在返回 0）
     fn read(&self, key: &str) -> i64 {
-        let map = self.data.read().unwrap();
+        let map = self.data.read();
         match map.get(key) {
-            Some(arc) => *arc.lock().unwrap(),
+            Some(arc) => *arc.lock(),
             None => 0,
         }
     }
@@ -209,7 +211,7 @@ impl RegisterStore {
     /// 不经过 MVCC 事务，不写 WAL，仅用于测试初始化。
     fn set(&self, key: &str, value: i64) {
         let arc = self.get_or_create_key(key);
-        *arc.lock().unwrap() = value;
+        *arc.lock() = value;
     }
 
     /// MVCC 事务写入：BEGIN + register_write + commit + WAL
@@ -231,7 +233,7 @@ impl RegisterStore {
                 }
                 // 应用到内存
                 let arc = self.get_or_create_key(key);
-                *arc.lock().unwrap() = value;
+                *arc.lock() = value;
                 self.write_seq.fetch_add(1, Ordering::SeqCst);
                 self.commit_count.fetch_add(1, Ordering::SeqCst);
                 Ok(value)
@@ -279,7 +281,7 @@ impl RegisterStore {
         new: i64,
     ) -> Result<i64, RegisterError> {
         let arc = self.get_or_create_key(key);
-        let mut guard = arc.lock().unwrap();
+        let mut guard = arc.lock();
         let current = *guard;
 
         if current != expected {
@@ -351,7 +353,7 @@ impl RegisterStore {
 
     /// key 数量
     fn key_count(&self) -> usize {
-        self.data.read().unwrap().len()
+        self.data.read().len()
     }
 
     /// 已提交事务数
@@ -654,7 +656,7 @@ mod phase_2_19 {
                         // 使用 write_with_retry 应对 WW 冲突
                         if store.write_with_retry(&mgr, "k0", value, 100).is_ok() {
                             success += 1;
-                            let mut wv = written_values.lock().unwrap();
+                            let mut wv = written_values.lock();
                             wv.push(value);
                         }
                     }
@@ -681,7 +683,7 @@ mod phase_2_19 {
 
         // 验证：final value 是 written_values 中的某个值
         let final_value = store.read("k0");
-        let wv = written_values.lock().unwrap();
+        let wv = written_values.lock();
         assert!(
             wv.contains(&final_value),
             "final value {} 应该是某次 write 的值",
@@ -738,7 +740,7 @@ mod phase_2_19 {
                         // 先把值加入 committed_values，再调用 write
                         // （确保 read 读到新值时 committed_values 已包含）
                         {
-                            let mut cv = committed_values.lock().unwrap();
+                            let mut cv = committed_values.lock();
                             cv.push(value);
                         }
                         if store.write(&mgr, "k0", value).is_ok() {
@@ -773,7 +775,7 @@ mod phase_2_19 {
                         };
                         total_reads += 1;
                         // 验证：value 必须在 committed_values 中
-                        let cv = committed_values.lock().unwrap();
+                        let cv = committed_values.lock();
                         if !cv.contains(&value) {
                             invalid_reads.fetch_add(1, Ordering::SeqCst);
                         }
@@ -808,7 +810,7 @@ mod phase_2_19 {
 
         // 验证：final value 在 committed_values 中
         let final_value = store.read("k0");
-        let cv = committed_values.lock().unwrap();
+        let cv = committed_values.lock();
         assert!(
             cv.contains(&final_value),
             "final value {} 应在已提交值集合中",
@@ -879,7 +881,7 @@ mod phase_2_19 {
                             }
                         }
                     }
-                    let mut sc = success_counts.lock().unwrap();
+                    let mut sc = success_counts.lock();
                     sc[tid] = success;
                     let _ = failures;
                 })
@@ -890,7 +892,7 @@ mod phase_2_19 {
             h.join().unwrap();
         }
 
-        let sc = success_counts.lock().unwrap();
+        let sc = success_counts.lock();
         let total_success: u64 = sc.iter().sum();
 
         // 验证：final value == 初始值 + 成功 CAS 数
@@ -961,7 +963,7 @@ mod phase_2_19 {
                             let value = (tid as i64) * 10000 + rng.next_in(1, 1000) as i64;
                             // 先把值加入 key_histories，再调用 write
                             {
-                                let mut kh = key_histories.lock().unwrap();
+                                let mut kh = key_histories.lock();
                                 kh[key_idx as usize].push(value);
                             }
                             if store.write_with_retry(&mgr, &key, value, 100).is_ok() {
@@ -970,7 +972,7 @@ mod phase_2_19 {
                         } else {
                             // read：验证返回值在 key 的历史中
                             let value = store.read(&key);
-                            let kh = key_histories.lock().unwrap();
+                            let kh = key_histories.lock();
                             assert!(
                                 kh[key_idx as usize].contains(&value),
                                 "key {} 返回值 {} 不在其历史中",
@@ -990,7 +992,7 @@ mod phase_2_19 {
         }
 
         // 验证：每个 key 的 final value 在其历史中
-        let kh = key_histories.lock().unwrap();
+        let kh = key_histories.lock();
         for i in 0..KEYS {
             let final_value = store.read(&key_name(i));
             assert!(
@@ -1040,7 +1042,7 @@ mod phase_2_19 {
                             let new = current + 1;
                             match store.cas(&mgr, &key, current, new) {
                                 Ok(_) => {
-                                    let mut ks = key_success.lock().unwrap();
+                                    let mut ks = key_success.lock();
                                     ks[key_idx as usize] += 1;
                                     break;
                                 }
@@ -1071,7 +1073,7 @@ mod phase_2_19 {
         }
 
         // 验证：每个 key 的 final value == INITIAL_VALUE + 成功 CAS 数
-        let ks = key_success.lock().unwrap();
+        let ks = key_success.lock();
         let mut total_success = 0u64;
         for i in 0..KEYS {
             let final_value = store.read(&key_name(i));
@@ -1276,7 +1278,7 @@ mod phase_2_19 {
                             let value = (tid as i64) * 1000 + rng.next_in(1, 100) as i64;
                             if store.write(&mgr, &key_name(key_idx), value).is_ok() {
                                 success += 1;
-                                let mut cv = committed_values.lock().unwrap();
+                                let mut cv = committed_values.lock();
                                 cv.push(value);
                             }
                         }
@@ -1301,7 +1303,7 @@ mod phase_2_19 {
         assert_eq!(recovered.write_seq(), phase1_total_writes);
 
         // 验证：每个 key 的 final value 在 committed_values 中
-        let cv = phase1_committed_values.lock().unwrap();
+        let cv = phase1_committed_values.lock();
         for k in 0..KEYS {
             let final_value = recovered.read(&key_name(k));
             assert!(
@@ -1339,7 +1341,7 @@ mod phase_2_19 {
                             let value = (tid as i64) * 10000 + rng.next_in(1, 100) as i64;
                             if store.write(&mgr, &key_name(key_idx), value).is_ok() {
                                 success += 1;
-                                let mut cv = committed_values.lock().unwrap();
+                                let mut cv = committed_values.lock();
                                 cv.push(value);
                             }
                         }
@@ -1366,7 +1368,7 @@ mod phase_2_19 {
         );
 
         // 验证：每个 key 的 final value 在 phase2_committed_values 中
-        let cv2 = phase2_committed_values.lock().unwrap();
+        let cv2 = phase2_committed_values.lock();
         for k in 0..KEYS {
             let final_value = recovered2.read(&key_name(k));
             assert!(
@@ -1422,7 +1424,7 @@ mod phase_2_19 {
                         let value = rng.next_in(1, VALUE_RANGE as u32) as i64;
                         // 先把值加入 committed_values，再调用 write
                         {
-                            let mut cv = committed_values.lock().unwrap();
+                            let mut cv = committed_values.lock();
                             cv.push(value);
                         }
                         if store.write(&mgr, "k0", value).is_ok() {
@@ -1455,7 +1457,7 @@ mod phase_2_19 {
                         };
                         local_reads += 1;
                         // 验证：value 必须在 committed_values 中
-                        let cv = committed_values.lock().unwrap();
+                        let cv = committed_values.lock();
                         if !cv.contains(&value) {
                             invalid_reads.fetch_add(1, Ordering::SeqCst);
                         }
@@ -1540,7 +1542,7 @@ mod phase_2_19 {
                             }
                         }
                     }
-                    let mut sc = success_counts.lock().unwrap();
+                    let mut sc = success_counts.lock();
                     sc[tid] = success;
                 })
             })
@@ -1550,7 +1552,7 @@ mod phase_2_19 {
             h.join().unwrap();
         }
 
-        let sc = success_counts.lock().unwrap();
+        let sc = success_counts.lock();
         let total_success: u64 = sc.iter().sum();
 
         // 验证：final value == INITIAL_VALUE + total_success（无丢失更新）

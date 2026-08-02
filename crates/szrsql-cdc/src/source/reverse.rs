@@ -47,14 +47,14 @@
 
 use crate::decoder::DecodedRow;
 use crate::schema::TableSchema;
-use crate::source::{
-    SourceConnector, SourceError, SourceEvent, SourceEventOp, SourceOffset,
-};
+use crate::source::{SourceConnector, SourceError, SourceEvent, SourceEventOp, SourceOffset};
 use crate::target::{TargetWriter, WriterError};
 use crate::{CdcEventOp, ChangeEvent};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // =====================================================================
@@ -259,12 +259,12 @@ impl ReverseReplicator {
 
     /// 获取当前状态
     pub fn state(&self) -> ReverseReplicatorState {
-        *self.state.read().unwrap()
+        *self.state.read()
     }
 
     /// 获取统计信息快照
     pub fn stats(&self) -> ReverseReplicatorStats {
-        self.stats.lock().unwrap().clone()
+        self.stats.lock().clone()
     }
 
     /// 启动反向复制（结构迁移 + 全量快照 + CDC 流）
@@ -282,7 +282,7 @@ impl ReverseReplicator {
     /// **注**：该方法阻塞直到 CDC 流结束或被 `stop` 中断
     pub fn start(&self) -> Result<(), ReverseReplicatorError> {
         {
-            let mut state = self.state.write().unwrap();
+            let mut state = self.state.write();
             if !state.can_start() {
                 return Err(ReverseReplicatorError::State(format!(
                     "cannot start from state {}",
@@ -297,7 +297,7 @@ impl ReverseReplicator {
 
         // 记录启动时间
         let now = unix_millis();
-        self.stats.lock().unwrap().started_at = now;
+        self.stats.lock().started_at = now;
 
         // 1. 连接源端
         if let Err(e) = self.source.connect() {
@@ -409,14 +409,14 @@ impl ReverseReplicator {
 
     /// 设置状态
     fn set_state(&self, new_state: ReverseReplicatorState) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         *state = new_state;
     }
 
     /// 运行结构迁移：发现源端 schema → ensure_table
     fn run_schema_migration(&self) -> Result<(), ReverseReplicatorError> {
         let schemas = self.source.discover_schemas(&[])?;
-        let mut cache = self.schemas.write().unwrap();
+        let mut cache = self.schemas.write();
         for schema in &schemas {
             // 在目标端 ensure_table
             self.target.ensure_table(schema)?;
@@ -428,7 +428,7 @@ impl ReverseReplicator {
     /// 运行全量快照：逐表抽取 → 批量写入目标端
     fn run_initial_snapshot(&self) -> Result<(), ReverseReplicatorError> {
         let table_names: Vec<String> = {
-            let cache = self.schemas.read().unwrap();
+            let cache = self.schemas.read();
             cache.keys().cloned().collect()
         };
 
@@ -439,7 +439,7 @@ impl ReverseReplicator {
             }
 
             let schema = {
-                let cache = self.schemas.read().unwrap();
+                let cache = self.schemas.read();
                 cache
                     .get(table_name)
                     .ok_or_else(|| {
@@ -467,11 +467,11 @@ impl ReverseReplicator {
                 Ok(())
             })?;
 
-            let mut stats = self.stats.lock().unwrap();
+            let mut stats = self.stats.lock();
             stats.snapshot_rows += rows_written;
         }
 
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock();
         stats.snapshot_tables += snapshot_count as u64;
         Ok(())
     }
@@ -505,12 +505,9 @@ impl ReverseReplicator {
     }
 
     /// 处理单个源端事件：转写为目标端写入
-    fn process_source_event(
-        &self,
-        event: &SourceEvent,
-    ) -> Result<(), ReverseReplicatorError> {
+    fn process_source_event(&self, event: &SourceEvent) -> Result<(), ReverseReplicatorError> {
         let now = unix_millis();
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock();
         stats.events_processed += 1;
         stats.last_event_at = now;
         stats.current_source_lsn = event.lsn;
@@ -528,7 +525,7 @@ impl ReverseReplicator {
 
         // 查找 schema
         let schema = {
-            let cache = self.schemas.read().unwrap();
+            let cache = self.schemas.read();
             cache.get(&event.table_name).cloned()
         };
 
@@ -536,7 +533,9 @@ impl ReverseReplicator {
             Some(s) => s,
             None => {
                 // schema 未缓存，尝试动态发现
-                let discovered = self.source.discover_schemas(std::slice::from_ref(&event.table_name))?;
+                let discovered = self
+                    .source
+                    .discover_schemas(std::slice::from_ref(&event.table_name))?;
                 if discovered.is_empty() {
                     return Err(ReverseReplicatorError::SchemaMismatch(format!(
                         "schema not found for table {}",
@@ -546,7 +545,6 @@ impl ReverseReplicator {
                 let s = discovered[0].clone();
                 self.schemas
                     .write()
-                    .unwrap()
                     .insert(event.table_name.clone(), s.clone());
                 self.target.ensure_table(&s)?;
                 s
@@ -604,12 +602,12 @@ impl ReverseReplicator {
                 }
                 Err(e) => {
                     // 非连接错误，不重试
-                    self.stats.lock().unwrap().errors += 1;
+                    self.stats.lock().errors += 1;
                     return Err(ReverseReplicatorError::Target(e));
                 }
             }
         }
-        self.stats.lock().unwrap().errors += 1;
+        self.stats.lock().errors += 1;
         Err(ReverseReplicatorError::Target(last_err.unwrap()))
     }
 
@@ -674,8 +672,8 @@ mod tests {
     use crate::source::{SourceError, SourceEvent, SourceOffset};
     use crate::target::{TargetWriter, WriterError};
     use crate::{CdcEventOp, ChangeEvent};
-    use szrsql_types::value::Value as SzValue;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use szrsql_types::value::Value as SzValue;
 
     // -----------------------------------------------------------------
     // Mock Source Connector
@@ -735,7 +733,7 @@ mod tests {
             _batch_size: usize,
             callback: &dyn Fn(&[DecodedRow]) -> Result<(), SourceError>,
         ) -> Result<u64, SourceError> {
-            let rows = self.snapshot_rows.lock().unwrap();
+            let rows = self.snapshot_rows.lock();
             let table_rows = rows.get(table).cloned().unwrap_or_default();
             let count = table_rows.len() as u64;
             if !table_rows.is_empty() {
@@ -754,7 +752,7 @@ mod tests {
             callback: &dyn Fn(&[SourceEvent]) -> Result<(), SourceError>,
         ) -> Result<(), SourceError> {
             self.streaming.store(true, Ordering::SeqCst);
-            let events = self.events.lock().unwrap().clone();
+            let events = self.events.lock().clone();
             if !events.is_empty() {
                 callback(&events)?;
                 let max_lsn = events.iter().map(|e| e.lsn).max().unwrap_or(0);
@@ -770,7 +768,7 @@ mod tests {
         }
 
         fn ack_offset(&self, offset: &SourceOffset) -> Result<(), SourceError> {
-            let mut current = self.confirmed_offset.lock().unwrap();
+            let mut current = self.confirmed_offset.lock();
             if offset.lsn >= current.lsn {
                 *current = offset.clone();
             }
@@ -778,7 +776,7 @@ mod tests {
         }
 
         fn confirmed_offset(&self) -> Result<SourceOffset, SourceError> {
-            Ok(self.confirmed_offset.lock().unwrap().clone())
+            Ok(self.confirmed_offset.lock().clone())
         }
 
         fn health_check(&self) -> Result<(), SourceError> {
@@ -810,11 +808,11 @@ mod tests {
         }
 
         fn written_count(&self) -> usize {
-            self.written_events.lock().unwrap().len()
+            self.written_events.lock().len()
         }
 
         fn written_events(&self) -> Vec<(CdcEventOp, Option<DecodedRow>)> {
-            self.written_events.lock().unwrap().clone()
+            self.written_events.lock().clone()
         }
     }
 
@@ -828,16 +826,12 @@ mod tests {
             if self.fail_on_write.load(Ordering::SeqCst) {
                 return Err(WriterError::Connection("mock failure".to_string()));
             }
-            self.written_events
-                .lock()
-                .unwrap()
-                .push((event.op, row.cloned()));
+            self.written_events.lock().push((event.op, row.cloned()));
             Ok(())
         }
 
         fn ensure_table(&self, _schema: &TableSchema) -> Result<(), WriterError> {
-            self.ensure_table_count
-                .fetch_add(1, Ordering::SeqCst);
+            self.ensure_table_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
 
@@ -1050,11 +1044,7 @@ mod tests {
             HashMap::new(),
         ));
         let target = Arc::new(MockTargetWriter::new());
-        let r = Arc::new(ReverseReplicator::new(
-            "task1",
-            source,
-            target.clone(),
-        ));
+        let r = Arc::new(ReverseReplicator::new("task1", source, target.clone()));
 
         let r_clone = r.clone();
         let stop_handle = std::thread::spawn(move || {
@@ -1169,14 +1159,13 @@ mod tests {
         let before = make_row(1, "Alice");
         let after = make_row(1, "Bob");
         let events = vec![SourceEvent::update(
-            10,
-            "public",
-            "users",
-            before,
-            after,
-            1000,
+            10, "public", "users", before, after, 1000,
         )];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
         let target = Arc::new(MockTargetWriter::new());
         let r = ReverseReplicator::new("task1", source, target.clone());
 
@@ -1192,7 +1181,11 @@ mod tests {
         let schema = make_schema(1, "users");
         let before = make_row(1, "Alice");
         let events = vec![SourceEvent::delete(10, "public", "users", before, 1000)];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
         let target = Arc::new(MockTargetWriter::new());
         let r = ReverseReplicator::new("task1", source, target.clone());
 
@@ -1207,7 +1200,11 @@ mod tests {
     fn reverse_commit_only_event_does_not_write() {
         let schema = make_schema(1, "users");
         let events = vec![SourceEvent::commit(10, 100, 1000)];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
         let target = Arc::new(MockTargetWriter::new());
         let r = ReverseReplicator::new("task1", source, target.clone());
 
@@ -1223,7 +1220,11 @@ mod tests {
     fn reverse_abort_event_does_not_write() {
         let schema = make_schema(1, "users");
         let events = vec![SourceEvent::abort(10, 100, 1000)];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
         let target = Arc::new(MockTargetWriter::new());
         let r = ReverseReplicator::new("task1", source, target.clone());
 
@@ -1240,12 +1241,23 @@ mod tests {
             SourceEvent::insert(1, "public", "users", make_row(1, "Alice"), 1000),
             SourceEvent::insert(2, "public", "users", make_row(2, "Bob"), 1001),
             SourceEvent::commit(3, 100, 1002),
-            SourceEvent::update(4, "public", "users", make_row(1, "Alice"), make_row(1, "Alice2"), 1003),
+            SourceEvent::update(
+                4,
+                "public",
+                "users",
+                make_row(1, "Alice"),
+                make_row(1, "Alice2"),
+                1003,
+            ),
             SourceEvent::commit(5, 101, 1004),
             SourceEvent::delete(6, "public", "users", make_row(2, "Bob"), 1005),
             SourceEvent::commit(7, 102, 1006),
         ];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
         let target = Arc::new(MockTargetWriter::new());
         let r = ReverseReplicator::new("task1", source, target.clone());
 
@@ -1294,13 +1306,13 @@ mod tests {
             SourceEvent::insert(100, "public", "users", make_row(1, "Alice"), 1000),
             SourceEvent::commit(200, 100, 1001),
         ];
-        let source = Arc::new(MockSourceConnector::new(events, vec![schema], HashMap::new()));
+        let source = Arc::new(MockSourceConnector::new(
+            events,
+            vec![schema],
+            HashMap::new(),
+        ));
 
-        let r = ReverseReplicator::new(
-            "task1",
-            source.clone(),
-            Arc::new(MockTargetWriter::new()),
-        );
+        let r = ReverseReplicator::new("task1", source.clone(), Arc::new(MockTargetWriter::new()));
         r.start().unwrap();
 
         // 源端 confirmed_offset 应被推进到最后事件 LSN
@@ -1324,10 +1336,7 @@ mod tests {
         r.start().unwrap();
 
         // 2 个表应调用 2 次 ensure_table
-        assert_eq!(
-            target.ensure_table_count.load(Ordering::SeqCst),
-            2
-        );
+        assert_eq!(target.ensure_table_count.load(Ordering::SeqCst), 2);
     }
 
     #[test]

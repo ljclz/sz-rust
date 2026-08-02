@@ -538,6 +538,8 @@ fn test_comment_storage() {
     );
 
     // 删除列注释
-    catalog.set_column_comment(&table_name, "name", None).unwrap();
+    catalog
+        .set_column_comment(&table_name, "name", None)
+        .unwrap();
     assert_eq!(catalog.get_column_comment(&table_name, "name"), None);
 }

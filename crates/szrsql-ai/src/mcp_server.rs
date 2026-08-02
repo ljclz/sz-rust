@@ -691,20 +691,14 @@ pub trait McpBackendV2: Send {
         ))
     }
     /// 监控指定复制任务（详细统计）
-    fn monitor_replication_task(
-        &self,
-        task_id: &str,
-    ) -> Result<ReplicationTaskInfo, McpError> {
+    fn monitor_replication_task(&self, task_id: &str) -> Result<ReplicationTaskInfo, McpError> {
         Err(McpError::BackendError(format!(
             "monitor_replication_task not available: no ReplicationTaskManager attached (task_id={})",
             task_id
         )))
     }
     /// 停止复制任务
-    fn stop_replication_task(
-        &self,
-        task_id: &str,
-    ) -> Result<StopReplicationTaskResult, McpError> {
+    fn stop_replication_task(&self, task_id: &str) -> Result<StopReplicationTaskResult, McpError> {
         Err(McpError::BackendError(format!(
             "stop_replication_task not available: no ReplicationTaskManager attached (task_id={})",
             task_id
@@ -1253,7 +1247,11 @@ impl McpBackendV2 for MockBackendV2 {
                 } else {
                     row_count / 100
                 };
-                let null_count = if col.nullable { row_count / 20 } else { 0 };
+                let null_count = if col.nullable {
+                    row_count / 20
+                } else {
+                    0
+                };
                 let min_value = if col.data_type.starts_with("BIGINT") {
                     Some("1".to_string())
                 } else if col.data_type.starts_with("DECIMAL") {
@@ -1342,15 +1340,13 @@ impl McpBackendV2 for MockBackendV2 {
             "high_qps" => {
                 let mut causes = vec![CauseEntry {
                     cause_type: CauseType::HighQps,
-                    description: "QPS 超过阈值，可能由突发流量或缺失索引导致全表扫描放大".to_string(),
+                    description: "QPS 超过阈值，可能由突发流量或缺失索引导致全表扫描放大"
+                        .to_string(),
                     confidence: 0.7,
                 }];
                 let mut evidence = vec![Evidence {
                     source: "alert".to_string(),
-                    detail: format!(
-                        "QPS={:.0}, threshold={:.0}",
-                        alert.value, alert.threshold
-                    ),
+                    detail: format!("QPS={:.0}, threshold={:.0}", alert.value, alert.threshold),
                 }];
                 // 关联慢查询作为证据
                 if let Some(sq) = self.slow_query_log.first() {
@@ -1399,10 +1395,7 @@ impl McpBackendV2 for MockBackendV2 {
                     .iter()
                     .map(|dl| Evidence {
                         source: "deadlock_history".to_string(),
-                        detail: format!(
-                            "txn_ids={:?} resource={}",
-                            dl.txn_ids, dl.resource
-                        ),
+                        detail: format!("txn_ids={:?} resource={}", dl.txn_ids, dl.resource),
                     })
                     .collect();
                 (causes, evidence)
@@ -1410,10 +1403,7 @@ impl McpBackendV2 for MockBackendV2 {
             "timeout" => {
                 let mut causes = vec![];
                 let mut evidence = vec![];
-                let lock_wait = self
-                    .wait_events
-                    .iter()
-                    .any(|w| w.event.contains("lock"));
+                let lock_wait = self.wait_events.iter().any(|w| w.event.contains("lock"));
                 if lock_wait {
                     causes.push(CauseEntry {
                         cause_type: CauseType::LockContention,
@@ -1429,10 +1419,7 @@ impl McpBackendV2 for MockBackendV2 {
                     if sq.rows_scanned > 10000 {
                         causes.push(CauseEntry {
                             cause_type: CauseType::MissingIndex,
-                            description: format!(
-                                "慢查询扫描 {} 行，可能导致超时",
-                                sq.rows_scanned
-                            ),
+                            description: format!("慢查询扫描 {} 行，可能导致超时", sq.rows_scanned),
                             confidence: 0.7,
                         });
                     }
@@ -1718,9 +1705,9 @@ impl McpBackendV2 for CatalogBackend {
     /// 1. `catalog.get_column_comment()`（COMMENT ON COLUMN 设置的）
     /// 2. `ColumnDefinition.comment`（CREATE TABLE 时内联指定的）
     fn describe_table(&self, table: &str) -> Result<crate::mcp::TableSchema, McpError> {
-        let name = self.find_table_name(table).ok_or_else(|| {
-            McpError::BackendError(format!("table not found: {table}"))
-        })?;
+        let name = self
+            .find_table_name(table)
+            .ok_or_else(|| McpError::BackendError(format!("table not found: {table}")))?;
         let schema = self
             .catalog
             .get_table(&name)
@@ -1754,19 +1741,16 @@ impl McpBackendV2 for CatalogBackend {
     ///
     /// `is_primary` 通过索引名是否以 `_pkey` 结尾判断（与 PG 命名约定一致）。
     fn list_indexes(&self, table: &str) -> Result<Vec<IndexInfo>, McpError> {
-        let name = self.find_table_name(table).ok_or_else(|| {
-            McpError::BackendError(format!("table not found: {table}"))
-        })?;
+        let name = self
+            .find_table_name(table)
+            .ok_or_else(|| McpError::BackendError(format!("table not found: {table}")))?;
         let indexes = self.catalog.list_indexes_for_table(&name);
         let result = indexes
             .into_iter()
             .map(|idx| {
                 // 先借用 idx.column_names()，再 move idx.name/idx.table，避免 partial move
-                let columns: Vec<String> = idx
-                    .column_names()
-                    .into_iter()
-                    .map(String::from)
-                    .collect();
+                let columns: Vec<String> =
+                    idx.column_names().into_iter().map(String::from).collect();
                 let is_primary = idx.name.ends_with("_pkey");
                 IndexInfo {
                     is_primary,
@@ -2064,26 +2048,28 @@ impl McpBackendV2 for CatalogBackend {
             match params.target_type.as_str() {
                 "memory" => {
                     let cfg = szrsql_cdc::target::TargetConfig::memory();
-                    szrsql_cdc::target::create_writer(&cfg)
-                        .map_err(|e| McpError::BackendError(format!("create memory writer failed: {e}")))?
+                    szrsql_cdc::target::create_writer(&cfg).map_err(|e| {
+                        McpError::BackendError(format!("create memory writer failed: {e}"))
+                    })?
                 }
                 "postgres" => {
                     let cfg = szrsql_cdc::target::TargetConfig::postgres(&params.target_connection);
-                    szrsql_cdc::target::create_writer(&cfg)
-                        .map_err(|e| McpError::BackendError(format!("create postgres writer failed: {e}")))?
+                    szrsql_cdc::target::create_writer(&cfg).map_err(|e| {
+                        McpError::BackendError(format!("create postgres writer failed: {e}"))
+                    })?
                 }
                 "mysql" => {
                     let cfg = szrsql_cdc::target::TargetConfig::mysql(&params.target_connection);
-                    szrsql_cdc::target::create_writer(&cfg)
-                        .map_err(|e| McpError::BackendError(format!("create mysql writer failed: {e}")))?
+                    szrsql_cdc::target::create_writer(&cfg).map_err(|e| {
+                        McpError::BackendError(format!("create mysql writer failed: {e}"))
+                    })?
                 }
                 "kafka" => {
                     // MVP：使用 MockKafkaProducer（将消息记录到内存）
                     // 生产环境应在注入 ReplicationTaskManager 前预构造 KafkaSink
                     // 并通过自定义 TaskConfig 直接调用 create_task
-                    let producer = std::sync::Arc::new(
-                        szrsql_cdc::target::kafka::MockKafkaProducer::new(),
-                    );
+                    let producer =
+                        std::sync::Arc::new(szrsql_cdc::target::kafka::MockKafkaProducer::new());
                     // target_connection 格式："brokers|topic"
                     let (brokers, topic) = params
                         .target_connection
@@ -2091,8 +2077,7 @@ impl McpBackendV2 for CatalogBackend {
                         .unwrap_or(("localhost:9092", "cdc-events"));
                     let kafka_cfg = szrsql_cdc::target::kafka::KafkaConfig::new(topic, brokers);
                     std::sync::Arc::new(szrsql_cdc::target::kafka::KafkaSink::new(
-                        kafka_cfg,
-                        producer,
+                        kafka_cfg, producer,
                     ))
                 }
                 other => {
@@ -2103,10 +2088,11 @@ impl McpBackendV2 for CatalogBackend {
             };
 
         // 2. 构造 TaskConfig
-        let table_filter = params
-            .table_filter
-            .as_ref()
-            .map(|v| v.iter().cloned().collect::<std::collections::HashSet<String>>());
+        let table_filter = params.table_filter.as_ref().map(|v| {
+            v.iter()
+                .cloned()
+                .collect::<std::collections::HashSet<String>>()
+        });
 
         // 根据目标端类型推断方言（P4-2）
         let dialect = match params.target_type.as_str() {
@@ -2156,10 +2142,7 @@ impl McpBackendV2 for CatalogBackend {
     }
 
     /// 监控指定复制任务 — 返回详细状态和统计
-    fn monitor_replication_task(
-        &self,
-        task_id: &str,
-    ) -> Result<ReplicationTaskInfo, McpError> {
+    fn monitor_replication_task(&self, task_id: &str) -> Result<ReplicationTaskInfo, McpError> {
         let mgr = self.replication.as_ref().ok_or_else(|| {
             McpError::BackendError(format!(
                 "CatalogBackend has no replication manager attached (use with_replication to enable monitor_replication_task, task_id={})",
@@ -2173,10 +2156,7 @@ impl McpBackendV2 for CatalogBackend {
     }
 
     /// 停止复制任务 — 注销 observer 并转入 Stopped 终态
-    fn stop_replication_task(
-        &self,
-        task_id: &str,
-    ) -> Result<StopReplicationTaskResult, McpError> {
+    fn stop_replication_task(&self, task_id: &str) -> Result<StopReplicationTaskResult, McpError> {
         let mgr = self.replication.as_ref().ok_or_else(|| {
             McpError::BackendError(format!(
                 "CatalogBackend has no replication manager attached (use with_replication to enable stop_replication_task, task_id={})",
@@ -2370,7 +2350,9 @@ fn collect_tables_from_expr(expr: &szrsql_sql::ast::Expr, out: &mut Vec<String>)
                 collect_tables_from_expr(item, out);
             }
         }
-        Expr::InSubquery { expr: e, subquery, .. } => {
+        Expr::InSubquery {
+            expr: e, subquery, ..
+        } => {
             collect_tables_from_expr(e, out);
             collect_tables_from_select(subquery, out);
         }
@@ -2381,8 +2363,12 @@ fn collect_tables_from_expr(expr: &szrsql_sql::ast::Expr, out: &mut Vec<String>)
             collect_tables_from_expr(low, out);
             collect_tables_from_expr(high, out);
         }
-        Expr::Like { expr: e, pattern, .. }
-        | Expr::SimilarTo { expr: e, pattern, .. } => {
+        Expr::Like {
+            expr: e, pattern, ..
+        }
+        | Expr::SimilarTo {
+            expr: e, pattern, ..
+        } => {
             collect_tables_from_expr(e, out);
             collect_tables_from_expr(pattern, out);
         }
@@ -2392,7 +2378,11 @@ fn collect_tables_from_expr(expr: &szrsql_sql::ast::Expr, out: &mut Vec<String>)
             collect_tables_from_expr(right, out);
         }
         Expr::Cast { expr: e, .. } => collect_tables_from_expr(e, out),
-        Expr::Substring { expr: e, from, for_len } => {
+        Expr::Substring {
+            expr: e,
+            from,
+            for_len,
+        } => {
             collect_tables_from_expr(e, out);
             if let Some(f) = from {
                 collect_tables_from_expr(f, out);
@@ -2593,11 +2583,9 @@ fn count_params_in_table_factor(tf: &szrsql_sql::ast::TableFactor) -> usize {
     match tf {
         TableFactor::Table { .. } => 0,
         TableFactor::Derived { subquery, .. } => count_params_in_select(subquery),
-        TableFactor::TableFunction { args, .. } => args
-            .iter()
-            .map(count_params_in_expr)
-            .max()
-            .unwrap_or(0),
+        TableFactor::TableFunction { args, .. } => {
+            args.iter().map(count_params_in_expr).max().unwrap_or(0)
+        }
     }
 }
 
@@ -2617,19 +2605,14 @@ fn count_params_in_expr(expr: &szrsql_sql::ast::Expr) -> usize {
     use szrsql_sql::ast::Expr;
     match expr {
         Expr::Parameter(idx) => *idx,
-        Expr::Literal(_)
-        | Expr::Identifier(_)
-        | Expr::Wildcard
-        | Expr::Array(_) => 0,
+        Expr::Literal(_) | Expr::Identifier(_) | Expr::Wildcard | Expr::Array(_) => 0,
         Expr::BinaryOp { left, right, .. } => {
             count_params_in_expr(left).max(count_params_in_expr(right))
         }
         Expr::UnaryOp { expr: e, .. } => count_params_in_expr(e),
-        Expr::Function { args, .. } | Expr::WindowFunction { args, .. } => args
-            .iter()
-            .map(count_params_in_expr)
-            .max()
-            .unwrap_or(0),
+        Expr::Function { args, .. } | Expr::WindowFunction { args, .. } => {
+            args.iter().map(count_params_in_expr).max().unwrap_or(0)
+        }
         Expr::Case {
             operand,
             when_then,
@@ -2656,23 +2639,31 @@ fn count_params_in_expr(expr: &szrsql_sql::ast::Expr) -> usize {
             }
             max_idx
         }
-        Expr::InSubquery { expr: e, subquery, .. } => {
-            count_params_in_expr(e).max(count_params_in_select(subquery))
-        }
-        Expr::Between { expr: e, low, high, .. } => count_params_in_expr(e)
+        Expr::InSubquery {
+            expr: e, subquery, ..
+        } => count_params_in_expr(e).max(count_params_in_select(subquery)),
+        Expr::Between {
+            expr: e, low, high, ..
+        } => count_params_in_expr(e)
             .max(count_params_in_expr(low))
             .max(count_params_in_expr(high)),
-        Expr::Like { expr: e, pattern, .. }
-        | Expr::SimilarTo { expr: e, pattern, .. } => {
-            count_params_in_expr(e).max(count_params_in_expr(pattern))
+        Expr::Like {
+            expr: e, pattern, ..
         }
+        | Expr::SimilarTo {
+            expr: e, pattern, ..
+        } => count_params_in_expr(e).max(count_params_in_expr(pattern)),
         Expr::IsNull { expr: e, .. } => count_params_in_expr(e),
         Expr::IsDistinctFrom { left, right, .. } => {
             count_params_in_expr(left).max(count_params_in_expr(right))
         }
         Expr::Subquery(sel) => count_params_in_select(sel),
         Expr::Exists { subquery, .. } => count_params_in_select(subquery),
-        Expr::Substring { expr: e, from, for_len } => {
+        Expr::Substring {
+            expr: e,
+            from,
+            for_len,
+        } => {
             let mut max_idx = count_params_in_expr(e);
             if let Some(f) = from {
                 max_idx = max_idx.max(count_params_in_expr(f));
@@ -2682,11 +2673,7 @@ fn count_params_in_expr(expr: &szrsql_sql::ast::Expr) -> usize {
             }
             max_idx
         }
-        Expr::Tuple(exprs) => exprs
-            .iter()
-            .map(count_params_in_expr)
-            .max()
-            .unwrap_or(0),
+        Expr::Tuple(exprs) => exprs.iter().map(count_params_in_expr).max().unwrap_or(0),
         Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
             count_params_in_expr(left).max(count_params_in_expr(right))
         }
@@ -3131,10 +3118,7 @@ impl ExecutorBackend {
     }
 
     /// 执行单条 Statement，返回 (columns, rows, affected_rows)
-    fn execute_statement_inner(
-        &self,
-        stmt: szrsql_sql::ast::Statement,
-    ) -> ExecResult {
+    fn execute_statement_inner(&self, stmt: szrsql_sql::ast::Statement) -> ExecResult {
         use szrsql_sql::ast::Statement;
         use szrsql_sql::plan::{LogicalPlan, Planner};
 
@@ -3189,9 +3173,7 @@ impl ExecutorBackend {
             }
 
             LogicalPlan::DropTable {
-                names,
-                if_exists,
-                ..
+                names, if_exists, ..
             } => {
                 for name in names {
                     {
@@ -3231,7 +3213,10 @@ impl ExecutorBackend {
                 });
                 if *if_not_exists {
                     let existing = self.catalog.borrow().list_indexes(table);
-                    if existing.iter().any(|i| i.name.eq_ignore_ascii_case(&idx_name)) {
+                    if existing
+                        .iter()
+                        .any(|i| i.name.eq_ignore_ascii_case(&idx_name))
+                    {
                         return Ok((vec![], vec![], 0));
                     }
                 }
@@ -3245,13 +3230,13 @@ impl ExecutorBackend {
                 Ok((vec![], vec![], 0))
             }
 
-            LogicalPlan::DropIndex { names, if_exists, .. } => {
+            LogicalPlan::DropIndex {
+                names, if_exists, ..
+            } => {
                 for name in names {
                     let removed = self.catalog.borrow_mut().remove_index(name);
                     if removed.is_none() && !*if_exists {
-                        return Err(McpError::BackendError(format!(
-                            "index not found: {name}"
-                        )));
+                        return Err(McpError::BackendError(format!("index not found: {name}")));
                     }
                 }
                 Ok((vec![], vec![], 0))
@@ -3295,7 +3280,9 @@ impl ExecutorBackend {
                 self.catalog
                     .borrow_mut()
                     .set_table_comment(&object_name, comment)
-                    .map_err(|e| McpError::BackendError(format!("set table comment error: {e:?}")))?;
+                    .map_err(|e| {
+                        McpError::BackendError(format!("set table comment error: {e:?}"))
+                    })?;
             }
             CommentObjectType::Column => {
                 let col = column_name.ok_or_else(|| {
@@ -3304,7 +3291,9 @@ impl ExecutorBackend {
                 self.catalog
                     .borrow_mut()
                     .set_column_comment(&object_name, &col, comment)
-                    .map_err(|e| McpError::BackendError(format!("set column comment error: {e:?}")))?;
+                    .map_err(|e| {
+                        McpError::BackendError(format!("set column comment error: {e:?}"))
+                    })?;
             }
         }
         Ok((vec![], vec![], 0))
@@ -3324,19 +3313,17 @@ impl ExecutorBackend {
 
         let key = Self::table_key(&table_name.name);
         // 取出目标表（temporarily remove 避免借用冲突）
-        let mut target_table = self
-            .tables
-            .borrow_mut()
-            .remove(&key)
-            .ok_or_else(|| {
-                McpError::BackendError(format!("table not found: {}", table_name.name))
-            })?;
+        let mut target_table = self.tables.borrow_mut().remove(&key).ok_or_else(|| {
+            McpError::BackendError(format!("table not found: {}", table_name.name))
+        })?;
 
         // 构造 Executor，注册其他表（用于 INSERT...SELECT 等跨表场景）
         let result = {
             let catalog = self.catalog.borrow();
             let tables = self.tables.borrow();
-            let mut exec = Executor::new().with_catalog(&*catalog).with_sql_functions_from_catalog(&*catalog);
+            let mut exec = Executor::new()
+                .with_catalog(&*catalog)
+                .with_sql_functions_from_catalog(&*catalog);
             for other_table in (*tables).values() {
                 exec.register_table(other_table);
             }
@@ -3388,16 +3375,15 @@ impl ExecutorBackend {
     }
 
     /// 执行读路径（SELECT 等）
-    fn execute_read(
-        &self,
-        plan: &szrsql_sql::plan::LogicalPlan,
-    ) -> ExecResult {
+    fn execute_read(&self, plan: &szrsql_sql::plan::LogicalPlan) -> ExecResult {
         use szrsql_sql::executor::Executor;
 
         let rows = {
             let catalog = self.catalog.borrow();
             let tables = self.tables.borrow();
-            let mut exec = Executor::new().with_catalog(&*catalog).with_sql_functions_from_catalog(&*catalog);
+            let mut exec = Executor::new()
+                .with_catalog(&*catalog)
+                .with_sql_functions_from_catalog(&*catalog);
             for table in (*tables).values() {
                 exec.register_table(table);
             }
@@ -3462,7 +3448,9 @@ impl ExecutorBackend {
                     // P3-Tx-Enhancement：通过 MVCC 管理器分配真实 txn_id + 快照
                     let iso = isolation
                         .map(|i| match i {
-                            TransactionIsolation::ReadUncommitted => IsolationLevel::ReadUncommitted,
+                            TransactionIsolation::ReadUncommitted => {
+                                IsolationLevel::ReadUncommitted
+                            }
                             TransactionIsolation::ReadCommitted => IsolationLevel::ReadCommitted,
                             TransactionIsolation::RepeatableRead => IsolationLevel::RepeatableRead,
                             TransactionIsolation::Serializable => IsolationLevel::Serializable,
@@ -3475,9 +3463,7 @@ impl ExecutorBackend {
 
                     let mut stats = self.stats.borrow_mut();
                     // 移除同 session 的旧事务（避免重复），添加新事务
-                    stats
-                        .active_transactions
-                        .retain(|t| t.txn_id != txn_id);
+                    stats.active_transactions.retain(|t| t.txn_id != txn_id);
                     stats.active_transactions.push(TransactionInfo {
                         txn_id,
                         state: "active".to_string(),
@@ -3515,9 +3501,7 @@ impl ExecutorBackend {
                             stats.alerts.push(AlertInfo {
                                 level: "critical".to_string(),
                                 rule_id: "mvcc_commit_failed".to_string(),
-                                message: format!(
-                                    "MVCC commit failed for txn {txn_id}: {e:?}"
-                                ),
+                                message: format!("MVCC commit failed for txn {txn_id}: {e:?}"),
                                 timestamp: now_ms,
                                 value: 1.0,
                                 threshold: 0.0,
@@ -3690,16 +3674,21 @@ impl ExecutorBackend {
 
         let mut stats = self.stats.borrow_mut();
         // 去重：同 txn + table + mode 不重复添加
-        let exists = stats.active_locks.iter().any(|l| {
-            l.txn_id == txn_id && l.table.eq_ignore_ascii_case(table) && l.mode == mode
-        });
+        let exists = stats
+            .active_locks
+            .iter()
+            .any(|l| l.txn_id == txn_id && l.table.eq_ignore_ascii_case(table) && l.mode == mode);
         if !exists {
             stats.active_locks.push(LockInfo {
                 txn_id,
                 table: table.to_string(),
                 mode: mode.to_string(),
                 granted: real_granted,
-                wait_start: if real_granted { None } else { Some(now_ms) },
+                wait_start: if real_granted {
+                    None
+                } else {
+                    Some(now_ms)
+                },
             });
         }
     }
@@ -3786,9 +3775,9 @@ impl McpBackendV2 for ExecutorBackend {
 
     fn describe_table(&self, table: &str) -> Result<crate::mcp::TableSchema, McpError> {
         use szrsql_sql::plan::Catalog;
-        let name = self.find_table_name(table).ok_or_else(|| {
-            McpError::BackendError(format!("table not found: {table}"))
-        })?;
+        let name = self
+            .find_table_name(table)
+            .ok_or_else(|| McpError::BackendError(format!("table not found: {table}")))?;
         let schema = self
             .catalog
             .borrow()
@@ -3821,18 +3810,15 @@ impl McpBackendV2 for ExecutorBackend {
 
     fn list_indexes(&self, table: &str) -> Result<Vec<IndexInfo>, McpError> {
         use szrsql_sql::plan::Catalog;
-        let name = self.find_table_name(table).ok_or_else(|| {
-            McpError::BackendError(format!("table not found: {table}"))
-        })?;
+        let name = self
+            .find_table_name(table)
+            .ok_or_else(|| McpError::BackendError(format!("table not found: {table}")))?;
         let indexes = self.catalog.borrow().list_indexes(&name);
         let result = indexes
             .into_iter()
             .map(|idx| {
-                let columns: Vec<String> = idx
-                    .column_names()
-                    .into_iter()
-                    .map(String::from)
-                    .collect();
+                let columns: Vec<String> =
+                    idx.column_names().into_iter().map(String::from).collect();
                 let is_primary = idx.name.ends_with("_pkey");
                 IndexInfo {
                     is_primary,
@@ -3903,10 +3889,7 @@ impl McpBackendV2 for ExecutorBackend {
                             stats.alerts.push(AlertInfo {
                                 level: "critical".to_string(),
                                 rule_id: "high_error_rate".to_string(),
-                                message: format!(
-                                    "High error rate: {} errors total",
-                                    error_count
-                                ),
+                                message: format!("High error rate: {} errors total", error_count),
                                 timestamp: now_ms,
                                 value: error_count as f64,
                                 threshold: 10.0,
@@ -3931,10 +3914,7 @@ impl McpBackendV2 for ExecutorBackend {
                 affected_rows: total_affected,
                 timestamp: now_ms,
             });
-            let aggr = stats
-                .query_aggr
-                .entry(sql.to_string())
-                .or_default();
+            let aggr = stats.query_aggr.entry(sql.to_string()).or_default();
             aggr.count += 1;
             aggr.total_ms += elapsed_ms;
             if elapsed_ms > aggr.max_ms {
@@ -3950,7 +3930,8 @@ impl McpBackendV2 for ExecutorBackend {
                     rule_id: "slow_query".to_string(),
                     message: format!(
                         "Query took {}ms (threshold {}ms): {}",
-                        elapsed_ms, slow_threshold,
+                        elapsed_ms,
+                        slow_threshold,
                         truncate_sql(sql, 100)
                     ),
                     timestamp: now_ms,
@@ -3971,9 +3952,10 @@ impl McpBackendV2 for ExecutorBackend {
     fn explain_query(&self, sql: &str) -> Result<ExplainPlan, McpError> {
         let stmts = szrsql_sql::parser::parse_sql(sql)
             .map_err(|e| McpError::BackendError(format!("parse error: {e:?}")))?;
-        let stmt = stmts.into_iter().next().ok_or_else(|| {
-            McpError::BackendError("empty SQL".into())
-        })?;
+        let stmt = stmts
+            .into_iter()
+            .next()
+            .ok_or_else(|| McpError::BackendError("empty SQL".into()))?;
         let plan = {
             let catalog = self.catalog.borrow();
             szrsql_sql::plan::Planner::new(&*catalog)
@@ -3985,7 +3967,8 @@ impl McpBackendV2 for ExecutorBackend {
         // — 无统计信息时回退到默认值（DEFAULT_ROW_COUNT=1000 等）
         let (cost, rows) = {
             let stats_clone = self.stats_store.borrow().clone();
-            let cost_model = szrsql_optimizer::cost::CostModel::new(std::sync::Arc::new(stats_clone));
+            let cost_model =
+                szrsql_optimizer::cost::CostModel::new(std::sync::Arc::new(stats_clone));
             let estimated = cost_model.estimate(&plan);
             (estimated.total(), estimated.cardinality as u64)
         };
@@ -4206,7 +4189,9 @@ impl McpBackendV2 for ExecutorBackend {
             duration_secs,
             top_functions: top_functions
                 .into_iter()
-                .map(|(name, calls, total_ms)| format!("{name} (calls={calls}, total_ms={total_ms})"))
+                .map(|(name, calls, total_ms)| {
+                    format!("{name} (calls={calls}, total_ms={total_ms})")
+                })
                 .collect(),
         })
     }
@@ -4274,9 +4259,7 @@ impl McpBackendV2 for ExecutorBackend {
         }
         let _ = start.elapsed();
         let mut maint = self.maintenance.borrow_mut();
-        let state = maint
-            .entry(Self::table_key(table))
-            .or_default();
+        let state = maint.entry(Self::table_key(table)).or_default();
         state.last_analyze_ms = Self::now_ms();
         state.analyze_count += 1;
         state.live_tuples = rows_analyzed;
@@ -4439,9 +4422,7 @@ impl McpBackendV2 for ExecutorBackend {
         let mut total_updates: u64 = 0;
 
         for (kind, table, affected, _) in &dml_records {
-            let entry = table_dml
-                .entry(table.clone())
-                .or_insert((0, 0, 0));
+            let entry = table_dml.entry(table.clone()).or_insert((0, 0, 0));
             match kind {
                 DmlKind::Insert => {
                     entry.0 = entry.0.saturating_add(*affected);
@@ -4502,18 +4483,14 @@ impl McpBackendV2 for ExecutorBackend {
             let current_bytes = (current_rows + dead_tuples) * AVG_ROW_BYTES;
 
             // 按表独立增长率（P3-Capacity-Advanced 核心改进）
-            let (ins, del, upd) = table_dml
-                .get(table_name)
-                .copied()
-                .unwrap_or((0, 0, 0));
+            let (ins, del, upd) = table_dml.get(table_name).copied().unwrap_or((0, 0, 0));
             let table_growth = compute_table_growth(ins, del);
             let predicted_rows = (current_rows + table_growth * days as f64).max(0.0);
 
             // UPDATE 产生的 dead_tuples 存储开销
             let update_dead_tuples = (upd as f64) * UPDATE_DEAD_TUPLE_RATIO;
             let update_bytes = update_dead_tuples * AVG_ROW_BYTES;
-            let predicted_bytes =
-                (predicted_rows + dead_tuples) * AVG_ROW_BYTES + update_bytes;
+            let predicted_bytes = (predicted_rows + dead_tuples) * AVG_ROW_BYTES + update_bytes;
 
             table_breakdown.push(TableForecast {
                 table: table_name.clone(),
@@ -4582,7 +4559,8 @@ impl McpBackendV2 for ExecutorBackend {
                 .unwrap_or(0);
 
             let mut null_count: u64 = 0;
-            let mut distinct_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut distinct_set: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             let mut value_counts: HashMap<String, u64> = HashMap::new();
             let mut min_str: Option<String> = None;
             let mut max_str: Option<String> = None;
@@ -4935,7 +4913,9 @@ impl McpBackendV2 for ExecutorBackend {
                         .wait_events
                         .iter()
                         .filter(|(k, _)| k.contains("lock") || k.contains("Lock"))
-                        .map(|(k, v)| format!("{k}(waits={},ms={})", v.total_waits, v.total_wait_ms))
+                        .map(|(k, v)| {
+                            format!("{k}(waits={},ms={})", v.total_waits, v.total_wait_ms)
+                        })
                         .collect();
                     evidence.push(Evidence {
                         source: "wait_events".to_string(),
@@ -4984,7 +4964,8 @@ impl McpBackendV2 for ExecutorBackend {
                 if causes.is_empty() {
                     causes.push(CauseEntry {
                         cause_type: CauseType::StatsStale,
-                        description: "未发现明显性能瓶颈，统计信息可能过期，建议执行 ANALYZE".to_string(),
+                        description: "未发现明显性能瓶颈，统计信息可能过期，建议执行 ANALYZE"
+                            .to_string(),
                         confidence: 0.4,
                     });
                 }
@@ -5104,7 +5085,8 @@ impl McpBackendV2 for ExecutorBackend {
 
                 causes.push(CauseEntry {
                     cause_type: CauseType::HighQps,
-                    description: "QPS 超过阈值，可能由突发流量或缺失索引导致全表扫描放大".to_string(),
+                    description: "QPS 超过阈值，可能由突发流量或缺失索引导致全表扫描放大"
+                        .to_string(),
                     confidence: 0.7,
                 });
                 evidence.push(Evidence {
@@ -5232,12 +5214,7 @@ impl McpBackendV2 for ExecutorBackend {
                     let dl_summary: Vec<String> = stats
                         .deadlock_history
                         .iter()
-                        .map(|dl| {
-                            format!(
-                                "txn_ids={:?} resource={}",
-                                dl.txn_ids, dl.resource
-                            )
-                        })
+                        .map(|dl| format!("txn_ids={:?} resource={}", dl.txn_ids, dl.resource))
                         .collect();
                     evidence.push(Evidence {
                         source: "deadlock_history".to_string(),
@@ -5269,9 +5246,15 @@ impl McpBackendV2 for ExecutorBackend {
                     .active_transactions
                     .iter()
                     .filter_map(|t| {
-                        t.wait_event
-                            .as_ref()
-                            .map(|w| format!("txn={} state={} wait={} sql={}", t.txn_id, t.state, w, truncate_sql(&t.sql, 60)))
+                        t.wait_event.as_ref().map(|w| {
+                            format!(
+                                "txn={} state={} wait={} sql={}",
+                                t.txn_id,
+                                t.state,
+                                w,
+                                truncate_sql(&t.sql, 60)
+                            )
+                        })
                     })
                     .collect();
                 if !waiting_txns.is_empty() {
@@ -5332,7 +5315,9 @@ impl McpBackendV2 for ExecutorBackend {
                         .wait_events
                         .iter()
                         .filter(|(k, _)| k.contains("lock") || k.contains("Lock"))
-                        .map(|(k, v)| format!("{k}(waits={},ms={})", v.total_waits, v.total_wait_ms))
+                        .map(|(k, v)| {
+                            format!("{k}(waits={},ms={})", v.total_waits, v.total_wait_ms)
+                        })
                         .collect();
                     evidence.push(Evidence {
                         source: "wait_events".to_string(),
@@ -5391,7 +5376,8 @@ impl McpBackendV2 for ExecutorBackend {
                 // 未知告警类型：回退到统计信息过期
                 let causes = vec![CauseEntry {
                     cause_type: CauseType::StatsStale,
-                    description: "未知告警类型，建议执行 ANALYZE 更新统计信息并检查日志".to_string(),
+                    description: "未知告警类型，建议执行 ANALYZE 更新统计信息并检查日志"
+                        .to_string(),
                     confidence: 0.3,
                 }];
                 let evidence = vec![Evidence {
@@ -5417,9 +5403,7 @@ impl McpBackendV2 for ExecutorBackend {
         /// 综合评分：计算某种根因类型的置信度增量
         ///
         /// 返回 (cause_type, score, description) 三元组，score ∈ [0, 1]
-        fn compute_cause_scores(
-            stats: &RuntimeStats,
-        ) -> Vec<(CauseType, f64, String)> {
+        fn compute_cause_scores(stats: &RuntimeStats) -> Vec<(CauseType, f64, String)> {
             let mut results: Vec<(CauseType, f64, String)> = Vec::new();
 
             // 指标采集
@@ -5432,11 +5416,7 @@ impl McpBackendV2 for ExecutorBackend {
                 .filter(|(k, _)| k.contains("lock") || k.contains("Lock"))
                 .map(|(_, v)| v.total_waits)
                 .sum::<u64>() as f64;
-            let pending_locks = stats
-                .active_locks
-                .iter()
-                .filter(|l| !l.granted)
-                .count() as f64;
+            let pending_locks = stats.active_locks.iter().filter(|l| !l.granted).count() as f64;
             let active_txns = stats.active_transactions.len() as f64;
             let total_qps: u64 = stats.query_aggr.values().map(|a| a.count).sum();
             let total_qps_f = total_qps as f64;
@@ -5459,8 +5439,8 @@ impl McpBackendV2 for ExecutorBackend {
             }
 
             // 2. LockContention：锁等待事件多 + 未授予锁多 → 锁竞争
-            let lock_contention_score = (lock_wait_events / 20.0).min(0.4)
-                + (pending_locks / 5.0).min(0.3);
+            let lock_contention_score =
+                (lock_wait_events / 20.0).min(0.4) + (pending_locks / 5.0).min(0.3);
             if lock_contention_score > 0.2 {
                 results.push((
                     CauseType::LockContention,
@@ -5508,8 +5488,8 @@ impl McpBackendV2 for ExecutorBackend {
             }
 
             // 6. ResourceContention：活动事务多 + 活跃锁多 → 资源竞争
-            let resource_contention_score = (active_txns / 10.0).min(0.3)
-                + (stats.active_locks.len() as f64 / 10.0).min(0.2);
+            let resource_contention_score =
+                (active_txns / 10.0).min(0.3) + (stats.active_locks.len() as f64 / 10.0).min(0.2);
             if resource_contention_score > 0.2 {
                 results.push((
                     CauseType::ResourceContention,
@@ -5550,7 +5530,8 @@ impl McpBackendV2 for ExecutorBackend {
 
         // 按置信度降序排序
         causes.sort_by(|a, b| {
-            b.confidence.partial_cmp(&a.confidence)
+            b.confidence
+                .partial_cmp(&a.confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -5628,8 +5609,13 @@ fn collect_operators(plan: &szrsql_sql::plan::LogicalPlan, ops: &mut Vec<String>
         LogicalPlan::Scan { table, .. } => {
             ops.push(format!("{indent}SeqScan({})", table.name));
         }
-        LogicalPlan::IndexScan { table, index_name, .. } => {
-            ops.push(format!("{indent}IndexScan({}, idx={})", table.name, index_name));
+        LogicalPlan::IndexScan {
+            table, index_name, ..
+        } => {
+            ops.push(format!(
+                "{indent}IndexScan({}, idx={})",
+                table.name, index_name
+            ));
         }
         LogicalPlan::Projection { input, .. } => {
             ops.push(format!("{indent}Projection"));
@@ -5639,7 +5625,12 @@ fn collect_operators(plan: &szrsql_sql::plan::LogicalPlan, ops: &mut Vec<String>
             ops.push(format!("{indent}Filter({predicate:?})"));
             collect_operators(input, ops, depth + 1);
         }
-        LogicalPlan::Join { join_type, left, right, .. } => {
+        LogicalPlan::Join {
+            join_type,
+            left,
+            right,
+            ..
+        } => {
             ops.push(format!("{indent}Join({join_type:?})"));
             collect_operators(left, ops, depth + 1);
             collect_operators(right, ops, depth + 1);
@@ -5673,7 +5664,11 @@ fn collect_operators(plan: &szrsql_sql::plan::LogicalPlan, ops: &mut Vec<String>
             ops.push(format!("{indent}CreateTable({})", name.name));
         }
         LogicalPlan::DropTable { names, .. } => {
-            let names_str = names.iter().map(|n| n.name.clone()).collect::<Vec<_>>().join(", ");
+            let names_str = names
+                .iter()
+                .map(|n| n.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
             ops.push(format!("{indent}DropTable({names_str})"));
         }
         _ => {
@@ -8446,7 +8441,9 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             id: Some(json!(1)),
             method: "tools/call".to_string(),
-            params: Some(json!({"name": "explain_root_cause", "arguments": {"alert_id": "high_qps"}})),
+            params: Some(
+                json!({"name": "explain_root_cause", "arguments": {"alert_id": "high_qps"}}),
+            ),
         };
         let resp = server.handle_request(&req);
         assert!(resp.error.is_none());
@@ -8543,8 +8540,15 @@ mod tests {
         let backend = MockBackendV2::default();
         let info = backend.get_lineage(Some("orders")).unwrap();
         assert_eq!(info.table.as_deref(), Some("orders"));
-        assert_eq!(info.upstream.len(), 2, "orders has 2 upstream edges from products");
-        assert!(info.downstream.is_empty(), "orders has no downstream in mock");
+        assert_eq!(
+            info.upstream.len(),
+            2,
+            "orders has 2 upstream edges from products"
+        );
+        assert!(
+            info.downstream.is_empty(),
+            "orders has no downstream in mock"
+        );
         // 上游边都来自 products
         for e in &info.upstream {
             assert_eq!(e.source.table, "products");
@@ -8560,15 +8564,21 @@ mod tests {
         assert_eq!(info.table.as_deref(), Some("products"));
         assert!(info.upstream.is_empty(), "products has no upstream");
         assert_eq!(info.downstream.len(), 3, "products has 3 downstream edges");
-        let target_tables: Vec<&str> =
-            info.downstream.iter().map(|e| e.target.table.as_str()).collect();
+        let target_tables: Vec<&str> = info
+            .downstream
+            .iter()
+            .map(|e| e.target.table.as_str())
+            .collect();
         assert!(target_tables.contains(&"orders"));
         assert!(target_tables.contains(&"order_items"));
         // 2 条到 orders
         let orders_count = target_tables.iter().filter(|t| **t == "orders").count();
         assert_eq!(orders_count, 2);
         // 1 条到 order_items
-        let order_items_count = target_tables.iter().filter(|t| **t == "order_items").count();
+        let order_items_count = target_tables
+            .iter()
+            .filter(|t| **t == "order_items")
+            .count();
         assert_eq!(order_items_count, 1);
     }
 
@@ -8788,15 +8798,13 @@ mod tests {
             TableName::new("users"),
             vec![IndexColumn::new("email")],
         );
-        catalog.create_index(users_idx, false).expect("create users_email_key index");
+        catalog
+            .create_index(users_idx, false)
+            .expect("create users_email_key index");
 
         // 列注释：users.name = '用户名'
         catalog
-            .set_column_comment(
-                &TableName::new("users"),
-                "name",
-                Some("用户名".to_string()),
-            )
+            .set_column_comment(&TableName::new("users"), "name", Some("用户名".to_string()))
             .expect("set column comment");
 
         // 表 2: orders
@@ -8810,7 +8818,13 @@ mod tests {
                     col
                 },
                 ColumnDefinition::new("user_id", ColumnType::Int64),
-                ColumnDefinition::new("total", ColumnType::Decimal { precision: 10, scale: 2 }),
+                ColumnDefinition::new(
+                    "total",
+                    ColumnType::Decimal {
+                        precision: 10,
+                        scale: 2,
+                    },
+                ),
             ],
         };
         catalog
@@ -8887,7 +8901,10 @@ mod tests {
 
         assert_eq!(schema.table, "orders");
         // 验证 DECIMAL 类型转换为字符串
-        let total_col = schema.columns.iter().find(|c| c.name == "total")
+        let total_col = schema
+            .columns
+            .iter()
+            .find(|c| c.name == "total")
             .expect("orders.total column must exist");
         assert_eq!(
             total_col.data_type, "DECIMAL(10,2)",
@@ -8903,7 +8920,10 @@ mod tests {
         assert!(result.is_err(), "describe_table on nonexistent must error");
         match result {
             Err(McpError::BackendError(msg)) => {
-                assert!(msg.contains("table not found"), "error message should mention table not found");
+                assert!(
+                    msg.contains("table not found"),
+                    "error message should mention table not found"
+                );
                 assert!(msg.contains("nonexistent"));
             }
             _ => panic!("expected BackendError, got: {:?}", result),
@@ -8952,7 +8972,10 @@ mod tests {
         let backend = CatalogBackend::new(Box::new(catalog));
         let views = backend.list_views().expect("list_views must succeed");
         // SzRSQL 不支持 VIEW，list_views 返回空 Vec（语义正确）
-        assert!(views.is_empty(), "SzRSQL does not support VIEW, list_views should be empty");
+        assert!(
+            views.is_empty(),
+            "SzRSQL does not support VIEW, list_views should be empty"
+        );
     }
 
     #[test]
@@ -8963,8 +8986,14 @@ mod tests {
         assert!(result.is_err(), "execute_sql should err without executor");
         match result {
             Err(McpError::BackendError(msg)) => {
-                assert!(msg.contains("execute_sql"), "error should mention execute_sql");
-                assert!(msg.contains("no executor attached"), "error should mention no executor attached");
+                assert!(
+                    msg.contains("execute_sql"),
+                    "error should mention execute_sql"
+                );
+                assert!(
+                    msg.contains("no executor attached"),
+                    "error should mention no executor attached"
+                );
             }
             _ => panic!("expected BackendError"),
         }
@@ -8984,7 +9013,10 @@ mod tests {
         let backend = CatalogBackend::new(Box::new(catalog));
         let stats = backend.db_stats().expect("db_stats must succeed");
         // table_count 应真实化（build_test_catalog 创建了 2 张表）
-        assert_eq!(stats.table_count, 2, "table_count should be real (2 tables)");
+        assert_eq!(
+            stats.table_count, 2,
+            "table_count should be real (2 tables)"
+        );
         // 其余字段未注入 executor，应为 0
         assert_eq!(stats.total_rows, 0);
         assert_eq!(stats.total_size_bytes, 0);
@@ -9007,9 +9039,7 @@ mod tests {
         let catalog = build_test_catalog();
         let backend = CatalogBackend::new(Box::new(catalog));
         // get_lineage 未连接 LineageStore，返回空 LineageInfo
-        let lineage = backend
-            .get_lineage(None)
-            .expect("get_lineage must succeed");
+        let lineage = backend.get_lineage(None).expect("get_lineage must succeed");
         assert!(lineage.upstream.is_empty());
         assert!(lineage.downstream.is_empty());
         assert!(lineage.tables.is_empty());
@@ -9021,9 +9051,7 @@ mod tests {
         let catalog = build_test_catalog();
         let backend = CatalogBackend::new(Box::new(catalog));
         // 未连接运行时状态，slow_queries 返回空
-        let slow = backend
-            .slow_queries(10)
-            .expect("slow_queries must succeed");
+        let slow = backend.slow_queries(10).expect("slow_queries must succeed");
         assert!(slow.is_empty(), "slow_queries should be empty in MVP");
     }
 
@@ -9048,7 +9076,10 @@ mod tests {
         let status = backend
             .autovacuum_status()
             .expect("autovacuum_status must succeed");
-        assert!(!status.enabled, "autovacuum should be disabled without executor");
+        assert!(
+            !status.enabled,
+            "autovacuum should be disabled without executor"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -9112,11 +9143,16 @@ mod tests {
         let backend = build_catalog_backend_with_executor();
         // 执行几条 SQL 触发统计采集
         backend.execute_sql("SELECT * FROM users").expect("SELECT");
-        backend.execute_sql("SELECT * FROM users").expect("SELECT again");
+        backend
+            .execute_sql("SELECT * FROM users")
+            .expect("SELECT again");
 
         // query_stats 应委托到 executor，返回真实统计
         let stats = backend.query_stats().expect("query_stats must succeed");
-        assert!(stats.total_queries >= 2, "should have at least 2 queries recorded");
+        assert!(
+            stats.total_queries >= 2,
+            "should have at least 2 queries recorded"
+        );
 
         // slow_queries 应委托到 executor
         let slow = backend.slow_queries(10).expect("slow_queries must succeed");
@@ -9134,14 +9170,20 @@ mod tests {
         let txns = backend
             .list_transactions()
             .expect("list_transactions must succeed");
-        assert!(!txns.is_empty(), "should have at least 1 active transaction after BEGIN");
+        assert!(
+            !txns.is_empty(),
+            "should have at least 1 active transaction after BEGIN"
+        );
 
         // COMMIT 后事务应清空
         backend.execute_sql("COMMIT").expect("COMMIT");
         let txns_after = backend
             .list_transactions()
             .expect("list_transactions after COMMIT");
-        assert!(txns_after.is_empty(), "transactions should be empty after COMMIT");
+        assert!(
+            txns_after.is_empty(),
+            "transactions should be empty after COMMIT"
+        );
     }
 
     #[test]
@@ -9157,7 +9199,10 @@ mod tests {
             .vacuum_table("users")
             .expect("vacuum_table must succeed");
         assert_eq!(vacuum_result.table, "users");
-        assert!(vacuum_result.dead_tuples_reclaimed >= 1, "should reclaim at least 1 dead tuple");
+        assert!(
+            vacuum_result.dead_tuples_reclaimed >= 1,
+            "should reclaim at least 1 dead tuple"
+        );
 
         // analyze_table 应委托到 executor
         let analyze_result = backend
@@ -9169,7 +9214,10 @@ mod tests {
         let status = backend
             .autovacuum_status()
             .expect("autovacuum_status must succeed");
-        assert!(status.tables_vacuumed >= 1, "should have vacuumed at least 1 table");
+        assert!(
+            status.tables_vacuumed >= 1,
+            "should have vacuumed at least 1 table"
+        );
     }
 
     #[test]
@@ -9187,7 +9235,10 @@ mod tests {
         let lineage = backend
             .get_lineage(Some("users_copy"))
             .expect("get_lineage must succeed");
-        assert!(!lineage.upstream.is_empty(), "users_copy should have upstream lineage from users");
+        assert!(
+            !lineage.upstream.is_empty(),
+            "users_copy should have upstream lineage from users"
+        );
     }
 
     #[test]
@@ -9197,7 +9248,10 @@ mod tests {
         // table_count 从 catalog 获取（1 张表）
         assert_eq!(stats.table_count, 1, "table_count from catalog (1 table)");
         // total_rows 从 executor 获取（2 行）
-        assert!(stats.total_rows >= 2, "total_rows from executor (>= 2 rows)");
+        assert!(
+            stats.total_rows >= 2,
+            "total_rows from executor (>= 2 rows)"
+        );
     }
 
     #[test]
@@ -9228,7 +9282,10 @@ mod tests {
         // list_tables 应返回 catalog 中的表（catalog_only），不返回 executor 中的表（exec_only）
         let tables = backend.list_tables().expect("list_tables");
         assert_eq!(tables.len(), 1, "should list 1 table from catalog");
-        assert_eq!(tables[0].name, "catalog_only", "should be catalog_only table");
+        assert_eq!(
+            tables[0].name, "catalog_only",
+            "should be catalog_only table"
+        );
     }
 
     #[test]
@@ -9310,7 +9367,11 @@ mod tests {
 
         // 9. 验证现有 30 个 MCP 工具不受影响
         let tables = backend.list_tables().expect("list_tables");
-        assert_eq!(tables.len(), 2, "MCP list_tables still works after tree ops");
+        assert_eq!(
+            tables.len(),
+            2,
+            "MCP list_tables still works after tree ops"
+        );
     }
 
     #[test]
@@ -9344,8 +9405,14 @@ mod tests {
         assert!(resp.error.is_none(), "list_tables request should succeed");
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("users"), "response should contain users table");
-        assert!(text.contains("orders"), "response should contain orders table");
+        assert!(
+            text.contains("users"),
+            "response should contain users table"
+        );
+        assert!(
+            text.contains("orders"),
+            "response should contain orders table"
+        );
     }
 
     #[test]
@@ -9363,12 +9430,18 @@ mod tests {
             })),
         };
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "describe_table request should succeed");
+        assert!(
+            resp.error.is_none(),
+            "describe_table request should succeed"
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
         assert!(text.contains("id"), "should contain id column");
         assert!(text.contains("name"), "should contain name column");
-        assert!(text.contains("用户名"), "should contain column comment '用户名'");
+        assert!(
+            text.contains("用户名"),
+            "should contain column comment '用户名'"
+        );
     }
 
     #[test]
@@ -9389,7 +9462,10 @@ mod tests {
         assert!(resp.error.is_none(), "list_indexes request should succeed");
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("users_email_key"), "should contain index name");
+        assert!(
+            text.contains("users_email_key"),
+            "should contain index name"
+        );
     }
 
     #[test]
@@ -9408,8 +9484,15 @@ mod tests {
         };
         let resp = server.handle_request(&req);
         // CatalogBackend 不支持 execute_sql，应返回后端错误
-        assert!(resp.error.is_some(), "execute_sql should return error in MVP");
-        assert_eq!(resp.error.unwrap().code, -32000, "should be BackendError code");
+        assert!(
+            resp.error.is_some(),
+            "execute_sql should return error in MVP"
+        );
+        assert_eq!(
+            resp.error.unwrap().code,
+            -32000,
+            "should be BackendError code"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -9470,11 +9553,17 @@ mod tests {
         let r2 = backend
             .execute_sql("INSERT INTO users (id, name) VALUES (2, 'Bob'), (3, 'Charlie')")
             .expect("INSERT 2");
-        assert_eq!(r2.affected_rows, 2, "multi-VALUES INSERT should affect 2 rows");
+        assert_eq!(
+            r2.affected_rows, 2,
+            "multi-VALUES INSERT should affect 2 rows"
+        );
 
         // list_tables 的 row_count 应反映真实行数
         let tables = backend.list_tables().expect("list_tables");
-        assert_eq!(tables[0].row_count, 3, "row_count should be 3 after inserts");
+        assert_eq!(
+            tables[0].row_count, 3,
+            "row_count should be 3 after inserts"
+        );
 
         // SELECT * 返回所有行
         let sel = backend
@@ -9566,10 +9655,16 @@ mod tests {
 
         // DELETE 全表
         let r2 = backend.execute_sql("DELETE FROM t").expect("DELETE all");
-        assert_eq!(r2.affected_rows, 2, "DELETE all should affect remaining 2 rows");
+        assert_eq!(
+            r2.affected_rows, 2,
+            "DELETE all should affect remaining 2 rows"
+        );
 
         let sel2 = backend.execute_sql("SELECT * FROM t").expect("SELECT");
-        assert!(sel2.rows.is_empty(), "table should be empty after DELETE all");
+        assert!(
+            sel2.rows.is_empty(),
+            "table should be empty after DELETE all"
+        );
     }
 
     #[test]
@@ -9598,7 +9693,11 @@ mod tests {
             .expect("CREATE UNIQUE INDEX");
 
         let indexes2 = backend.list_indexes("t").expect("list_indexes 2");
-        assert_eq!(indexes2.len(), 2, "should list 2 indexes after second CREATE");
+        assert_eq!(
+            indexes2.len(),
+            2,
+            "should list 2 indexes after second CREATE"
+        );
         let unique_idx = indexes2
             .iter()
             .find(|i| i.name == "idx_name")
@@ -9705,13 +9804,20 @@ mod tests {
             .explain_query("SELECT * FROM t")
             .expect("EXPLAIN SELECT");
         assert_eq!(plan.sql, "SELECT * FROM t");
-        assert!(!plan.operators.is_empty(), "EXPLAIN should produce operators");
+        assert!(
+            !plan.operators.is_empty(),
+            "EXPLAIN should produce operators"
+        );
         // 应该包含 SeqScan(t)
         let has_scan = plan
             .operators
             .iter()
             .any(|op| op.contains("SeqScan") && op.contains("t"));
-        assert!(has_scan, "EXPLAIN should contain SeqScan(t), got: {:?}", plan.operators);
+        assert!(
+            has_scan,
+            "EXPLAIN should contain SeqScan(t), got: {:?}",
+            plan.operators
+        );
     }
 
     #[test]
@@ -9726,7 +9832,11 @@ mod tests {
             .expect("EXPLAIN");
         // 应包含 Filter 节点
         let has_filter = plan.operators.iter().any(|op| op.contains("Filter"));
-        assert!(has_filter, "EXPLAIN should contain Filter, got: {:?}", plan.operators);
+        assert!(
+            has_filter,
+            "EXPLAIN should contain Filter, got: {:?}",
+            plan.operators
+        );
     }
 
     #[test]
@@ -9744,7 +9854,10 @@ mod tests {
         let err = backend.prepare_statement("stmt2", "").unwrap_err();
         match err {
             McpError::BackendError(msg) => {
-                assert!(msg.contains("parse error") || msg.contains("empty"), "unexpected: {msg}");
+                assert!(
+                    msg.contains("parse error") || msg.contains("empty"),
+                    "unexpected: {msg}"
+                );
             }
             other => panic!("expected BackendError, got {other:?}"),
         }
@@ -9801,7 +9914,10 @@ mod tests {
         let r = backend
             .prepare_statement("s6", "UPDATE t SET name = $1 WHERE id = $2")
             .expect("update params");
-        assert_eq!(r.parameter_count, 2, "UPDATE SET $1 WHERE $2 should have 2 params");
+        assert_eq!(
+            r.parameter_count, 2,
+            "UPDATE SET $1 WHERE $2 should have 2 params"
+        );
 
         // 7. DELETE 中的参数
         let r = backend
@@ -9828,10 +9944,7 @@ mod tests {
                 "SELECT * FROM t WHERE id IN (SELECT id FROM t2 WHERE x = $1)",
             )
             .expect("subquery param");
-        assert_eq!(
-            r.parameter_count, 1,
-            "Subquery with $1 should have 1 param"
-        );
+        assert_eq!(r.parameter_count, 1, "Subquery with $1 should have 1 param");
 
         // 10. 参数在 JOIN ON 条件中
         let r = backend
@@ -9861,10 +9974,7 @@ mod tests {
                 "SELECT COUNT(*) FROM t GROUP BY x HAVING COUNT(*) > $1",
             )
             .expect("having param");
-        assert_eq!(
-            r.parameter_count, 1,
-            "HAVING $1 should have 1 param"
-        );
+        assert_eq!(r.parameter_count, 1, "HAVING $1 should have 1 param");
     }
 
     #[test]
@@ -9908,7 +10018,11 @@ mod tests {
             .iter()
             .find(|c| c.name == "name")
             .expect("name column should exist");
-        assert_eq!(name_col.comment.as_deref(), Some("用户名"), "comment should be '用户名'");
+        assert_eq!(
+            name_col.comment.as_deref(),
+            Some("用户名"),
+            "comment should be '用户名'"
+        );
     }
 
     #[test]
@@ -9996,7 +10110,9 @@ mod tests {
             .expect("CREATE");
 
         // 第二次 CREATE 不带 IF NOT EXISTS 应报错
-        let err = backend.execute_sql("CREATE TABLE t (id BIGINT)").unwrap_err();
+        let err = backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .unwrap_err();
         match err {
             McpError::BackendError(msg) => {
                 assert!(msg.contains("already exists"), "unexpected: {msg}");
@@ -10035,9 +10151,9 @@ mod tests {
 
     #[test]
     fn test_executor_backend_with_data_constructor() {
+        use szrsql_sql::ast::{ColumnDefinition, TableName};
         use szrsql_sql::executor::InMemoryTable;
         use szrsql_sql::plan::{InMemoryCatalog, TableSchema};
-        use szrsql_sql::ast::{ColumnDefinition, TableName};
         use szrsql_types::value::ColumnType;
 
         let mut catalog = InMemoryCatalog::new();
@@ -10083,7 +10199,10 @@ mod tests {
         // 不同表名应产生不同 resource_id
         let id1 = table_resource_id("users");
         let id2 = table_resource_id("orders");
-        assert_ne!(id1, id2, "different table names must produce different resource_id");
+        assert_ne!(
+            id1, id2,
+            "different table names must produce different resource_id"
+        );
     }
 
     #[test]
@@ -10091,16 +10210,20 @@ mod tests {
         // 无冲突时 record_lock 应正确加锁并记录到 active_locks（granted=true）
         let backend = ExecutorBackend::new();
         // 手动注入一个活动事务（txn_id=100）
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 100,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 100,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         // 调用 record_lock
         backend.record_lock("t1", "RowExclusiveLock", true, 2000);
         // 验证 active_locks
@@ -10110,7 +10233,10 @@ mod tests {
         assert_eq!(locks[0].table, "t1");
         assert_eq!(locks[0].mode, "RowExclusiveLock");
         assert!(locks[0].granted, "lock should be granted (no conflict)");
-        assert!(locks[0].wait_start.is_none(), "granted lock has no wait_start");
+        assert!(
+            locks[0].wait_start.is_none(),
+            "granted lock has no wait_start"
+        );
         // 验证 LockManager 内部也持有该锁
         assert!(backend.lock_mgr.holds_lock(100, table_resource_id("t1")));
     }
@@ -10120,18 +10246,29 @@ mod tests {
         // 冲突时 record_lock 应记录 granted=false
         let backend = ExecutorBackend::new();
         // 先让 txn 1 持有 t1 的 X 锁
-        backend.lock_mgr.try_lock(1, table_resource_id("t1"), szrsql_tx::lock::LockMode::Exclusive).expect("txn1 lock");
+        backend
+            .lock_mgr
+            .try_lock(
+                1,
+                table_resource_id("t1"),
+                szrsql_tx::lock::LockMode::Exclusive,
+            )
+            .expect("txn1 lock");
         // 手动注入 txn 2 为活动事务
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 2,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 2,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         // txn 2 尝试加 t1 的 X 锁（冲突）
         backend.record_lock("t1", "RowExclusiveLock", true, 2000);
         // 验证 active_locks
@@ -10148,25 +10285,45 @@ mod tests {
         let backend = ExecutorBackend::new();
         // 模拟 BEGIN：设置 current_txn 并添加活动事务
         backend.set_current_txn_id(Some(100));
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 100,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 100,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         // txn 100 持有 t1 的 X 锁
-        backend.lock_mgr.try_lock(100, table_resource_id("t1"), szrsql_tx::lock::LockMode::Exclusive).expect("lock");
-        assert!(backend.lock_mgr.holds_lock(100, table_resource_id("t1")), "lock held before COMMIT");
+        backend
+            .lock_mgr
+            .try_lock(
+                100,
+                table_resource_id("t1"),
+                szrsql_tx::lock::LockMode::Exclusive,
+            )
+            .expect("lock");
+        assert!(
+            backend.lock_mgr.holds_lock(100, table_resource_id("t1")),
+            "lock held before COMMIT"
+        );
         // 执行 COMMIT
         backend.execute_sql("COMMIT").expect("COMMIT");
         // 验证 LockManager 中的锁已释放
-        assert!(!backend.lock_mgr.holds_lock(100, table_resource_id("t1")), "lock released after COMMIT");
+        assert!(
+            !backend.lock_mgr.holds_lock(100, table_resource_id("t1")),
+            "lock released after COMMIT"
+        );
         // 验证 stats.active_locks 也已清空
-        assert!(backend.stats.borrow().active_locks.is_empty(), "active_locks cleared after COMMIT");
+        assert!(
+            backend.stats.borrow().active_locks.is_empty(),
+            "active_locks cleared after COMMIT"
+        );
     }
 
     #[test]
@@ -10174,40 +10331,71 @@ mod tests {
         // ROLLBACK 应通过 LockManager.unlock_all 释放所有锁
         let backend = ExecutorBackend::new();
         backend.set_current_txn_id(Some(200));
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 200,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
-        backend.lock_mgr.try_lock(200, table_resource_id("t2"), szrsql_tx::lock::LockMode::Exclusive).expect("lock");
-        assert!(backend.lock_mgr.holds_lock(200, table_resource_id("t2")), "lock held before ROLLBACK");
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 200,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
+        backend
+            .lock_mgr
+            .try_lock(
+                200,
+                table_resource_id("t2"),
+                szrsql_tx::lock::LockMode::Exclusive,
+            )
+            .expect("lock");
+        assert!(
+            backend.lock_mgr.holds_lock(200, table_resource_id("t2")),
+            "lock held before ROLLBACK"
+        );
         // 执行 ROLLBACK
         backend.execute_sql("ROLLBACK").expect("ROLLBACK");
         // 验证锁已释放
-        assert!(!backend.lock_mgr.holds_lock(200, table_resource_id("t2")), "lock released after ROLLBACK");
-        assert!(backend.stats.borrow().active_locks.is_empty(), "active_locks cleared after ROLLBACK");
+        assert!(
+            !backend.lock_mgr.holds_lock(200, table_resource_id("t2")),
+            "lock released after ROLLBACK"
+        );
+        assert!(
+            backend.stats.borrow().active_locks.is_empty(),
+            "active_locks cleared after ROLLBACK"
+        );
     }
 
     #[test]
     fn test_p3_deadlock_unlock_on_kill() {
         // kill_transaction 应通过 LockManager.unlock_all 释放该事务的锁
         let backend = ExecutorBackend::new();
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 300,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
-        backend.lock_mgr.try_lock(300, table_resource_id("t3"), szrsql_tx::lock::LockMode::Exclusive).expect("lock");
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 300,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
+        backend
+            .lock_mgr
+            .try_lock(
+                300,
+                table_resource_id("t3"),
+                szrsql_tx::lock::LockMode::Exclusive,
+            )
+            .expect("lock");
         // 记录到 stats.active_locks
         backend.stats.borrow_mut().active_locks.push(LockInfo {
             txn_id: 300,
@@ -10216,13 +10404,22 @@ mod tests {
             granted: true,
             wait_start: None,
         });
-        assert!(backend.lock_mgr.holds_lock(300, table_resource_id("t3")), "lock held before kill");
+        assert!(
+            backend.lock_mgr.holds_lock(300, table_resource_id("t3")),
+            "lock held before kill"
+        );
         // kill txn 300
         let result = backend.kill_transaction(300).expect("kill");
         assert!(result.killed, "transaction should be killed");
         // 验证锁已释放
-        assert!(!backend.lock_mgr.holds_lock(300, table_resource_id("t3")), "lock released after kill");
-        assert!(backend.stats.borrow().active_locks.is_empty(), "active_locks cleared after kill");
+        assert!(
+            !backend.lock_mgr.holds_lock(300, table_resource_id("t3")),
+            "lock released after kill"
+        );
+        assert!(
+            backend.stats.borrow().active_locks.is_empty(),
+            "active_locks cleared after kill"
+        );
     }
 
     #[test]
@@ -10230,7 +10427,10 @@ mod tests {
         // 初始状态 deadlock_history 应为空
         let backend = ExecutorBackend::new();
         let history = backend.deadlock_history().expect("deadlock_history");
-        assert!(history.is_empty(), "deadlock_history should be empty initially");
+        assert!(
+            history.is_empty(),
+            "deadlock_history should be empty initially"
+        );
     }
 
     #[test]
@@ -10248,11 +10448,19 @@ mod tests {
         // 重复写入（同 txn_ids + 同 resource）应去重
         backend.record_deadlocks(&cycles, "t1", 2000);
         let history2 = backend.deadlock_history().expect("deadlock_history");
-        assert_eq!(history2.len(), 1, "duplicate deadlock should be deduplicated");
+        assert_eq!(
+            history2.len(),
+            1,
+            "duplicate deadlock should be deduplicated"
+        );
         // 不同 resource 应记录新条目
         backend.record_deadlocks(&cycles, "t2", 3000);
         let history3 = backend.deadlock_history().expect("deadlock_history");
-        assert_eq!(history3.len(), 2, "different resource should add new record");
+        assert_eq!(
+            history3.len(),
+            2,
+            "different resource should add new record"
+        );
         // 不同 txn_ids 应记录新条目
         let cycles2 = vec![vec![3, 4]];
         backend.record_deadlocks(&cycles2, "t1", 4000);
@@ -10273,9 +10481,11 @@ mod tests {
         let resource_b: u64 = 2002;
 
         // txn 1 持有 resource_a 的 X 锁
-        mgr.try_lock(1, resource_a, szrsql_tx::lock::LockMode::Exclusive).expect("txn1 lock A");
+        mgr.try_lock(1, resource_a, szrsql_tx::lock::LockMode::Exclusive)
+            .expect("txn1 lock A");
         // txn 2 持有 resource_b 的 X 锁
-        mgr.try_lock(2, resource_b, szrsql_tx::lock::LockMode::Exclusive).expect("txn2 lock B");
+        mgr.try_lock(2, resource_b, szrsql_tx::lock::LockMode::Exclusive)
+            .expect("txn2 lock B");
 
         // 初始无环
         let cycles0 = mgr.detect_all_deadlocks();
@@ -10285,18 +10495,31 @@ mod tests {
         let mgr_clone1 = Arc::clone(&mgr);
         let handle1 = thread::spawn(move || {
             // 超时 500ms，足够建立等待边
-            mgr_clone1.lock(1, resource_b, szrsql_tx::lock::LockMode::Exclusive, Duration::from_millis(500))
+            mgr_clone1.lock(
+                1,
+                resource_b,
+                szrsql_tx::lock::LockMode::Exclusive,
+                Duration::from_millis(500),
+            )
         });
 
         // 等待线程 1 进入等待队列
         thread::sleep(Duration::from_millis(30));
 
         // 主线程：txn 2 请求 resource_a（进入 waiters 后立即检测到死锁：txn2→txn1→txn2）
-        let result2 = mgr.lock(2, resource_a, szrsql_tx::lock::LockMode::Exclusive, Duration::from_millis(500));
+        let result2 = mgr.lock(
+            2,
+            resource_a,
+            szrsql_tx::lock::LockMode::Exclusive,
+            Duration::from_millis(500),
+        );
 
         // 验证 txn 2 的 lock() 返回 Deadlock 错误（lock() 内部检测到环后中止自身）
-        assert!(matches!(result2, Err(szrsql_tx::lock::LockError::Deadlock(2))),
-            "txn 2 should detect deadlock, got: {:?}", result2);
+        assert!(
+            matches!(result2, Err(szrsql_tx::lock::LockError::Deadlock(2))),
+            "txn 2 should detect deadlock, got: {:?}",
+            result2
+        );
 
         // 等待线程 1 完成（txn 1 的 lock 可能超时或被唤醒后获取锁）
         let result1 = handle1.join().expect("thread1 join");
@@ -10310,16 +10533,20 @@ mod tests {
     fn test_p3_deadlock_record_lock_dedup() {
         // 同 txn + table + mode 不重复添加到 active_locks
         let backend = ExecutorBackend::new();
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 500,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "BEGIN".to_string(),
-            wait_event: None,
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 500,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "BEGIN".to_string(),
+                wait_event: None,
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         // 同一事务对同一表多次加锁
         backend.record_lock("t1", "RowExclusiveLock", true, 1000);
         backend.record_lock("t1", "RowExclusiveLock", true, 2000);
@@ -10335,9 +10562,15 @@ mod tests {
         backend.record_lock("t1", "RowExclusiveLock", true, 1000);
         let locks = backend.stats.borrow().active_locks.clone();
         assert_eq!(locks.len(), 1, "should have 1 lock in stats");
-        assert_eq!(locks[0].txn_id, 0, "txn_id should be 0 (no active transaction)");
+        assert_eq!(
+            locks[0].txn_id, 0,
+            "txn_id should be 0 (no active transaction)"
+        );
         // LockManager 中不应有锁（因为 txn_id=0 不走 LockManager）
-        assert!(!backend.lock_mgr.holds_lock(0, table_resource_id("t1")), "LockManager should not have lock for txn_id=0");
+        assert!(
+            !backend.lock_mgr.holds_lock(0, table_resource_id("t1")),
+            "LockManager should not have lock for txn_id=0"
+        );
     }
 
     // =================================================================
@@ -10353,10 +10586,22 @@ mod tests {
         assert_eq!(forecast.current_value, 0.0);
         assert_eq!(forecast.predicted_value, 0.0);
         assert_eq!(forecast.confidence, 0.0);
-        assert!(forecast.storage_bytes_current.is_none(), "storage_bytes_current should be None for empty history");
-        assert!(forecast.storage_bytes_predicted.is_none(), "storage_bytes_predicted should be None for empty history");
-        assert!(forecast.net_growth_rate_per_day.is_none(), "net_growth_rate_per_day should be None for empty history");
-        assert!(forecast.table_breakdown.is_none(), "table_breakdown should be None for empty history");
+        assert!(
+            forecast.storage_bytes_current.is_none(),
+            "storage_bytes_current should be None for empty history"
+        );
+        assert!(
+            forecast.storage_bytes_predicted.is_none(),
+            "storage_bytes_predicted should be None for empty history"
+        );
+        assert!(
+            forecast.net_growth_rate_per_day.is_none(),
+            "net_growth_rate_per_day should be None for empty history"
+        );
+        assert!(
+            forecast.table_breakdown.is_none(),
+            "table_breakdown should be None for empty history"
+        );
     }
 
     #[test]
@@ -10371,34 +10616,69 @@ mod tests {
             timestamp: 1000,
         });
         let forecast = backend.capacity_predict(0).expect("capacity_predict");
-        assert!(forecast.storage_bytes_current.is_none(), "storage_bytes_current should be None for days=0");
-        assert!(forecast.table_breakdown.is_none(), "table_breakdown should be None for days=0");
+        assert!(
+            forecast.storage_bytes_current.is_none(),
+            "storage_bytes_current should be None for days=0"
+        );
+        assert!(
+            forecast.table_breakdown.is_none(),
+            "table_breakdown should be None for days=0"
+        );
     }
 
     #[test]
     fn test_p3_capacity_predict_with_inserts_returns_real_fields() {
         // 有 INSERT 操作时，新增字段应有真实值
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t (id BIGINT)").expect("CREATE");
-        backend.execute_sql("INSERT INTO t (id) VALUES (1)").expect("INSERT");
-        backend.execute_sql("INSERT INTO t (id) VALUES (2)").expect("INSERT");
+        backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .expect("CREATE");
+        backend
+            .execute_sql("INSERT INTO t (id) VALUES (1)")
+            .expect("INSERT");
+        backend
+            .execute_sql("INSERT INTO t (id) VALUES (2)")
+            .expect("INSERT");
 
         let forecast = backend.capacity_predict(30).expect("capacity_predict");
-        assert!(forecast.current_value > 0.0, "current_value should be > 0 (2 rows)");
-        assert!(forecast.predicted_value >= forecast.current_value, "predicted should be >= current");
-        assert!(forecast.storage_bytes_current.is_some(), "storage_bytes_current should be Some");
-        assert!(forecast.storage_bytes_predicted.is_some(), "storage_bytes_predicted should be Some");
-        assert!(forecast.net_growth_rate_per_day.is_some(), "net_growth_rate_per_day should be Some");
-        assert!(forecast.table_breakdown.is_some(), "table_breakdown should be Some");
+        assert!(
+            forecast.current_value > 0.0,
+            "current_value should be > 0 (2 rows)"
+        );
+        assert!(
+            forecast.predicted_value >= forecast.current_value,
+            "predicted should be >= current"
+        );
+        assert!(
+            forecast.storage_bytes_current.is_some(),
+            "storage_bytes_current should be Some"
+        );
+        assert!(
+            forecast.storage_bytes_predicted.is_some(),
+            "storage_bytes_predicted should be Some"
+        );
+        assert!(
+            forecast.net_growth_rate_per_day.is_some(),
+            "net_growth_rate_per_day should be Some"
+        );
+        assert!(
+            forecast.table_breakdown.is_some(),
+            "table_breakdown should be Some"
+        );
         // storage_bytes_current > 0
-        assert!(forecast.storage_bytes_current.unwrap() > 0.0, "storage_bytes_current should be > 0");
+        assert!(
+            forecast.storage_bytes_current.unwrap() > 0.0,
+            "storage_bytes_current should be > 0"
+        );
     }
 
     #[test]
     fn test_p3_capacity_net_growth_rate_insert_delete() {
         // 净增长率 = (INSERT - DELETE) / span_days
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t (id BIGINT)").expect("CREATE");
+        backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .expect("CREATE");
         // 3 条 INSERT（时间戳 1000）
         backend.stats.borrow_mut().query_history.push(QueryRecord {
             sql: "INSERT INTO t VALUES (1)".to_string(),
@@ -10416,26 +10696,50 @@ mod tests {
         let forecast = backend.capacity_predict(30).expect("capacity_predict");
         let net_rate = forecast.net_growth_rate_per_day.expect("net_growth_rate");
         // 净增长 = 3 - 1 = 2，span_days = 1.0，所以 net_rate = 2.0
-        assert!((net_rate - 2.0).abs() < 0.01, "net_growth_rate should be 2.0 (3 inserts - 1 delete / 1 day), got {}", net_rate);
+        assert!(
+            (net_rate - 2.0).abs() < 0.01,
+            "net_growth_rate should be 2.0 (3 inserts - 1 delete / 1 day), got {}",
+            net_rate
+        );
     }
 
     #[test]
     fn test_p3_capacity_table_breakdown_contains_tables() {
         // table_breakdown 应包含所有表
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t1 (id BIGINT)").expect("CREATE t1");
-        backend.execute_sql("CREATE TABLE t2 (id BIGINT)").expect("CREATE t2");
-        backend.execute_sql("INSERT INTO t1 (id) VALUES (1)").expect("INSERT t1");
-        backend.execute_sql("INSERT INTO t2 (id) VALUES (1)").expect("INSERT t2");
+        backend
+            .execute_sql("CREATE TABLE t1 (id BIGINT)")
+            .expect("CREATE t1");
+        backend
+            .execute_sql("CREATE TABLE t2 (id BIGINT)")
+            .expect("CREATE t2");
+        backend
+            .execute_sql("INSERT INTO t1 (id) VALUES (1)")
+            .expect("INSERT t1");
+        backend
+            .execute_sql("INSERT INTO t2 (id) VALUES (1)")
+            .expect("INSERT t2");
 
         let forecast = backend.capacity_predict(30).expect("capacity_predict");
         let breakdown = forecast.table_breakdown.expect("table_breakdown");
         assert_eq!(breakdown.len(), 2, "should have 2 tables in breakdown");
         // 每张表应有 current_rows > 0
         for tf in &breakdown {
-            assert!(tf.current_rows > 0.0, "table {} should have current_rows > 0", tf.table);
-            assert!(tf.current_bytes > 0.0, "table {} should have current_bytes > 0", tf.table);
-            assert!(tf.predicted_rows >= tf.current_rows, "table {} predicted should be >= current", tf.table);
+            assert!(
+                tf.current_rows > 0.0,
+                "table {} should have current_rows > 0",
+                tf.table
+            );
+            assert!(
+                tf.current_bytes > 0.0,
+                "table {} should have current_bytes > 0",
+                tf.table
+            );
+            assert!(
+                tf.predicted_rows >= tf.current_rows,
+                "table {} predicted should be >= current",
+                tf.table
+            );
         }
     }
 
@@ -10443,7 +10747,9 @@ mod tests {
     fn test_p3_capacity_confidence_bounded_0_1() {
         // 置信度应在 [0, 1] 范围内
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t (id BIGINT)").expect("CREATE");
+        backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .expect("CREATE");
         // 注入大量查询历史
         for i in 0..200 {
             backend.stats.borrow_mut().query_history.push(QueryRecord {
@@ -10454,30 +10760,48 @@ mod tests {
             });
         }
         let forecast = backend.capacity_predict(30).expect("capacity_predict");
-        assert!(forecast.confidence >= 0.0 && forecast.confidence <= 1.0,
-            "confidence should be in [0, 1], got {}", forecast.confidence);
+        assert!(
+            forecast.confidence >= 0.0 && forecast.confidence <= 1.0,
+            "confidence should be in [0, 1], got {}",
+            forecast.confidence
+        );
         // 200 个样本 + 足够时间跨度，置信度应较高
-        assert!(forecast.confidence > 0.5, "confidence should be > 0.5 with 200 samples, got {}", forecast.confidence);
+        assert!(
+            forecast.confidence > 0.5,
+            "confidence should be > 0.5 with 200 samples, got {}",
+            forecast.confidence
+        );
     }
 
     #[test]
     fn test_p3_capacity_storage_bytes_predicted_ge_current() {
         // 净增长时，预测存储大小应 >= 当前存储大小
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t (id BIGINT)").expect("CREATE");
-        backend.execute_sql("INSERT INTO t (id) VALUES (1)").expect("INSERT");
+        backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .expect("CREATE");
+        backend
+            .execute_sql("INSERT INTO t (id) VALUES (1)")
+            .expect("INSERT");
 
         let forecast = backend.capacity_predict(30).expect("capacity_predict");
         let current = forecast.storage_bytes_current.expect("current");
         let predicted = forecast.storage_bytes_predicted.expect("predicted");
-        assert!(predicted >= current, "predicted bytes ({}) should be >= current bytes ({})", predicted, current);
+        assert!(
+            predicted >= current,
+            "predicted bytes ({}) should be >= current bytes ({})",
+            predicted,
+            current
+        );
     }
 
     #[test]
     fn test_p3_capacity_delete_reduces_net_growth() {
         // DELETE 操作应降低净增长率
         let backend = ExecutorBackend::new();
-        backend.execute_sql("CREATE TABLE t (id BIGINT)").expect("CREATE");
+        backend
+            .execute_sql("CREATE TABLE t (id BIGINT)")
+            .expect("CREATE");
         // 只有 INSERT
         backend.stats.borrow_mut().query_history.push(QueryRecord {
             sql: "INSERT INTO t VALUES (1)".to_string(),
@@ -10504,9 +10828,12 @@ mod tests {
         let forecast_with_delete = backend.capacity_predict(30).expect("capacity_predict");
         let rate_with_delete = forecast_with_delete.net_growth_rate_per_day.expect("rate");
 
-        assert!(rate_with_delete < rate_insert_only,
+        assert!(
+            rate_with_delete < rate_insert_only,
             "net growth rate with delete ({}) should be < insert-only ({})",
-            rate_with_delete, rate_insert_only);
+            rate_with_delete,
+            rate_insert_only
+        );
     }
 
     // =================================================================
@@ -10535,17 +10862,35 @@ mod tests {
             threshold: 5.0,
         });
 
-        let report = backend.explain_root_cause("lock_wait").expect("explain_root_cause");
-        assert!(report.likely_causes.iter().any(|c| c.cause_type == CauseType::LockContention),
-            "lock_wait rule should return LockContention cause");
+        let report = backend
+            .explain_root_cause("lock_wait")
+            .expect("explain_root_cause");
+        assert!(
+            report
+                .likely_causes
+                .iter()
+                .any(|c| c.cause_type == CauseType::LockContention),
+            "lock_wait rule should return LockContention cause"
+        );
         // 主根因置信度应较高（>= 0.8）
-        let lock_cause = report.likely_causes.iter()
+        let lock_cause = report
+            .likely_causes
+            .iter()
             .find(|c| c.cause_type == CauseType::LockContention)
             .expect("should have LockContention cause");
-        assert!(lock_cause.confidence >= 0.8, "LockContention confidence should be >= 0.8, got {}", lock_cause.confidence);
+        assert!(
+            lock_cause.confidence >= 0.8,
+            "LockContention confidence should be >= 0.8, got {}",
+            lock_cause.confidence
+        );
         // 应有 wait_events_lock 证据
-        assert!(report.evidence.iter().any(|e| e.source == "wait_events_lock"),
-            "should have wait_events_lock evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "wait_events_lock"),
+            "should have wait_events_lock evidence"
+        );
     }
 
     #[test]
@@ -10559,11 +10904,15 @@ mod tests {
                 total_wait_ms: 5000,
             },
         );
-        backend.stats.borrow_mut().deadlock_history.push(DeadlockRecord {
-            timestamp: 1000,
-            txn_ids: vec![1, 2],
-            resource: "table:t1".to_string(),
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .deadlock_history
+            .push(DeadlockRecord {
+                timestamp: 1000,
+                txn_ids: vec![1, 2],
+                resource: "table:t1".to_string(),
+            });
         backend.stats.borrow_mut().alerts.push(AlertInfo {
             level: "critical".to_string(),
             rule_id: "lock_wait".to_string(),
@@ -10573,14 +10922,31 @@ mod tests {
             threshold: 5.0,
         });
 
-        let report = backend.explain_root_cause("lock_wait").expect("explain_root_cause");
-        assert!(report.likely_causes.iter().any(|c| c.cause_type == CauseType::LockContention),
-            "should have LockContention cause");
-        assert!(report.likely_causes.iter().any(|c| c.cause_type == CauseType::Deadlock),
-            "should have Deadlock cause when deadlock_history is non-empty");
+        let report = backend
+            .explain_root_cause("lock_wait")
+            .expect("explain_root_cause");
+        assert!(
+            report
+                .likely_causes
+                .iter()
+                .any(|c| c.cause_type == CauseType::LockContention),
+            "should have LockContention cause"
+        );
+        assert!(
+            report
+                .likely_causes
+                .iter()
+                .any(|c| c.cause_type == CauseType::Deadlock),
+            "should have Deadlock cause when deadlock_history is non-empty"
+        );
         // 应有 deadlock_history 证据
-        assert!(report.evidence.iter().any(|e| e.source == "deadlock_history"),
-            "should have deadlock_history evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "deadlock_history"),
+            "should have deadlock_history evidence"
+        );
     }
 
     #[test]
@@ -10610,11 +10976,20 @@ mod tests {
             threshold: 5.0,
         });
 
-        let report = backend.explain_root_cause("lock_wait").expect("explain_root_cause");
-        assert!(report.likely_causes.iter().any(|c| c.cause_type == CauseType::MissingIndex),
-            "should have MissingIndex cause when slow query exists");
-        assert!(report.evidence.iter().any(|e| e.source == "slow_query"),
-            "should have slow_query evidence");
+        let report = backend
+            .explain_root_cause("lock_wait")
+            .expect("explain_root_cause");
+        assert!(
+            report
+                .likely_causes
+                .iter()
+                .any(|c| c.cause_type == CauseType::MissingIndex),
+            "should have MissingIndex cause when slow query exists"
+        );
+        assert!(
+            report.evidence.iter().any(|e| e.source == "slow_query"),
+            "should have slow_query evidence"
+        );
     }
 
     #[test]
@@ -10644,9 +11019,16 @@ mod tests {
             threshold: 5.0,
         });
 
-        let report = backend.explain_root_cause("lock_wait").expect("explain_root_cause");
-        assert!(report.evidence.iter().any(|e| e.source == "active_locks_pending"),
-            "should have active_locks_pending evidence");
+        let report = backend
+            .explain_root_cause("lock_wait")
+            .expect("explain_root_cause");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "active_locks_pending"),
+            "should have active_locks_pending evidence"
+        );
     }
 
     #[test]
@@ -10661,16 +11043,20 @@ mod tests {
         });
         backend.stats.borrow_mut().slow_query_threshold_ms = 1000;
         // 注入有 wait_event 的活动事务
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 1,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "UPDATE t SET x = 1".to_string(),
-            wait_event: Some("Lock:txn".to_string()),
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 1,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "UPDATE t SET x = 1".to_string(),
+                wait_event: Some("Lock:txn".to_string()),
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         // 注入未授予的活动锁
         backend.stats.borrow_mut().active_locks.push(LockInfo {
             txn_id: 1,
@@ -10688,24 +11074,40 @@ mod tests {
             threshold: 1000.0,
         });
 
-        let report = backend.explain_root_cause("slow_query").expect("explain_root_cause");
+        let report = backend
+            .explain_root_cause("slow_query")
+            .expect("explain_root_cause");
         // 应有活动事务证据
-        assert!(report.evidence.iter().any(|e| e.source == "active_transactions"),
-            "slow_query should have active_transactions evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "active_transactions"),
+            "slow_query should have active_transactions evidence"
+        );
         // 应有活动锁证据
-        assert!(report.evidence.iter().any(|e| e.source == "active_locks_pending"),
-            "slow_query should have active_locks_pending evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "active_locks_pending"),
+            "slow_query should have active_locks_pending evidence"
+        );
     }
 
     #[test]
     fn test_p3_root_cause_deadlock_evidence_chain_enhanced() {
         // deadlock 规则的证据链应包含等待事件和活动事务证据
         let backend = ExecutorBackend::new();
-        backend.stats.borrow_mut().deadlock_history.push(DeadlockRecord {
-            timestamp: 1000,
-            txn_ids: vec![1, 2],
-            resource: "table:t1".to_string(),
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .deadlock_history
+            .push(DeadlockRecord {
+                timestamp: 1000,
+                txn_ids: vec![1, 2],
+                resource: "table:t1".to_string(),
+            });
         backend.stats.borrow_mut().wait_events.insert(
             "Lock:txn".to_string(),
             WaitEventAggr {
@@ -10714,16 +11116,20 @@ mod tests {
             },
         );
         // 注入参与死锁的活动事务
-        backend.stats.borrow_mut().active_transactions.push(TransactionInfo {
-            txn_id: 1,
-            state: "active".to_string(),
-            started_at: 1000,
-            sql: "UPDATE t1 SET x = 1 WHERE id = 1".to_string(),
-            wait_event: Some("Lock:txn".to_string()),
-            isolation: None,
-            snapshot_active_count: None,
-            snapshot_xmax: None,
-        });
+        backend
+            .stats
+            .borrow_mut()
+            .active_transactions
+            .push(TransactionInfo {
+                txn_id: 1,
+                state: "active".to_string(),
+                started_at: 1000,
+                sql: "UPDATE t1 SET x = 1 WHERE id = 1".to_string(),
+                wait_event: Some("Lock:txn".to_string()),
+                isolation: None,
+                snapshot_active_count: None,
+                snapshot_xmax: None,
+            });
         backend.stats.borrow_mut().alerts.push(AlertInfo {
             level: "critical".to_string(),
             rule_id: "deadlock".to_string(),
@@ -10733,13 +11139,22 @@ mod tests {
             threshold: 0.0,
         });
 
-        let report = backend.explain_root_cause("deadlock").expect("explain_root_cause");
+        let report = backend
+            .explain_root_cause("deadlock")
+            .expect("explain_root_cause");
         // 应有 wait_events 证据
-        assert!(report.evidence.iter().any(|e| e.source == "wait_events"),
-            "deadlock should have wait_events evidence");
+        assert!(
+            report.evidence.iter().any(|e| e.source == "wait_events"),
+            "deadlock should have wait_events evidence"
+        );
         // 应有活动事务证据（包含参与死锁的事务）
-        assert!(report.evidence.iter().any(|e| e.source == "active_transactions"),
-            "deadlock should have active_transactions evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "active_transactions"),
+            "deadlock should have active_transactions evidence"
+        );
     }
 
     #[test]
@@ -10763,10 +11178,17 @@ mod tests {
             threshold: 100.0,
         });
 
-        let report = backend.explain_root_cause("high_qps").expect("explain_root_cause");
+        let report = backend
+            .explain_root_cause("high_qps")
+            .expect("explain_root_cause");
         // 应有 query_aggr_top_qps 证据
-        assert!(report.evidence.iter().any(|e| e.source == "query_aggr_top_qps"),
-            "high_qps should have query_aggr_top_qps evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "query_aggr_top_qps"),
+            "high_qps should have query_aggr_top_qps evidence"
+        );
     }
 
     #[test]
@@ -10796,13 +11218,22 @@ mod tests {
             threshold: 0.0,
         });
 
-        let report = backend.explain_root_cause("full_table_scan").expect("explain_root_cause");
+        let report = backend
+            .explain_root_cause("full_table_scan")
+            .expect("explain_root_cause");
         // 应有 wait_events 证据
-        assert!(report.evidence.iter().any(|e| e.source == "wait_events"),
-            "full_table_scan should have wait_events evidence");
+        assert!(
+            report.evidence.iter().any(|e| e.source == "wait_events"),
+            "full_table_scan should have wait_events evidence"
+        );
         // 应有 active_locks_pending 证据
-        assert!(report.evidence.iter().any(|e| e.source == "active_locks_pending"),
-            "full_table_scan should have active_locks_pending evidence");
+        assert!(
+            report
+                .evidence
+                .iter()
+                .any(|e| e.source == "active_locks_pending"),
+            "full_table_scan should have active_locks_pending evidence"
+        );
     }
 
     #[test]
@@ -10814,7 +11245,11 @@ mod tests {
             confidence: 0.5,
         };
         let json = serde_json::to_string(&cause).expect("serialize");
-        assert!(json.contains("ResourceContention"), "serialized JSON should contain ResourceContention: {}", json);
+        assert!(
+            json.contains("ResourceContention"),
+            "serialized JSON should contain ResourceContention: {}",
+            json
+        );
         // 反序列化
         let deserialized: CauseEntry = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized.cause_type, CauseType::ResourceContention);
@@ -10825,7 +11260,10 @@ mod tests {
         // 不存在的 alert_id 应返回错误
         let backend = ExecutorBackend::new();
         let result = backend.explain_root_cause("nonexistent_alert");
-        assert!(result.is_err(), "explain_root_cause should error for non-existent alert");
+        assert!(
+            result.is_err(),
+            "explain_root_cause should error for non-existent alert"
+        );
     }
 
     #[test]
@@ -10871,10 +11309,16 @@ mod tests {
             })),
         };
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "execute_sql should succeed via server");
+        assert!(
+            resp.error.is_none(),
+            "execute_sql should succeed via server"
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("alice"), "response should contain data, got: {text}");
+        assert!(
+            text.contains("alice"),
+            "response should contain data, got: {text}"
+        );
     }
 
     #[test]
@@ -10896,10 +11340,16 @@ mod tests {
             })),
         };
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "explain_query should succeed via server");
+        assert!(
+            resp.error.is_none(),
+            "explain_query should succeed via server"
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("SeqScan"), "response should contain SeqScan, got: {text}");
+        assert!(
+            text.contains("SeqScan"),
+            "response should contain SeqScan, got: {text}"
+        );
     }
 
     // =================================================================
@@ -10924,18 +11374,15 @@ mod tests {
         std::sync::Arc<szrsql_cdc::CdcEngine>,
         std::sync::Arc<szrsql_cdc::schema::SchemaRegistry>,
     ) {
+        use std::sync::Arc;
         use szrsql_cdc::schema::{ColumnDef, DataType, SchemaRegistry};
         use szrsql_cdc::slot::SlotManager;
         use szrsql_cdc::task::ReplicationTaskManager;
         use szrsql_cdc::{CdcEngine, CdcObserverManager};
-        use std::sync::Arc;
 
         // 1. 构造 CDC 组件
         let observer_mgr = Arc::new(CdcObserverManager::new());
-        let cdc_engine = Arc::new(CdcEngine::with_timestamp_fn(
-            observer_mgr,
-            Box::new(|| 0),
-        ));
+        let cdc_engine = Arc::new(CdcEngine::with_timestamp_fn(observer_mgr, Box::new(|| 0)));
         let slot_mgr = Arc::new(SlotManager::in_memory());
         let registry = Arc::new(SchemaRegistry::new());
         let decoder = Arc::new(szrsql_cdc::decoder::RowDecoder::new(registry.clone()));
@@ -10968,7 +11415,11 @@ mod tests {
     }
 
     /// 构造 JSON-RPC tools/call 请求
-    fn make_tools_call_request(id: i64, tool_name: &str, arguments: serde_json::Value) -> JsonRpcRequest {
+    fn make_tools_call_request(
+        id: i64,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> JsonRpcRequest {
         JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(json!(id)),
@@ -10997,17 +11448,26 @@ mod tests {
             }),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_some(), "create_replication_task without manager should error");
+        assert!(
+            resp.error.is_some(),
+            "create_replication_task without manager should error"
+        );
 
         // list_replication_tasks 应返回错误
         let req = make_tools_call_request(2, "list_replication_tasks", json!({}));
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_some(), "list_replication_tasks without manager should error");
+        assert!(
+            resp.error.is_some(),
+            "list_replication_tasks without manager should error"
+        );
 
         // replication_manager_stats 应返回错误
         let req = make_tools_call_request(3, "replication_manager_stats", json!({}));
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_some(), "replication_manager_stats without manager should error");
+        assert!(
+            resp.error.is_some(),
+            "replication_manager_stats without manager should error"
+        );
     }
 
     /// 测试 2：完整生命周期 — create → list → monitor → stop → stats
@@ -11030,20 +11490,40 @@ mod tests {
             }),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "create_replication_task should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "create_replication_task should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("rep_e2e_1"), "result should contain task_id, got: {text}");
-        assert!(text.contains("\"created\": true"), "result should have created=true, got: {text}");
-        assert!(text.contains("\"state\": \"running\""), "task should be running, got: {text}");
+        assert!(
+            text.contains("rep_e2e_1"),
+            "result should contain task_id, got: {text}"
+        );
+        assert!(
+            text.contains("\"created\": true"),
+            "result should have created=true, got: {text}"
+        );
+        assert!(
+            text.contains("\"state\": \"running\""),
+            "task should be running, got: {text}"
+        );
 
         // 2. list_replication_tasks
         let req = make_tools_call_request(2, "list_replication_tasks", json!({}));
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "list_replication_tasks should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "list_replication_tasks should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("rep_e2e_1"), "list should contain task_id, got: {text}");
+        assert!(
+            text.contains("rep_e2e_1"),
+            "list should contain task_id, got: {text}"
+        );
 
         // 3. monitor_replication_task
         let req = make_tools_call_request(
@@ -11052,33 +11532,60 @@ mod tests {
             json!({"task_id": "rep_e2e_1"}),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "monitor_replication_task should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "monitor_replication_task should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("rep_e2e_1"), "monitor should contain task_id, got: {text}");
-        assert!(text.contains("\"state\": \"running\""), "monitor should show running state, got: {text}");
+        assert!(
+            text.contains("rep_e2e_1"),
+            "monitor should contain task_id, got: {text}"
+        );
+        assert!(
+            text.contains("\"state\": \"running\""),
+            "monitor should show running state, got: {text}"
+        );
 
         // 4. stop_replication_task
-        let req = make_tools_call_request(
-            4,
-            "stop_replication_task",
-            json!({"task_id": "rep_e2e_1"}),
-        );
+        let req =
+            make_tools_call_request(4, "stop_replication_task", json!({"task_id": "rep_e2e_1"}));
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "stop_replication_task should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "stop_replication_task should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("\"stopped\": true"), "stop result should have stopped=true, got: {text}");
-        assert!(text.contains("\"state\": \"stopped\""), "task state should be stopped, got: {text}");
+        assert!(
+            text.contains("\"stopped\": true"),
+            "stop result should have stopped=true, got: {text}"
+        );
+        assert!(
+            text.contains("\"state\": \"stopped\""),
+            "task state should be stopped, got: {text}"
+        );
 
         // 5. replication_manager_stats
         let req = make_tools_call_request(5, "replication_manager_stats", json!({}));
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "replication_manager_stats should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "replication_manager_stats should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("\"total_tasks\": 1"), "stats should show 1 total task, got: {text}");
-        assert!(text.contains("\"total_created\": 1"), "stats should show 1 created, got: {text}");
+        assert!(
+            text.contains("\"total_tasks\": 1"),
+            "stats should show 1 total task, got: {text}"
+        );
+        assert!(
+            text.contains("\"total_created\": 1"),
+            "stats should show 1 created, got: {text}"
+        );
     }
 
     /// 测试 3：create_replication_task 参数验证 — 缺少必填参数应失败
@@ -11127,7 +11634,10 @@ mod tests {
             json!({"task_id": "nonexistent_task"}),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_some(), "monitor nonexistent task should error");
+        assert!(
+            resp.error.is_some(),
+            "monitor nonexistent task should error"
+        );
     }
 
     /// 测试 5：stop_replication_task 查询不存在的任务应失败
@@ -11199,7 +11709,11 @@ mod tests {
             }),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "create with table_filter should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "create with table_filter should succeed: {:?}",
+            resp.error
+        );
 
         // 验证 monitor 返回的 table_filter 字段
         let req = make_tools_call_request(
@@ -11211,8 +11725,14 @@ mod tests {
         assert!(resp.error.is_none(), "monitor should succeed");
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("users"), "table_filter should contain users, got: {text}");
-        assert!(text.contains("orders"), "table_filter should contain orders, got: {text}");
+        assert!(
+            text.contains("users"),
+            "table_filter should contain users, got: {text}"
+        );
+        assert!(
+            text.contains("orders"),
+            "table_filter should contain orders, got: {text}"
+        );
     }
 
     /// 测试 8：Kafka 目标端类型创建（使用 MockKafkaProducer）
@@ -11233,10 +11753,17 @@ mod tests {
             }),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_none(), "create kafka target should succeed: {:?}", resp.error);
+        assert!(
+            resp.error.is_none(),
+            "create kafka target should succeed: {:?}",
+            resp.error
+        );
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("\"created\": true"), "kafka task should be created, got: {text}");
+        assert!(
+            text.contains("\"created\": true"),
+            "kafka task should be created, got: {text}"
+        );
     }
 
     /// 测试 9：不支持的目标类型应失败
@@ -11302,9 +11829,18 @@ mod tests {
         assert!(resp.error.is_none(), "list should succeed");
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("rep_multi_1"), "list should contain rep_multi_1");
-        assert!(text.contains("rep_multi_2"), "list should contain rep_multi_2");
-        assert!(text.contains("rep_multi_3"), "list should contain rep_multi_3");
+        assert!(
+            text.contains("rep_multi_1"),
+            "list should contain rep_multi_1"
+        );
+        assert!(
+            text.contains("rep_multi_2"),
+            "list should contain rep_multi_2"
+        );
+        assert!(
+            text.contains("rep_multi_3"),
+            "list should contain rep_multi_3"
+        );
 
         // stats 应显示 total_tasks=3
         let req = make_tools_call_request(11, "replication_manager_stats", json!({}));
@@ -11312,8 +11848,14 @@ mod tests {
         assert!(resp.error.is_none(), "stats should succeed");
         let result = resp.result.expect("result should be present");
         let text = result["content"][0]["text"].as_str().expect("text content");
-        assert!(text.contains("\"total_tasks\": 3"), "stats should show 3 tasks, got: {text}");
-        assert!(text.contains("\"running_tasks\": 3"), "stats should show 3 running, got: {text}");
+        assert!(
+            text.contains("\"total_tasks\": 3"),
+            "stats should show 3 tasks, got: {text}"
+        );
+        assert!(
+            text.contains("\"running_tasks\": 3"),
+            "stats should show 3 running, got: {text}"
+        );
     }
 
     /// 测试 12：monitor_replication_task 缺少 task_id 参数应失败
@@ -11412,9 +11954,7 @@ mod tests {
             }
             if std::time::Instant::now() > deadline {
                 let last = monitor_req().unwrap_or_default();
-                panic!(
-                    "timeout waiting for CDC event processing, got: {last}"
-                );
+                panic!("timeout waiting for CDC event processing, got: {last}");
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
@@ -11481,6 +12021,9 @@ mod tests {
             json!({"task_id": "rep_stop_twice"}),
         );
         let resp = server.handle_request(&req);
-        assert!(resp.error.is_some(), "second stop should error (already stopped)");
+        assert!(
+            resp.error.is_some(),
+            "second stop should error (already stopped)"
+        );
     }
 }

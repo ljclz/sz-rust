@@ -41,7 +41,9 @@ use crate::wal::{WalError, WalOpType, WalReader, WalRecord, WalWriter};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 
 // =====================================================================
 // XorShift64 — 固定种子 PRNG（与 isolation_fuzz / jepsen_* 同风格）
@@ -223,13 +225,13 @@ impl KvStore {
     /// 获取 row 的行锁（不存在则创建）
     fn get_row_lock(&self, row_id: i64) -> Arc<Mutex<()>> {
         {
-            let map = self.row_locks.read().unwrap();
+            let map = self.row_locks.read();
             if let Some(arc) = map.get(&row_id) {
                 return Arc::clone(arc);
             }
         }
         // 双检锁
-        let mut map = self.row_locks.write().unwrap();
+        let mut map = self.row_locks.write();
         map.entry(row_id)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
@@ -237,17 +239,17 @@ impl KvStore {
 
     /// 读取 row 的当前值（不存在返回 None）
     fn read(&self, row_id: i64) -> Option<i64> {
-        self.data.read().unwrap().get(&row_id).copied()
+        self.data.read().get(&row_id).copied()
     }
 
     /// 当前 row 数量
     fn len(&self) -> usize {
-        self.data.read().unwrap().len()
+        self.data.read().len()
     }
 
     /// 是否为空
     fn is_empty(&self) -> bool {
-        self.data.read().unwrap().is_empty()
+        self.data.read().is_empty()
     }
 
     /// MVCC 事务 INSERT：行不存在时插入
@@ -259,7 +261,7 @@ impl KvStore {
     /// 4. commit 成功 → 写 WAL(Insert, row_id, value) + 应用内存
     fn insert(&self, mgr: &MvccManager, row_id: i64, value: i64) -> Result<(), KvError> {
         let lock = self.get_row_lock(row_id);
-        let _guard = lock.lock().unwrap();
+        let _guard = lock.lock();
 
         // 检查行不存在
         if self.read(row_id).is_some() {
@@ -285,7 +287,7 @@ impl KvStore {
                     wal.append(record)?;
                 }
                 // 应用到内存
-                self.data.write().unwrap().insert(row_id, value);
+                self.data.write().insert(row_id, value);
                 self.commit_count.fetch_add(1, Ordering::SeqCst);
                 self.insert_count.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -300,7 +302,7 @@ impl KvStore {
     /// MVCC 事务 UPDATE：行存在时修改
     fn update(&self, mgr: &MvccManager, row_id: i64, value: i64) -> Result<(), KvError> {
         let lock = self.get_row_lock(row_id);
-        let _guard = lock.lock().unwrap();
+        let _guard = lock.lock();
 
         // 检查行存在
         if self.read(row_id).is_none() {
@@ -325,7 +327,7 @@ impl KvStore {
                     );
                     wal.append(record)?;
                 }
-                self.data.write().unwrap().insert(row_id, value);
+                self.data.write().insert(row_id, value);
                 self.commit_count.fetch_add(1, Ordering::SeqCst);
                 self.update_count.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -340,7 +342,7 @@ impl KvStore {
     /// MVCC 事务 DELETE：行存在时删除
     fn delete(&self, mgr: &MvccManager, row_id: i64) -> Result<(), KvError> {
         let lock = self.get_row_lock(row_id);
-        let _guard = lock.lock().unwrap();
+        let _guard = lock.lock();
 
         // 检查行存在
         if self.read(row_id).is_none() {
@@ -365,7 +367,7 @@ impl KvStore {
                     );
                     wal.append(record)?;
                 }
-                self.data.write().unwrap().remove(&row_id);
+                self.data.write().remove(&row_id);
                 self.commit_count.fetch_add(1, Ordering::SeqCst);
                 self.delete_count.fetch_add(1, Ordering::SeqCst);
                 Ok(())
@@ -471,7 +473,7 @@ impl KvStore {
 
     /// 快照：返回当前所有 row 的 (row_id, value) 排序后 Vec
     fn to_sorted_vec(&self) -> Vec<(i64, i64)> {
-        let data = self.data.read().unwrap();
+        let data = self.data.read();
         let mut v: Vec<(i64, i64)> = data.iter().map(|(k, v)| (*k, *v)).collect();
         v.sort_unstable_by_key(|(k, _)| *k);
         v

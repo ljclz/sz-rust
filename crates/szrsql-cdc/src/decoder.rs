@@ -27,9 +27,11 @@
 //!    退化为"原始字节"，返回 `Value::Blob`，不阻断 CDC 流。
 
 use crate::schema::{ColumnDef, DataType, SchemaRegistry, TableSchema};
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use szrsql_types::value::Value as SzValue;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 
 // =====================================================================
 // 解码错误
@@ -82,10 +84,7 @@ impl DecodedRow {
 
     /// 按列名查找列值
     pub fn get(&self, name: &str) -> Option<&SzValue> {
-        self.columns
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
+        self.columns.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
 
     /// 转为 JSON 对象（列名 → 列值）
@@ -141,7 +140,7 @@ impl RowDecoder {
         // 快速路径：缓存命中且版本匹配
         if let Some(version) = version {
             {
-                let cache = self.cache.read().unwrap();
+                let cache = self.cache.read();
                 if let Some((cached_version, schema)) = cache.get(&table_id) {
                     if *cached_version == version {
                         return Ok(schema.clone());
@@ -153,13 +152,13 @@ impl RowDecoder {
                 .schema_registry
                 .get_schema(table_id)
                 .ok_or(DecodeError::SchemaNotFound(table_id))?;
-            let mut cache = self.cache.write().unwrap();
+            let mut cache = self.cache.write();
             cache.insert(table_id, (version, schema.clone()));
             return Ok(schema);
         }
         // version = None：用缓存或首次加载
         {
-            let cache = self.cache.read().unwrap();
+            let cache = self.cache.read();
             if let Some((_, schema)) = cache.get(&table_id) {
                 return Ok(schema.clone());
             }
@@ -168,7 +167,7 @@ impl RowDecoder {
             .schema_registry
             .get_schema(table_id)
             .ok_or(DecodeError::SchemaNotFound(table_id))?;
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write();
         cache.insert(table_id, (schema.version, schema.clone()));
         Ok(schema)
     }
@@ -234,13 +233,13 @@ impl RowDecoder {
 
     /// 清空 schema 缓存（schema 大量变更时调用）
     pub fn invalidate_cache(&self) {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write();
         cache.clear();
     }
 
     /// 缓存大小（监控用）
     pub fn cache_size(&self) -> usize {
-        self.cache.read().unwrap().len()
+        self.cache.read().len()
     }
 }
 
@@ -351,10 +350,7 @@ fn decode_value_by_type(data_type: DataType, bytes: &[u8]) -> Result<SzValue, De
         }
         DataType::Bool => {
             if bytes.is_empty() {
-                return Err(DecodeError::Truncated {
-                    need: 1,
-                    have: 0,
-                });
+                return Err(DecodeError::Truncated { need: 1, have: 0 });
             }
             Ok(SzValue::Bool(bytes[0] != 0))
         }
@@ -430,7 +426,11 @@ fn serialize_value(value: &SzValue) -> Vec<u8> {
         SzValue::Float64(v) => v.to_be_bytes().to_vec(),
         SzValue::Text(s) => s.as_bytes().to_vec(),
         SzValue::Blob(b) => b.clone(),
-        SzValue::Bool(b) => vec![if *b { 1 } else { 0 }],
+        SzValue::Bool(b) => vec![if *b {
+            1
+        } else {
+            0
+        }],
         SzValue::Date(d) => d.to_be_bytes().to_vec(),
         SzValue::Timestamp(t) => t.to_be_bytes().to_vec(),
         SzValue::Decimal(_, _) => Vec::new(),
@@ -467,9 +467,7 @@ pub fn value_to_json(value: &SzValue) -> serde_json::Value {
         SzValue::Decimal(v, scale) => {
             serde_json::json!({"unscaled": v.to_string(), "scale": scale})
         }
-        SzValue::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(value_to_json).collect())
-        }
+        SzValue::Array(arr) => serde_json::Value::Array(arr.iter().map(value_to_json).collect()),
         SzValue::Enum(s) => serde_json::Value::String(s.clone()),
         SzValue::Range(_) => serde_json::Value::Null,
         SzValue::Json(v) => v.clone(),
@@ -484,8 +482,16 @@ fn base64_encode(bytes: &[u8]) -> String {
     let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let b1 = if chunk.len() > 1 {
+            chunk[1] as u32
+        } else {
+            0
+        };
+        let b2 = if chunk.len() > 2 {
+            chunk[2] as u32
+        } else {
+            0
+        };
         let triple = (b0 << 16) | (b1 << 8) | b2;
         result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
         result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
@@ -554,7 +560,11 @@ mod tests {
     fn encode_bool(b: bool) -> Vec<u8> {
         let mut buf = vec![0x00];
         buf.extend_from_slice(&1u32.to_be_bytes());
-        buf.push(if b { 1 } else { 0 });
+        buf.push(if b {
+            1
+        } else {
+            0
+        });
         buf
     }
 
@@ -625,7 +635,10 @@ mod tests {
         let decoder = RowDecoder::new(registry);
 
         let result = decoder.decode(999, &[0x00], Some(1));
-        assert!(matches!(result.unwrap_err(), DecodeError::SchemaNotFound(999)));
+        assert!(matches!(
+            result.unwrap_err(),
+            DecodeError::SchemaNotFound(999)
+        ));
     }
 
     #[test]

@@ -46,7 +46,9 @@ pub mod startup;
 pub mod system_tables;
 pub mod tls;
 
-pub use auth::{AuthError, AuthMode, ScramServerSession};
+/// P2-14：会话取消注册表类型别名（HTTP 管理端点 + pgwire 会话共享）
+pub use crate::http::CancelRegistry;
+pub use auth::{AuthError, AuthMode, ScramServerSession, SharedScramCredentials};
 pub use crash::{install_crash_handler, CrashConfig};
 pub use daemon::{daemonize, DaemonError, PidFile, PidFileError};
 pub use dirty_tracker::DirtyTableTracker;
@@ -58,7 +60,7 @@ pub use session::{
     ExecutorService, ExtendedExecuteResult, ExtendedPreparedStatement, Portal, PortalDescription,
     QueryResult, ResultColumn, SessionError, StatementDescription, TransactionState,
 };
+pub use startup::{StartupError, StartupMessage, StartupParams, PROTOCOL_VERSION_3_0};
 /// ADV-CONC-1：re-export InMemoryTable，供 MySQL/TDS/Oracle 协议共享表存储使用
 pub use szrsql_sql::executor::InMemoryTable;
-pub use startup::{StartupError, StartupMessage, StartupParams, PROTOCOL_VERSION_3_0};
 pub use tls::{TlsConfig, TlsError};

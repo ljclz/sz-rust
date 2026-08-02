@@ -21,8 +21,8 @@
 
 #![allow(clippy::approx_constant)]
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -47,8 +47,7 @@ fn test_data_dir() -> std::path::PathBuf {
 fn unique_wal_path(prefix: &str) -> std::path::PathBuf {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let tid = thread::current()
-        .id();
+    let tid = thread::current().id();
     test_data_dir().join(format!("{prefix}_adversarial_{tid:?}_{n}.wal"))
 }
 
@@ -274,7 +273,10 @@ fn test_adv_con_005_write_skew_under_si() {
     // SI 下写偏斜允许（两者都成功），Serializable 下应检测到
     // 这里验证 SI 的行为：两者都成功
     assert!(r1.is_ok(), "T1 should commit under SI: {r1:?}");
-    assert!(r2.is_ok(), "T2 should commit under SI (write skew allowed): {r2:?}");
+    assert!(
+        r2.is_ok(),
+        "T2 should commit under SI (write skew allowed): {r2:?}"
+    );
 }
 
 #[test]
@@ -318,7 +320,8 @@ fn test_adv_con_006_mvcc_gc_vs_active_txn() {
     // T2-T101 提交 100 个事务
     for i in 2..102 {
         let txn = mgr.begin();
-        mgr.register_write(txn.txn_id, format!("users:{i}")).unwrap();
+        mgr.register_write(txn.txn_id, format!("users:{i}"))
+            .unwrap();
         mgr.commit(txn.txn_id, 1000 + i as u64).unwrap();
     }
 
@@ -367,7 +370,10 @@ fn test_adv_con_009_shared_state_concurrent_access() {
                 mgr_clone
                     .register_write(txn.txn_id, format!("t{tid}:k{i}"))
                     .unwrap();
-                if mgr_clone.commit(txn.txn_id, 1000 + tid as u64 * 100 + i as u64).is_ok() {
+                if mgr_clone
+                    .commit(txn.txn_id, 1000 + tid as u64 * 100 + i as u64)
+                    .is_ok()
+                {
                     commit_count += 1;
                 }
             }
@@ -444,7 +450,10 @@ fn test_adv_con_010b_lock_upgrade_with_conflict() {
     // T2 释放后，T1 应能升级
     lock_mgr.unlock(2, 100);
     let result = lock_mgr.upgrade(1, 100, Duration::from_millis(200));
-    assert!(result.is_ok(), "T1 should upgrade after T2 releases: {result:?}");
+    assert!(
+        result.is_ok(),
+        "T1 should upgrade after T2 releases: {result:?}"
+    );
 }
 
 // =====================================================================
@@ -472,7 +481,11 @@ fn test_adv_mem_007_buffer_pool_eviction() {
 
     // 访问 page 4，应淘汰 LRU 页（page 0）
     let _page = pool.read_page(4).expect("read page 4");
-    assert_eq!(pool.total_len(), 4, "pool size should remain 4 after eviction");
+    assert_eq!(
+        pool.total_len(),
+        4,
+        "pool size should remain 4 after eviction"
+    );
 
     let stats = pool.stats();
     assert!(
@@ -597,11 +610,7 @@ fn test_adv_dat_001_rollback_restores_state() {
 
     // 回滚
     let restore_ops = undo.rollback_txn(txn_id).expect("rollback");
-    assert_eq!(
-        restore_ops.len(),
-        2,
-        "rollback should return 2 restore ops"
-    );
+    assert_eq!(restore_ops.len(), 2, "rollback should return 2 restore ops");
 
     // 验证事务状态为 aborted
     assert_eq!(
@@ -617,7 +626,8 @@ fn test_adv_dat_001b_rollback_after_commit_fails() {
     let undo = UndoManager::new();
 
     let txn_id = 200;
-    undo.record_insert(txn_id, "users:1", b"data".to_vec()).unwrap();
+    undo.record_insert(txn_id, "users:1", b"data".to_vec())
+        .unwrap();
     undo.commit_txn(txn_id).unwrap();
 
     let result = undo.rollback_txn(txn_id);
@@ -660,11 +670,7 @@ fn test_adv_dat_002_wal_crash_recovery() {
 
     // 重新打开并回放
     let records = WalReplayer::replay_all(&wal_path).expect("replay WAL");
-    assert_eq!(
-        records.len(),
-        5,
-        "should recover 5 records after crash"
-    );
+    assert_eq!(records.len(), 5, "should recover 5 records after crash");
 
     for (i, record) in records.iter().enumerate() {
         assert_eq!(record.tx_id, i as u32, "tx_id mismatch at {i}");
@@ -776,7 +782,11 @@ fn test_adv_dat_002d_group_commit_persistence() {
 
     // 崩溃后回放
     let records = WalReplayer::replay_all(&wal_path).expect("replay");
-    assert_eq!(records.len(), 3, "should recover all 3 group-committed records");
+    assert_eq!(
+        records.len(),
+        3,
+        "should recover all 3 group-committed records"
+    );
 
     // 清理
     let _ = std::fs::remove_file(&wal_path);
@@ -833,10 +843,7 @@ fn test_adv_con_006c_force_vacuum_for_wraparound() {
 
     let mgr = MvccManager::new();
     let report = scheduler.force_vacuum_all(100_000, &mgr);
-    assert!(
-        report.forced_vacuum,
-        "report should indicate forced vacuum"
-    );
+    assert!(report.forced_vacuum, "report should indicate forced vacuum");
 }
 
 // =====================================================================
@@ -859,7 +866,8 @@ fn test_adv_con_009b_concurrent_lock_manager() {
         handles.push(thread::spawn(move || {
             for rid in 0..10u64 {
                 // 尝试加 X 锁，超时 100ms
-                let result = mgr_clone.lock(tid, rid, LockMode::Exclusive, Duration::from_millis(100));
+                let result =
+                    mgr_clone.lock(tid, rid, LockMode::Exclusive, Duration::from_millis(100));
                 if result.is_ok() {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                     // 模拟工作
@@ -876,10 +884,7 @@ fn test_adv_con_009b_concurrent_lock_manager() {
 
     // 至少一些加锁应成功（可能因冲突失败，但不应 panic）
     let total = success_count.load(Ordering::SeqCst);
-    assert!(
-        total > 0,
-        "at least some locks should succeed: {total}"
-    );
+    assert!(total > 0, "at least some locks should succeed: {total}");
 }
 
 // =====================================================================
@@ -919,8 +924,8 @@ fn test_adv_mem_008c_long_txn_does_not_block_xid_alloc() {
 #[test]
 fn test_adv_dat_002e_wal_observer_notification() {
     // ADV-DAT-002 (补充)：WAL Observer 应在提交时收到通知
-    use szrsql_tx::wal::{WalHookWriter, WalObserver, WalObserverManager};
     use std::sync::Mutex;
+    use szrsql_tx::wal::{WalHookWriter, WalObserver, WalObserverManager};
 
     struct CountingObserver {
         commit_count: Arc<Mutex<u32>>,
@@ -965,12 +970,20 @@ fn test_adv_dat_002e_wal_observer_notification() {
     let _ = hook_writer.fire_commit(100).expect("fire commit");
 
     // 验证 observer 被通知
-    assert_eq!(*commit_count.lock().unwrap(), 1, "observer should receive 1 commit");
+    assert_eq!(
+        *commit_count.lock().unwrap(),
+        1,
+        "observer should receive 1 commit"
+    );
     assert_eq!(*rollback_count.lock().unwrap(), 0, "no rollbacks");
 
     // fire rollback
     hook_writer.fire_rollback(200);
-    assert_eq!(*rollback_count.lock().unwrap(), 1, "observer should receive 1 rollback");
+    assert_eq!(
+        *rollback_count.lock().unwrap(),
+        1,
+        "observer should receive 1 rollback"
+    );
 
     // 清理
     let _ = std::fs::remove_file(&wal_path);

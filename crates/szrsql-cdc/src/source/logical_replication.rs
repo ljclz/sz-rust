@@ -63,11 +63,12 @@
 use crate::decoder::DecodedRow;
 use crate::schema::{ColumnDef, TableSchema};
 use crate::source::{SourceConfig, SourceConnector, SourceError, SourceEvent, SourceOffset};
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use szrsql_types::value::Value as SzValue;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 // Lsn — PG Log Sequence Number
@@ -372,9 +373,7 @@ impl TupleData {
             let value = match col_data {
                 ColumnData::Null => SzValue::Null,
                 ColumnData::Unchanged => SzValue::Null, // 未改变的列用 Null 表示（实际应从旧行取）
-                ColumnData::Value(bytes) => {
-                    parse_column_value(bytes, col_def.type_oid)?
-                }
+                ColumnData::Value(bytes) => parse_column_value(bytes, col_def.type_oid)?,
             };
             result.push((col_def.name.clone(), value));
         }
@@ -413,7 +412,12 @@ fn parse_column_value(bytes: &[u8], type_oid: u32) -> Result<SzValue, SourceErro
         OID_BOOL => match text {
             "t" => SzValue::Bool(true),
             "f" => SzValue::Bool(false),
-            _ => return Err(SourceError::Internal(format!("invalid bool value: {}", text))),
+            _ => {
+                return Err(SourceError::Internal(format!(
+                    "invalid bool value: {}",
+                    text
+                )))
+            }
         },
         OID_INT2 | OID_INT4 | OID_INT8 | OID_OID => {
             let v: i64 = text.parse().map_err(|e| {
@@ -445,9 +449,7 @@ fn parse_column_value(bytes: &[u8], type_oid: u32) -> Result<SzValue, SourceErro
         OID_TIMESTAMP | OID_TIMESTAMPTZ => {
             // 解析 PG timestamp text 格式
             let ts = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S%.6f")
-                .or_else(|_| {
-                    chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S")
-                })
+                .or_else(|_| chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S"))
                 .map_err(|e| {
                     SourceError::Internal(format!("parse timestamp '{}' failed: {}", text, e))
                 })?;
@@ -490,7 +492,10 @@ fn hex_digit(b: u8) -> Result<u8, SourceError> {
         b'0'..=b'9' => Ok(b - b'0'),
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(SourceError::Internal(format!("invalid hex digit: {}", b as char))),
+        _ => Err(SourceError::Internal(format!(
+            "invalid hex digit: {}",
+            b as char
+        ))),
     }
 }
 
@@ -534,8 +539,7 @@ impl LogicalReplicationParser {
             b'T' => Self::parse_truncate(payload).map(LogicalReplicationMessage::Truncate),
             _ => Err(SourceError::Internal(format!(
                 "unknown logical replication message type: 0x{:02X} ('{}')",
-                msg_type,
-                msg_type as char
+                msg_type, msg_type as char
             ))),
         }
     }
@@ -616,7 +620,11 @@ impl LogicalReplicationParser {
         for _ in 0..num_columns {
             // 每列：Int8(flags) String(name) Int32(type_oid) Int32(type_modifier)
             if data.len() < cursor + 1 {
-                return Err(truncated_error("Relation column flags", cursor + 1, data.len()));
+                return Err(truncated_error(
+                    "Relation column flags",
+                    cursor + 1,
+                    data.len(),
+                ));
             }
             let flags = data[cursor];
             cursor += 1;
@@ -625,7 +633,11 @@ impl LogicalReplicationParser {
             cursor += consumed;
 
             if data.len() < cursor + 8 {
-                return Err(truncated_error("Relation column type", cursor + 8, data.len()));
+                return Err(truncated_error(
+                    "Relation column type",
+                    cursor + 8,
+                    data.len(),
+                ));
             }
             let type_oid = read_u32_be(&data[cursor..cursor + 4]);
             cursor += 4;
@@ -708,9 +720,9 @@ impl LogicalReplicationParser {
                 } else {
                     // 没有 'N'，说明只有 key 列（无新元组）— 罕见情况
                     // 此时复用 old_tuple 作为 new_tuple
-                    new_tuple = old_tuple.clone().ok_or_else(|| {
-                        SourceError::Internal("Update: no new tuple".to_string())
-                    })?;
+                    new_tuple = old_tuple
+                        .clone()
+                        .ok_or_else(|| SourceError::Internal("Update: no new tuple".to_string()))?;
                 }
             }
             b'N' => {
@@ -790,7 +802,11 @@ impl LogicalReplicationParser {
 
         for _ in 0..num_columns {
             if data.len() < cursor + 2 {
-                return Err(truncated_error("TupleData column length", cursor + 2, data.len()));
+                return Err(truncated_error(
+                    "TupleData column length",
+                    cursor + 2,
+                    data.len(),
+                ));
             }
             let col_len = read_i16_be(&data[cursor..cursor + 2]);
             cursor += 2;
@@ -801,7 +817,11 @@ impl LogicalReplicationParser {
                 len if len >= 0 => {
                     let len = len as usize;
                     if data.len() < cursor + len {
-                        return Err(truncated_error("TupleData column value", cursor + len, data.len()));
+                        return Err(truncated_error(
+                            "TupleData column value",
+                            cursor + len,
+                            data.len(),
+                        ));
                     }
                     ColumnData::Value(data[cursor..cursor + len].to_vec())
                 }
@@ -812,7 +832,11 @@ impl LogicalReplicationParser {
                     )))
                 }
             };
-            cursor += if col_len >= 0 { col_len as usize } else { 0 };
+            cursor += if col_len >= 0 {
+                col_len as usize
+            } else {
+                0
+            };
             columns.push(col_data);
         }
 
@@ -856,9 +880,10 @@ fn read_i32_be(data: &[u8]) -> i32 {
 /// # 返回
 /// - `(String, consumed_bytes)`：字符串和消费的字节数（含 null 终止符）
 fn read_cstring(data: &[u8]) -> Result<(String, usize), SourceError> {
-    let null_pos = data.iter().position(|&b| b == 0).ok_or_else(|| {
-        SourceError::Internal("C string not null-terminated".to_string())
-    })?;
+    let null_pos = data
+        .iter()
+        .position(|&b| b == 0)
+        .ok_or_else(|| SourceError::Internal("C string not null-terminated".to_string()))?;
     let s = std::str::from_utf8(&data[..null_pos])
         .map_err(|e| SourceError::Internal(format!("C string not UTF-8: {}", e)))?
         .to_string();
@@ -952,8 +977,7 @@ impl StreamMessage {
             }
             _ => Err(SourceError::Internal(format!(
                 "unknown stream message type: 0x{:02X} ('{}')",
-                msg_type,
-                msg_type as char
+                msg_type, msg_type as char
             ))),
         }
     }
@@ -1080,12 +1104,13 @@ impl LogicalReplicationSource {
     /// # 参数
     /// - `tables`：要发布的表名列表（空表示发布所有表）
     pub fn create_publication(&self, tables: &[String]) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 先尝试删除已存在的 publication（幂等）
-        let drop_sql = format!("DROP PUBLICATION IF EXISTS {};", quote_ident(&self.publication_name));
+        let drop_sql = format!(
+            "DROP PUBLICATION IF EXISTS {};",
+            quote_ident(&self.publication_name)
+        );
         let _ = client.batch_execute(&drop_sql);
 
         // 构建 CREATE PUBLICATION 语句
@@ -1110,10 +1135,11 @@ impl LogicalReplicationSource {
 
     /// 删除 publication（如果存在）
     pub fn drop_publication(&self) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
-        let sql = format!("DROP PUBLICATION IF EXISTS {};", quote_ident(&self.publication_name));
+        let mut client = self.client.lock();
+        let sql = format!(
+            "DROP PUBLICATION IF EXISTS {};",
+            quote_ident(&self.publication_name)
+        );
         client
             .batch_execute(&sql)
             .map_err(|e| SourceError::Sql(format!("Drop publication failed: {e}")))?;
@@ -1128,9 +1154,7 @@ impl LogicalReplicationSource {
     /// # 返回
     /// - `Ok(u64)`：slot 的初始 LSN（consistency point）
     pub fn create_replication_slot(&self) -> Result<u64, SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 使用 pg_create_logical_replication_slot 创建 slot
         // slot_options 指定 publication_name（PG 14+ 支持）
@@ -1159,9 +1183,7 @@ impl LogicalReplicationSource {
 
     /// 删除 replication slot（如果存在）
     pub fn drop_replication_slot(&self) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         let sql = format!("SELECT pg_drop_replication_slot('{}');", self.slot_name);
         // 注意：slot 不存在时 pg_drop_replication_slot 会报错，这里忽略错误实现幂等
         let _ = client.query(&sql, &[]);
@@ -1194,14 +1216,14 @@ impl LogicalReplicationSource {
     ///
     /// 执行 `SELECT pg_current_wal_lsn()` 获取源端最新 WAL 位置。
     pub fn query_current_wal_lsn(&self) -> Result<u64, SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         let rows = client
             .query("SELECT pg_current_wal_lsn()", &[])
             .map_err(|e| SourceError::Sql(format!("Query current_wal_lsn failed: {e}")))?;
         if rows.is_empty() {
-            return Err(SourceError::Sql("current_wal_lsn returned no rows".to_string()));
+            return Err(SourceError::Sql(
+                "current_wal_lsn returned no rows".to_string(),
+            ));
         }
         let lsn_str: String = rows[0]
             .try_get(0)
@@ -1237,9 +1259,7 @@ impl LogicalReplicationSource {
 
         // 获取 client 锁，启动 copy_out 流
         // 注意：CopyOutReader 借用 &mut Client，需持有 MutexGuard 直到流结束
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         let mut reader = client
             .copy_out(&sql)
@@ -1260,9 +1280,9 @@ impl LogicalReplicationSource {
             }
 
             // 从 CopyOut 流读取数据
-            let n = reader
-                .read(&mut tmp)
-                .map_err(|e| SourceError::Connection(format!("Read replication stream failed: {e}")))?;
+            let n = reader.read(&mut tmp).map_err(|e| {
+                SourceError::Connection(format!("Read replication stream failed: {e}"))
+            })?;
 
             if n == 0 {
                 // 流结束（EOF）
@@ -1283,9 +1303,7 @@ impl LogicalReplicationSource {
                         buf.drain(..consumed);
                         match message {
                             StreamMessage::WalData {
-                                wal_start,
-                                data,
-                                ..
+                                wal_start, data, ..
                             } => {
                                 // 解析 logical replication 消息
                                 if data.is_empty() {
@@ -1318,9 +1336,7 @@ impl LogicalReplicationSource {
                 callback(&events)?;
                 // 更新已确认位点（取最后事件的 LSN）
                 if let Some(max_lsn) = events.iter().map(|e| e.lsn).max() {
-                    let mut offset = self.confirmed_offset.lock().map_err(|e| {
-                        SourceError::Internal(format!("confirmed_offset mutex poisoned: {e}"))
-                    })?;
+                    let mut offset = self.confirmed_offset.lock();
                     if max_lsn > offset.lsn {
                         offset.lsn = max_lsn;
                     }
@@ -1383,8 +1399,7 @@ impl LogicalReplicationSource {
             }
             _ => Err(SourceError::Internal(format!(
                 "unknown stream message type: 0x{:02X} ('{}')",
-                msg_type,
-                msg_type as char
+                msg_type, msg_type as char
             ))),
         }
     }
@@ -1425,9 +1440,7 @@ impl LogicalReplicationSource {
             }
             LogicalReplicationMessage::Relation(rel) => {
                 // 更新 relation 缓存
-                let mut relations = self.relations.lock().map_err(|e| {
-                    SourceError::Internal(format!("relations mutex poisoned: {e}"))
-                })?;
+                let mut relations = self.relations.lock();
                 relations.insert(rel.relation_id, rel.clone());
                 None
             }
@@ -1518,9 +1531,7 @@ impl LogicalReplicationSource {
 
     /// 从缓存中查找 RelationMessage
     fn get_relation(&self, relation_id: u32) -> Result<RelationMessage, SourceError> {
-        let relations = self.relations.lock().map_err(|e| {
-            SourceError::Internal(format!("relations mutex poisoned: {e}"))
-        })?;
+        let relations = self.relations.lock();
         relations.get(&relation_id).cloned().ok_or_else(|| {
             SourceError::Internal(format!(
                 "relation_id {} not found in cache (Relation message missing?)",
@@ -1547,9 +1558,7 @@ impl SourceConnector for LogicalReplicationSource {
         if self.connected.load(Ordering::SeqCst) {
             return Ok(());
         }
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         client
             .batch_execute("SELECT 1")
             .map_err(|e| SourceError::Connection(format!("PG health check failed: {e}")))?;
@@ -1569,9 +1578,7 @@ impl SourceConnector for LogicalReplicationSource {
         }
 
         let schema_name = self.schema_name();
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 构建 information_schema.columns 查询
         let table_filter = if tables.is_empty() {
@@ -1605,22 +1612,24 @@ impl SourceConnector for LogicalReplicationSource {
             let table_name: String = row
                 .try_get(0)
                 .map_err(|e| SourceError::SchemaDiscovery(format!("Get table_name failed: {e}")))?;
-            let column_name: String = row
-                .try_get(1)
-                .map_err(|e| SourceError::SchemaDiscovery(format!("Get column_name failed: {e}")))?;
+            let column_name: String = row.try_get(1).map_err(|e| {
+                SourceError::SchemaDiscovery(format!("Get column_name failed: {e}"))
+            })?;
             let pg_type: String = row
                 .try_get(2)
                 .map_err(|e| SourceError::SchemaDiscovery(format!("Get data_type failed: {e}")))?;
-            let is_nullable: String = row
-                .try_get(3)
-                .map_err(|e| SourceError::SchemaDiscovery(format!("Get is_nullable failed: {e}")))?;
-            let ordinal: i32 = row
-                .try_get(4)
-                .map_err(|e| SourceError::SchemaDiscovery(format!("Get ordinal_position failed: {e}")))?;
-            table_columns
-                .entry(table_name)
-                .or_default()
-                .push((column_name, pg_type, is_nullable == "YES", ordinal));
+            let is_nullable: String = row.try_get(3).map_err(|e| {
+                SourceError::SchemaDiscovery(format!("Get is_nullable failed: {e}"))
+            })?;
+            let ordinal: i32 = row.try_get(4).map_err(|e| {
+                SourceError::SchemaDiscovery(format!("Get ordinal_position failed: {e}"))
+            })?;
+            table_columns.entry(table_name).or_default().push((
+                column_name,
+                pg_type,
+                is_nullable == "YES",
+                ordinal,
+            ));
         }
 
         // 构造 TableSchema 列表
@@ -1629,7 +1638,8 @@ impl SourceConnector for LogicalReplicationSource {
             cols.sort_by_key(|c| c.3);
             let mut col_defs = Vec::with_capacity(cols.len());
             for (name, pg_type, nullable, _) in cols {
-                let data_type = crate::source::pg_source::PgSourceConnector::pg_type_to_szrsql(&pg_type)?;
+                let data_type =
+                    crate::source::pg_source::PgSourceConnector::pg_type_to_szrsql(&pg_type)?;
                 col_defs.push(ColumnDef {
                     name,
                     data_type,
@@ -1657,9 +1667,7 @@ impl SourceConnector for LogicalReplicationSource {
             return Err(SourceError::Connection("not connected".to_string()));
         }
 
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         let sql = format!("SELECT * FROM {}", quote_ident(table));
         let rows = client
@@ -1706,14 +1714,14 @@ impl SourceConnector for LogicalReplicationSource {
             return Err(SourceError::Connection("not connected".to_string()));
         }
         if self.streaming.load(Ordering::SeqCst) {
-            return Err(SourceError::Internal("cdc stream already running".to_string()));
+            return Err(SourceError::Internal(
+                "cdc stream already running".to_string(),
+            ));
         }
 
         // 设置起始位点
         {
-            let mut offset = self.confirmed_offset.lock().map_err(|e| {
-                SourceError::Internal(format!("confirmed_offset mutex poisoned: {e}"))
-            })?;
+            let mut offset = self.confirmed_offset.lock();
             if start_lsn > offset.lsn {
                 offset.lsn = start_lsn;
             }
@@ -1738,9 +1746,7 @@ impl SourceConnector for LogicalReplicationSource {
     }
 
     fn ack_offset(&self, offset: &SourceOffset) -> Result<(), SourceError> {
-        let mut current = self.confirmed_offset.lock().map_err(|e| {
-            SourceError::Internal(format!("confirmed_offset mutex poisoned: {e}"))
-        })?;
+        let mut current = self.confirmed_offset.lock();
         if offset.lsn >= current.lsn {
             *current = offset.clone();
         }
@@ -1751,9 +1757,7 @@ impl SourceConnector for LogicalReplicationSource {
     }
 
     fn confirmed_offset(&self) -> Result<SourceOffset, SourceError> {
-        let guard = self.confirmed_offset.lock().map_err(|e| {
-            SourceError::Internal(format!("confirmed_offset mutex poisoned: {e}"))
-        })?;
+        let guard = self.confirmed_offset.lock();
         Ok(guard.clone())
     }
 
@@ -1761,9 +1765,7 @@ impl SourceConnector for LogicalReplicationSource {
         if !self.connected.load(Ordering::SeqCst) {
             return Err(SourceError::Connection("not connected".to_string()));
         }
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         client
             .batch_execute("SELECT 1")
             .map_err(|e| SourceError::Connection(format!("PG health_check failed: {e}")))?;
@@ -1849,7 +1851,10 @@ fn pg_row_value_to_szvalue(
             .unwrap_or(SzValue::Null),
         OID_FLOAT4 => pg_row
             .try_get::<_, Option<f32>>(idx)
-            .map(|v| v.map(|f| SzValue::Float64(f as f64)).unwrap_or(SzValue::Null))
+            .map(|v| {
+                v.map(|f| SzValue::Float64(f as f64))
+                    .unwrap_or(SzValue::Null)
+            })
             .unwrap_or(SzValue::Null),
         OID_FLOAT8 | OID_NUMERIC => pg_row
             .try_get::<_, Option<f64>>(idx)
@@ -2028,7 +2033,7 @@ mod tests {
         let mut buf = vec![b'I'];
         buf.extend_from_slice(&relation_id.to_be_bytes());
         buf.push(b'N'); // new tuple follows
-        // TupleData
+                        // TupleData
         buf.extend_from_slice(&(tuple.len() as u16).to_be_bytes());
         for &(value, _unchanged) in tuple {
             match value {
@@ -2077,8 +2082,8 @@ mod tests {
     #[test]
     fn parse_relation_message_correct() {
         let columns = vec![
-            (1u8, "id", 20u32, -1i32),        // int8, key column
-            (0u8, "name", 1043u32, 100i32),   // varchar(100)
+            (1u8, "id", 20u32, -1i32),      // int8, key column
+            (0u8, "name", 1043u32, 100i32), // varchar(100)
         ];
         let data = build_relation_message(16384, "public", "users", b'd', &columns);
         let msg = LogicalReplicationParser::parse_message(&data).unwrap();
@@ -2145,7 +2150,7 @@ mod tests {
         let mut buf = vec![b'D'];
         buf.extend_from_slice(&16384u32.to_be_bytes());
         buf.push(b'K'); // key columns
-        // TupleData: 1 column, value "42"
+                        // TupleData: 1 column, value "42"
         buf.extend_from_slice(&1u16.to_be_bytes());
         buf.extend_from_slice(&2i16.to_be_bytes());
         buf.extend_from_slice(b"42");
@@ -2393,6 +2398,8 @@ mod tests {
     }
 
     #[test]
+    // 测试用近似浮点值（非 PI 常量），clippy::approx_constant 豁免
+    #[allow(clippy::approx_constant)]
     fn parse_column_value_float8() {
         let v = parse_column_value(b"3.14159", 701).unwrap();
         assert_eq!(v, SzValue::Float64(3.14159));
@@ -2407,7 +2414,10 @@ mod tests {
     #[test]
     fn parse_column_value_uuid() {
         let v = parse_column_value(b"550e8400-e29b-41d4-a716-446655440000", 2950).unwrap();
-        assert_eq!(v, SzValue::Text("550e8400-e29b-41d4-a716-446655440000".to_string()));
+        assert_eq!(
+            v,
+            SzValue::Text("550e8400-e29b-41d4-a716-446655440000".to_string())
+        );
     }
 
     #[test]

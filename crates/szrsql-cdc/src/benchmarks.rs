@@ -25,15 +25,16 @@
 //! - 平均延迟 / P50 / P95 / P99 / 最大延迟（纳秒）
 //! - 与基线对比的开销百分比
 
+use crate::migration::Dialect;
 use crate::schema::{ColumnDef, DataType, SchemaRegistry};
 use crate::slot::SlotManager;
 use crate::target::memory::MemoryWriter;
 use crate::task::{ReplicationTaskManager, TaskConfig};
 use crate::{CdcEngine, CdcObserver, CdcObserverManager, ChangeEvent};
-use crate::migration::Dialect;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
 
 // =====================================================================
 // 辅助函数
@@ -87,7 +88,8 @@ fn print_result(name: &str, total_events: u64, duration: Duration, latencies_ns:
     println!("  总耗时     : {:.3} s", secs);
     println!("  吞吐量     : {tps} events/sec (TPS)");
     println!("  延迟 (ns)  : avg={avg}, p50={p50}, p95={p95}, p99={p99}, max={max}");
-    println!("  延迟 (us)  : avg={:.3}, p50={:.3}, p95={:.3}, p99={:.3}, max={:.3}",
+    println!(
+        "  延迟 (us)  : avg={:.3}, p50={:.3}, p95={:.3}, p99={:.3}, max={:.3}",
         avg as f64 / 1000.0,
         p50 as f64 / 1000.0,
         p95 as f64 / 1000.0,
@@ -104,14 +106,14 @@ fn print_result(name: &str, total_events: u64, duration: Duration, latencies_ns:
 struct CountingObserver {
     count: AtomicU64,
     /// 每个事件的到达时间戳（纳秒），用于延迟统计
-    arrive_times_ns: std::sync::Mutex<Vec<u64>>,
+    arrive_times_ns: parking_lot::Mutex<Vec<u64>>,
 }
 
 impl CountingObserver {
     fn new() -> Self {
         Self {
             count: AtomicU64::new(0),
-            arrive_times_ns: std::sync::Mutex::new(Vec::new()),
+            arrive_times_ns: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
@@ -124,7 +126,7 @@ impl CdcObserver for CountingObserver {
     fn on_event(&self, _event: ChangeEvent) {
         self.count.fetch_add(1, Ordering::Relaxed);
         // 仅记录前 N 个事件的到达时间，避免 Vec 无限增长影响测量
-        let mut times = self.arrive_times_ns.lock().unwrap();
+        let mut times = self.arrive_times_ns.lock();
         if times.len() < 10_000 {
             times.push(now_nanos());
         }
@@ -167,7 +169,12 @@ fn bench_100k_tps_single_observer() {
     // 由于 dispatch 是同步的，到达时间≈分发时间，延迟测量意义不大
     // 此处主要测 TPS
     let empty_latencies: Vec<u64> = Vec::new();
-    print_result("P4-3.1 10万TPS单observer", total_events, duration, &empty_latencies);
+    print_result(
+        "P4-3.1 10万TPS单observer",
+        total_events,
+        duration,
+        &empty_latencies,
+    );
 
     // 断言：单线程应能处理 >=50K TPS（留出 CI 环境余量）
     let tps = (total_events as f64 / duration.as_secs_f64()) as u64;
@@ -186,20 +193,20 @@ fn bench_end_to_end_latency() {
 
     // 使用自定义 observer 记录到达时间和事件 timestamp
     struct LatencyObserver {
-        latencies_ns: std::sync::Mutex<Vec<u64>>,
+        latencies_ns: parking_lot::Mutex<Vec<u64>>,
     }
     impl CdcObserver for LatencyObserver {
         fn on_event(&self, event: ChangeEvent) {
             let now = now_nanos();
             let lat = now.saturating_sub(event.timestamp);
-            let mut lats = self.latencies_ns.lock().unwrap();
+            let mut lats = self.latencies_ns.lock();
             if lats.len() < 10_000 {
                 lats.push(lat);
             }
         }
     }
     let observer = Arc::new(LatencyObserver {
-        latencies_ns: std::sync::Mutex::new(Vec::new()),
+        latencies_ns: parking_lot::Mutex::new(Vec::new()),
     });
 
     let engine = CdcEngine::with_timestamp_fn(observer_mgr.clone(), Box::new(|| 0));
@@ -214,7 +221,7 @@ fn bench_end_to_end_latency() {
     }
     let duration = start.elapsed();
 
-    let latencies: Vec<u64> = observer.latencies_ns.lock().unwrap().clone();
+    let latencies: Vec<u64> = observer.latencies_ns.lock().clone();
     print_result("P4-3.2 端到端延迟", total_events, duration, &latencies);
 
     // 断言：P99 延迟应 < 100us（100000ns）
@@ -235,10 +242,14 @@ fn bench_multi_task_concurrent_throughput() {
 
     let registry = Arc::new(SchemaRegistry::new());
     registry
-        .create_table(42, "bench_table", vec![
-            ColumnDef::not_null("id", DataType::Int64),
-            ColumnDef::nullable("val", DataType::Int64),
-        ])
+        .create_table(
+            42,
+            "bench_table",
+            vec![
+                ColumnDef::not_null("id", DataType::Int64),
+                ColumnDef::nullable("val", DataType::Int64),
+            ],
+        )
         .unwrap();
 
     let decoder = Arc::new(crate::decoder::RowDecoder::new(registry.clone()));
@@ -246,12 +257,7 @@ fn bench_multi_task_concurrent_throughput() {
     let observer_mgr = Arc::new(CdcObserverManager::new());
     let engine = Arc::new(CdcEngine::with_timestamp_fn(observer_mgr, Box::new(|| 0)));
 
-    let mgr = ReplicationTaskManager::new(
-        slot_mgr,
-        decoder,
-        registry,
-        engine,
-    );
+    let mgr = ReplicationTaskManager::new(slot_mgr, decoder, registry, engine);
 
     // 创建 task_count 个任务，每个有独立的 MemoryWriter
     let mut writers = Vec::new();
@@ -298,7 +304,10 @@ fn bench_multi_task_concurrent_throughput() {
     // 验证每个 writer 都收到所有事件
     for (i, w) in writers.iter().enumerate() {
         let count = w.write_count();
-        assert_eq!(count, total_events, "task {i} 应收到全部 {total_events} 事件，实际 {count}");
+        assert_eq!(
+            count, total_events,
+            "task {i} 应收到全部 {total_events} 事件，实际 {count}"
+        );
     }
 
     let empty_latencies: Vec<u64> = Vec::new();
@@ -364,8 +373,14 @@ fn bench_cdc_engine_overhead() {
 
     println!("\n========== P4-3.4 CDC 引擎开销 ==========");
     println!("  事件总数       : {total_events}");
-    println!("  基线 (无 observer) : {:.3} s, TPS={baseline_tps}", baseline_secs);
-    println!("  有 1 observer      : {:.3} s, TPS={with_obs_tps}", with_observer_secs);
+    println!(
+        "  基线 (无 observer) : {:.3} s, TPS={baseline_tps}",
+        baseline_secs
+    );
+    println!(
+        "  有 1 observer      : {:.3} s, TPS={with_obs_tps}",
+        with_observer_secs
+    );
     println!("  开销百分比    : {:.2}%", overhead_pct);
 
     // 验证 observer 收到全部事件
@@ -396,18 +411,15 @@ fn bench_ddl_sync_overhead() {
     let observer_mgr = Arc::new(CdcObserverManager::new());
     let engine = Arc::new(CdcEngine::with_timestamp_fn(observer_mgr, Box::new(|| 0)));
 
-    let mgr = ReplicationTaskManager::new(
-        slot_mgr,
-        decoder,
-        registry.clone(),
-        engine,
-    );
+    let mgr = ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), engine);
 
     // 1. 纯 DML 基线
     registry
-        .create_table(42, "bench_dml", vec![
-            ColumnDef::not_null("id", DataType::Int64),
-        ])
+        .create_table(
+            42,
+            "bench_dml",
+            vec![ColumnDef::not_null("id", DataType::Int64)],
+        )
         .unwrap();
     let writer_dml = Arc::new(MemoryWriter::new());
     let config = TaskConfig {
@@ -496,8 +508,7 @@ fn bench_ddl_sync_overhead() {
     let mixed_tps = (dml_count as f64 / mixed_duration.as_secs_f64()) as u64;
 
     let overhead_pct = if dml_tps > 0 {
-        ((dml_duration.as_secs_f64() - mixed_duration.as_secs_f64())
-            / dml_duration.as_secs_f64())
+        ((dml_duration.as_secs_f64() - mixed_duration.as_secs_f64()) / dml_duration.as_secs_f64())
             * 100.0
     } else {
         0.0
@@ -506,8 +517,14 @@ fn bench_ddl_sync_overhead() {
     println!("\n========== P4-3.5 DDL 同步开销 ==========");
     println!("  DML 事件数    : {dml_count}");
     println!("  DDL 事件数    : {ddl_count} (每 {ddl_interval} DML 插入 1 DDL)");
-    println!("  纯 DML        : {:.3} s, TPS={dml_tps}", dml_duration.as_secs_f64());
-    println!("  DML + DDL     : {:.3} s, TPS={mixed_tps}", mixed_duration.as_secs_f64());
+    println!(
+        "  纯 DML        : {:.3} s, TPS={dml_tps}",
+        dml_duration.as_secs_f64()
+    );
+    println!(
+        "  DML + DDL     : {:.3} s, TPS={mixed_tps}",
+        mixed_duration.as_secs_f64()
+    );
     println!("  TPS 变化      : {:.2}%", overhead_pct);
 
     // 验证：DDL 应被处理
@@ -551,7 +568,12 @@ fn bench_high_concurrency_transaction_stream() {
     let duration = start.elapsed();
 
     let empty_latencies: Vec<u64> = Vec::new();
-    print_result("P4-3.6 高并发事务流", total_events, duration, &empty_latencies);
+    print_result(
+        "P4-3.6 高并发事务流",
+        total_events,
+        duration,
+        &empty_latencies,
+    );
 
     assert_eq!(observer.count(), total_events, "所有事件应被处理");
 

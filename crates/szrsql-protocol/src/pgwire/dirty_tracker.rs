@@ -44,10 +44,7 @@ impl DirtyTableTracker {
     /// 批量标记多张表为脏。
     ///
     /// 接收任意 `IntoIterator<Item = impl AsRef<str>>`，便于直接传入 `HashSet<String>` 或 `Vec<&str>`。
-    pub async fn mark_dirty_many(
-        &self,
-        table_names: impl IntoIterator<Item = impl AsRef<str>>,
-    ) {
+    pub async fn mark_dirty_many(&self, table_names: impl IntoIterator<Item = impl AsRef<str>>) {
         let mut guard = self.inner.lock().await;
         for name in table_names {
             guard.insert(name.as_ref().to_string());

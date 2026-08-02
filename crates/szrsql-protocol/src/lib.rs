@@ -25,7 +25,7 @@ pub mod openapi;
 pub mod pgwire;
 
 pub use health::{HealthChecker, HealthStatus};
-pub use http::{HttpConfig, HttpError, HttpServer, MetricsRegistry};
+pub use http::{HttpConfig, HttpError, HttpServer, ManagementHandle, MetricsRegistry};
 
 /// 返回 crate 版本号，供 workspace 骨架冒烟测试使用。
 pub fn version() -> &'static str {

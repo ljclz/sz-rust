@@ -226,8 +226,8 @@ impl TnsPacket {
             });
         }
         // 跳过 2 字节包校验和（偏移 2-3）
-        let packet_type = PacketType::from_u8(buf[4])
-            .ok_or_else(|| TnsPacketError::UnknownType(buf[4]))?;
+        let packet_type =
+            PacketType::from_u8(buf[4]).ok_or_else(|| TnsPacketError::UnknownType(buf[4]))?;
         let flags = PacketFlags(buf[5]);
         // 跳过 2 字节头校验和（偏移 6-7）
         let data = buf[TNS_HEADER_LEN..total_len].to_vec();
@@ -268,8 +268,8 @@ impl TnsPacketCodec {
         if payload_len > 0 {
             reader.read_exact(&mut data).await?;
         }
-        let packet_type = PacketType::from_u8(header[4])
-            .ok_or_else(|| TnsPacketError::UnknownType(header[4]))?;
+        let packet_type =
+            PacketType::from_u8(header[4]).ok_or_else(|| TnsPacketError::UnknownType(header[4]))?;
         let flags = PacketFlags(header[5]);
         Ok(TnsPacket {
             packet_type,
@@ -488,7 +488,9 @@ mod tests {
         let expected = original.encode();
 
         let (mut tx, mut rx) = duplex(256);
-        TnsPacketCodec::write_packet(&mut tx, &original).await.unwrap();
+        TnsPacketCodec::write_packet(&mut tx, &original)
+            .await
+            .unwrap();
 
         let mut buf = vec![0u8; expected.len()];
         rx.read_exact(&mut buf).await.unwrap();

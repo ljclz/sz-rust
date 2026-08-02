@@ -1089,7 +1089,11 @@ fn format_decimal(v: i128, scale: u8) -> String {
     let int_part = v / divisor;
     let frac_part = (v % divisor).abs();
     // 当值为负且整数部分为 0 时，int_part.to_string() 不含负号，需手动补上
-    let sign = if v < 0 && int_part == 0 { "-" } else { "" };
+    let sign = if v < 0 && int_part == 0 {
+        "-"
+    } else {
+        ""
+    };
     format!("{sign}{int_part}.{frac_part:0scale_usize$}")
 }
 
@@ -2650,19 +2654,13 @@ mod tests {
     #[test]
     fn tsquery_parse_and() {
         let q = TsQuery::parse("hello & world").unwrap();
-        assert_eq!(
-            q,
-            TsQuery::lexeme("hello").and(TsQuery::lexeme("world"))
-        );
+        assert_eq!(q, TsQuery::lexeme("hello").and(TsQuery::lexeme("world")));
     }
 
     #[test]
     fn tsquery_parse_or() {
         let q = TsQuery::parse("hello | world").unwrap();
-        assert_eq!(
-            q,
-            TsQuery::lexeme("hello").or(TsQuery::lexeme("world"))
-        );
+        assert_eq!(q, TsQuery::lexeme("hello").or(TsQuery::lexeme("world")));
     }
 
     #[test]

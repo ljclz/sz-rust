@@ -174,6 +174,8 @@ mod phase_2_8 {
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    // P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+    use parking_lot::Mutex;
     use std::thread;
 
     // -----------------------------------------------------------------
@@ -191,7 +193,7 @@ mod phase_2_8 {
         const TOTAL: usize = THREADS * ROUNDS;
 
         let mgr = Arc::new(MvccManager::new());
-        let txn_ids = Arc::new(std::sync::Mutex::new(Vec::with_capacity(TOTAL)));
+        let txn_ids = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(TOTAL)));
 
         let handles: Vec<_> = (0..THREADS)
             .map(|_| {
@@ -200,7 +202,7 @@ mod phase_2_8 {
                 thread::spawn(move || {
                     for _ in 0..ROUNDS {
                         let txn = mgr.begin();
-                        txn_ids.lock().unwrap().push(txn.txn_id);
+                        txn_ids.lock().push(txn.txn_id);
                     }
                 })
             })
@@ -210,7 +212,7 @@ mod phase_2_8 {
             h.join().unwrap();
         }
 
-        let txn_ids = txn_ids.lock().unwrap();
+        let txn_ids = txn_ids.lock();
         assert_eq!(txn_ids.len(), TOTAL);
 
         // 验证所有 txn_id 唯一
@@ -598,7 +600,7 @@ mod phase_2_8 {
         const THREADS: usize = 10;
         const ROUNDS: usize = 10;
         let mgr = Arc::new(MvccManager::new());
-        let txn_ids = Arc::new(std::sync::Mutex::new(Vec::with_capacity(TXN_COUNT)));
+        let txn_ids = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(TXN_COUNT)));
 
         let handles: Vec<_> = (0..THREADS)
             .map(|_| {
@@ -607,7 +609,7 @@ mod phase_2_8 {
                 thread::spawn(move || {
                     for _ in 0..ROUNDS {
                         let txn = mgr.begin();
-                        txn_ids.lock().unwrap().push(txn.txn_id);
+                        txn_ids.lock().push(txn.txn_id);
                     }
                 })
             })
@@ -617,7 +619,7 @@ mod phase_2_8 {
             h.join().unwrap();
         }
 
-        let concurrent_txn_ids = txn_ids.lock().unwrap();
+        let concurrent_txn_ids = txn_ids.lock();
         assert_eq!(concurrent_txn_ids.len(), TXN_COUNT);
 
         // 排序后比较（并发下顺序可能不同，但集合应一致）
@@ -879,7 +881,7 @@ mod phase_2_8 {
         const THREADS: usize = 10;
 
         let mgr = Arc::new(MvccManager::new());
-        let snapshots = Arc::new(std::sync::Mutex::new(Vec::with_capacity(THREADS)));
+        let snapshots = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(THREADS)));
 
         // 先 BEGIN 一个事务 T0（始终活跃）
         let t0 = mgr.begin();
@@ -890,7 +892,7 @@ mod phase_2_8 {
                 let snapshots = Arc::clone(&snapshots);
                 thread::spawn(move || {
                     let txn = mgr.begin();
-                    snapshots.lock().unwrap().push((txn.txn_id, txn.snapshot));
+                    snapshots.lock().push((txn.txn_id, txn.snapshot));
                 })
             })
             .collect();
@@ -899,7 +901,7 @@ mod phase_2_8 {
             h.join().unwrap();
         }
 
-        let snapshots = snapshots.lock().unwrap();
+        let snapshots = snapshots.lock();
         assert_eq!(snapshots.len(), THREADS);
 
         // 验证每个快照：

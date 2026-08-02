@@ -406,56 +406,102 @@ impl SystemTableKind {
             (Some("pg_catalog"), "pg_user") | (None, "pg_user") => Some(Self::PgUser),
             (Some("pg_catalog"), "pg_settings") | (None, "pg_settings") => Some(Self::PgSettings),
             // Navicat 兼容：表空间与统计视图（占位实现）
-            (Some("pg_catalog"), "pg_tablespace") | (None, "pg_tablespace") => Some(Self::PgTablespace),
-            (Some("pg_catalog"), "pg_stat_activity") | (None, "pg_stat_activity") => Some(Self::PgStatActivity),
+            (Some("pg_catalog"), "pg_tablespace") | (None, "pg_tablespace") => {
+                Some(Self::PgTablespace)
+            }
+            (Some("pg_catalog"), "pg_stat_activity") | (None, "pg_stat_activity") => {
+                Some(Self::PgStatActivity)
+            }
             (Some("pg_catalog"), "pg_locks") | (None, "pg_locks") => Some(Self::PgLocks),
             (Some("pg_catalog"), "pg_matviews") | (None, "pg_matviews") => Some(Self::PgMatviews),
             (Some("pg_catalog"), "pg_rewrite") | (None, "pg_rewrite") => Some(Self::PgRewrite),
             (Some("pg_catalog"), "pg_trigger") | (None, "pg_trigger") => Some(Self::PgTrigger),
             (Some("pg_catalog"), "pg_authid") | (None, "pg_authid") => Some(Self::PgAuthid),
             (Some("pg_catalog"), "pg_proc") | (None, "pg_proc") => Some(Self::PgProc),
-            (Some("pg_catalog"), "pg_db_role_setting") | (None, "pg_db_role_setting") => Some(Self::PgDbRoleSetting),
-            (Some("pg_catalog"), "pg_default_acl") | (None, "pg_default_acl") => Some(Self::PgDefaultAcl),
-            (Some("pg_catalog"), "pg_shdescription") | (None, "pg_shdescription") => Some(Self::PgShdescription),
-            (Some("pg_catalog"), "pg_event_trigger") | (None, "pg_event_trigger") => Some(Self::PgEventTrigger),
-            (Some("pg_catalog"), "pg_extension") | (None, "pg_extension") => Some(Self::PgExtension),
-            (Some("pg_catalog"), "pg_collation") | (None, "pg_collation") => Some(Self::PgCollation),
+            (Some("pg_catalog"), "pg_db_role_setting") | (None, "pg_db_role_setting") => {
+                Some(Self::PgDbRoleSetting)
+            }
+            (Some("pg_catalog"), "pg_default_acl") | (None, "pg_default_acl") => {
+                Some(Self::PgDefaultAcl)
+            }
+            (Some("pg_catalog"), "pg_shdescription") | (None, "pg_shdescription") => {
+                Some(Self::PgShdescription)
+            }
+            (Some("pg_catalog"), "pg_event_trigger") | (None, "pg_event_trigger") => {
+                Some(Self::PgEventTrigger)
+            }
+            (Some("pg_catalog"), "pg_extension") | (None, "pg_extension") => {
+                Some(Self::PgExtension)
+            }
+            (Some("pg_catalog"), "pg_collation") | (None, "pg_collation") => {
+                Some(Self::PgCollation)
+            }
             (Some("pg_catalog"), "pg_am") | (None, "pg_am") => Some(Self::PgAm),
             (Some("pg_catalog"), "pg_opclass") | (None, "pg_opclass") => Some(Self::PgOpclass),
             (Some("pg_catalog"), "pg_opfamily") | (None, "pg_opfamily") => Some(Self::PgOpfamily),
             (Some("pg_catalog"), "pg_cast") | (None, "pg_cast") => Some(Self::PgCast),
-            (Some("pg_catalog"), "pg_conversion") | (None, "pg_conversion") => Some(Self::PgConversion),
+            (Some("pg_catalog"), "pg_conversion") | (None, "pg_conversion") => {
+                Some(Self::PgConversion)
+            }
             (Some("pg_catalog"), "pg_depend") | (None, "pg_depend") => Some(Self::PgDepend),
             (Some("pg_catalog"), "pg_shdepend") | (None, "pg_shdepend") => Some(Self::PgShdepend),
-            (Some("pg_catalog"), "pg_stat_user_tables") | (None, "pg_stat_user_tables") => Some(Self::PgStatUserTables),
-            (Some("pg_catalog"), "pg_statio_user_tables") | (None, "pg_statio_user_tables") => Some(Self::PgStatioUserTables),
+            (Some("pg_catalog"), "pg_stat_user_tables") | (None, "pg_stat_user_tables") => {
+                Some(Self::PgStatUserTables)
+            }
+            (Some("pg_catalog"), "pg_statio_user_tables") | (None, "pg_statio_user_tables") => {
+                Some(Self::PgStatioUserTables)
+            }
             (Some("pg_catalog"), "pg_attrdef") | (None, "pg_attrdef") => Some(Self::PgAttrdef),
-            (Some("pg_catalog"), "pg_auth_members") | (None, "pg_auth_members") => Some(Self::PgAuthMembers),
+            (Some("pg_catalog"), "pg_auth_members") | (None, "pg_auth_members") => {
+                Some(Self::PgAuthMembers)
+            }
             (Some("pg_catalog"), "pg_policy") | (None, "pg_policy") => Some(Self::PgPolicy),
             (Some("pg_catalog"), "pg_inherits") | (None, "pg_inherits") => Some(Self::PgInherits),
-            (Some("pg_catalog"), "pg_init_privs") | (None, "pg_init_privs") => Some(Self::PgInitPrivs),
+            (Some("pg_catalog"), "pg_init_privs") | (None, "pg_init_privs") => {
+                Some(Self::PgInitPrivs)
+            }
             (Some("pg_catalog"), "pg_language") | (None, "pg_language") => Some(Self::PgLanguage),
-            (Some("pg_catalog"), "pg_largeobject") | (None, "pg_largeobject") => Some(Self::PgLargeobject),
-            (Some("pg_catalog"), "pg_largeobject_metadata") | (None, "pg_largeobject_metadata") => Some(Self::PgLargeobjectMetadata),
+            (Some("pg_catalog"), "pg_largeobject") | (None, "pg_largeobject") => {
+                Some(Self::PgLargeobject)
+            }
+            (Some("pg_catalog"), "pg_largeobject_metadata") | (None, "pg_largeobject_metadata") => {
+                Some(Self::PgLargeobjectMetadata)
+            }
             (Some("pg_catalog"), "pg_seclabel") | (None, "pg_seclabel") => Some(Self::PgSeclabel),
-            (Some("pg_catalog"), "pg_shseclabel") | (None, "pg_shseclabel") => Some(Self::PgShseclabel),
-            (Some("pg_catalog"), "pg_stat_database") | (None, "pg_stat_database") => Some(Self::PgStatDatabase),
-            (Some("pg_catalog"), "pg_stat_database_conflicts") | (None, "pg_stat_database_conflicts") => Some(Self::PgStatDatabaseConflicts),
-            (Some("pg_catalog"), "pg_stat_bgwriter") | (None, "pg_stat_bgwriter") => Some(Self::PgStatBgwriter),
+            (Some("pg_catalog"), "pg_shseclabel") | (None, "pg_shseclabel") => {
+                Some(Self::PgShseclabel)
+            }
+            (Some("pg_catalog"), "pg_stat_database") | (None, "pg_stat_database") => {
+                Some(Self::PgStatDatabase)
+            }
+            (Some("pg_catalog"), "pg_stat_database_conflicts")
+            | (None, "pg_stat_database_conflicts") => Some(Self::PgStatDatabaseConflicts),
+            (Some("pg_catalog"), "pg_stat_bgwriter") | (None, "pg_stat_bgwriter") => {
+                Some(Self::PgStatBgwriter)
+            }
             (Some("pg_catalog"), "pg_stats") | (None, "pg_stats") => Some(Self::PgStats),
             // P2-1.3：pg_statistic 系统表（列级统计信息，从 ANALYZE 收集）
-            (Some("pg_catalog"), "pg_statistic") | (None, "pg_statistic") => Some(Self::PgStatistic),
+            (Some("pg_catalog"), "pg_statistic") | (None, "pg_statistic") => {
+                Some(Self::PgStatistic)
+            }
             // Navicat 兼容：pg_operator / pg_foreign_table（占位空）
             (Some("pg_catalog"), "pg_operator") | (None, "pg_operator") => Some(Self::PgOperator),
-            (Some("pg_catalog"), "pg_foreign_table") | (None, "pg_foreign_table") => Some(Self::PgForeignTable),
+            (Some("pg_catalog"), "pg_foreign_table") | (None, "pg_foreign_table") => {
+                Some(Self::PgForeignTable)
+            }
             // Navicat 兼容：information_schema.routines / parameters（占位空）
             (Some("information_schema"), "routines") => Some(Self::InfoSchemaRoutines),
             (Some("information_schema"), "parameters") => Some(Self::InfoSchemaParameters),
             // Navicat 兼容：系统函数被解析为 Table 时也需识别（如 pg_available_extension_versions()）
             // sqlparser 会将无参数的表函数解析为 Table，这里统一处理
-            (None, "pg_available_extension_versions") | (Some("pg_catalog"), "pg_available_extension_versions") => Some(Self::PgExtension),
-            (None, "pg_available_extensions") | (Some("pg_catalog"), "pg_available_extensions") => Some(Self::PgExtension),
-            (None, "pg_foreign_server") | (Some("pg_catalog"), "pg_foreign_server") => Some(Self::PgForeignServer),
+            (None, "pg_available_extension_versions")
+            | (Some("pg_catalog"), "pg_available_extension_versions") => Some(Self::PgExtension),
+            (None, "pg_available_extensions") | (Some("pg_catalog"), "pg_available_extensions") => {
+                Some(Self::PgExtension)
+            }
+            (None, "pg_foreign_server") | (Some("pg_catalog"), "pg_foreign_server") => {
+                Some(Self::PgForeignServer)
+            }
             (None, "pg_sequence") | (Some("pg_catalog"), "pg_sequence") => Some(Self::PgSequence),
             _ => None,
         }
@@ -515,18 +561,26 @@ impl SystemTableKind {
             Self::PgInitPrivs => szrsql_catalog::navicat::pg_init_privs_schema(),
             Self::PgLanguage => szrsql_catalog::navicat::pg_language_schema(),
             Self::PgLargeobject => szrsql_catalog::navicat::pg_largeobject_schema(),
-            Self::PgLargeobjectMetadata => szrsql_catalog::navicat::pg_largeobject_metadata_schema(),
+            Self::PgLargeobjectMetadata => {
+                szrsql_catalog::navicat::pg_largeobject_metadata_schema()
+            }
             Self::PgSeclabel => szrsql_catalog::navicat::pg_seclabel_schema(),
             Self::PgShseclabel => szrsql_catalog::navicat::pg_shseclabel_schema(),
             Self::PgStatDatabase => szrsql_catalog::navicat::pg_stat_database_schema(),
-            Self::PgStatDatabaseConflicts => szrsql_catalog::navicat::pg_stat_database_conflicts_schema(),
+            Self::PgStatDatabaseConflicts => {
+                szrsql_catalog::navicat::pg_stat_database_conflicts_schema()
+            }
             Self::PgStatBgwriter => szrsql_catalog::navicat::pg_stat_bgwriter_schema(),
             Self::PgStats => szrsql_catalog::navicat::pg_stats_schema(),
             Self::PgStatistic => szrsql_catalog::navicat::pg_statistic_schema(),
             Self::PgOperator => szrsql_catalog::navicat::pg_operator_schema(),
             Self::PgForeignTable => szrsql_catalog::navicat::pg_foreign_table_schema(),
-            Self::InfoSchemaRoutines => szrsql_catalog::navicat::information_schema_routines_schema(),
-            Self::InfoSchemaParameters => szrsql_catalog::navicat::information_schema_parameters_schema(),
+            Self::InfoSchemaRoutines => {
+                szrsql_catalog::navicat::information_schema_routines_schema()
+            }
+            Self::InfoSchemaParameters => {
+                szrsql_catalog::navicat::information_schema_parameters_schema()
+            }
             Self::PgSequence => szrsql_catalog::navicat::pg_sequence_schema(),
             Self::PgForeignServer => szrsql_catalog::navicat::pg_foreign_server_schema(),
         }
@@ -642,14 +696,18 @@ fn pg_class_with_stats(
     stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Vec<Vec<Value>> {
     let mut rows = szrsql_catalog::navicat::pg_class(catalog);
-    let Some(stats) = stats else { return rows; };
+    let Some(stats) = stats else {
+        return rows;
+    };
 
     // 构建 relname → TableStatistics 的查找表
     // stats 以 qualified_name().to_lowercase() 为键，但 pg_class 行中只有 relname（不含 schema）
     // 对无 schema 的表（常见情况），relname == qualified_name
     use std::sync::Arc;
-    let mut stats_by_relname: std::collections::HashMap<String, Arc<szrsql_optimizer::statistics::TableStatistics>> =
-        std::collections::HashMap::new();
+    let mut stats_by_relname: std::collections::HashMap<
+        String,
+        Arc<szrsql_optimizer::statistics::TableStatistics>,
+    > = std::collections::HashMap::new();
     for table_name in catalog.list_tables() {
         let qualified = table_name.qualified_name().to_lowercase();
         if let Some(table_stats) = stats.get_table_stats(&qualified) {
@@ -693,7 +751,9 @@ fn pg_statistic_with_stats(
     stats: Option<&dyn szrsql_optimizer::statistics::StatisticsStore>,
 ) -> Vec<Vec<Value>> {
     let mut rows = Vec::new();
-    let Some(stats) = stats else { return rows; };
+    let Some(stats) = stats else {
+        return rows;
+    };
 
     for table_name in catalog.list_tables() {
         let qualified = table_name.qualified_name().to_lowercase();
@@ -803,9 +863,14 @@ pub fn try_execute_system_table_query(
     // 这里拦截后用内存 hash join 执行。
     if select.from.len() == 1 && !select.from[0].joins.is_empty() {
         if contains_system_table_factor(&select.from[0].relation)
-            || select.from[0].joins.iter().any(|j| contains_system_table_factor(&j.relation))
+            || select.from[0]
+                .joins
+                .iter()
+                .any(|j| contains_system_table_factor(&j.relation))
         {
-            return Some(execute_system_catalog_join(select, catalog, current_db, stats));
+            return Some(execute_system_catalog_join(
+                select, catalog, current_db, stats,
+            ));
         }
         return None;
     }
@@ -813,9 +878,14 @@ pub fn try_execute_system_table_query(
     // Navicat 兼容：逗号分隔的 CROSS JOIN（FROM pg_opclass opc, pg_namespace nsp WHERE ...）
     // 多个 from 项被解析为 select.from.len() > 1，需拦截处理
     if select.from.len() > 1 {
-        let any_system = select.from.iter().any(|t| contains_system_table_factor(&t.relation));
+        let any_system = select
+            .from
+            .iter()
+            .any(|t| contains_system_table_factor(&t.relation));
         if any_system {
-            return Some(execute_system_catalog_cross_join(select, catalog, current_db, stats));
+            return Some(execute_system_catalog_cross_join(
+                select, catalog, current_db, stats,
+            ));
         }
         return None;
     }
@@ -834,13 +904,17 @@ pub fn try_execute_system_table_query(
     // Navicat 兼容：GROUP BY + count(*) 聚合查询（简化支持）
     // HAVING 在分组后作为行级过滤应用（聚合表达式暂用 NULL 降级，仅 count 求值）
     if !select.group_by.is_empty() {
-        return Some(execute_system_table_group_by(select, kind, catalog, current_db, stats));
+        return Some(execute_system_table_group_by(
+            select, kind, catalog, current_db, stats,
+        ));
     }
     if select.having.is_some() {
         return None;
     }
 
-    Some(execute_system_table_select(select, kind, catalog, current_db, stats))
+    Some(execute_system_table_select(
+        select, kind, catalog, current_db, stats,
+    ))
 }
 
 /// Describe 阶段推导系统表查询的结果列（不执行实际查询）。
@@ -895,7 +969,8 @@ pub fn try_describe_system_table_columns(
         let is_system_join = select.from.len() == 1
             && !select.from[0].joins.is_empty()
             && (contains_system_table_factor(&select.from[0].relation)
-                || select.from[0].joins
+                || select.from[0]
+                    .joins
                     .iter()
                     .any(|j| contains_system_table_factor(&j.relation)));
 
@@ -949,7 +1024,11 @@ fn execute_system_table_group_by(
     let mut rows = kind.compute_rows(&adapter, current_db, stats);
 
     // 提取 GROUP BY 列索引
-    let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.to_lowercase()).collect();
+    let column_names: Vec<String> = schema
+        .columns
+        .iter()
+        .map(|c| c.name.to_lowercase())
+        .collect();
     let mut group_indices: Vec<usize> = Vec::new();
     for g in &select.group_by {
         let idx = extract_column_index(g, &column_names).ok_or_else(|| {
@@ -1049,11 +1128,7 @@ fn execute_system_table_group_by(
 ///
 /// 对 HAVING 中的 `count(*)` / `count(col)` 表达式替换为结果行中对应的 count 列值，
 /// 然后用通用求值器求值布尔结果。
-fn eval_having_predicate(
-    expr: &Expr,
-    result_columns: &[ResultColumn],
-    row: &[Value],
-) -> bool {
+fn eval_having_predicate(expr: &Expr, result_columns: &[ResultColumn], row: &[Value]) -> bool {
     // 找到 count 列的索引
     let count_idx: Option<usize> = result_columns
         .iter()
@@ -1084,7 +1159,10 @@ fn eval_having_predicate(
     }
 
     let replaced = replace_count(expr, count_idx, row);
-    let dummy_cols: Vec<String> = result_columns.iter().map(|c| c.name.to_lowercase()).collect();
+    let dummy_cols: Vec<String> = result_columns
+        .iter()
+        .map(|c| c.name.to_lowercase())
+        .collect();
     let val = eval_projection_expr(&replaced, &dummy_cols, row);
     match val {
         Value::Bool(b) => b,
@@ -1119,24 +1197,33 @@ fn try_execute_navicat_function_query(
 
     let (col_name, value) = match expr {
         // SELECT version()
-        Expr::Function { name, .. } if name.eq_ignore_ascii_case("version") => {
-            ("version".to_string(), Value::Text(SZRSQL_VERSION.to_string()))
-        }
+        Expr::Function { name, .. } if name.eq_ignore_ascii_case("version") => (
+            "version".to_string(),
+            Value::Text(SZRSQL_VERSION.to_string()),
+        ),
         // SELECT current_database()
-        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_database") => {
-            ("current_database".to_string(), Value::Text(current_db.to_string()))
-        }
+        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_database") => (
+            "current_database".to_string(),
+            Value::Text(current_db.to_string()),
+        ),
         // SELECT current_schema()
-        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_schema") => {
-            ("current_schema".to_string(), Value::Text("public".to_string()))
-        }
+        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_schema") => (
+            "current_schema".to_string(),
+            Value::Text("public".to_string()),
+        ),
         // SELECT current_user() / SELECT current_user
-        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_user") => {
-            ("current_user".to_string(), Value::Text("szrsql".to_string()))
-        }
+        Expr::Function { name, .. } if name.eq_ignore_ascii_case("current_user") => (
+            "current_user".to_string(),
+            Value::Text("szrsql".to_string()),
+        ),
         // SELECT current_user（标识符形式）
-        Expr::Identifier(idents) if idents.len() == 1 && idents[0].eq_ignore_ascii_case("current_user") => {
-            ("current_user".to_string(), Value::Text("szrsql".to_string()))
+        Expr::Identifier(idents)
+            if idents.len() == 1 && idents[0].eq_ignore_ascii_case("current_user") =>
+        {
+            (
+                "current_user".to_string(),
+                Value::Text("szrsql".to_string()),
+            )
         }
         // SELECT current_setting('name')
         Expr::Function { name, args, .. }
@@ -1216,10 +1303,13 @@ fn try_execute_cte_system_table(
         let outer_uses_cte = match &outer_select.from[0].relation {
             TableFactor::Table { name, .. } => name.name.eq_ignore_ascii_case(cte_name),
             _ => false,
-        } || outer_select.from[0].joins.iter().any(|j| match &j.relation {
-            TableFactor::Table { name, .. } => name.name.eq_ignore_ascii_case(cte_name),
-            _ => false,
-        });
+        } || outer_select.from[0]
+            .joins
+            .iter()
+            .any(|j| match &j.relation {
+                TableFactor::Table { name, .. } => name.name.eq_ignore_ascii_case(cte_name),
+                _ => false,
+            });
         if !outer_uses_cte {
             return None;
         }
@@ -1249,7 +1339,12 @@ fn try_execute_cte_system_table(
                 }
             }
         }
-        return Some(execute_system_catalog_join(&new_select, catalog, current_db, stats));
+        return Some(execute_system_catalog_join(
+            &new_select,
+            catalog,
+            current_db,
+            stats,
+        ));
     }
 
     // 外层 FROM 必须是简单的 Table 引用，且名字匹配 CTE 名
@@ -1276,14 +1371,11 @@ fn try_execute_cte_system_table(
     }
 
     // 应用外层 SELECT 的投影（通常是 SELECT *）
-    let (columns, mut projected_rows) = match project_columns(
-        &outer_select.projection,
-        &schema,
-        &rows,
-    ) {
-        Ok(p) => p,
-        Err(e) => return Some(Err(e)),
-    };
+    let (columns, mut projected_rows) =
+        match project_columns(&outer_select.projection, &schema, &rows) {
+            Ok(p) => p,
+            Err(e) => return Some(Err(e)),
+        };
 
     // 应用外层 DISTINCT
     if outer_select.distinct {
@@ -1303,7 +1395,11 @@ fn dedup_rows(rows: &mut Vec<Vec<Value>>) {
     let mut seen = std::collections::HashSet::new();
     rows.retain(|row| {
         // 用 Value 的 Debug 表示作为去重键（简单可靠）
-        let key: String = row.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join("|");
+        let key: String = row
+            .iter()
+            .map(|v| format!("{:?}", v))
+            .collect::<Vec<_>>()
+            .join("|");
         seen.insert(key)
     });
 }
@@ -1377,15 +1473,19 @@ fn contains_system_table_factor(factor: &TableFactor) -> bool {
     match factor {
         TableFactor::Table { name, .. } => SystemTableKind::from_name(name).is_some(),
         TableFactor::Derived { subquery, .. } => {
-            subquery.from.iter().any(|t| contains_system_table_factor(&t.relation))
+            subquery
+                .from
+                .iter()
+                .any(|t| contains_system_table_factor(&t.relation))
                 || subquery.from.iter().any(|t| {
-                    t.joins.iter().any(|j| contains_system_table_factor(&j.relation))
+                    t.joins
+                        .iter()
+                        .any(|j| contains_system_table_factor(&j.relation))
                 })
         }
         // Navicat 兼容：表函数（如 pg_available_extension_versions()）
         // 视为系统表引用，避免 table not found 错误
         TableFactor::TableFunction { name, .. } => is_system_function(name),
-        _ => false,
     }
 }
 
@@ -1506,7 +1606,6 @@ fn materialize_system_table_factor(
             };
             Some((col_names, Vec::new()))
         }
-        _ => None,
     }
 }
 
@@ -1623,7 +1722,8 @@ fn execute_system_catalog_cross_join(
     }
 
     // 投影（复用 JOIN 的投影函数）
-    let (result_columns, projected_rows) = project_join_columns(&select.projection, &all_cols, &filtered_rows)?;
+    let (result_columns, projected_rows) =
+        project_join_columns(&select.projection, &all_cols, &filtered_rows)?;
 
     let tag = format!("SELECT {}", projected_rows.len());
     Ok(QueryResult::ResultSet {
@@ -1649,72 +1749,80 @@ fn execute_system_catalog_join(
     let from = &select.from[0];
 
     // 物化主表
-    let (left_cols, left_rows) = match materialize_system_table_factor(&from.relation, catalog, current_db, stats) {
-        Some(v) => v,
-        None => {
-            return Err(SessionError::Protocol(format!(
-                "system catalog JOIN: left relation is not a system table: {:?}",
-                from.relation
-            )));
-        }
-    };
+    let (left_cols, left_rows) =
+        match materialize_system_table_factor(&from.relation, catalog, current_db, stats) {
+            Some(v) => v,
+            None => {
+                return Err(SessionError::Protocol(format!(
+                    "system catalog JOIN: left relation is not a system table: {:?}",
+                    from.relation
+                )));
+            }
+        };
     // 主表别名（用于 ON/WHERE 中的别名解析）
     let left_alias = table_factor_alias(&from.relation);
 
     // 累积结果：(列名列表, 行数据, 表别名)
     // 初始为主表
-    let mut joined_cols: Vec<(String, String)> =
-        left_cols.iter().map(|c| (left_alias.clone(), c.clone())).collect();
+    let mut joined_cols: Vec<(String, String)> = left_cols
+        .iter()
+        .map(|c| (left_alias.clone(), c.clone()))
+        .collect();
     let mut joined_rows: Vec<Vec<Value>> = left_rows;
 
     // 依次处理每个 JOIN
     for join in &from.joins {
         // Navicat 兼容：支持 INNER/LEFT/CROSS JOIN
-        if !matches!(join.join_type, JoinType::Inner | JoinType::LeftOuter | JoinType::Cross) {
+        if !matches!(
+            join.join_type,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::Cross
+        ) {
             return Err(SessionError::Protocol(format!(
                 "system catalog JOIN only supports INNER/LEFT/CROSS JOIN, got {:?}",
                 join.join_type
             )));
         }
-        let (right_cols, right_rows) = match materialize_system_table_factor(&join.relation, catalog, current_db, stats) {
-            Some(v) => v,
-            None => {
-                // Navicat 兼容：无法物化的 JOIN 右表（如复杂子查询、未知系统表）
-                // 降级为空表，避免整个查询失败。LEFT JOIN 保留左表行（右表列填 NULL），
-                // INNER JOIN 结果为空。
-                let placeholder_cols = vec!["placeholder".to_string()];
-                let right_alias_tmp = table_factor_alias(&join.relation);
-                for c in &placeholder_cols {
-                    joined_cols.push((right_alias_tmp.clone(), c.clone()));
-                }
-                if matches!(join.join_type, JoinType::LeftOuter) {
-                    for row in &joined_rows {
-                        let mut new_row = row.clone();
-                        for _ in &placeholder_cols {
-                            new_row.push(Value::Null);
-                        }
-                        // 注意：这里不能直接修改 joined_rows，需要通过 new_rows
-                        // 但由于右表为空，LEFT JOIN 的结果就是左表行 + NULL
-                        // 简化处理：直接跳过此 JOIN 的笛卡尔积，保留左表行
-                        let _ = new_row; // 抑制未使用警告
+        let (right_cols, right_rows) =
+            match materialize_system_table_factor(&join.relation, catalog, current_db, stats) {
+                Some(v) => v,
+                None => {
+                    // Navicat 兼容：无法物化的 JOIN 右表（如复杂子查询、未知系统表）
+                    // 降级为空表，避免整个查询失败。LEFT JOIN 保留左表行（右表列填 NULL），
+                    // INNER JOIN 结果为空。
+                    let placeholder_cols = vec!["placeholder".to_string()];
+                    let right_alias_tmp = table_factor_alias(&join.relation);
+                    for c in &placeholder_cols {
+                        joined_cols.push((right_alias_tmp.clone(), c.clone()));
                     }
-                    // LEFT JOIN 空右表：保留左表行，右表列填 NULL
-                    for row in joined_rows.iter_mut() {
-                        for _ in &placeholder_cols {
-                            row.push(Value::Null);
+                    if matches!(join.join_type, JoinType::LeftOuter) {
+                        for row in &joined_rows {
+                            let mut new_row = row.clone();
+                            for _ in &placeholder_cols {
+                                new_row.push(Value::Null);
+                            }
+                            // 注意：这里不能直接修改 joined_rows，需要通过 new_rows
+                            // 但由于右表为空，LEFT JOIN 的结果就是左表行 + NULL
+                            // 简化处理：直接跳过此 JOIN 的笛卡尔积，保留左表行
+                            let _ = new_row; // 抑制未使用警告
                         }
+                        // LEFT JOIN 空右表：保留左表行，右表列填 NULL
+                        for row in joined_rows.iter_mut() {
+                            for _ in &placeholder_cols {
+                                row.push(Value::Null);
+                            }
+                        }
+                    } else {
+                        // INNER JOIN 空右表：结果为空
+                        joined_rows.clear();
                     }
-                } else {
-                    // INNER JOIN 空右表：结果为空
-                    joined_rows.clear();
+                    continue;
                 }
-                continue;
-            }
-        };
+            };
         let right_alias = table_factor_alias(&join.relation);
 
         // 解析 ON 条件：alias.col = alias.col
-        let on_pairs = extract_join_on_pairs(&join.condition, &joined_cols, &right_cols, &right_alias)?;
+        let on_pairs =
+            extract_join_on_pairs(&join.condition, &joined_cols, &right_cols, &right_alias)?;
 
         // Navicat 兼容：当 ON 条件全部降级为 extra_filters（无有效等值连接对）时，
         // 对左表每行与右表做笛卡尔积，应用 extra_filters 过滤。
@@ -1738,9 +1846,10 @@ fn execute_system_catalog_join(
                 for rrow in &right_rows {
                     let mut combined = lrow.clone();
                     combined.extend(rrow.clone());
-                    let passes: bool = on_pairs.extra_filters.iter().all(|f| {
-                        eval_where_predicate_join(f, &temp_col_names, &combined)
-                    });
+                    let passes: bool = on_pairs
+                        .extra_filters
+                        .iter()
+                        .all(|f| eval_where_predicate_join(f, &temp_col_names, &combined));
                     if passes {
                         new_rows.push(combined);
                         matched = true;
@@ -1811,7 +1920,8 @@ fn execute_system_catalog_join(
                 .map(|(a, c)| format!("{}.{}", a, c))
                 .collect();
             for filter_expr in &on_pairs.extra_filters {
-                joined_rows.retain(|row| eval_where_predicate_join(filter_expr, &filter_col_names, row));
+                joined_rows
+                    .retain(|row| eval_where_predicate_join(filter_expr, &filter_col_names, row));
             }
         }
     }
@@ -1831,18 +1941,25 @@ fn execute_system_catalog_join(
     // 策略：按 GROUP BY 列分组，对每组应用聚合函数（count/sum/avg/max/min）
     // 非聚合列取组内第一行值。
     if !select.group_by.is_empty() {
-        let group_indices: Vec<usize> = select.group_by.iter().filter_map(|g| {
-            // 解析 alias.col 形式
-            if let Expr::Identifier(idents) = g {
-                if idents.len() == 2 {
-                    let full = format!("{}.{}", idents[0].to_lowercase(), idents[1].to_lowercase());
-                    return all_col_names.iter().position(|c| c.to_lowercase() == full);
-                } else if idents.len() == 1 {
-                    return all_col_names.iter().position(|c| c.to_lowercase() == idents[0].to_lowercase());
+        let group_indices: Vec<usize> = select
+            .group_by
+            .iter()
+            .filter_map(|g| {
+                // 解析 alias.col 形式
+                if let Expr::Identifier(idents) = g {
+                    if idents.len() == 2 {
+                        let full =
+                            format!("{}.{}", idents[0].to_lowercase(), idents[1].to_lowercase());
+                        return all_col_names.iter().position(|c| c.to_lowercase() == full);
+                    } else if idents.len() == 1 {
+                        return all_col_names
+                            .iter()
+                            .position(|c| c.to_lowercase() == idents[0].to_lowercase());
+                    }
                 }
-            }
-            None
-        }).collect();
+                None
+            })
+            .collect();
 
         if group_indices.len() != select.group_by.len() {
             return Err(SessionError::Protocol(
@@ -1854,7 +1971,8 @@ fn execute_system_catalog_join(
         use std::collections::BTreeMap;
         let mut groups: BTreeMap<Vec<String>, Vec<Vec<Value>>> = BTreeMap::new();
         for row in joined_rows {
-            let key: Vec<String> = group_indices.iter()
+            let key: Vec<String> = group_indices
+                .iter()
                 .map(|&i| format!("{:?}", row.get(i).cloned().unwrap_or(Value::Null)))
                 .collect();
             groups.entry(key).or_default().push(row);
@@ -1878,23 +1996,25 @@ fn execute_system_catalog_join(
         }
 
         // 构造聚合后的列结构（用于 HAVING/ORDER 求值）
-        let agg_cols: Vec<(String, String)> = select.projection.iter().filter_map(|item| {
-            let (expr, alias) = match item {
-                SelectItem::UnnamedExpr(e) => (e, None),
-                SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.clone())),
-                _ => return None,
-            };
-            let name = alias.unwrap_or_else(|| expr_display_name(expr));
-            Some(("_agg".to_string(), name))
-        }).collect();
+        let agg_cols: Vec<(String, String)> = select
+            .projection
+            .iter()
+            .filter_map(|item| {
+                let (expr, alias) = match item {
+                    SelectItem::UnnamedExpr(e) => (e, None),
+                    SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.clone())),
+                    _ => return None,
+                };
+                let name = alias.unwrap_or_else(|| expr_display_name(expr));
+                Some(("_agg".to_string(), name))
+            })
+            .collect();
 
         // HAVING 过滤
         if let Some(having_expr) = &select.having {
-            let agg_col_names: Vec<String> = agg_cols.iter()
-                .map(|(_, c)| c.to_lowercase()).collect();
-            agg_rows.retain(|row| {
-                eval_having_predicate_join(having_expr, &agg_col_names, row)
-            });
+            let agg_col_names: Vec<String> =
+                agg_cols.iter().map(|(_, c)| c.to_lowercase()).collect();
+            agg_rows.retain(|row| eval_having_predicate_join(having_expr, &agg_col_names, row));
         }
 
         // 替换 joined_rows 和 joined_cols
@@ -1902,16 +2022,18 @@ fn execute_system_catalog_join(
         joined_cols = agg_cols;
 
         // 跳过普通投影，直接构造结果
-        let result_columns: Vec<ResultColumn> = joined_cols.iter()
+        let result_columns: Vec<ResultColumn> = joined_cols
+            .iter()
             .map(|(_, name)| ResultColumn {
                 name: name.clone(),
                 column_type: ColumnType::Text,
-            }).collect();
+            })
+            .collect();
 
         // ORDER BY 多列（聚合后）— Navicat 兼容
         if !select.order_by.is_empty() {
-            let agg_col_names: Vec<String> = joined_cols.iter()
-                .map(|(_, c)| c.to_lowercase()).collect();
+            let agg_col_names: Vec<String> =
+                joined_cols.iter().map(|(_, c)| c.to_lowercase()).collect();
             apply_order_by_multi_join(&mut joined_rows, &agg_col_names, &select.order_by);
         }
 
@@ -1970,7 +2092,8 @@ fn execute_system_catalog_join(
     }
 
     // 投影
-    let (result_columns, projected_rows) = project_join_columns(&select.projection, &joined_cols, &joined_rows)?;
+    let (result_columns, projected_rows) =
+        project_join_columns(&select.projection, &joined_cols, &joined_rows)?;
 
     let tag = format!("SELECT {}", projected_rows.len());
     Ok(QueryResult::ResultSet {
@@ -2027,30 +2150,51 @@ fn extract_join_on_pairs(
             let mut left_indices = Vec::new();
             let mut right_indices = Vec::new();
             for c in cols {
-                let li = left_cols.iter().position(|(_, name)| name.eq_ignore_ascii_case(c))
-                    .ok_or_else(|| SessionError::Protocol(format!(
-                        "USING column '{}' not found in left side of system catalog JOIN", c
-                    )))?;
-                let ri = right_cols.iter().position(|name| name.eq_ignore_ascii_case(c))
-                    .ok_or_else(|| SessionError::Protocol(format!(
-                        "USING column '{}' not found in right side of system catalog JOIN", c
-                    )))?;
+                let li = left_cols
+                    .iter()
+                    .position(|(_, name)| name.eq_ignore_ascii_case(c))
+                    .ok_or_else(|| {
+                        SessionError::Protocol(format!(
+                            "USING column '{}' not found in left side of system catalog JOIN",
+                            c
+                        ))
+                    })?;
+                let ri = right_cols
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(c))
+                    .ok_or_else(|| {
+                        SessionError::Protocol(format!(
+                            "USING column '{}' not found in right side of system catalog JOIN",
+                            c
+                        ))
+                    })?;
                 left_indices.push(li);
                 right_indices.push(ri);
             }
-            return Ok(JoinOnPairs { left_indices, right_indices, extra_filters: Vec::new() });
+            return Ok(JoinOnPairs {
+                left_indices,
+                right_indices,
+                extra_filters: Vec::new(),
+            });
         }
         JoinCondition::Natural => {
             // NATURAL JOIN: 双方所有同名列
             let mut left_indices = Vec::new();
             let mut right_indices = Vec::new();
             for (li, (_, lname)) in left_cols.iter().enumerate() {
-                if let Some(ri) = right_cols.iter().position(|r| r.eq_ignore_ascii_case(lname)) {
+                if let Some(ri) = right_cols
+                    .iter()
+                    .position(|r| r.eq_ignore_ascii_case(lname))
+                {
                     left_indices.push(li);
                     right_indices.push(ri);
                 }
             }
-            return Ok(JoinOnPairs { left_indices, right_indices, extra_filters: Vec::new() });
+            return Ok(JoinOnPairs {
+                left_indices,
+                right_indices,
+                extra_filters: Vec::new(),
+            });
         }
         JoinCondition::None => {
             // CROSS JOIN 无条件 — 返回空列对，触发笛卡尔积
@@ -2082,7 +2226,11 @@ fn extract_join_on_pairs(
             _ => {}
         }
         match expr {
-            Expr::BinaryOp { left, op: BinaryOp::Eq, right } => {
+            Expr::BinaryOp {
+                left,
+                op: BinaryOp::Eq,
+                right,
+            } => {
                 // Navicat 兼容：支持 `col = literal` 形式（如 `n.nspname = 'public'`）
                 // 当一边是字面量时，整个条件作为 JOIN 后过滤，不参与等值连接。
                 let left_is_literal = matches!(&**left, Expr::Literal(_));
@@ -2105,7 +2253,10 @@ fn extract_join_on_pairs(
                 // 这样 LEFT JOIN 时左行保留并填 NULL，再由 extra_filters 行级过滤。
                 let (li, ri) = if l_alias == right_alias && r_alias != right_alias {
                     // left 是右表，right 是左表
-                    let Some(ri) = right_cols.iter().position(|c| c.eq_ignore_ascii_case(&l_col)) else {
+                    let Some(ri) = right_cols
+                        .iter()
+                        .position(|c| c.eq_ignore_ascii_case(&l_col))
+                    else {
                         extra_filters.push(expr.clone());
                         return Ok(());
                     };
@@ -2120,7 +2271,10 @@ fn extract_join_on_pairs(
                         extra_filters.push(expr.clone());
                         return Ok(());
                     };
-                    let Some(ri) = right_cols.iter().position(|c| c.eq_ignore_ascii_case(&r_col)) else {
+                    let Some(ri) = right_cols
+                        .iter()
+                        .position(|c| c.eq_ignore_ascii_case(&r_col))
+                    else {
                         extra_filters.push(expr.clone());
                         return Ok(());
                     };
@@ -2134,9 +2288,29 @@ fn extract_join_on_pairs(
                 right_indices.push(ri);
                 Ok(())
             }
-            Expr::BinaryOp { left, op: BinaryOp::And, right } => {
-                collect_eq(left, left_cols, right_cols, right_alias, left_indices, right_indices, extra_filters)?;
-                collect_eq(right, left_cols, right_cols, right_alias, left_indices, right_indices, extra_filters)?;
+            Expr::BinaryOp {
+                left,
+                op: BinaryOp::And,
+                right,
+            } => {
+                collect_eq(
+                    left,
+                    left_cols,
+                    right_cols,
+                    right_alias,
+                    left_indices,
+                    right_indices,
+                    extra_filters,
+                )?;
+                collect_eq(
+                    right,
+                    left_cols,
+                    right_cols,
+                    right_alias,
+                    left_indices,
+                    right_indices,
+                    extra_filters,
+                )?;
                 Ok(())
             }
             // Navicat 兼容：ON 中的非等值条件（如 `t.oid > 0`）降级为 JOIN 后过滤
@@ -2149,8 +2323,20 @@ fn extract_join_on_pairs(
     }
 
     let mut extra_filters: Vec<Expr> = Vec::new();
-    collect_eq(on_expr, left_cols, right_cols, right_alias, &mut left_indices, &mut right_indices, &mut extra_filters)?;
-    Ok(JoinOnPairs { left_indices, right_indices, extra_filters })
+    collect_eq(
+        on_expr,
+        left_cols,
+        right_cols,
+        right_alias,
+        &mut left_indices,
+        &mut right_indices,
+        &mut extra_filters,
+    )?;
+    Ok(JoinOnPairs {
+        left_indices,
+        right_indices,
+        extra_filters,
+    })
 }
 
 /// 从表达式中解析出 (alias, col) 形式。
@@ -2188,10 +2374,16 @@ fn value_to_key(v: &Value) -> String {
 /// 评估 WHERE 谓词（JOIN 版本，支持 alias.col 形式）。
 fn eval_where_predicate_join(expr: &Expr, col_names: &[String], row: &[Value]) -> bool {
     match expr {
-        Expr::BinaryOp { left, op: BinaryOp::Eq, right } => {
-            eval_eq_condition_join(left, right, col_names, row)
-        }
-        Expr::BinaryOp { left, op: BinaryOp::And, right } => {
+        Expr::BinaryOp {
+            left,
+            op: BinaryOp::Eq,
+            right,
+        } => eval_eq_condition_join(left, right, col_names, row),
+        Expr::BinaryOp {
+            left,
+            op: BinaryOp::And,
+            right,
+        } => {
             eval_where_predicate_join(left, col_names, row)
                 && eval_where_predicate_join(right, col_names, row)
         }
@@ -2207,14 +2399,15 @@ fn eval_eq_condition_join(left: &Expr, right: &Expr, col_names: &[String], row: 
         extract_literal(right),
     ) {
         (Some(idx), Some(val)) => (idx, val),
-        (Some(idx), None) => {
-            match extract_literal(right) {
-                Some(val) => (idx, val),
-                None => return true,
-            }
-        }
+        (Some(idx), None) => match extract_literal(right) {
+            Some(val) => (idx, val),
+            None => return true,
+        },
         (None, _) => {
-            match (extract_column_index_join(right, col_names), extract_literal(left)) {
+            match (
+                extract_column_index_join(right, col_names),
+                extract_literal(left),
+            ) {
                 (Some(idx), Some(val)) => (idx, val),
                 _ => return true,
             }
@@ -2233,9 +2426,9 @@ fn extract_column_index_join(expr: &Expr, col_names: &[String]) -> Option<usize>
         Expr::Identifier(idents) if idents.len() == 1 => {
             // 不带前缀：匹配列名的尾段
             let name = idents[0].to_lowercase();
-            col_names.iter().position(|c| {
-                c.to_lowercase().ends_with(&format!(".{}", name))
-            })
+            col_names
+                .iter()
+                .position(|c| c.to_lowercase().ends_with(&format!(".{}", name)))
         }
         _ => None,
     }
@@ -2250,7 +2443,11 @@ fn apply_order_by_join(rows: &mut [Vec<Value>], col_names: &[String], order: &Or
     let ascending = order.asc;
     rows.sort_by(|a, b| {
         let cmp = compare_values(a.get(col_idx), b.get(col_idx));
-        if ascending { cmp } else { cmp.reverse() }
+        if ascending {
+            cmp
+        } else {
+            cmp.reverse()
+        }
     });
 }
 
@@ -2258,26 +2455,37 @@ fn apply_order_by_join(rows: &mut [Vec<Value>], col_names: &[String], order: &Or
 ///
 /// 按 ORDER BY 子句中的列顺序依次排序，先按第一列排序，
 /// 第一列相等时按第二列排序，以此类推。支持 alias.col 形式。
-fn apply_order_by_multi_join(rows: &mut [Vec<Value>], col_names: &[String], orders: &[OrderByExpr]) {
+fn apply_order_by_multi_join(
+    rows: &mut [Vec<Value>],
+    col_names: &[String],
+    orders: &[OrderByExpr],
+) {
     // 预解析每列的索引和升降序
-    let sort_keys: Vec<(usize, bool)> = orders.iter().filter_map(|order| {
-        let idx = match &order.expr {
-            Expr::Literal(Value::Int64(n)) => {
-                if *n < 1 || (*n as usize) > col_names.len() {
-                    return None;
+    let sort_keys: Vec<(usize, bool)> = orders
+        .iter()
+        .filter_map(|order| {
+            let idx = match &order.expr {
+                Expr::Literal(Value::Int64(n)) => {
+                    if *n < 1 || (*n as usize) > col_names.len() {
+                        return None;
+                    }
+                    (*n - 1) as usize
                 }
-                (*n - 1) as usize
-            }
-            _ => extract_column_index_join(&order.expr, col_names)?,
-        };
-        Some((idx, order.asc))
-    }).collect();
+                _ => extract_column_index_join(&order.expr, col_names)?,
+            };
+            Some((idx, order.asc))
+        })
+        .collect();
 
     rows.sort_by(|a, b| {
         for &(idx, ascending) in &sort_keys {
             let cmp = compare_values(a.get(idx), b.get(idx));
             if cmp != std::cmp::Ordering::Equal {
-                return if ascending { cmp } else { cmp.reverse() };
+                return if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                };
             }
         }
         std::cmp::Ordering::Equal
@@ -2508,7 +2716,9 @@ fn eval_where_predicate(expr: &Expr, column_names: &[String], row: &[Value]) -> 
             left,
             op: szrsql_sql::ast::BinaryOp::Lt,
             right,
-        } => eval_cmp_condition(left, right, column_names, row, |o| o == std::cmp::Ordering::Less),
+        } => eval_cmp_condition(left, right, column_names, row, |o| {
+            o == std::cmp::Ordering::Less
+        }),
         Expr::BinaryOp {
             left,
             op: szrsql_sql::ast::BinaryOp::LtEq,
@@ -2554,7 +2764,14 @@ fn eval_where_predicate(expr: &Expr, column_names: &[String], row: &[Value]) -> 
             pattern,
             negated,
             case_insensitive,
-        } => eval_like_condition(expr, pattern, *negated, *case_insensitive, column_names, row),
+        } => eval_like_condition(
+            expr,
+            pattern,
+            *negated,
+            *case_insensitive,
+            column_names,
+            row,
+        ),
         // IS [NOT] NULL
         Expr::IsNull { expr, negated } => {
             let idx = extract_column_index(expr, column_names);
@@ -2883,24 +3100,31 @@ fn apply_order_by(rows: &mut [Vec<Value>], column_names: &[String], order: &Orde
 /// 第一列相等时按第二列排序，以此类推。
 fn apply_order_by_multi(rows: &mut [Vec<Value>], column_names: &[String], orders: &[OrderByExpr]) {
     // 预解析每列的索引和升降序
-    let sort_keys: Vec<(usize, bool)> = orders.iter().filter_map(|order| {
-        let idx = match &order.expr {
-            Expr::Literal(Value::Int64(n)) => {
-                if *n < 1 || (*n as usize) > column_names.len() {
-                    return None;
+    let sort_keys: Vec<(usize, bool)> = orders
+        .iter()
+        .filter_map(|order| {
+            let idx = match &order.expr {
+                Expr::Literal(Value::Int64(n)) => {
+                    if *n < 1 || (*n as usize) > column_names.len() {
+                        return None;
+                    }
+                    (*n - 1) as usize
                 }
-                (*n - 1) as usize
-            }
-            _ => extract_column_index(&order.expr, column_names)?,
-        };
-        Some((idx, order.asc))
-    }).collect();
+                _ => extract_column_index(&order.expr, column_names)?,
+            };
+            Some((idx, order.asc))
+        })
+        .collect();
 
     rows.sort_by(|a, b| {
         for &(idx, ascending) in &sort_keys {
             let cmp = compare_values(a.get(idx), b.get(idx));
             if cmp != std::cmp::Ordering::Equal {
-                return if ascending { cmp } else { cmp.reverse() };
+                return if ascending {
+                    cmp
+                } else {
+                    cmp.reverse()
+                };
             }
         }
         std::cmp::Ordering::Equal
@@ -2974,7 +3198,11 @@ fn project_columns(
 
     if has_wildcard {
         // 混合通配符与表达式 —— 展开通配符后追加表达式列
-        let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.to_lowercase()).collect();
+        let column_names: Vec<String> = schema
+            .columns
+            .iter()
+            .map(|c| c.name.to_lowercase())
+            .collect();
         let mut result_columns: Vec<ResultColumn> = Vec::new();
         let mut expr_list: Vec<Option<&Expr>> = Vec::new(); // None = 通配符列
 
@@ -3026,7 +3254,11 @@ fn project_columns(
         return Ok((result_columns, projected_rows));
     }
 
-    let column_names: Vec<String> = schema.columns.iter().map(|c| c.name.to_lowercase()).collect();
+    let column_names: Vec<String> = schema
+        .columns
+        .iter()
+        .map(|c| c.name.to_lowercase())
+        .collect();
 
     // 预先检查是否是 count(*) 聚合（整行 count）
     if projection.len() == 1 {
@@ -3089,11 +3321,7 @@ fn expr_display_name(expr: &Expr) -> String {
 }
 
 /// 推断投影表达式的结果类型
-fn expr_result_type(
-    expr: &Expr,
-    schema: &TableSchema,
-    column_names: &[String],
-) -> ColumnType {
+fn expr_result_type(expr: &Expr, schema: &TableSchema, column_names: &[String]) -> ColumnType {
     match expr {
         Expr::Identifier(idents) => {
             let name = idents.last().cloned().unwrap_or_default();
@@ -3186,15 +3414,21 @@ fn eval_projection_expr(expr: &Expr, column_names: &[String], row: &[Value]) -> 
                 _ => Value::Null,
             }
         }
-        Expr::BinaryOp { left, op, right } => {
-            eval_binary_op(left, *op, right, column_names, row)
-        }
+        Expr::BinaryOp { left, op, right } => eval_binary_op(left, *op, right, column_names, row),
         Expr::IsNull { expr, negated } => {
             let v = eval_projection_expr(expr, column_names, row);
             let is_null = matches!(v, Value::Null);
-            Value::Bool(if *negated { !is_null } else { is_null })
+            Value::Bool(if *negated {
+                !is_null
+            } else {
+                is_null
+            })
         }
-        Expr::InList { expr, list, negated } => {
+        Expr::InList {
+            expr,
+            list,
+            negated,
+        } => {
             let v = eval_projection_expr(expr, column_names, row);
             let mut found = false;
             for item in list {
@@ -3204,7 +3438,11 @@ fn eval_projection_expr(expr: &Expr, column_names: &[String], row: &[Value]) -> 
                     break;
                 }
             }
-            Value::Bool(if *negated { !found } else { found })
+            Value::Bool(if *negated {
+                !found
+            } else {
+                found
+            })
         }
         _ => Value::Null,
     }
@@ -3247,9 +3485,7 @@ fn eval_projection_function(
             .min_by(|a, b| compare_values(Some(a), Some(b)))
             .cloned()
             .unwrap_or(Value::Null),
-        "current_user" | "user" | "session_user" | "current_role" => {
-            Value::Text("postgres".into())
-        }
+        "current_user" | "user" | "session_user" | "current_role" => Value::Text("postgres".into()),
         "current_database" => Value::Text("szrsql".into()),
         "version" => Value::Text("14.0-szrsql (SzRSQL 1.0.0-rc.2)".into()),
         "pg_get_userbyid" => Value::Text("postgres".into()),
@@ -3276,15 +3512,16 @@ fn eval_projection_function(
         "pg_get_expr" => Value::Text(String::new()),
         "pg_get_constraintdef" => {
             // P0 Navicat 兼容修复：从同一行的 condef 列取值
-            if let Some(pos) = column_names.iter().position(|n| n.eq_ignore_ascii_case("condef")) {
+            if let Some(pos) = column_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("condef"))
+            {
                 row.get(pos).cloned().unwrap_or(Value::Text(String::new()))
             } else {
                 Value::Text(String::new())
             }
         }
-        "pg_get_viewdef" | "pg_get_indexdef" | "pg_get_triggerdef" => {
-            Value::Text(String::new())
-        }
+        "pg_get_viewdef" | "pg_get_indexdef" | "pg_get_triggerdef" => Value::Text(String::new()),
         "to_char" | "to_number" | "to_date" | "to_timestamp" => {
             arg_vals.first().cloned().unwrap_or(Value::Null)
         }
@@ -3327,7 +3564,9 @@ fn eval_projection_function(
         "current_setting" => match arg_vals.first() {
             Some(Value::Text(s)) => {
                 let lower = s.to_lowercase();
-                pg_default_setting(&lower).map(Value::Text).unwrap_or(Value::Text(String::new()))
+                pg_default_setting(&lower)
+                    .map(Value::Text)
+                    .unwrap_or(Value::Text(String::new()))
             }
             _ => Value::Text(String::new()),
         },
@@ -3391,18 +3630,44 @@ fn eval_binary_op(
         BinaryOp::Plus => numeric_op(&l, &r, |a, b| a + b, |a, b| a + b),
         BinaryOp::Minus => numeric_op(&l, &r, |a, b| a - b, |a, b| a - b),
         BinaryOp::Multiply => numeric_op(&l, &r, |a, b| a * b, |a, b| a * b),
-        BinaryOp::Divide => numeric_op(&l, &r, |a, b| if b == 0 { 0 } else { a / b }, |a, b| a / b),
-        BinaryOp::Modulo => numeric_op(&l, &r, |a, b| if b == 0 { 0 } else { a % b }, |a, b| a % b),
+        BinaryOp::Divide => numeric_op(
+            &l,
+            &r,
+            |a, b| {
+                if b == 0 {
+                    0
+                } else {
+                    a / b
+                }
+            },
+            |a, b| a / b,
+        ),
+        BinaryOp::Modulo => numeric_op(
+            &l,
+            &r,
+            |a, b| {
+                if b == 0 {
+                    0
+                } else {
+                    a % b
+                }
+            },
+            |a, b| a % b,
+        ),
         BinaryOp::Eq => Value::Bool(values_equal_case(&l, &r)),
         BinaryOp::NotEq => Value::Bool(!values_equal_case(&l, &r)),
         BinaryOp::Lt => Value::Bool(compare_values(Some(&l), Some(&r)) == std::cmp::Ordering::Less),
-        BinaryOp::LtEq => Value::Bool(
-            matches!(compare_values(Some(&l), Some(&r)), std::cmp::Ordering::Less | std::cmp::Ordering::Equal),
-        ),
-        BinaryOp::Gt => Value::Bool(compare_values(Some(&l), Some(&r)) == std::cmp::Ordering::Greater),
-        BinaryOp::GtEq => Value::Bool(
-            matches!(compare_values(Some(&l), Some(&r)), std::cmp::Ordering::Greater | std::cmp::Ordering::Equal),
-        ),
+        BinaryOp::LtEq => Value::Bool(matches!(
+            compare_values(Some(&l), Some(&r)),
+            std::cmp::Ordering::Less | std::cmp::Ordering::Equal
+        )),
+        BinaryOp::Gt => {
+            Value::Bool(compare_values(Some(&l), Some(&r)) == std::cmp::Ordering::Greater)
+        }
+        BinaryOp::GtEq => Value::Bool(matches!(
+            compare_values(Some(&l), Some(&r)),
+            std::cmp::Ordering::Greater | std::cmp::Ordering::Equal
+        )),
         BinaryOp::And => Value::Bool(is_truthy(&l) && is_truthy(&r)),
         BinaryOp::Or => Value::Bool(is_truthy(&l) || is_truthy(&r)),
         _ => Value::Null,
@@ -3431,7 +3696,13 @@ fn value_to_text(v: &Value) -> String {
         Value::Text(s) => s.clone(),
         Value::Int64(n) => n.to_string(),
         Value::Float64(n) => n.to_string(),
-        Value::Bool(b) => if *b { "t".into() } else { "f".into() },
+        Value::Bool(b) => {
+            if *b {
+                "t".into()
+            } else {
+                "f".into()
+            }
+        }
         Value::Null => String::new(),
         _ => format!("{:?}", v),
     }
@@ -3491,7 +3762,10 @@ fn eval_join_agg_expr(
                             let v = eval_projection_expr(arg, column_names, row);
                             match v {
                                 Value::Int64(n) => sum += n as f64,
-                                Value::Float64(n) => { is_int = false; sum += n; }
+                                Value::Float64(n) => {
+                                    is_int = false;
+                                    sum += n;
+                                }
                                 Value::Null => {}
                                 _ => {}
                             }
@@ -3512,8 +3786,14 @@ fn eval_join_agg_expr(
                         for row in group_rows {
                             let v = eval_projection_expr(arg, column_names, row);
                             match v {
-                                Value::Int64(n) => { sum += n as f64; count += 1; }
-                                Value::Float64(n) => { sum += n; count += 1; }
+                                Value::Int64(n) => {
+                                    sum += n as f64;
+                                    count += 1;
+                                }
+                                Value::Float64(n) => {
+                                    sum += n;
+                                    count += 1;
+                                }
                                 Value::Null => {}
                                 _ => {}
                             }
@@ -3532,7 +3812,9 @@ fn eval_join_agg_expr(
                         let mut best: Option<Value> = None;
                         for row in group_rows {
                             let v = eval_projection_expr(arg, column_names, row);
-                            if matches!(v, Value::Null) { continue; }
+                            if matches!(v, Value::Null) {
+                                continue;
+                            }
                             best = Some(match best {
                                 None => v,
                                 Some(cur) => {
@@ -3542,7 +3824,11 @@ fn eval_join_agg_expr(
                                     } else {
                                         compare_values_agg(&v, &cur) < 0
                                     };
-                                    if replace { v } else { cur }
+                                    if replace {
+                                        v
+                                    } else {
+                                        cur
+                                    }
                                 }
                             });
                         }
@@ -3563,15 +3849,33 @@ fn compare_values_agg(a: &Value, b: &Value) -> i32 {
     match (a, b) {
         (Value::Int64(x), Value::Int64(y)) => (x - y).signum() as i32,
         (Value::Float64(x), Value::Float64(y)) => {
-            if x > y { 1 } else if x < y { -1 } else { 0 }
+            if x > y {
+                1
+            } else if x < y {
+                -1
+            } else {
+                0
+            }
         }
         (Value::Int64(x), Value::Float64(y)) => {
             let xf = *x as f64;
-            if xf > *y { 1 } else if xf < *y { -1 } else { 0 }
+            if xf > *y {
+                1
+            } else if xf < *y {
+                -1
+            } else {
+                0
+            }
         }
         (Value::Float64(x), Value::Int64(y)) => {
             let yf = *y as f64;
-            if *x > yf { 1 } else if *x < yf { -1 } else { 0 }
+            if *x > yf {
+                1
+            } else if *x < yf {
+                -1
+            } else {
+                0
+            }
         }
         (Value::Text(x), Value::Text(y)) => x.cmp(y) as i32,
         (Value::Bool(x), Value::Bool(y)) => (*x as i32) - (*y as i32),
@@ -3582,11 +3886,7 @@ fn compare_values_agg(a: &Value, b: &Value) -> i32 {
 /// 求值 JOIN + GROUP BY 后的 HAVING 谓词
 ///
 /// 将 HAVING 中的聚合函数替换为聚合结果后求值布尔结果。
-fn eval_having_predicate_join(
-    expr: &Expr,
-    column_names: &[String],
-    row: &[Value],
-) -> bool {
+fn eval_having_predicate_join(expr: &Expr, column_names: &[String], row: &[Value]) -> bool {
     let val = eval_projection_expr(expr, column_names, row);
     match val {
         Value::Bool(b) => b,
@@ -3992,7 +4292,10 @@ mod tests {
         let query_result = result.unwrap().expect("JOIN should succeed");
         match query_result {
             QueryResult::ResultSet { rows, .. } => {
-                assert!(!rows.is_empty(), "should have at least one row for user tables");
+                assert!(
+                    !rows.is_empty(),
+                    "should have at least one row for user tables"
+                );
             }
             _ => panic!("expected ResultSet"),
         }
@@ -4039,7 +4342,10 @@ mod tests {
         let sql = "SELECT DISTINCT tablename FROM pg_tables";
         let stmts = szrsql_sql::parser::parse_sql(sql).expect("parse should succeed");
         let result = try_execute_system_table_query(&stmts[0], &cat, "szrsql", None);
-        assert!(result.is_some(), "DISTINCT should be supported for system table queries");
+        assert!(
+            result.is_some(),
+            "DISTINCT should be supported for system table queries"
+        );
         match result.unwrap() {
             Ok(QueryResult::ResultSet { rows, .. }) => {
                 // users/orders 两张表 → DISTINCT 后 2 行
@@ -4142,11 +4448,11 @@ mod tests {
 
     /// 构建 users 表的统计信息（row_count = 100，2 列）
     fn make_stats_store_for_users() -> szrsql_optimizer::statistics::InMemoryStatisticsStore {
+        use std::collections::HashMap;
+        use std::time::SystemTime;
         use szrsql_optimizer::statistics::{
             ColumnStatistics, InMemoryStatisticsStore, StatisticsStore, TableStatistics,
         };
-        use std::collections::HashMap;
-        use std::time::SystemTime;
 
         let mut column_stats = HashMap::new();
         column_stats.insert(

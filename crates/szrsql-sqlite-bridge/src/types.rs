@@ -137,7 +137,10 @@ mod tests {
     #[test]
     fn from_value_int64_maps_to_integer() {
         // Int64 → INTEGER
-        assert_eq!(SqliteType::from_value(&Value::Int64(42)), SqliteType::Integer);
+        assert_eq!(
+            SqliteType::from_value(&Value::Int64(42)),
+            SqliteType::Integer
+        );
         assert_eq!(
             SqliteType::from_value(&Value::Int64(i64::MIN)),
             SqliteType::Integer

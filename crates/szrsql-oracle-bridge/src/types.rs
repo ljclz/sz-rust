@@ -229,12 +229,26 @@ impl OracleType {
                     format!("NUMBER({precision},{scale})")
                 }
             }
-            Self::Varchar2 { size, char_semantics } => {
-                let unit = if *char_semantics { "CHAR" } else { "BYTE" };
+            Self::Varchar2 {
+                size,
+                char_semantics,
+            } => {
+                let unit = if *char_semantics {
+                    "CHAR"
+                } else {
+                    "BYTE"
+                };
                 format!("VARCHAR2({size} {unit})")
             }
-            Self::Char { size, char_semantics } => {
-                let unit = if *char_semantics { "CHAR" } else { "BYTE" };
+            Self::Char {
+                size,
+                char_semantics,
+            } => {
+                let unit = if *char_semantics {
+                    "CHAR"
+                } else {
+                    "BYTE"
+                };
                 format!("CHAR({size} {unit})")
             }
             Self::Date => "DATE".to_string(),
@@ -322,7 +336,9 @@ impl OracleType {
     pub fn to_value(self, raw: &str) -> Result<Value, OracleTypeError> {
         match self {
             Self::Number { scale, .. } => parse_number_to_value(raw, scale),
-            Self::Varchar2 { .. } | Self::Char { .. } | Self::Clob => Ok(Value::Text(raw.to_string())),
+            Self::Varchar2 { .. } | Self::Char { .. } | Self::Clob => {
+                Ok(Value::Text(raw.to_string()))
+            }
             Self::Date | Self::Timestamp { .. } => parse_datetime_to_value(raw),
             Self::Blob | Self::Raw { .. } => {
                 let bytes = hex_decode(raw)?;
@@ -427,7 +443,9 @@ fn parse_number_to_value(raw: &str, scale: i8) -> Result<Value, OracleTypeError>
 fn normalize_number_literal(s: &str) -> Result<String, OracleTypeError> {
     let s = s.trim_start_matches('+');
     if s.is_empty() {
-        return Err(OracleTypeError::ParseNumberFailed { input: s.to_string() });
+        return Err(OracleTypeError::ParseNumberFailed {
+            input: s.to_string(),
+        });
     }
 
     // 处理科学计数法 e/E
@@ -435,9 +453,11 @@ fn normalize_number_literal(s: &str) -> Result<String, OracleTypeError> {
     if let Some(e_pos) = lower.find('e') {
         let mantissa = &s[..e_pos];
         let exp_str = &s[e_pos + 1..];
-        let exp: i32 = exp_str.parse().map_err(|_| OracleTypeError::ParseNumberFailed {
-            input: s.to_string(),
-        })?;
+        let exp: i32 = exp_str
+            .parse()
+            .map_err(|_| OracleTypeError::ParseNumberFailed {
+                input: s.to_string(),
+            })?;
         // 移除 mantissa 中的小数点，根据 exp 调整
         let (neg, mantissa_abs) = if let Some(rest) = mantissa.strip_prefix('-') {
             (true, rest)
@@ -501,22 +521,38 @@ fn split_decimal_parts(s: &str) -> Result<(bool, String, String), OracleTypeErro
     };
 
     if abs.is_empty() {
-        return Err(OracleTypeError::ParseNumberFailed { input: s.to_string() });
+        return Err(OracleTypeError::ParseNumberFailed {
+            input: s.to_string(),
+        });
     }
 
     if let Some(dot_pos) = abs.find('.') {
         let int_part = &abs[..dot_pos];
         let frac_part = &abs[dot_pos + 1..];
         // 校验：仅含数字
-        if !int_part.chars().all(|c| c.is_ascii_digit()) || !frac_part.chars().all(|c| c.is_ascii_digit()) {
-            return Err(OracleTypeError::ParseNumberFailed { input: s.to_string() });
+        if !int_part.chars().all(|c| c.is_ascii_digit())
+            || !frac_part.chars().all(|c| c.is_ascii_digit())
+        {
+            return Err(OracleTypeError::ParseNumberFailed {
+                input: s.to_string(),
+            });
         }
-        let int_part = if int_part.is_empty() { "0".to_string() } else { int_part.to_string() };
-        let frac_part = if frac_part.is_empty() { String::new() } else { frac_part.to_string() };
+        let int_part = if int_part.is_empty() {
+            "0".to_string()
+        } else {
+            int_part.to_string()
+        };
+        let frac_part = if frac_part.is_empty() {
+            String::new()
+        } else {
+            frac_part.to_string()
+        };
         Ok((negative, int_part, frac_part))
     } else {
         if !abs.chars().all(|c| c.is_ascii_digit()) {
-            return Err(OracleTypeError::ParseNumberFailed { input: s.to_string() });
+            return Err(OracleTypeError::ParseNumberFailed {
+                input: s.to_string(),
+            });
         }
         Ok((negative, abs.to_string(), String::new()))
     }
@@ -573,7 +609,11 @@ fn parse_i128(digits: &str, negative: bool) -> Result<i128, OracleTypeError> {
         .map_err(|_| OracleTypeError::ParseNumberFailed {
             input: digits.to_string(),
         })?;
-    Ok(if negative { -abs } else { abs })
+    Ok(if negative {
+        -abs
+    } else {
+        abs
+    })
 }
 
 /// 解析 Oracle 日期/时间字符串为 Value::Timestamp（微秒精度，UTC）。
@@ -674,10 +714,26 @@ fn parse_datetime_to_value(raw: &str) -> Result<Value, OracleTypeError> {
 /// 输入：year (任意整数), month (1..=12), day (1..=31)
 /// 输出：days since 1970-01-01（可负）
 fn days_from_civil(year: i32, month: u32, day: u32) -> i32 {
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let y = if month <= 2 {
+        year - 1
+    } else {
+        year
+    };
+    let era = if y >= 0 {
+        y
+    } else {
+        y - 399
+    } / 400;
     let yoe = (y - era * 400) as u32; // [0, 399]
-    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1; // [0, 365]
+    let doy =
+        (153 * (if month > 2 {
+            month - 3
+        } else {
+            month + 9
+        }) + 2)
+            / 5
+            + day
+            - 1; // [0, 365]
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
     (era as i64 * 146_097 + doe as i64 - 719_468) as i32
 }
@@ -691,17 +747,33 @@ fn days_to_date_string(days: i32) -> String {
 /// Howard Hinnant 算法：自 1970-01-01 起的天数 → 公历 (year, month, day)。
 fn civil_from_days(days: i32) -> (i32, u32, u32) {
     let z = days as i64 + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let era = if z >= 0 {
+        z
+    } else {
+        z - 146_096
+    } / 146_097;
     let doe = (z - era * 146_097) as u32; // [0, 146096]
-    // 注意：必须包含 - doe / 146_096 项，否则 doe=146096（400 年周期最后一天）
-    // 会得到 yoe=400（超出 [0, 399] 范围），导致 2000-02-29 等日期往返失败
+                                          // 注意：必须包含 - doe / 146_096 项，否则 doe=146096（400 年周期最后一天）
+                                          // 会得到 yoe=400（超出 [0, 399] 范围），导致 2000-02-29 等日期往返失败
     let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe as i32 + era as i32 * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
     let mp = (5 * doy + 2) / 153; // [0, 11]
     let d = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
+    let m = if mp < 10 {
+        mp + 3
+    } else {
+        mp - 9
+    }; // [1, 12]
+    (
+        if m <= 2 {
+            y + 1
+        } else {
+            y
+        },
+        m,
+        d,
+    )
 }
 
 /// 微秒时间戳 → "YYYY-MM-DD HH:MM:SS.FFFFFF"。
@@ -714,9 +786,7 @@ fn micros_to_timestamp_string(us: i64) -> String {
     let minute = ((secs_in_day % 3_600) / 60) as u32;
     let second = (secs_in_day % 60) as u32;
     let (year, month, day) = civil_from_days(days as i32);
-    format!(
-        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{frac_us:06}"
-    )
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{frac_us:06}")
 }
 
 /// 格式化 Oracle 字符串字面量：单引号转义为两个单引号。
@@ -782,12 +852,16 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, OracleTypeError> {
     let mut bytes = Vec::with_capacity(cleaned.len() / 2);
     let chars: Vec<char> = cleaned.chars().collect();
     for i in (0..chars.len()).step_by(2) {
-        let high = chars[i].to_digit(16).ok_or_else(|| OracleTypeError::ParseHexFailed {
-            input: s.to_string(),
-        })?;
-        let low = chars[i + 1].to_digit(16).ok_or_else(|| OracleTypeError::ParseHexFailed {
-            input: s.to_string(),
-        })?;
+        let high = chars[i]
+            .to_digit(16)
+            .ok_or_else(|| OracleTypeError::ParseHexFailed {
+                input: s.to_string(),
+            })?;
+        let low = chars[i + 1]
+            .to_digit(16)
+            .ok_or_else(|| OracleTypeError::ParseHexFailed {
+                input: s.to_string(),
+            })?;
         bytes.push(((high << 4) | low) as u8);
     }
     Ok(bytes)
@@ -1006,10 +1080,7 @@ mod tests {
     #[test]
     fn literal_text_escapes_single_quotes() {
         let v = Value::Text("it's a test".to_string());
-        assert_eq!(
-            OracleType::value_to_oracle_literal(&v),
-            "'it''s a test'"
-        );
+        assert_eq!(OracleType::value_to_oracle_literal(&v), "'it''s a test'");
     }
 
     #[test]
@@ -1023,10 +1094,7 @@ mod tests {
 
     #[test]
     fn literal_bool_uses_zero_one() {
-        assert_eq!(
-            OracleType::value_to_oracle_literal(&Value::Bool(true)),
-            "1"
-        );
+        assert_eq!(OracleType::value_to_oracle_literal(&Value::Bool(true)), "1");
         assert_eq!(
             OracleType::value_to_oracle_literal(&Value::Bool(false)),
             "0"
@@ -1117,10 +1185,7 @@ mod tests {
             OracleType::Timestamp { precision: 6 }.to_ddl(),
             "TIMESTAMP(6)"
         );
-        assert_eq!(
-            OracleType::Raw { size: 200 }.to_ddl(),
-            "RAW(200)"
-        );
+        assert_eq!(OracleType::Raw { size: 200 }.to_ddl(), "RAW(200)");
     }
 
     // -----------------------------------------------------------------
@@ -1162,9 +1227,18 @@ mod tests {
 
     #[test]
     fn hex_decode_uppercase_lowercase() {
-        assert_eq!(hex_decode("DEADBEEF").unwrap(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
-        assert_eq!(hex_decode("deadbeef").unwrap(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
-        assert_eq!(hex_decode("0xDEADBEEF").unwrap(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(
+            hex_decode("DEADBEEF").unwrap(),
+            vec![0xDE, 0xAD, 0xBE, 0xEF]
+        );
+        assert_eq!(
+            hex_decode("deadbeef").unwrap(),
+            vec![0xDE, 0xAD, 0xBE, 0xEF]
+        );
+        assert_eq!(
+            hex_decode("0xDEADBEEF").unwrap(),
+            vec![0xDE, 0xAD, 0xBE, 0xEF]
+        );
         assert_eq!(hex_decode("").unwrap(), Vec::<u8>::new());
     }
 

@@ -169,7 +169,11 @@ impl AdversarialTest {
                 category,
                 sql: sql.to_string(),
                 status: CompatStatus::Pass,
-                detail: format!("{}: 已拒绝（{}）", dialect.name(), truncate_str(&e.to_string(), 80)),
+                detail: format!(
+                    "{}: 已拒绝（{}）",
+                    dialect.name(),
+                    truncate_str(&e.to_string(), 80)
+                ),
             },
         }
     }
@@ -234,9 +238,7 @@ impl AdversarialTest {
                 category,
                 sql,
                 status: CompatStatus::Fail,
-                detail: format!(
-                    "{dialect_name}: 解析线程崩溃（栈溢出或其它 OS 信号）"
-                ),
+                detail: format!("{dialect_name}: 解析线程崩溃（栈溢出或其它 OS 信号）"),
             },
         }
     }
@@ -751,7 +753,10 @@ impl AdversarialTest {
             Dialect::PostgreSQL,
         ));
         // 超大 JSON
-        let huge_json = format!("SELECT '{{\"x\":{}}}'::jsonb", "1,".repeat(1000).trim_end_matches(','));
+        let huge_json = format!(
+            "SELECT '{{\"x\":{}}}'::jsonb",
+            "1,".repeat(1000).trim_end_matches(',')
+        );
         v.push(Self::expect_parse_ok(
             "超大 JSON PG",
             AdversarialCategory::JsonBoundary,
@@ -848,9 +853,12 @@ mod tests {
         let results = AdversarialTest::run_all();
         assert!(!results.is_empty(), "对抗性测试不应为空");
         // 至少覆盖 10 个分类
-        let categories: std::collections::HashSet<_> =
-            results.iter().map(|r| r.category).collect();
-        assert!(categories.len() >= 10, "应覆盖至少 10 个分类，实际 {}", categories.len());
+        let categories: std::collections::HashSet<_> = results.iter().map(|r| r.category).collect();
+        assert!(
+            categories.len() >= 10,
+            "应覆盖至少 10 个分类，实际 {}",
+            categories.len()
+        );
     }
 
     #[test]

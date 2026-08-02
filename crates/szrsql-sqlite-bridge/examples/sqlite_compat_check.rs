@@ -131,14 +131,23 @@ fn main() {
                 if page_size == szrsql_sqlite_bridge::PAGE_SIZE_DEFAULT {
                     ok!("export_page_size");
                 } else {
-                    fail!("export_page_size", format!("expected {}, got {}", szrsql_sqlite_bridge::PAGE_SIZE_DEFAULT, page_size));
+                    fail!(
+                        "export_page_size",
+                        format!(
+                            "expected {}, got {}",
+                            szrsql_sqlite_bridge::PAGE_SIZE_DEFAULT,
+                            page_size
+                        )
+                    );
                 }
 
                 // 校验头部解码
                 match SqliteHeader::decode(&bytes) {
                     Ok(header) => {
-                        println!("    头部信息: page_size={}, text_encoding={}, db_size_pages={}",
-                                 header.page_size, header.text_encoding, header.db_size_pages);
+                        println!(
+                            "    头部信息: page_size={}, text_encoding={}, db_size_pages={}",
+                            header.page_size, header.text_encoding, header.db_size_pages
+                        );
                         ok!("header_decode");
                     }
                     Err(e) => fail!("header_decode", format!("{e:?}")),
@@ -156,7 +165,10 @@ fn main() {
             if data.is_empty() {
                 ok!("import_returns_empty");
             } else {
-                fail!("import_returns_empty", format!("expected empty, got {} tables", data.len()));
+                fail!(
+                    "import_returns_empty",
+                    format!("expected empty, got {} tables", data.len())
+                );
             }
         }
         Err(e) => fail!("import_returns_empty", format!("{e:?}")),
@@ -172,8 +184,14 @@ fn main() {
 
     // 2.5 导出有数据的表（当前版本仅写头部）
     let tables_with_data: Vec<(String, Vec<Value>)> = vec![
-        ("users".to_string(), vec![Value::Int64(1), Value::Text("Alice".to_string())]),
-        ("orders".to_string(), vec![Value::Int64(100), Value::Float64(99.5)]),
+        (
+            "users".to_string(),
+            vec![Value::Int64(1), Value::Text("Alice".to_string())],
+        ),
+        (
+            "orders".to_string(),
+            vec![Value::Int64(100), Value::Float64(99.5)],
+        ),
     ];
     match adapter.export_to_sqlite(&tables_with_data, &test_db) {
         Ok(_) => ok!("export_with_data"),

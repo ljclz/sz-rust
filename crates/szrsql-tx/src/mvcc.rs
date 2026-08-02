@@ -513,9 +513,7 @@ impl MvccManager {
         let xmax = self.txn_id_alloc.load(Ordering::SeqCst);
         let snapshot = Snapshot::new(active_ids, xmax);
         let txn = Transaction::new(txn_id, snapshot, level);
-        self.active_txns
-            .write()
-            .insert(txn_id, txn.clone());
+        self.active_txns.write().insert(txn_id, txn.clone());
         tracing::Span::current().record("txn_id", txn_id);
         trace!(txn_id, active_count, "transaction begun");
         txn
@@ -619,11 +617,7 @@ impl MvccManager {
     /// })?;
     /// ```
     #[instrument(skip(self, on_pre_commit), fields(txn_id, commit_lsn))]
-    pub fn commit_durable<F>(
-        &self,
-        txn_id: u32,
-        mut on_pre_commit: F,
-    ) -> Result<(), MvccError>
+    pub fn commit_durable<F>(&self, txn_id: u32, mut on_pre_commit: F) -> Result<(), MvccError>
     where
         F: FnMut(u32) -> Result<u64, MvccError>,
     {
@@ -647,14 +641,20 @@ impl MvccManager {
         // 阶段 2：SSI 写偏斜检测（仅 SERIALIZABLE）
         if txn.isolation_level == IsolationLevel::Serializable && self.has_write_skew(&txn)? {
             self.aborted_txns.write().insert(txn_id);
-            warn!(txn_id, "commit_durable: transaction aborted due to write skew");
+            warn!(
+                txn_id,
+                "commit_durable: transaction aborted due to write skew"
+            );
             return Err(MvccError::WriteSkewDetected(txn_id));
         }
 
         // 阶段 3：First-Committer-Wins（写写冲突检测）
         if !txn.write_set.is_empty() && self.has_write_write_conflict(&txn)? {
             self.aborted_txns.write().insert(txn_id);
-            warn!(txn_id, "commit_durable: transaction aborted due to write-write conflict");
+            warn!(
+                txn_id,
+                "commit_durable: transaction aborted due to write-write conflict"
+            );
             return Err(MvccError::WriteWriteConflict(txn_id));
         }
 
@@ -682,7 +682,10 @@ impl MvccManager {
                 write_set: txn.write_set.clone(),
             });
         }
-        debug!(txn_id, commit_lsn, write_count, "commit_durable: transaction committed (log-then-commit)");
+        debug!(
+            txn_id,
+            commit_lsn, write_count, "commit_durable: transaction committed (log-then-commit)"
+        );
         Ok(())
     }
 
@@ -925,7 +928,16 @@ impl MvccManager {
     /// 只短暂阻塞 commit/abort（在更新对应集合时）。
     ///
     /// **返回**：`VacuumStats` 包含回收的各类条目数量
-    #[instrument(skip(self), fields(safe_xid, vacuumed_committed, vacuumed_aborted, vacuumed_writes, retained_active))]
+    #[instrument(
+        skip(self),
+        fields(
+            safe_xid,
+            vacuumed_committed,
+            vacuumed_aborted,
+            vacuumed_writes,
+            retained_active
+        )
+    )]
     pub fn vacuum(&self) -> VacuumStats {
         let safe_xid = self.vacuum_safe_xid();
 
@@ -1016,8 +1028,14 @@ impl MvccManager {
         let committed_guard = self.committed_txns.read();
         let aborted_guard = self.aborted_txns.read();
         let parent_map = HashMap::new();
-        txn.snapshot
-            .is_visible(xmin, xmax, txn_id, &*committed_guard, &*aborted_guard, &parent_map)
+        txn.snapshot.is_visible(
+            xmin,
+            xmax,
+            txn_id,
+            &*committed_guard,
+            &*aborted_guard,
+            &parent_map,
+        )
     }
 
     // -----------------------------------------------------------------

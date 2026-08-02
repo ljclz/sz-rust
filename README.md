@@ -1,8 +1,6 @@
 # SzRSQL
 
-> 基于 Rust 的分布式 SQL 数据库，兼容 PostgreSQL 协议（pgwire v3.0），支持 MVCC 事务、WAL 持久化、B+Tree 存储、行级锁、多方言解析。
-
-SzRSQL 是一个用 Rust 实现的分布式 SQL 数据库，目标是提供与 PostgreSQL 协议级兼容（pgwire v3.0）的嵌入式/独立数据库服务。项目采用 Workspace 多 crate 架构，涵盖 SQL 解析、查询优化、存储引擎、事务管理、WAL 持久化、复制、安全、运维等完整数据库栈。
+> 基于 Rust 的分布式 SQL 数据库，同时兼容 PostgreSQL（pgwire v3.0）、MySQL Wire Protocol v10、SQL Server TDS、Oracle TNS、SQLite JSON 五种协议，支持 MVCC 事务、WAL 持久化、B+Tree 索引、行级锁、多方言解析。
 
 - **版本**：v1.0.0-rc.1
 - **许可证**：MIT
@@ -40,10 +38,10 @@ SzRSQL 是一个用 Rust 实现的分布式 SQL 数据库，目标是提供与 P
 
 | 模块 | 能力 |
 |------|------|
-| **SQL 引擎** | 多方言解析（PG/MySQL/Oracle/SQL Server/SQLite）、AST、执行器、PL/pgSQL 解释器、CTE/窗口函数/MERGE/UPSERT/RETURNING/SAVEPOINT |
+| **SQL 引擎** | 多方言解析（PG/MySQL/Oracle/SQL Server/SQLite）、AST、执行器、CTE/窗口函数/MERGE/UPSERT/RETURNING |
 | **查询优化** | 逻辑/物理计划、基于代价的优化、物化视图查询重写、增量维护 |
 | **存储引擎** | B+Tree 索引、Buffer Pool、Freelist、Page 管理、TOAST、列存、外部格式（Arrow/Parquet/CSV/JSONLines） |
-| **事务** | MVCC 多版本并发控制、Strict 2PL 行级锁、死锁检测（DFS 环检测）、Savepoint、事务 ID 全局唯一 |
+| **事务** | MVCC 多版本并发控制、Strict 2PL 行级锁、死锁检测（DFS 环检测）、事务 ID 全局唯一 |
 | **持久化** | WAL 预写日志、log-then-commit 事务模型、WAL 压缩（zstd）、全页镜像（FPI）、WAL 摘要、Group Commit |
 | **协议** | pgwire v3.0、SCRAM-SHA-256 认证、TLS 1.3（rustls）、扩展协议（Prepared/Portal）、ParameterStatus、MySQL Wire Protocol（HandshakeV10 + mysql_native_password）、SQL Server TDS 协议、SQLite 文件格式读写、Oracle SQL 方言桥接 |
 | **分布式** | 分布式事务、CDC 变更数据捕获、Schema Registry |
@@ -582,7 +580,7 @@ WARN connection_idle_timeout, closing connection  timeout_secs=300
 - 匹配率：100%（结果与 PG 18 完全一致）
 - INSERT 100K 顺序插入吞吐测试通过
 
-> 数据来源：`docs/archive/phase-7-排查报告/PERF_BENCH_REPORT.md`（2026-07-25 实测）+ `docs/大数据量对比测试报告.md`（1K-10M 行）。P95/P99 详见报告。
+> 数据来源：`docs/archive/phase-7-排查报告/PERF_BENCH_REPORT.md`（2026-07-25 实测）。P95/P99 详见报告。
 
 ---
 
@@ -704,15 +702,20 @@ curl -X POST -H "Authorization: Bearer $SZRSQL_HTTP_TOKEN" \
 
 | 文档 | 说明 |
 |------|------|
-| `docs/项目成熟度评估报告.md` | 项目成熟度评估（基于代码核验，定期更新） |
-| `docs/全面排查汇总报告.md` | 全面排查汇总（5 大技能结果） |
-| `docs/兼容性评估报告.md` | 数据库兼容性评估（PG 100%） |
-| `docs/大数据量对比测试报告.md` | 大数据量对比测试（1K-10M 行 × 5 数据库） |
-| `docs/对抗性边界审计清单.md` | 对抗性边界审计清单（60 项审计用例） |
-| `docs/ADR与生产Bug定位规范.md` | ADR 规范与生产 Bug 定位流程（v1.1.0） |
+| `docs/SzRSQL深度代码审计报告_2026-08-01.md` | 深度代码审计报告（基于实际代码逐行审计，含 Bug 清单与优化措施） |
+| `docs/审计证据链_2026-08-01.md` | 审计证据链（每项结论的 file:line 证据索引） |
+| `docs/审计规范合规性报告_2026-08-01.md` | 审计规范合规性报告 |
+| `docs/综合评估报告_2026-07-31.md` | 综合评估报告（性能瓶颈分析与解决方案） |
+| `docs/项目实际能力总结_2026-08-01.md` | 项目实际能力总结（已实现功能清单） |
+| `docs/NineData分析与szrsql数据复制环方案.md` | NineData 分析与 szrsql 内部数据复制闭环方案 |
+| `docs/ADR与生产Bug定位规范.md` | ADR 规范与生产 Bug 定位流程 |
 | `docs/release_stages.md` | 发布阶段定义（Alpha→Beta→RC→GA） |
 | `docs/downgrade_plan.md` | 降级方案（Patch/Minor/Major 三类） |
 | `docs/szrsql-engineering-practices.md` | 工程实践规范（7 道门禁 + 数据库强化） |
+| `docs/对抗性边界审计清单.md` | 对抗性边界审计清单（60 项审计用例） |
+| `docs/安全自审计清单.md` | 安全自审计清单 |
+| `docs/发布清单.md` | 发布清单 |
+| `docs/生产试点方案.md` | 生产试点方案 |
 
 ### ADR 决策记录（docs/adr/）
 
@@ -743,6 +746,19 @@ curl -X POST -H "Authorization: Bearer $SZRSQL_HTTP_TOKEN" \
 
 ## 限制与已知问题
 
+### 限制与已知问题
+
+> **当前主要 Bug（2026-08-01 审计报告确认）**：
+> - **BUG-2**：`TRUNCATE TABLE` 不重置关联自增序列（MySQL 语义不兼容）
+> - **BUG-3**：`SAVEPOINT` / `RELEASE SAVEPOINT` / `ROLLBACK TO SAVEPOINT` 暂不支持（savepoint.rs 已实现但未接入 session 层）
+> - **BUG-4**：`PL/pgSQL` 解释器（125KB）已存在但未接入执行器，`CREATE FUNCTION ... LANGUAGE plpgsql` 注册元数据但 `SELECT func()` 不执行函数体
+> - **BUG-5**：物化视图 `SELECT` 路由实现存在（executor.rs L6461），端到端接通待验证
+> - **BUG-7**：部分系统表元数据列（datacl/relacl/stanumbers 等）返回空占位值
+> - **BUG-8**：MySQL `SHOW DATABASES` 未配置 `allowed_databases`，实际仅返回 `information_schema`
+> - **BUG-11**：分页存储恢复（`restore_from_paged_storage`）丢失 MVCC 元数据（xmin/xmax/deleted）
+> - **BUG-12**：WAL 崩溃恢复回放仍走 TableData 全量快照（写入端已为行级记录）
+> - **BUG-14**：B+Tree 主键索引仅支持 Int64 类型，其他类型退化为全表扫描
+
 ### 未实现的 PostgreSQL 功能
 
 - **SQL 语法**（6 项）：`SUBSTRING` 函数、`ILIKE` 运算符、`SIMILAR TO` 运算符、`IS DISTINCT FROM`、`~` 正则匹配运算符、`UUID` 类型（语法层）
@@ -751,11 +767,6 @@ curl -X POST -H "Authorization: Bearer $SZRSQL_HTTP_TOKEN" \
 - **多线程基准**：性能测试为单线程，未做多线程并发基准
 - **PostGIS**：几何类型未实现，PostGIS 不可用
 - **无第三方安全审计**：仅有自测，缺乏外部审计报告
-
-### 已知问题
-
-- 未设置 `--wal-path` 时为 commit-then-log 模式，ACK 成功但数据可能未持久化（仅测试用）
-- 守护进程化后 tracing stderr 输出被重定向到 `/dev/null`，需配置 file appender
 
 ---
 

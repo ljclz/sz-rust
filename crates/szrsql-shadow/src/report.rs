@@ -130,7 +130,14 @@ impl ShadowReport {
         md.push_str(&format!("| szrsql 错误 | {} |\n", self.sz_errors));
         md.push_str(&format!("| 双方错误 | {} |\n", self.both_errors));
         md.push_str(&format!("| 匹配率 | {:.4}% |\n", self.match_rate * 100.0));
-        md.push_str(&format!("| 上线标准 | {} |\n", if self.passed { "✅ 通过" } else { "❌ 未通过" }));
+        md.push_str(&format!(
+            "| 上线标准 | {} |\n",
+            if self.passed {
+                "✅ 通过"
+            } else {
+                "❌ 未通过"
+            }
+        ));
 
         md.push_str("\n## 2. 延迟统计\n\n");
         md.push_str("| 数据库 | P50 (ms) | P95 (ms) | P99 (ms) |\n");

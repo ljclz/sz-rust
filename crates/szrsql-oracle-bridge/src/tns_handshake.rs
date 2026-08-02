@@ -518,7 +518,10 @@ mod tests {
         // 长度 = 24 + 服务名字节数
         assert_eq!(payload.len(), CONNECT_FIXED_LEN + 4);
         // Version 偏移 0
-        assert_eq!(u16::from_be_bytes([payload[0], payload[1]]), TNS_VERSION_314);
+        assert_eq!(
+            u16::from_be_bytes([payload[0], payload[1]]),
+            TNS_VERSION_314
+        );
         // Connection Data Length 偏移 16
         let conn_data_len = u16::from_be_bytes([payload[16], payload[17]]);
         assert_eq!(conn_data_len as usize, 4);
@@ -572,7 +575,10 @@ mod tests {
         let payload = resp.encode_payload();
         assert_eq!(payload.len(), ACCEPT_FIXED_LEN);
         // Version 偏移 0
-        assert_eq!(u16::from_be_bytes([payload[0], payload[1]]), TNS_VERSION_314);
+        assert_eq!(
+            u16::from_be_bytes([payload[0], payload[1]]),
+            TNS_VERSION_314
+        );
         // SDU 偏移 4
         assert_eq!(u16::from_be_bytes([payload[4], payload[5]]), DEFAULT_SDU);
         // TDU 偏移 6
@@ -584,6 +590,9 @@ mod tests {
         // 验证 Connect 包的总长度（含 TNS 头部）
         let req = ConnectRequest::new("ORCL").unwrap();
         let packet = req.encode();
-        assert_eq!(packet.encoded_len(), crate::tns_packet::TNS_HEADER_LEN + CONNECT_FIXED_LEN + 4);
+        assert_eq!(
+            packet.encoded_len(),
+            crate::tns_packet::TNS_HEADER_LEN + CONNECT_FIXED_LEN + 4
+        );
     }
 }

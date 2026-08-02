@@ -93,11 +93,7 @@ fn gen_delete_entries(n: usize) -> Vec<TrafficEntry> {
 }
 
 /// 运行基准测试（szrsql + PG 18 差分执行），返回报告
-fn run_bench(
-    pg_url: &str,
-    schema_suffix: &str,
-    entries: Vec<TrafficEntry>,
-) -> ShadowReport {
+fn run_bench(pg_url: &str, schema_suffix: &str, entries: Vec<TrafficEntry>) -> ShadowReport {
     let jsonl_file = NamedTempFile::new().unwrap();
     Recorder::save_to_jsonl(&entries, jsonl_file.path()).unwrap();
 
@@ -107,10 +103,7 @@ fn run_bench(
         skip_sz_errors: true,
     };
     let replay = ShadowReplay::new(config);
-    let columns = vec![
-        ("id", ColumnType::Int64),
-        ("name", ColumnType::Text),
-    ];
+    let columns = vec![("id", ColumnType::Int64), ("name", ColumnType::Text)];
     let results = replay
         .replay_from_jsonl(jsonl_file.path(), "t", columns)
         .expect("replay failed");
@@ -150,7 +143,10 @@ fn bench_insert_1k() {
     println!("总耗时：{:.2}s", duration.as_secs_f64());
     println!(
         "PG 18 TPS：{:.0}",
-        calc_tps(report.total, Duration::from_secs_f64(report.pg_p50_ms / 1000.0 * report.total as f64))
+        calc_tps(
+            report.total,
+            Duration::from_secs_f64(report.pg_p50_ms / 1000.0 * report.total as f64)
+        )
     );
 
     // 验证：至少 90% 应匹配

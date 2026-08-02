@@ -19,20 +19,21 @@
 
 #![allow(clippy::approx_constant)]
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 use szrsql_sql::ast::*;
+use szrsql_sql::check_constraint::CheckConstraintValidator;
 use szrsql_sql::cursor::{CursorError, CursorManager, FetchDirection};
 use szrsql_sql::executor::{Executor, InMemoryTable, TableStorage};
-use szrsql_sql::parser::parse_one;
-use szrsql_sql::plan::{Catalog, CheckConstraint, ForeignKeyConstraint, InMemoryCatalog, LogicalPlan, Planner, TableSchema};
-use szrsql_sql::trigger::{
-    TriggerContext, TriggerOutcome, TriggerRegistry, TriggerFunction,
-};
 use szrsql_sql::foreign_key::ForeignKeyValidator;
-use szrsql_sql::check_constraint::CheckConstraintValidator;
+use szrsql_sql::parser::parse_one;
+use szrsql_sql::plan::{
+    Catalog, CheckConstraint, ForeignKeyConstraint, InMemoryCatalog, LogicalPlan, Planner,
+    TableSchema,
+};
+use szrsql_sql::trigger::{TriggerContext, TriggerFunction, TriggerOutcome, TriggerRegistry};
 use szrsql_types::value::{ColumnType, Value};
 
 // =====================================================================
@@ -136,7 +137,10 @@ fn test_adv_mem_009d_cursor_double_close() {
     mgr.close("cur").expect("first close");
 
     // 验证游标已关闭
-    assert!(mgr.get("cur").unwrap().is_closed(), "cursor should be closed");
+    assert!(
+        mgr.get("cur").unwrap().is_closed(),
+        "cursor should be closed"
+    );
 
     // 第二次关闭应安全返回 Ok（PG 语义：CLOSE 已关闭的游标是幂等操作）
     let result = mgr.close("cur");
@@ -179,7 +183,10 @@ fn test_adv_mem_010_temp_table_cleanup() {
     // 如果没有内存泄漏，这里不会有问题（Rust 的所有权机制保证）
     // 重新创建 catalog 验证系统正常
     let new_catalog = InMemoryCatalog::new();
-    assert!(new_catalog.list_tables().is_empty(), "new catalog should be empty");
+    assert!(
+        new_catalog.list_tables().is_empty(),
+        "new catalog should be empty"
+    );
 }
 
 #[test]
@@ -307,7 +314,9 @@ fn test_adv_dat_006_fk_insert_invalid_reference() {
             on_update: None,
         },
     };
-    catalog.add_foreign_key(&TableName::new("child"), fk).expect("add FK");
+    catalog
+        .add_foreign_key(&TableName::new("child"), fk)
+        .expect("add FK");
 
     // 创建父表数据
     let mut parent_table = InMemoryTable::with_columns("parent", vec![("id", ColumnType::Int64)]);
@@ -367,7 +376,9 @@ fn test_adv_dat_006b_fk_valid_reference() {
             on_update: None,
         },
     };
-    catalog.add_foreign_key(&TableName::new("child"), fk).expect("add FK");
+    catalog
+        .add_foreign_key(&TableName::new("child"), fk)
+        .expect("add FK");
 
     // 创建父表数据
     let mut parent_table = InMemoryTable::with_columns("parent", vec![("id", ColumnType::Int64)]);
@@ -567,7 +578,10 @@ fn test_adv_dat_009_trigger_recursion_limit() {
     }
 
     impl TriggerFunction for CountingTrigger {
-        fn call(&self, _ctx: &TriggerContext) -> Result<TriggerOutcome, szrsql_sql::executor::ExecutionError> {
+        fn call(
+            &self,
+            _ctx: &TriggerContext,
+        ) -> Result<TriggerOutcome, szrsql_sql::executor::ExecutionError> {
             let n = self.count.fetch_add(1, Ordering::SeqCst);
             // 限制递归深度为 100（模拟递归限制）
             if n >= 100 {
@@ -577,7 +591,9 @@ fn test_adv_dat_009_trigger_recursion_limit() {
         }
     }
 
-    let trigger = CountingTrigger { count: call_count_clone };
+    let trigger = CountingTrigger {
+        count: call_count_clone,
+    };
     let mut registry = TriggerRegistry::new();
     registry.register("limit_trigger", Arc::new(trigger));
 
@@ -588,7 +604,15 @@ fn test_adv_dat_009_trigger_recursion_limit() {
     };
     let row = vec![Value::Int64(1)];
     let event = TriggerEvent::Insert;
-    let ctx = TriggerContext::for_row("t", "limit_trigger", TriggerTiming::Before, &event, &schema, Some(&row), None);
+    let ctx = TriggerContext::for_row(
+        "t",
+        "limit_trigger",
+        TriggerTiming::Before,
+        &event,
+        &schema,
+        Some(&row),
+        None,
+    );
 
     let func = registry.get("limit_trigger").expect("trigger exists");
 
@@ -599,7 +623,11 @@ fn test_adv_dat_009_trigger_recursion_limit() {
     }
 
     // 验证调用计数
-    assert_eq!(call_count.load(Ordering::SeqCst), 100, "trigger should be called 100 times");
+    assert_eq!(
+        call_count.load(Ordering::SeqCst),
+        100,
+        "trigger should be called 100 times"
+    );
 }
 
 // =====================================================================
@@ -628,34 +656,38 @@ fn test_adv_dat_010_cascade_delete_multi_level() {
     }
 
     // parent REFERENCES grandparent(id) ON DELETE CASCADE
-    catalog.add_foreign_key(
-        &TableName::new("parent"),
-        ForeignKeyConstraint {
-            name: None,
-            columns: vec!["parent_id".to_string()],
-            reference: ForeignKeyReference {
-                table: TableName::new("grandparent"),
-                columns: Some(vec!["id".to_string()]),
-                on_delete: Some(ReferenceAction::Cascade),
-                on_update: None,
+    catalog
+        .add_foreign_key(
+            &TableName::new("parent"),
+            ForeignKeyConstraint {
+                name: None,
+                columns: vec!["parent_id".to_string()],
+                reference: ForeignKeyReference {
+                    table: TableName::new("grandparent"),
+                    columns: Some(vec!["id".to_string()]),
+                    on_delete: Some(ReferenceAction::Cascade),
+                    on_update: None,
+                },
             },
-        },
-    ).expect("add FK parent→grandparent");
+        )
+        .expect("add FK parent→grandparent");
 
     // child REFERENCES parent(id) ON DELETE CASCADE
-    catalog.add_foreign_key(
-        &TableName::new("child"),
-        ForeignKeyConstraint {
-            name: None,
-            columns: vec!["parent_id".to_string()],
-            reference: ForeignKeyReference {
-                table: TableName::new("parent"),
-                columns: Some(vec!["id".to_string()]),
-                on_delete: Some(ReferenceAction::Cascade),
-                on_update: None,
+    catalog
+        .add_foreign_key(
+            &TableName::new("child"),
+            ForeignKeyConstraint {
+                name: None,
+                columns: vec!["parent_id".to_string()],
+                reference: ForeignKeyReference {
+                    table: TableName::new("parent"),
+                    columns: Some(vec!["id".to_string()]),
+                    on_delete: Some(ReferenceAction::Cascade),
+                    on_update: None,
+                },
             },
-        },
-    ).expect("add FK child→parent");
+        )
+        .expect("add FK child→parent");
 
     // 验证 FK 约束已正确注册
     let parent_fks = catalog.get_foreign_keys(&TableName::new("parent"));
@@ -668,7 +700,10 @@ fn test_adv_dat_010_cascade_delete_multi_level() {
 
     // 验证级联引用关系
     let gp_refs = catalog.get_referencing_keys(&TableName::new("grandparent"));
-    assert!(!gp_refs.is_empty(), "grandparent should be referenced by parent");
+    assert!(
+        !gp_refs.is_empty(),
+        "grandparent should be referenced by parent"
+    );
 
     let p_refs = catalog.get_referencing_keys(&TableName::new("parent"));
     assert!(!p_refs.is_empty(), "parent should be referenced by child");
@@ -753,8 +788,14 @@ fn test_adv_edg_009b_float_division_by_zero() {
     let negative = -1.0f64 / zero;
     let nan = 0.0f64 / zero;
 
-    assert!(positive.is_infinite() && positive > 0.0, "1.0/0.0 should be +Infinity");
-    assert!(negative.is_infinite() && negative < 0.0, "-1.0/0.0 should be -Infinity");
+    assert!(
+        positive.is_infinite() && positive > 0.0,
+        "1.0/0.0 should be +Infinity"
+    );
+    assert!(
+        negative.is_infinite() && negative < 0.0,
+        "-1.0/0.0 should be -Infinity"
+    );
     assert!(nan.is_nan(), "0.0/0.0 should be NaN");
 }
 
@@ -823,10 +864,7 @@ fn test_adv_sql_010_parameterized_query_parsing() {
     // 验证解析结果包含参数占位符
     if let Ok(Statement::Select(s)) = result {
         // SELECT 语句应成功解析，WHERE 子句包含 $1 和 $2 占位符
-        assert!(
-            s.where_clause.is_some(),
-            "WHERE clause should exist"
-        );
+        assert!(s.where_clause.is_some(), "WHERE clause should exist");
     }
 }
 
@@ -843,14 +881,12 @@ fn test_adv_sql_010b_parameter_in_string_literal() {
         let item = &s.projection[0];
         // 验证它是字符串字面值而非参数引用
         match item {
-            SelectItem::ExprWithAlias { expr, .. } | SelectItem::UnnamedExpr(expr) => {
-                match expr {
-                    Expr::Literal(Value::Text(t)) => {
-                        assert_eq!(t, "price is $1", "string should contain literal $1");
-                    }
-                    other => panic!("expected string literal, got: {other:?}"),
+            SelectItem::ExprWithAlias { expr, .. } | SelectItem::UnnamedExpr(expr) => match expr {
+                Expr::Literal(Value::Text(t)) => {
+                    assert_eq!(t, "price is $1", "string should contain literal $1");
                 }
-            }
+                other => panic!("expected string literal, got: {other:?}"),
+            },
             other => panic!("expected expression select item, got: {other:?}"),
         }
     }
@@ -987,8 +1023,8 @@ fn test_adv_edg_002_single_row_aggregates() {
 #[test]
 fn test_adv_edg_003_max_int_overflow_detection() {
     // ADV-EDG-003: i64::MAX + 1 应检测溢出并返回错误，而非静默环绕
-    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
     use szrsql_sql::ast::{BinaryOp, Expr};
+    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
 
     let expr = Expr::BinaryOp {
         left: Box::new(Expr::Literal(Value::Int64(i64::MAX))),
@@ -1007,10 +1043,7 @@ fn test_adv_edg_003_max_int_overflow_detection() {
 fn test_adv_edg_003b_max_int_storage() {
     // ADV-EDG-003 (补充): i64::MAX 应能正确存储和查询
     let mut catalog = InMemoryCatalog::new();
-    catalog.add_simple_table(
-        "t",
-        vec![("id", ColumnType::Int64)],
-    );
+    catalog.add_simple_table("t", vec![("id", ColumnType::Int64)]);
 
     let mut table = InMemoryTable::with_columns("t", vec![("id", ColumnType::Int64)]);
     table.insert(vec![Value::Int64(i64::MAX)]);
@@ -1041,8 +1074,8 @@ fn test_adv_edg_004_empty_string_vs_null() {
         "t",
         vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
     );
-    table.insert(vec![Value::Int64(1), Value::Text("".into())]);  // 空字符串
-    table.insert(vec![Value::Int64(2), Value::Null]);              // NULL
+    table.insert(vec![Value::Int64(1), Value::Text("".into())]); // 空字符串
+    table.insert(vec![Value::Int64(2), Value::Null]); // NULL
     table.insert(vec![Value::Int64(3), Value::Text("alice".into())]);
 
     let mut exec = Executor::new();
@@ -1215,8 +1248,8 @@ fn test_adv_edg_008b_null_sort_desc() {
 fn test_adv_edg_010_negation_overflow() {
     // ADV-EDG-010: abs(i64::MIN) 应检测溢出
     // -i64::MIN = i64::MAX + 1 → 溢出
-    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
     use szrsql_sql::ast::{Expr, UnaryOp};
+    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
 
     let expr = Expr::UnaryOp {
         op: UnaryOp::Minus,
@@ -1233,8 +1266,8 @@ fn test_adv_edg_010_negation_overflow() {
 #[test]
 fn test_adv_edg_010b_min_int_div_neg_one() {
     // ADV-EDG-010 (补充): i64::MIN / -1 应检测溢出
-    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
     use szrsql_sql::ast::{BinaryOp, Expr};
+    use szrsql_sql::expr::{EvalError, ExprEvaluator, RowContext};
 
     let expr = Expr::BinaryOp {
         left: Box::new(Expr::Literal(Value::Int64(i64::MIN))),
@@ -1252,8 +1285,8 @@ fn test_adv_edg_010b_min_int_div_neg_one() {
 #[test]
 fn test_adv_edg_010c_negative_modulo() {
     // ADV-EDG-010 (补充): 负数取模应正确处理
-    use szrsql_sql::expr::{ExprEvaluator, RowContext};
     use szrsql_sql::ast::{BinaryOp, Expr};
+    use szrsql_sql::expr::{ExprEvaluator, RowContext};
 
     let expr = Expr::BinaryOp {
         left: Box::new(Expr::Literal(Value::Int64(-7))),
@@ -1262,7 +1295,10 @@ fn test_adv_edg_010c_negative_modulo() {
     };
 
     let result = ExprEvaluator::eval(&expr, &RowContext::new());
-    assert!(result.is_ok(), "negative modulo should not error: {result:?}");
+    assert!(
+        result.is_ok(),
+        "negative modulo should not error: {result:?}"
+    );
 }
 
 // =====================================================================
@@ -1368,19 +1404,42 @@ fn test_adv_dat_001_rollback_multi_operation() {
     );
 
     // 初始数据
-    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), Value::Int64(100)]);
-    table.insert(vec![Value::Int64(2), Value::Text("bob".into()), Value::Int64(200)]);
+    table.insert(vec![
+        Value::Int64(1),
+        Value::Text("alice".into()),
+        Value::Int64(100),
+    ]);
+    table.insert(vec![
+        Value::Int64(2),
+        Value::Text("bob".into()),
+        Value::Int64(200),
+    ]);
     assert_eq!(table.row_count(), 2);
 
     // 创建快照（模拟 BEGIN）
     let snapshot = table.snapshot();
 
     // 执行多种 DML 操作
-    table.insert(vec![Value::Int64(3), Value::Text("carol".into()), Value::Int64(300)]);  // INSERT
-    table.delete_row(0);  // DELETE id=1
-    table.update_row(1, vec![Value::Int64(2), Value::Text("bob_updated".into()), Value::Int64(999)]);  // UPDATE
+    table.insert(vec![
+        Value::Int64(3),
+        Value::Text("carol".into()),
+        Value::Int64(300),
+    ]); // INSERT
+    table.delete_row(0); // DELETE id=1
+    table.update_row(
+        1,
+        vec![
+            Value::Int64(2),
+            Value::Text("bob_updated".into()),
+            Value::Int64(999),
+        ],
+    ); // UPDATE
 
-    assert_eq!(table.row_count(), 2, "after DML: 1 deleted + 1 inserted = 2");
+    assert_eq!(
+        table.row_count(),
+        2,
+        "after DML: 1 deleted + 1 inserted = 2"
+    );
 
     // 回滚（模拟 ROLLBACK）
     table.restore(snapshot);
@@ -1393,11 +1452,19 @@ fn test_adv_dat_001_rollback_multi_operation() {
 
     // 验证原始数据完整恢复
     assert_eq!(rows[0][0], Value::Int64(1), "id=1 should be restored");
-    assert_eq!(rows[0][1], Value::Text("alice".into()), "alice should be restored");
+    assert_eq!(
+        rows[0][1],
+        Value::Text("alice".into()),
+        "alice should be restored"
+    );
     assert_eq!(rows[0][2], Value::Int64(100), "v=100 should be restored");
 
     assert_eq!(rows[1][0], Value::Int64(2), "id=2 should be restored");
-    assert_eq!(rows[1][1], Value::Text("bob".into()), "bob (not bob_updated) should be restored");
+    assert_eq!(
+        rows[1][1],
+        Value::Text("bob".into()),
+        "bob (not bob_updated) should be restored"
+    );
     assert_eq!(rows[1][2], Value::Int64(200), "v=200 should be restored");
 }
 
@@ -1406,10 +1473,7 @@ fn test_adv_dat_001b_rollback_after_multiple_inserts() {
     // ADV-DAT-001 (补充): 大量 INSERT 后回滚应完全撤销
     use szrsql_sql::executor::MutableTable;
 
-    let mut table = InMemoryTable::with_columns(
-        "t",
-        vec![("id", ColumnType::Int64)],
-    );
+    let mut table = InMemoryTable::with_columns("t", vec![("id", ColumnType::Int64)]);
 
     // 初始 10 行
     for i in 0..10i64 {
@@ -1427,7 +1491,11 @@ fn test_adv_dat_001b_rollback_after_multiple_inserts() {
 
     // 回滚
     table.restore(snapshot);
-    assert_eq!(table.row_count(), 10, "rollback should remove 1000 inserted rows");
+    assert_eq!(
+        table.row_count(),
+        10,
+        "rollback should remove 1000 inserted rows"
+    );
 
     // 验证原始 10 行完整
     let rows: Vec<_> = table.scan_iter().collect();

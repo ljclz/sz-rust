@@ -46,7 +46,9 @@ pub mod source;
 pub mod target;
 pub mod task;
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use szrsql_tx::wal::{WalObserver, WalOpType, WalRecord};
 
 // =====================================================================
@@ -356,7 +358,7 @@ impl CdcObserverManager {
     ///
     /// 返回 `true` 表示注册成功；若已注册相同指针的 observer，返回 `false`
     pub fn register(&self, observer: Arc<dyn CdcObserver>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         let target_addr = arc_data_addr(&observer);
         if observers.iter().any(|o| arc_data_addr(o) == target_addr) {
             return false;
@@ -369,7 +371,7 @@ impl CdcObserverManager {
     ///
     /// 返回 `true` 表示注销成功；若未找到，返回 `false`
     pub fn unregister<O: CdcObserver + 'static>(&self, observer: &Arc<O>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         let target_addr = arc_data_addr(observer);
         let original_len = observers.len();
         observers.retain(|o| arc_data_addr(o) != target_addr);
@@ -381,7 +383,7 @@ impl CdcObserverManager {
     /// 同步调用每个 observer 的 `on_event`。单个 observer 的 panic 会被
     /// `catch_unwind` 捕获，不影响其他 observer 的通知。
     pub fn notify(&self, event: ChangeEvent) {
-        let observers = self.observers.read().unwrap();
+        let observers = self.observers.read();
         let count = observers.len();
         for observer in observers.iter() {
             // 每个 observer 独立 clone 一份 event
@@ -397,7 +399,7 @@ impl CdcObserverManager {
 
     /// 获取已注册的观察者数量
     pub fn observer_count(&self) -> usize {
-        self.observers.read().unwrap().len()
+        self.observers.read().len()
     }
 
     /// 获取已分发的（observer × event）总次数
@@ -461,7 +463,7 @@ pub struct CdcEngine {
     /// 显式事务（BEGIN...COMMIT）期间，DML 产生的 CDC 事件暂存于此，
     /// 直到 COMMIT 成功后统一分发（消除脏读）；ROLLBACK 时直接丢弃。
     /// autocommit 模式不经过此缓冲，直接 dispatch_event。
-    txn_buffers: std::sync::Mutex<std::collections::HashMap<u32, Vec<ChangeEvent>>>,
+    txn_buffers: Mutex<std::collections::HashMap<u32, Vec<ChangeEvent>>>,
 }
 
 impl CdcEngine {
@@ -490,7 +492,7 @@ impl CdcEngine {
             total_processed: std::sync::atomic::AtomicU64::new(0),
             pending_events: std::sync::atomic::AtomicU64::new(0),
             lsn_counter: std::sync::atomic::AtomicU64::new(1),
-            txn_buffers: std::sync::Mutex::new(std::collections::HashMap::new()),
+            txn_buffers: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -551,7 +553,7 @@ impl CdcEngine {
     /// 而是按 txn_id 缓冲。COMMIT 成功后调用 `commit_txn` 统一分发；
     /// ROLLBACK 时调用 `abort_txn` 丢弃。
     pub fn stage_event(&self, txn_id: u32, event: ChangeEvent) {
-        let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buffers = self.txn_buffers.lock();
         buffers.entry(txn_id).or_default().push(event);
     }
 
@@ -560,7 +562,7 @@ impl CdcEngine {
     /// 返回分发的事件数量。若 txn_id 无缓冲事件，返回 0。
     pub fn commit_txn(&self, txn_id: u32) -> usize {
         let events = {
-            let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+            let mut buffers = self.txn_buffers.lock();
             buffers.remove(&txn_id).unwrap_or_default()
         };
         let count = events.len();
@@ -600,13 +602,13 @@ impl CdcEngine {
     ///
     /// 返回丢弃的事件数量。若 txn_id 无缓冲事件，返回 0。
     pub fn abort_txn(&self, txn_id: u32) -> usize {
-        let mut buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buffers = self.txn_buffers.lock();
         buffers.remove(&txn_id).map(|v| v.len()).unwrap_or(0)
     }
 
     /// Batch 3：查询指定事务的缓冲事件数（测试/监控用）
     pub fn staged_event_count(&self, txn_id: u32) -> usize {
-        let buffers = self.txn_buffers.lock().unwrap_or_else(|e| e.into_inner());
+        let buffers = self.txn_buffers.lock();
         buffers.get(&txn_id).map(|v| v.len()).unwrap_or(0)
     }
 
@@ -730,22 +732,22 @@ impl CollectingObserver {
 
     /// 获取已接收的事件快照（clone）
     pub fn events(&self) -> Vec<ChangeEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 
     /// 获取已接收的事件数量
     pub fn len(&self) -> usize {
-        self.events.lock().unwrap().len()
+        self.events.lock().len()
     }
 
     /// 是否为空
     pub fn is_empty(&self) -> bool {
-        self.events.lock().unwrap().is_empty()
+        self.events.lock().is_empty()
     }
 
     /// 清空已接收的事件
     pub fn clear(&self) {
-        self.events.lock().unwrap().clear();
+        self.events.lock().clear();
     }
 }
 
@@ -757,7 +759,7 @@ impl Default for CollectingObserver {
 
 impl CdcObserver for CollectingObserver {
     fn on_event(&self, event: ChangeEvent) {
-        self.events.lock().unwrap().push(event);
+        self.events.lock().push(event);
     }
 }
 
@@ -1655,7 +1657,9 @@ mod tests {
         }
         impl CountingObserver {
             fn new() -> Self {
-                Self { count: AtomicUsize::new(0) }
+                Self {
+                    count: AtomicUsize::new(0),
+                }
             }
             fn count(&self) -> usize {
                 self.count.load(Ordering::SeqCst)

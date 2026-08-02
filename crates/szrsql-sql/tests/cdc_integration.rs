@@ -81,10 +81,7 @@ fn make_catalog() -> InMemoryCatalog {
     let mut catalog = InMemoryCatalog::new();
     catalog.add_simple_table(
         "test_table",
-        vec![
-            ("id", ColumnType::Int64),
-            ("name", ColumnType::Text),
-        ],
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
     );
     catalog
 }
@@ -93,10 +90,7 @@ fn make_catalog() -> InMemoryCatalog {
 fn make_table() -> InMemoryTable {
     InMemoryTable::with_columns(
         "test_table",
-        vec![
-            ("id", ColumnType::Int64),
-            ("name", ColumnType::Text),
-        ],
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
     )
 }
 
@@ -121,7 +115,10 @@ fn test_p7_1_cdc_insert_event_dispatch() {
         .with_cdc_engine(cdc_engine);
 
     // 执行 INSERT
-    let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'alice')", &catalog);
+    let plan = plan_sql(
+        "INSERT INTO test_table (id, name) VALUES (1, 'alice')",
+        &catalog,
+    );
     let result = executor
         .execute_insert(&plan, &mut table)
         .expect("insert failed");
@@ -129,12 +126,23 @@ fn test_p7_1_cdc_insert_event_dispatch() {
 
     // 验证 observer 收到 Insert 事件
     let events = observer.events();
-    assert_eq!(events.len(), 1, "expected 1 CDC event, got {}", events.len());
+    assert_eq!(
+        events.len(),
+        1,
+        "expected 1 CDC event, got {}",
+        events.len()
+    );
     let event = &events[0];
     assert_eq!(event.op, CdcEventOp::Insert);
-    assert!(event.old_row.is_none(), "Insert event should have no old_row");
+    assert!(
+        event.old_row.is_none(),
+        "Insert event should have no old_row"
+    );
     assert!(event.new_row.is_some(), "Insert event should have new_row");
-    assert!(event.table_id.is_some(), "Insert event should have table_id");
+    assert!(
+        event.table_id.is_some(),
+        "Insert event should have table_id"
+    );
 }
 
 #[test]
@@ -153,7 +161,10 @@ fn test_p7_1_cdc_multiple_inserts_lsn_monotonic() {
 
     // 执行 3 次 INSERT
     for i in 1..=3 {
-        let sql = format!("INSERT INTO test_table (id, name) VALUES ({}, 'user{}')", i, i);
+        let sql = format!(
+            "INSERT INTO test_table (id, name) VALUES ({}, 'user{}')",
+            i, i
+        );
         let plan = plan_sql(&sql, &catalog);
         executor
             .execute_insert(&plan, &mut table)
@@ -185,7 +196,10 @@ fn test_p7_1_cdc_no_engine_no_event() {
     // Executor 不绑定 CDC 引擎
     let executor = Executor::new().with_catalog(&catalog);
 
-    let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'alice')", &catalog);
+    let plan = plan_sql(
+        "INSERT INTO test_table (id, name) VALUES (1, 'alice')",
+        &catalog,
+    );
     let result = executor
         .execute_insert(&plan, &mut table)
         .expect("insert failed");
@@ -203,7 +217,10 @@ fn test_p7_1_cdc_delete_event_dispatch() {
     // 插入测试数据（不绑定 CDC，避免插入事件干扰）
     {
         let executor = Executor::new().with_catalog(&catalog);
-        let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'alice')", &catalog);
+        let plan = plan_sql(
+            "INSERT INTO test_table (id, name) VALUES (1, 'alice')",
+            &catalog,
+        );
         executor
             .execute_insert(&plan, &mut table)
             .expect("insert failed");
@@ -227,7 +244,10 @@ fn test_p7_1_cdc_delete_event_dispatch() {
 
     // 验证 observer 收到 Delete 事件
     let events = observer.events();
-    let delete_events: Vec<_> = events.iter().filter(|e| e.op == CdcEventOp::Delete).collect();
+    let delete_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.op == CdcEventOp::Delete)
+        .collect();
     assert!(
         !delete_events.is_empty(),
         "expected at least 1 Delete event, got {} total events",
@@ -235,7 +255,10 @@ fn test_p7_1_cdc_delete_event_dispatch() {
     );
     for event in &delete_events {
         assert!(event.old_row.is_some(), "Delete event should have old_row");
-        assert!(event.new_row.is_none(), "Delete event should have no new_row");
+        assert!(
+            event.new_row.is_none(),
+            "Delete event should have no new_row"
+        );
     }
 }
 
@@ -247,7 +270,10 @@ fn test_p7_1_cdc_update_event_dispatch() {
     // 插入测试数据（不绑定 CDC）
     {
         let executor = Executor::new().with_catalog(&catalog);
-        let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'alice')", &catalog);
+        let plan = plan_sql(
+            "INSERT INTO test_table (id, name) VALUES (1, 'alice')",
+            &catalog,
+        );
         executor
             .execute_insert(&plan, &mut table)
             .expect("insert failed");
@@ -271,7 +297,10 @@ fn test_p7_1_cdc_update_event_dispatch() {
 
     // 验证 observer 收到 Update 事件
     let events = observer.events();
-    let update_events: Vec<_> = events.iter().filter(|e| e.op == CdcEventOp::Update).collect();
+    let update_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.op == CdcEventOp::Update)
+        .collect();
     assert!(
         !update_events.is_empty(),
         "expected at least 1 Update event, got {} total events",
@@ -300,7 +329,10 @@ fn test_p7_1_cdc_table_id_stable() {
         let executor = Executor::new()
             .with_catalog(&catalog)
             .with_cdc_engine(cdc_engine.clone());
-        let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'a')", &catalog);
+        let plan = plan_sql(
+            "INSERT INTO test_table (id, name) VALUES (1, 'a')",
+            &catalog,
+        );
         executor
             .execute_insert(&plan, &mut table1)
             .expect("insert failed");
@@ -309,7 +341,10 @@ fn test_p7_1_cdc_table_id_stable() {
         let executor = Executor::new()
             .with_catalog(&catalog)
             .with_cdc_engine(cdc_engine);
-        let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (2, 'b')", &catalog);
+        let plan = plan_sql(
+            "INSERT INTO test_table (id, name) VALUES (2, 'b')",
+            &catalog,
+        );
         executor
             .execute_insert(&plan, &mut table2)
             .expect("insert failed");
@@ -319,8 +354,7 @@ fn test_p7_1_cdc_table_id_stable() {
     let events = observer.events();
     assert_eq!(events.len(), 2);
     assert_eq!(
-        events[0].table_id,
-        events[1].table_id,
+        events[0].table_id, events[1].table_id,
         "same table name should produce same table_id"
     );
 }
@@ -341,7 +375,10 @@ fn test_p7_1_cdc_mixed_dml_sequence() {
         let executor = Executor::new()
             .with_catalog(&catalog)
             .with_cdc_engine(cdc_engine.clone());
-        let plan = plan_sql("INSERT INTO test_table (id, name) VALUES (1, 'alice')", &catalog);
+        let plan = plan_sql(
+            "INSERT INTO test_table (id, name) VALUES (1, 'alice')",
+            &catalog,
+        );
         executor
             .execute_insert(&plan, &mut table)
             .expect("insert failed");

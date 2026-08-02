@@ -18,26 +18,25 @@
 //! - SELECT：DISTINCT / projection / FROM / WHERE / GROUP BY / HAVING / ORDER BY / LIMIT / OFFSET
 
 use crate::ast::*;
-use std::borrow::Cow;
-use std::sync::atomic::{AtomicU64, Ordering};
 use sqlparser::ast::{
-    AssignmentTarget, BinaryOperator, ColumnDef as SpColumnDef, ColumnOption, ColumnOptionDef,
-    ConflictTarget, DataType, DoUpdate, Expr as SpExpr, FunctionArg as SpFunctionArg,
-    FunctionArgExpr as SpFunctionArgExpr, FunctionArguments as SpFunctionArguments, GeneratedAs,
-    GeneratedExpressionMode, Ident, Insert, JoinConstraint, JoinOperator, ObjectName,
-    OnConflictAction, OnInsert, OrderByExpr as SpOrderByExpr, Query as SpQuery,
-    SelectItem as SpSelectItem, SetExpr as SpSetExpr, SetOperator as SpSetOperator,
-    SetQuantifier as SpSetQuantifier, Statement as SpStatement, TableAlias as SpTableAlias,
-    TableConstraint as SpTableConstraint, TableFactor as SpTableFactor,
-    TableWithJoins as SpTableWithJoins, TransactionAccessMode, TransactionIsolationLevel,
-    TransactionMode, TriggerEvent as SpTriggerEvent, TriggerExecBody,
+    AlterTableOperation as SpAlterTableOperation, AssignmentTarget, BinaryOperator,
+    ColumnDef as SpColumnDef, ColumnOption, ColumnOptionDef, ConflictTarget, DataType, DoUpdate,
+    Expr as SpExpr, FunctionArg as SpFunctionArg, FunctionArgExpr as SpFunctionArgExpr,
+    FunctionArguments as SpFunctionArguments, GeneratedAs, GeneratedExpressionMode, Ident, Insert,
+    JoinConstraint, JoinOperator, ObjectName, OnConflictAction, OnInsert,
+    OrderByExpr as SpOrderByExpr, Query as SpQuery, SelectItem as SpSelectItem,
+    SetExpr as SpSetExpr, SetOperator as SpSetOperator, SetQuantifier as SpSetQuantifier,
+    Statement as SpStatement, TableAlias as SpTableAlias, TableConstraint as SpTableConstraint,
+    TableFactor as SpTableFactor, TableWithJoins as SpTableWithJoins, TransactionAccessMode,
+    TransactionIsolationLevel, TransactionMode, TriggerEvent as SpTriggerEvent, TriggerExecBody,
     TriggerObject as SpTriggerObject, TriggerPeriod as SpTriggerPeriod, UnaryOperator,
     Value as SpValue, WindowFrame as SpWindowFrame, WindowFrameBound as SpWindowFrameBound,
     WindowFrameUnits as SpWindowFrameUnits, WindowSpec as SpWindowSpec, WindowType as SpWindowType,
-    AlterTableOperation as SpAlterTableOperation,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::{Parser, ParserError};
+use std::borrow::Cow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use szrsql_types::value::{ColumnType, Value};
 use tracing::{trace, warn};
 
@@ -104,11 +103,10 @@ pub(crate) fn count_binary_op_keywords(sql: &str) -> usize {
         if i + 2 <= bytes.len() {
             let or_matches = upper(bytes[i]) == b'O'
                 && upper(bytes[i + 1]) == b'R'
-                && (i + 2 == bytes.len()
-                    || {
-                        let b = bytes[i + 2];
-                        !(b.is_ascii_alphanumeric() || b == b'_')
-                    });
+                && (i + 2 == bytes.len() || {
+                    let b = bytes[i + 2];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                });
             if or_matches {
                 count += 1;
                 i += 2;
@@ -120,11 +118,10 @@ pub(crate) fn count_binary_op_keywords(sql: &str) -> usize {
             let and_matches = upper(bytes[i]) == b'A'
                 && upper(bytes[i + 1]) == b'N'
                 && upper(bytes[i + 2]) == b'D'
-                && (i + 3 == bytes.len()
-                    || {
-                        let b = bytes[i + 3];
-                        !(b.is_ascii_alphanumeric() || b == b'_')
-                    });
+                && (i + 3 == bytes.len() || {
+                    let b = bytes[i + 3];
+                    !(b.is_ascii_alphanumeric() || b == b'_')
+                });
             if and_matches {
                 count += 1;
                 i += 3;
@@ -177,16 +174,23 @@ impl From<ParserError> for ParseError {
 /// 其余语句仍由 sqlparser 处理，最后按原始顺序合并结果。
 pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParseError> {
     let sql_len = sql.len();
-    let span = tracing::span!(tracing::Level::TRACE, "parse_sql", sql_len, stmt_count = tracing::field::Empty);
+    let span = tracing::span!(
+        tracing::Level::TRACE,
+        "parse_sql",
+        sql_len,
+        stmt_count = tracing::field::Empty
+    );
     span.in_scope(|| {
         trace!(sql_len, "parsing SQL");
-        parse_sql_inner(sql).inspect(|stmts| {
-            tracing::Span::current().record("stmt_count", stmts.len());
-            trace!(stmt_count = stmts.len(), "SQL parsed");
-        }).map_err(|e| {
-            warn!(error = %e, sql_len, sql = %sql, "SQL parse failed");
-            e
-        })
+        parse_sql_inner(sql)
+            .inspect(|stmts| {
+                tracing::Span::current().record("stmt_count", stmts.len());
+                trace!(stmt_count = stmts.len(), "SQL parsed");
+            })
+            .map_err(|e| {
+                warn!(error = %e, sql_len, sql = %sql, "SQL parse failed");
+                e
+            })
     })
 }
 
@@ -483,9 +487,8 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
                 .to_uppercase()
                 .starts_with("IF NOT EXISTS")
         {
-            create_mv_if_not_exists_stmts.push(parse_create_materialized_view_if_not_exists(
-                trimmed,
-            )?);
+            create_mv_if_not_exists_stmts
+                .push(parse_create_materialized_view_if_not_exists(trimmed)?);
         }
     }
 
@@ -852,7 +855,11 @@ fn normalize_set_no_value(seg: &str) -> String {
     // 2. SET CHARACTER SET charset → SET character_set_client = 'charset'
     if after_set_upper.starts_with("CHARACTER SET") {
         let charset = after_set[13..].trim();
-        let val = if charset.is_empty() { "UTF8" } else { charset };
+        let val = if charset.is_empty() {
+            "UTF8"
+        } else {
+            charset
+        };
         // 去掉首尾引号（如有），再重新加引号
         let val = val.trim_matches('\'').trim_matches('"');
         return format!("SET character_set_client = '{}'", val.replace('\'', "''"));
@@ -861,7 +868,11 @@ fn normalize_set_no_value(seg: &str) -> String {
     // 3. SET SESSION AUTHORIZATION xxx → SET session_authorization = 'xxx'
     if after_set_upper.starts_with("SESSION AUTHORIZATION") {
         let val = after_set[20..].trim();
-        let val = if val.is_empty() { "DEFAULT" } else { val };
+        let val = if val.is_empty() {
+            "DEFAULT"
+        } else {
+            val
+        };
         let val = val.trim_matches('\'').trim_matches('"');
         return format!("SET session_authorization = '{}'", val.replace('\'', "''"));
     }
@@ -869,7 +880,11 @@ fn normalize_set_no_value(seg: &str) -> String {
     // 4. SET TIME ZONE xxx → SET timezone = 'xxx'
     if after_set_upper == "TIME ZONE" || after_set_upper.starts_with("TIME ZONE ") {
         let val = after_set[9..].trim();
-        let val = if val.is_empty() { "UTC" } else { val };
+        let val = if val.is_empty() {
+            "UTC"
+        } else {
+            val
+        };
         let val = val.trim_matches('\'').trim_matches('"');
         return format!("SET timezone = '{}'", val.replace('\'', "''"));
     }
@@ -1025,9 +1040,7 @@ pub fn parse_single_statement(sql: &str) -> Result<Statement, ParseError> {
     // 过滤掉空语句（如末尾多余的空段）
     let non_empty: Vec<&Statement> = stmts.iter().filter(|s| !is_empty_statement(s)).collect();
     if non_empty.is_empty() {
-        return Err(ParseError::Unsupported(
-            "empty SQL statement".to_string(),
-        ));
+        return Err(ParseError::Unsupported("empty SQL statement".to_string()));
     }
     if non_empty.len() > 1 {
         return Err(ParseError::Unsupported(format!(
@@ -1036,10 +1049,7 @@ pub fn parse_single_statement(sql: &str) -> Result<Statement, ParseError> {
         )));
     }
     // 克隆首条非空语句（避免消耗 vec）
-    Ok(stmts
-        .into_iter()
-        .find(|s| !is_empty_statement(s))
-        .unwrap())
+    Ok(stmts.into_iter().find(|s| !is_empty_statement(s)).unwrap())
 }
 
 /// 判断语句是否为空语句（如纯分号产生的空 Statement）
@@ -1426,7 +1436,14 @@ pub(crate) fn convert_statement(stmt: SpStatement) -> Result<Statement, ParseErr
             query,
             if_not_exists,
             ..
-        } => convert_create_view(materialized, if_not_exists, or_replace, name, columns, query),
+        } => convert_create_view(
+            materialized,
+            if_not_exists,
+            or_replace,
+            name,
+            columns,
+            query,
+        ),
         // Phase F-10: ALTER TABLE
         SpStatement::AlterTable {
             name,
@@ -1503,7 +1520,9 @@ fn convert_alter_table(
 }
 
 /// 转换单个 ALTER TABLE 操作
-fn convert_alter_table_operation(op: SpAlterTableOperation) -> Result<AlterTableOperation, ParseError> {
+fn convert_alter_table_operation(
+    op: SpAlterTableOperation,
+) -> Result<AlterTableOperation, ParseError> {
     use sqlparser::ast::AlterColumnOperation as SpAlterColOp;
 
     match op {
@@ -1956,7 +1975,10 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
             let alias = match alias {
                 Some(a) => convert_table_alias(a),
                 None => TableAlias {
-                    name: format!("__nested_join_{}__", NESTED_JOIN_COUNTER.fetch_add(1, Ordering::Relaxed)),
+                    name: format!(
+                        "__nested_join_{}__",
+                        NESTED_JOIN_COUNTER.fetch_add(1, Ordering::Relaxed)
+                    ),
                     column_aliases: None,
                 },
             };
@@ -2140,8 +2162,7 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
     if depth > MAX_EXPR_DEPTH {
         return Err(ParseError::Unsupported(format!(
             "expression nesting too deep: {} > {} (ADV-BUG-001 protection)",
-            depth,
-            MAX_EXPR_DEPTH
+            depth, MAX_EXPR_DEPTH
         )));
     }
     match expr {
@@ -2225,7 +2246,10 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             };
             let mut when_then = Vec::with_capacity(conditions.len());
             for (cond, res) in conditions.into_iter().zip(results) {
-                when_then.push((convert_expr_inner(cond, depth + 1)?, convert_expr_inner(res, depth + 1)?));
+                when_then.push((
+                    convert_expr_inner(cond, depth + 1)?,
+                    convert_expr_inner(res, depth + 1)?,
+                ));
             }
             let else_expr = match else_result {
                 Some(e) => Some(Box::new(convert_expr_inner(*e, depth + 1)?)),
@@ -2399,7 +2423,7 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
                 args,
                 distinct: false,
             })
-        },
+        }
         SpExpr::Subquery(query) => Ok(Expr::Subquery(Box::new(convert_query(*query)?))),
         SpExpr::Exists { subquery, negated } => Ok(Expr::Exists {
             subquery: Box::new(convert_query(*subquery)?),
@@ -4763,9 +4787,7 @@ fn parse_create_function(sql: &str) -> Result<Statement, ParseError> {
             continue;
         }
         if upper_remaining.starts_with("CONTAINS SQL") {
-            remaining = remaining["CONTAINS SQL".len()..]
-                .trim_start()
-                .to_string();
+            remaining = remaining["CONTAINS SQL".len()..].trim_start().to_string();
             continue;
         }
         if upper_remaining.starts_with("MODIFIES SQL DATA") {
@@ -4799,9 +4821,7 @@ fn parse_create_function(sql: &str) -> Result<Statement, ParseError> {
         // 转换为 PG 风格 body：BEGIN RETURN a + b; END
         // 注意：必须区分 RETURN（函数体）和 RETURNS（返回类型声明），
         // 通过检查 RETURN 后是否跟空白字符且不是 RETURNS 来判断。
-        if upper_remaining.starts_with("RETURN")
-            && !upper_remaining.starts_with("RETURNS")
-        {
+        if upper_remaining.starts_with("RETURN") && !upper_remaining.starts_with("RETURNS") {
             // 确认 RETURN 后是空白或行尾（独立关键字）
             let after_return_kw = &remaining["RETURN".len()..];
             let is_return_keyword = after_return_kw
@@ -5721,9 +5741,9 @@ fn parse_comment(sql: &str) -> Result<Statement, ParseError> {
         let after_column = rest["COLUMN".len()..].trim();
         let (full_name, remaining) = extract_identifier_and_rest(after_column)?;
         // 分离表名和列名：取最后一个 `.` 之后的部分作为列名
-        let (table_part, column_part) = full_name
-            .rsplit_once('.')
-            .ok_or_else(|| ParseError::Unsupported(format!("expected table.column format: {full_name}")))?;
+        let (table_part, column_part) = full_name.rsplit_once('.').ok_or_else(|| {
+            ParseError::Unsupported(format!("expected table.column format: {full_name}"))
+        })?;
         let remaining = remaining.trim();
         let upper_remaining = remaining.to_uppercase();
         if !upper_remaining.starts_with("IS") {
@@ -5754,9 +5774,7 @@ fn parse_comment(sql: &str) -> Result<Statement, ParseError> {
 fn extract_identifier_and_rest(s: &str) -> Result<(String, String), ParseError> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(ParseError::Unsupported(
-            "expected identifier".to_string(),
-        ));
+        return Err(ParseError::Unsupported("expected identifier".to_string()));
     }
     // 处理带引号的标识符
     if let Some(inner) = s.strip_prefix('"') {

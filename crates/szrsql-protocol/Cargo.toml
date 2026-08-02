@@ -35,6 +35,8 @@ rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 # Phase 4.12：崩溃日志时间戳（ISO 8601 格式）
 chrono = { workspace = true }
+# P0-6：Mutex/RwLock 中毒修复（parking_lot 无中毒语义，避免 .unwrap() 级联 panic）
+parking_lot = { workspace = true }
 
 # Phase 4.13：进程守护化 + PID 文件（平台特定依赖）
 [target.'cfg(unix)'.dependencies]

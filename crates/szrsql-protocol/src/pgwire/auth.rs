@@ -46,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -238,6 +239,77 @@ impl CredentialStore {
 impl Default for CredentialStore {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// =====================================================================
+//  SharedScramCredentials — 运行时可热重载的 SCRAM 凭据存储
+// =====================================================================
+
+/// P2-14：运行时可热重载的 SCRAM 凭据存储。
+///
+/// 通过 `Arc` 在 PgwireServer（认证路径）与 HttpServer（`/api/v1/config/reload`）
+/// 之间共享同一实例：
+///
+/// - 认证路径调用 [`SharedScramCredentials::current`] 获取最新凭据快照，
+///   因此 reload 后**新连接立即使用新凭据**（无需重启）。
+/// - `/api/v1/config/reload` 调用 [`SharedScramCredentials::reload_from_file`]
+///   从磁盘重新加载凭据文件并原子替换内存内容。
+///
+/// 内部使用 `std::sync::RwLock`，`current()` 返回克隆快照（不持锁跨 await）。
+#[derive(Debug, Clone)]
+pub struct SharedScramCredentials {
+    inner: Arc<std::sync::RwLock<CredentialStore>>,
+}
+
+impl Default for SharedScramCredentials {
+    fn default() -> Self {
+        Self::new(CredentialStore::new())
+    }
+}
+
+impl SharedScramCredentials {
+    /// 创建共享凭据存储（初始内容为 `store`）
+    pub fn new(store: CredentialStore) -> Self {
+        Self {
+            inner: Arc::new(std::sync::RwLock::new(store)),
+        }
+    }
+
+    /// 获取当前凭据快照（克隆，不持锁）
+    pub fn current(&self) -> CredentialStore {
+        self.inner
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 原子替换内存中的凭据存储
+    pub fn update(&self, store: CredentialStore) {
+        *self
+            .inner
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = store;
+    }
+
+    /// 从磁盘文件重新加载凭据并替换内存内容（P2-14 config reload 核心）。
+    ///
+    /// # 返回
+    ///
+    /// - `Ok(store)`：加载成功，内存已替换为新凭据
+    /// - `Err(AuthError)`：文件不存在或解析失败（内存保持原状，不破坏运行中认证）
+    pub fn reload_from_file(&self, path: &Path) -> Result<CredentialStore, AuthError> {
+        let store = match CredentialStore::load_from_file(path)? {
+            Some(store) => store,
+            None => {
+                return Err(AuthError::Protocol(format!(
+                    "credentials file not found: {}",
+                    path.display()
+                )));
+            }
+        };
+        self.update(store.clone());
+        Ok(store)
     }
 }
 
@@ -654,7 +726,10 @@ mod tests {
         let mut store = CredentialStore::new();
         store.add_user("Charlie", "pass123");
         assert_eq!(store.credentials.len(), 1);
-        assert_eq!(store.credentials.get("charlie"), Some(&"pass123".to_string()));
+        assert_eq!(
+            store.credentials.get("charlie"),
+            Some(&"pass123".to_string())
+        );
 
         assert!(store.remove_user("charlie"));
         assert!(store.credentials.is_empty());
@@ -697,7 +772,11 @@ mod tests {
         let mode = store.to_auth_mode();
         assert!(mode.is_scram());
         match mode {
-            AuthMode::ScramSha256 { credentials, salt, iterations } => {
+            AuthMode::ScramSha256 {
+                credentials,
+                salt,
+                iterations,
+            } => {
                 assert_eq!(credentials.get("alice"), Some(&"secret123".to_string()));
                 assert!(!salt.is_empty());
                 assert_eq!(iterations, DEFAULT_SCRYPT_ITERATIONS);

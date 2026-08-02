@@ -132,10 +132,9 @@ impl MysqlType {
     /// 返回该类型的二进制标志位（用于 Column Definition flags 字段）。
     pub fn binary_flag(self) -> u16 {
         match self {
-            MysqlType::TinyBlob
-            | MysqlType::MediumBlob
-            | MysqlType::LongBlob
-            | MysqlType::Blob => 128, // BINARY_FLAG
+            MysqlType::TinyBlob | MysqlType::MediumBlob | MysqlType::LongBlob | MysqlType::Blob => {
+                128
+            } // BINARY_FLAG
             _ => 0,
         }
     }
@@ -183,15 +182,9 @@ mod tests {
     fn test_type_from_int64_ranges() {
         // i8 范围
         assert_eq!(MysqlType::from_value(&Value::Int64(100)), MysqlType::Tiny);
-        assert_eq!(
-            MysqlType::from_value(&Value::Int64(-100)),
-            MysqlType::Tiny
-        );
+        assert_eq!(MysqlType::from_value(&Value::Int64(-100)), MysqlType::Tiny);
         // i16 范围
-        assert_eq!(
-            MysqlType::from_value(&Value::Int64(1000)),
-            MysqlType::Short
-        );
+        assert_eq!(MysqlType::from_value(&Value::Int64(1000)), MysqlType::Short);
         // i32 范围
         assert_eq!(
             MysqlType::from_value(&Value::Int64(100000)),

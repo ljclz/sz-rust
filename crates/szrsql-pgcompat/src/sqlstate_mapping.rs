@@ -36,27 +36,104 @@ impl SqlStateMapping {
     pub fn run_all() -> Vec<SqlStateMappingResult> {
         // (常量名, SzRSQL SqlState, PostgreSQL 官方 SQLSTATE, 说明)
         let cases: &[(&str, SqlState, &str, &str)] = &[
-            ("successful_completion", SqlState::SUCCESSFUL_COMPLETION, "00000", "成功完成"),
+            (
+                "successful_completion",
+                SqlState::SUCCESSFUL_COMPLETION,
+                "00000",
+                "成功完成",
+            ),
             ("syntax_error", SqlState::SYNTAX_ERROR, "42601", "语法错误"),
-            ("invalid_authorization_specification", SqlState::INVALID_AUTHORIZATION_SPECIFICATION, "28000", "无效的授权规范"),
-            ("protocol_violation", SqlState::PROTOCOL_VIOLATION, "08P01", "协议违反"),
-            ("connection_exception", SqlState::CONNECTION_EXCEPTION, "08000", "连接异常"),
-            ("feature_not_supported", SqlState::FEATURE_NOT_SUPPORTED, "0A000", "不支持的功能"),
-            ("internal_error", SqlState::INTERNAL_ERROR, "XX000", "内部错误"),
-            ("undefined_table", SqlState::UNDEFINED_TABLE, "42P01", "未定义表"),
-            ("undefined_column", SqlState::UNDEFINED_COLUMN, "42703", "未定义列"),
-            ("duplicate_table", SqlState::DUPLICATE_TABLE, "42P07", "重复表"),
-            ("foreign_key_violation", SqlState::FOREIGN_KEY_VIOLATION, "23503", "外键约束违反"),
-            ("check_violation", SqlState::CHECK_VIOLATION, "23514", "CHECK 约束违反"),
-            ("invalid_text_representation", SqlState::INVALID_TEXT_REPRESENTATION, "22P02", "无效的文本表示"),
-            ("undefined_object", SqlState::UNDEFINED_OBJECT, "42704", "未定义对象"),
-            ("duplicate_object", SqlState::DUPLICATE_OBJECT, "42710", "重复对象"),
-            ("invalid_transaction_state", SqlState::INVALID_TRANSACTION_STATE, "25000", "无效事务状态"),
+            (
+                "invalid_authorization_specification",
+                SqlState::INVALID_AUTHORIZATION_SPECIFICATION,
+                "28000",
+                "无效的授权规范",
+            ),
+            (
+                "protocol_violation",
+                SqlState::PROTOCOL_VIOLATION,
+                "08P01",
+                "协议违反",
+            ),
+            (
+                "connection_exception",
+                SqlState::CONNECTION_EXCEPTION,
+                "08000",
+                "连接异常",
+            ),
+            (
+                "feature_not_supported",
+                SqlState::FEATURE_NOT_SUPPORTED,
+                "0A000",
+                "不支持的功能",
+            ),
+            (
+                "internal_error",
+                SqlState::INTERNAL_ERROR,
+                "XX000",
+                "内部错误",
+            ),
+            (
+                "undefined_table",
+                SqlState::UNDEFINED_TABLE,
+                "42P01",
+                "未定义表",
+            ),
+            (
+                "undefined_column",
+                SqlState::UNDEFINED_COLUMN,
+                "42703",
+                "未定义列",
+            ),
+            (
+                "duplicate_table",
+                SqlState::DUPLICATE_TABLE,
+                "42P07",
+                "重复表",
+            ),
+            (
+                "foreign_key_violation",
+                SqlState::FOREIGN_KEY_VIOLATION,
+                "23503",
+                "外键约束违反",
+            ),
+            (
+                "check_violation",
+                SqlState::CHECK_VIOLATION,
+                "23514",
+                "CHECK 约束违反",
+            ),
+            (
+                "invalid_text_representation",
+                SqlState::INVALID_TEXT_REPRESENTATION,
+                "22P02",
+                "无效的文本表示",
+            ),
+            (
+                "undefined_object",
+                SqlState::UNDEFINED_OBJECT,
+                "42704",
+                "未定义对象",
+            ),
+            (
+                "duplicate_object",
+                SqlState::DUPLICATE_OBJECT,
+                "42710",
+                "重复对象",
+            ),
+            (
+                "invalid_transaction_state",
+                SqlState::INVALID_TRANSACTION_STATE,
+                "25000",
+                "无效事务状态",
+            ),
         ];
 
         cases
             .iter()
-            .map(|(name, szrsql_state, expected, desc)| Self::check_one(name, szrsql_state, expected, desc))
+            .map(|(name, szrsql_state, expected, desc)| {
+                Self::check_one(name, szrsql_state, expected, desc)
+            })
             .collect()
     }
 
@@ -143,15 +220,28 @@ mod tests {
     fn all_results_have_5char_codes() {
         let results = SqlStateMapping::run_all();
         for r in &results {
-            assert_eq!(r.expected_pg_code.len(), 5, "PG SQLSTATE 应为 5 字符: {}", r.name);
-            assert_eq!(r.actual_szrsql_code.len(), 5, "SzRSQL SQLSTATE 应为 5 字符: {}", r.name);
+            assert_eq!(
+                r.expected_pg_code.len(),
+                5,
+                "PG SQLSTATE 应为 5 字符: {}",
+                r.name
+            );
+            assert_eq!(
+                r.actual_szrsql_code.len(),
+                5,
+                "SzRSQL SQLSTATE 应为 5 字符: {}",
+                r.name
+            );
         }
     }
 
     #[test]
     fn syntax_error_maps_correctly() {
         let results = SqlStateMapping::run_all();
-        let syntax = results.iter().find(|r| r.name == "syntax_error").expect("应包含 syntax_error");
+        let syntax = results
+            .iter()
+            .find(|r| r.name == "syntax_error")
+            .expect("应包含 syntax_error");
         assert_eq!(syntax.expected_pg_code, "42601");
         assert_eq!(syntax.actual_szrsql_code, "42601");
         assert_eq!(syntax.status, CompatStatus::Pass);
@@ -162,9 +252,12 @@ mod tests {
         let results = SqlStateMapping::run_all();
         for r in &results {
             assert_eq!(
-                r.status, CompatStatus::Pass,
+                r.status,
+                CompatStatus::Pass,
                 "SQLSTATE {} 应与 PG 官方一致（SzRSQL={}, PG={}）",
-                r.name, r.actual_szrsql_code, r.expected_pg_code
+                r.name,
+                r.actual_szrsql_code,
+                r.expected_pg_code
             );
         }
     }

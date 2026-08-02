@@ -26,9 +26,9 @@
 //! 参考文档：<https://www.postgresql.org/docs/current/protocol-replication.html>
 
 use bytes::{Buf, BufMut, BytesMut};
+use std::sync::Arc;
 use szrsql_replication::stream::{ReplicationMessage, ReplicationPrimary};
 use szrsql_tx::wal::WalRecord;
-use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::trace;
@@ -205,7 +205,11 @@ pub fn encode_keepalive(current_lsn: u64, reply_requested: bool) -> BytesMut {
     buf.put_u8(COPY_DATA_KEEPALIVE);
     buf.put_i64(current_lsn as i64);
     buf.put_i64(0); // send_time
-    buf.put_u8(if reply_requested { 1 } else { 0 });
+    buf.put_u8(if reply_requested {
+        1
+    } else {
+        0
+    });
     buf
 }
 
@@ -304,7 +308,9 @@ impl WalSender {
     }
 
     /// 注册备库到主库并获取接收通道。
-    pub fn connect(&self) -> Result<UnboundedReceiver<ReplicationMessage>, ReplicationProtocolError> {
+    pub fn connect(
+        &self,
+    ) -> Result<UnboundedReceiver<ReplicationMessage>, ReplicationProtocolError> {
         self.primary
             .accept_replica(&self.replica_id, self.start_lsn)
             .map_err(|e| ReplicationProtocolError::Protocol(e.to_string()))
@@ -452,7 +458,10 @@ mod tests {
         assert_eq!(parse_lsn("0/0").unwrap(), 0);
         assert_eq!(parse_lsn("0/16B3740").unwrap(), 0x016B3740);
         assert_eq!(parse_lsn("1/0").unwrap(), 0x1_00000000);
-        assert_eq!(parse_lsn("FF/FFFFFFFF").unwrap(), 0xFF * (1u64 << 32) + 0xFFFFFFFF);
+        assert_eq!(
+            parse_lsn("FF/FFFFFFFF").unwrap(),
+            0xFF * (1u64 << 32) + 0xFFFFFFFF
+        );
         assert_eq!(parse_lsn("FFFFFFFF/FFFFFFFF").unwrap(), u64::MAX);
         assert!(parse_lsn("invalid").is_err());
         assert!(parse_lsn("1/2/3").is_err());

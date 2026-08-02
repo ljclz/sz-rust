@@ -24,8 +24,8 @@ use std::time::Duration;
 
 use szrsql_protocol::pgwire::auth::{build_client_first_message, AuthMode};
 use szrsql_protocol::pgwire::message::{
-    MSG_AUTHENTICATION, MSG_BIND_COMPLETE, MSG_COMMAND_COMPLETE, MSG_DATA_ROW,
-    MSG_ERROR_RESPONSE, MSG_PARSE_COMPLETE, MSG_READY_FOR_QUERY, MSG_ROW_DESCRIPTION,
+    MSG_AUTHENTICATION, MSG_BIND_COMPLETE, MSG_COMMAND_COMPLETE, MSG_DATA_ROW, MSG_ERROR_RESPONSE,
+    MSG_PARSE_COMPLETE, MSG_READY_FOR_QUERY, MSG_ROW_DESCRIPTION,
 };
 use szrsql_protocol::pgwire::pg_types::oid;
 use szrsql_protocol::pgwire::server::{PgwireConfig, PgwireServer};
@@ -304,7 +304,9 @@ async fn test_adv_net_001_invalid_protocol_version() {
         }
         None => {
             // 连接被关闭也是可接受的拒绝行为
-            println!("ADV-NET-001: server closed connection for invalid protocol version (acceptable)");
+            println!(
+                "ADV-NET-001: server closed connection for invalid protocol version (acceptable)"
+            );
         }
     }
 }
@@ -557,12 +559,7 @@ async fn test_adv_net_002b_wrong_password_scram() {
     // 4. 应收到 AuthenticationSASLContinue（auth_code=11）
     let (msg_type, payload) = read_backend_message(&mut stream).await;
     assert_eq!(msg_type, MSG_AUTHENTICATION, "expected SASLContinue");
-    let continue_code = i32::from_be_bytes([
-        payload[0],
-        payload[1],
-        payload[2],
-        payload[3],
-    ]);
+    let continue_code = i32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
     assert_eq!(continue_code, 11, "expected AUTH_SASL_CONTINUE");
 
     // 5. 发送错误的 client-final（proof 明显错误）
@@ -573,7 +570,10 @@ async fn test_adv_net_002b_wrong_password_scram() {
     let total_len = (4 + wrong_final.len()) as i32;
     sasl_resp.extend_from_slice(&total_len.to_be_bytes());
     sasl_resp.extend_from_slice(wrong_final);
-    stream.write_all(&sasl_resp).await.expect("write sasl response");
+    stream
+        .write_all(&sasl_resp)
+        .await
+        .expect("write sasl response");
     stream.flush().await.expect("flush");
 
     // 6. 应收到 ErrorResponse（错误密码 proof）
@@ -619,12 +619,7 @@ async fn test_adv_net_002c_scram_unknown_user() {
     // 2. 应收到 AuthenticationSASL（服务器要求 SCRAM 认证）
     let (msg_type, payload) = read_backend_message(&mut stream).await;
     assert_eq!(msg_type, MSG_AUTHENTICATION, "expected AUTH_SASL");
-    let auth_code = i32::from_be_bytes([
-        payload[0],
-        payload[1],
-        payload[2],
-        payload[3],
-    ]);
+    let auth_code = i32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
     assert_eq!(auth_code, 10, "expected AUTH_SASL code");
 
     // 3. 发送 SASLInitialResponse with unknown user
@@ -703,7 +698,10 @@ async fn test_adv_net_003_ssl_request_without_tls_config() {
 
     // 应收到单字节 'N'（拒绝 SSL）
     let response = read_exact_or_die(&mut stream, 1).await;
-    assert_eq!(response, b"N", "expected 'N' response for SSLRequest without TLS config");
+    assert_eq!(
+        response, b"N",
+        "expected 'N' response for SSLRequest without TLS config"
+    );
 
     // 连接应可继续明文 Startup
     send_startup(&mut stream, "alice").await;
@@ -725,7 +723,10 @@ async fn test_adv_net_003b_gssenc_request_rejected() {
 
     // 发送 GSSNCRequest
     let gss_req = encode_special_request(PROTOCOL_GSSNC_REQUEST);
-    stream.write_all(&gss_req).await.expect("write GSSNCRequest");
+    stream
+        .write_all(&gss_req)
+        .await
+        .expect("write GSSNCRequest");
     stream.flush().await.expect("flush");
 
     // 应收到 'N'（拒绝 GSSAPI）
@@ -762,7 +763,10 @@ async fn test_adv_net_003c_ssl_request_then_normal_startup() {
     assert!(types.contains(&MSG_READY_FOR_QUERY));
 
     // 验证可执行查询
-    stream.write_all(&encode_query("SELECT 1")).await.expect("write");
+    stream
+        .write_all(&encode_query("SELECT 1"))
+        .await
+        .expect("write");
     stream.flush().await.expect("flush");
     let types = read_until_ready_for_query(&mut stream).await;
     assert!(types.contains(&MSG_ROW_DESCRIPTION));
@@ -807,7 +811,10 @@ async fn test_adv_net_004_large_bind_parameter() {
         .expect("write Bind");
     stream.flush().await.expect("flush");
     let (bind_type, _) = read_backend_message(&mut stream).await;
-    assert_eq!(bind_type, MSG_BIND_COMPLETE, "Bind should succeed with 1MB param");
+    assert_eq!(
+        bind_type, MSG_BIND_COMPLETE,
+        "Bind should succeed with 1MB param"
+    );
 
     // Execute + Sync（扩展协议需要 Sync 才会返回 ReadyForQuery）
     stream
@@ -876,7 +883,10 @@ async fn test_adv_net_004b_many_bind_parameters() {
         .expect("write Bind");
     stream.flush().await.expect("flush");
     let (bind_type, _) = read_backend_message(&mut stream).await;
-    assert_eq!(bind_type, MSG_BIND_COMPLETE, "Bind with 100 params should succeed");
+    assert_eq!(
+        bind_type, MSG_BIND_COMPLETE,
+        "Bind with 100 params should succeed"
+    );
 
     // Execute + Sync
     stream
@@ -933,13 +943,22 @@ async fn test_adv_net_005_parse_without_execute() {
     stream.write_all(&encode_sync()).await.expect("write Sync");
     stream.flush().await.expect("flush");
     let (sync_type, _) = read_backend_message(&mut stream).await;
-    assert_eq!(sync_type, MSG_READY_FOR_QUERY, "Sync should return ReadyForQuery");
+    assert_eq!(
+        sync_type, MSG_READY_FOR_QUERY,
+        "Sync should return ReadyForQuery"
+    );
 
     // 验证连接仍可用
-    stream.write_all(&encode_query("SELECT 1")).await.expect("write");
+    stream
+        .write_all(&encode_query("SELECT 1"))
+        .await
+        .expect("write");
     stream.flush().await.expect("flush");
     let types = read_until_ready_for_query(&mut stream).await;
-    assert!(types.contains(&MSG_DATA_ROW), "connection should still work");
+    assert!(
+        types.contains(&MSG_DATA_ROW),
+        "connection should still work"
+    );
 }
 
 #[tokio::test]
@@ -997,7 +1016,10 @@ async fn test_adv_net_005b_repeated_bind_same_statement() {
     }
     assert_eq!(bind_complete_count, 5, "should receive 5 BindComplete");
     assert_eq!(data_rows, 5, "should receive 5 data rows from 5 Execute");
-    assert_eq!(command_complete_count, 5, "should receive 5 CommandComplete");
+    assert_eq!(
+        command_complete_count, 5,
+        "should receive 5 CommandComplete"
+    );
 }
 
 #[tokio::test]
@@ -1023,13 +1045,19 @@ async fn test_adv_net_005c_execute_unknown_portal() {
 
     // 应收到 ErrorResponse
     let (msg_type, _) = read_backend_message(&mut stream).await;
-    assert_eq!(msg_type, MSG_ERROR_RESPONSE, "expected ErrorResponse for unknown portal");
+    assert_eq!(
+        msg_type, MSG_ERROR_RESPONSE,
+        "expected ErrorResponse for unknown portal"
+    );
 
     // Sync 恢复
     stream.write_all(&encode_sync()).await.expect("write Sync");
     stream.flush().await.expect("flush");
     let (sync_type, _) = read_backend_message(&mut stream).await;
-    assert_eq!(sync_type, MSG_READY_FOR_QUERY, "Sync should restore session");
+    assert_eq!(
+        sync_type, MSG_READY_FOR_QUERY,
+        "Sync should restore session"
+    );
 }
 
 // =====================================================================
@@ -1050,10 +1078,7 @@ async fn test_adv_net_006_cancel_request_random_pid() {
 
     // 使用 encode_cancel_request 构造完整的 CancelRequest（含 pid + secret）
     let cancel_bytes = encode_cancel_request(99999, 0);
-    stream
-        .write_all(&cancel_bytes)
-        .await
-        .expect("write cancel");
+    stream.write_all(&cancel_bytes).await.expect("write cancel");
     stream.flush().await.expect("flush");
 
     // CancelRequest 处理后服务器应关闭连接（不进入主循环）
@@ -1260,7 +1285,10 @@ async fn test_adv_net_009_high_frequency_queries() {
     );
 
     // 连接仍可用
-    stream.write_all(&encode_query("SELECT 1")).await.expect("write");
+    stream
+        .write_all(&encode_query("SELECT 1"))
+        .await
+        .expect("write");
     stream.flush().await.expect("flush");
     let types = read_until_ready_for_query(&mut stream).await;
     assert!(types.contains(&MSG_DATA_ROW));
@@ -1332,7 +1360,10 @@ async fn test_adv_net_010_idle_connection() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // 验证连接仍可用
-    stream.write_all(&encode_query("SELECT 1")).await.expect("write");
+    stream
+        .write_all(&encode_query("SELECT 1"))
+        .await
+        .expect("write");
     stream.flush().await.expect("flush");
 
     let result = tokio::time::timeout(
@@ -1396,11 +1427,8 @@ async fn test_adv_net_010c_terminate_closes_connection() {
     stream.flush().await.expect("flush");
 
     // 服务器应关闭连接
-    let result = tokio::time::timeout(
-        Duration::from_millis(500),
-        try_read_exact(&mut stream, 1),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(Duration::from_millis(500), try_read_exact(&mut stream, 1)).await;
 
     match result {
         Err(_) => println!("ADV-NET-010c: timeout after Terminate (acceptable)"),
@@ -1504,7 +1532,7 @@ async fn test_adv_net_001f_negative_bind_param_count() {
     let mut payload = Vec::new();
     payload.push(0); // portal name (empty cstring)
     payload.push(0); // statement name (empty cstring)
-    // parameter_format_codes count = 0 (i16)
+                     // parameter_format_codes count = 0 (i16)
     payload.extend_from_slice(&0i16.to_be_bytes());
     // parameters count = -1 (i16 = 0xFFFF，被修复后的 u16 解析为 65535)
     payload.extend_from_slice(&(-1i16).to_be_bytes());

@@ -1377,8 +1377,12 @@ fn test_parse_empty_input() {
 fn test_parse_unsupported_statement() {
     // 当前 SzRSQL 已支持 TRUNCATE TABLE（Phase 6.x），改为测试真正不支持的语句
     // FLASHBACK 已通过预处理支持，这里使用完全无效的 DBLINK 语句
-    let result = parse_one("CREATE DATABASE LINK link1 CONNECT TO user IDENTIFIED BY pass USING 'db'");
-    assert!(result.is_err(), "expected CREATE DATABASE LINK to be unsupported");
+    let result =
+        parse_one("CREATE DATABASE LINK link1 CONNECT TO user IDENTIFIED BY pass USING 'db'");
+    assert!(
+        result.is_err(),
+        "expected CREATE DATABASE LINK to be unsupported"
+    );
 }
 
 #[test]
@@ -1665,10 +1669,9 @@ fn test_parse_set_transaction_isolation() {
 
 #[test]
 fn test_parse_set_session_characteristics() {
-    let stmts = parse_sql(
-        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
-    )
-    .unwrap();
+    let stmts =
+        parse_sql("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            .unwrap();
     assert_eq!(stmts.len(), 1);
 }
 
@@ -1737,4 +1740,3 @@ fn test_parse_set_with_newline_after_to() {
     let stmts = parse_sql("SET AUTOCOMMIT TO\n").unwrap();
     assert_eq!(stmts.len(), 1);
 }
-

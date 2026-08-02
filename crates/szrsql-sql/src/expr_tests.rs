@@ -826,10 +826,18 @@ fn test_pg_regex_partial_match() {
 #[test]
 fn test_pg_regex_null_handling() {
     // NULL ~ 'a' → NULL
-    let e = binary(Expr::Literal(Value::Null), BinaryOp::RegexMatch, lit_text("a"));
+    let e = binary(
+        Expr::Literal(Value::Null),
+        BinaryOp::RegexMatch,
+        lit_text("a"),
+    );
     assert_eq!(eval(&e).unwrap(), Value::Null);
     // 'a' ~ NULL → NULL
-    let e = binary(lit_text("a"), BinaryOp::RegexMatch, Expr::Literal(Value::Null));
+    let e = binary(
+        lit_text("a"),
+        BinaryOp::RegexMatch,
+        Expr::Literal(Value::Null),
+    );
     assert_eq!(eval(&e).unwrap(), Value::Null);
 }
 

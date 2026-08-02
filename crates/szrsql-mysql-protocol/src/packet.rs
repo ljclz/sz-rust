@@ -155,10 +155,7 @@ impl PacketCodec {
             }
         }
 
-        Ok(Packet {
-            seq_id,
-            payload,
-        })
+        Ok(Packet { seq_id, payload })
     }
 
     /// 向流中写入一个 MySQL 包。

@@ -294,10 +294,7 @@ impl DistCluster {
     }
 
     /// 获取指定节点的 Raft 状态
-    pub fn node_raft_state(
-        &self,
-        node_id: NodeId,
-    ) -> Option<crate::raft::RaftState> {
+    pub fn node_raft_state(&self, node_id: NodeId) -> Option<crate::raft::RaftState> {
         self.nodes.get(&node_id)?.raft_state()
     }
 
@@ -353,14 +350,22 @@ mod tests {
             .filter(|&&id| cluster.node_raft_state(id) == Some(crate::raft::RaftState::Leader))
             .copied()
             .collect();
-        assert_eq!(leaders.len(), 1, "应有且仅有 1 个 Leader，实际 {}", leaders.len());
+        assert_eq!(
+            leaders.len(),
+            1,
+            "应有且仅有 1 个 Leader，实际 {}",
+            leaders.len()
+        );
 
         // 其他 2 个为 Follower
         let leader = leaders[0];
         let followers: Vec<NodeId> = cluster
             .all_node_ids
             .iter()
-            .filter(|&&id| id != leader && cluster.node_raft_state(id) == Some(crate::raft::RaftState::Follower))
+            .filter(|&&id| {
+                id != leader
+                    && cluster.node_raft_state(id) == Some(crate::raft::RaftState::Follower)
+            })
             .copied()
             .collect();
         assert_eq!(followers.len(), 2, "应有 2 个 Follower");
@@ -368,8 +373,12 @@ mod tests {
         // 所有节点 term 应一致
         let leader_term = cluster.node_term(leader).unwrap();
         for &id in cluster.node_ids() {
-            assert_eq!(cluster.node_term(id).unwrap(), leader_term,
-                "节点 {} term 不一致", id);
+            assert_eq!(
+                cluster.node_term(id).unwrap(),
+                leader_term,
+                "节点 {} term 不一致",
+                id
+            );
         }
     }
 
@@ -381,7 +390,12 @@ mod tests {
 
         // 写入 10 个键
         for i in 0..10u8 {
-            cluster.put(format!("key{}", i).into_bytes(), format!("val{}", i).into_bytes()).unwrap();
+            cluster
+                .put(
+                    format!("key{}", i).into_bytes(),
+                    format!("val{}", i).into_bytes(),
+                )
+                .unwrap();
         }
 
         // 验证所有节点都已复制
@@ -390,12 +404,22 @@ mod tests {
                 let key = format!("key{}", i);
                 let expected = format!("val{}", i);
                 let actual = cluster.get_from(node_id, key.as_bytes()).unwrap();
-                assert_eq!(actual, Some(expected.into_bytes()),
-                    "节点 {} 缺少 key={}（应有 val={}）", node_id, i, i);
+                assert_eq!(
+                    actual,
+                    Some(expected.into_bytes()),
+                    "节点 {} 缺少 key={}（应有 val={}）",
+                    node_id,
+                    i,
+                    i
+                );
             }
             // 验证键数量
-            assert_eq!(cluster.kv_len(node_id).unwrap(), 10,
-                "节点 {} 键数量应为 10", node_id);
+            assert_eq!(
+                cluster.kv_len(node_id).unwrap(),
+                10,
+                "节点 {} 键数量应为 10",
+                node_id
+            );
         }
     }
 
@@ -408,7 +432,9 @@ mod tests {
         let original_leader = cluster.leader().expect("初始 Leader 已选出");
 
         // 写入初始数据
-        cluster.put(b"before_crash".to_vec(), b"v1".to_vec()).unwrap();
+        cluster
+            .put(b"before_crash".to_vec(), b"v1".to_vec())
+            .unwrap();
 
         // Leader 崩溃
         cluster.set_offline(original_leader);
@@ -421,7 +447,9 @@ mod tests {
         assert_ne!(new_leader, original_leader, "新 Leader 应不同于原 Leader");
 
         // 新 Leader 应能继续写入
-        cluster.put(b"after_crash".to_vec(), b"v2".to_vec()).unwrap();
+        cluster
+            .put(b"after_crash".to_vec(), b"v2".to_vec())
+            .unwrap();
 
         // 验证新数据在所有在线节点上
         for &node_id in cluster.node_ids() {
@@ -431,7 +459,8 @@ mod tests {
             assert_eq!(
                 cluster.get_from(node_id, b"after_crash").unwrap(),
                 Some(b"v2".to_vec()),
-                "节点 {} 应有 after_crash=v2", node_id
+                "节点 {} 应有 after_crash=v2",
+                node_id
             );
         }
 
@@ -455,7 +484,12 @@ mod tests {
 
         // 写入 5 个键
         for i in 0..5u8 {
-            cluster.put(format!("k{}", i).into_bytes(), format!("v{}", i).into_bytes()).unwrap();
+            cluster
+                .put(
+                    format!("k{}", i).into_bytes(),
+                    format!("v{}", i).into_bytes(),
+                )
+                .unwrap();
         }
 
         // 删除 k2
@@ -463,10 +497,18 @@ mod tests {
 
         // 验证所有节点都已删除 k2
         for &node_id in cluster.node_ids() {
-            assert_eq!(cluster.get_from(node_id, b"k2").unwrap(), None,
-                "节点 {} 应已删除 k2", node_id);
-            assert_eq!(cluster.kv_len(node_id).unwrap(), 4,
-                "节点 {} 应有 4 个键", node_id);
+            assert_eq!(
+                cluster.get_from(node_id, b"k2").unwrap(),
+                None,
+                "节点 {} 应已删除 k2",
+                node_id
+            );
+            assert_eq!(
+                cluster.kv_len(node_id).unwrap(),
+                4,
+                "节点 {} 应有 4 个键",
+                node_id
+            );
         }
     }
 
@@ -485,8 +527,12 @@ mod tests {
 
         // 验证所有节点键数量 = 100
         for &node_id in cluster.node_ids() {
-            assert_eq!(cluster.kv_len(node_id).unwrap(), 100,
-                "节点 {} 应有 100 个键", node_id);
+            assert_eq!(
+                cluster.kv_len(node_id).unwrap(),
+                100,
+                "节点 {} 应有 100 个键",
+                node_id
+            );
         }
 
         // 验证随机键在所有节点上一致
@@ -497,7 +543,10 @@ mod tests {
                 assert_eq!(
                     cluster.get_from(node_id, key.as_bytes()).unwrap(),
                     Some(expected.clone().into_bytes()),
-                    "节点 {} 上 k{:03} 应为 v{:03}", node_id, i, i
+                    "节点 {} 上 k{:03} 应为 v{:03}",
+                    node_id,
+                    i,
+                    i
                 );
             }
         }
@@ -512,7 +561,9 @@ mod tests {
         let leader = cluster.leader().expect("Leader 已选出");
 
         // 写入初始数据
-        cluster.put(b"before_partition".to_vec(), b"v1".to_vec()).unwrap();
+        cluster
+            .put(b"before_partition".to_vec(), b"v1".to_vec())
+            .unwrap();
 
         // 找出两个 Follower
         let followers: Vec<NodeId> = cluster
@@ -570,7 +621,8 @@ mod tests {
             assert_eq!(
                 cluster.get_from(node_id, b"k1").unwrap(),
                 Some(b"v1".to_vec()),
-                "节点 {} 应有 k1=v1", node_id
+                "节点 {} 应有 k1=v1",
+                node_id
             );
         }
     }
@@ -597,17 +649,26 @@ mod tests {
 
         cluster.put(b"k".to_vec(), b"v1".to_vec()).unwrap();
         for &node_id in cluster.node_ids() {
-            assert_eq!(cluster.get_from(node_id, b"k").unwrap(), Some(b"v1".to_vec()));
+            assert_eq!(
+                cluster.get_from(node_id, b"k").unwrap(),
+                Some(b"v1".to_vec())
+            );
         }
 
         cluster.put(b"k".to_vec(), b"v2".to_vec()).unwrap();
         for &node_id in cluster.node_ids() {
-            assert_eq!(cluster.get_from(node_id, b"k").unwrap(), Some(b"v2".to_vec()));
+            assert_eq!(
+                cluster.get_from(node_id, b"k").unwrap(),
+                Some(b"v2".to_vec())
+            );
         }
 
         cluster.put(b"k".to_vec(), b"v3".to_vec()).unwrap();
         for &node_id in cluster.node_ids() {
-            assert_eq!(cluster.get_from(node_id, b"k").unwrap(), Some(b"v3".to_vec()));
+            assert_eq!(
+                cluster.get_from(node_id, b"k").unwrap(),
+                Some(b"v3".to_vec())
+            );
         }
     }
 }

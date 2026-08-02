@@ -72,7 +72,7 @@ pub use tns_packet::{
     TNS_MAX_PACKET_LEN,
 };
 pub use ttc::{TtcError, TtcFunction, TtcPacket, TTC_HEADER_LEN};
-pub use types::{OracleTypeError, OracleType};
+pub use types::{OracleType, OracleTypeError};
 
 /// 返回 crate 版本号，供 workspace 骨架冒烟测试使用。
 pub fn version() -> &'static str {

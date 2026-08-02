@@ -27,7 +27,9 @@ use crate::wal::{WalError, WalOpType, WalReader, WalRecord, WalWriter};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 
 // =====================================================================
 // XorShift64 — 固定种子 PRNG（与 jepsen_bank / jepsen_register 同风格）
@@ -142,7 +144,7 @@ impl SetStore {
     fn add(&self, mgr: &MvccManager, element: i64) -> Result<bool, SetError> {
         // 先检查元素是否已存在（快速路径，避免不必要的 MVCC 事务）
         {
-            let elements = self.elements.read().unwrap();
+            let elements = self.elements.read();
             if elements.contains(&element) {
                 self.add_count.fetch_add(1, Ordering::SeqCst);
                 return Ok(false);
@@ -167,7 +169,7 @@ impl SetStore {
                     wal.append(record)?;
                 }
                 // 应用到内存
-                let mut elements = self.elements.write().unwrap();
+                let mut elements = self.elements.write();
                 let is_new = elements.insert(element);
                 self.add_count.fetch_add(1, Ordering::SeqCst);
                 if is_new {
@@ -222,7 +224,7 @@ impl SetStore {
         match mgr.commit(txn.txn_id, 0) {
             Ok(()) => {
                 self.commit_count.fetch_add(1, Ordering::SeqCst);
-                let elements = self.elements.read().unwrap();
+                let elements = self.elements.read();
                 Ok(elements.contains(&element))
             }
             Err(e) => {
@@ -234,22 +236,22 @@ impl SetStore {
 
     /// 无事务直接查询（不存在返回 false）
     fn contains(&self, element: i64) -> bool {
-        self.elements.read().unwrap().contains(&element)
+        self.elements.read().contains(&element)
     }
 
     /// 集合大小
     fn len(&self) -> usize {
-        self.elements.read().unwrap().len()
+        self.elements.read().len()
     }
 
     /// 是否为空
     fn is_empty(&self) -> bool {
-        self.elements.read().unwrap().is_empty()
+        self.elements.read().is_empty()
     }
 
     /// 快照：返回当前所有元素的 Vec（排序）
     fn to_sorted_vec(&self) -> Vec<i64> {
-        let elements = self.elements.read().unwrap();
+        let elements = self.elements.read();
         let mut v: Vec<i64> = elements.iter().copied().collect();
         v.sort_unstable();
         v
@@ -521,7 +523,7 @@ mod phase_2_20 {
         );
 
         // 验证：集合包含且仅包含所有期望元素
-        let actual_elements: HashSet<i64> = store.elements.read().unwrap().clone();
+        let actual_elements: HashSet<i64> = store.elements.read().clone();
         assert_eq!(
             actual_elements, expected_elements,
             "集合内容应与期望完全一致"
@@ -640,7 +642,7 @@ mod phase_2_20 {
         );
 
         // 验证：集合内容与期望一致
-        let actual_elements: HashSet<i64> = store.elements.read().unwrap().clone();
+        let actual_elements: HashSet<i64> = store.elements.read().clone();
         assert_eq!(actual_elements, expected_elements);
 
         // 验证：new_element_count == 期望元素数（重复 add 不计入）
@@ -691,7 +693,7 @@ mod phase_2_20 {
                             + rng.next_range(ELEMENT_RANGE as u32) as i64;
                         // 先把元素加入 committed_elements，再调用 add
                         {
-                            let mut ce = committed_elements.write().unwrap();
+                            let mut ce = committed_elements.write();
                             ce.insert(element);
                         }
                         if store.add_with_retry(&mgr, element, 100).is_ok() {
@@ -726,7 +728,7 @@ mod phase_2_20 {
                         local_contains += 1;
                         // 验证：若 store.contains 返回 true，则元素必须在 committed_elements 中
                         if in_store {
-                            let ce = committed_elements.read().unwrap();
+                            let ce = committed_elements.read();
                             if !ce.contains(&element) {
                                 invalid_contains.fetch_add(1, Ordering::SeqCst);
                             }
@@ -764,8 +766,8 @@ mod phase_2_20 {
         assert_eq!(store.add_count(), total_writes);
 
         // 验证：集合是 committed_elements 的子集（可能等于）
-        let actual_elements: HashSet<i64> = store.elements.read().unwrap().clone();
-        let ce = committed_elements.read().unwrap();
+        let actual_elements: HashSet<i64> = store.elements.read().clone();
+        let ce = committed_elements.read();
         for elem in &actual_elements {
             assert!(
                 ce.contains(elem),
@@ -1084,7 +1086,7 @@ mod phase_2_20 {
         assert_eq!(store.len(), expected_elements.len());
 
         // 验证：集合内容与期望一致
-        let actual_elements: HashSet<i64> = store.elements.read().unwrap().clone();
+        let actual_elements: HashSet<i64> = store.elements.read().clone();
         assert_eq!(actual_elements, expected_elements);
 
         // 验证：统计

@@ -34,8 +34,8 @@
 use crate::packet::{read_lenenc_string, write_lenenc_string};
 use crate::types::MysqlType;
 use chrono::{Datelike, Timelike};
-use szrsql_types::value::Value;
 use std::collections::HashMap;
+use szrsql_types::value::Value;
 
 /// Prepared Statement ID 类型。
 pub type StmtId = u32;
@@ -75,7 +75,10 @@ impl PreparedStatement {
 
     /// 记录某个参数的 long data（BLOB/TEXT 流式发送）。
     pub fn append_long_data(&mut self, param_idx: u16, data: &[u8]) {
-        self.long_data.entry(param_idx).or_default().extend_from_slice(data);
+        self.long_data
+            .entry(param_idx)
+            .or_default()
+            .extend_from_slice(data);
     }
 
     /// 清空所有 long data（COM_STMT_RESET 调用）。
@@ -368,7 +371,11 @@ impl StmtExecuteCommand {
     /// 解析 COM_STMT_EXECUTE payload。
     ///
     /// 需要传入 prepared statement 的参数数量，用于解析 NULL bitmap。
-    pub fn parse(payload: &[u8], num_params: u16, long_data: &HashMap<u16, Vec<u8>>) -> Result<Self, StmtExecError> {
+    pub fn parse(
+        payload: &[u8],
+        num_params: u16,
+        long_data: &HashMap<u16, Vec<u8>>,
+    ) -> Result<Self, StmtExecError> {
         if payload.len() < 9 {
             return Err(StmtExecError::PayloadTooShort);
         }
@@ -430,9 +437,15 @@ impl StmtExecuteCommand {
                 if let Some(data) = long_data.get(&idx) {
                     if !data.is_empty() {
                         // 根据参数类型决定是 BLOB 还是 TEXT
-                        let (expected_type, _) = param_types.get(idx as usize).copied().unwrap_or((MysqlType::Blob, false));
+                        let (expected_type, _) = param_types
+                            .get(idx as usize)
+                            .copied()
+                            .unwrap_or((MysqlType::Blob, false));
                         let value = match expected_type {
-                            MysqlType::TinyBlob | MysqlType::MediumBlob | MysqlType::LongBlob | MysqlType::Blob => Value::Blob(data.clone()),
+                            MysqlType::TinyBlob
+                            | MysqlType::MediumBlob
+                            | MysqlType::LongBlob
+                            | MysqlType::Blob => Value::Blob(data.clone()),
                             _ => Value::Text(String::from_utf8_lossy(data).to_string()),
                         };
                         params.push(value);
@@ -730,7 +743,8 @@ fn decode_binary_value(
                             .and_hms_micro_opt(0, 0, 0, 0)
                             .unwrap()
                     });
-                let utc = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc);
+                let utc =
+                    chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(dt, chrono::Utc);
                 let micros = utc.timestamp_micros();
                 Ok((Value::Timestamp(micros), &buf[1 + len..]))
             } else {
@@ -809,7 +823,11 @@ fn encode_binary_value(value: &Value, buf: &mut Vec<u8>) {
     match value {
         Value::Null => {} // NULL 已在 bitmap 中标记
         Value::Bool(b) => {
-            buf.push(if *b { 1 } else { 0 });
+            buf.push(if *b {
+                1
+            } else {
+                0
+            });
         }
         Value::Int64(n) => {
             // 按值范围选择最小整数类型
@@ -1124,7 +1142,7 @@ mod tests {
         let encoded = encode_binary_row(&row);
         assert_eq!(encoded[0], 0x00); // header
         assert_eq!(encoded[1], 0x00); // NULL bitmap (no nulls)
-        // 42 fits in i8, so 1 byte
+                                      // 42 fits in i8, so 1 byte
         assert_eq!(encoded[2], 42);
         // 100 fits in i8, so 1 byte
         assert_eq!(encoded[3], 100);
@@ -1137,7 +1155,7 @@ mod tests {
         assert_eq!(encoded[0], 0x00); // header
         assert_eq!(encoded[1], 0x02); // bit 1 set (param 1 is NULL)
         assert_eq!(encoded[2], 1); // value 1
-        // NULL skipped
+                                   // NULL skipped
         assert_eq!(encoded[3], 3); // value 3
     }
 

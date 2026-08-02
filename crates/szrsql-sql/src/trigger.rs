@@ -26,9 +26,9 @@ use crate::ast::{Expr, TriggerDefinition, TriggerEvent, TriggerLevel, TriggerTim
 use crate::executor::{ExecutionError, Row};
 use crate::expr::{EvalError, ExprEvaluator, RowContext};
 use crate::plan::TableSchema;
-use szrsql_types::value::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use szrsql_types::value::Value;
 
 // =====================================================================
 //  触发器执行上下文

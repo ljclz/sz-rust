@@ -45,7 +45,9 @@ use crate::{CdcEventOp, ChangeEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 
 // =====================================================================
 // AVRO 二进制编码原语
@@ -381,12 +383,12 @@ impl SchemaRegistry {
 
     /// 设置兼容性级别
     pub fn set_compatibility(&self, level: CompatibilityLevel) {
-        *self.compatibility.lock().unwrap() = level;
+        *self.compatibility.lock() = level;
     }
 
     /// 获取当前兼容性级别
     pub fn compatibility(&self) -> CompatibilityLevel {
-        *self.compatibility.lock().unwrap()
+        *self.compatibility.lock()
     }
 
     /// 注册 schema
@@ -411,7 +413,7 @@ impl SchemaRegistry {
             .unwrap_or(0);
 
         let version = {
-            let by_subject = self.by_subject.read().unwrap();
+            let by_subject = self.by_subject.read();
             by_subject
                 .get(subject)
                 .map(|v| v.len() as u32 + 1)
@@ -426,10 +428,9 @@ impl SchemaRegistry {
             registered_at: timestamp,
         };
 
-        self.by_id.write().unwrap().insert(id, entry.clone());
+        self.by_id.write().insert(id, entry.clone());
         self.by_subject
             .write()
-            .unwrap()
             .entry(subject.to_string())
             .or_default()
             .push(entry);
@@ -439,18 +440,18 @@ impl SchemaRegistry {
 
     /// 按 ID 查询 schema
     pub fn lookup_by_id(&self, id: u32) -> Option<SchemaEntry> {
-        self.by_id.read().unwrap().get(&id).cloned()
+        self.by_id.read().get(&id).cloned()
     }
 
     /// 按 subject 查询最新版本
     pub fn lookup_latest_by_subject(&self, subject: &str) -> Option<SchemaEntry> {
-        let by_subject = self.by_subject.read().unwrap();
+        let by_subject = self.by_subject.read();
         by_subject.get(subject).and_then(|v| v.last().cloned())
     }
 
     /// 按 subject + version 查询
     pub fn lookup_by_subject_version(&self, subject: &str, version: u32) -> Option<SchemaEntry> {
-        let by_subject = self.by_subject.read().unwrap();
+        let by_subject = self.by_subject.read();
         by_subject
             .get(subject)
             .and_then(|v| v.iter().find(|e| e.version == version).cloned())
@@ -460,7 +461,6 @@ impl SchemaRegistry {
     pub fn list_versions(&self, subject: &str) -> Vec<SchemaEntry> {
         self.by_subject
             .read()
-            .unwrap()
             .get(subject)
             .cloned()
             .unwrap_or_default()
@@ -475,12 +475,12 @@ impl SchemaRegistry {
 
     /// 获取所有已注册的 subject 列表
     pub fn list_subjects(&self) -> Vec<String> {
-        self.by_subject.read().unwrap().keys().cloned().collect()
+        self.by_subject.read().keys().cloned().collect()
     }
 
     /// 获取已注册 schema 总数
     pub fn schema_count(&self) -> usize {
-        self.by_id.read().unwrap().len()
+        self.by_id.read().len()
     }
 
     /// 检查两个 schema 的兼容性

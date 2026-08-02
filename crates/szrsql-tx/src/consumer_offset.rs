@@ -54,7 +54,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 
 // =====================================================================
 // 持久化文件格式
@@ -240,7 +241,7 @@ impl OffsetStore {
             return Ok(()); // in-memory 模式
         }
 
-        let offsets = self.offsets.read().unwrap();
+        let offsets = self.offsets.read();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -299,11 +300,11 @@ impl OffsetStore {
         partition: u32,
         lsn: u64,
     ) -> Result<(), OffsetStoreError> {
-        let _guard = self.persist_lock.lock().unwrap();
+        let _guard = self.persist_lock.lock();
 
         // 检查 LSN 不倒退
         {
-            let offsets = self.offsets.read().unwrap();
+            let offsets = self.offsets.read();
             if let Some(&existing) = offsets.get(&(group.to_string(), partition)) {
                 if lsn < existing {
                     return Err(OffsetStoreError::Regression {
@@ -316,13 +317,13 @@ impl OffsetStore {
 
         // 更新内存索引
         {
-            let mut offsets = self.offsets.write().unwrap();
+            let mut offsets = self.offsets.write();
             offsets.insert((group.to_string(), partition), lsn);
         }
 
         // 清理去重窗口中 <= 新 LSN 的项
         {
-            let mut processed = self.processed.write().unwrap();
+            let mut processed = self.processed.write();
             if let Some(set) = processed.get_mut(&(group.to_string(), partition)) {
                 set.retain(|&x| x > lsn);
             }
@@ -341,7 +342,6 @@ impl OffsetStore {
     pub fn get_offset(&self, group: &str, partition: u32) -> Option<u64> {
         self.offsets
             .read()
-            .unwrap()
             .get(&(group.to_string(), partition))
             .copied()
     }
@@ -350,7 +350,7 @@ impl OffsetStore {
     ///
     /// **注**：`committed_at` 字段使用当前时间戳（内存中不存储原始 committed_at）
     pub fn list_offsets(&self) -> Vec<OffsetRecord> {
-        let offsets = self.offsets.read().unwrap();
+        let offsets = self.offsets.read();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -385,7 +385,7 @@ impl OffsetStore {
         }
 
         // 添加到去重窗口
-        let mut processed = self.processed.write().unwrap();
+        let mut processed = self.processed.write();
         let set = processed.entry((group.to_string(), partition)).or_default();
         set.insert(lsn)
     }
@@ -404,7 +404,7 @@ impl OffsetStore {
         }
 
         // 检查去重窗口
-        let processed = self.processed.read().unwrap();
+        let processed = self.processed.read();
         processed
             .get(&(group.to_string(), partition))
             .map(|set| set.contains(&lsn))
@@ -420,14 +420,14 @@ impl OffsetStore {
     ///
     /// **注**：重置后，`get_offset` 返回 `None`，下次消费从 LSN 0 + 1 = 1 开始
     pub fn reset(&self, group: &str, partition: u32) -> Result<(), OffsetStoreError> {
-        let _guard = self.persist_lock.lock().unwrap();
+        let _guard = self.persist_lock.lock();
 
         {
-            let mut offsets = self.offsets.write().unwrap();
+            let mut offsets = self.offsets.write();
             offsets.remove(&(group.to_string(), partition));
         }
         {
-            let mut processed = self.processed.write().unwrap();
+            let mut processed = self.processed.write();
             processed.remove(&(group.to_string(), partition));
         }
 
@@ -439,7 +439,7 @@ impl OffsetStore {
     ///
     /// 主要用于安全关闭前的 flush
     pub fn flush(&self) -> Result<(), OffsetStoreError> {
-        let _guard = self.persist_lock.lock().unwrap();
+        let _guard = self.persist_lock.lock();
         self.persist_to_file()
     }
 
@@ -450,7 +450,7 @@ impl OffsetStore {
 
     /// 获取去重窗口大小（用于监控和测试）
     pub fn dedup_window_size(&self, group: &str, partition: u32) -> usize {
-        let processed = self.processed.read().unwrap();
+        let processed = self.processed.read();
         processed
             .get(&(group.to_string(), partition))
             .map(|set| set.len())
@@ -459,7 +459,7 @@ impl OffsetStore {
 
     /// 获取所有消费者组列表（去重 + 排序）
     pub fn list_consumer_groups(&self) -> Vec<String> {
-        let offsets = self.offsets.read().unwrap();
+        let offsets = self.offsets.read();
         let mut groups: Vec<String> = offsets
             .keys()
             .map(|(g, _)| g.clone())
@@ -472,7 +472,7 @@ impl OffsetStore {
 
     /// 获取指定消费者组的所有分区 offset（按分区 ID 升序）
     pub fn list_partitions(&self, group: &str) -> Vec<(u32, u64)> {
-        let offsets = self.offsets.read().unwrap();
+        let offsets = self.offsets.read();
         let mut result: Vec<(u32, u64)> = offsets
             .iter()
             .filter(|((g, _), _)| g == group)
@@ -484,7 +484,7 @@ impl OffsetStore {
 
     /// 获取已注册的 (group, partition) 总数
     pub fn offset_count(&self) -> usize {
-        self.offsets.read().unwrap().len()
+        self.offsets.read().len()
     }
 }
 
@@ -1335,7 +1335,7 @@ mod tests {
         store: Arc<OffsetStore>,
         group: String,
         partition: u32,
-        processed: std::sync::Mutex<std::collections::HashSet<u64>>,
+        processed: parking_lot::Mutex<std::collections::HashSet<u64>>,
     }
 
     impl SimulatedConsumer {
@@ -1344,7 +1344,7 @@ mod tests {
                 store,
                 group: group.to_string(),
                 partition,
-                processed: std::sync::Mutex::new(std::collections::HashSet::new()),
+                processed: parking_lot::Mutex::new(std::collections::HashSet::new()),
             }
         }
 
@@ -1355,7 +1355,7 @@ mod tests {
                 // 通过 mark_processed 去重
                 if self.store.mark_processed(&self.group, self.partition, lsn) {
                     // 模拟处理（应用 idempotent 操作）
-                    let mut processed = self.processed.lock().unwrap();
+                    let mut processed = self.processed.lock();
                     let is_new = processed.insert(lsn);
                     assert!(is_new, "duplicate processing detected for lsn {}", lsn);
                     processed_count += 1;
@@ -1379,7 +1379,7 @@ mod tests {
 
         /// 已处理的事件总数
         fn processed_count(&self) -> usize {
-            self.processed.lock().unwrap().len()
+            self.processed.lock().len()
         }
     }
 
@@ -1443,7 +1443,7 @@ mod tests {
             consumer.commit(100).unwrap();
 
             // 持久化 processed set（模拟下游应用的持久化状态）
-            let processed = consumer.processed.lock().unwrap();
+            let processed = consumer.processed.lock();
             let json = serde_json::to_string(&processed.iter().collect::<Vec<_>>()).unwrap();
             std::fs::write(&processed_path, &json).unwrap();
         }
@@ -1459,7 +1459,7 @@ mod tests {
             let json = std::fs::read_to_string(&processed_path).unwrap();
             let vec: Vec<u64> = serde_json::from_str(&json).unwrap();
             {
-                let mut processed = consumer.processed.lock().unwrap();
+                let mut processed = consumer.processed.lock();
                 for lsn in vec {
                     processed.insert(lsn);
                 }
@@ -1499,7 +1499,7 @@ mod tests {
             consumer.process_batch(&events);
 
             // 持久化 processed set
-            let processed = consumer.processed.lock().unwrap();
+            let processed = consumer.processed.lock();
             let json = serde_json::to_string(&processed.iter().collect::<Vec<_>>()).unwrap();
             std::fs::write(&processed_path, &json).unwrap();
             // 注意：没有 commit_offset，崩溃
@@ -1516,7 +1516,7 @@ mod tests {
             let json = std::fs::read_to_string(&processed_path).unwrap();
             let vec: Vec<u64> = serde_json::from_str(&json).unwrap();
             {
-                let mut processed = consumer.processed.lock().unwrap();
+                let mut processed = consumer.processed.lock();
                 for lsn in vec {
                     processed.insert(lsn);
                 }

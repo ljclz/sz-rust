@@ -334,7 +334,11 @@ fn encode_number_from_str(s: &str) -> Vec<u8> {
     }
 
     // 终止符：正数 0x66（102），负数 0x9A（102 取补）
-    result.push(if negative { 0x9A } else { 0x66 });
+    result.push(if negative {
+        0x9A
+    } else {
+        0x66
+    });
 
     result
 }
@@ -390,7 +394,14 @@ fn format_decimal_string(unscaled: i128, scale: u32) -> String {
 /// - second = 45, +1 = 46 = 0x2E
 ///
 /// 编码结果：[0x78, 0x7C, 0x07, 0x10, 0x0B, 0x1F, 0x2E]
-pub fn encode_date(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32) -> Vec<u8> {
+pub fn encode_date(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> Vec<u8> {
     let century = year.div_euclid(100);
     let year_in_century = year.rem_euclid(100);
 
@@ -439,7 +450,17 @@ pub fn encode_value(value: &Value) -> (u8, Vec<u8>) {
         Value::Null => (0, vec![0x00]),
         Value::Bool(b) => {
             // Oracle 没有 BOOLEAN 类型，用 NUMBER(1) 表示
-            (2, encode_number(if *b { 1 } else { 0 }, 0))
+            (
+                2,
+                encode_number(
+                    if *b {
+                        1
+                    } else {
+                        0
+                    },
+                    0,
+                ),
+            )
         }
         Value::Int64(n) => (2, encode_number(*n as i128, 0)),
         Value::Float64(f) => {
@@ -467,7 +488,10 @@ pub fn encode_value(value: &Value) -> (u8, Vec<u8>) {
                 .unwrap()
                 .checked_add_signed(chrono::Duration::days(*days as i64))
                 .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
-                        (12, encode_date(date.year(), date.month(), date.day(), 0, 0, 0))
+            (
+                12,
+                encode_date(date.year(), date.month(), date.day(), 0, 0, 0),
+            )
         }
         Value::Timestamp(micros) => {
             // SzRSQL Timestamp = microseconds since epoch，转 Oracle DATE 7字节（秒精度）
@@ -476,18 +500,19 @@ pub fn encode_value(value: &Value) -> (u8, Vec<u8>) {
                 .unwrap_or_else(|| chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap());
             let naive = dt.naive_utc();
             use chrono::{Datelike, Timelike};
-            (12, encode_date(
-                naive.year(),
-                naive.month(),
-                naive.day(),
-                naive.hour(),
-                naive.minute(),
-                naive.second(),
-            ))
+            (
+                12,
+                encode_date(
+                    naive.year(),
+                    naive.month(),
+                    naive.day(),
+                    naive.hour(),
+                    naive.minute(),
+                    naive.second(),
+                ),
+            )
         }
-        Value::Decimal(unscaled, scale) => {
-            (2, encode_number(*unscaled, *scale as i8))
-        }
+        Value::Decimal(unscaled, scale) => (2, encode_number(*unscaled, *scale as i8)),
         Value::Json(v) => {
             // JSON 序列化为字符串，按 VARCHAR2 编码
             let s = serde_json::to_string(v).unwrap_or_default();
@@ -581,7 +606,10 @@ mod tests {
     fn ttc_packet_parse_too_short() {
         let buf = [0x01, 0x02];
         let result = TtcPacket::parse(&buf);
-        assert!(matches!(result, Err(TtcError::PayloadTooShort { got: 2, min: 3 })));
+        assert!(matches!(
+            result,
+            Err(TtcError::PayloadTooShort { got: 2, min: 3 })
+        ));
     }
 
     #[test]
@@ -645,17 +673,19 @@ mod tests {
         assert_eq!(encoded.len(), 7);
         assert_eq!(encoded[0], 120); // century=20, +100=120
         assert_eq!(encoded[1], 124); // year=24, +100=124
-        assert_eq!(encoded[2], 7);   // month=6, +1=7
-        assert_eq!(encoded[3], 16);  // day=15, +1=16
-        assert_eq!(encoded[4], 11);  // hour=10, +1=11
-        assert_eq!(encoded[5], 31);  // minute=30, +1=31
-        assert_eq!(encoded[6], 46);  // second=45, +1=46
+        assert_eq!(encoded[2], 7); // month=6, +1=7
+        assert_eq!(encoded[3], 16); // day=15, +1=16
+        assert_eq!(encoded[4], 11); // hour=10, +1=11
+        assert_eq!(encoded[5], 31); // minute=30, +1=31
+        assert_eq!(encoded[6], 46); // second=45, +1=46
     }
 
     #[test]
     fn decode_date_roundtrip() {
         let original = (2024, 6, 15, 10, 30, 45);
-        let encoded = encode_date(original.0, original.1, original.2, original.3, original.4, original.5);
+        let encoded = encode_date(
+            original.0, original.1, original.2, original.3, original.4, original.5,
+        );
         let decoded = decode_date(&encoded).unwrap();
         assert_eq!(decoded, original);
     }
@@ -683,7 +713,7 @@ mod tests {
         assert!(!bytes.is_empty());
         // 42 为 2 位整数 → 指数 = 2-1 = 1 → exp_byte = 1+193 = 194 = 0xC2
         assert_eq!(bytes[0], 0xC2); // 指数（1+193）
-        // 尾数：base-100 字节 = 42，正数 +1 = 43 = 0x2B
+                                    // 尾数：base-100 字节 = 42，正数 +1 = 43 = 0x2B
         assert_eq!(bytes[1], 0x2B); // 42+1=43
     }
 
@@ -710,7 +740,7 @@ mod tests {
 
     #[test]
     fn encode_value_date() {
-                let days = chrono::NaiveDate::from_ymd_opt(2024, 1, 1)
+        let days = chrono::NaiveDate::from_ymd_opt(2024, 1, 1)
             .unwrap()
             .signed_duration_since(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
             .num_days() as i32;
@@ -720,10 +750,10 @@ mod tests {
         // century = 20+100 = 120
         assert_eq!(bytes[0], 120); // century=20, +100=120
         assert_eq!(bytes[1], 124); // year=24, +100=124
-        assert_eq!(bytes[2], 2);   // month=1, +1=2
-        assert_eq!(bytes[3], 2);   // day=1, +1=2
-        assert_eq!(bytes[4], 1);   // hour=0, +1=1
-        assert_eq!(bytes[5], 1);   // minute=0, +1=1
-        assert_eq!(bytes[6], 1);   // second=0, +1=1
+        assert_eq!(bytes[2], 2); // month=1, +1=2
+        assert_eq!(bytes[3], 2); // day=1, +1=2
+        assert_eq!(bytes[4], 1); // hour=0, +1=1
+        assert_eq!(bytes[5], 1); // minute=0, +1=1
+        assert_eq!(bytes[6], 1); // second=0, +1=1
     }
 }

@@ -53,13 +53,19 @@ impl DataTypeMapping {
         let cases = Self::mapping_table();
         cases
             .into_iter()
-            .map(|(pg_type, aliases, expected_type, supported, detail)| DataTypeMappingResult {
-                name: pg_type.to_string(),
-                pg_aliases: aliases.into_iter().map(String::from).collect(),
-                expected_szrsql_type: expected_type.to_string(),
-                status: if supported { CompatStatus::Pass } else { CompatStatus::NotImplemented },
-                detail,
-            })
+            .map(
+                |(pg_type, aliases, expected_type, supported, detail)| DataTypeMappingResult {
+                    name: pg_type.to_string(),
+                    pg_aliases: aliases.into_iter().map(String::from).collect(),
+                    expected_szrsql_type: expected_type.to_string(),
+                    status: if supported {
+                        CompatStatus::Pass
+                    } else {
+                        CompatStatus::NotImplemented
+                    },
+                    detail,
+                },
+            )
             .collect()
     }
 
@@ -320,7 +326,9 @@ impl DataTypeMapping {
             "bytea" | "binary" | "varbinary" => Some(ColumnType::Blob),
             "boolean" | "bool" => Some(ColumnType::Bool),
             "date" => Some(ColumnType::Date),
-            "timestamp" | "timestamp without time zone" | "timestamptz"
+            "timestamp"
+            | "timestamp without time zone"
+            | "timestamptz"
             | "timestamp with time zone" => Some(ColumnType::Timestamp),
             "numeric" | "decimal" => Some(ColumnType::Decimal {
                 precision: 38,
@@ -368,8 +376,17 @@ mod tests {
     #[test]
     fn core_types_are_supported() {
         let results = DataTypeMapping::run_all();
-        for name in &["bigint", "integer", "text", "boolean", "timestamp", "numeric"] {
-            let r = results.iter().find(|r| r.name == *name)
+        for name in &[
+            "bigint",
+            "integer",
+            "text",
+            "boolean",
+            "timestamp",
+            "numeric",
+        ] {
+            let r = results
+                .iter()
+                .find(|r| r.name == *name)
                 .unwrap_or_else(|| panic!("应包含类型 {name}"));
             assert_eq!(r.status, CompatStatus::Pass, "核心类型 {name} 应支持");
         }
@@ -405,7 +422,9 @@ mod tests {
     fn unsupported_types_marked_not_implemented() {
         let results = DataTypeMapping::run_all();
         // Phase F-10: interval 现已支持（存为 Text）
-        let interval = results.iter().find(|r| r.name == "interval")
+        let interval = results
+            .iter()
+            .find(|r| r.name == "interval")
             .expect("应包含 interval 类型");
         assert_eq!(interval.status, CompatStatus::Pass);
     }
@@ -413,7 +432,9 @@ mod tests {
     #[test]
     fn array_type_mapping_present() {
         let results = DataTypeMapping::run_all();
-        let array = results.iter().find(|r| r.name == "array")
+        let array = results
+            .iter()
+            .find(|r| r.name == "array")
             .expect("应包含 array 类型");
         assert_eq!(array.expected_szrsql_type, "Array(T)");
         assert_eq!(array.status, CompatStatus::Pass);
@@ -421,15 +442,42 @@ mod tests {
 
     #[test]
     fn to_column_type_basic() {
-        assert_eq!(DataTypeMapping::to_column_type("bigint"), Some(ColumnType::Int64));
-        assert_eq!(DataTypeMapping::to_column_type("int8"), Some(ColumnType::Int64));
-        assert_eq!(DataTypeMapping::to_column_type("text"), Some(ColumnType::Text));
-        assert_eq!(DataTypeMapping::to_column_type("boolean"), Some(ColumnType::Bool));
-        assert_eq!(DataTypeMapping::to_column_type("bytea"), Some(ColumnType::Blob));
-        assert_eq!(DataTypeMapping::to_column_type("date"), Some(ColumnType::Date));
-        assert_eq!(DataTypeMapping::to_column_type("timestamp"), Some(ColumnType::Timestamp));
-        assert_eq!(DataTypeMapping::to_column_type("json"), Some(ColumnType::Json));
-        assert_eq!(DataTypeMapping::to_column_type("tsvector"), Some(ColumnType::TsVector));
+        assert_eq!(
+            DataTypeMapping::to_column_type("bigint"),
+            Some(ColumnType::Int64)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("int8"),
+            Some(ColumnType::Int64)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("text"),
+            Some(ColumnType::Text)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("boolean"),
+            Some(ColumnType::Bool)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("bytea"),
+            Some(ColumnType::Blob)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("date"),
+            Some(ColumnType::Date)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("timestamp"),
+            Some(ColumnType::Timestamp)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("json"),
+            Some(ColumnType::Json)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("tsvector"),
+            Some(ColumnType::TsVector)
+        );
     }
 
     #[test]
@@ -447,9 +495,18 @@ mod tests {
     #[test]
     fn to_column_type_unsupported_returns_none() {
         // Phase F-10: interval/point/xml 现已支持（存为 Text）
-        assert_eq!(DataTypeMapping::to_column_type("interval"), Some(ColumnType::Text));
-        assert_eq!(DataTypeMapping::to_column_type("point"), Some(ColumnType::Text));
-        assert_eq!(DataTypeMapping::to_column_type("xml"), Some(ColumnType::Text));
+        assert_eq!(
+            DataTypeMapping::to_column_type("interval"),
+            Some(ColumnType::Text)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("point"),
+            Some(ColumnType::Text)
+        );
+        assert_eq!(
+            DataTypeMapping::to_column_type("xml"),
+            Some(ColumnType::Text)
+        );
         // 真正未实现的类型仍返回 None
         assert_eq!(DataTypeMapping::to_column_type("nonexistent"), None);
     }

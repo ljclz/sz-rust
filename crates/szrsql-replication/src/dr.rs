@@ -25,7 +25,8 @@
 //! 对应 `SzRSQL实施进度.md` Phase 7a.7。
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 use szrsql_tx::wal::WalRecord;
@@ -374,7 +375,7 @@ impl DrCluster {
             return Err(DrError::EmptyNodeId);
         }
 
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         if nodes.contains_key(node_id) {
             return Err(DrError::NodeAlreadyExists(node_id.to_string()));
         }
@@ -388,7 +389,7 @@ impl DrCluster {
                 last_heartbeat: Instant::now(),
             },
         );
-        *self.primary_id.lock().unwrap() = Some(node_id.to_string());
+        *self.primary_id.lock() = Some(node_id.to_string());
         Ok(())
     }
 
@@ -400,10 +401,10 @@ impl DrCluster {
             return Err(DrError::EmptyNodeId);
         }
 
-        let primary_id = self.primary_id.lock().unwrap().clone();
+        let primary_id = self.primary_id.lock().clone();
         let primary_id = primary_id.ok_or(DrError::NoPrimary)?;
 
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         if nodes.contains_key(node_id) {
             return Err(DrError::NodeAlreadyExists(node_id.to_string()));
         }
@@ -436,10 +437,10 @@ impl DrCluster {
     /// # 返回
     /// 追加后的新 LSN
     pub fn write(&self, records: Vec<WalRecord>) -> Result<u64, DrError> {
-        let primary_id = self.primary_id.lock().unwrap().clone();
+        let primary_id = self.primary_id.lock().clone();
         let primary_id = primary_id.ok_or(DrError::NoPrimary)?;
 
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         match nodes.get_mut(&primary_id) {
             Some(ClusterNode::Primary { primary, .. }) => Ok(primary.append_records(records)),
             Some(_) => Err(DrError::NotPrimary(primary_id)),
@@ -453,7 +454,7 @@ impl DrCluster {
     /// - 备库：直接返回本地页存储
     /// - 宕机节点：返回宕机时保留的页数据
     pub fn read_pages(&self, node_id: &str) -> Result<Vec<(u32, Vec<u8>)>, DrError> {
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock();
         let node = nodes
             .get(node_id)
             .ok_or_else(|| DrError::NodeNotFound(node_id.to_string()))?;
@@ -476,7 +477,7 @@ impl DrCluster {
     ///
     /// 将备库接收缓冲区中的所有待处理消息（WalBatch/Heartbeat/Eof）排空并应用。
     pub fn pump_replica(&self, node_id: &str) -> Result<(), DrError> {
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         let node = nodes
             .get_mut(node_id)
             .ok_or_else(|| DrError::NodeNotFound(node_id.to_string()))?;
@@ -531,7 +532,7 @@ impl DrCluster {
     /// 泵送所有备库消息
     pub fn pump_all_replicas(&self) -> Result<(), DrError> {
         let replica_ids: Vec<String> = {
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             nodes
                 .iter()
                 .filter(|(_, n)| matches!(n, ClusterNode::Replica { .. }))
@@ -550,10 +551,10 @@ impl DrCluster {
 
     /// 主库发送心跳到所有备库
     pub fn send_heartbeat(&self) -> Result<(), DrError> {
-        let primary_id = self.primary_id.lock().unwrap().clone();
+        let primary_id = self.primary_id.lock().clone();
         let primary_id = primary_id.ok_or(DrError::NoPrimary)?;
 
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         match nodes.get_mut(&primary_id) {
             Some(ClusterNode::Primary {
                 primary,
@@ -583,8 +584,8 @@ impl DrCluster {
         let mut new_events = Vec::new();
         let now = Instant::now();
 
-        let primary_id = self.primary_id.lock().unwrap().clone();
-        let nodes = self.nodes.lock().unwrap();
+        let primary_id = self.primary_id.lock().clone();
+        let nodes = self.nodes.lock();
 
         // 检查主库状态
         let primary_down = match &primary_id {
@@ -598,7 +599,6 @@ impl DrCluster {
             let already_recorded: Vec<String> = self
                 .events
                 .lock()
-                .unwrap()
                 .iter()
                 .filter_map(|e| match e {
                     FailoverEvent::PrimaryDown { node_id, .. } => Some(node_id.clone()),
@@ -630,7 +630,6 @@ impl DrCluster {
                     let missed_count = self
                         .events
                         .lock()
-                        .unwrap()
                         .iter()
                         .filter(|e| {
                             matches!(e, FailoverEvent::HeartbeatMissed { node_id, .. } if node_id == id)
@@ -646,7 +645,7 @@ impl DrCluster {
         }
 
         // 记录事件
-        self.events.lock().unwrap().extend(new_events.clone());
+        self.events.lock().extend(new_events.clone());
         new_events
     }
 
@@ -669,9 +668,9 @@ impl DrCluster {
         let start = Instant::now();
 
         // 校验：当前不能有活跃主库
-        let old_primary_id = self.primary_id.lock().unwrap().clone();
+        let old_primary_id = self.primary_id.lock().clone();
         if let Some(ref pid) = old_primary_id {
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             if matches!(nodes.get(pid), Some(ClusterNode::Primary { .. })) {
                 warn!(old_primary_id = %pid, replica_id = %replica_id, "promote_replica refused: primary still alive");
                 return Err(DrError::PrimaryAlive(pid.clone()));
@@ -682,7 +681,7 @@ impl DrCluster {
 
         // 提取备库页数据
         let pages = {
-            let mut nodes = self.nodes.lock().unwrap();
+            let mut nodes = self.nodes.lock();
             let node = nodes
                 .remove(replica_id)
                 .ok_or_else(|| DrError::NodeNotFound(replica_id.to_string()))?;
@@ -700,14 +699,11 @@ impl DrCluster {
         };
 
         // 记录故障切换开始事件
-        self.events
-            .lock()
-            .unwrap()
-            .push(FailoverEvent::FailoverStart {
-                from_id: old_primary_id.unwrap_or_default(),
-                to_id: replica_id.to_string(),
-                at: start,
-            });
+        self.events.lock().push(FailoverEvent::FailoverStart {
+            from_id: old_primary_id.unwrap_or_default(),
+            to_id: replica_id.to_string(),
+            at: start,
+        });
 
         // 创建新主库
         let new_primary = ReplicationPrimary::new(replica_id);
@@ -715,7 +711,7 @@ impl DrCluster {
 
         // 收集其他备库 ID 和 confirmed_lsn
         let other_replicas: Vec<(String, u64)> = {
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             nodes
                 .iter()
                 .filter_map(|(id, node)| match node {
@@ -737,7 +733,7 @@ impl DrCluster {
 
         // 更新其他备库的接收端
         {
-            let mut nodes = self.nodes.lock().unwrap();
+            let mut nodes = self.nodes.lock();
             for (id, rx) in new_receivers {
                 if let Some(ClusterNode::Replica { receiver, .. }) = nodes.get_mut(&id) {
                     *receiver = rx;
@@ -747,7 +743,7 @@ impl DrCluster {
 
         // 插入新主库节点
         {
-            let mut nodes = self.nodes.lock().unwrap();
+            let mut nodes = self.nodes.lock();
             nodes.insert(
                 replica_id.to_string(),
                 ClusterNode::Primary {
@@ -758,7 +754,7 @@ impl DrCluster {
                 },
             );
         }
-        *self.primary_id.lock().unwrap() = Some(replica_id.to_string());
+        *self.primary_id.lock() = Some(replica_id.to_string());
 
         // 泵送其他备库以应用追平批次
         for (id, _) in &other_replicas {
@@ -770,14 +766,11 @@ impl DrCluster {
             return Err(DrError::FailoverTimeout(duration));
         }
 
-        self.events
-            .lock()
-            .unwrap()
-            .push(FailoverEvent::FailoverComplete {
-                new_primary_id: replica_id.to_string(),
-                at: Instant::now(),
-                duration,
-            });
+        self.events.lock().push(FailoverEvent::FailoverComplete {
+            new_primary_id: replica_id.to_string(),
+            at: Instant::now(),
+            duration,
+        });
 
         Ok(duration)
     }
@@ -790,9 +783,9 @@ impl DrCluster {
     /// 故障切换耗时
     pub fn auto_failover(&self) -> Result<Duration, DrError> {
         // 校验主库已宕机
-        let primary_id = self.primary_id.lock().unwrap().clone();
+        let primary_id = self.primary_id.lock().clone();
         if let Some(ref pid) = &primary_id {
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             if matches!(nodes.get(pid), Some(ClusterNode::Primary { .. })) {
                 warn!(primary_id = %pid, "auto_failover refused: primary still alive");
                 return Err(DrError::PrimaryAlive(pid.clone()));
@@ -801,7 +794,7 @@ impl DrCluster {
 
         // 选择 confirmed_lsn 最高的备库
         let best_replica = {
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             let mut best: Option<(String, u64)> = None;
             for (id, node) in nodes.iter() {
                 if let ClusterNode::Replica { confirmed_lsn, .. } = node {
@@ -834,7 +827,7 @@ impl DrCluster {
     /// - 宕机节点：返回错误
     pub fn kill_node(&self, node_id: &str) -> Result<(), DrError> {
         warn!(node_id = %node_id, "kill_node: simulating node crash");
-        let mut nodes = self.nodes.lock().unwrap();
+        let mut nodes = self.nodes.lock();
         let node = nodes
             .remove(node_id)
             .ok_or_else(|| DrError::NodeNotFound(node_id.to_string()))?;
@@ -861,7 +854,7 @@ impl DrCluster {
                     },
                 );
                 // 清除主库 ID
-                *self.primary_id.lock().unwrap() = None;
+                *self.primary_id.lock() = None;
             }
             ClusterNode::Replica {
                 pages,
@@ -894,7 +887,7 @@ impl DrCluster {
     pub fn recover_node(&self, node_id: &str) -> Result<(), DrError> {
         // 恢复操作只是标记节点可以重新加入
         // 实际重连由 rejoin_as_replica 完成
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock();
         match nodes.get(node_id) {
             Some(ClusterNode::Down { .. }) => Ok(()),
             Some(ClusterNode::Primary { .. }) => Err(DrError::NotDown(node_id.to_string())),
@@ -910,7 +903,7 @@ impl DrCluster {
         info!(node_id = %node_id, "rejoin_as_replica: node rejoining cluster as replica");
         // 提取宕机节点的页数据和 confirmed_lsn
         let (pages, confirmed_lsn) = {
-            let mut nodes = self.nodes.lock().unwrap();
+            let mut nodes = self.nodes.lock();
             let node = nodes
                 .remove(node_id)
                 .ok_or_else(|| DrError::NodeNotFound(node_id.to_string()))?;
@@ -933,9 +926,9 @@ impl DrCluster {
 
         // 连接到当前主库
         let receiver = {
-            let primary_id = self.primary_id.lock().unwrap().clone();
+            let primary_id = self.primary_id.lock().clone();
             let primary_id = primary_id.ok_or(DrError::NoPrimary)?;
-            let nodes = self.nodes.lock().unwrap();
+            let nodes = self.nodes.lock();
             match nodes.get(&primary_id) {
                 Some(ClusterNode::Primary { primary, .. }) => {
                     primary.accept_replica(node_id, confirmed_lsn)?
@@ -946,7 +939,7 @@ impl DrCluster {
 
         // 插入为备库
         {
-            let mut nodes = self.nodes.lock().unwrap();
+            let mut nodes = self.nodes.lock();
             nodes.insert(
                 node_id.to_string(),
                 ClusterNode::Replica {
@@ -961,7 +954,7 @@ impl DrCluster {
         }
 
         // 记录事件
-        self.events.lock().unwrap().push(FailoverEvent::NodeRejoin {
+        self.events.lock().push(FailoverEvent::NodeRejoin {
             node_id: node_id.to_string(),
             as_role: NodeRole::Replica,
             at: Instant::now(),
@@ -979,12 +972,12 @@ impl DrCluster {
 
     /// 当前主库 ID
     pub fn primary_id(&self) -> Option<String> {
-        self.primary_id.lock().unwrap().clone()
+        self.primary_id.lock().clone()
     }
 
     /// 列出所有节点信息
     pub fn list_nodes(&self) -> Vec<NodeInfo> {
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock();
         nodes
             .iter()
             .map(|(id, node)| match node {
@@ -1029,12 +1022,12 @@ impl DrCluster {
 
     /// 获取事件日志
     pub fn events(&self) -> Vec<FailoverEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 
     /// 获取集群统计
     pub fn stats(&self) -> DrStats {
-        let nodes = self.nodes.lock().unwrap();
+        let nodes = self.nodes.lock();
         let mut primary_count = 0;
         let mut replica_count = 0;
         let mut down_count = 0;
@@ -1045,22 +1038,16 @@ impl DrCluster {
                 ClusterNode::Down { .. } => down_count += 1,
             }
         }
-        let last_failover_duration =
-            self.events
-                .lock()
-                .unwrap()
-                .iter()
-                .rev()
-                .find_map(|e| match e {
-                    FailoverEvent::FailoverComplete { duration, .. } => Some(*duration),
-                    _ => None,
-                });
+        let last_failover_duration = self.events.lock().iter().rev().find_map(|e| match e {
+            FailoverEvent::FailoverComplete { duration, .. } => Some(*duration),
+            _ => None,
+        });
         DrStats {
             total_nodes: nodes.len(),
             primary_count,
             replica_count,
             down_count,
-            total_events: self.events.lock().unwrap().len(),
+            total_events: self.events.lock().len(),
             last_failover_duration,
         }
     }

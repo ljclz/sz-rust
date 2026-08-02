@@ -17,14 +17,17 @@ use crate::handshake::{
     PreLoginOptionType,
 };
 use crate::packet::{PacketCodec, PacketError, TdsPacket, TdsPacketType};
-use crate::result_set::{encode_envchange, ColumnMetaData, DoneStatus, EnvChangeType, ResultSetEncoder};
-use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
+use crate::result_set::{
+    encode_envchange, ColumnMetaData, DoneStatus, EnvChangeType, ResultSetEncoder,
+};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
+use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
+use szrsql_protocol::pgwire::InMemoryTable;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 /// TDS 服务器配置。
 #[derive(Debug, Clone)]
@@ -128,6 +131,12 @@ pub struct TdsServer {
     config: TdsConfig,
     /// 连接 ID 计数器
     connection_id_counter: AtomicI32,
+    /// 跨会话共享的表存储（None = 独立存储，不与其他协议共享）
+    shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
+    /// 跨会话共享的锁管理器
+    lock_manager: Option<Arc<szrsql_tx::lock::LockManager>>,
+    /// 跨会话共享的事务 ID 计数器
+    shared_txn_counter: Option<Arc<AtomicU32>>,
 }
 
 impl TdsServer {
@@ -136,7 +145,31 @@ impl TdsServer {
         Self {
             config,
             connection_id_counter: AtomicI32::new(1),
+            shared_tables: None,
+            lock_manager: None,
+            shared_txn_counter: None,
         }
+    }
+
+    /// 注入跨会话共享的表存储，使 TDS 协议与 pgwire/MySQL 共享同一份数据。
+    pub fn with_shared_tables(
+        mut self,
+        tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    ) -> Self {
+        self.shared_tables = Some(tables);
+        self
+    }
+
+    /// 注入跨会话共享的锁管理器，启用行级并发控制。
+    pub fn with_lock_manager(mut self, lm: Arc<szrsql_tx::lock::LockManager>) -> Self {
+        self.lock_manager = Some(lm);
+        self
+    }
+
+    /// 注入跨会话共享的事务 ID 计数器，保证事务 ID 全局唯一。
+    pub fn with_shared_txn_counter(mut self, counter: Arc<AtomicU32>) -> Self {
+        self.shared_txn_counter = Some(counter);
+        self
     }
 
     /// 启动监听循环。
@@ -161,6 +194,18 @@ impl TdsServer {
     pub async fn handle_connection(&self, stream: TcpStream) -> Result<(), TdsServerError> {
         let conn_id = self.connection_id_counter.fetch_add(1, Ordering::SeqCst) as u32;
         let mut conn = Connection::new(self.config.clone(), conn_id);
+        // BUG-1 修复：注入共享存储/锁管理器/事务计数器，使 TDS 协议与 pgwire/MySQL 共享同一份数据。
+        let mut executor = ExecutorService::new();
+        if let Some(st) = &self.shared_tables {
+            executor = executor.with_shared_tables(st.clone());
+        }
+        if let Some(lm) = &self.lock_manager {
+            executor = executor.with_lock_manager(lm.clone());
+        }
+        if let Some(tc) = &self.shared_txn_counter {
+            executor = executor.with_shared_txn_counter(tc.clone());
+        }
+        conn.executor = Arc::new(Mutex::new(executor));
         conn.handle(stream).await
     }
 }
@@ -204,11 +249,7 @@ impl Connection {
     /// 处理连接主流程。
     async fn handle(&mut self, mut stream: TcpStream) -> Result<(), TdsServerError> {
         let username = self.do_handshake(&mut stream).await?;
-        tracing::info!(
-            "TDS conn {} authenticated as '{}'",
-            self.conn_id,
-            username
-        );
+        tracing::info!("TDS conn {} authenticated as '{}'", self.conn_id, username);
 
         let idle_timeout = self.config.connection_idle_timeout;
         loop {
@@ -216,7 +257,9 @@ impl Connection {
             let read_result = if idle_timeout.is_zero() {
                 PacketCodec::read_packet(&mut stream).await
             } else {
-                match tokio::time::timeout(idle_timeout, PacketCodec::read_packet(&mut stream)).await {
+                match tokio::time::timeout(idle_timeout, PacketCodec::read_packet(&mut stream))
+                    .await
+                {
                     Ok(r) => r,
                     Err(_) => {
                         tracing::warn!(
@@ -260,10 +303,7 @@ impl Connection {
     }
 
     /// 执行 Pre-Login + Login7 握手。
-    async fn do_handshake(
-        &mut self,
-        stream: &mut TcpStream,
-    ) -> Result<String, TdsServerError> {
+    async fn do_handshake(&mut self, stream: &mut TcpStream) -> Result<String, TdsServerError> {
         // 阶段 1：读取 Pre-Login 请求
         let pre_login_req_packet = PacketCodec::read_packet(stream).await?;
         if pre_login_req_packet.packet_type != TdsPacketType::PreLogin {
@@ -320,10 +360,8 @@ impl Connection {
                         .iter()
                         .any(|d| d == &login.database)
                 {
-                    let err = ErrorToken::new(
-                        4060,
-                        format!("Cannot open database '{}'", login.database),
-                    );
+                    let err =
+                        ErrorToken::new(4060, format!("Cannot open database '{}'", login.database));
                     self.send_error_token(stream, &err).await?;
                     return Err(TdsServerError::Auth(AuthError::AccessDenied(username)));
                 }
@@ -365,7 +403,10 @@ impl Connection {
         // 协商包大小（与 DEFAULT_PACKET_SIZE 保持一致）
         let packet_size = crate::handshake::DEFAULT_PACKET_SIZE.to_string();
         // 当前数据库上下文（未指定时为 master）
-        let current_db = self.current_db.clone().unwrap_or_else(|| "master".to_string());
+        let current_db = self
+            .current_db
+            .clone()
+            .unwrap_or_else(|| "master".to_string());
         // 合并 ENVCHANGE + LOGINACK + DONE 到单个 payload
         let mut combined = Vec::with_capacity(128);
         combined.extend_from_slice(&encode_envchange(
@@ -488,10 +529,8 @@ impl Connection {
                 PacketCodec::write_packet(stream, &packet).await?;
             }
             _ => {
-                let err = ErrorToken::new(
-                    0,
-                    format!("unsupported RPC procedure: '{}'", rpc.proc_name),
-                );
+                let err =
+                    ErrorToken::new(0, format!("unsupported RPC procedure: '{}'", rpc.proc_name));
                 self.send_error_token(stream, &err).await?;
             }
         }
@@ -633,7 +672,10 @@ impl Connection {
 
 /// 从 CommandComplete 标签中解析受影响行数。
 fn parse_affected_rows(tag: &str) -> u64 {
-    tag.split_whitespace().last().and_then(|s| s.parse().ok()).unwrap_or(0)
+    tag.split_whitespace()
+        .last()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 /// 编码 RETURNVALUE token (0xAC) 返回 INTN(8) 类型的 i64 值。
@@ -654,10 +696,7 @@ fn parse_affected_rows(tag: &str) -> u64 {
 /// ```
 fn encode_returnvalue_int64(param_ord: u16, param_name: &str, value: i64) -> Vec<u8> {
     let name_units: Vec<u16> = param_name.encode_utf16().collect();
-    let name_bytes: Vec<u8> = name_units
-        .iter()
-        .flat_map(|u| u.to_le_bytes())
-        .collect();
+    let name_bytes: Vec<u8> = name_units.iter().flat_map(|u| u.to_le_bytes()).collect();
     // 计算 payload 长度（从 param_ord 到 value 结束）
     // param_ord(2) + name_len(1) + name + status(1) + user_type(4) + flags(2) + type_info(2) + value_len(1) + value(8)
     let payload_len = 2 + 1 + name_bytes.len() + 1 + 4 + 2 + 2 + 1 + 8;
@@ -707,9 +746,7 @@ fn substitute_sp_execute_params(sql: &str, values: &[&crate::command::RpcParam])
     if values.is_empty() {
         return sql.to_string();
     }
-    let param_names: Vec<String> = (1..=values.len())
-        .map(|i| format!("@p{i}"))
-        .collect();
+    let param_names: Vec<String> = (1..=values.len()).map(|i| format!("@p{i}")).collect();
     substitute_params_in_sql(sql, &param_names, values)
 }
 
@@ -766,10 +803,7 @@ fn substitute_params_in_sql(
                 replaced.push_str(&remaining[..at_pos]);
                 let after_at = &remaining[at_pos..];
                 // 尝试匹配参数名（大小写不敏感）
-                let matched = name_lower
-                    .len()
-                    .min(after_at.len())
-                    .eq(&name_lower.len())
+                let matched = name_lower.len().min(after_at.len()).eq(&name_lower.len())
                     && after_at[..name_lower.len()].eq_ignore_ascii_case(&name_lower);
                 if matched {
                     // 确保后面不是标识符字符（避免 @p1 匹配到 @p10）

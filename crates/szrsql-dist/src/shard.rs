@@ -14,8 +14,8 @@
 //! - [`ShardCluster`] — 多分片集群测试夹具
 
 use crate::raft::{
-    Config, DEFAULT_SNAPSHOT_THRESHOLD, InMemoryNetwork, Index, MessageType, NodeId, RaftError,
-    RaftNode, RpcMessage,
+    Config, InMemoryNetwork, Index, MessageType, NodeId, RaftError, RaftNode, RpcMessage,
+    DEFAULT_SNAPSHOT_THRESHOLD,
 };
 use std::collections::{BTreeMap, HashMap};
 use tracing::{instrument, trace, warn};

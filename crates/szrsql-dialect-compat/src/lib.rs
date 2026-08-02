@@ -32,14 +32,14 @@
 pub mod adversarial;
 pub mod mysql;
 pub mod oracle;
-pub mod sqlserver;
 pub mod sqlite;
+pub mod sqlserver;
 
-pub use adversarial::{AdversarialTest, AdversarialTestResult, AdversarialCategory};
-pub use mysql::{MysqlCompat, MysqlCompatResult, MysqlCategory};
-pub use oracle::{OracleCompat, OracleCompatResult, OracleCategory};
-pub use sqlserver::{SqlserverCompat, SqlserverCompatResult, SqlserverCategory};
-pub use sqlite::{SqliteCompat, SqliteCompatResult, SqliteCategory};
+pub use adversarial::{AdversarialCategory, AdversarialTest, AdversarialTestResult};
+pub use mysql::{MysqlCategory, MysqlCompat, MysqlCompatResult};
+pub use oracle::{OracleCategory, OracleCompat, OracleCompatResult};
+pub use sqlite::{SqliteCategory, SqliteCompat, SqliteCompatResult};
+pub use sqlserver::{SqlserverCategory, SqlserverCompat, SqlserverCompatResult};
 
 use serde::{Deserialize, Serialize};
 

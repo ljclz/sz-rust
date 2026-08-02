@@ -273,9 +273,7 @@ impl SqliteHeader {
             reserved_space: bytes[20],
             file_change_counter: u32::from_be_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
             db_size_pages: u32::from_be_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]),
-            first_freelist_trunk: u32::from_be_bytes([
-                bytes[32], bytes[33], bytes[34], bytes[35],
-            ]),
+            first_freelist_trunk: u32::from_be_bytes([bytes[32], bytes[33], bytes[34], bytes[35]]),
             freelist_pages: u32::from_be_bytes([bytes[36], bytes[37], bytes[38], bytes[39]]),
             schema_cookie: u32::from_be_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]),
             schema_format: u32::from_be_bytes([bytes[44], bytes[45], bytes[46], bytes[47]]),
@@ -285,14 +283,10 @@ impl SqliteHeader {
             largest_root_btree: u32::from_be_bytes([bytes[52], bytes[53], bytes[54], bytes[55]]),
             text_encoding,
             user_version: u32::from_be_bytes([bytes[60], bytes[61], bytes[62], bytes[63]]),
-            incremental_vacuum: u32::from_be_bytes([
-                bytes[64], bytes[65], bytes[66], bytes[67],
-            ]),
+            incremental_vacuum: u32::from_be_bytes([bytes[64], bytes[65], bytes[66], bytes[67]]),
             application_id: u32::from_be_bytes([bytes[68], bytes[69], bytes[70], bytes[71]]),
             version_valid_for: u32::from_be_bytes([bytes[92], bytes[93], bytes[94], bytes[95]]),
-            sqlite_version_number: u32::from_be_bytes([
-                bytes[96], bytes[97], bytes[98], bytes[99],
-            ]),
+            sqlite_version_number: u32::from_be_bytes([bytes[96], bytes[97], bytes[98], bytes[99]]),
         })
     }
 }
@@ -434,7 +428,10 @@ mod tests {
         let mut buf = vec![0u8; HEADER_SIZE];
         buf[0..16].copy_from_slice(b"NOTSQLite format");
         let result = SqliteHeader::decode(&buf);
-        assert!(matches!(result, Err(SqliteFormatError::InvalidMagic { .. })));
+        assert!(matches!(
+            result,
+            Err(SqliteFormatError::InvalidMagic { .. })
+        ));
     }
 
     #[test]

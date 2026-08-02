@@ -25,7 +25,8 @@ use crate::parser::parse_one;
 use crate::plan::{InMemoryCatalog, LogicalPlan, Planner};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use szrsql_types::value::{ColumnType, Value};
 
 // =====================================================================
@@ -174,8 +175,8 @@ fn run_concurrent_fuzz(num_threads: usize, ops_per_thread: usize, keys_per_threa
             for _ in 0..ops_per_thread {
                 let op_type = rng.next_range(100);
                 let key = key_start + (rng.next_range(keys_per_thread as u64) as i64);
-                let mut state = state.lock().unwrap();
-                let mut feed = feed.lock().unwrap();
+                let mut state = state.lock();
+                let mut feed = feed.lock();
 
                 if op_type < 50 {
                     // 50% INSERT（UPSERT 语义：新 key → INSERT 事件，已存在 → UPDATE 事件）
@@ -227,12 +228,10 @@ fn run_concurrent_fuzz(num_threads: usize, ops_per_thread: usize, keys_per_threa
     // 取出源表状态和 CDC 事件流
     let source = Arc::try_unwrap(source_state)
         .expect("all threads done")
-        .into_inner()
-        .expect("mutex not poisoned");
+        .into_inner();
     let mut feed = Arc::try_unwrap(cdc_feed)
         .expect("all threads done")
-        .into_inner()
-        .expect("mutex not poisoned");
+        .into_inner();
 
     // 增量刷新：从 CDC 事件流构建 MV
     let mut incr_store = make_mv_store_with_pk();
@@ -369,7 +368,7 @@ fn cdc_feed_thread_safe_under_arc_mutex() {
     for i in 0..8 {
         let feed = Arc::clone(&feed);
         let handle = std::thread::spawn(move || {
-            let mut feed = feed.lock().unwrap();
+            let mut feed = feed.lock();
             feed.push_insert(
                 "users",
                 vec![Value::Int64(i), Value::Text(format!("user{i}"))],
@@ -382,7 +381,7 @@ fn cdc_feed_thread_safe_under_arc_mutex() {
         handle.join().expect("thread panicked");
     }
 
-    let feed = feed.lock().unwrap();
+    let feed = feed.lock();
     assert_eq!(feed.len(), 8);
 
     // 验证所有事件都是 INSERT

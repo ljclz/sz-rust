@@ -409,29 +409,28 @@ mod tests {
         let results = SqlSyntaxCompat::run_all();
         let has_ddl = results.iter().any(|r| r.category == SyntaxCategory::Ddl);
         let has_dml = results.iter().any(|r| r.category == SyntaxCategory::Dml);
-        let has_func = results.iter().any(|r| r.category == SyntaxCategory::Function);
+        let has_func = results
+            .iter()
+            .any(|r| r.category == SyntaxCategory::Function);
         let has_type = results.iter().any(|r| r.category == SyntaxCategory::Type);
-        let has_op = results.iter().any(|r| r.category == SyntaxCategory::Operator);
-        assert!(has_ddl && has_dml && has_func && has_type && has_op, "应覆盖所有分类");
+        let has_op = results
+            .iter()
+            .any(|r| r.category == SyntaxCategory::Operator);
+        assert!(
+            has_ddl && has_dml && has_func && has_type && has_op,
+            "应覆盖所有分类"
+        );
     }
 
     #[test]
     fn basic_select_should_pass() {
-        let result = SqlSyntaxCompat::check(
-            "basic select",
-            SyntaxCategory::Dml,
-            "SELECT 1",
-        );
+        let result = SqlSyntaxCompat::check("basic select", SyntaxCategory::Dml, "SELECT 1");
         assert_eq!(result.status, CompatStatus::Pass, "SELECT 1 应可解析");
     }
 
     #[test]
     fn invalid_sql_should_fail() {
-        let result = SqlSyntaxCompat::check(
-            "invalid",
-            SyntaxCategory::Dml,
-            "SELECT FROM WHERE",
-        );
+        let result = SqlSyntaxCompat::check("invalid", SyntaxCategory::Dml, "SELECT FROM WHERE");
         assert_eq!(result.status, CompatStatus::Fail, "非法 SQL 应解析失败");
     }
 }

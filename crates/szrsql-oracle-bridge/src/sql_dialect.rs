@@ -376,8 +376,7 @@ fn convert_rownum_limit(sql: &str) -> String {
 /// 处理 `SELECT ROWNUM, ... FROM t` 这类用法。
 fn convert_rownum_general(sql: &str) -> String {
     let re = Regex::new(r"(?i)\bROWNUM\b").unwrap();
-    re.replace_all(sql, "ROW_NUMBER() OVER ()")
-        .to_string()
+    re.replace_all(sql, "ROW_NUMBER() OVER ()").to_string()
 }
 
 /// SYSDATE → CURRENT_TIMESTAMP
@@ -463,8 +462,7 @@ fn convert_minus(sql: &str) -> String {
 /// （WHERE / GROUP BY / HAVING / ORDER BY）的兼容性。
 fn convert_from_dual(sql: &str) -> String {
     let re = Regex::new(r"(?i)\bFROM\s+dual\b").unwrap();
-    re.replace_all(sql, "FROM (SELECT 1) AS dual")
-        .to_string()
+    re.replace_all(sql, "FROM (SELECT 1) AS dual").to_string()
 }
 
 // =====================================================================
@@ -578,7 +576,9 @@ mod tests {
     #[test]
     fn convert_sql_to_char_renamed() {
         let dialect = OracleDialect::new();
-        let result = dialect.convert_sql("SELECT TO_CHAR(123) FROM dual").unwrap();
+        let result = dialect
+            .convert_sql("SELECT TO_CHAR(123) FROM dual")
+            .unwrap();
         assert!(result.contains("to_char(123)"));
     }
 
@@ -594,7 +594,9 @@ mod tests {
     #[test]
     fn convert_sql_to_number_to_cast() {
         let dialect = OracleDialect::new();
-        let result = dialect.convert_sql("SELECT TO_NUMBER('123') FROM dual").unwrap();
+        let result = dialect
+            .convert_sql("SELECT TO_NUMBER('123') FROM dual")
+            .unwrap();
         assert!(result.contains("CAST('123' AS NUMERIC)"));
     }
 

@@ -412,9 +412,7 @@ impl VolumeClaimTemplate {
     /// 校验合法性
     pub fn validate(&self) -> Result<(), CloudError> {
         if self.name.is_empty() {
-            return Err(CloudError::InvalidVolumeClaim(
-                "name is empty".to_string(),
-            ));
+            return Err(CloudError::InvalidVolumeClaim("name is empty".to_string()));
         }
         if self.access_modes.is_empty() {
             return Err(CloudError::InvalidVolumeClaim(
@@ -516,7 +514,10 @@ impl CdcDeploymentSpec {
         lines.push("kind: Deployment".to_string());
         lines.push("metadata:".to_string());
         lines.push(format!("  name: {}", yaml_scalar(&self.base.name)));
-        lines.push(format!("  namespace: {}", yaml_scalar(&self.base.namespace)));
+        lines.push(format!(
+            "  namespace: {}",
+            yaml_scalar(&self.base.namespace)
+        ));
         lines.push("  labels:".to_string());
         lines.push("    app: cdc".to_string());
         lines.push(format!("    cluster-id: {}", yaml_scalar(&self.cluster_id)));
@@ -526,12 +527,18 @@ impl CdcDeploymentSpec {
         lines.push("  selector:".to_string());
         lines.push("    matchLabels:".to_string());
         lines.push("      app: cdc".to_string());
-        lines.push(format!("      cluster-id: {}", yaml_scalar(&self.cluster_id)));
+        lines.push(format!(
+            "      cluster-id: {}",
+            yaml_scalar(&self.cluster_id)
+        ));
         lines.push("  template:".to_string());
         lines.push("    metadata:".to_string());
         lines.push("      labels:".to_string());
         lines.push("        app: cdc".to_string());
-        lines.push(format!("        cluster-id: {}", yaml_scalar(&self.cluster_id)));
+        lines.push(format!(
+            "        cluster-id: {}",
+            yaml_scalar(&self.cluster_id)
+        ));
         lines.push(format!("        node-role: {}", self.node_role.as_str()));
         if !self.pod_annotations.is_empty() {
             lines.push("      annotations:".to_string());
@@ -571,11 +578,20 @@ impl CdcDeploymentSpec {
         // volumeMounts
         lines.push("        volumeMounts:".to_string());
         lines.push("        - name: config".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&self.config_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&self.config_mount_path)
+        ));
         lines.push("        - name: data".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&self.data_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&self.data_mount_path)
+        ));
         lines.push("        - name: wal".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&self.wal_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&self.wal_mount_path)
+        ));
         // livenessProbe
         let probe_port = self
             .base
@@ -585,13 +601,19 @@ impl CdcDeploymentSpec {
             .unwrap_or(8080);
         lines.push("        livenessProbe:".to_string());
         lines.push("          httpGet:".to_string());
-        lines.push(format!("            path: {}", yaml_scalar(&self.health_check_path)));
+        lines.push(format!(
+            "            path: {}",
+            yaml_scalar(&self.health_check_path)
+        ));
         lines.push(format!("            port: {}", probe_port));
         // volumes（config volume 引用 ConfigMap）
         lines.push("      volumes:".to_string());
         lines.push("      - name: config".to_string());
         lines.push("        configMap:".to_string());
-        lines.push(format!("          name: {}-config", yaml_scalar(&self.base.name)));
+        lines.push(format!(
+            "          name: {}-config",
+            yaml_scalar(&self.base.name)
+        ));
         lines.join("\n")
     }
 }
@@ -651,12 +673,18 @@ impl CdcStatefulSet {
         lines.push("  selector:".to_string());
         lines.push("    matchLabels:".to_string());
         lines.push("      app: cdc".to_string());
-        lines.push(format!("      cluster-id: {}", yaml_scalar(&dep.cluster_id)));
+        lines.push(format!(
+            "      cluster-id: {}",
+            yaml_scalar(&dep.cluster_id)
+        ));
         lines.push("  template:".to_string());
         lines.push("    metadata:".to_string());
         lines.push("      labels:".to_string());
         lines.push("        app: cdc".to_string());
-        lines.push(format!("        cluster-id: {}", yaml_scalar(&dep.cluster_id)));
+        lines.push(format!(
+            "        cluster-id: {}",
+            yaml_scalar(&dep.cluster_id)
+        ));
         lines.push(format!("        node-role: {}", dep.node_role.as_str()));
         if !dep.pod_annotations.is_empty() {
             lines.push("      annotations:".to_string());
@@ -696,26 +724,37 @@ impl CdcStatefulSet {
         // volumeMounts
         lines.push("        volumeMounts:".to_string());
         lines.push("        - name: config".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&dep.config_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&dep.config_mount_path)
+        ));
         lines.push("        - name: data".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&dep.data_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&dep.data_mount_path)
+        ));
         lines.push("        - name: wal".to_string());
-        lines.push(format!("          mountPath: {}", yaml_scalar(&dep.wal_mount_path)));
+        lines.push(format!(
+            "          mountPath: {}",
+            yaml_scalar(&dep.wal_mount_path)
+        ));
         // livenessProbe
-        let probe_port = base
-            .ports
-            .first()
-            .map(|p| p.container_port)
-            .unwrap_or(8080);
+        let probe_port = base.ports.first().map(|p| p.container_port).unwrap_or(8080);
         lines.push("        livenessProbe:".to_string());
         lines.push("          httpGet:".to_string());
-        lines.push(format!("            path: {}", yaml_scalar(&dep.health_check_path)));
+        lines.push(format!(
+            "            path: {}",
+            yaml_scalar(&dep.health_check_path)
+        ));
         lines.push(format!("            port: {}", probe_port));
         // volumes（config volume 引用 ConfigMap）
         lines.push("      volumes:".to_string());
         lines.push("      - name: config".to_string());
         lines.push("        configMap:".to_string());
-        lines.push(format!("          name: {}-config", yaml_scalar(&base.name)));
+        lines.push(format!(
+            "          name: {}-config",
+            yaml_scalar(&base.name)
+        ));
         // volumeClaimTemplates
         if !self.volume_claim_templates.is_empty() {
             lines.push("  volumeClaimTemplates:".to_string());
@@ -727,7 +766,10 @@ impl CdcStatefulSet {
                 for mode in &vct.access_modes {
                     lines.push(format!("      - {}", mode));
                 }
-                lines.push(format!("      storageClassName: {}", yaml_scalar(&vct.storage_class)));
+                lines.push(format!(
+                    "      storageClassName: {}",
+                    yaml_scalar(&vct.storage_class)
+                ));
                 lines.push("      resources:".to_string());
                 lines.push("        requests:".to_string());
                 lines.push(format!("          storage: {}", vct.storage_size));
@@ -782,7 +824,10 @@ impl CsiVolumeSpec {
         let mut lines = Vec::new();
         lines.push("csi:".to_string());
         lines.push(format!("  driver: {}", yaml_scalar(&self.driver)));
-        lines.push(format!("  volumeHandle: {}", yaml_scalar(&self.volume_handle)));
+        lines.push(format!(
+            "  volumeHandle: {}",
+            yaml_scalar(&self.volume_handle)
+        ));
         lines.push(format!("  readOnly: {}", self.readonly));
         if !self.mount_options.is_empty() {
             lines.push("  mountOptions:".to_string());
@@ -912,14 +957,11 @@ impl CloudDeploymentGenerator {
     pub fn new(cluster_id: impl Into<String>) -> Self {
         let cluster_id = cluster_id.into();
         let config = CloudConfig::default();
-        let resources = K8sResourceSpec::new(
-            format!("{}-node", cluster_id),
-            &config.namespace,
-        )
-        .with_image("szrsql/cdc")
-        .with_replicas(1)
-        .with_port(ContainerPort::new("api", 8080))
-        .with_env_var("CLUSTER_ID", &cluster_id);
+        let resources = K8sResourceSpec::new(format!("{}-node", cluster_id), &config.namespace)
+            .with_image("szrsql/cdc")
+            .with_replicas(1)
+            .with_port(ContainerPort::new("api", 8080))
+            .with_env_var("CLUSTER_ID", &cluster_id);
 
         Self {
             cluster_id,
@@ -989,8 +1031,8 @@ impl CloudDeploymentGenerator {
         base.namespace = self.config.namespace.clone();
 
         // 构建 CDC 部署规格
-        let mut deployment = CdcDeploymentSpec::new(base, &self.cluster_id)
-            .with_node_role(self.node_role);
+        let mut deployment =
+            CdcDeploymentSpec::new(base, &self.cluster_id).with_node_role(self.node_role);
         // 设置存储类到 PVC 模板
         for (key, value) in self.build_annotations() {
             deployment = deployment.with_pod_annotation(key, value);
@@ -1013,15 +1055,12 @@ impl CloudDeploymentGenerator {
             .first()
             .map(|p| p.container_port)
             .unwrap_or(8080);
-        CdcServiceSpec::new(
-            format!("{}-node", self.cluster_id),
-            &self.config.namespace,
-        )
-        .with_service_type(ServiceType::ClusterIP)
-        .with_port(port)
-        .with_target_port(port)
-        .with_selector("app", "cdc")
-        .with_selector("cluster-id", &self.cluster_id)
+        CdcServiceSpec::new(format!("{}-node", self.cluster_id), &self.config.namespace)
+            .with_service_type(ServiceType::ClusterIP)
+            .with_port(port)
+            .with_target_port(port)
+            .with_selector("app", "cdc")
+            .with_selector("cluster-id", &self.cluster_id)
     }
 
     /// 生成 ConfigMap
@@ -1162,7 +1201,10 @@ mod tests {
         assert_eq!(spec.memory_limit, "2Gi");
         assert_eq!(spec.storage_size, "20Gi");
         assert_eq!(spec.env_vars.len(), 1);
-        assert_eq!(spec.env_vars[0], ("LOG_LEVEL".to_string(), "debug".to_string()));
+        assert_eq!(
+            spec.env_vars[0],
+            ("LOG_LEVEL".to_string(), "debug".to_string())
+        );
         assert_eq!(spec.ports.len(), 1);
         assert_eq!(spec.ports[0].container_port, 9090);
     }
@@ -1255,8 +1297,7 @@ mod tests {
             .with_replicas(2)
             .with_port(ContainerPort::new("api", 8080))
             .with_env_var("CLUSTER_ID", "cluster-1");
-        let dep = CdcDeploymentSpec::new(base, "cluster-1")
-            .with_node_role(NodeRole::Leader);
+        let dep = CdcDeploymentSpec::new(base, "cluster-1").with_node_role(NodeRole::Leader);
         let yaml = dep.to_yaml();
         assert!(yaml.contains("apiVersion: apps/v1"));
         assert!(yaml.contains("kind: Deployment"));
@@ -1299,8 +1340,8 @@ mod tests {
 
     #[test]
     fn cdc_service_spec_loadbalancer() {
-        let svc = CdcServiceSpec::new("cdc-svc", "szrsql")
-            .with_service_type(ServiceType::LoadBalancer);
+        let svc =
+            CdcServiceSpec::new("cdc-svc", "szrsql").with_service_type(ServiceType::LoadBalancer);
         let yaml = svc.to_yaml();
         assert!(yaml.contains("type: LoadBalancer"));
     }
@@ -1492,8 +1533,7 @@ mod tests {
             .with_replicas(3)
             .with_port(ContainerPort::new("api", 8080))
             .with_env_var("CLUSTER_ID", "cluster-1");
-        let dep = CdcDeploymentSpec::new(base, "cluster-1")
-            .with_node_role(NodeRole::Leader);
+        let dep = CdcDeploymentSpec::new(base, "cluster-1").with_node_role(NodeRole::Leader);
         let sts = CdcStatefulSet::new(dep);
         let yaml = sts.to_yaml();
         assert!(yaml.contains("apiVersion: apps/v1"));
@@ -1589,10 +1629,8 @@ mod tests {
 
     #[test]
     fn cdc_statefulset_yaml_contains_liveness_probe() {
-        let base = K8sResourceSpec::new("cdc", "ns")
-            .with_port(ContainerPort::new("api", 8080));
-        let dep = CdcDeploymentSpec::new(base, "c1")
-            .with_health_check_path("/healthz");
+        let base = K8sResourceSpec::new("cdc", "ns").with_port(ContainerPort::new("api", 8080));
+        let dep = CdcDeploymentSpec::new(base, "c1").with_health_check_path("/healthz");
         let sts = CdcStatefulSet::new(dep);
         let yaml = sts.to_yaml();
         assert!(yaml.contains("livenessProbe:"));
@@ -1664,8 +1702,11 @@ mod tests {
         let resources = K8sResourceSpec::new("custom-node", "szrsql")
             .with_replicas(1)
             .with_cpu_request("1000m");
-        let gen = CloudDeploymentGenerator::new("cluster-1")
-            .with_node_config(NodeRole::Leader, 5, resources);
+        let gen = CloudDeploymentGenerator::new("cluster-1").with_node_config(
+            NodeRole::Leader,
+            5,
+            resources,
+        );
         assert_eq!(gen.node_role, NodeRole::Leader);
         assert_eq!(gen.resources.replicas, 5);
         assert_eq!(gen.resources.cpu_request, "1000m");
@@ -1688,8 +1729,11 @@ mod tests {
 
     #[test]
     fn generator_generate_statefulset() {
-        let gen = CloudDeploymentGenerator::new("cluster-1")
-            .with_node_config(NodeRole::Leader, 3, K8sResourceSpec::new("cdc-node", "szrsql"));
+        let gen = CloudDeploymentGenerator::new("cluster-1").with_node_config(
+            NodeRole::Leader,
+            3,
+            K8sResourceSpec::new("cdc-node", "szrsql"),
+        );
         let sts = gen.generate_statefulset();
         assert_eq!(sts.deployment.cluster_id, "cluster-1");
         assert_eq!(sts.deployment.node_role, NodeRole::Leader);
@@ -1711,8 +1755,11 @@ mod tests {
 
     #[test]
     fn generator_generate_configmap() {
-        let gen = CloudDeploymentGenerator::new("cluster-1")
-            .with_node_config(NodeRole::Leader, 1, K8sResourceSpec::new("cdc", "ns"));
+        let gen = CloudDeploymentGenerator::new("cluster-1").with_node_config(
+            NodeRole::Leader,
+            1,
+            K8sResourceSpec::new("cdc", "ns"),
+        );
         let mut data = HashMap::new();
         data.insert("custom_key".to_string(), "custom_value".to_string());
         let cm = gen.generate_configmap(data);
@@ -1725,8 +1772,11 @@ mod tests {
 
     #[test]
     fn generator_generate_all_yaml_multi_doc() {
-        let gen = CloudDeploymentGenerator::new("cluster-1")
-            .with_node_config(NodeRole::Leader, 3, K8sResourceSpec::new("cdc", "szrsql"));
+        let gen = CloudDeploymentGenerator::new("cluster-1").with_node_config(
+            NodeRole::Leader,
+            3,
+            K8sResourceSpec::new("cdc", "szrsql"),
+        );
         let yaml = gen.generate_all_yaml();
         // 应包含 3 个文档，用 --- 分隔（2 个分隔符）
         let doc_count = yaml.matches("---").count();
@@ -1855,8 +1905,11 @@ mod tests {
 
     #[test]
     fn generator_node_role_passed_to_statefulset() {
-        let gen = CloudDeploymentGenerator::new("c1")
-            .with_node_config(NodeRole::Follower, 2, K8sResourceSpec::new("cdc", "ns"));
+        let gen = CloudDeploymentGenerator::new("c1").with_node_config(
+            NodeRole::Follower,
+            2,
+            K8sResourceSpec::new("cdc", "ns"),
+        );
         let sts = gen.generate_statefulset();
         assert_eq!(sts.deployment.node_role, NodeRole::Follower);
         let yaml = sts.to_yaml();
@@ -1865,8 +1918,11 @@ mod tests {
 
     #[test]
     fn generator_replicas_passed_to_statefulset() {
-        let gen = CloudDeploymentGenerator::new("c1")
-            .with_node_config(NodeRole::Leader, 7, K8sResourceSpec::new("cdc", "ns"));
+        let gen = CloudDeploymentGenerator::new("c1").with_node_config(
+            NodeRole::Leader,
+            7,
+            K8sResourceSpec::new("cdc", "ns"),
+        );
         let sts = gen.generate_statefulset();
         assert_eq!(sts.deployment.base.replicas, 7);
         let yaml = sts.to_yaml();

@@ -740,10 +740,7 @@ fn test_columns_comment_column_exposed() {
 
     // 3. set_table_comment 不影响列级 COMMENT
     catalog
-        .set_table_comment(
-            &TableName::new("users"),
-            Some("用户主表".to_string()),
-        )
+        .set_table_comment(&TableName::new("users"), Some("用户主表".to_string()))
         .unwrap();
     let rows = columns(&catalog);
     let id_row = rows
@@ -751,7 +748,8 @@ fn test_columns_comment_column_exposed() {
         .find(|r| r[3] == Value::Text("id".into()))
         .expect("应找到 id 列");
     assert_eq!(
-        id_row[11], Value::Null,
+        id_row[11],
+        Value::Null,
         "set_table_comment 不应影响列级 COMMENT"
     );
     let name_row = rows
@@ -774,7 +772,8 @@ fn test_columns_comment_column_exposed() {
         .find(|r| r[3] == Value::Text("name".into()))
         .expect("应找到 name 列");
     assert_eq!(
-        name_row[11], Value::Null,
+        name_row[11],
+        Value::Null,
         "删除注释后 COMMENT 列应回到 NULL"
     );
 }

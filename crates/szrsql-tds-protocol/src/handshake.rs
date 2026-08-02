@@ -198,7 +198,9 @@ impl PreLogin {
     /// 从 payload 字节序列解析。
     pub fn decode(payload: &[u8]) -> Result<Self, HandshakeError> {
         if payload.is_empty() {
-            return Ok(Self { options: Vec::new() });
+            return Ok(Self {
+                options: Vec::new(),
+            });
         }
 
         // 第一阶段：解析头部
@@ -240,10 +242,7 @@ impl PreLogin {
                 )));
             }
             let data = payload[abs_start..abs_end].to_vec();
-            options.push(PreLoginOption {
-                option_type,
-                data,
-            });
+            options.push(PreLoginOption { option_type, data });
         }
 
         Ok(Self { options })
@@ -251,9 +250,7 @@ impl PreLogin {
 
     /// 查找指定类型的选项。
     pub fn find(&self, opt_type: PreLoginOptionType) -> Option<&PreLoginOption> {
-        self.options
-            .iter()
-            .find(|o| o.option_type == opt_type)
+        self.options.iter().find(|o| o.option_type == opt_type)
     }
 }
 
@@ -411,7 +408,11 @@ impl Login7 {
         let change_pwd_len = 0;
         let cb_len_len = 0;
 
-        let data_start = fixed_len + offsets_table_len + client_id_len + sspi_len + atch_db_len
+        let data_start = fixed_len
+            + offsets_table_len
+            + client_id_len
+            + sspi_len
+            + atch_db_len
             + change_pwd_len
             + cb_len_len;
 
@@ -504,8 +505,8 @@ impl Login7 {
                 payload.len()
             )));
         }
-        let total_len = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]])
-            as usize;
+        let total_len =
+            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
         if total_len != payload.len() {
             return Err(HandshakeError::Protocol(format!(
                 "login7 length mismatch: declared {total_len}, actual {}",
@@ -524,8 +525,7 @@ impl Login7 {
         let type_flags = payload[26];
         let option_flags3 = payload[27];
         let time_zone = i32::from_be_bytes([payload[28], payload[29], payload[30], payload[31]]);
-        let client_lcid =
-            u32::from_be_bytes([payload[32], payload[33], payload[34], payload[35]]);
+        let client_lcid = u32::from_be_bytes([payload[32], payload[33], payload[34], payload[35]]);
 
         // 9 个变长字段偏移表（每个 4 字节：offset u16 + length u16，单位 u16 字符）
         let offsets_table_start = 36;
@@ -554,19 +554,20 @@ impl Login7 {
         client_id.copy_from_slice(&payload[client_id_pos..client_id_pos + 6]);
 
         // 提取变长字段（按 offset/length 直接读取字节，UTF-16LE 解码为 String）
-        let extract = |offset: usize, byte_len: usize, name: &str| -> Result<Vec<u8>, HandshakeError> {
-            if byte_len == 0 {
-                return Ok(Vec::new());
-            }
-            let end = offset + byte_len;
-            if end > payload.len() {
-                return Err(HandshakeError::Protocol(format!(
-                    "login7 {name} out of bounds: offset={offset}, len={byte_len}, payload={}",
-                    payload.len()
-                )));
-            }
-            Ok(payload[offset..end].to_vec())
-        };
+        let extract =
+            |offset: usize, byte_len: usize, name: &str| -> Result<Vec<u8>, HandshakeError> {
+                if byte_len == 0 {
+                    return Ok(Vec::new());
+                }
+                let end = offset + byte_len;
+                if end > payload.len() {
+                    return Err(HandshakeError::Protocol(format!(
+                        "login7 {name} out of bounds: offset={offset}, len={byte_len}, payload={}",
+                        payload.len()
+                    )));
+                }
+                Ok(payload[offset..end].to_vec())
+            };
         let decode_utf16 = |bytes: &[u8]| -> String {
             let units: Vec<u16> = bytes
                 .chunks_exact(2)

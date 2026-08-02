@@ -186,151 +186,346 @@ impl OracleCompat {
 
     fn test_types() -> Vec<OracleCompatResult> {
         vec![
-            Self::check("NUMBER 类型", OracleCategory::Type,
-                "CREATE TABLE t (id NUMBER)"),
-            Self::check("NUMBER(p) 类型", OracleCategory::Type,
-                "CREATE TABLE t (id NUMBER(10))"),
-            Self::check("NUMBER(p,s) 类型", OracleCategory::Type,
-                "CREATE TABLE t (price NUMBER(10, 2))"),
-            Self::check("INTEGER 类型", OracleCategory::Type,
-                "CREATE TABLE t (id INTEGER)"),
-            Self::check("FLOAT 类型", OracleCategory::Type,
-                "CREATE TABLE t (price FLOAT)"),
-            Self::check("BINARY_FLOAT 类型", OracleCategory::Type,
-                "CREATE TABLE t (price BINARY_FLOAT)"),
-            Self::check("BINARY_DOUBLE 类型", OracleCategory::Type,
-                "CREATE TABLE t (price BINARY_DOUBLE)"),
-            Self::check("VARCHAR2 类型", OracleCategory::Type,
-                "CREATE TABLE t (name VARCHAR2(100))"),
-            Self::check("NVARCHAR2 类型", OracleCategory::Type,
-                "CREATE TABLE t (name NVARCHAR2(100))"),
-            Self::check("CHAR 类型", OracleCategory::Type,
-                "CREATE TABLE t (code CHAR(10))"),
-            Self::check("NCHAR 类型", OracleCategory::Type,
-                "CREATE TABLE t (code NCHAR(10))"),
-            Self::check("CLOB 类型", OracleCategory::Type,
-                "CREATE TABLE t (content CLOB)"),
-            Self::check("BLOB 类型", OracleCategory::Type,
-                "CREATE TABLE t (data BLOB)"),
-            Self::check("NCLOB 类型", OracleCategory::Type,
-                "CREATE TABLE t (content NCLOB)"),
-            Self::check("DATE 类型", OracleCategory::Type,
-                "CREATE TABLE t (birthday DATE)"),
-            Self::check("TIMESTAMP 类型", OracleCategory::Type,
-                "CREATE TABLE t (created_at TIMESTAMP)"),
-            Self::check("TIMESTAMP WITH TIME ZONE", OracleCategory::Type,
-                "CREATE TABLE t (ts TIMESTAMP WITH TIME ZONE)"),
-            Self::check("RAW 类型", OracleCategory::Type,
-                "CREATE TABLE t (data RAW(100))"),
-            Self::check("LONG 类型", OracleCategory::Type,
-                "CREATE TABLE t (data LONG)"),
-            Self::check("ROWID 类型", OracleCategory::Type,
-                "CREATE TABLE t (rid ROWID)"),
-            Self::check("JSON 类型", OracleCategory::Type,
-                "CREATE TABLE t (data JSON)"),
+            Self::check(
+                "NUMBER 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (id NUMBER)",
+            ),
+            Self::check(
+                "NUMBER(p) 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (id NUMBER(10))",
+            ),
+            Self::check(
+                "NUMBER(p,s) 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (price NUMBER(10, 2))",
+            ),
+            Self::check(
+                "INTEGER 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (id INTEGER)",
+            ),
+            Self::check(
+                "FLOAT 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (price FLOAT)",
+            ),
+            Self::check(
+                "BINARY_FLOAT 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (price BINARY_FLOAT)",
+            ),
+            Self::check(
+                "BINARY_DOUBLE 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (price BINARY_DOUBLE)",
+            ),
+            Self::check(
+                "VARCHAR2 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (name VARCHAR2(100))",
+            ),
+            Self::check(
+                "NVARCHAR2 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (name NVARCHAR2(100))",
+            ),
+            Self::check(
+                "CHAR 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (code CHAR(10))",
+            ),
+            Self::check(
+                "NCHAR 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (code NCHAR(10))",
+            ),
+            Self::check(
+                "CLOB 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (content CLOB)",
+            ),
+            Self::check(
+                "BLOB 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (data BLOB)",
+            ),
+            Self::check(
+                "NCLOB 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (content NCLOB)",
+            ),
+            Self::check(
+                "DATE 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (birthday DATE)",
+            ),
+            Self::check(
+                "TIMESTAMP 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (created_at TIMESTAMP)",
+            ),
+            Self::check(
+                "TIMESTAMP WITH TIME ZONE",
+                OracleCategory::Type,
+                "CREATE TABLE t (ts TIMESTAMP WITH TIME ZONE)",
+            ),
+            Self::check(
+                "RAW 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (data RAW(100))",
+            ),
+            Self::check(
+                "LONG 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (data LONG)",
+            ),
+            Self::check(
+                "ROWID 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (rid ROWID)",
+            ),
+            Self::check(
+                "JSON 类型",
+                OracleCategory::Type,
+                "CREATE TABLE t (data JSON)",
+            ),
         ]
     }
 
     fn test_functions() -> Vec<OracleCompatResult> {
         vec![
-            Self::check("SYSDATE 函数", OracleCategory::Function,
-                "SELECT SYSDATE FROM dual"),
-            Self::check("CURRENT_DATE 函数", OracleCategory::Function,
-                "SELECT CURRENT_DATE FROM dual"),
-            Self::check("CURRENT_TIMESTAMP 函数", OracleCategory::Function,
-                "SELECT CURRENT_TIMESTAMP FROM dual"),
-            Self::check("DECODE 函数", OracleCategory::Function,
-                "SELECT DECODE(status, 1, 'active', 2, 'inactive', 'unknown') FROM users"),
-            Self::check("DECODE 无默认值", OracleCategory::Function,
-                "SELECT DECODE(status, 1, 'active') FROM users"),
-            Self::check("NVL 函数", OracleCategory::Function,
-                "SELECT NVL(name, 'unknown') FROM users"),
-            Self::check("NVL2 函数", OracleCategory::Function,
-                "SELECT NVL2(name, name, 'unknown') FROM users"),
-            Self::check("COALESCE 函数", OracleCategory::Function,
-                "SELECT COALESCE(name, 'unknown') FROM users"),
-            Self::check("TO_DATE 函数", OracleCategory::Function,
-                "SELECT TO_DATE('2024-01-01', 'YYYY-MM-DD') FROM dual"),
-            Self::check("TO_NUMBER 函数", OracleCategory::Function,
-                "SELECT TO_NUMBER('123') FROM dual"),
-            Self::check("TO_CHAR 函数", OracleCategory::Function,
-                "SELECT TO_CHAR(123) FROM dual"),
-            Self::check("COUNT 函数", OracleCategory::Function,
-                "SELECT COUNT(*) FROM users"),
-            Self::check("SUM/AVG/MAX/MIN 函数", OracleCategory::Function,
-                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees"),
-            Self::check("LENGTH 函数", OracleCategory::Function,
-                "SELECT LENGTH(name) FROM users"),
-            Self::check("UPPER/LOWER 函数", OracleCategory::Function,
-                "SELECT UPPER(name), LOWER(name) FROM users"),
-            Self::check("SUBSTR 函数", OracleCategory::Function,
-                "SELECT SUBSTR(name, 1, 3) FROM users"),
-            Self::check("INSTR 函数", OracleCategory::Function,
-                "SELECT INSTR(name, 'a') FROM users"),
-            Self::check("TRIM 函数", OracleCategory::Function,
-                "SELECT TRIM('  hello  ') FROM dual"),
-            Self::check("CAST 函数", OracleCategory::Function,
-                "SELECT CAST('123' AS NUMBER) FROM dual"),
-            Self::check("CASE WHEN 表达式", OracleCategory::Function,
-                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users"),
-            Self::check("USER 函数", OracleCategory::Function,
-                "SELECT USER FROM dual"),
+            Self::check(
+                "SYSDATE 函数",
+                OracleCategory::Function,
+                "SELECT SYSDATE FROM dual",
+            ),
+            Self::check(
+                "CURRENT_DATE 函数",
+                OracleCategory::Function,
+                "SELECT CURRENT_DATE FROM dual",
+            ),
+            Self::check(
+                "CURRENT_TIMESTAMP 函数",
+                OracleCategory::Function,
+                "SELECT CURRENT_TIMESTAMP FROM dual",
+            ),
+            Self::check(
+                "DECODE 函数",
+                OracleCategory::Function,
+                "SELECT DECODE(status, 1, 'active', 2, 'inactive', 'unknown') FROM users",
+            ),
+            Self::check(
+                "DECODE 无默认值",
+                OracleCategory::Function,
+                "SELECT DECODE(status, 1, 'active') FROM users",
+            ),
+            Self::check(
+                "NVL 函数",
+                OracleCategory::Function,
+                "SELECT NVL(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "NVL2 函数",
+                OracleCategory::Function,
+                "SELECT NVL2(name, name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "COALESCE 函数",
+                OracleCategory::Function,
+                "SELECT COALESCE(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "TO_DATE 函数",
+                OracleCategory::Function,
+                "SELECT TO_DATE('2024-01-01', 'YYYY-MM-DD') FROM dual",
+            ),
+            Self::check(
+                "TO_NUMBER 函数",
+                OracleCategory::Function,
+                "SELECT TO_NUMBER('123') FROM dual",
+            ),
+            Self::check(
+                "TO_CHAR 函数",
+                OracleCategory::Function,
+                "SELECT TO_CHAR(123) FROM dual",
+            ),
+            Self::check(
+                "COUNT 函数",
+                OracleCategory::Function,
+                "SELECT COUNT(*) FROM users",
+            ),
+            Self::check(
+                "SUM/AVG/MAX/MIN 函数",
+                OracleCategory::Function,
+                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees",
+            ),
+            Self::check(
+                "LENGTH 函数",
+                OracleCategory::Function,
+                "SELECT LENGTH(name) FROM users",
+            ),
+            Self::check(
+                "UPPER/LOWER 函数",
+                OracleCategory::Function,
+                "SELECT UPPER(name), LOWER(name) FROM users",
+            ),
+            Self::check(
+                "SUBSTR 函数",
+                OracleCategory::Function,
+                "SELECT SUBSTR(name, 1, 3) FROM users",
+            ),
+            Self::check(
+                "INSTR 函数",
+                OracleCategory::Function,
+                "SELECT INSTR(name, 'a') FROM users",
+            ),
+            Self::check(
+                "TRIM 函数",
+                OracleCategory::Function,
+                "SELECT TRIM('  hello  ') FROM dual",
+            ),
+            Self::check(
+                "CAST 函数",
+                OracleCategory::Function,
+                "SELECT CAST('123' AS NUMBER) FROM dual",
+            ),
+            Self::check(
+                "CASE WHEN 表达式",
+                OracleCategory::Function,
+                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users",
+            ),
+            Self::check(
+                "USER 函数",
+                OracleCategory::Function,
+                "SELECT USER FROM dual",
+            ),
         ]
     }
 
     fn test_operators() -> Vec<OracleCompatResult> {
         vec![
-            Self::check("|| 字符串拼接", OracleCategory::Operator,
-                "SELECT 'a' || 'b' || 'c' FROM dual"),
-            Self::check("LIKE 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE name LIKE 'A%'"),
-            Self::check("BETWEEN 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE age BETWEEN 18 AND 65"),
-            Self::check("IN 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE id IN (1, 2, 3)"),
-            Self::check("IS NULL 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE name IS NULL"),
-            Self::check("IS NOT NULL 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE name IS NOT NULL"),
-            Self::check("AND 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE age > 18 AND age < 65"),
-            Self::check("OR 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE age < 18 OR age > 65"),
-            Self::check("NOT 运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE NOT (age > 65)"),
-            Self::check("seq.NEXTVAL 运算符", OracleCategory::Operator,
-                "SELECT seq_users.NEXTVAL FROM dual"),
-            Self::check("seq.CURRVAL 运算符", OracleCategory::Operator,
-                "SELECT seq_users.CURRVAL FROM dual"),
-            Self::check("比较运算符", OracleCategory::Operator,
-                "SELECT * FROM users WHERE age >= 18 AND age <= 65"),
-            Self::check("算术运算符", OracleCategory::Operator,
-                "SELECT 1 + 2 * 3 - 4 / 2 FROM dual"),
-            Self::check("|| 拼接列", OracleCategory::Operator,
-                "SELECT first_name || ' ' || last_name FROM users"),
+            Self::check(
+                "|| 字符串拼接",
+                OracleCategory::Operator,
+                "SELECT 'a' || 'b' || 'c' FROM dual",
+            ),
+            Self::check(
+                "LIKE 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE name LIKE 'A%'",
+            ),
+            Self::check(
+                "BETWEEN 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE age BETWEEN 18 AND 65",
+            ),
+            Self::check(
+                "IN 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE id IN (1, 2, 3)",
+            ),
+            Self::check(
+                "IS NULL 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE name IS NULL",
+            ),
+            Self::check(
+                "IS NOT NULL 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE name IS NOT NULL",
+            ),
+            Self::check(
+                "AND 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE age > 18 AND age < 65",
+            ),
+            Self::check(
+                "OR 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE age < 18 OR age > 65",
+            ),
+            Self::check(
+                "NOT 运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE NOT (age > 65)",
+            ),
+            Self::check(
+                "seq.NEXTVAL 运算符",
+                OracleCategory::Operator,
+                "SELECT seq_users.NEXTVAL FROM dual",
+            ),
+            Self::check(
+                "seq.CURRVAL 运算符",
+                OracleCategory::Operator,
+                "SELECT seq_users.CURRVAL FROM dual",
+            ),
+            Self::check(
+                "比较运算符",
+                OracleCategory::Operator,
+                "SELECT * FROM users WHERE age >= 18 AND age <= 65",
+            ),
+            Self::check(
+                "算术运算符",
+                OracleCategory::Operator,
+                "SELECT 1 + 2 * 3 - 4 / 2 FROM dual",
+            ),
+            Self::check(
+                "|| 拼接列",
+                OracleCategory::Operator,
+                "SELECT first_name || ' ' || last_name FROM users",
+            ),
         ]
     }
 
     fn test_identifiers() -> Vec<OracleCompatResult> {
         vec![
-            Self::check("双引号标识符", OracleCategory::Identifier,
-                "SELECT \"id\", \"name\" FROM \"users\""),
-            Self::check("带 schema 前缀", OracleCategory::Identifier,
-                "SELECT * FROM hr.users"),
-            Self::check("别名 AS", OracleCategory::Identifier,
-                "SELECT id AS user_id, name AS user_name FROM users"),
-            Self::check("别名省略 AS", OracleCategory::Identifier,
-                "SELECT id user_id, name user_name FROM users"),
-            Self::check("表别名", OracleCategory::Identifier,
-                "SELECT u.id, u.name FROM users u"),
-            Self::check("限定列名", OracleCategory::Identifier,
-                "SELECT users.id, users.name FROM users"),
-            Self::check("schema.table 列限定", OracleCategory::Identifier,
-                "SELECT hr.users.id FROM hr.users"),
-            Self::check("列名带下划线", OracleCategory::Identifier,
-                "SELECT user_id, first_name, last_name FROM users"),
-            Self::check("大小写敏感标识符", OracleCategory::Identifier,
-                "SELECT \"CamelCase\" FROM users"),
+            Self::check(
+                "双引号标识符",
+                OracleCategory::Identifier,
+                "SELECT \"id\", \"name\" FROM \"users\"",
+            ),
+            Self::check(
+                "带 schema 前缀",
+                OracleCategory::Identifier,
+                "SELECT * FROM hr.users",
+            ),
+            Self::check(
+                "别名 AS",
+                OracleCategory::Identifier,
+                "SELECT id AS user_id, name AS user_name FROM users",
+            ),
+            Self::check(
+                "别名省略 AS",
+                OracleCategory::Identifier,
+                "SELECT id user_id, name user_name FROM users",
+            ),
+            Self::check(
+                "表别名",
+                OracleCategory::Identifier,
+                "SELECT u.id, u.name FROM users u",
+            ),
+            Self::check(
+                "限定列名",
+                OracleCategory::Identifier,
+                "SELECT users.id, users.name FROM users",
+            ),
+            Self::check(
+                "schema.table 列限定",
+                OracleCategory::Identifier,
+                "SELECT hr.users.id FROM hr.users",
+            ),
+            Self::check(
+                "列名带下划线",
+                OracleCategory::Identifier,
+                "SELECT user_id, first_name, last_name FROM users",
+            ),
+            Self::check(
+                "大小写敏感标识符",
+                OracleCategory::Identifier,
+                "SELECT \"CamelCase\" FROM users",
+            ),
         ]
     }
 }
@@ -343,13 +538,19 @@ mod tests {
     fn run_all_returns_nonempty() {
         let results = OracleCompat::run_all();
         assert!(!results.is_empty(), "Oracle 检查项不应为空");
-        assert!(results.len() >= 50, "Oracle 检查项应至少 50 项，实际: {}", results.len());
+        assert!(
+            results.len() >= 50,
+            "Oracle 检查项应至少 50 项，实际: {}",
+            results.len()
+        );
     }
 
     #[test]
     fn basic_select_passes() {
         let results = OracleCompat::run_all();
-        let select_basic = results.iter().find(|r| r.name == "SELECT 基本语法")
+        let select_basic = results
+            .iter()
+            .find(|r| r.name == "SELECT 基本语法")
             .expect("应包含 SELECT 基本语法 测试");
         assert_eq!(select_basic.status, CompatStatus::Pass);
     }
@@ -357,7 +558,9 @@ mod tests {
     #[test]
     fn nvl_function_passes() {
         let results = OracleCompat::run_all();
-        let nvl = results.iter().find(|r| r.name == "NVL 函数")
+        let nvl = results
+            .iter()
+            .find(|r| r.name == "NVL 函数")
             .expect("应包含 NVL 函数测试");
         assert_eq!(nvl.status, CompatStatus::Pass);
     }
@@ -365,7 +568,9 @@ mod tests {
     #[test]
     fn decode_function_passes() {
         let results = OracleCompat::run_all();
-        let decode = results.iter().find(|r| r.name == "DECODE 函数")
+        let decode = results
+            .iter()
+            .find(|r| r.name == "DECODE 函数")
             .expect("应包含 DECODE 函数测试");
         assert_eq!(decode.status, CompatStatus::Pass);
     }

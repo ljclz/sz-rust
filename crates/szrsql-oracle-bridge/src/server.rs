@@ -24,12 +24,14 @@ use crate::tns_handshake::{
     negotiate_sdu, negotiate_tdu, negotiate_version, AcceptResponse, ConnectRequest, HandshakeError,
 };
 use crate::tns_packet::{PacketType, TnsPacket, TnsPacketCodec, TnsPacketError};
-use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
+use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
+use szrsql_protocol::pgwire::InMemoryTable;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 /// Oracle 服务器配置。
 #[derive(Debug, Clone)]
@@ -118,6 +120,12 @@ pub struct OracleServer {
     config: OracleConfig,
     /// 连接 ID 计数器
     connection_id_counter: AtomicI32,
+    /// 跨会话共享的表存储（None = 独立存储，不与其他协议共享）
+    shared_tables: Option<Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>>,
+    /// 跨会话共享的锁管理器
+    lock_manager: Option<Arc<szrsql_tx::lock::LockManager>>,
+    /// 跨会话共享的事务 ID 计数器
+    shared_txn_counter: Option<Arc<AtomicU32>>,
 }
 
 impl OracleServer {
@@ -126,7 +134,31 @@ impl OracleServer {
         Self {
             config,
             connection_id_counter: AtomicI32::new(1),
+            shared_tables: None,
+            lock_manager: None,
+            shared_txn_counter: None,
         }
+    }
+
+    /// 注入跨会话共享的表存储，使 Oracle 协议与 pgwire/MySQL 共享同一份数据。
+    pub fn with_shared_tables(
+        mut self,
+        tables: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    ) -> Self {
+        self.shared_tables = Some(tables);
+        self
+    }
+
+    /// 注入跨会话共享的锁管理器，启用行级并发控制。
+    pub fn with_lock_manager(mut self, lm: Arc<szrsql_tx::lock::LockManager>) -> Self {
+        self.lock_manager = Some(lm);
+        self
+    }
+
+    /// 注入跨会话共享的事务 ID 计数器，保证事务 ID 全局唯一。
+    pub fn with_shared_txn_counter(mut self, counter: Arc<AtomicU32>) -> Self {
+        self.shared_txn_counter = Some(counter);
+        self
     }
 
     /// 启动监听循环。
@@ -151,6 +183,18 @@ impl OracleServer {
     pub async fn handle_connection(&self, stream: TcpStream) -> Result<(), OracleServerError> {
         let conn_id = self.connection_id_counter.fetch_add(1, Ordering::SeqCst) as u32;
         let mut conn = Connection::new(self.config.clone(), conn_id);
+        // BUG-1 修复：注入共享存储/锁管理器/事务计数器，使 Oracle 协议与 pgwire/MySQL 共享同一份数据。
+        let mut executor = ExecutorService::new();
+        if let Some(st) = &self.shared_tables {
+            executor = executor.with_shared_tables(st.clone());
+        }
+        if let Some(lm) = &self.lock_manager {
+            executor = executor.with_lock_manager(lm.clone());
+        }
+        if let Some(tc) = &self.shared_txn_counter {
+            executor = executor.with_shared_txn_counter(tc.clone());
+        }
+        conn.executor = Arc::new(Mutex::new(executor));
         conn.handle(stream).await
     }
 }
@@ -179,10 +223,7 @@ impl Connection {
     async fn handle(&mut self, mut stream: TcpStream) -> Result<(), OracleServerError> {
         // 1. TNS 握手
         self.do_handshake(&mut stream).await?;
-        tracing::info!(
-            "Oracle conn {} TNS handshake completed",
-            self.conn_id
-        );
+        tracing::info!("Oracle conn {} TNS handshake completed", self.conn_id);
 
         // 2. 命令循环
         let idle_timeout = self.config.connection_idle_timeout;
@@ -191,7 +232,9 @@ impl Connection {
             let read_result = if idle_timeout.is_zero() {
                 TnsPacketCodec::read_packet(&mut stream).await
             } else {
-                match tokio::time::timeout(idle_timeout, TnsPacketCodec::read_packet(&mut stream)).await {
+                match tokio::time::timeout(idle_timeout, TnsPacketCodec::read_packet(&mut stream))
+                    .await
+                {
                     Ok(r) => r,
                     Err(_) => {
                         tracing::warn!(
@@ -230,8 +273,8 @@ impl Connection {
                 }
                 _ => {
                     // 其他类型：返回 Error 包
-                    let err_payload = format!("unsupported packet type: {:?}", packet.packet_type)
-                        .into_bytes();
+                    let err_payload =
+                        format!("unsupported packet type: {:?}", packet.packet_type).into_bytes();
                     let err_packet = TnsPacket::new(PacketType::Error, err_payload);
                     TnsPacketCodec::write_packet(&mut stream, &err_packet).await?;
                 }
@@ -264,8 +307,8 @@ impl Connection {
         );
 
         // 发送 Accept Response
-        let accept = AcceptResponse::new(negotiated_version)
-            .with_sdu_tdu(negotiated_sdu, negotiated_tdu);
+        let accept =
+            AcceptResponse::new(negotiated_version).with_sdu_tdu(negotiated_sdu, negotiated_tdu);
         let accept_packet = accept.encode();
         TnsPacketCodec::write_packet(stream, &accept_packet).await?;
 
@@ -389,7 +432,9 @@ fn extract_sql_from_ttc_payload(payload: &[u8]) -> Option<String> {
 }
 
 /// 将 ExecutorService 的执行结果格式化为文本响应。
-fn format_results(results: &[Result<QueryResult, szrsql_protocol::pgwire::session::SessionError>]) -> String {
+fn format_results(
+    results: &[Result<QueryResult, szrsql_protocol::pgwire::session::SessionError>],
+) -> String {
     let mut output = String::new();
     for result in results {
         match result {
@@ -403,10 +448,7 @@ fn format_results(results: &[Result<QueryResult, szrsql_protocol::pgwire::sessio
                 }
                 // 数据行
                 for row in rows {
-                    let cells: Vec<String> = row
-                        .iter()
-                        .map(|v| format_value(v))
-                        .collect();
+                    let cells: Vec<String> = row.iter().map(|v| format_value(v)).collect();
                     output.push_str(&cells.join(" | "));
                     output.push('\n');
                 }
@@ -477,7 +519,9 @@ mod tests {
     #[test]
     fn extract_sql_finds_select_statement() {
         // 模拟 TTC 负载：前缀控制字节 + SQL 文本
-        let payload = [0x01, 0x5e, 0x00, b'S', b'E', b'L', b'E', b'C', b'T', b' ', b'1'];
+        let payload = [
+            0x01, 0x5e, 0x00, b'S', b'E', b'L', b'E', b'C', b'T', b' ', b'1',
+        ];
         let sql = extract_sql_from_ttc_payload(&payload);
         assert_eq!(sql, Some("SELECT 1".to_string()));
     }
@@ -485,8 +529,8 @@ mod tests {
     #[test]
     fn extract_sql_finds_create_table() {
         let payload = [
-            0x03, 0x5e,
-            b'C', b'R', b'E', b'A', b'T', b'E', b' ', b'T', b'A', b'B', b'L', b'E', b' ', b't', b'(', b')',
+            0x03, 0x5e, b'C', b'R', b'E', b'A', b'T', b'E', b' ', b'T', b'A', b'B', b'L', b'E',
+            b' ', b't', b'(', b')',
         ];
         let sql = extract_sql_from_ttc_payload(&payload);
         assert!(sql.is_some());

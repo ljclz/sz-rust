@@ -501,9 +501,8 @@ pub type SchemaProvider =
     Arc<dyn Fn(&[String]) -> Result<Vec<TableSchema>, SourceError> + Send + Sync>;
 
 /// 源端快照提供者 — 注入此闭包以返回全量快照数据（测试用）
-pub type SnapshotProvider = Arc<
-    dyn Fn(&str, usize) -> Result<Vec<DecodedRow>, SourceError> + Send + Sync,
->;
+pub type SnapshotProvider =
+    Arc<dyn Fn(&str, usize) -> Result<Vec<DecodedRow>, SourceError> + Send + Sync>;
 
 // =====================================================================
 // SourceConnectorFactory — 工厂函数
@@ -521,11 +520,9 @@ pub fn create_source_connector(
     config: &SourceConfig,
 ) -> Result<Arc<dyn SourceConnector>, SourceError> {
     match config.source_type.as_str() {
-        "postgres" | "postgresql" | "pg" => {
-            Ok(Arc::new(crate::source::pg_source::PgSourceConnector::new(
-                config.clone(),
-            )?))
-        }
+        "postgres" | "postgresql" | "pg" => Ok(Arc::new(
+            crate::source::pg_source::PgSourceConnector::new(config.clone())?,
+        )),
         _ => Err(SourceError::Unsupported(format!(
             "unsupported source type: {}",
             config.source_type
@@ -550,10 +547,9 @@ pub fn create_real_pg_source_connector(
     // 使用 `::postgres::` 显式引用外部 crate
     let client = ::postgres::Client::connect(&config.connection_string, ::postgres::NoTls)
         .map_err(|e| SourceError::Connection(format!("PG connect failed: {e}")))?;
-    Ok(Arc::new(crate::source::pg_real::PgRealSourceConnector::new(
-        client,
-        config.clone(),
-    )?))
+    Ok(Arc::new(
+        crate::source::pg_real::PgRealSourceConnector::new(client, config.clone())?,
+    ))
 }
 
 /// P1-2: 创建 PG logical replication 源端连接器（基于 replication slot + START_REPLICATION）
@@ -691,7 +687,8 @@ mod tests {
         let after = DecodedRow {
             columns: vec![("id".to_string(), SzValue::Int64(1))],
         };
-        let event = SourceEvent::update(100, "public", "users", before.clone(), after.clone(), 1000);
+        let event =
+            SourceEvent::update(100, "public", "users", before.clone(), after.clone(), 1000);
         assert_eq!(event.op, SourceEventOp::Update);
         assert_eq!(event.before, Some(before));
         assert_eq!(event.after, Some(after));
@@ -725,8 +722,7 @@ mod tests {
         let row = DecodedRow {
             columns: vec![("id".to_string(), SzValue::Int64(1))],
         };
-        let event = SourceEvent::insert(100, "public", "users", row, 1000)
-            .with_tx_id(42);
+        let event = SourceEvent::insert(100, "public", "users", row, 1000).with_tx_id(42);
         assert_eq!(event.tx_id, Some(42));
     }
 

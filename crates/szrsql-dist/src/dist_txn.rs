@@ -21,12 +21,12 @@
 use crate::raft::{NodeId, RaftError};
 use crate::runtime::{DistRuntime, DistRuntimeError};
 use crate::shard::KeyRange;
-use crate::txn::{LockInfo, Mutation, WriteRecord, TxnError};
+use crate::txn::{LockInfo, Mutation, TxnError, WriteRecord};
 
 // 复用 txn.rs 中的前缀常量和编码函数
 use crate::txn::{
-    WRITE_KIND_DELETE, WRITE_KIND_PUT, WRITE_KIND_ROLLBACK,
-    data_key, lock_key, write_key, write_prefix_range,
+    data_key, lock_key, write_key, write_prefix_range, WRITE_KIND_DELETE, WRITE_KIND_PUT,
+    WRITE_KIND_ROLLBACK,
 };
 
 // =====================================================================
@@ -91,7 +91,11 @@ impl<'a> DistTxnClient<'a> {
 
         // 2. 检查锁
         let lkey = lock_key(key);
-        if let Some(lock_bytes) = self.runtime.get_shard(shard_id, &lkey).map_err(txn_err_from)? {
+        if let Some(lock_bytes) = self
+            .runtime
+            .get_shard(shard_id, &lkey)
+            .map_err(txn_err_from)?
+        {
             let lock = LockInfo::decode(&lock_bytes)?;
             if lock.start_ts <= read_ts {
                 return Err(TxnError::LockedOnRead {
@@ -107,7 +111,10 @@ impl<'a> DistTxnClient<'a> {
             start: Some(start),
             end: Some(end),
         };
-        let writes = self.runtime.scan_shard(shard_id, &range).map_err(txn_err_from)?;
+        let writes = self
+            .runtime
+            .scan_shard(shard_id, &range)
+            .map_err(txn_err_from)?;
 
         let mut latest: Option<(u64, WriteRecord)> = None;
         for (k, v) in writes {
@@ -137,7 +144,11 @@ impl<'a> DistTxnClient<'a> {
                     return Ok(None);
                 }
                 let dkey = data_key(key, record.start_ts);
-                Ok(self.runtime.get_shard(shard_id, &dkey).map_err(txn_err_from)?.map(|v| v.to_vec()))
+                Ok(self
+                    .runtime
+                    .get_shard(shard_id, &dkey)
+                    .map_err(txn_err_from)?
+                    .map(|v| v.to_vec()))
             }
         }
     }
@@ -170,7 +181,10 @@ impl<'a> DistTxnClient<'a> {
             start: Some(start),
             end: Some(end),
         };
-        let writes = self.runtime.scan_shard(shard_id, &range).map_err(txn_err_from)?;
+        let writes = self
+            .runtime
+            .scan_shard(shard_id, &range)
+            .map_err(txn_err_from)?;
         for (k, _) in &writes {
             if let Some(commit_ts) = WriteRecord::extract_commit_ts(k) {
                 if WriteRecord::extract_key(k) != Some(key) {
@@ -184,7 +198,11 @@ impl<'a> DistTxnClient<'a> {
 
         // 2. 检查锁
         let lkey = lock_key(key);
-        if let Some(existing) = self.runtime.get_shard(shard_id, &lkey).map_err(txn_err_from)? {
+        if let Some(existing) = self
+            .runtime
+            .get_shard(shard_id, &lkey)
+            .map_err(txn_err_from)?
+        {
             let lock = LockInfo::decode(&existing)?;
             return Err(TxnError::KeyAlreadyLocked {
                 key: key.to_vec(),
@@ -194,7 +212,9 @@ impl<'a> DistTxnClient<'a> {
 
         // 3. 写入 data 记录
         let dkey = data_key(key, start_ts);
-        self.runtime.put_shard(shard_id, dkey, mutation.value().to_vec()).map_err(txn_err_from)?;
+        self.runtime
+            .put_shard(shard_id, dkey, mutation.value().to_vec())
+            .map_err(txn_err_from)?;
 
         // 4. 写入 lock 记录
         let lock = LockInfo {
@@ -203,7 +223,9 @@ impl<'a> DistTxnClient<'a> {
             kind: mutation.lock_kind(),
             value: mutation.value().to_vec(),
         };
-        self.runtime.put_shard(shard_id, lkey, lock.encode()).map_err(txn_err_from)?;
+        self.runtime
+            .put_shard(shard_id, lkey, lock.encode())
+            .map_err(txn_err_from)?;
 
         Ok(())
     }
@@ -242,7 +264,10 @@ impl<'a> DistTxnClient<'a> {
         let primary_key = mutations[0].key();
 
         // 1. 用原始键路由 primary 到分片
-        let primary_shard_id = self.runtime.route_raw_key(primary_key).map_err(txn_err_from)?;
+        let primary_shard_id = self
+            .runtime
+            .route_raw_key(primary_key)
+            .map_err(txn_err_from)?;
 
         // 2. 检查 primary 锁
         let primary_lkey = lock_key(primary_key);
@@ -271,7 +296,9 @@ impl<'a> DistTxnClient<'a> {
             .map_err(txn_err_from)?;
 
         // 4. 删除 primary 的 lock
-        self.runtime.delete_shard(primary_shard_id, primary_lkey).map_err(txn_err_from)?;
+        self.runtime
+            .delete_shard(primary_shard_id, primary_lkey)
+            .map_err(txn_err_from)?;
 
         // 5. 对每个 secondary，写入 write 记录，删除 lock
         for m in mutations.iter().skip(1) {
@@ -282,7 +309,11 @@ impl<'a> DistTxnClient<'a> {
             let swkey = write_key(skey, commit_ts);
 
             // 读取 secondary 锁获取 kind
-            let skind = if let Some(slock_bytes) = self.runtime.get_shard(secondary_shard_id, &slkey).map_err(txn_err_from)? {
+            let skind = if let Some(slock_bytes) = self
+                .runtime
+                .get_shard(secondary_shard_id, &slkey)
+                .map_err(txn_err_from)?
+            {
                 LockInfo::decode(&slock_bytes)?.kind
             } else {
                 // secondary 锁不存在，使用 mutation 的 kind
@@ -296,7 +327,9 @@ impl<'a> DistTxnClient<'a> {
             self.runtime
                 .put_shard(secondary_shard_id, swkey, swrecord.encode())
                 .map_err(txn_err_from)?;
-            self.runtime.delete_shard(secondary_shard_id, slkey).map_err(txn_err_from)?;
+            self.runtime
+                .delete_shard(secondary_shard_id, slkey)
+                .map_err(txn_err_from)?;
         }
 
         Ok(commit_ts)
@@ -326,17 +359,25 @@ impl<'a> DistTxnClient<'a> {
             let dkey = data_key(key, start_ts);
 
             // 删除 lock
-            let _ = self.runtime.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
+            let _ = self
+                .runtime
+                .delete_shard(shard_id, lkey)
+                .map_err(txn_err_from)?;
 
             // 写入 ROLLBACK 记录
             let wrecord = WriteRecord {
                 start_ts,
                 kind: WRITE_KIND_ROLLBACK,
             };
-            self.runtime.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
+            self.runtime
+                .put_shard(shard_id, wkey, wrecord.encode())
+                .map_err(txn_err_from)?;
 
             // 删除 data
-            let _ = self.runtime.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
+            let _ = self
+                .runtime
+                .delete_shard(shard_id, dkey)
+                .map_err(txn_err_from)?;
         }
         Ok(())
     }
@@ -365,7 +406,10 @@ impl<'a> DistTxnClient<'a> {
 
         // 2. 用原始键路由 primary_key 到分片
         let primary_key = &lock.primary_key;
-        let primary_shard_id = self.runtime.route_raw_key(primary_key).map_err(txn_err_from)?;
+        let primary_shard_id = self
+            .runtime
+            .route_raw_key(primary_key)
+            .map_err(txn_err_from)?;
 
         // 3. 扫描 primary 的写记录（写记录是事务状态的最终判据）。
         //    注意：即使 primary 锁仍存在，也可能已有 COMMIT 写记录（commit 阶段
@@ -377,7 +421,10 @@ impl<'a> DistTxnClient<'a> {
             start: Some(start),
             end: Some(end),
         };
-        let primary_writes = self.runtime.scan_shard(primary_shard_id, &range).map_err(txn_err_from)?;
+        let primary_writes = self
+            .runtime
+            .scan_shard(primary_shard_id, &range)
+            .map_err(txn_err_from)?;
 
         // 4. 找到 start_ts 匹配的写记录
         for (k, v) in &primary_writes {
@@ -399,13 +446,20 @@ impl<'a> DistTxnClient<'a> {
                         start_ts: lock.start_ts,
                         kind: record.kind,
                     };
-                    self.runtime.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
-                    self.runtime.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
+                    self.runtime
+                        .put_shard(shard_id, wkey, wrecord.encode())
+                        .map_err(txn_err_from)?;
+                    self.runtime
+                        .delete_shard(shard_id, lkey)
+                        .map_err(txn_err_from)?;
                     return Ok(ResolveResult::Committed);
                 }
                 WRITE_KIND_ROLLBACK => {
                     // 事务已回滚，回滚 secondary
-                    self.rollback(&[Mutation::put(key.to_vec(), lock.value.clone())], lock.start_ts)?;
+                    self.rollback(
+                        &[Mutation::put(key.to_vec(), lock.value.clone())],
+                        lock.start_ts,
+                    )?;
                     return Ok(ResolveResult::RolledBack);
                 }
                 _ => {}
@@ -413,7 +467,10 @@ impl<'a> DistTxnClient<'a> {
         }
 
         // 5. 未找到匹配的写记录，回滚（事务确实未完成）
-        self.rollback(&[Mutation::put(key.to_vec(), lock.value.clone())], lock.start_ts)?;
+        self.rollback(
+            &[Mutation::put(key.to_vec(), lock.value.clone())],
+            lock.start_ts,
+        )?;
         Ok(ResolveResult::RolledBack)
     }
 }
@@ -432,7 +489,9 @@ fn txn_err_from(e: DistRuntimeError) -> TxnError {
     match e {
         DistRuntimeError::Raft(r) => TxnError::Raft(r),
         DistRuntimeError::Route(s) => TxnError::RouteError(s),
-        DistRuntimeError::ShardNotFound(id) => TxnError::RouteError(format!("shard {} not found", id)),
+        DistRuntimeError::ShardNotFound(id) => {
+            TxnError::RouteError(format!("shard {} not found", id))
+        }
         DistRuntimeError::NotLeader(id) => TxnError::Raft(RaftError::NotLeader(id)),
         DistRuntimeError::Serialization(_s) => TxnError::CorruptData,
     }
@@ -499,7 +558,9 @@ impl<'a> ClusterTxnCoordinator<'a> {
     /// # Errors
     /// 若集群无 Leader（未初始化或多数派节点宕机），返回 `NotLeader(0)`
     fn leader_or_err(&self) -> Result<NodeId, TxnError> {
-        self.cluster.leader().ok_or(TxnError::Raft(RaftError::NotLeader(0)))
+        self.cluster
+            .leader()
+            .ok_or(TxnError::Raft(RaftError::NotLeader(0)))
     }
 
     /// 在 Leader 上执行闭包操作，自动处理 Leader 切换
@@ -510,7 +571,9 @@ impl<'a> ClusterTxnCoordinator<'a> {
         F: FnMut(&mut DistRuntime) -> Result<R, TxnError>,
     {
         let leader = self.leader_or_err()?;
-        let runtime = self.cluster.node_mut(leader)
+        let runtime = self
+            .cluster
+            .node_mut(leader)
             .ok_or(TxnError::Raft(RaftError::NotLeader(leader)))?;
         match f(runtime) {
             Ok(r) => Ok(r),
@@ -518,7 +581,9 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 // Leader 切换：等待新 Leader 选举完成
                 self.cluster.run_for(500);
                 let new_leader = self.leader_or_err()?;
-                let runtime = self.cluster.node_mut(new_leader)
+                let runtime = self
+                    .cluster
+                    .node_mut(new_leader)
                     .ok_or(TxnError::Raft(RaftError::NotLeader(new_leader)))?;
                 f(runtime)
             }
@@ -604,7 +669,10 @@ impl<'a> ClusterTxnCoordinator<'a> {
                         return Ok(None);
                     }
                     let dkey = data_key(key, record.start_ts);
-                    Ok(rt.get_shard(shard_id, &dkey).map_err(txn_err_from)?.map(|v| v.to_vec()))
+                    Ok(rt
+                        .get_shard(shard_id, &dkey)
+                        .map_err(txn_err_from)?
+                        .map(|v| v.to_vec()))
                 }
             }
         })
@@ -653,7 +721,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
 
             // 写入 data 记录
             let dkey = data_key(key, start_ts);
-            rt.put_shard(shard_id, dkey, mutation.value().to_vec()).map_err(txn_err_from)?;
+            rt.put_shard(shard_id, dkey, mutation.value().to_vec())
+                .map_err(txn_err_from)?;
 
             // 写入 lock 记录
             let lock = LockInfo {
@@ -662,7 +731,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 kind: mutation.lock_kind(),
                 value: mutation.value().to_vec(),
             };
-            rt.put_shard(shard_id, lkey, lock.encode()).map_err(txn_err_from)?;
+            rt.put_shard(shard_id, lkey, lock.encode())
+                .map_err(txn_err_from)?;
 
             Ok(())
         })?;
@@ -686,11 +756,7 @@ impl<'a> ClusterTxnCoordinator<'a> {
     /// Commit 阶段：提交事务
     ///
     /// 提交后驱动 `run_for(200)` 确保 commit 记录在多数派节点上复制。
-    pub fn commit(
-        &mut self,
-        mutations: &[Mutation],
-        start_ts: u64,
-    ) -> Result<u64, TxnError> {
+    pub fn commit(&mut self, mutations: &[Mutation], start_ts: u64) -> Result<u64, TxnError> {
         if mutations.is_empty() {
             return Ok(self.begin());
         }
@@ -726,7 +792,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 .map_err(txn_err_from)?;
 
             // 删除 primary 的 lock
-            rt.delete_shard(primary_shard_id, primary_lkey).map_err(txn_err_from)?;
+            rt.delete_shard(primary_shard_id, primary_lkey)
+                .map_err(txn_err_from)?;
 
             // 提交 secondary
             for m in mutations.iter().skip(1) {
@@ -735,7 +802,10 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 let slkey = lock_key(skey);
                 let swkey = write_key(skey, commit_ts);
 
-                let skind = if let Some(slock_bytes) = rt.get_shard(secondary_shard_id, &slkey).map_err(txn_err_from)? {
+                let skind = if let Some(slock_bytes) = rt
+                    .get_shard(secondary_shard_id, &slkey)
+                    .map_err(txn_err_from)?
+                {
                     LockInfo::decode(&slock_bytes)?.kind
                 } else {
                     m.lock_kind()
@@ -747,7 +817,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 };
                 rt.put_shard(secondary_shard_id, swkey, swrecord.encode())
                     .map_err(txn_err_from)?;
-                rt.delete_shard(secondary_shard_id, slkey).map_err(txn_err_from)?;
+                rt.delete_shard(secondary_shard_id, slkey)
+                    .map_err(txn_err_from)?;
             }
 
             Ok(commit_ts)
@@ -773,7 +844,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                     start_ts,
                     kind: WRITE_KIND_ROLLBACK,
                 };
-                rt.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
+                rt.put_shard(shard_id, wkey, wrecord.encode())
+                    .map_err(txn_err_from)?;
                 let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
             }
             Ok(rollback_ts)
@@ -787,12 +859,11 @@ impl<'a> ClusterTxnCoordinator<'a> {
         let result = self.with_leader(|rt| {
             let shard_id = rt.route_raw_key(key).map_err(txn_err_from)?;
             let lkey = lock_key(key);
-            let lock_bytes = rt
-                .get_shard(shard_id, &lkey)
-                .map_err(txn_err_from)?
-                .ok_or(TxnError::LockNotFound {
+            let lock_bytes = rt.get_shard(shard_id, &lkey).map_err(txn_err_from)?.ok_or(
+                TxnError::LockNotFound {
                     primary_key: key.to_vec(),
-                })?;
+                },
+            )?;
             let lock = LockInfo::decode(&lock_bytes)?;
 
             let primary_key = &lock.primary_key;
@@ -803,7 +874,9 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 start: Some(start),
                 end: Some(end),
             };
-            let primary_writes = rt.scan_shard(primary_shard_id, &range).map_err(txn_err_from)?;
+            let primary_writes = rt
+                .scan_shard(primary_shard_id, &range)
+                .map_err(txn_err_from)?;
 
             for (k, v) in &primary_writes {
                 if WriteRecord::extract_key(k) != Some(primary_key) {
@@ -821,7 +894,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                             start_ts: lock.start_ts,
                             kind: record.kind,
                         };
-                        rt.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
+                        rt.put_shard(shard_id, wkey, wrecord.encode())
+                            .map_err(txn_err_from)?;
                         rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
                         return Ok(ResolveResult::Committed);
                     }
@@ -833,7 +907,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                             start_ts: lock.start_ts,
                             kind: WRITE_KIND_ROLLBACK,
                         };
-                        rt.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
+                        rt.put_shard(shard_id, wkey, wrecord.encode())
+                            .map_err(txn_err_from)?;
                         rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
                         let dkey = data_key(key, lock.start_ts);
                         let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
@@ -850,7 +925,8 @@ impl<'a> ClusterTxnCoordinator<'a> {
                 start_ts: lock.start_ts,
                 kind: WRITE_KIND_ROLLBACK,
             };
-            rt.put_shard(shard_id, wkey, wrecord.encode()).map_err(txn_err_from)?;
+            rt.put_shard(shard_id, wkey, wrecord.encode())
+                .map_err(txn_err_from)?;
             rt.delete_shard(shard_id, lkey).map_err(txn_err_from)?;
             let dkey = data_key(key, lock.start_ts);
             let _ = rt.delete_shard(shard_id, dkey).map_err(txn_err_from)?;
@@ -874,7 +950,9 @@ impl<'a> ClusterTxnCoordinator<'a> {
             if !self.cluster.is_online(node_id) {
                 continue;
             }
-            let runtime = self.cluster.node(node_id)
+            let runtime = self
+                .cluster
+                .node(node_id)
                 .ok_or(TxnError::Raft(RaftError::NotLeader(node_id)))?;
             let shard_id = runtime.route_raw_key(key).map_err(txn_err_from)?;
 
@@ -913,7 +991,10 @@ impl<'a> ClusterTxnCoordinator<'a> {
                         None
                     } else {
                         let dkey = data_key(key, record.start_ts);
-                        runtime.get_shard(shard_id, &dkey).map_err(txn_err_from)?.map(|v| v.to_vec())
+                        runtime
+                            .get_shard(shard_id, &dkey)
+                            .map_err(txn_err_from)?
+                            .map(|v| v.to_vec())
                     }
                 }
             };
@@ -1015,8 +1096,11 @@ mod tests {
         let ts_b = ts_a; // 与 A 相同的 start_ts
         let m_b = Mutation::put(b"ck1".to_vec(), b"v_b".to_vec());
         let result = txn_b.prewrite(&m_b, b"ck1", ts_b);
-        assert!(matches!(result, Err(TxnError::WriteConflict { .. })),
-            "应检测到写冲突，实际 {:?}", result);
+        assert!(
+            matches!(result, Err(TxnError::WriteConflict { .. })),
+            "应检测到写冲突，实际 {:?}",
+            result
+        );
     }
 
     /// P0-DIST 迭代 2：Percolator 锁冲突检测
@@ -1036,8 +1120,11 @@ mod tests {
         let ts_b = txn_b.begin();
         let m_b = Mutation::put(b"lk1".to_vec(), b"v_b".to_vec());
         let result = txn_b.prewrite(&m_b, b"lk1", ts_b);
-        assert!(matches!(result, Err(TxnError::KeyAlreadyLocked { .. })),
-            "应检测到锁冲突，实际 {:?}", result);
+        assert!(
+            matches!(result, Err(TxnError::KeyAlreadyLocked { .. })),
+            "应检测到锁冲突，实际 {:?}",
+            result
+        );
     }
 
     /// P0-DIST 迭代 2：Percolator 删除事务
@@ -1074,18 +1161,24 @@ mod tests {
 
         // 版本 1：v1
         let ts1 = txn.begin();
-        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v1".to_vec())], ts1).unwrap();
-        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v1".to_vec())], ts1).unwrap();
+        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v1".to_vec())], ts1)
+            .unwrap();
+        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v1".to_vec())], ts1)
+            .unwrap();
 
         // 版本 2：v2
         let ts2 = txn.begin();
-        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v2".to_vec())], ts2).unwrap();
-        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v2".to_vec())], ts2).unwrap();
+        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v2".to_vec())], ts2)
+            .unwrap();
+        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v2".to_vec())], ts2)
+            .unwrap();
 
         // 版本 3：v3
         let ts3 = txn.begin();
-        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v3".to_vec())], ts3).unwrap();
-        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v3".to_vec())], ts3).unwrap();
+        txn.prewrite_all(&[Mutation::put(b"sk1".to_vec(), b"v3".to_vec())], ts3)
+            .unwrap();
+        txn.commit(&[Mutation::put(b"sk1".to_vec(), b"v3".to_vec())], ts3)
+            .unwrap();
 
         // 用 ts1 读应返回 v1（但 ts1 已用于 commit，实际应使用更新 的 read_ts）
         // 注：commit_ts > start_ts，所以用 start_ts 读可能读不到自己的提交
@@ -1104,13 +1197,17 @@ mod tests {
 
         // 第一次写入
         let ts1 = txn.begin();
-        txn.prewrite_all(&[Mutation::put(b"ok1".to_vec(), b"v1".to_vec())], ts1).unwrap();
-        txn.commit(&[Mutation::put(b"ok1".to_vec(), b"v1".to_vec())], ts1).unwrap();
+        txn.prewrite_all(&[Mutation::put(b"ok1".to_vec(), b"v1".to_vec())], ts1)
+            .unwrap();
+        txn.commit(&[Mutation::put(b"ok1".to_vec(), b"v1".to_vec())], ts1)
+            .unwrap();
 
         // 覆盖写入
         let ts2 = txn.begin();
-        txn.prewrite_all(&[Mutation::put(b"ok1".to_vec(), b"v2".to_vec())], ts2).unwrap();
-        txn.commit(&[Mutation::put(b"ok1".to_vec(), b"v2".to_vec())], ts2).unwrap();
+        txn.prewrite_all(&[Mutation::put(b"ok1".to_vec(), b"v2".to_vec())], ts2)
+            .unwrap();
+        txn.commit(&[Mutation::put(b"ok1".to_vec(), b"v2".to_vec())], ts2)
+            .unwrap();
 
         // 读取应返回最新值
         let read_ts = txn.begin();
@@ -1289,8 +1386,7 @@ mod tests {
         let results = txn.verify_replication(b"ck1", read_ts).unwrap();
         assert!(!results.is_empty(), "应至少有一个在线节点");
         for (node_id, val) in &results {
-            assert_eq!(val, &Some(b"cv1".to_vec()),
-                "节点 {} 应读到 cv1", node_id);
+            assert_eq!(val, &Some(b"cv1".to_vec()), "节点 {} 应读到 cv1", node_id);
         }
     }
 

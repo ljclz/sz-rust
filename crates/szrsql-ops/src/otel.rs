@@ -21,7 +21,9 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 //  常量
@@ -798,28 +800,28 @@ impl SimpleSpanProcessor {
 
     /// 返回已收集的 Span 列表
     pub fn spans(&self) -> Vec<SpanData> {
-        self.spans.lock().unwrap().clone()
+        self.spans.lock().clone()
     }
 
     /// 已收集 Span 数
     pub fn len(&self) -> usize {
-        self.spans.lock().unwrap().len()
+        self.spans.lock().len()
     }
 
     /// 是否为空
     pub fn is_empty(&self) -> bool {
-        self.spans.lock().unwrap().is_empty()
+        self.spans.lock().is_empty()
     }
 
     /// 清空
     pub fn clear(&self) {
-        self.spans.lock().unwrap().clear();
+        self.spans.lock().clear();
     }
 }
 
 impl SpanProcessor for SimpleSpanProcessor {
     fn on_end(&self, span: SpanData) {
-        self.spans.lock().unwrap().push(span);
+        self.spans.lock().push(span);
     }
 }
 
@@ -854,28 +856,28 @@ impl BatchSpanProcessor {
 
     /// 强制刷新（导出所有缓冲的 Span）
     pub fn force_flush(&self) {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut buffer = self.buffer.lock();
         if buffer.is_empty() {
             return;
         }
         let batch: Vec<SpanData> = buffer.drain(..).collect();
-        self.exported.lock().unwrap().extend(batch);
+        self.exported.lock().extend(batch);
         self.export_count.fetch_add(1, Ordering::SeqCst);
     }
 
     /// 返回已导出的 Span 列表
     pub fn exported_spans(&self) -> Vec<SpanData> {
-        self.exported.lock().unwrap().clone()
+        self.exported.lock().clone()
     }
 
     /// 缓冲区中 Span 数
     pub fn buffered_len(&self) -> usize {
-        self.buffer.lock().unwrap().len()
+        self.buffer.lock().len()
     }
 
     /// 已导出 Span 数
     pub fn exported_len(&self) -> usize {
-        self.exported.lock().unwrap().len()
+        self.exported.lock().len()
     }
 
     /// 总 Span 数（缓冲 + 已导出）
@@ -890,8 +892,8 @@ impl BatchSpanProcessor {
 
     /// 清空所有
     pub fn clear(&self) {
-        self.buffer.lock().unwrap().clear();
-        self.exported.lock().unwrap().clear();
+        self.buffer.lock().clear();
+        self.exported.lock().clear();
     }
 
     /// 尝试触发导出（如果缓冲区达到阈值）
@@ -905,7 +907,7 @@ impl BatchSpanProcessor {
 
 impl SpanProcessor for BatchSpanProcessor {
     fn on_end(&self, span: SpanData) {
-        self.buffer.lock().unwrap().push(span);
+        self.buffer.lock().push(span);
         self.try_export();
     }
 }

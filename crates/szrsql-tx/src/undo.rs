@@ -22,7 +22,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
+// P0-6：使用 parking_lot::RwLock 替代 std::sync::RwLock，消除中毒 panic 风险
+use parking_lot::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // =====================================================================
@@ -241,12 +242,12 @@ impl UndoManager {
 
     /// 检查事务是否已提交
     fn is_txn_committed(&self, txn_id: u32) -> bool {
-        self.committed_txns.read().unwrap().contains_key(&txn_id)
+        self.committed_txns.read().contains_key(&txn_id)
     }
 
     /// 检查事务是否已回滚
     fn is_txn_aborted(&self, txn_id: u32) -> bool {
-        self.aborted_txns.read().unwrap().contains(&txn_id)
+        self.aborted_txns.read().contains(&txn_id)
     }
 
     // -----------------------------------------------------------------
@@ -359,23 +360,13 @@ impl UndoManager {
         let entry = UndoEntry::new(lsn, txn_id, key_str.clone(), op, before_value, after_value);
 
         // 写入 entries
-        self.entries.write().unwrap().insert(lsn, entry);
+        self.entries.write().insert(lsn, entry);
 
         // 更新 key_lsns 索引
-        self.key_lsns
-            .write()
-            .unwrap()
-            .entry(key_str)
-            .or_default()
-            .push(lsn);
+        self.key_lsns.write().entry(key_str).or_default().push(lsn);
 
         // 更新 txn_lsns 索引
-        self.txn_lsns
-            .write()
-            .unwrap()
-            .entry(txn_id)
-            .or_default()
-            .push(lsn);
+        self.txn_lsns.write().entry(txn_id).or_default().push(lsn);
 
         Ok(lsn)
     }
@@ -397,13 +388,12 @@ impl UndoManager {
         }
 
         let commit_ts = now_micros();
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write();
 
         // 标记该事务的所有 entries 为已提交
         let txn_lsns = self
             .txn_lsns
             .read()
-            .unwrap()
             .get(&txn_id)
             .cloned()
             .unwrap_or_default();
@@ -415,10 +405,7 @@ impl UndoManager {
         }
 
         // 记录已提交事务
-        self.committed_txns
-            .write()
-            .unwrap()
-            .insert(txn_id, commit_ts);
+        self.committed_txns.write().insert(txn_id, commit_ts);
 
         Ok(commit_ts)
     }
@@ -436,18 +423,17 @@ impl UndoManager {
             return Err(UndoError::TxnAlreadyAborted(txn_id));
         }
 
-        let entries = self.entries.read().unwrap();
+        let entries = self.entries.read();
         let txn_lsns = self
             .txn_lsns
             .read()
-            .unwrap()
             .get(&txn_id)
             .cloned()
             .unwrap_or_default();
 
         if txn_lsns.is_empty() {
             // 无 UNDO entries，但仍需标记为已回滚
-            self.aborted_txns.write().unwrap().insert(txn_id);
+            self.aborted_txns.write().insert(txn_id);
             return Ok(Vec::new());
         }
 
@@ -463,7 +449,7 @@ impl UndoManager {
         }
 
         // 标记为已回滚
-        self.aborted_txns.write().unwrap().insert(txn_id);
+        self.aborted_txns.write().insert(txn_id);
 
         Ok(restore_ops)
     }
@@ -483,8 +469,8 @@ impl UndoManager {
         key: &str,
         as_of_lsn: u64,
     ) -> Result<Option<Vec<u8>>, UndoError> {
-        let entries = self.entries.read().unwrap();
-        let key_lsns = self.key_lsns.read().unwrap();
+        let entries = self.entries.read();
+        let key_lsns = self.key_lsns.read();
 
         let lsns = key_lsns
             .get(key)
@@ -520,8 +506,8 @@ impl UndoManager {
         key: &str,
         as_of_timestamp: u64,
     ) -> Result<Option<Vec<u8>>, UndoError> {
-        let entries = self.entries.read().unwrap();
-        let key_lsns = self.key_lsns.read().unwrap();
+        let entries = self.entries.read();
+        let key_lsns = self.key_lsns.read();
 
         let lsns = key_lsns
             .get(key)
@@ -554,8 +540,8 @@ impl UndoManager {
 
     /// 获取 key 的所有已提交历史版本（按 LSN 升序）
     pub fn get_history(&self, key: &str) -> Result<Vec<HistoryVersion>, UndoError> {
-        let entries = self.entries.read().unwrap();
-        let key_lsns = self.key_lsns.read().unwrap();
+        let entries = self.entries.read();
+        let key_lsns = self.key_lsns.read();
 
         let lsns = key_lsns
             .get(key)
@@ -591,13 +577,13 @@ impl UndoManager {
     /// 早于此 LSN 的已提交 UNDO entries 可被 `purge()` 回收。
     /// 通常设置为最老活跃事务的快照 LSN。
     pub fn set_min_retain_lsn(&self, lsn: u64) {
-        let mut retain = self.min_retain_lsn.write().unwrap();
+        let mut retain = self.min_retain_lsn.write();
         *retain = lsn;
     }
 
     /// 获取最小保留 LSN
     pub fn min_retain_lsn(&self) -> u64 {
-        *self.min_retain_lsn.read().unwrap()
+        *self.min_retain_lsn.read()
     }
 
     /// 清理早于 `min_retain_lsn` 的已提交 UNDO entries
@@ -605,11 +591,11 @@ impl UndoManager {
     /// 返回清理的 entries 数量。
     /// **注意**：未提交/已回滚的 entries 不会被清理（保留用于审计）。
     pub fn purge(&self) -> Result<usize, UndoError> {
-        let min_retain = *self.min_retain_lsn.read().unwrap();
+        let min_retain = *self.min_retain_lsn.read();
 
-        let mut entries = self.entries.write().unwrap();
-        let mut key_lsns = self.key_lsns.write().unwrap();
-        let mut txn_lsns = self.txn_lsns.write().unwrap();
+        let mut entries = self.entries.write();
+        let mut key_lsns = self.key_lsns.write();
+        let mut txn_lsns = self.txn_lsns.write();
 
         let mut purged_count = 0;
         let mut lsns_to_purge = Vec::new();
@@ -650,14 +636,13 @@ impl UndoManager {
 
     /// 获取 entry 数量（包含已提交和未提交）
     pub fn entry_count(&self) -> usize {
-        self.entries.read().unwrap().len()
+        self.entries.read().len()
     }
 
     /// 获取已提交 entry 数量
     pub fn committed_entry_count(&self) -> usize {
         self.entries
             .read()
-            .unwrap()
             .values()
             .filter(|e| e.is_committed())
             .count()
@@ -665,19 +650,18 @@ impl UndoManager {
 
     /// 获取已提交事务数量
     pub fn committed_txn_count(&self) -> usize {
-        self.committed_txns.read().unwrap().len()
+        self.committed_txns.read().len()
     }
 
     /// 获取已回滚事务数量
     pub fn aborted_txn_count(&self) -> usize {
-        self.aborted_txns.read().unwrap().len()
+        self.aborted_txns.read().len()
     }
 
     /// 获取某事务的 UNDO entries 数量
     pub fn txn_entry_count(&self, txn_id: u32) -> usize {
         self.txn_lsns
             .read()
-            .unwrap()
             .get(&txn_id)
             .map(|lsns| lsns.len())
             .unwrap_or(0)
@@ -687,7 +671,6 @@ impl UndoManager {
     pub fn key_version_count(&self, key: &str) -> usize {
         self.key_lsns
             .read()
-            .unwrap()
             .get(key)
             .map(|lsns| lsns.len())
             .unwrap_or(0)

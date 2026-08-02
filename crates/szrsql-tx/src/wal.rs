@@ -391,8 +391,7 @@ impl WalRowChange {
 
     /// 编码为 Insert 载荷：`[row_id: u32][new_len: u32][new_payload]`
     pub fn encode_insert(&self) -> Vec<u8> {
-        let mut buf =
-            Vec::with_capacity(4 + 4 + self.new_payload.len());
+        let mut buf = Vec::with_capacity(4 + 4 + self.new_payload.len());
         buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
         buf.extend_from_slice(&(self.new_payload.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.new_payload);
@@ -402,9 +401,8 @@ impl WalRowChange {
     /// 编码为 Update 载荷：
     /// `[row_id: u32][old_len: u32][old_payload][new_len: u32][new_payload]`
     pub fn encode_update(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(
-            4 + 4 + self.old_payload.len() + 4 + self.new_payload.len(),
-        );
+        let mut buf =
+            Vec::with_capacity(4 + 4 + self.old_payload.len() + 4 + self.new_payload.len());
         buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
         buf.extend_from_slice(&(self.old_payload.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.old_payload);
@@ -415,8 +413,7 @@ impl WalRowChange {
 
     /// 编码为 Delete 载荷：`[row_id: u32][old_len: u32][old_payload]`
     pub fn encode_delete(&self) -> Vec<u8> {
-        let mut buf =
-            Vec::with_capacity(4 + 4 + self.old_payload.len());
+        let mut buf = Vec::with_capacity(4 + 4 + self.old_payload.len());
         buf.extend_from_slice(&(self.row_id as u32).to_le_bytes());
         buf.extend_from_slice(&(self.old_payload.len() as u32).to_le_bytes());
         buf.extend_from_slice(&self.old_payload);
@@ -461,9 +458,8 @@ impl WalRowChange {
         }
         let old_payload = data[8..8 + old_len].to_vec();
         let new_len_off = 8 + old_len;
-        let new_len = u32::from_le_bytes(
-            data[new_len_off..new_len_off + 4].try_into().unwrap(),
-        ) as usize;
+        let new_len =
+            u32::from_le_bytes(data[new_len_off..new_len_off + 4].try_into().unwrap()) as usize;
         if data.len() < new_len_off + 4 + new_len {
             return Err(WalError::BufferTooShort {
                 need: new_len_off + 4 + new_len,
@@ -952,13 +948,21 @@ impl WalReader {
                 Ok(None) => {
                     let count = records.len();
                     tracing::Span::current().record("record_count", count);
-                    debug!(record_count = count, eof_reached = true, "WAL read_all completed");
+                    debug!(
+                        record_count = count,
+                        eof_reached = true,
+                        "WAL read_all completed"
+                    );
                     return Ok((records, true));
                 }
                 Err(_) => {
                     let count = records.len();
                     tracing::Span::current().record("record_count", count);
-                    warn!(record_count = count, eof_reached = false, "WAL read_all stopped at corruption");
+                    warn!(
+                        record_count = count,
+                        eof_reached = false,
+                        "WAL read_all stopped at corruption"
+                    );
                     return Ok((records, false));
                 }
             }
@@ -1129,7 +1133,11 @@ impl WalSegmentManager {
             }
         }
 
-        let active_segment = if max_seg == 0 { 1 } else { max_seg };
+        let active_segment = if max_seg == 0 {
+            1
+        } else {
+            max_seg
+        };
         let active_path = Self::segment_path_static(&dir, active_segment);
         let current_segment_bytes = std::fs::metadata(&active_path)
             .map(|m| m.len())
@@ -1266,7 +1274,10 @@ impl WalCheckpoint {
     /// 从二进制解码
     pub fn decode(data: &[u8]) -> Result<Self, WalError> {
         if data.len() < 12 {
-            return Err(WalError::BufferTooShort { need: 12, have: data.len() });
+            return Err(WalError::BufferTooShort {
+                need: 12,
+                have: data.len(),
+            });
         }
         let checkpoint_lsn = u64::from_le_bytes(data[0..8].try_into().unwrap());
         let count = u32::from_le_bytes(data[8..12].try_into().unwrap()) as usize;
@@ -1279,7 +1290,9 @@ impl WalCheckpoint {
         let mut active_txns = Vec::with_capacity(count);
         for i in 0..count {
             let offset = 12 + i * 4;
-            active_txns.push(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
+            active_txns.push(u32::from_le_bytes(
+                data[offset..offset + 4].try_into().unwrap(),
+            ));
         }
         Ok(Self {
             checkpoint_lsn,
@@ -1292,20 +1305,20 @@ impl WalCheckpoint {
         let lsn = writer
             .current_lsn
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let mut record = WalRecord::new(
-            lsn,
-            0,
-            WalOpType::Checkpoint,
-            0,
-            self.encode(),
-        );
+        let mut record = WalRecord::new(lsn, 0, WalOpType::Checkpoint, 0, self.encode());
         record.update_checksum();
         let encoded = record.encode();
 
         let mut file = writer.file.lock();
-        file.write_all(&encoded).map_err(|e| WalError::IoError(e.to_string()))?;
-        file.sync_all().map_err(|e| WalError::IoError(e.to_string()))?;
-        debug!(lsn, checkpoint_lsn = self.checkpoint_lsn, "checkpoint written to WAL");
+        file.write_all(&encoded)
+            .map_err(|e| WalError::IoError(e.to_string()))?;
+        file.sync_all()
+            .map_err(|e| WalError::IoError(e.to_string()))?;
+        debug!(
+            lsn,
+            checkpoint_lsn = self.checkpoint_lsn,
+            "checkpoint written to WAL"
+        );
         Ok(lsn)
     }
 
@@ -1358,7 +1371,11 @@ impl WalReplayer {
                 Ok(Some(record)) => {
                     if !callback(&record) {
                         tracing::Span::current().record("replayed_count", count);
-                        debug!(replayed_count = count, stopped_by_callback = true, "WAL replay stopped by callback");
+                        debug!(
+                            replayed_count = count,
+                            stopped_by_callback = true,
+                            "WAL replay stopped by callback"
+                        );
                         return Ok(count);
                     }
                     count += 1;
@@ -1637,7 +1654,8 @@ impl CheckpointManager {
         let truncated = wal.truncate_before(start_lsn).unwrap_or(0);
         tracing::Span::current().record("truncated_bytes", truncated);
         debug!(
-            start_lsn, end_lsn, truncated, "checkpoint_with_truncate completed"
+            start_lsn,
+            end_lsn, truncated, "checkpoint_with_truncate completed"
         );
 
         Ok((end_lsn, truncated))
@@ -3631,7 +3649,13 @@ mod tests {
             let records = WalReplayer::replay_all(&path).unwrap();
             assert_eq!(records.len(), 5, "should have 5 records remaining");
             for (i, r) in records.iter().enumerate() {
-                assert_eq!(r.lsn, 5 + i as u64, "record {} should have lsn {}", i, 5 + i);
+                assert_eq!(
+                    r.lsn,
+                    5 + i as u64,
+                    "record {} should have lsn {}",
+                    i,
+                    5 + i
+                );
             }
 
             // current_lsn 不变
@@ -3701,7 +3725,11 @@ mod tests {
 
             // 验证：replay 后只剩 start(5) + end(6) 两条记录
             let records = WalReplayer::replay_all(&path).unwrap();
-            assert_eq!(records.len(), 2, "should have 2 checkpoint records remaining");
+            assert_eq!(
+                records.len(),
+                2,
+                "should have 2 checkpoint records remaining"
+            );
             assert_eq!(records[0].lsn, 5);
             assert_eq!(records[1].lsn, 6);
 
@@ -4143,7 +4171,9 @@ mod tests {
     mod phase_2_4 {
         use super::*;
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::{Arc, Mutex};
+        use std::sync::Arc;
+        // P0-6：使用 parking_lot::Mutex（通过 super::* 引入）
+        use parking_lot::Mutex;
 
         /// 测试辅助：生成唯一临时文件路径
         fn temp_wal_path(test_name: &str) -> std::path::PathBuf {
@@ -4201,23 +4231,23 @@ mod tests {
             }
 
             fn committed(&self) -> Vec<(u32, Vec<WalRecord>)> {
-                self.committed.lock().unwrap().clone()
+                self.committed.lock().clone()
             }
 
             fn rolled_back(&self) -> Vec<u32> {
-                self.rolled_back.lock().unwrap().clone()
+                self.rolled_back.lock().clone()
             }
         }
 
         impl WalObserver for MockObserver {
             fn on_commit(&self, tx_id: u32, records: Vec<WalRecord>) {
                 self.commit_calls.fetch_add(1, Ordering::SeqCst);
-                self.committed.lock().unwrap().push((tx_id, records));
+                self.committed.lock().push((tx_id, records));
             }
 
             fn on_rollback(&self, tx_id: u32) {
                 self.rollback_calls.fetch_add(1, Ordering::SeqCst);
-                self.rolled_back.lock().unwrap().push(tx_id);
+                self.rolled_back.lock().push(tx_id);
             }
         }
 
@@ -4854,10 +4884,8 @@ mod tests {
     #[test]
     fn p9_2_wal_writer_append_row_change_records() {
         // 端到端验证：WalWriter 写入行级 Insert/Update/Delete 记录，WalReader 读回
-        let temp = std::env::temp_dir().join(format!(
-            "szrsql_p9_2_wal_row_{}.wal",
-            std::process::id()
-        ));
+        let temp =
+            std::env::temp_dir().join(format!("szrsql_p9_2_wal_row_{}.wal", std::process::id()));
         std::fs::remove_file(&temp).ok();
         let writer = WalWriter::create_new(&temp).unwrap();
 

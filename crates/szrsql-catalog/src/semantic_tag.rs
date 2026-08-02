@@ -453,14 +453,8 @@ mod tests {
     fn test_split_top_level_commas() {
         assert_eq!(split_top_level_commas(""), vec![""]);
         assert_eq!(split_top_level_commas("a,b,c"), vec!["a", "b", "c"]);
-        assert_eq!(
-            split_top_level_commas(r#""a,b",c"#),
-            vec![r#""a,b""#, "c"]
-        );
-        assert_eq!(
-            split_top_level_commas(r#"[1,2],3"#),
-            vec!["[1,2]", "3"]
-        );
+        assert_eq!(split_top_level_commas(r#""a,b",c"#), vec![r#""a,b""#, "c"]);
+        assert_eq!(split_top_level_commas(r#"[1,2],3"#), vec!["[1,2]", "3"]);
     }
 
     #[test]
@@ -473,18 +467,9 @@ mod tests {
 
     #[test]
     fn test_parse_json_string_with_escape() {
-        assert_eq!(
-            parse_json_string(r#""a\"b""#),
-            Some(r#"a"b"#.to_string())
-        );
-        assert_eq!(
-            parse_json_string(r#""a\nb""#),
-            Some("a\nb".to_string())
-        );
-        assert_eq!(
-            parse_json_string(r#""a\\b""#),
-            Some(r#"a\b"#.to_string())
-        );
+        assert_eq!(parse_json_string(r#""a\"b""#), Some(r#"a"b"#.to_string()));
+        assert_eq!(parse_json_string(r#""a\nb""#), Some("a\nb".to_string()));
+        assert_eq!(parse_json_string(r#""a\\b""#), Some(r#"a\b"#.to_string()));
     }
 
     #[test]
@@ -496,7 +481,10 @@ mod tests {
         assert_eq!(parse_json_string_array(r#"[]"#), Vec::<String>::new());
         assert_eq!(parse_json_string_array(r#"["单"]"#), vec!["单".to_string()]);
         // 非 JSON 数组返回空
-        assert_eq!(parse_json_string_array(r#""not array""#), Vec::<String>::new());
+        assert_eq!(
+            parse_json_string_array(r#""not array""#),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

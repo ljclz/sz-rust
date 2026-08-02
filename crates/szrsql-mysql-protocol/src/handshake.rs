@@ -10,9 +10,7 @@
 //! 详见 MySQL 文档 "Protocol::HandshakeV10" 和 "Protocol::HandshakeResponse41"。
 
 use crate::auth::SALT_LEN;
-use crate::packet::{
-    read_lenenc_string, read_nul_string, write_lenenc_int, write_nul_string,
-};
+use crate::packet::{read_lenenc_string, read_nul_string, write_lenenc_int, write_nul_string};
 use thiserror::Error;
 
 /// 服务器能力标志位（部分）。
@@ -161,14 +159,14 @@ impl HandshakeV10 {
         }
 
         // 2. 服务器版本
-        let server_version =
-            read_nul_string(&mut buf).ok_or_else(|| HandshakeError::Protocol(
-                "missing server version".to_string(),
-            ))?;
+        let server_version = read_nul_string(&mut buf)
+            .ok_or_else(|| HandshakeError::Protocol("missing server version".to_string()))?;
 
         // 3. 连接 ID
         if buf.len() < 4 {
-            return Err(HandshakeError::Protocol("missing connection id".to_string()));
+            return Err(HandshakeError::Protocol(
+                "missing connection id".to_string(),
+            ));
         }
         let connection_id = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
         buf = &buf[4..];
@@ -185,9 +183,7 @@ impl HandshakeV10 {
 
         // 5. 填充字节
         if buf.is_empty() {
-            return Err(HandshakeError::Protocol(
-                "missing filler byte".to_string(),
-            ));
+            return Err(HandshakeError::Protocol("missing filler byte".to_string()));
         }
         buf = &buf[1..];
 
@@ -202,7 +198,9 @@ impl HandshakeV10 {
 
         // 7. 字符集
         if buf.is_empty() {
-            return Err(HandshakeError::Protocol("missing character_set".to_string()));
+            return Err(HandshakeError::Protocol(
+                "missing character_set".to_string(),
+            ));
         }
         let character_set = buf[0];
         buf = &buf[1..];
@@ -361,10 +359,8 @@ impl HandshakeResponse41 {
         buf = &buf[23..];
 
         // 5. username
-        let username =
-            read_nul_string(&mut buf).ok_or_else(|| HandshakeError::Protocol(
-                "missing username".to_string(),
-            ))?;
+        let username = read_nul_string(&mut buf)
+            .ok_or_else(|| HandshakeError::Protocol("missing username".to_string()))?;
 
         // 6. auth_response
         let auth_response = if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
@@ -400,36 +396,35 @@ impl HandshakeResponse41 {
         //   说明客户端实际未发 database，把刚才读到的值作为 auth_plugin_name。
         // - 若仅 CONNECT_WITH_DB：正常读 database。
         // - 若仅 PLUGIN_AUTH：正常读 auth_plugin_name。
-        let (database, auth_plugin_name) =
-            if capability_flags & CLIENT_CONNECT_WITH_DB != 0
-                && capability_flags & CLIENT_PLUGIN_AUTH != 0
-            {
-                // 两者都设置：先读 database
-                let db_candidate = read_nul_string(&mut buf);
-                // 读完 database 后，buf 应该还有 auth_plugin_name（以 NUL 结尾）
-                if buf.is_empty() {
-                    // 没有剩余数据：客户端实际未发 database，db_candidate 就是 auth_plugin_name
-                    let plugin = db_candidate.unwrap_or_default();
-                    tracing::debug!(
-                        target: "mysql_handshake",
-                        plugin = %plugin,
-                        "CONNECT_WITH_DB set but no database sent; treating value as auth_plugin_name"
-                    );
-                    (None, plugin)
-                } else {
-                    // 有剩余数据：db_candidate 是真 database，继续读 auth_plugin_name
-                    let plugin = read_nul_string(&mut buf).unwrap_or_default();
-                    (db_candidate, plugin)
-                }
-            } else if capability_flags & CLIENT_CONNECT_WITH_DB != 0 {
-                // 仅 CONNECT_WITH_DB：读 database
-                (read_nul_string(&mut buf), String::new())
-            } else if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
-                // 仅 PLUGIN_AUTH：读 auth_plugin_name
-                (None, read_nul_string(&mut buf).unwrap_or_default())
+        let (database, auth_plugin_name) = if capability_flags & CLIENT_CONNECT_WITH_DB != 0
+            && capability_flags & CLIENT_PLUGIN_AUTH != 0
+        {
+            // 两者都设置：先读 database
+            let db_candidate = read_nul_string(&mut buf);
+            // 读完 database 后，buf 应该还有 auth_plugin_name（以 NUL 结尾）
+            if buf.is_empty() {
+                // 没有剩余数据：客户端实际未发 database，db_candidate 就是 auth_plugin_name
+                let plugin = db_candidate.unwrap_or_default();
+                tracing::debug!(
+                    target: "mysql_handshake",
+                    plugin = %plugin,
+                    "CONNECT_WITH_DB set but no database sent; treating value as auth_plugin_name"
+                );
+                (None, plugin)
             } else {
-                (None, String::new())
-            };
+                // 有剩余数据：db_candidate 是真 database，继续读 auth_plugin_name
+                let plugin = read_nul_string(&mut buf).unwrap_or_default();
+                (db_candidate, plugin)
+            }
+        } else if capability_flags & CLIENT_CONNECT_WITH_DB != 0 {
+            // 仅 CONNECT_WITH_DB：读 database
+            (read_nul_string(&mut buf), String::new())
+        } else if capability_flags & CLIENT_PLUGIN_AUTH != 0 {
+            // 仅 PLUGIN_AUTH：读 auth_plugin_name
+            (None, read_nul_string(&mut buf).unwrap_or_default())
+        } else {
+            (None, String::new())
+        };
 
         Ok(Self {
             capability_flags,
@@ -595,7 +590,10 @@ mod tests {
         ];
         let handshake = HandshakeV10::new("test", 1, &salt);
         // 前 8 字节
-        assert_eq!(handshake.auth_plugin_data_part_1, [10, 20, 30, 40, 50, 60, 70, 80]);
+        assert_eq!(
+            handshake.auth_plugin_data_part_1,
+            [10, 20, 30, 40, 50, 60, 70, 80]
+        );
         // 后 12 字节
         assert_eq!(
             handshake.auth_plugin_data_part_2,
@@ -611,7 +609,9 @@ mod tests {
             character_set: CHARSET_UTF8MB4,
             reserved: [0u8; 23],
             username: "root".to_string(),
-            auth_response: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            auth_response: vec![
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+            ],
             database: None,
             auth_plugin_name: "mysql_native_password".to_string(),
         };
@@ -655,7 +655,13 @@ mod tests {
         );
         let encoded = err.encode();
         assert_eq!(encoded[0], 0xFF); // ERR 标识
-        assert_eq!(encoded[1..3], [error_codes::ACCESS_DENIED as u8, (error_codes::ACCESS_DENIED >> 8) as u8]);
+        assert_eq!(
+            encoded[1..3],
+            [
+                error_codes::ACCESS_DENIED as u8,
+                (error_codes::ACCESS_DENIED >> 8) as u8
+            ]
+        );
         assert_eq!(encoded[3], b'#');
         assert_eq!(&encoded[4..9], b"28000");
     }

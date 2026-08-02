@@ -38,7 +38,9 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 
 // =====================================================================
 // DataType — 列数据类型
@@ -327,7 +329,7 @@ impl SchemaChangeObserverManager {
 
     /// 注册观察者（返回 true 表示注册成功，false 表示已注册相同指针的 observer）
     pub fn register(&self, observer: Arc<dyn SchemaChangeObserver>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         let target_addr = Arc::as_ptr(&observer) as *const () as usize;
         if observers
             .iter()
@@ -341,7 +343,7 @@ impl SchemaChangeObserverManager {
 
     /// 注销观察者（返回 true 表示注销成功）
     pub fn unregister<O: SchemaChangeObserver + 'static>(&self, observer: &Arc<O>) -> bool {
-        let mut observers = self.observers.write().unwrap();
+        let mut observers = self.observers.write();
         let target_addr = Arc::as_ptr(observer) as *const () as usize;
         let original_len = observers.len();
         observers.retain(|o| Arc::as_ptr(o) as *const () as usize != target_addr);
@@ -350,7 +352,7 @@ impl SchemaChangeObserverManager {
 
     /// 通知所有观察者：分发一个 SchemaChangeEvent
     pub fn notify(&self, event: SchemaChangeEvent) {
-        let observers = self.observers.read().unwrap();
+        let observers = self.observers.read();
         let count = observers.len();
         for observer in observers.iter() {
             let event_clone = event.clone();
@@ -364,7 +366,7 @@ impl SchemaChangeObserverManager {
 
     /// 获取已注册的观察者数量
     pub fn observer_count(&self) -> usize {
-        self.observers.read().unwrap().len()
+        self.observers.read().len()
     }
 
     /// 获取已分发的总次数
@@ -444,7 +446,7 @@ impl SchemaRegistry {
         }
 
         let table_name = table_name.into();
-        let mut schemas = self.schemas.write().unwrap();
+        let mut schemas = self.schemas.write();
         if schemas.contains_key(&table_id) {
             return Err(SchemaError::TableAlreadyExists {
                 table_id,
@@ -473,7 +475,7 @@ impl SchemaRegistry {
         table_id: u32,
         column: ColumnDef,
     ) -> Result<TableSchema, SchemaError> {
-        let mut schemas = self.schemas.write().unwrap();
+        let mut schemas = self.schemas.write();
         let schema = schemas
             .get_mut(&table_id)
             .ok_or(SchemaError::TableNotFound(table_id))?;
@@ -501,7 +503,7 @@ impl SchemaRegistry {
         table_id: u32,
         column_name: &str,
     ) -> Result<TableSchema, SchemaError> {
-        let mut schemas = self.schemas.write().unwrap();
+        let mut schemas = self.schemas.write();
         let schema = schemas
             .get_mut(&table_id)
             .ok_or(SchemaError::TableNotFound(table_id))?;
@@ -535,17 +537,14 @@ impl SchemaRegistry {
     /// **错误**：
     /// - `TableNotFound`：table_id 不存在
     pub fn drop_table(&self, table_id: u32) -> Result<TableSchema, SchemaError> {
-        let mut schemas = self.schemas.write().unwrap();
+        let mut schemas = self.schemas.write();
         let schema = schemas
             .remove(&table_id)
             .ok_or(SchemaError::TableNotFound(table_id))?;
 
         let new_version = self.global_version.fetch_add(1, Ordering::SeqCst) + 1;
         // 记录已删除表的最后版本（便于审计）
-        self.dropped_versions
-            .write()
-            .unwrap()
-            .insert(table_id, new_version);
+        self.dropped_versions.write().insert(table_id, new_version);
         // 返回的 schema.version 是删除前的版本，但 new_version 是本次操作的版本
         // 为了语义清晰，返回的 schema 携带新版本
         let mut dropped_schema = schema;
@@ -555,40 +554,32 @@ impl SchemaRegistry {
 
     /// 获取表的 schema（如果存在）
     pub fn get_schema(&self, table_id: u32) -> Option<TableSchema> {
-        self.schemas.read().unwrap().get(&table_id).cloned()
+        self.schemas.read().get(&table_id).cloned()
     }
 
     /// 获取表的当前 schema 版本（如果表存在）
     pub fn get_version(&self, table_id: u32) -> Option<u64> {
-        self.schemas
-            .read()
-            .unwrap()
-            .get(&table_id)
-            .map(|s| s.version)
+        self.schemas.read().get(&table_id).map(|s| s.version)
     }
 
     /// 获取已注册的表数量
     pub fn table_count(&self) -> usize {
-        self.schemas.read().unwrap().len()
+        self.schemas.read().len()
     }
 
     /// 获取已删除表的最后版本号（审计用）
     pub fn get_dropped_version(&self, table_id: u32) -> Option<u64> {
-        self.dropped_versions
-            .read()
-            .unwrap()
-            .get(&table_id)
-            .copied()
+        self.dropped_versions.read().get(&table_id).copied()
     }
 
     /// 判断表是否存在
     pub fn contains_table(&self, table_id: u32) -> bool {
-        self.schemas.read().unwrap().contains_key(&table_id)
+        self.schemas.read().contains_key(&table_id)
     }
 
     /// 获取所有表的 schema 快照
     pub fn list_tables(&self) -> Vec<TableSchema> {
-        self.schemas.read().unwrap().values().cloned().collect()
+        self.schemas.read().values().cloned().collect()
     }
 }
 
@@ -877,34 +868,34 @@ impl SchemaAwareCdcEngine {
 ///
 /// 主要用于测试：注册后可通过 `events()` 获取所有接收的事件
 pub struct CollectingSchemaObserver {
-    events: std::sync::Mutex<Vec<SchemaChangeEvent>>,
+    events: parking_lot::Mutex<Vec<SchemaChangeEvent>>,
 }
 
 impl CollectingSchemaObserver {
     pub fn new() -> Self {
         Self {
-            events: std::sync::Mutex::new(Vec::new()),
+            events: parking_lot::Mutex::new(Vec::new()),
         }
     }
 
     /// 获取已接收的事件快照（clone）
     pub fn events(&self) -> Vec<SchemaChangeEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 
     /// 获取已接收的事件数量
     pub fn len(&self) -> usize {
-        self.events.lock().unwrap().len()
+        self.events.lock().len()
     }
 
     /// 是否为空
     pub fn is_empty(&self) -> bool {
-        self.events.lock().unwrap().is_empty()
+        self.events.lock().is_empty()
     }
 
     /// 清空已接收的事件
     pub fn clear(&self) {
-        self.events.lock().unwrap().clear();
+        self.events.lock().clear();
     }
 }
 
@@ -916,7 +907,7 @@ impl Default for CollectingSchemaObserver {
 
 impl SchemaChangeObserver for CollectingSchemaObserver {
     fn on_schema_change(&self, event: SchemaChangeEvent) {
-        self.events.lock().unwrap().push(event);
+        self.events.lock().push(event);
     }
 }
 

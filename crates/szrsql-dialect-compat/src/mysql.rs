@@ -176,158 +176,343 @@ impl MysqlCompat {
     /// 数据类型兼容性测试
     fn test_types() -> Vec<MysqlCompatResult> {
         vec![
-            Self::check("TINYINT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (id TINYINT)"),
-            Self::check("SMALLINT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (id SMALLINT)"),
-            Self::check("MEDIUMINT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (id MEDIUMINT)"),
-            Self::check("INT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (id INT)"),
-            Self::check("BIGINT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (id BIGINT)"),
-            Self::check("VARCHAR 类型", MysqlCategory::Type,
-                "CREATE TABLE t (name VARCHAR(255))"),
-            Self::check("CHAR 类型", MysqlCategory::Type,
-                "CREATE TABLE t (code CHAR(10))"),
-            Self::check("TEXT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (content TEXT)"),
-            Self::check("MEDIUMTEXT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (content MEDIUMTEXT)"),
-            Self::check("LONGTEXT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (content LONGTEXT)"),
-            Self::check("BLOB 类型", MysqlCategory::Type,
-                "CREATE TABLE t (data BLOB)"),
-            Self::check("FLOAT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (score FLOAT)"),
-            Self::check("DOUBLE 类型", MysqlCategory::Type,
-                "CREATE TABLE t (price DOUBLE)"),
-            Self::check("DECIMAL 类型", MysqlCategory::Type,
-                "CREATE TABLE t (price DECIMAL(10, 2))"),
-            Self::check("DATE 类型", MysqlCategory::Type,
-                "CREATE TABLE t (birthday DATE)"),
-            Self::check("DATETIME 类型", MysqlCategory::Type,
-                "CREATE TABLE t (created_at DATETIME)"),
-            Self::check("TIMESTAMP 类型", MysqlCategory::Type,
-                "CREATE TABLE t (updated_at TIMESTAMP)"),
-            Self::check("TIME 类型", MysqlCategory::Type,
-                "CREATE TABLE t (duration TIME)"),
-            Self::check("YEAR 类型", MysqlCategory::Type,
-                "CREATE TABLE t (year YEAR)"),
-            Self::check("BOOLEAN 类型", MysqlCategory::Type,
-                "CREATE TABLE t (is_active BOOLEAN)"),
-            Self::check("JSON 类型", MysqlCategory::Type,
-                "CREATE TABLE t (data JSON)"),
-            Self::check("ENUM 类型", MysqlCategory::Type,
-                "CREATE TABLE t (status ENUM('active', 'inactive'))"),
-            Self::check("BIT 类型", MysqlCategory::Type,
-                "CREATE TABLE t (flags BIT(8))"),
+            Self::check(
+                "TINYINT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (id TINYINT)",
+            ),
+            Self::check(
+                "SMALLINT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (id SMALLINT)",
+            ),
+            Self::check(
+                "MEDIUMINT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (id MEDIUMINT)",
+            ),
+            Self::check("INT 类型", MysqlCategory::Type, "CREATE TABLE t (id INT)"),
+            Self::check(
+                "BIGINT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (id BIGINT)",
+            ),
+            Self::check(
+                "VARCHAR 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (name VARCHAR(255))",
+            ),
+            Self::check(
+                "CHAR 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (code CHAR(10))",
+            ),
+            Self::check(
+                "TEXT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (content TEXT)",
+            ),
+            Self::check(
+                "MEDIUMTEXT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (content MEDIUMTEXT)",
+            ),
+            Self::check(
+                "LONGTEXT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (content LONGTEXT)",
+            ),
+            Self::check(
+                "BLOB 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (data BLOB)",
+            ),
+            Self::check(
+                "FLOAT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (score FLOAT)",
+            ),
+            Self::check(
+                "DOUBLE 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (price DOUBLE)",
+            ),
+            Self::check(
+                "DECIMAL 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (price DECIMAL(10, 2))",
+            ),
+            Self::check(
+                "DATE 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (birthday DATE)",
+            ),
+            Self::check(
+                "DATETIME 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (created_at DATETIME)",
+            ),
+            Self::check(
+                "TIMESTAMP 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (updated_at TIMESTAMP)",
+            ),
+            Self::check(
+                "TIME 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (duration TIME)",
+            ),
+            Self::check(
+                "YEAR 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (year YEAR)",
+            ),
+            Self::check(
+                "BOOLEAN 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (is_active BOOLEAN)",
+            ),
+            Self::check(
+                "JSON 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (data JSON)",
+            ),
+            Self::check(
+                "ENUM 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (status ENUM('active', 'inactive'))",
+            ),
+            Self::check(
+                "BIT 类型",
+                MysqlCategory::Type,
+                "CREATE TABLE t (flags BIT(8))",
+            ),
         ]
     }
 
     /// 内置函数兼容性测试
     fn test_functions() -> Vec<MysqlCompatResult> {
         vec![
-            Self::check("NOW() 函数", MysqlCategory::Function,
-                "SELECT NOW()"),
-            Self::check("CURDATE() 函数", MysqlCategory::Function,
-                "SELECT CURDATE()"),
-            Self::check("CURTIME() 函数", MysqlCategory::Function,
-                "SELECT CURTIME()"),
-            Self::check("IFNULL 函数", MysqlCategory::Function,
-                "SELECT IFNULL(name, 'unknown') FROM users"),
-            Self::check("IF 函数", MysqlCategory::Function,
-                "SELECT IF(age > 18, 'adult', 'minor') FROM users"),
-            Self::check("CONCAT 函数", MysqlCategory::Function,
-                "SELECT CONCAT(first_name, ' ', last_name) FROM users"),
-            Self::check("CONCAT_WS 函数", MysqlCategory::Function,
-                "SELECT CONCAT_WS(',', first_name, last_name) FROM users"),
-            Self::check("GROUP_CONCAT 函数", MysqlCategory::Function,
-                "SELECT department, GROUP_CONCAT(name) FROM employees GROUP BY department"),
-            Self::check("DATE_FORMAT 函数", MysqlCategory::Function,
-                "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d')"),
-            Self::check("STR_TO_DATE 函数", MysqlCategory::Function,
-                "SELECT STR_TO_DATE('2024-01-01', '%Y-%m-%d')"),
-            Self::check("UNIX_TIMESTAMP 函数", MysqlCategory::Function,
-                "SELECT UNIX_TIMESTAMP()"),
-            Self::check("FROM_UNIXTIME 函数", MysqlCategory::Function,
-                "SELECT FROM_UNIXTIME(1700000000)"),
-            Self::check("COUNT 函数", MysqlCategory::Function,
-                "SELECT COUNT(*) FROM users"),
-            Self::check("SUM/AVG/MAX/MIN 函数", MysqlCategory::Function,
-                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees"),
-            Self::check("LENGTH 函数", MysqlCategory::Function,
-                "SELECT LENGTH(name) FROM users"),
-            Self::check("UPPER/LOWER 函数", MysqlCategory::Function,
-                "SELECT UPPER(name), LOWER(name) FROM users"),
-            Self::check("SUBSTRING 函数", MysqlCategory::Function,
-                "SELECT SUBSTRING(name, 1, 3) FROM users"),
-            Self::check("TRIM 函数", MysqlCategory::Function,
-                "SELECT TRIM('  hello  ')"),
-            Self::check("COALESCE 函数", MysqlCategory::Function,
-                "SELECT COALESCE(name, 'unknown') FROM users"),
-            Self::check("CAST 函数", MysqlCategory::Function,
-                "SELECT CAST('123' AS SIGNED)"),
-            Self::check("CASE WHEN 表达式", MysqlCategory::Function,
-                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users"),
+            Self::check("NOW() 函数", MysqlCategory::Function, "SELECT NOW()"),
+            Self::check(
+                "CURDATE() 函数",
+                MysqlCategory::Function,
+                "SELECT CURDATE()",
+            ),
+            Self::check(
+                "CURTIME() 函数",
+                MysqlCategory::Function,
+                "SELECT CURTIME()",
+            ),
+            Self::check(
+                "IFNULL 函数",
+                MysqlCategory::Function,
+                "SELECT IFNULL(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "IF 函数",
+                MysqlCategory::Function,
+                "SELECT IF(age > 18, 'adult', 'minor') FROM users",
+            ),
+            Self::check(
+                "CONCAT 函数",
+                MysqlCategory::Function,
+                "SELECT CONCAT(first_name, ' ', last_name) FROM users",
+            ),
+            Self::check(
+                "CONCAT_WS 函数",
+                MysqlCategory::Function,
+                "SELECT CONCAT_WS(',', first_name, last_name) FROM users",
+            ),
+            Self::check(
+                "GROUP_CONCAT 函数",
+                MysqlCategory::Function,
+                "SELECT department, GROUP_CONCAT(name) FROM employees GROUP BY department",
+            ),
+            Self::check(
+                "DATE_FORMAT 函数",
+                MysqlCategory::Function,
+                "SELECT DATE_FORMAT(NOW(), '%Y-%m-%d')",
+            ),
+            Self::check(
+                "STR_TO_DATE 函数",
+                MysqlCategory::Function,
+                "SELECT STR_TO_DATE('2024-01-01', '%Y-%m-%d')",
+            ),
+            Self::check(
+                "UNIX_TIMESTAMP 函数",
+                MysqlCategory::Function,
+                "SELECT UNIX_TIMESTAMP()",
+            ),
+            Self::check(
+                "FROM_UNIXTIME 函数",
+                MysqlCategory::Function,
+                "SELECT FROM_UNIXTIME(1700000000)",
+            ),
+            Self::check(
+                "COUNT 函数",
+                MysqlCategory::Function,
+                "SELECT COUNT(*) FROM users",
+            ),
+            Self::check(
+                "SUM/AVG/MAX/MIN 函数",
+                MysqlCategory::Function,
+                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees",
+            ),
+            Self::check(
+                "LENGTH 函数",
+                MysqlCategory::Function,
+                "SELECT LENGTH(name) FROM users",
+            ),
+            Self::check(
+                "UPPER/LOWER 函数",
+                MysqlCategory::Function,
+                "SELECT UPPER(name), LOWER(name) FROM users",
+            ),
+            Self::check(
+                "SUBSTRING 函数",
+                MysqlCategory::Function,
+                "SELECT SUBSTRING(name, 1, 3) FROM users",
+            ),
+            Self::check(
+                "TRIM 函数",
+                MysqlCategory::Function,
+                "SELECT TRIM('  hello  ')",
+            ),
+            Self::check(
+                "COALESCE 函数",
+                MysqlCategory::Function,
+                "SELECT COALESCE(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "CAST 函数",
+                MysqlCategory::Function,
+                "SELECT CAST('123' AS SIGNED)",
+            ),
+            Self::check(
+                "CASE WHEN 表达式",
+                MysqlCategory::Function,
+                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users",
+            ),
         ]
     }
 
     /// 运算符兼容性测试
     fn test_operators() -> Vec<MysqlCompatResult> {
         vec![
-            Self::check("REGEXP 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE name REGEXP '^A'"),
-            Self::check("RLIKE 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE name RLIKE '^A'"),
-            Self::check("LIKE 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE name LIKE 'A%'"),
-            Self::check("BETWEEN 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE age BETWEEN 18 AND 65"),
-            Self::check("IN 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE id IN (1, 2, 3)"),
-            Self::check("IS NULL 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE name IS NULL"),
-            Self::check("IS NOT NULL 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE name IS NOT NULL"),
-            Self::check("AND 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE age > 18 AND age < 65"),
-            Self::check("OR 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE age < 18 OR age > 65"),
-            Self::check("NOT 运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE NOT (age > 65)"),
-            Self::check("字符串拼接 CONCAT", MysqlCategory::Operator,
-                "SELECT CONCAT('a', 'b')"),
-            Self::check("DIV 整除运算符", MysqlCategory::Operator,
-                "SELECT 10 DIV 3"),
-            Self::check("MOD 取模运算符", MysqlCategory::Operator,
-                "SELECT 10 MOD 3"),
-            Self::check("比较运算符", MysqlCategory::Operator,
-                "SELECT * FROM users WHERE age >= 18 AND age <= 65"),
-            Self::check("算术运算符", MysqlCategory::Operator,
-                "SELECT 1 + 2 * 3 - 4 / 2"),
+            Self::check(
+                "REGEXP 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE name REGEXP '^A'",
+            ),
+            Self::check(
+                "RLIKE 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE name RLIKE '^A'",
+            ),
+            Self::check(
+                "LIKE 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE name LIKE 'A%'",
+            ),
+            Self::check(
+                "BETWEEN 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE age BETWEEN 18 AND 65",
+            ),
+            Self::check(
+                "IN 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE id IN (1, 2, 3)",
+            ),
+            Self::check(
+                "IS NULL 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE name IS NULL",
+            ),
+            Self::check(
+                "IS NOT NULL 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE name IS NOT NULL",
+            ),
+            Self::check(
+                "AND 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE age > 18 AND age < 65",
+            ),
+            Self::check(
+                "OR 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE age < 18 OR age > 65",
+            ),
+            Self::check(
+                "NOT 运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE NOT (age > 65)",
+            ),
+            Self::check(
+                "字符串拼接 CONCAT",
+                MysqlCategory::Operator,
+                "SELECT CONCAT('a', 'b')",
+            ),
+            Self::check("DIV 整除运算符", MysqlCategory::Operator, "SELECT 10 DIV 3"),
+            Self::check("MOD 取模运算符", MysqlCategory::Operator, "SELECT 10 MOD 3"),
+            Self::check(
+                "比较运算符",
+                MysqlCategory::Operator,
+                "SELECT * FROM users WHERE age >= 18 AND age <= 65",
+            ),
+            Self::check(
+                "算术运算符",
+                MysqlCategory::Operator,
+                "SELECT 1 + 2 * 3 - 4 / 2",
+            ),
         ]
     }
 
     /// 标识符兼容性测试
     fn test_identifiers() -> Vec<MysqlCompatResult> {
         vec![
-            Self::check("反引号标识符", MysqlCategory::Identifier,
-                "SELECT `id`, `name` FROM `users`"),
-            Self::check("反引号保留字", MysqlCategory::Identifier,
-                "SELECT `order`, `group` FROM `table`"),
-            Self::check("带数据库名前缀", MysqlCategory::Identifier,
-                "SELECT * FROM mydb.users"),
-            Self::check("别名 AS", MysqlCategory::Identifier,
-                "SELECT id AS user_id, name AS user_name FROM users"),
-            Self::check("别名省略 AS", MysqlCategory::Identifier,
-                "SELECT id user_id, name user_name FROM users"),
-            Self::check("表别名", MysqlCategory::Identifier,
-                "SELECT u.id, u.name FROM users u"),
-            Self::check("列名带下划线", MysqlCategory::Identifier,
-                "SELECT user_id, first_name, last_name FROM users"),
-            Self::check("双引号字符串字面量", MysqlCategory::Identifier,
-                "SELECT \"hello\""),
+            Self::check(
+                "反引号标识符",
+                MysqlCategory::Identifier,
+                "SELECT `id`, `name` FROM `users`",
+            ),
+            Self::check(
+                "反引号保留字",
+                MysqlCategory::Identifier,
+                "SELECT `order`, `group` FROM `table`",
+            ),
+            Self::check(
+                "带数据库名前缀",
+                MysqlCategory::Identifier,
+                "SELECT * FROM mydb.users",
+            ),
+            Self::check(
+                "别名 AS",
+                MysqlCategory::Identifier,
+                "SELECT id AS user_id, name AS user_name FROM users",
+            ),
+            Self::check(
+                "别名省略 AS",
+                MysqlCategory::Identifier,
+                "SELECT id user_id, name user_name FROM users",
+            ),
+            Self::check(
+                "表别名",
+                MysqlCategory::Identifier,
+                "SELECT u.id, u.name FROM users u",
+            ),
+            Self::check(
+                "列名带下划线",
+                MysqlCategory::Identifier,
+                "SELECT user_id, first_name, last_name FROM users",
+            ),
+            Self::check(
+                "双引号字符串字面量",
+                MysqlCategory::Identifier,
+                "SELECT \"hello\"",
+            ),
         ]
     }
 }
@@ -340,13 +525,19 @@ mod tests {
     fn run_all_returns_nonempty() {
         let results = MysqlCompat::run_all();
         assert!(!results.is_empty(), "MySQL 检查项不应为空");
-        assert!(results.len() >= 50, "MySQL 检查项应至少 50 项，实际: {}", results.len());
+        assert!(
+            results.len() >= 50,
+            "MySQL 检查项应至少 50 项，实际: {}",
+            results.len()
+        );
     }
 
     #[test]
     fn basic_select_passes() {
         let results = MysqlCompat::run_all();
-        let select_basic = results.iter().find(|r| r.name == "SELECT 基本语法")
+        let select_basic = results
+            .iter()
+            .find(|r| r.name == "SELECT 基本语法")
             .expect("应包含 SELECT 基本语法 测试");
         assert_eq!(select_basic.status, CompatStatus::Pass);
     }
@@ -354,7 +545,9 @@ mod tests {
     #[test]
     fn limit_offset_comma_passes() {
         let results = MysqlCompat::run_all();
-        let limit = results.iter().find(|r| r.name == "SELECT LIMIT offset, count")
+        let limit = results
+            .iter()
+            .find(|r| r.name == "SELECT LIMIT offset, count")
             .expect("应包含 LIMIT offset, count 测试");
         assert_eq!(limit.status, CompatStatus::Pass);
     }
@@ -362,7 +555,9 @@ mod tests {
     #[test]
     fn backtick_identifier_passes() {
         let results = MysqlCompat::run_all();
-        let backtick = results.iter().find(|r| r.name == "反引号标识符")
+        let backtick = results
+            .iter()
+            .find(|r| r.name == "反引号标识符")
             .expect("应包含反引号标识符测试");
         assert_eq!(backtick.status, CompatStatus::Pass);
     }

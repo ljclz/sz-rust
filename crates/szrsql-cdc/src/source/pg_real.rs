@@ -40,10 +40,11 @@ use crate::decoder::DecodedRow;
 use crate::schema::{ColumnDef, DataType, TableSchema};
 use crate::source::pg_source::PgSourceConnector;
 use crate::source::{SourceConfig, SourceConnector, SourceError, SourceEvent, SourceOffset};
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use szrsql_types::value::Value as SzValue;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use std::time::Duration;
 
 // =====================================================================
@@ -145,9 +146,7 @@ impl PgRealSourceConnector {
     /// # 参数
     /// - `tables`：要追踪的表名列表
     pub fn install_cdc_triggers(&self, tables: &[String]) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 1. 创建 CDC 日志表
         client
@@ -188,7 +187,11 @@ $$ LANGUAGE plpgsql;"#,
             }
             let trigger_name = format!("_szrsql_cdc_trg_{}", table);
             // DROP 已存在的触发器（幂等）
-            let drop_sql = format!("DROP TRIGGER IF EXISTS {} ON {};", trigger_name, quote_ident(table));
+            let drop_sql = format!(
+                "DROP TRIGGER IF EXISTS {} ON {};",
+                trigger_name,
+                quote_ident(table)
+            );
             client
                 .batch_execute(&drop_sql)
                 .map_err(|e| SourceError::Sql(format!("Drop trigger failed: {e}")))?;
@@ -199,9 +202,9 @@ $$ LANGUAGE plpgsql;"#,
                 trigger_name = trigger_name,
                 table = quote_ident(table)
             );
-            client
-                .batch_execute(&create_sql)
-                .map_err(|e| SourceError::Sql(format!("Create trigger failed for table {table}: {e}")))?;
+            client.batch_execute(&create_sql).map_err(|e| {
+                SourceError::Sql(format!("Create trigger failed for table {table}: {e}"))
+            })?;
         }
 
         Ok(())
@@ -209,12 +212,14 @@ $$ LANGUAGE plpgsql;"#,
 
     /// 卸载指定表上的 CDC 触发器（清理用）
     pub fn uninstall_cdc_triggers(&self, tables: &[String]) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         for table in tables {
             let trigger_name = format!("_szrsql_cdc_trg_{}", table);
-            let sql = format!("DROP TRIGGER IF EXISTS {} ON {};", trigger_name, quote_ident(table));
+            let sql = format!(
+                "DROP TRIGGER IF EXISTS {} ON {};",
+                trigger_name,
+                quote_ident(table)
+            );
             let _ = client.batch_execute(&sql);
         }
         Ok(())
@@ -222,9 +227,7 @@ $$ LANGUAGE plpgsql;"#,
 
     /// 清空 CDC 日志表（测试 / 重置用）
     pub fn clear_cdc_log(&self) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         client
             .batch_execute(&format!("TRUNCATE TABLE {};", CDC_LOG_TABLE))
             .map_err(|e| SourceError::Sql(format!("Truncate CDC log failed: {e}")))?;
@@ -233,9 +236,7 @@ $$ LANGUAGE plpgsql;"#,
 
     /// 删除 CDC 日志表（彻底清理）
     pub fn drop_cdc_log(&self) -> Result<(), SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         let _ = client.batch_execute("DROP FUNCTION IF EXISTS _szrsql_cdc_capture() CASCADE;");
         let _ = client.batch_execute(&format!("DROP TABLE IF EXISTS {};", CDC_LOG_TABLE));
         Ok(())
@@ -305,10 +306,8 @@ $$ LANGUAGE plpgsql;"#,
             DataType::Timestamp => pg_row
                 .try_get::<_, Option<chrono::NaiveDateTime>>(name)
                 .map(|v| {
-                    v.map(|t| {
-                        SzValue::Timestamp(t.and_utc().timestamp_micros())
-                    })
-                    .unwrap_or(SzValue::Null)
+                    v.map(|t| SzValue::Timestamp(t.and_utc().timestamp_micros()))
+                        .unwrap_or(SzValue::Null)
                 })
                 .unwrap_or(SzValue::Null),
             DataType::Uuid => pg_row
@@ -341,21 +340,13 @@ $$ LANGUAGE plpgsql;"#,
                         .as_str()
                         .map(|s| SzValue::Text(s.to_string()))
                         .unwrap_or(SzValue::Null),
-                    DataType::Real => v
-                        .as_f64()
-                        .map(SzValue::Float64)
-                        .unwrap_or(SzValue::Null),
+                    DataType::Real => v.as_f64().map(SzValue::Float64).unwrap_or(SzValue::Null),
                     DataType::Bool => v.as_bool().map(SzValue::Bool).unwrap_or(SzValue::Null),
                     DataType::Blob => {
                         // JSONB 中 Blob 存储为 hex 字符串
                         v.as_str()
                             .map(|s| {
-                                let bytes = s
-                                    .as_bytes()
-                                    .iter()
-                                    .step_by(2)
-                                    .cloned()
-                                    .collect();
+                                let bytes = s.as_bytes().iter().step_by(2).cloned().collect();
                                 SzValue::Blob(bytes)
                             })
                             .unwrap_or(SzValue::Null)
@@ -365,7 +356,9 @@ $$ LANGUAGE plpgsql;"#,
                         .as_i64()
                         .map(|i| SzValue::Date(i as i32))
                         .unwrap_or(SzValue::Null),
-                    DataType::Timestamp => v.as_i64().map(SzValue::Timestamp).unwrap_or(SzValue::Null),
+                    DataType::Timestamp => {
+                        v.as_i64().map(SzValue::Timestamp).unwrap_or(SzValue::Null)
+                    }
                     DataType::Uuid => v
                         .as_str()
                         .map(|s| SzValue::Text(s.to_string()))
@@ -388,9 +381,7 @@ impl SourceConnector for PgRealSourceConnector {
             return Ok(());
         }
         // 验证连接活性
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         client
             .batch_execute("SELECT 1")
             .map_err(|e| SourceError::Connection(format!("PG health check failed: {e}")))?;
@@ -410,16 +401,15 @@ impl SourceConnector for PgRealSourceConnector {
         }
 
         let schema_name = self.schema_name();
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 如果未指定表名，查询 schema 下所有表
         let table_filter = if tables.is_empty() {
             String::new()
         } else {
             // 占位符从 $2 开始（$1 是 schema_name）
-            let placeholders: Vec<String> = (1..=tables.len()).map(|i| format!("${}", i + 1)).collect();
+            let placeholders: Vec<String> =
+                (1..=tables.len()).map(|i| format!("${}", i + 1)).collect();
             format!("AND table_name IN ({})", placeholders.join(", "))
         };
 
@@ -431,8 +421,7 @@ impl SourceConnector for PgRealSourceConnector {
             table_filter
         );
 
-        let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> =
-            vec![&schema_name];
+        let mut params: Vec<&(dyn postgres::types::ToSql + Sync)> = vec![&schema_name];
         for t in tables {
             params.push(t);
         }
@@ -444,15 +433,15 @@ impl SourceConnector for PgRealSourceConnector {
         // 按 table_name 分组
         let mut table_columns: HashMap<String, Vec<(String, String, bool, i32)>> = HashMap::new();
         for row in &rows {
-            let table_name: String = row.try_get(0).map_err(|e| {
-                SourceError::SchemaDiscovery(format!("Get table_name failed: {e}"))
-            })?;
+            let table_name: String = row
+                .try_get(0)
+                .map_err(|e| SourceError::SchemaDiscovery(format!("Get table_name failed: {e}")))?;
             let column_name: String = row.try_get(1).map_err(|e| {
                 SourceError::SchemaDiscovery(format!("Get column_name failed: {e}"))
             })?;
-            let pg_type: String = row.try_get(2).map_err(|e| {
-                SourceError::SchemaDiscovery(format!("Get data_type failed: {e}"))
-            })?;
+            let pg_type: String = row
+                .try_get(2)
+                .map_err(|e| SourceError::SchemaDiscovery(format!("Get data_type failed: {e}")))?;
             let is_nullable: String = row.try_get(3).map_err(|e| {
                 SourceError::SchemaDiscovery(format!("Get is_nullable failed: {e}"))
             })?;
@@ -460,10 +449,12 @@ impl SourceConnector for PgRealSourceConnector {
                 SourceError::SchemaDiscovery(format!("Get ordinal_position failed: {e}"))
             })?;
             let nullable = is_nullable == "YES";
-            table_columns
-                .entry(table_name)
-                .or_default()
-                .push((column_name, pg_type, nullable, ordinal));
+            table_columns.entry(table_name).or_default().push((
+                column_name,
+                pg_type,
+                nullable,
+                ordinal,
+            ));
         }
 
         // 构造 TableSchema 列表
@@ -488,7 +479,7 @@ impl SourceConnector for PgRealSourceConnector {
                 version: 1,
             };
             // 缓存 schema
-            let mut cache = self.discovered_tables.lock().unwrap();
+            let mut cache = self.discovered_tables.lock();
             cache.insert(schema.table_name.clone(), schema.clone());
             result.push(schema);
         }
@@ -508,7 +499,7 @@ impl SourceConnector for PgRealSourceConnector {
 
         // 查找缓存的 schema
         let schema = {
-            let cache = self.discovered_tables.lock().unwrap();
+            let cache = self.discovered_tables.lock();
             cache
                 .get(table)
                 .ok_or_else(|| {
@@ -520,9 +511,7 @@ impl SourceConnector for PgRealSourceConnector {
                 .clone()
         };
 
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 执行全表扫描
         let sql = format!("SELECT * FROM {}", quote_ident(table));
@@ -559,20 +548,21 @@ impl SourceConnector for PgRealSourceConnector {
             return Err(SourceError::Connection("not connected".to_string()));
         }
 
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         // 查询 CDC 日志表的最大 id 作为当前 LSN
         let rows = client
-            .query(&format!("SELECT COALESCE(MAX(id), 0) FROM {}", CDC_LOG_TABLE), &[])
+            .query(
+                &format!("SELECT COALESCE(MAX(id), 0) FROM {}", CDC_LOG_TABLE),
+                &[],
+            )
             .map_err(|e| SourceError::Sql(format!("Query current_lsn failed: {e}")))?;
         if rows.is_empty() {
             return Ok(0);
         }
-        let lsn: i64 = rows[0].try_get(0).map_err(|e| {
-            SourceError::Sql(format!("Get current_lsn value failed: {e}"))
-        })?;
+        let lsn: i64 = rows[0]
+            .try_get(0)
+            .map_err(|e| SourceError::Sql(format!("Get current_lsn value failed: {e}")))?;
         Ok(lsn as u64)
     }
 
@@ -585,12 +575,14 @@ impl SourceConnector for PgRealSourceConnector {
             return Err(SourceError::Connection("not connected".to_string()));
         }
         if self.streaming.load(Ordering::SeqCst) {
-            return Err(SourceError::Internal("cdc stream already running".to_string()));
+            return Err(SourceError::Internal(
+                "cdc stream already running".to_string(),
+            ));
         }
 
         // 设置起始位点
         {
-            let mut offset = self.confirmed_offset.lock().unwrap();
+            let mut offset = self.confirmed_offset.lock();
             if start_lsn > offset.lsn {
                 offset.lsn = start_lsn;
             }
@@ -617,16 +609,14 @@ impl SourceConnector for PgRealSourceConnector {
 
     fn ack_offset(&self, offset: &SourceOffset) -> Result<(), SourceError> {
         // 更新内存中的位点
-        let mut current = self.confirmed_offset.lock().unwrap();
+        let mut current = self.confirmed_offset.lock();
         if offset.lsn >= current.lsn {
             *current = offset.clone();
         }
 
         // 删除已消费的日志行（保留最近 1000 行用于审计）
         let keep_count = 1000;
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         let sql = format!(
             "DELETE FROM {log_table} WHERE id <= $1 AND id <= (SELECT MAX(id) - {keep_count} FROM {log_table});",
             log_table = CDC_LOG_TABLE,
@@ -638,16 +628,14 @@ impl SourceConnector for PgRealSourceConnector {
     }
 
     fn confirmed_offset(&self) -> Result<SourceOffset, SourceError> {
-        Ok(self.confirmed_offset.lock().unwrap().clone())
+        Ok(self.confirmed_offset.lock().clone())
     }
 
     fn health_check(&self) -> Result<(), SourceError> {
         if !self.connected.load(Ordering::SeqCst) {
             return Err(SourceError::Connection("not connected".to_string()));
         }
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
         client
             .batch_execute("SELECT 1")
             .map_err(|e| SourceError::Connection(format!("PG health_check failed: {e}")))?;
@@ -670,7 +658,7 @@ impl PgRealSourceConnector {
             }
 
             // 查询当前位点之后的新事件
-            let current_lsn = self.confirmed_offset.lock().unwrap().lsn;
+            let current_lsn = self.confirmed_offset.lock().lsn;
             let events = self.poll_cdc_log(current_lsn, batch_size)?;
 
             if events.is_empty() {
@@ -684,7 +672,7 @@ impl PgRealSourceConnector {
 
             // 更新位点（取最后事件的 LSN）
             if let Some(max_lsn) = events.iter().map(|e| e.lsn).max() {
-                let mut offset = self.confirmed_offset.lock().unwrap();
+                let mut offset = self.confirmed_offset.lock();
                 if max_lsn > offset.lsn {
                     offset.lsn = max_lsn;
                 }
@@ -699,9 +687,7 @@ impl PgRealSourceConnector {
         start_lsn: u64,
         batch_size: i64,
     ) -> Result<Vec<SourceEvent>, SourceError> {
-        let mut client = self.client.lock().map_err(|e| {
-            SourceError::Internal(format!("PG client mutex poisoned: {e}"))
-        })?;
+        let mut client = self.client.lock();
 
         let sql = format!(
             "SELECT id, table_name, op, old_data, new_data, tx_id, EXTRACT(EPOCH FROM created_at) * 1000
@@ -719,27 +705,27 @@ impl PgRealSourceConnector {
         // 需要查 schema 缓存来重建 DecodedRow
         let mut events = Vec::with_capacity(rows.len());
         for row in &rows {
-            let id: i64 = row.try_get(0).map_err(|e| {
-                SourceError::Internal(format!("Get id failed: {e}"))
-            })?;
-            let table_name: String = row.try_get(1).map_err(|e| {
-                SourceError::Internal(format!("Get table_name failed: {e}"))
-            })?;
-            let op: String = row.try_get(2).map_err(|e| {
-                SourceError::Internal(format!("Get op failed: {e}"))
-            })?;
-            let old_data: Option<serde_json::Value> = row.try_get(3).map_err(|e| {
-                SourceError::Internal(format!("Get old_data failed: {e}"))
-            })?;
-            let new_data: Option<serde_json::Value> = row.try_get(4).map_err(|e| {
-                SourceError::Internal(format!("Get new_data failed: {e}"))
-            })?;
+            let id: i64 = row
+                .try_get(0)
+                .map_err(|e| SourceError::Internal(format!("Get id failed: {e}")))?;
+            let table_name: String = row
+                .try_get(1)
+                .map_err(|e| SourceError::Internal(format!("Get table_name failed: {e}")))?;
+            let op: String = row
+                .try_get(2)
+                .map_err(|e| SourceError::Internal(format!("Get op failed: {e}")))?;
+            let old_data: Option<serde_json::Value> = row
+                .try_get(3)
+                .map_err(|e| SourceError::Internal(format!("Get old_data failed: {e}")))?;
+            let new_data: Option<serde_json::Value> = row
+                .try_get(4)
+                .map_err(|e| SourceError::Internal(format!("Get new_data failed: {e}")))?;
             let tx_id: Option<i64> = row.try_get(5).ok();
             let timestamp: Option<f64> = row.try_get(6).ok();
 
             // 查 schema 缓存
             let schema = {
-                let cache = self.discovered_tables.lock().unwrap();
+                let cache = self.discovered_tables.lock();
                 cache.get(&table_name).cloned()
             };
 
@@ -846,7 +832,10 @@ mod tests {
             SourceConfig::postgres(conn_str),
             postgres::NoTls,
         );
-        assert!(result.is_ok(), "PG connect failed (check PG 18 is running on 127.0.0.1:5432)");
+        assert!(
+            result.is_ok(),
+            "PG connect failed (check PG 18 is running on 127.0.0.1:5432)"
+        );
     }
 
     #[test]

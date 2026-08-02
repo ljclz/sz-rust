@@ -808,11 +808,7 @@ async fn test_e2e_set_variable_does_not_return_unsupported_error() {
     let mut stream = setup_connection(port, "set_var_user").await;
 
     // SET character_set_results = 'utf8' — 应返回 CommandComplete
-    let resp = send_query_and_read(
-        &mut stream,
-        "SET character_set_results = 'utf8'",
-    )
-    .await;
+    let resp = send_query_and_read(&mut stream, "SET character_set_results = 'utf8'").await;
     let types = parse_message_types(&resp);
     assert!(
         !types.contains(&MSG_ERROR_RESPONSE),

@@ -121,7 +121,11 @@ pub fn encode_value(value: &Value) -> (u64, Vec<u8>) {
             let serial = SERIAL_TEXT_BASE + (bytes.len() as u64) * 2;
             (serial, bytes.to_vec())
         }
-        Value::Array(_) | Value::Range(_) | Value::Json(_) | Value::TsVector(_) | Value::TsQuery(_) => {
+        Value::Array(_)
+        | Value::Range(_)
+        | Value::Json(_)
+        | Value::TsVector(_)
+        | Value::TsQuery(_) => {
             // 使用 Value 的 cast_explicit 转为 Text，再编码
             let text = value_to_text(value);
             let bytes = text.as_bytes();
@@ -166,18 +170,23 @@ fn value_to_text(value: &Value) -> String {
     match value {
         Value::Array(arr) => {
             // 数组序列化为 JSON
-            let json_arr: Vec<serde_json::Value> = arr
-                .iter()
-                .map(|v| value_to_json(v))
-                .collect();
+            let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| value_to_json(v)).collect();
             serde_json::to_string(&json_arr).unwrap_or_else(|_| "[]".to_string())
         }
         Value::Range(r) => {
             // 范围序列化为文本
             let lower = r.lower.as_ref().map(|v| value_to_json(v));
             let upper = r.upper.as_ref().map(|v| value_to_json(v));
-            let l_bracket = if r.lower_inc { '[' } else { '(' };
-            let r_bracket = if r.upper_inc { ']' } else { ')' };
+            let l_bracket = if r.lower_inc {
+                '['
+            } else {
+                '('
+            };
+            let r_bracket = if r.upper_inc {
+                ']'
+            } else {
+                ')'
+            };
             format!(
                 "{}{},{}{}",
                 l_bracket,
@@ -214,7 +223,11 @@ fn value_to_json(value: &Value) -> serde_json::Value {
             }
         }
         Value::Enum(s) => serde_json::json!(s),
-        Value::Array(_) | Value::Range(_) | Value::Json(_) | Value::TsVector(_) | Value::TsQuery(_) => {
+        Value::Array(_)
+        | Value::Range(_)
+        | Value::Json(_)
+        | Value::TsVector(_)
+        | Value::TsQuery(_) => {
             serde_json::json!(value_to_text(value))
         }
     }
@@ -472,15 +485,37 @@ mod tests {
     #[test]
     fn roundtrip_integers() {
         let test_values: &[i64] = &[
-            0, 1, -1, 42, -42, 127, -128, 128, -129, 32767, -32768,
-            32768, 8388607, -8388608, 8388608, 2147483647, -2147483648,
-            2147483648, 140737488355327, -140737488355328,
-            i64::MAX, i64::MIN,
+            0,
+            1,
+            -1,
+            42,
+            -42,
+            127,
+            -128,
+            128,
+            -129,
+            32767,
+            -32768,
+            32768,
+            8388607,
+            -8388608,
+            8388608,
+            2147483647,
+            -2147483648,
+            2147483648,
+            140737488355327,
+            -140737488355328,
+            i64::MAX,
+            i64::MIN,
         ];
         for &v in test_values {
             let (st, payload) = encode_value(&Value::Int64(v));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Int64(v), "roundtrip failed for Int64({v}): st={st}, payload={payload:?}");
+            assert_eq!(
+                decoded,
+                Value::Int64(v),
+                "roundtrip failed for Int64({v}): st={st}, payload={payload:?}"
+            );
         }
     }
 
@@ -498,14 +533,26 @@ mod tests {
     #[test]
     fn roundtrip_float64() {
         let test_values: &[f64] = &[
-            0.0, -0.0, 1.0, -1.0, 3.5, -3.5,
-            f64::INFINITY, f64::NEG_INFINITY,
-            1e308, -1e308, 1e-308,
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            3.5,
+            -3.5,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1e308,
+            -1e308,
+            1e-308,
         ];
         for &v in test_values {
             let (st, payload) = encode_value(&Value::Float64(v));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Float64(v), "roundtrip failed for Float64({v})");
+            assert_eq!(
+                decoded,
+                Value::Float64(v),
+                "roundtrip failed for Float64({v})"
+            );
         }
     }
 
@@ -533,7 +580,11 @@ mod tests {
         for &s in test_values {
             let (st, payload) = encode_value(&Value::Text(s.to_string()));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Text(s.to_string()), "roundtrip failed for Text({s:?})");
+            assert_eq!(
+                decoded,
+                Value::Text(s.to_string()),
+                "roundtrip failed for Text({s:?})"
+            );
         }
     }
 
@@ -560,7 +611,11 @@ mod tests {
         for v in test_values {
             let (st, payload) = encode_value(&Value::Blob(v.clone()));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Blob(v.clone()), "roundtrip failed for Blob({v:?})");
+            assert_eq!(
+                decoded,
+                Value::Blob(v.clone()),
+                "roundtrip failed for Blob({v:?})"
+            );
         }
     }
 
@@ -600,19 +655,25 @@ mod tests {
         for &d in test_values {
             let (st, payload) = encode_value(&Value::Date(d));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Int64(i64::from(d)), "roundtrip failed for Date({d})");
+            assert_eq!(
+                decoded,
+                Value::Int64(i64::from(d)),
+                "roundtrip failed for Date({d})"
+            );
         }
     }
 
     #[test]
     fn roundtrip_timestamp() {
-        let test_values: &[i64] = &[
-            0, 1, -1, 1_700_000_000_000_000, i64::MAX, i64::MIN,
-        ];
+        let test_values: &[i64] = &[0, 1, -1, 1_700_000_000_000_000, i64::MAX, i64::MIN];
         for &t in test_values {
             let (st, payload) = encode_value(&Value::Timestamp(t));
             let decoded = decode_value(st, &payload);
-            assert_eq!(decoded, Value::Int64(t), "roundtrip failed for Timestamp({t})");
+            assert_eq!(
+                decoded,
+                Value::Int64(t),
+                "roundtrip failed for Timestamp({t})"
+            );
         }
     }
 

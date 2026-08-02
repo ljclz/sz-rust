@@ -585,7 +585,10 @@ async fn test_e2e_require_tls_rejects_plaintext_startup() {
     // 读取服务器响应：应为 ErrorResponse（'E'）
     let mut buf = [0u8; 256];
     let n = stream.read(&mut buf).await.expect("read should succeed");
-    assert!(n > 0, "server should respond with ErrorResponse before closing");
+    assert!(
+        n > 0,
+        "server should respond with ErrorResponse before closing"
+    );
 
     // 首字节应为 'E'（MSG_ERROR_RESPONSE）
     assert_eq!(
@@ -643,7 +646,10 @@ async fn test_e2e_require_tls_accepts_tls_handshake() {
     // 服务器应回 'S' 表示支持 SSL
     let mut resp = [0u8; 1];
     stream.read_exact(&mut resp).await.expect("read 'S'");
-    assert_eq!(resp[0], b'S', "server with require_tls should accept SSLRequest");
+    assert_eq!(
+        resp[0], b'S',
+        "server with require_tls should accept SSLRequest"
+    );
 
     // 执行 TLS 握手（sslmode=require，跳过证书验证）
     let connector = tls_connector_no_verify();
@@ -658,9 +664,13 @@ async fn test_e2e_require_tls_accepts_tls_handshake() {
     let response = read_until_ready_for_query(&mut tls_stream).await;
     let types = parse_message_types(&response);
 
-    assert_eq!(types[0], MSG_AUTHENTICATION, "first message should be AuthenticationOk");
     assert_eq!(
-        types[types.len() - 1], MSG_READY_FOR_QUERY,
+        types[0], MSG_AUTHENTICATION,
+        "first message should be AuthenticationOk"
+    );
+    assert_eq!(
+        types[types.len() - 1],
+        MSG_READY_FOR_QUERY,
         "last message should be ReadyForQuery"
     );
 

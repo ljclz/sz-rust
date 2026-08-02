@@ -51,11 +51,7 @@ pub struct ReplayResult {
 /// - `sql`: SQL 文本（用于错误消息）
 /// - `sz_rows`: szrsql 结果集（字符串矩阵）
 /// - `pg_rows`: PG 18 结果集（字符串矩阵）
-pub fn compare_results(
-    sql: &str,
-    sz_rows: &[Vec<String>],
-    pg_rows: &[Vec<String>],
-) -> MatchStatus {
+pub fn compare_results(sql: &str, sz_rows: &[Vec<String>], pg_rows: &[Vec<String>]) -> MatchStatus {
     // 行数比对
     if sz_rows.len() != pg_rows.len() {
         return MatchStatus::Mismatch(format!(

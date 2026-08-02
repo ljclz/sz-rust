@@ -49,7 +49,9 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // =====================================================================
@@ -671,7 +673,7 @@ impl ClusterCoordinator {
         };
 
         let now = (self.timestamp_fn)();
-        let mut nodes = self.nodes.write().unwrap();
+        let mut nodes = self.nodes.write();
         if nodes.contains_key(node_id) {
             return Err(ClusterError::NodeAlreadyExists(node_id.to_string()));
         }
@@ -700,7 +702,7 @@ impl ClusterCoordinator {
     pub fn unregister_node(&self, node_id: &str) -> Result<(), ClusterError> {
         // 1. 标记节点为 Leaving（防止新任务分配到此节点）
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             let node = nodes
                 .get_mut(node_id)
                 .ok_or_else(|| ClusterError::NodeNotFound(node_id.to_string()))?;
@@ -709,7 +711,7 @@ impl ClusterCoordinator {
 
         // 2. 迁移该节点的任务
         let task_ids: Vec<String> = {
-            let assignments = self.assignments.read().unwrap();
+            let assignments = self.assignments.read();
             assignments
                 .iter()
                 .filter(|(_, nid)| *nid == node_id)
@@ -730,13 +732,13 @@ impl ClusterCoordinator {
 
         // 3. 从亲和性索引移除
         {
-            let mut source_nodes = self.source_nodes.write().unwrap();
+            let mut source_nodes = self.source_nodes.write();
             source_nodes.retain(|_, nid| nid != node_id);
         }
 
         // 4. 从节点列表移除
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             nodes.remove(node_id);
         }
 
@@ -753,7 +755,7 @@ impl ClusterCoordinator {
     /// - `NodeNotFound`：节点不存在
     pub fn heartbeat(&self, node_id: &str) -> Result<(), ClusterError> {
         let now = (self.timestamp_fn)();
-        let mut nodes = self.nodes.write().unwrap();
+        let mut nodes = self.nodes.write();
         let node = nodes
             .get_mut(node_id)
             .ok_or_else(|| ClusterError::NodeNotFound(node_id.to_string()))?;
@@ -783,7 +785,7 @@ impl ClusterCoordinator {
         cpu_usage: f64,
         memory_usage: f64,
     ) -> Result<(), ClusterError> {
-        let mut nodes = self.nodes.write().unwrap();
+        let mut nodes = self.nodes.write();
         let node = nodes
             .get_mut(node_id)
             .ok_or_else(|| ClusterError::NodeNotFound(node_id.to_string()))?;
@@ -822,7 +824,7 @@ impl ClusterCoordinator {
 
         // 1. 检查任务是否已分配
         {
-            let assignments = self.assignments.read().unwrap();
+            let assignments = self.assignments.read();
             if let Some(existing_node) = assignments.get(task_id) {
                 return Err(ClusterError::TaskAlreadyAssigned {
                     task_id: task_id.to_string(),
@@ -833,7 +835,7 @@ impl ClusterCoordinator {
 
         // 2. 选节点（先读锁）
         let target_node_id = {
-            let nodes = self.nodes.read().unwrap();
+            let nodes = self.nodes.read();
             let candidates: Vec<ClusterNode> = nodes
                 .values()
                 .filter(|n| n.can_accept_tasks())
@@ -846,25 +848,22 @@ impl ClusterCoordinator {
             }
             // 亲和性：若 source_id 非空，查亲和性索引
             let affinity_node = if !source_id.is_empty() {
-                let source_nodes = self.source_nodes.read().unwrap();
+                let source_nodes = self.source_nodes.read();
                 source_nodes.get(source_id).cloned()
             } else {
                 None
             };
-            let selected = TaskAssignment::select_node(
-                &candidates,
-                affinity_node.as_deref(),
-            )
-            .ok_or_else(|| {
-                ClusterError::NoAvailableNode("select_node returned none".to_string())
-            })?;
+            let selected = TaskAssignment::select_node(&candidates, affinity_node.as_deref())
+                .ok_or_else(|| {
+                    ClusterError::NoAvailableNode("select_node returned none".to_string())
+                })?;
             selected.node_id.clone()
         };
 
         // 3. 调用分发器（在持锁外，避免网络调用阻塞锁）
         {
             let node_snapshot = {
-                let nodes = self.nodes.read().unwrap();
+                let nodes = self.nodes.read();
                 nodes
                     .get(&target_node_id)
                     .cloned()
@@ -877,7 +876,7 @@ impl ClusterCoordinator {
 
         // 4. 写入分配映射 + 更新节点容量 + 更新亲和性索引
         {
-            let mut assignments = self.assignments.write().unwrap();
+            let mut assignments = self.assignments.write();
             // 二次检查（防止并发分配）
             if let Some(existing) = assignments.get(task_id) {
                 return Err(ClusterError::TaskAlreadyAssigned {
@@ -888,16 +887,15 @@ impl ClusterCoordinator {
             assignments.insert(task_id.to_string(), target_node_id.clone());
         }
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             if let Some(node) = nodes.get_mut(&target_node_id) {
-                node.capacity.current_tasks =
-                    node.capacity.current_tasks.saturating_add(1);
+                node.capacity.current_tasks = node.capacity.current_tasks.saturating_add(1);
             }
         }
         if !source_id.is_empty() {
-            let mut task_sources = self.task_sources.write().unwrap();
+            let mut task_sources = self.task_sources.write();
             task_sources.insert(task_id.to_string(), source_id.to_string());
-            let mut source_nodes = self.source_nodes.write().unwrap();
+            let mut source_nodes = self.source_nodes.write();
             // 仅当该 source 还没有亲和节点时设置
             source_nodes
                 .entry(source_id.to_string())
@@ -920,7 +918,7 @@ impl ClusterCoordinator {
     fn unassign_task_internal(&self, task_id: &str) -> Result<(), ClusterError> {
         // 1. 移除分配映射
         let node_id = {
-            let mut assignments = self.assignments.write().unwrap();
+            let mut assignments = self.assignments.write();
             assignments
                 .remove(task_id)
                 .ok_or_else(|| ClusterError::TaskNotAssigned(task_id.to_string()))?
@@ -928,7 +926,7 @@ impl ClusterCoordinator {
 
         // 2. 通知节点取消任务（持锁外）
         let node_snapshot = {
-            let nodes = self.nodes.read().unwrap();
+            let nodes = self.nodes.read();
             nodes.get(&node_id).cloned()
         };
         if let Some(node) = node_snapshot {
@@ -937,16 +935,15 @@ impl ClusterCoordinator {
 
         // 3. 减少节点 current_tasks
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             if let Some(node) = nodes.get_mut(&node_id) {
-                node.capacity.current_tasks =
-                    node.capacity.current_tasks.saturating_sub(1);
+                node.capacity.current_tasks = node.capacity.current_tasks.saturating_sub(1);
             }
         }
 
         // 4. 移除任务的 source 映射（亲和性索引保留，便于同源任务仍可复用）
         {
-            let mut task_sources = self.task_sources.write().unwrap();
+            let mut task_sources = self.task_sources.write();
             task_sources.remove(task_id);
         }
         Ok(())
@@ -963,14 +960,10 @@ impl ClusterCoordinator {
     /// - `NodeNotFound`：目标节点不存在
     /// - `NodeDead`：目标节点已死亡
     /// - `NodeCapacityFull`：目标节点容量已满
-    pub fn migrate_task(
-        &self,
-        task_id: &str,
-        target_node_id: &str,
-    ) -> Result<(), ClusterError> {
+    pub fn migrate_task(&self, task_id: &str, target_node_id: &str) -> Result<(), ClusterError> {
         // 1. 校验目标节点
         {
-            let nodes = self.nodes.read().unwrap();
+            let nodes = self.nodes.read();
             let node = nodes
                 .get(target_node_id)
                 .ok_or_else(|| ClusterError::NodeNotFound(target_node_id.to_string()))?;
@@ -981,15 +974,13 @@ impl ClusterCoordinator {
                 return Err(ClusterError::NodeLeaving(target_node_id.to_string()));
             }
             if !node.capacity.has_capacity() {
-                return Err(ClusterError::NodeCapacityFull(
-                    target_node_id.to_string(),
-                ));
+                return Err(ClusterError::NodeCapacityFull(target_node_id.to_string()));
             }
         }
 
         // 2. 获取当前分配的源节点
         let source_node_id = {
-            let assignments = self.assignments.read().unwrap();
+            let assignments = self.assignments.read();
             assignments
                 .get(task_id)
                 .cloned()
@@ -1002,7 +993,7 @@ impl ClusterCoordinator {
 
         // 3. 调用分发器（持锁外）
         let (source_node_snap, target_node_snap) = {
-            let nodes = self.nodes.read().unwrap();
+            let nodes = self.nodes.read();
             let src = nodes
                 .get(&source_node_id)
                 .ok_or_else(|| ClusterError::NodeNotFound(source_node_id.clone()))?
@@ -1019,25 +1010,23 @@ impl ClusterCoordinator {
 
         // 4. 更新分配映射 + 容量
         {
-            let mut assignments = self.assignments.write().unwrap();
+            let mut assignments = self.assignments.write();
             assignments.insert(task_id.to_string(), target_node_id.to_string());
         }
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             if let Some(node) = nodes.get_mut(&source_node_id) {
-                node.capacity.current_tasks =
-                    node.capacity.current_tasks.saturating_sub(1);
+                node.capacity.current_tasks = node.capacity.current_tasks.saturating_sub(1);
             }
             if let Some(node) = nodes.get_mut(target_node_id) {
-                node.capacity.current_tasks =
-                    node.capacity.current_tasks.saturating_add(1);
+                node.capacity.current_tasks = node.capacity.current_tasks.saturating_add(1);
             }
         }
         // 5. 更新亲和性索引（若该任务有 source_id）
         {
-            let task_sources = self.task_sources.read().unwrap();
+            let task_sources = self.task_sources.read();
             if let Some(source_id) = task_sources.get(task_id) {
-                let mut source_nodes = self.source_nodes.write().unwrap();
+                let mut source_nodes = self.source_nodes.write();
                 source_nodes.insert(source_id.clone(), target_node_id.to_string());
             }
         }
@@ -1052,7 +1041,7 @@ impl ClusterCoordinator {
     fn migrate_task_away(&self, task_id: &str, from_node_id: &str) -> Result<(), ClusterError> {
         // 选目标节点（排除 from_node_id）
         let target_node_id = {
-            let nodes = self.nodes.read().unwrap();
+            let nodes = self.nodes.read();
             let candidates: Vec<ClusterNode> = nodes
                 .values()
                 .filter(|n| n.node_id != from_node_id && n.can_accept_tasks())
@@ -1066,9 +1055,9 @@ impl ClusterCoordinator {
             }
             // 亲和性：若任务有 source_id，优先选同源节点
             let affinity_node = {
-                let task_sources = self.task_sources.read().unwrap();
+                let task_sources = self.task_sources.read();
                 task_sources.get(task_id).and_then(|sid| {
-                    let source_nodes = self.source_nodes.read().unwrap();
+                    let source_nodes = self.source_nodes.read();
                     source_nodes.get(sid).cloned()
                 })
             };
@@ -1103,7 +1092,7 @@ impl ClusterCoordinator {
 
         // 1. 标记超时节点为 Dead
         {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write();
             for node in nodes.values_mut() {
                 if node.status == NodeStatus::Alive
                     && node.is_heartbeat_timeout(now, self.config.heartbeat_timeout_ms)
@@ -1119,7 +1108,7 @@ impl ClusterCoordinator {
         if self.config.enable_task_migration && !dead_nodes.is_empty() {
             for dead_node_id in &dead_nodes {
                 let task_ids: Vec<String> = {
-                    let assignments = self.assignments.read().unwrap();
+                    let assignments = self.assignments.read();
                     assignments
                         .iter()
                         .filter(|(_, nid)| *nid == dead_node_id)
@@ -1164,7 +1153,7 @@ impl ClusterCoordinator {
 
     /// 内部 Leader 选举实现
     fn elect_leader_internal(&self) -> Option<String> {
-        let mut nodes = self.nodes.write().unwrap();
+        let mut nodes = self.nodes.write();
         // 找出 node_id 字典序最小的 Alive 节点
         let leader_id = nodes
             .values()
@@ -1191,7 +1180,7 @@ impl ClusterCoordinator {
 
     /// 获取当前 Leader
     pub fn current_leader(&self) -> Option<String> {
-        let nodes = self.nodes.read().unwrap();
+        let nodes = self.nodes.read();
         nodes
             .values()
             .find(|n| n.role == NodeRole::Leader && n.status == NodeStatus::Alive)
@@ -1204,13 +1193,13 @@ impl ClusterCoordinator {
 
     /// 获取节点信息
     pub fn get_node(&self, node_id: &str) -> Option<ClusterNode> {
-        let nodes = self.nodes.read().unwrap();
+        let nodes = self.nodes.read();
         nodes.get(node_id).cloned()
     }
 
     /// 列出所有节点
     pub fn list_nodes(&self) -> Vec<ClusterNode> {
-        let nodes = self.nodes.read().unwrap();
+        let nodes = self.nodes.read();
         let mut list: Vec<ClusterNode> = nodes.values().cloned().collect();
         // 按 node_id 字典序排序，保证输出稳定
         list.sort_by(|a, b| a.node_id.cmp(&b.node_id));
@@ -1219,7 +1208,7 @@ impl ClusterCoordinator {
 
     /// 列出所有任务分配（task_id -> node_id）
     pub fn list_assignments(&self) -> Vec<(String, String)> {
-        let assignments = self.assignments.read().unwrap();
+        let assignments = self.assignments.read();
         let mut list: Vec<(String, String)> = assignments
             .iter()
             .map(|(t, n)| (t.clone(), n.clone()))
@@ -1230,30 +1219,30 @@ impl ClusterCoordinator {
 
     /// 获取任务分配的节点 ID
     pub fn get_assignment(&self, task_id: &str) -> Option<String> {
-        let assignments = self.assignments.read().unwrap();
+        let assignments = self.assignments.read();
         assignments.get(task_id).cloned()
     }
 
     /// 获取任务的 source_id
     pub fn get_task_source(&self, task_id: &str) -> Option<String> {
-        let task_sources = self.task_sources.read().unwrap();
+        let task_sources = self.task_sources.read();
         task_sources.get(task_id).cloned()
     }
 
     /// 获取 source 的亲和节点
     pub fn get_source_affinity(&self, source_id: &str) -> Option<String> {
-        let source_nodes = self.source_nodes.read().unwrap();
+        let source_nodes = self.source_nodes.read();
         source_nodes.get(source_id).cloned()
     }
 
     /// 节点数量
     pub fn node_count(&self) -> usize {
-        self.nodes.read().unwrap().len()
+        self.nodes.read().len()
     }
 
     /// 任务分配数量
     pub fn assignment_count(&self) -> usize {
-        self.assignments.read().unwrap().len()
+        self.assignments.read().len()
     }
 
     /// 已分配任务总数（累计）
@@ -1297,8 +1286,8 @@ fn tracing_debug(msg: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::Mutex;
     use std::sync::atomic::AtomicU64;
-    use std::sync::Mutex;
     use std::thread;
 
     // -----------------------------------------------------------------
@@ -1320,9 +1309,7 @@ mod tests {
     /// 用法：`let (coord, time) = make_controllable_coord(cfg);`
     /// - 注册节点时 time 为初始值 1000
     /// - 测试中 `time.store(50000, Ordering::SeqCst)` 推进时间
-    fn make_controllable_coord(
-        config: ClusterConfig,
-    ) -> (ClusterCoordinator, Arc<AtomicU64>) {
+    fn make_controllable_coord(config: ClusterConfig) -> (ClusterCoordinator, Arc<AtomicU64>) {
         let time = Arc::new(AtomicU64::new(1000));
         let time_clone = time.clone();
         let coord = ClusterCoordinator::with_timestamp_fn(
@@ -1501,9 +1488,7 @@ mod tests {
     #[test]
     fn register_node_success() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        let node = coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        let node = coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         assert_eq!(node.node_id, "node-1");
         assert_eq!(coord.node_count(), 1);
     }
@@ -1511,9 +1496,7 @@ mod tests {
     #[test]
     fn register_node_duplicate_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let result = coord.register_node("node-1", "10.0.0.1:9090", 5);
         assert!(matches!(result, Err(ClusterError::NodeAlreadyExists(_))));
         assert_eq!(coord.node_count(), 1);
@@ -1543,9 +1526,7 @@ mod tests {
     #[test]
     fn unregister_node_success() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         assert_eq!(coord.node_count(), 1);
         coord.unregister_node("node-1").unwrap();
         assert_eq!(coord.node_count(), 0);
@@ -1561,15 +1542,9 @@ mod tests {
     #[test]
     fn list_nodes_sorted_by_id() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-c", "10.0.0.3:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-a", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-b", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-c", "10.0.0.3:8080", 10).unwrap();
+        coord.register_node("node-a", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-b", "10.0.0.2:8080", 10).unwrap();
         let list = coord.list_nodes();
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].node_id, "node-a");
@@ -1580,9 +1555,7 @@ mod tests {
     #[test]
     fn get_node_returns_clone() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let node = coord.get_node("node-1").unwrap();
         assert_eq!(node.address, "10.0.0.1:8080");
         assert!(coord.get_node("node-x").is_none());
@@ -1595,9 +1568,7 @@ mod tests {
     #[test]
     fn heartbeat_updates_last_heartbeat() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 时间戳固定为 1000，所以 last_heartbeat 应该是 1000
         coord.heartbeat("node-1").unwrap();
         let node = coord.get_node("node-1").unwrap();
@@ -1614,12 +1585,10 @@ mod tests {
     #[test]
     fn heartbeat_revives_dead_node() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 标记为 Dead（手动设置）
         {
-            let mut nodes = coord.nodes.write().unwrap();
+            let mut nodes = coord.nodes.write();
             nodes.get_mut("node-1").unwrap().status = NodeStatus::Dead;
         }
         // 心跳恢复
@@ -1631,9 +1600,7 @@ mod tests {
     #[test]
     fn check_heartbeats_marks_timeout_nodes_dead() {
         let (coord, time) = make_controllable_coord(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 注册时 last_heartbeat=1000
         // 推进时间到 50000，50000 - 1000 = 49000 > 30000，超时
         time.store(50_000, Ordering::SeqCst);
@@ -1646,9 +1613,7 @@ mod tests {
     #[test]
     fn check_heartbeats_does_not_mark_recent_nodes_dead() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 时间戳始终 1000，注册时 last_heartbeat=1000，check 时 now=1000
         let dead = coord.check_heartbeats();
         assert!(dead.is_empty());
@@ -1663,9 +1628,7 @@ mod tests {
     #[test]
     fn assign_task_to_single_node() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let node_id = coord.assign_task("task-1", "source-1").unwrap();
         assert_eq!(node_id, "node-1");
         assert_eq!(coord.assignment_count(), 1);
@@ -1722,12 +1685,13 @@ mod tests {
     #[test]
     fn assign_task_duplicate_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "source-1").unwrap();
         let result = coord.assign_task("task-1", "source-1");
-        assert!(matches!(result, Err(ClusterError::TaskAlreadyAssigned { .. })));
+        assert!(matches!(
+            result,
+            Err(ClusterError::TaskAlreadyAssigned { .. })
+        ));
     }
 
     #[test]
@@ -1751,15 +1715,11 @@ mod tests {
     #[test]
     fn assign_task_skips_dead_node() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         // 标记 node-1 为 Dead
         {
-            let mut nodes = coord.nodes.write().unwrap();
+            let mut nodes = coord.nodes.write();
             nodes.get_mut("node-1").unwrap().status = NodeStatus::Dead;
         }
         // 应分配到 node-2
@@ -1770,9 +1730,7 @@ mod tests {
     #[test]
     fn assign_task_empty_task_id_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let result = coord.assign_task("", "source-1");
         assert!(matches!(result, Err(ClusterError::InvalidConfig(_))));
     }
@@ -1780,19 +1738,11 @@ mod tests {
     #[test]
     fn unassign_task_decreases_current_tasks() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "source-1").unwrap();
-        assert_eq!(
-            coord.get_node("node-1").unwrap().capacity.current_tasks,
-            1
-        );
+        assert_eq!(coord.get_node("node-1").unwrap().capacity.current_tasks, 1);
         coord.unassign_task("task-1").unwrap();
-        assert_eq!(
-            coord.get_node("node-1").unwrap().capacity.current_tasks,
-            0
-        );
+        assert_eq!(coord.get_node("node-1").unwrap().capacity.current_tasks, 0);
         assert_eq!(coord.assignment_count(), 0);
     }
 
@@ -1806,9 +1756,7 @@ mod tests {
     #[test]
     fn get_assignment_returns_node_id() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "source-1").unwrap();
         assert_eq!(coord.get_assignment("task-1"), Some("node-1".to_string()));
         assert_eq!(coord.get_assignment("task-x"), None);
@@ -1817,9 +1765,7 @@ mod tests {
     #[test]
     fn list_assignments_sorted_by_task_id() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-c", "").unwrap();
         coord.assign_task("task-a", "").unwrap();
         coord.assign_task("task-b", "").unwrap();
@@ -1844,23 +1790,15 @@ mod tests {
         coord.migrate_task("task-1", "node-2").unwrap();
         assert_eq!(coord.get_assignment("task-1"), Some("node-2".to_string()));
         // 容量更新
-        assert_eq!(
-            coord.get_node("node-1").unwrap().capacity.current_tasks,
-            0
-        );
-        assert_eq!(
-            coord.get_node("node-2").unwrap().capacity.current_tasks,
-            1
-        );
+        assert_eq!(coord.get_node("node-1").unwrap().capacity.current_tasks, 0);
+        assert_eq!(coord.get_node("node-2").unwrap().capacity.current_tasks, 1);
         assert_eq!(coord.total_migrated(), 1);
     }
 
     #[test]
     fn migrate_task_to_same_node_noop() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "").unwrap();
         // 迁移到同节点应成功（noop）
         coord.migrate_task("task-1", "node-1").unwrap();
@@ -1870,9 +1808,7 @@ mod tests {
     #[test]
     fn migrate_nonexistent_task_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let result = coord.migrate_task("task-x", "node-1");
         assert!(matches!(result, Err(ClusterError::TaskNotAssigned(_))));
     }
@@ -1880,9 +1816,7 @@ mod tests {
     #[test]
     fn migrate_to_nonexistent_node_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "").unwrap();
         let result = coord.migrate_task("task-1", "node-x");
         assert!(matches!(result, Err(ClusterError::NodeNotFound(_))));
@@ -1891,16 +1825,12 @@ mod tests {
     #[test]
     fn migrate_to_dead_node_fails() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         coord.assign_task("task-1", "").unwrap();
         // 标记 node-2 为 Dead
         {
-            let mut nodes = coord.nodes.write().unwrap();
+            let mut nodes = coord.nodes.write();
             nodes.get_mut("node-2").unwrap().status = NodeStatus::Dead;
         }
         let result = coord.migrate_task("task-1", "node-2");
@@ -1929,7 +1859,9 @@ mod tests {
         assert_eq!(coord.get_assignment("task-1"), Some("node-1".to_string()));
         // 注销 node-1，任务应迁移到其他节点
         coord.unregister_node("node-1").unwrap();
-        let new_node = coord.get_assignment("task-1").expect("task should be migrated");
+        let new_node = coord
+            .get_assignment("task-1")
+            .expect("task should be migrated");
         assert_ne!(new_node, "node-1");
         assert_eq!(coord.node_count(), 2);
     }
@@ -1937,12 +1869,8 @@ mod tests {
     #[test]
     fn dead_node_tasks_auto_migrated_on_check_heartbeats() {
         let (coord, time) = make_controllable_coord(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         // 任务分配到 node-1（字典序最小）
         coord.assign_task("task-1", "").unwrap();
         assert_eq!(coord.get_assignment("task-1"), Some("node-1".to_string()));
@@ -1966,12 +1894,8 @@ mod tests {
             enable_task_migration: false,
         };
         let (coord, time) = make_controllable_coord(cfg);
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         coord.assign_task("task-1", "").unwrap();
         // 推进时间，给 node-2 发心跳保持存活
         time.store(40_000, Ordering::SeqCst);
@@ -1991,15 +1915,9 @@ mod tests {
     #[test]
     fn elect_leader_picks_smallest_node_id() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-3", "10.0.0.3:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-3", "10.0.0.3:8080", 10).unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         // 注册时已触发选举，应选 node-1
         assert_eq!(coord.current_leader(), Some("node-1".to_string()));
     }
@@ -2007,12 +1925,10 @@ mod tests {
     #[test]
     fn elect_leader_no_alive_nodes_returns_none() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 标记为 Dead
         {
-            let mut nodes = coord.nodes.write().unwrap();
+            let mut nodes = coord.nodes.write();
             nodes.get_mut("node-1").unwrap().status = NodeStatus::Dead;
         }
         let leader = coord.elect_leader();
@@ -2023,16 +1939,12 @@ mod tests {
     #[test]
     fn elect_leader_changes_when_leader_dies() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         assert_eq!(coord.current_leader(), Some("node-1".to_string()));
         // node-1 死亡
         {
-            let mut nodes = coord.nodes.write().unwrap();
+            let mut nodes = coord.nodes.write();
             nodes.get_mut("node-1").unwrap().status = NodeStatus::Dead;
         }
         // 触发选举
@@ -2077,9 +1989,7 @@ mod tests {
         // 注册 5 个节点，每个容量 20
         for i in 0..5 {
             let node_id = format!("node-{}", i);
-            coord
-                .register_node(&node_id, "10.0.0.1:8080", 20)
-                .unwrap();
+            coord.register_node(&node_id, "10.0.0.1:8080", 20).unwrap();
         }
         let mut handles = Vec::new();
         for i in 0..50 {
@@ -2148,9 +2058,7 @@ mod tests {
     fn config_heartbeat_timeout_affects_check() {
         let cfg = ClusterConfig::default().with_heartbeat_timeout_ms(5000);
         let (coord, time) = make_controllable_coord(cfg);
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         // 推进时间到 10000，10000 - 1000 = 9000 > 5000，超时
         time.store(10_000, Ordering::SeqCst);
         let dead = coord.check_heartbeats();
@@ -2176,9 +2084,7 @@ mod tests {
     #[test]
     fn total_assigned_increments() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         assert_eq!(coord.total_assigned(), 0);
         coord.assign_task("task-1", "").unwrap();
         assert_eq!(coord.total_assigned(), 1);
@@ -2199,12 +2105,8 @@ mod tests {
     #[test]
     fn total_dead_nodes_increments() {
         let (coord, time) = make_controllable_coord(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         assert_eq!(coord.total_dead_nodes(), 0);
         // 推进时间到 50000，两个节点都超时（50000-1000=49000>30000）
         time.store(50_000, Ordering::SeqCst);
@@ -2215,9 +2117,7 @@ mod tests {
     #[test]
     fn get_task_source_returns_source_id() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "pg-source-1").unwrap();
         assert_eq!(
             coord.get_task_source("task-1"),
@@ -2233,18 +2133,13 @@ mod tests {
         coord.assign_task("task-1", "pg-source-1").unwrap();
         let affinity = coord.get_source_affinity("pg-source-1");
         assert!(affinity.is_some());
-        assert_eq!(
-            affinity,
-            coord.get_assignment("task-1")
-        );
+        assert_eq!(affinity, coord.get_assignment("task-1"));
     }
 
     #[test]
     fn update_node_metrics_clamps_values() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.update_node_metrics("node-1", 150.0, -10.0).unwrap();
         let node = coord.get_node("node-1").unwrap();
         assert_eq!(node.capacity.cpu_usage, 100.0);
@@ -2319,11 +2214,11 @@ mod tests {
         }
 
         fn dispatch_log(&self) -> Vec<(String, String, String)> {
-            self.dispatch_log.lock().unwrap().clone()
+            self.dispatch_log.lock().clone()
         }
 
         fn migrate_log(&self) -> Vec<(String, String, String)> {
-            self.migrate_log.lock().unwrap().clone()
+            self.migrate_log.lock().clone()
         }
     }
 
@@ -2334,7 +2229,7 @@ mod tests {
             source_id: &str,
             target_node: &ClusterNode,
         ) -> Result<(), ClusterError> {
-            self.dispatch_log.lock().unwrap().push((
+            self.dispatch_log.lock().push((
                 task_id.to_string(),
                 source_id.to_string(),
                 target_node.node_id.clone(),
@@ -2352,7 +2247,7 @@ mod tests {
             source_node: &ClusterNode,
             target_node: &ClusterNode,
         ) -> Result<(), ClusterError> {
-            self.migrate_log.lock().unwrap().push((
+            self.migrate_log.lock().push((
                 task_id.to_string(),
                 source_node.node_id.clone(),
                 target_node.node_id.clone(),
@@ -2370,9 +2265,7 @@ mod tests {
             Arc::new(NoopHeartbeatProvider),
             dispatcher.clone(),
         );
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         coord.assign_task("task-1", "source-1").unwrap();
         let log = dispatcher.dispatch_log();
         assert_eq!(log.len(), 1);
@@ -2390,12 +2283,8 @@ mod tests {
             Arc::new(NoopHeartbeatProvider),
             dispatcher.clone(),
         );
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         coord.assign_task("task-1", "").unwrap();
         coord.migrate_task("task-1", "node-2").unwrap();
         let log = dispatcher.migrate_log();
@@ -2414,9 +2303,7 @@ mod tests {
             provider.clone(),
             Arc::new(NoopTaskDispatcher),
         );
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
         let node = coord.get_node("node-1").unwrap();
         let _ = provider.send_heartbeat(&node);
         assert_eq!(provider.send_count(), 1);
@@ -2468,12 +2355,8 @@ mod tests {
     #[test]
     fn unregister_leader_triggers_reelection() {
         let coord = make_test_coordinator(ClusterConfig::default());
-        coord
-            .register_node("node-1", "10.0.0.1:8080", 10)
-            .unwrap();
-        coord
-            .register_node("node-2", "10.0.0.2:8080", 10)
-            .unwrap();
+        coord.register_node("node-1", "10.0.0.1:8080", 10).unwrap();
+        coord.register_node("node-2", "10.0.0.2:8080", 10).unwrap();
         assert_eq!(coord.current_leader(), Some("node-1".to_string()));
         coord.unregister_node("node-1").unwrap();
         // node-1 下线后，node-2 应成为新 Leader

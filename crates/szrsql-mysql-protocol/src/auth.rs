@@ -105,8 +105,7 @@ impl AuthSession {
             AuthMode::Trust => Ok(username.to_string()),
 
             AuthMode::MysqlNativePassword { users } => {
-                if auth_plugin != "mysql_native_password" && auth_plugin != "mysql_clear_password"
-                {
+                if auth_plugin != "mysql_native_password" && auth_plugin != "mysql_clear_password" {
                     return Err(AuthError::UnsupportedPlugin(auth_plugin.to_string()));
                 }
                 if auth_response.len() != 20 {

@@ -52,10 +52,7 @@ fn make_catalog() -> InMemoryCatalog {
     let mut catalog = InMemoryCatalog::new();
     catalog.add_simple_table(
         "test_table",
-        vec![
-            ("id", ColumnType::Int64),
-            ("name", ColumnType::Text),
-        ],
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
     );
     catalog
 }
@@ -64,10 +61,7 @@ fn make_catalog() -> InMemoryCatalog {
 fn make_table() -> InMemoryTable {
     InMemoryTable::with_columns(
         "test_table",
-        vec![
-            ("id", ColumnType::Int64),
-            ("name", ColumnType::Text),
-        ],
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
     )
 }
 
@@ -79,7 +73,9 @@ fn make_wal_writer(test_name: &str) -> (Arc<WalWriter>, std::path::PathBuf) {
     let seq = WAL_FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let path = std::env::temp_dir().join(format!(
         "szrsql_p9_2_{}_{}_{}.wal",
-        test_name, std::process::id(), seq
+        test_name,
+        std::process::id(),
+        seq
     ));
     std::fs::remove_file(&path).ok();
     let writer = Arc::new(WalWriter::create_new(&path).expect("create WAL failed"));
@@ -187,10 +183,7 @@ fn test_p9_2_wal_update_row_record_written() {
         let executor = Executor::new()
             .with_catalog(&catalog)
             .with_wal_writer(writer.clone());
-        let plan = plan_sql(
-            "UPDATE test_table SET name = 'bob' WHERE id = 1",
-            &catalog,
-        );
+        let plan = plan_sql("UPDATE test_table SET name = 'bob' WHERE id = 1", &catalog);
         let result = executor
             .execute_update(&plan, &mut table)
             .expect("update failed");
@@ -215,12 +208,21 @@ fn test_p9_2_wal_update_row_record_written() {
     let record = updates[0];
     let change = WalRowChange::decode_update(record.page_id, &record.data)
         .expect("decode Update payload failed");
-    assert!(!change.old_payload.is_empty(), "old_payload should be non-empty");
-    assert!(!change.new_payload.is_empty(), "new_payload should be non-empty");
+    assert!(
+        !change.old_payload.is_empty(),
+        "old_payload should be non-empty"
+    );
+    assert!(
+        !change.new_payload.is_empty(),
+        "new_payload should be non-empty"
+    );
 
     let old_str = String::from_utf8_lossy(&change.old_payload);
     let new_str = String::from_utf8_lossy(&change.new_payload);
-    assert!(old_str.contains("alice"), "old_payload should contain 'alice'");
+    assert!(
+        old_str.contains("alice"),
+        "old_payload should contain 'alice'"
+    );
     assert!(new_str.contains("bob"), "new_payload should contain 'bob'");
 
     std::fs::remove_file(&path).ok();
@@ -277,11 +279,17 @@ fn test_p9_2_wal_delete_row_record_written() {
     let record = deletes[0];
     let change = WalRowChange::decode_delete(record.page_id, &record.data)
         .expect("decode Delete payload failed");
-    assert!(!change.old_payload.is_empty(), "old_payload should be non-empty");
+    assert!(
+        !change.old_payload.is_empty(),
+        "old_payload should be non-empty"
+    );
     assert!(change.new_payload.is_empty(), "new_payload should be empty");
 
     let old_str = String::from_utf8_lossy(&change.old_payload);
-    assert!(old_str.contains("alice"), "old_payload should contain 'alice'");
+    assert!(
+        old_str.contains("alice"),
+        "old_payload should contain 'alice'"
+    );
 
     std::fs::remove_file(&path).ok();
 }

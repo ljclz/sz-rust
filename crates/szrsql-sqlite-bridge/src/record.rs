@@ -52,7 +52,8 @@ pub fn encode_record(values: &[Value]) -> Vec<u8> {
     }
 
     // 第四步：拼接完整 record
-    let mut buf = Vec::with_capacity(header_size + encoded.iter().map(|(_, p)| p.len()).sum::<usize>());
+    let mut buf =
+        Vec::with_capacity(header_size + encoded.iter().map(|(_, p)| p.len()).sum::<usize>());
     buf.extend(encode_varint(header_size as u64));
     buf.extend(&serial_types_buf);
     for (_, payload) in &encoded {

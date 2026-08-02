@@ -22,6 +22,7 @@
 use crate::pgwire::copy::{
     format_csv_field, parse_csv_line, parse_text_line, string_to_value, value_to_string, CopyError,
 };
+use crate::pgwire::dirty_tracker::DirtyTableTracker;
 use crate::pgwire::message::SqlState;
 use crate::pgwire::notify::{Notification, NotifyHub};
 use szrsql_sql::ast::{
@@ -33,10 +34,10 @@ use szrsql_sql::executor::{
     PreparedStatementStore, SessionState, SharedSequenceState, TableSnapshot, TableStorage,
     TempTableStore, TransactionHistory,
 };
-use crate::pgwire::dirty_tracker::DirtyTableTracker;
 use szrsql_sql::parser::{parse_sql, ParseError};
 use szrsql_sql::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner, TableSchema};
-use szrsql_tx::mvcc::{IsolationLevel, MvccManager, MvccError};
+use szrsql_sql::savepoint::{SavepointError, SavepointStack};
+use szrsql_tx::mvcc::{IsolationLevel, MvccError, MvccManager};
 use szrsql_tx::wal::{WalError, WalOpType, WalRecord, WalWriter};
 use szrsql_types::value::{ColumnType, Value};
 use thiserror::Error;
@@ -341,6 +342,8 @@ pub struct ExecutorService {
     txn_state: TransactionState,
     /// 事务期间的表快照（表名小写 → 快照）
     txn_snapshots: HashMap<String, TableSnapshot>,
+    /// SAVEPOINT 栈（P0-2：事务内嵌套保存点管理）
+    savepoint_stack: SavepointStack,
     /// Phase 4.3 扩展查询：命名预处理语句存储（名称 → ExtendedPreparedStatement）
     extended_statements: HashMap<String, ExtendedPreparedStatement>,
     /// Phase 4.3 扩展查询：命名 portal 存储（名称 → Portal）
@@ -441,7 +444,8 @@ pub struct ExecutorService {
     /// - `ANALYZE [table_name [, ...]]` 扫描表数据收集统计信息（行数、NDV、min/max、直方图）
     /// - 统计结果存入此 store，供 CostModel 进行基于成本的优化（P2-1.2 激活）
     /// - 未注入时 ANALYZE 命令返回错误（不支持）
-    statistics_store: Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
+    statistics_store:
+        Option<Arc<std::sync::Mutex<szrsql_optimizer::statistics::InMemoryStatisticsStore>>>,
     /// P2-2.1：分布式事务状态（显式事务期间持有，COMMIT/ROLLBACK 时消费）。
     ///
     /// - **BEGIN**：若 `dist_runtime` 已注入，从 TSO 获取 `start_ts`，
@@ -472,6 +476,15 @@ pub struct ExecutorService {
     /// `ReplicationPrimary`，由后者扇出到所有已连接的 TCP 备库。
     /// 未注入时退化为旧行为（不推送复制流，单节点模式）。
     replication_primary: Option<Arc<szrsql_replication::stream::ReplicationPrimary>>,
+    /// P0-3：PL/pgSQL 函数注册表（跨会话共享，供 plpgsql_interp 解释器使用）。
+    ///
+    /// 注入后，每次 SQL 执行时会将此注册表设置到 `current_plpgsql_interp` 线程局部，
+    /// 使 `ExprEvaluator` 在调用 `LANGUAGE plpgsql` 函数时能通过 `PlPgSqlInterpreter`
+    /// 执行函数体。未注入时退化为旧行为（plpgsql 函数无法执行）。
+    ///
+    /// 注意：此处使用 `std::sync::Mutex`（而非 tokio::sync::Mutex），因为
+    /// 表达式求值是同步的（`ExprEvaluator::eval`），不能 await。
+    plpgsql_registry: Option<Arc<std::sync::Mutex<szrsql_sql::plpgsql_interp::FunctionRegistry>>>,
 }
 
 /// P2-2.1：分布式事务状态（显式事务期间的 Percolator 2PC 累积器）。
@@ -501,6 +514,7 @@ impl ExecutorService {
             transaction_history: TransactionHistory::new(),
             txn_state: TransactionState::Idle,
             txn_snapshots: HashMap::new(),
+            savepoint_stack: SavepointStack::new(),
             extended_statements: HashMap::new(),
             portals: HashMap::new(),
             pid: 0,
@@ -525,6 +539,7 @@ impl ExecutorService {
             conflict_log: None,
             node_id: 1,
             replication_primary: None,
+            plpgsql_registry: None,
         }
     }
 
@@ -662,10 +677,7 @@ impl ExecutorService {
     ///
     /// 分布式写入失败仅记录 warn 日志，不中断 DML（best-effort 双写）。
     /// 未注入时退化为本地内存表存储（旧行为，用于测试兼容）。
-    pub fn with_dist_runtime(
-        mut self,
-        handle: szrsql_dist::runtime::DistRuntimeHandle,
-    ) -> Self {
+    pub fn with_dist_runtime(mut self, handle: szrsql_dist::runtime::DistRuntimeHandle) -> Self {
         self.dist_runtime = Some(handle);
         self
     }
@@ -722,6 +734,19 @@ impl ExecutorService {
         primary: Arc<szrsql_replication::stream::ReplicationPrimary>,
     ) -> Self {
         self.replication_primary = Some(primary);
+        self
+    }
+
+    /// P0-3：注入 PL/pgSQL 函数注册表，启用 plpgsql_interp 解释器执行。
+    ///
+    /// 注入后，每次 SQL 执行时会将此注册表设置到 `current_plpgsql_interp` 线程局部，
+    /// 使 `ExprEvaluator` 在调用 `LANGUAGE plpgsql` 函数时能通过 `PlPgSqlInterpreter`
+    /// 执行函数体。未注入时退化为旧行为（plpgsql 函数无法执行）。
+    pub fn with_plpgsql_registry(
+        mut self,
+        registry: Arc<std::sync::Mutex<szrsql_sql::plpgsql_interp::FunctionRegistry>>,
+    ) -> Self {
+        self.plpgsql_registry = Some(registry);
         self
     }
 
@@ -967,6 +992,13 @@ impl ExecutorService {
         // ADV-CONC-1：在规划前从共享存储同步 catalog（跨 session CREATE TABLE 可见性）
         self.sync_catalog_from_shared().await;
 
+        // P0-3：设置 PL/pgSQL 解释器线程局部注册表（整个语句执行期间可用）。
+        // 作用域绑定到本函数，函数返回时 guard 析构自动清理 thread_local。
+        let _plpgsql_guard = self
+            .plpgsql_registry
+            .as_ref()
+            .map(|r| szrsql_sql::expr::current_plpgsql_interp::guard(r.clone()));
+
         // 1. 拦截事务控制语句（不进入 Planner）
         //    注意：ROLLBACK 在 InFailedTransaction 状态下也必须放行
         if let Some(tx_result) = self.handle_transaction_control(&stmt).await? {
@@ -987,9 +1019,10 @@ impl ExecutorService {
         //    这类查询需要 MutableCatalog 接口（szrsql-catalog 提供），无法走 Planner
         //    （Planner 只接受 Catalog trait）。在 plan_statement 之前拦截，直接返回结果。
         //    P2-1.3：注入 statistics_store，使 pg_class.reltuples / pg_statistic 可从 ANALYZE 统计信息填充。
-        let stats_ref = self.statistics_store.as_ref().map(|inner| {
-            szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone())
-        });
+        let stats_ref = self
+            .statistics_store
+            .as_ref()
+            .map(|inner| szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone()));
         let stats_dyn = stats_ref
             .as_ref()
             .map(|s| s as &dyn szrsql_optimizer::statistics::StatisticsStore);
@@ -1020,9 +1053,7 @@ impl ExecutorService {
                 CommentObjectType::Column => {
                     // P0 修复：COLUMN 注释必须指定列名，否则报错（之前是假成功）
                     let col = column_name.as_ref().ok_or_else(|| {
-                        SessionError::Plan(
-                            "COMMENT ON COLUMN requires a column name".into(),
-                        )
+                        SessionError::Plan("COMMENT ON COLUMN requires a column name".into())
                     })?;
                     self.catalog
                         .set_column_comment(object_name, col, comment.clone())
@@ -1058,7 +1089,12 @@ impl ExecutorService {
         // - `EXPLAIN VERBOSE ...` — 当前等同于普通 EXPLAIN（后续扩展）
         //
         // 结果以单列 "QUERY PLAN" 结果集返回，每行一个计划节点。
-        if let Statement::Explain { statement, analyze, verbose: _ } = &stmt {
+        if let Statement::Explain {
+            statement,
+            analyze,
+            verbose: _,
+        } = &stmt
+        {
             return self.execute_explain(*statement.clone(), *analyze).await;
         }
 
@@ -1104,7 +1140,8 @@ impl ExecutorService {
                 let optimized = if let Some(inner) = stats_store_inner {
                     let shared = szrsql_optimizer::statistics::SharedStatisticsStore::new(inner);
                     let cost_model = szrsql_optimizer::cost::CostModel::new(Arc::new(shared));
-                    let join_optimizer = szrsql_optimizer::join_order::JoinOrderOptimizer::new(cost_model);
+                    let join_optimizer =
+                        szrsql_optimizer::join_order::JoinOrderOptimizer::new(cost_model);
                     join_optimizer.optimize(optimized)
                 } else {
                     optimized
@@ -1258,8 +1295,7 @@ impl ExecutorService {
             Ok(optimized)
         })
         .await
-        .map_err(|e| SessionError::Transaction(format!("explain planning task panicked: {e}")))?
-        ?;
+        .map_err(|e| SessionError::Transaction(format!("explain planning task panicked: {e}")))??;
 
         // 2. 格式化计划
         let plan_text = szrsql_sql::plan::format_plan(&plan);
@@ -1371,12 +1407,78 @@ impl ExecutorService {
                     in_transaction: false,
                 }))
             }
-            // SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT — Phase 4.2 暂不支持
-            Statement::Rollback { savepoint: Some(_) }
-            | Statement::Savepoint(_)
-            | Statement::ReleaseSavepoint(_) => Err(SessionError::Transaction(format!(
-                "savepoint not supported in Phase 4.2: {stmt:?}"
-            ))),
+            // P0-2 修复：SAVEPOINT / RELEASE SAVEPOINT / ROLLBACK TO SAVEPOINT 接通
+            //
+            // SavepointStack 已完整实现（savepoint.rs），此处将三个语句分支从拒绝
+            // 改为委托到 savepoint_stack，并在 SAVEPOINT 时捕获当前表快照、
+            // ROLLBACK TO 时恢复快照。
+            Statement::Savepoint(name) => {
+                if !self.in_transaction() {
+                    return Err(SessionError::Transaction(
+                        "no active transaction to create savepoint".into(),
+                    ));
+                }
+                let snapshots = self.snapshot_current_tables().await;
+                match self.savepoint_stack.savepoint(name, snapshots) {
+                    Ok(()) => Ok(Some(QueryResult::TransactionComplete {
+                        tag: format!("SAVEPOINT {name}"),
+                        in_transaction: true,
+                    })),
+                    Err(SavepointError::DuplicateName(n)) => Err(SessionError::Transaction(
+                        format!("savepoint \"{n}\" already exists"),
+                    )),
+                    Err(SavepointError::NoActiveTransaction) => {
+                        Err(SessionError::Transaction("no active transaction".into()))
+                    }
+                    Err(e) => Err(SessionError::Transaction(format!("savepoint error: {e}"))),
+                }
+            }
+            Statement::ReleaseSavepoint(name) => {
+                if !self.in_transaction() {
+                    return Err(SessionError::Transaction(
+                        "no active transaction to release savepoint".into(),
+                    ));
+                }
+                match self.savepoint_stack.release(name) {
+                    Ok(()) => Ok(Some(QueryResult::TransactionComplete {
+                        tag: format!("RELEASE SAVEPOINT {name}"),
+                        in_transaction: true,
+                    })),
+                    Err(SavepointError::NotFound(n)) => Err(SessionError::Transaction(format!(
+                        "savepoint \"{n}\" does not exist"
+                    ))),
+                    Err(SavepointError::NoActiveTransaction) => {
+                        Err(SessionError::Transaction("no active transaction".into()))
+                    }
+                    Err(e) => Err(SessionError::Transaction(format!("savepoint error: {e}"))),
+                }
+            }
+            Statement::Rollback {
+                savepoint: Some(name),
+            } => {
+                if !self.in_transaction() {
+                    return Err(SessionError::Transaction(
+                        "no active transaction to roll back to savepoint".into(),
+                    ));
+                }
+                match self.savepoint_stack.rollback_to(name) {
+                    Ok(snaps) => {
+                        // 恢复各表到保存点状态（不修改 txn_snapshots，保留事务起始快照供 COMMIT/ROLLBACK 使用）
+                        self.restore_tables(snaps).await;
+                        Ok(Some(QueryResult::TransactionComplete {
+                            tag: format!("ROLLBACK TO SAVEPOINT {name}"),
+                            in_transaction: true,
+                        }))
+                    }
+                    Err(SavepointError::NotFound(n)) => Err(SessionError::Transaction(format!(
+                        "savepoint \"{n}\" does not exist"
+                    ))),
+                    Err(SavepointError::NoActiveTransaction) => {
+                        Err(SessionError::Transaction("no active transaction".into()))
+                    }
+                    Err(e) => Err(SessionError::Transaction(format!("savepoint error: {e}"))),
+                }
+            }
             // SET TRANSACTION ISOLATION LEVEL — P0 修复
             // 之前是 NO-OP 假成功，现在实际写入 session_state 的 transaction_isolation 变量，
             // 使 SHOW transaction_isolation 返回正确值。
@@ -1400,7 +1502,10 @@ impl ExecutorService {
                         TransactionIsolation::Serializable => IsolationLevel::Serializable,
                     };
                     self.pending_isolation = Some(mvcc_iso);
-                    tracing::debug!(isolation = iso_str, "SET TRANSACTION ISOLATION LEVEL recorded");
+                    tracing::debug!(
+                        isolation = iso_str,
+                        "SET TRANSACTION ISOLATION LEVEL recorded"
+                    );
                 }
                 if let Some(acc) = access {
                     let acc_str = match acc {
@@ -1445,10 +1550,14 @@ impl ExecutorService {
         }
         self.txn_modified_tables.clear();
         self.txn_state = TransactionState::InTransaction;
+        // P0-2 修复：将事务起始快照推入 savepoint_stack，作为 ROLLBACK（无参数）的恢复基准
+        self.savepoint_stack.begin(self.txn_snapshots.clone());
 
         // P0-TX-1 修复：同步到 MvccManager 状态机
         if let Some(mgr) = &self.mvcc {
-            let level = self.pending_isolation.unwrap_or(IsolationLevel::RepeatableRead);
+            let level = self
+                .pending_isolation
+                .unwrap_or(IsolationLevel::RepeatableRead);
             let txn = mgr.begin_with_isolation(level);
             self.current_txn_id = txn.txn_id;
             tracing::debug!(
@@ -1673,6 +1782,8 @@ impl ExecutorService {
         } else {
             self.txn_snapshots.clear();
         }
+        // P0-2 修复：提交事务时清空 savepoint_stack
+        self.savepoint_stack.commit();
         self.txn_state = TransactionState::Idle;
         // ADV-CONC-1：释放本事务持有的所有行级锁（Strict 2PL）
         if let Some(lm) = &self.lock_manager {
@@ -1772,6 +1883,8 @@ impl ExecutorService {
             }
         }
         self.txn_snapshots.clear();
+        // P0-2 修复：回滚事务时清空 savepoint_stack（丢弃所有保存点）
+        self.savepoint_stack.rollback_all();
         // P0-TX-1 修复：同步到 MvccManager 状态机
         if let Some(mgr) = &self.mvcc {
             if txn_id > 0 {
@@ -1860,6 +1973,46 @@ impl ExecutorService {
             }
         }
         tracing::debug!("transaction rolled back");
+    }
+
+    /// P0-2 辅助：对本地表和共享表各取一份快照（SAVEPOINT 时调用）。
+    async fn snapshot_current_tables(&self) -> HashMap<String, TableSnapshot> {
+        let mut snaps = HashMap::new();
+        for (name, table) in &self.tables {
+            let table_guard = table.lock().await;
+            snaps.insert(name.clone(), table_guard.snapshot());
+        }
+        if let Some(shared) = &self.shared_tables {
+            let guard = shared.read().await;
+            for (name, table) in guard.iter() {
+                if !snaps.contains_key(name) {
+                    let table_guard = table.lock().await;
+                    snaps.insert(name.clone(), table_guard.snapshot());
+                }
+            }
+        }
+        snaps
+    }
+
+    /// P0-2 辅助：将给定快照恢复到本地表和共享表（ROLLBACK TO SAVEPOINT 时调用）。
+    async fn restore_tables(&self, snapshots: HashMap<String, TableSnapshot>) {
+        for (name, table) in &self.tables {
+            if let Some(snapshot) = snapshots.get(name) {
+                let mut table_guard = table.lock().await;
+                table_guard.restore(snapshot.clone());
+            }
+        }
+        if let Some(shared) = &self.shared_tables {
+            let guard = shared.read().await;
+            for (name, table) in guard.iter() {
+                if snapshots.contains_key(name) && !self.tables.contains_key(name) {
+                    if let Some(snapshot) = snapshots.get(name) {
+                        let mut table_guard = table.lock().await;
+                        table_guard.restore(snapshot.clone());
+                    }
+                }
+            }
+        }
     }
 
     /// 根据计划类型分派执行。
@@ -2133,7 +2286,9 @@ impl ExecutorService {
         // P0 修复：COPY FROM 此前直接调用 table.insert_row 跳过所有约束校验，
         // 现在通过 Executor::validate_row_for_insert 复用 FK/CHECK/ENUM 校验逻辑。
         // 校验失败立即中止 COPY（与 PG 行为一致），已插入的行保留（事务回滚由调用方处理）。
-        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         let mut affected_rows: usize = 0;
         for (line_idx, line) in data_lines.iter().enumerate() {
             let line_no = if options.header {
@@ -2182,9 +2337,11 @@ impl ExecutorService {
             // P0 修复：调用 Executor 校验 FK/CHECK/ENUM 约束
             executor
                 .validate_row_for_insert(&table_name, &schema, &row)
-                .map_err(|e| SessionError::Execution(format!(
-                    "COPY FROM line {line_no}: constraint violation: {e}"
-                )))?;
+                .map_err(|e| {
+                    SessionError::Execution(format!(
+                        "COPY FROM line {line_no}: constraint violation: {e}"
+                    ))
+                })?;
 
             table_guard.insert_row(row);
             affected_rows += 1;
@@ -2288,8 +2445,12 @@ impl ExecutorService {
                 };
 
                 // OPT-6：仅锁定查询计划实际引用的表（合并本地表和共享表）
-                let referenced: std::collections::HashSet<String> = plan.collect_referenced_table_names();
-                let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+                let referenced: std::collections::HashSet<String> =
+                    plan.collect_referenced_table_names();
+                let mut all_arcs: std::collections::HashMap<
+                    String,
+                    std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>,
+                > = std::collections::HashMap::new();
                 for (k, v) in &self.tables {
                     if referenced.contains(&k.to_lowercase()) {
                         all_arcs.insert(k.clone(), v.clone());
@@ -2310,7 +2471,9 @@ impl ExecutorService {
                 }
 
                 let mut executor = Executor::new();
-                executor = executor.with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+                executor = executor
+                    .with_catalog(&self.catalog)
+                    .with_sql_functions_from_catalog(&self.catalog);
                 executor = executor.with_temp_store(&self.temp_store);
                 // P0-TX-1 Phase B：注入 MVCC 上下文
                 if let Some(mvcc) = &self.mvcc {
@@ -2441,7 +2604,10 @@ impl ExecutorService {
         // - 若计划不引用任何物理表（如 `SELECT 1`），无需锁定任何表。
         let referenced: std::collections::HashSet<String> = plan.collect_referenced_table_names();
 
-        let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        let mut all_arcs: std::collections::HashMap<
+            String,
+            std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>,
+        > = std::collections::HashMap::new();
         // 仅收集被引用的本地表
         for (k, v) in &self.tables {
             if referenced.contains(&k.to_lowercase()) {
@@ -2459,12 +2625,12 @@ impl ExecutorService {
             }
         }
         // P0-6：仅收集被引用的物化视图存储表
-        let mv_arcs: Vec<(String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>)> =
-            self.materialized_view_tables
-                .iter()
-                .filter(|(k, _)| referenced.contains(&k.to_lowercase()))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
+        let mv_arcs: Vec<(String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>)> = self
+            .materialized_view_tables
+            .iter()
+            .filter(|(k, _)| referenced.contains(&k.to_lowercase()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         // 先锁定收集到的表（确保 Executor 不跨 .await 持有，因为 Executor<'_> 非 Send）
         let mut guards = Vec::with_capacity(all_arcs.len());
         for table_arc in all_arcs.values() {
@@ -2478,7 +2644,9 @@ impl ExecutorService {
 
         // 构造 Executor 并注册收集到的表（同步操作，不涉及 .await）
         let mut executor = Executor::new();
-        executor = executor.with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        executor = executor
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         executor = executor.with_temp_store(&self.temp_store);
         // P0-TX-1 Phase B：注入 MVCC 上下文，启用事务可见性过滤
         if let Some(mvcc) = &self.mvcc {
@@ -2536,7 +2704,9 @@ impl ExecutorService {
     /// 调用 Executor::execute_show_tables，返回单列结果集（列名 `Table`）。
     async fn execute_show_tables_plan(&mut self) -> Result<QueryResult, SessionError> {
         // 构造 Executor 并绑定 catalog（不需要表数据，仅需 catalog 元信息）
-        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         let rows = executor.execute_show_tables()?;
         let columns = vec![ResultColumn {
             name: "Table".into(),
@@ -2553,7 +2723,9 @@ impl ExecutorService {
         &mut self,
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
-        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         let rows = executor.execute_show_create_table(plan)?;
         let columns = vec![
             ResultColumn {
@@ -2596,9 +2768,7 @@ impl ExecutorService {
     ) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_set_names(plan, &mut self.session_state)?;
-        Ok(QueryResult::DdlComplete {
-            tag: "SET".into(),
-        })
+        Ok(QueryResult::DdlComplete { tag: "SET".into() })
     }
 
     /// 执行 `SET <variable> = <value>` — 求值 value 表达式并写入 session_state。
@@ -2611,9 +2781,7 @@ impl ExecutorService {
     ) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_set_variable(plan, &mut self.session_state)?;
-        Ok(QueryResult::DdlComplete {
-            tag: "SET".into(),
-        })
+        Ok(QueryResult::DdlComplete { tag: "SET".into() })
     }
 
     // -----------------------------------------------------------------
@@ -2625,7 +2793,12 @@ impl ExecutorService {
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
         let (table, schema, returning) = match plan {
-            LogicalPlan::Insert { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            LogicalPlan::Insert {
+                table,
+                schema,
+                returning,
+                ..
+            } => (table.clone(), schema.clone(), returning.clone()),
             _ => {
                 return Err(SessionError::InvalidStatement(format!(
                     "expected Insert plan, got {:?}",
@@ -2638,7 +2811,9 @@ impl ExecutorService {
             .get_table_arc(&table.name, table.schema.as_deref())
             .await?;
         let mut table_guard = table_arc.lock().await;
-        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let mut executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         if let Some(mvcc) = &self.mvcc {
             executor = executor.with_mvcc(mvcc, self.current_txn_id);
         }
@@ -2702,7 +2877,12 @@ impl ExecutorService {
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
         let (table, schema, returning) = match plan {
-            LogicalPlan::Update { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            LogicalPlan::Update {
+                table,
+                schema,
+                returning,
+                ..
+            } => (table.clone(), schema.clone(), returning.clone()),
             _ => {
                 return Err(SessionError::InvalidStatement(format!(
                     "expected Update plan, got {:?}",
@@ -2718,7 +2898,9 @@ impl ExecutorService {
             .get_table_arc(&table.name, table.schema.as_deref())
             .await?;
         let mut table_guard = table_arc.lock().await;
-        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let mut executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         if let Some(mvcc) = &self.mvcc {
             executor = executor.with_mvcc(mvcc, self.current_txn_id);
         }
@@ -2745,6 +2927,10 @@ impl ExecutorService {
         // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
         if let Some(writer) = &self.wal_writer {
             executor = executor.with_wal_writer(writer.clone());
+        }
+        // P1-9：注入行锁管理器，启用行级冲突检测（UPDATE 路径）
+        if let Some(lm) = &self.lock_manager {
+            executor = executor.with_row_lock_manager(lm.clone(), self.current_txn_id);
         }
         let DmlResult {
             affected_rows,
@@ -2778,7 +2964,12 @@ impl ExecutorService {
         plan: &LogicalPlan,
     ) -> Result<QueryResult, SessionError> {
         let (table, schema, returning) = match plan {
-            LogicalPlan::Delete { table, schema, returning, .. } => (table.clone(), schema.clone(), returning.clone()),
+            LogicalPlan::Delete {
+                table,
+                schema,
+                returning,
+                ..
+            } => (table.clone(), schema.clone(), returning.clone()),
             _ => {
                 return Err(SessionError::InvalidStatement(format!(
                     "expected Delete plan, got {:?}",
@@ -2794,7 +2985,9 @@ impl ExecutorService {
             .get_table_arc(&table.name, table.schema.as_deref())
             .await?;
         let mut table_guard = table_arc.lock().await;
-        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let mut executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         if let Some(mvcc) = &self.mvcc {
             executor = executor.with_mvcc(mvcc, self.current_txn_id);
         }
@@ -2821,6 +3014,10 @@ impl ExecutorService {
         // P9-2：注入 WAL 写入器，启用 DML 行级 WAL 记录
         if let Some(writer) = &self.wal_writer {
             executor = executor.with_wal_writer(writer.clone());
+        }
+        // P1-9：注入行锁管理器，启用行级冲突检测（DELETE 路径）
+        if let Some(lm) = &self.lock_manager {
+            executor = executor.with_row_lock_manager(lm.clone(), self.current_txn_id);
         }
         let DmlResult {
             affected_rows,
@@ -2867,7 +3064,9 @@ impl ExecutorService {
             .get_table_arc(&table.name, table.schema.as_deref())
             .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         let DmlResult { affected_rows, .. } = executor.execute_replace(plan, &mut *table_guard)?;
 
         Ok(QueryResult::AffectedRows {
@@ -2893,7 +3092,9 @@ impl ExecutorService {
             .get_table_arc(&table.name, table.schema.as_deref())
             .await?;
         let mut table_guard = table_arc.lock().await;
-        let executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         let DmlResult { affected_rows, .. } = executor.execute_merge(plan, &mut *table_guard)?;
 
         Ok(QueryResult::AffectedRows {
@@ -2933,12 +3134,15 @@ impl ExecutorService {
 
         // P0-STORE 阶段 1：若表有 PRIMARY KEY 约束且主键列为 Int64，
         // 自动启用 B+Tree 主键索引，供 WHERE pk = literal 等查询走 O(log n) 路径。
-        if let LogicalPlan::CreateTable { columns, constraints, .. } = plan {
+        if let LogicalPlan::CreateTable {
+            columns,
+            constraints,
+            ..
+        } = plan
+        {
             // 1. 检查列级 PRIMARY KEY 约束（col INT PRIMARY KEY）
             for (idx, col) in columns.iter().enumerate() {
-                if col.primary_key
-                    && col.data_type == szrsql_types::value::ColumnType::Int64
-                {
+                if col.primary_key && col.data_type == szrsql_types::value::ColumnType::Int64 {
                     table.enable_btree_pk(idx);
                     tracing::debug!(
                         table = %table_name,
@@ -2950,15 +3154,16 @@ impl ExecutorService {
             }
             // 2. 若列级未命中，检查表级 PRIMARY KEY 约束（PRIMARY KEY (col)）
             if !table.has_btree_pk() {
-                if let Some(TableConstraint::PrimaryKey { columns: pk_cols, .. }) = constraints
+                if let Some(TableConstraint::PrimaryKey {
+                    columns: pk_cols, ..
+                }) = constraints
                     .iter()
                     .find(|c| matches!(c, TableConstraint::PrimaryKey { .. }))
                 {
                     if pk_cols.len() == 1 {
                         if let Some(pk_col_name) = pk_cols.first() {
                             if let Some(idx) = columns.iter().position(|c| &c.name == pk_col_name) {
-                                if columns[idx].data_type
-                                    == szrsql_types::value::ColumnType::Int64
+                                if columns[idx].data_type == szrsql_types::value::ColumnType::Int64
                                 {
                                     table.enable_btree_pk(idx);
                                     tracing::debug!(
@@ -3041,7 +3246,8 @@ impl ExecutorService {
             if cascade {
                 // 收集所有 FK 引用此表的表（递归）
                 let mut queue: Vec<TableName> = vec![name.clone()];
-                let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+                let mut visited: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
                 visited.insert(key.clone());
                 while let Some(current) = queue.pop() {
                     // 找出所有 FK 引用 current 表的表
@@ -3064,10 +3270,8 @@ impl ExecutorService {
                 // RESTRICT：若有 FK 依赖则报错
                 let dependents = self.collect_fk_dependents(name);
                 if !dependents.is_empty() {
-                    let dep_names: Vec<String> = dependents
-                        .iter()
-                        .map(|t| t.qualified_name())
-                        .collect();
+                    let dep_names: Vec<String> =
+                        dependents.iter().map(|t| t.qualified_name()).collect();
                     return Err(SessionError::Execution(format!(
                         "DROP TABLE {}: cannot drop table because other objects depend on it (RESTRICT): {}",
                         name.qualified_name(),
@@ -3153,10 +3357,7 @@ impl ExecutorService {
     /// 执行 DROP INDEX 计划 — P0-FIX-1
     ///
     /// 调用 `Executor::execute_drop_index` 从 catalog 移除索引元数据。
-    fn execute_drop_index_plan(
-        &mut self,
-        plan: &LogicalPlan,
-    ) -> Result<QueryResult, SessionError> {
+    fn execute_drop_index_plan(&mut self, plan: &LogicalPlan) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_drop_index(plan, &mut self.catalog)?;
         Ok(QueryResult::DdlComplete {
@@ -3183,7 +3384,12 @@ impl ExecutorService {
                 columns,
                 query,
                 ..
-            } => (name.clone(), columns.clone(), (**query).clone(), *materialized),
+            } => (
+                name.clone(),
+                columns.clone(),
+                (**query).clone(),
+                *materialized,
+            ),
             _ => {
                 return Err(SessionError::Execution(format!(
                     "expected CreateView plan, got {:?}",
@@ -3209,9 +3415,9 @@ impl ExecutorService {
         let stmt = Statement::Select(Box::new(mv_query.clone()));
         let select_plan = Planner::new(&self.catalog)
             .plan_statement(stmt)
-            .map_err(|e| SessionError::Execution(format!(
-                "materialized view schema derive failed: {e}"
-            )))?;
+            .map_err(|e| {
+                SessionError::Execution(format!("materialized view schema derive failed: {e}"))
+            })?;
         let mut schema = szrsql_sql::plan::plan_schema(&select_plan);
         // 应用显式列别名（CREATE MATERIALIZED VIEW mv (col1, col2) AS ...）
         if !mv_columns.is_empty() && mv_columns.len() == schema.columns.len() {
@@ -3222,7 +3428,8 @@ impl ExecutorService {
         schema.name = mv_name.clone();
         let storage = Arc::new(Mutex::new(InMemoryTable::new(schema)));
         let mv_key = mv_name.name.to_lowercase();
-        self.materialized_view_tables.insert(mv_key.clone(), storage.clone());
+        self.materialized_view_tables
+            .insert(mv_key.clone(), storage.clone());
 
         // P0-MV 修复：立即执行 SELECT 查询并填充物化视图存储表
         // OPT-6：仅锁定查询计划实际引用的表（确保 Executor 不跨 .await 持有，因为 Executor<'_> 非 Send）
@@ -3230,7 +3437,8 @@ impl ExecutorService {
         // P0-DEADLOCK 修复：self.tables 和 shared_tables 可能存有同一个 Arc，
         // tokio::sync::Mutex 不可重入，重复锁定同一 Mutex 会死锁。
         // 使用 Arc::ptr_eq 去重。
-        let referenced: std::collections::HashSet<String> = select_plan.collect_referenced_table_names();
+        let referenced: std::collections::HashSet<String> =
+            select_plan.collect_referenced_table_names();
         let mut all_arcs: Vec<Arc<Mutex<InMemoryTable>>> = self
             .tables
             .iter()
@@ -3249,7 +3457,8 @@ impl ExecutorService {
                 }
             }
         }
-        let mut table_guards: Vec<tokio::sync::MutexGuard<'_, InMemoryTable>> = Vec::with_capacity(all_arcs.len());
+        let mut table_guards: Vec<tokio::sync::MutexGuard<'_, InMemoryTable>> =
+            Vec::with_capacity(all_arcs.len());
         for arc in &all_arcs {
             table_guards.push(arc.lock().await);
         }
@@ -3272,10 +3481,9 @@ impl ExecutorService {
                     )))
                 }
             };
-            exec.execute(&select_plan)
-                .map_err(|e| SessionError::Execution(format!(
-                    "materialized view populate failed: {e}"
-                )))?
+            exec.execute(&select_plan).map_err(|e| {
+                SessionError::Execution(format!("materialized view populate failed: {e}"))
+            })?
         };
         drop(mv_guard);
         drop(table_guards);
@@ -3297,14 +3505,13 @@ impl ExecutorService {
     ///
     /// 调用 `Executor::execute_drop_view` 从 catalog 移除视图定义。
     /// P0-6 修复：物化视图同时移除其存储表。
-    fn execute_drop_view_plan(
-        &mut self,
-        plan: &LogicalPlan,
-    ) -> Result<QueryResult, SessionError> {
+    fn execute_drop_view_plan(&mut self, plan: &LogicalPlan) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_drop_view(plan, &mut self.catalog)?;
         if let LogicalPlan::DropView {
-            names, materialized, ..
+            names,
+            materialized,
+            ..
         } = plan
         {
             if *materialized {
@@ -3316,14 +3523,11 @@ impl ExecutorService {
         }
         let tag = match plan {
             LogicalPlan::DropView {
-                materialized: true,
-                ..
+                materialized: true, ..
             } => "DROP MATERIALIZED VIEW",
             _ => "DROP VIEW",
         };
-        Ok(QueryResult::DdlComplete {
-            tag: tag.into(),
-        })
+        Ok(QueryResult::DdlComplete { tag: tag.into() })
     }
 
     /// 执行 REFRESH MATERIALIZED VIEW 计划 — P0-FIX-1 / P0-6 修复
@@ -3384,7 +3588,9 @@ impl ExecutorService {
         // 现在创建 Executor 并注册表（此后不再有 await 直到 execute 完成）
         // 使用块作用域确保 Executor（!Send）在下一个 await 前被释放
         let rows = {
-            let mut exec = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+            let mut exec = Executor::new()
+                .with_catalog(&self.catalog)
+                .with_sql_functions_from_catalog(&self.catalog);
             for guard in &table_guards {
                 exec.register_table(&**guard);
             }
@@ -3401,7 +3607,7 @@ impl ExecutorService {
             };
             exec.execute(&select_plan)?
         }; // exec 在此处被释放（块作用域结束）
-        // 显式释放 guards
+           // 显式释放 guards
         drop(mv_guard);
         drop(table_guards);
         // 清空并重填存储表
@@ -3426,6 +3632,33 @@ impl ExecutorService {
     ) -> Result<QueryResult, SessionError> {
         let executor = Executor::new();
         executor.execute_create_function(plan, &mut self.catalog)?;
+        // P0-3：若为 LANGUAGE plpgsql，同步注册到 plpgsql_registry（供解释器使用）
+        if let LogicalPlan::CreateFunction {
+            name,
+            parameters,
+            return_type,
+            language,
+            body,
+            strict,
+            ..
+        } = plan
+        {
+            if language.to_lowercase() == "plpgsql" {
+                if let Some(reg) = &self.plpgsql_registry {
+                    let pl_func = szrsql_sql::plpgsql_interp::PlFunction {
+                        name: name.clone(),
+                        parameters: parameters.clone(),
+                        return_type: return_type.clone(),
+                        body: body.clone(),
+                        strict: *strict,
+                    };
+                    if let Ok(mut guard) = reg.lock() {
+                        guard.register(pl_func);
+                        tracing::debug!(function = %name, "registered plpgsql function in interpreter registry");
+                    }
+                }
+            }
+        }
         Ok(QueryResult::DdlComplete {
             tag: "CREATE FUNCTION".into(),
         })
@@ -3500,7 +3733,10 @@ impl ExecutorService {
 
             // 同步重命名 self.tables 中的 key
             // 解析新表名
-            let new_name = if let LogicalPlan::AlterTable { name, operations, .. } = plan {
+            let new_name = if let LogicalPlan::AlterTable {
+                name, operations, ..
+            } = plan
+            {
                 let mut result = name.clone();
                 for op in operations {
                     if let szrsql_sql::ast::AlterTableOperation::RenameTable { new_name } = op {
@@ -3672,31 +3908,48 @@ impl ExecutorService {
     ) -> Result<QueryResult, SessionError> {
         // OPT-6：仅锁定预处理语句实际引用的表（确保 Executor 不跨 .await 持有）
         // 从预处理语句存储中取出 AST，规划后提取引用的表名。
-        // 规划失败或未找到时退化为锁定所有表（保持原行为）。
-        let referenced: std::collections::HashSet<String> = if let LogicalPlan::Execute { name, .. } = plan {
+        // P1-10 修复：规划失败或未找到时不再退化为锁定所有表（避免并发度退化），
+        // 而是记录 warning 并返回错误（与 PG 行为一致：预处理语句不存在应报错）。
+        let referenced: std::collections::HashSet<String> = if let LogicalPlan::Execute {
+            name,
+            ..
+        } = plan
+        {
             match self.prepared_store.get(name) {
                 Some((stmt, _)) => {
                     let planner = Planner::new(&self.catalog);
                     match planner.plan_statement(stmt.clone()) {
                         Ok(p) => p.collect_referenced_table_names(),
-                        Err(_) => std::collections::HashSet::new(),
+                        Err(e) => {
+                            tracing::warn!(error = %e, statement = %name, "P1-10: plan failed for prepared statement");
+                            // 规划失败时不锁定任何表，后续 executor.execute_execute 会返回实际错误
+                            std::collections::HashSet::new()
+                        }
                     }
                 }
-                None => std::collections::HashSet::new(),
+                None => {
+                    tracing::warn!(statement = %name, "P1-10: prepared statement not found");
+                    std::collections::HashSet::new()
+                }
             }
         } else {
             std::collections::HashSet::new()
         };
+        // P1-10：referenced 为空时不退化为锁定所有表（避免并发度退化）
+        // 仅锁定 referenced 中实际包含的表；若 referenced 为空则不锁定任何表
         // ADV-CONC-1：合并本地表和共享表（跨 session CREATE TABLE 可见性）
-        let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        let mut all_arcs: std::collections::HashMap<
+            String,
+            std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>,
+        > = std::collections::HashMap::new();
         for (k, v) in &self.tables {
-            if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+            if referenced.contains(&k.to_lowercase()) {
                 all_arcs.insert(k.clone(), v.clone());
             }
         }
         if let Some(shared) = &self.shared_tables {
             for (k, v) in shared.read().await.iter() {
-                if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                if referenced.contains(&k.to_lowercase()) {
                     all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
                 }
             }
@@ -3706,7 +3959,9 @@ impl ExecutorService {
             guards.push(table_arc.lock().await);
         }
 
-        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let mut executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         for guard in &guards {
             executor.register_table(&**guard);
         }
@@ -4011,6 +4266,12 @@ impl ExecutorService {
         // 扩展查询路径（asyncpg/Navicat prepared statement）必须与简单查询路径一样同步
         self.sync_catalog_from_shared().await;
 
+        // P0-3：设置 PL/pgSQL 解释器线程局部注册表（扩展查询路径同样需要）
+        let _plpgsql_guard = self
+            .plpgsql_registry
+            .as_ref()
+            .map(|r| szrsql_sql::expr::current_plpgsql_interp::guard(r.clone()));
+
         let portal = self.portals.get(portal_name).cloned().ok_or_else(|| {
             SessionError::Protocol(format!("portal \"{portal_name}\" does not exist"))
         })?;
@@ -4043,9 +4304,10 @@ impl ExecutorService {
         // 这类查询需要 MutableCatalog 接口，无法走 LogicalPlan::Execute 路径。
         // 与简单查询协议保持一致：直接计算结果集返回。
         // P2-1.3：注入 statistics_store，使 pg_class.reltuples / pg_statistic 可从 ANALYZE 统计信息填充。
-        let stats_ref = self.statistics_store.as_ref().map(|inner| {
-            szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone())
-        });
+        let stats_ref = self
+            .statistics_store
+            .as_ref()
+            .map(|inner| szrsql_optimizer::statistics::SharedStatisticsStore::new(inner.clone()));
         let stats_dyn = stats_ref
             .as_ref()
             .map(|s| s as &dyn szrsql_optimizer::statistics::StatisticsStore);
@@ -4117,26 +4379,33 @@ impl ExecutorService {
         };
 
         // OPT-6：仅锁定查询计划实际引用的表（确保 Executor 不跨 .await 持有）
-        // 先对原始 SELECT 语句做一次规划以提取引用的表名。规划失败时退化为锁定所有表
-        // （保持原行为，避免因规划错误导致扩展查询不可用）。
+        // P1-10 修复：规划失败时不再退化为锁定所有表（避免并发度退化），
+        // 而是记录 warning 并仅锁定实际引用的表（referenced 为空时不锁定任何表）。
         let referenced: std::collections::HashSet<String> = {
             let catalog_ref: &InMemoryCatalog = &self.catalog;
             let planner = Planner::new(catalog_ref);
             match planner.plan_statement(ps.statement.clone()) {
                 Ok(p) => p.collect_referenced_table_names(),
-                Err(_) => std::collections::HashSet::new(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "P1-10: plan failed for extended query, locking no tables");
+                    std::collections::HashSet::new()
+                }
             }
         };
         // ADV-CONC-1：合并本地表和共享表（跨 session CREATE TABLE 可见性）
-        let mut all_arcs: std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>> = std::collections::HashMap::new();
+        // P1-10：referenced 为空时不退化为锁定所有表
+        let mut all_arcs: std::collections::HashMap<
+            String,
+            std::sync::Arc<tokio::sync::Mutex<InMemoryTable>>,
+        > = std::collections::HashMap::new();
         for (k, v) in &self.tables {
-            if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+            if referenced.contains(&k.to_lowercase()) {
                 all_arcs.insert(k.clone(), v.clone());
             }
         }
         if let Some(shared) = &self.shared_tables {
             for (k, v) in shared.read().await.iter() {
-                if referenced.is_empty() || referenced.contains(&k.to_lowercase()) {
+                if referenced.contains(&k.to_lowercase()) {
                     all_arcs.entry(k.clone()).or_insert_with(|| v.clone());
                 }
             }
@@ -4146,7 +4415,9 @@ impl ExecutorService {
             guards.push(table_arc.lock().await);
         }
 
-        let mut executor = Executor::new().with_catalog(&self.catalog).with_sql_functions_from_catalog(&self.catalog);
+        let mut executor = Executor::new()
+            .with_catalog(&self.catalog)
+            .with_sql_functions_from_catalog(&self.catalog);
         for guard in &guards {
             executor.register_table(&**guard);
         }
@@ -4648,9 +4919,9 @@ fn derive_expr_type(expr: &Expr, input_schema: &[szrsql_sql::ast::ColumnDefiniti
                         opt.as_ref()
                             .and_then(|funcs| funcs.get(&lower_name))
                             .and_then(|overloads| {
-                                overloads.iter().find_map(|def| {
-                                    parse_return_type_str(&def.return_type)
-                                })
+                                overloads
+                                    .iter()
+                                    .find_map(|def| parse_return_type_str(&def.return_type))
                             })
                     })
                     .unwrap_or(ColumnType::Text)
@@ -4670,18 +4941,15 @@ fn parse_return_type_str(type_str: &str) -> Option<ColumnType> {
     // 去掉括号修饰，如 VARCHAR(50) → varchar
     let base = t.split('(').next().unwrap_or(&t).trim();
     match base {
-        "int" | "integer" | "int4" | "int8" | "bigint" | "smallint" | "int2"
-        | "serial" | "bigserial" | "mediumint" => Some(ColumnType::Int64),
-        "float" | "float4" | "float8" | "double" | "real" | "double precision" | "numeric" | "decimal" => {
-            Some(ColumnType::Float64)
-        }
+        "int" | "integer" | "int4" | "int8" | "bigint" | "smallint" | "int2" | "serial"
+        | "bigserial" | "mediumint" => Some(ColumnType::Int64),
+        "float" | "float4" | "float8" | "double" | "real" | "double precision" | "numeric"
+        | "decimal" => Some(ColumnType::Float64),
         "bool" | "boolean" => Some(ColumnType::Bool),
         "text" | "varchar" | "char" | "character" | "character varying" | "string" => {
             Some(ColumnType::Text)
         }
-        "date" | "timestamp" | "timestamptz" | "time" | "timetz" => {
-            Some(ColumnType::Timestamp)
-        }
+        "date" | "timestamp" | "timestamptz" | "time" | "timetz" => Some(ColumnType::Timestamp),
         _ => None,
     }
 }
@@ -4805,6 +5073,108 @@ mod tests {
         let results = svc.execute_sql("SELECT * FROM t").await;
         match &results[0] {
             Ok(QueryResult::ResultSet { rows, .. }) => assert_eq!(rows.len(), 1),
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
+    }
+
+    /// P0-2：SAVEPOINT / ROLLBACK TO / RELEASE SAVEPOINT 端到端集成测试。
+    ///
+    /// 验证 savepoint_stack 与 session 事务生命周期同步：
+    /// - SAVEPOINT 捕获当前快照
+    /// - ROLLBACK TO 恢复表数据到保存点状态
+    /// - RELEASE 移除保存点
+    /// - 外层 ROLLBACK 回滚到事务起始（不含保存点后的修改）
+    #[tokio::test]
+    async fn test_savepoint_e2e() {
+        let mut svc = ExecutorService::new();
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+
+        // 插入初始行 id=1
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+
+        // BEGIN
+        let results = svc.execute_sql("BEGIN").await;
+        assert!(results[0].is_ok(), "BEGIN should succeed");
+        assert!(svc.in_transaction());
+
+        // SAVEPOINT sp1
+        let results = svc.execute_sql("SAVEPOINT sp1").await;
+        let sp_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag == "SAVEPOINT sp1");
+        assert!(sp_ok, "SAVEPOINT should succeed, got {:?}", &results[0]);
+
+        // INSERT id=2（sp1 之后）
+        svc.execute_sql("INSERT INTO t (id) VALUES (2)").await;
+        let rows = row_count(&svc.execute_sql("SELECT * FROM t").await);
+        assert_eq!(rows, 2, "should see 2 rows before rollback");
+
+        // ROLLBACK TO sp1 → id=2 应消失
+        let results = svc.execute_sql("ROLLBACK TO SAVEPOINT sp1").await;
+        let r_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag == "ROLLBACK TO SAVEPOINT sp1");
+        assert!(r_ok, "ROLLBACK TO should succeed, got {:?}", &results[0]);
+        let rows = row_count(&svc.execute_sql("SELECT * FROM t").await);
+        assert_eq!(rows, 1, "should see 1 row after rollback to sp1");
+
+        // INSERT id=3（sp1 之后，新修改）
+        svc.execute_sql("INSERT INTO t (id) VALUES (3)").await;
+
+        // RELEASE sp1
+        let results = svc.execute_sql("RELEASE SAVEPOINT sp1").await;
+        let rel_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag.starts_with("RELEASE"));
+        assert!(rel_ok, "RELEASE should succeed, got {:?}", &results[0]);
+
+        // COMMIT → id=1 和 id=3 应持久化
+        svc.execute_sql("COMMIT").await;
+        assert!(!svc.in_transaction());
+        let rows = row_count(&svc.execute_sql("SELECT * FROM t").await);
+        assert_eq!(rows, 2, "committed rows should be 1 and 3");
+    }
+
+    /// P0-2：RELEASE 后再次 ROLLBACK TO 已释放的保存点应报错。
+    #[tokio::test]
+    async fn test_savepoint_rollback_to_released_fails() {
+        let mut svc = ExecutorService::new();
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+
+        svc.execute_sql("BEGIN").await;
+        svc.execute_sql("SAVEPOINT sp1").await;
+        svc.execute_sql("RELEASE SAVEPOINT sp1").await;
+
+        // ROLLBACK TO 已释放的保存点 → 报错
+        let results = svc.execute_sql("ROLLBACK TO SAVEPOINT sp1").await;
+        assert!(
+            results[0].is_err(),
+            "ROLLBACK TO released savepoint should fail"
+        );
+        // 错误语句会将事务置为 failed 状态，需 ROLLBACK 清理
+        svc.execute_sql("ROLLBACK").await;
+        assert!(!svc.in_transaction());
+    }
+
+    /// P0-2：SAVEPOINT 嵌套 + 外层 ROLLBACK 回到事务起始。
+    #[tokio::test]
+    async fn test_savepoint_outer_rollback() {
+        let mut svc = ExecutorService::new();
+        svc.execute_sql("CREATE TABLE t (id BIGINT)").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
+
+        svc.execute_sql("BEGIN").await;
+        svc.execute_sql("SAVEPOINT sp1").await;
+        svc.execute_sql("INSERT INTO t (id) VALUES (2)").await;
+
+        // 外层 ROLLBACK → 回到事务起始，sp1 及其后所有修改全部丢弃
+        svc.execute_sql("ROLLBACK").await;
+        assert!(!svc.in_transaction());
+        let rows = row_count(&svc.execute_sql("SELECT * FROM t").await);
+        assert_eq!(
+            rows, 1,
+            "outer ROLLBACK should discard all transaction changes"
+        );
+    }
+
+    fn row_count(results: &[Result<QueryResult, SessionError>]) -> usize {
+        match &results[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => rows.len(),
             other => panic!("expected ResultSet, got {other:?}"),
         }
     }
@@ -5329,8 +5699,10 @@ mod tests {
     #[tokio::test]
     async fn test_analyze_without_statistics_store_returns_error() {
         let mut svc = ExecutorService::new();
-        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
-        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')").await;
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)")
+            .await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')")
+            .await;
 
         // 未注入 statistics_store，ANALYZE 应返回错误
         let results = svc.execute_sql("ANALYZE t").await;
@@ -5348,10 +5720,14 @@ mod tests {
 
         let store = Arc::new(std::sync::Mutex::new(InMemoryStatisticsStore::new()));
         let mut svc = ExecutorService::new().with_statistics_store(store.clone());
-        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
-        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')").await;
-        svc.execute_sql("INSERT INTO t (id, name) VALUES (2, 'bob')").await;
-        svc.execute_sql("INSERT INTO t (id, name) VALUES (3, 'alice')").await;
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)")
+            .await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (1, 'alice')")
+            .await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (2, 'bob')")
+            .await;
+        svc.execute_sql("INSERT INTO t (id, name) VALUES (3, 'alice')")
+            .await;
 
         // 执行 ANALYZE
         let results = svc.execute_sql("ANALYZE t").await;
@@ -5377,7 +5753,10 @@ mod tests {
         let name_stats = stats
             .column("name")
             .expect("column stats for name should exist");
-        assert_eq!(name_stats.distinct_count, 2, "name distinct_count should be 2 (alice, bob)");
+        assert_eq!(
+            name_stats.distinct_count, 2,
+            "name distinct_count should be 2 (alice, bob)"
+        );
     }
 
     /// P2-1.1：ANALYZE 不带表名时扫描所有用户表。
@@ -5471,16 +5850,24 @@ mod tests {
         let mut svc = ExecutorService::new().with_statistics_store(store.clone());
 
         // 创建两张表
-        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)").await;
-        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT, value TEXT)").await;
+        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)")
+            .await;
+        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT, value TEXT)")
+            .await;
 
         // 插入测试数据
-        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')").await;
-        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (2, 'bob')").await;
-        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (3, 'carol')").await;
-        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (1, 1, 'v1')").await;
-        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (2, 2, 'v2')").await;
-        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (3, 1, 'v3')").await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')")
+            .await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (2, 'bob')")
+            .await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (3, 'carol')")
+            .await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (1, 1, 'v1')")
+            .await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (2, 2, 'v2')")
+            .await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id, value) VALUES (3, 1, 'v3')")
+            .await;
 
         // ANALYZE 收集统计信息（激活 CBO）
         let analyze_results = svc.execute_sql("ANALYZE").await;
@@ -5498,7 +5885,12 @@ mod tests {
                 // t1.id=2 → 1 行（t2.t1_id=2 有 1 行：v2）
                 // t1.id=3 → 0 行（t2 无 t1_id=3）
                 // 总计 3 行
-                assert_eq!(rows.len(), 3, "JOIN should return 3 rows, got {}", rows.len());
+                assert_eq!(
+                    rows.len(),
+                    3,
+                    "JOIN should return 3 rows, got {}",
+                    rows.len()
+                );
             }
             other => panic!("expected ResultSet, got {other:?}"),
         }
@@ -5511,10 +5903,14 @@ mod tests {
     async fn test_cbo_not_injected_join_works() {
         let mut svc = ExecutorService::new();
 
-        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)").await;
-        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT)").await;
-        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')").await;
-        svc.execute_sql("INSERT INTO t2 (id, t1_id) VALUES (1, 1)").await;
+        svc.execute_sql("CREATE TABLE t1 (id BIGINT, name TEXT)")
+            .await;
+        svc.execute_sql("CREATE TABLE t2 (id BIGINT, t1_id BIGINT)")
+            .await;
+        svc.execute_sql("INSERT INTO t1 (id, name) VALUES (1, 'alice')")
+            .await;
+        svc.execute_sql("INSERT INTO t2 (id, t1_id) VALUES (1, 1)")
+            .await;
 
         // 未注入 statistics_store，仅 RBO 生效
         let results = svc
@@ -5593,7 +5989,8 @@ mod tests {
         let mut svc = ExecutorService::new().with_dist_runtime(handle.clone());
 
         // 建表
-        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)")
+            .await;
 
         // 显式事务：BEGIN → INSERT → COMMIT
         svc.execute_sql("BEGIN").await;
@@ -5605,7 +6002,10 @@ mod tests {
             .await;
         // 验证 mutations 已累积
         {
-            let state = svc.dist_txn_state.as_ref().expect("dist_txn_state should exist");
+            let state = svc
+                .dist_txn_state
+                .as_ref()
+                .expect("dist_txn_state should exist");
             let guard = state.mutations.lock().unwrap();
             assert!(
                 !guard.is_empty(),
@@ -5644,7 +6044,8 @@ mod tests {
         let handle = make_dist_runtime_for_p2();
         let mut svc = ExecutorService::new().with_dist_runtime(handle.clone());
 
-        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)").await;
+        svc.execute_sql("CREATE TABLE t (id BIGINT, name TEXT)")
+            .await;
 
         // 显式事务：BEGIN → INSERT → ROLLBACK
         svc.execute_sql("BEGIN").await;
@@ -5719,6 +6120,54 @@ mod tests {
         );
         svc.execute_sql("INSERT INTO t (id) VALUES (1)").await;
         let results = svc.execute_sql("COMMIT").await;
-        assert!(results[0].is_ok(), "COMMIT should succeed without dist_runtime");
+        assert!(
+            results[0].is_ok(),
+            "COMMIT should succeed without dist_runtime"
+        );
+    }
+
+    /// P0-3：PL/pgSQL 解释器端到端集成测试。
+    ///
+    /// 验证：
+    /// - CREATE FUNCTION ... LANGUAGE plpgsql 注册函数到解释器
+    /// - SELECT func() 实际执行 PL/pgSQL 函数体（而非返回 NULL/错误）
+    /// - 函数参数绑定正确
+    #[tokio::test]
+    async fn test_plpgsql_e2e() {
+        use std::sync::Mutex;
+        let pl_registry = Arc::new(Mutex::new(
+            szrsql_sql::plpgsql_interp::FunctionRegistry::new(),
+        ));
+        let mut svc = ExecutorService::new().with_plpgsql_registry(pl_registry);
+
+        // 创建简单 plpgsql 函数：add(a, b) 返回 a + b
+        let results = svc
+            .execute_sql(
+                "CREATE FUNCTION add(a INTEGER, b INTEGER) RETURNS INTEGER \
+             LANGUAGE plpgsql AS $$ BEGIN RETURN a + b; END $$",
+            )
+            .await;
+        assert!(
+            results[0].is_ok(),
+            "CREATE FUNCTION plpgsql should succeed: {:?}",
+            &results[0]
+        );
+
+        // 调用函数
+        let results = svc.execute_sql("SELECT add(2, 3)").await;
+        match &results[0] {
+            Ok(QueryResult::ResultSet { rows, .. }) => {
+                assert_eq!(rows.len(), 1, "should return 1 row");
+                assert_eq!(rows[0].len(), 1, "should return 1 column");
+                // 验证结果是 5（而非 NULL 或错误）
+                assert_eq!(
+                    &rows[0][0],
+                    &szrsql_types::value::Value::Int64(5),
+                    "add(2,3) should return 5, got {:?}",
+                    &rows[0][0]
+                );
+            }
+            other => panic!("expected ResultSet, got {other:?}"),
+        }
     }
 }

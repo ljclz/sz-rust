@@ -61,8 +61,6 @@ mod enum_type_tests;
 #[cfg(test)]
 mod executor_tests;
 #[cfg(test)]
-mod mvcc_integration_tests;
-#[cfg(test)]
 mod expr_tests;
 #[cfg(test)]
 mod extended_index_tests;
@@ -92,6 +90,8 @@ mod materialized_view_simple_tests;
 mod materialized_view_tests;
 #[cfg(test)]
 mod merge_tests;
+#[cfg(test)]
+mod mvcc_integration_tests;
 #[cfg(test)]
 mod parser_tests;
 #[cfg(test)]

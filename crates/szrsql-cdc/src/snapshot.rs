@@ -28,9 +28,9 @@
 use crate::decoder::DecodedRow;
 use crate::schema::TableSchema;
 use crate::target::{TargetWriter, WriterError};
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
 use std::sync::Arc;
+use szrsql_types::value::Value as SzValue;
 
 // =====================================================================
 // SnapshotError — 快照错误
@@ -270,7 +270,9 @@ impl SnapshotTransfer {
         })?;
 
         loop {
-            let batch = self.source.read_batch(schema, last_pk.as_ref(), self.config.batch_size)?;
+            let batch = self
+                .source
+                .read_batch(schema, last_pk.as_ref(), self.config.batch_size)?;
             if batch.is_empty() {
                 break;
             }
@@ -318,11 +320,11 @@ impl SnapshotTransfer {
         // 注：此处使用合成的 Insert 事件（lsn=0，因为快照阶段无 LSN 概念）
         for row in batch {
             let event = crate::ChangeEvent::insert(
-                0,           // tx_id（快照阶段无事务）
-                0,           // lsn（快照阶段无 LSN）
+                0, // tx_id（快照阶段无事务）
+                0, // lsn（快照阶段无 LSN）
                 schema.table_id,
                 Vec::new(), // new_row（已通过 row 参数传递）
-                0,           // timestamp
+                0,          // timestamp
             );
             self.writer.write_event(&event, schema, Some(row))?;
         }
@@ -345,7 +347,9 @@ fn estimate_row_size(row: &DecodedRow) -> u64 {
             SzValue::Text(s) => s.len() as u64,
             SzValue::Blob(b) => b.len() as u64,
             SzValue::Decimal(_, _) => 16,
-            SzValue::Json(v) => serde_json::to_string(v).map(|s| s.len() as u64).unwrap_or(0),
+            SzValue::Json(v) => serde_json::to_string(v)
+                .map(|s| s.len() as u64)
+                .unwrap_or(0),
             SzValue::Enum(s) => s.len() as u64,
             SzValue::Array(arr) => arr.iter().map(estimate_value_size).sum(),
             SzValue::Range(_) => 32,
@@ -416,7 +420,8 @@ impl MemoryRowSource {
 
 impl RowSource for MemoryRowSource {
     fn begin_snapshot(&self) -> Result<u64, SnapshotError> {
-        self.in_snapshot.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.in_snapshot
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         // 返回固定的 snapshot_lsn（测试用）
         Ok(1000)
     }
@@ -463,7 +468,8 @@ impl RowSource for MemoryRowSource {
     }
 
     fn commit_snapshot(&self) -> Result<(), SnapshotError> {
-        self.in_snapshot.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.in_snapshot
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
@@ -481,8 +487,8 @@ mod tests {
     use super::*;
     use crate::schema::{ColumnDef, DataType};
     use crate::target::memory::MemoryWriter;
-    use szrsql_types::value::Value as SzValue;
     use std::sync::Arc;
+    use szrsql_types::value::Value as SzValue;
 
     fn make_schema(table_id: u32, name: &str) -> TableSchema {
         TableSchema {
@@ -530,11 +536,15 @@ mod tests {
         assert_eq!(batch.len(), 2);
         assert_eq!(batch[0].get("id"), Some(&SzValue::Int64(1)));
 
-        let batch2 = source.read_batch(&schema, Some(&SzValue::Int64(2)), 2).unwrap();
+        let batch2 = source
+            .read_batch(&schema, Some(&SzValue::Int64(2)), 2)
+            .unwrap();
         assert_eq!(batch2.len(), 1);
         assert_eq!(batch2[0].get("id"), Some(&SzValue::Int64(3)));
 
-        let batch3 = source.read_batch(&schema, Some(&SzValue::Int64(3)), 2).unwrap();
+        let batch3 = source
+            .read_batch(&schema, Some(&SzValue::Int64(3)), 2)
+            .unwrap();
         assert!(batch3.is_empty());
 
         source.commit_snapshot().unwrap();
@@ -543,9 +553,7 @@ mod tests {
     #[test]
     fn snapshot_transfer_single_table() {
         let schema = make_schema(1, "users");
-        let rows: Vec<DecodedRow> = (1..=5)
-            .map(|i| make_row(i, &format!("user{i}")))
-            .collect();
+        let rows: Vec<DecodedRow> = (1..=5).map(|i| make_row(i, &format!("user{i}"))).collect();
         let source = Arc::new(MemoryRowSource::new(vec![schema.clone()]).with_data("users", rows));
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
 
@@ -566,7 +574,11 @@ mod tests {
         let schema2 = make_schema(2, "orders");
 
         let users = vec![make_row(1, "Alice"), make_row(2, "Bob")];
-        let orders = vec![make_row(10, "order1"), make_row(20, "order2"), make_row(30, "order3")];
+        let orders = vec![
+            make_row(10, "order1"),
+            make_row(20, "order2"),
+            make_row(30, "order3"),
+        ];
 
         let source = Arc::new(
             MemoryRowSource::new(vec![schema1, schema2])
@@ -585,9 +597,7 @@ mod tests {
     #[test]
     fn snapshot_transfer_batch_iteration() {
         let schema = make_schema(1, "users");
-        let rows: Vec<DecodedRow> = (1..=25)
-            .map(|i| make_row(i, &format!("user{i}")))
-            .collect();
+        let rows: Vec<DecodedRow> = (1..=25).map(|i| make_row(i, &format!("user{i}"))).collect();
         let source = Arc::new(MemoryRowSource::new(vec![schema]).with_data("users", rows));
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
 
@@ -659,9 +669,7 @@ mod tests {
     #[test]
     fn snapshot_transfer_records_last_pk() {
         let schema = make_schema(1, "users");
-        let rows: Vec<DecodedRow> = (1..=3)
-            .map(|i| make_row(i, &format!("user{i}")))
-            .collect();
+        let rows: Vec<DecodedRow> = (1..=3).map(|i| make_row(i, &format!("user{i}"))).collect();
         let source = Arc::new(MemoryRowSource::new(vec![schema]).with_data("users", rows));
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
 

@@ -19,7 +19,9 @@ use crate::cluster::ClusterCoordinator;
 use crate::task::{ReplicationTaskManager, TaskConfig, TaskError, TaskInfo};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// P8-4 安全加固：生成 32 字节（256 bit）随机 hex API Key。
@@ -148,7 +150,11 @@ pub struct TenantConfig {
 
 impl TenantConfig {
     /// 创建租户配置（自动填充该等级的默认限制）
-    pub fn new(tenant_id: impl Into<String>, tenant_name: impl Into<String>, tier: TenantTier) -> Self {
+    pub fn new(
+        tenant_id: impl Into<String>,
+        tenant_name: impl Into<String>,
+        tier: TenantTier,
+    ) -> Self {
         let (max_tasks, max_throughput, retention_hours) = tier.default_limits();
         Self {
             tenant_id: tenant_id.into(),
@@ -164,7 +170,7 @@ impl TenantConfig {
     }
 
     /// 校验配置合法怀
-pub fn validate(&self) -> Result<(), ServiceError> {
+    pub fn validate(&self) -> Result<(), ServiceError> {
         if self.tenant_id.is_empty() {
             return Err(ServiceError::InvalidConfig(
                 "tenant_id is empty".to_string(),
@@ -189,12 +195,12 @@ pub fn validate(&self) -> Result<(), ServiceError> {
     }
 
     /// 检柀source 类型是否在白名单冀
-pub fn allows_source(&self, source_type: &str) -> bool {
+    pub fn allows_source(&self, source_type: &str) -> bool {
         self.allowed_sources.iter().any(|s| s == source_type)
     }
 
     /// 检柀target 类型是否在白名单冀
-pub fn allows_target(&self, target_type: &str) -> bool {
+    pub fn allows_target(&self, target_type: &str) -> bool {
         self.allowed_targets.iter().any(|t| t == target_type)
     }
 }
@@ -236,10 +242,7 @@ pub enum ServiceError {
 
     /// 无权限（任务不属于该租户＿    
     #[error("forbidden: task {task_id} does not belong to tenant {tenant_id}")]
-    Forbidden {
-        task_id: String,
-        tenant_id: String,
-    },
+    Forbidden { task_id: String, tenant_id: String },
 
     /// 吞吐量配额超陀    
     #[error("quota exceeded: throughput {current} > max {max} for tenant {tenant_id}")]
@@ -303,7 +306,7 @@ pub struct TenantUsage {
 
 impl TenantUsage {
     /// 创建初始使用釀
-pub fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             last_reset_at: current_millis(),
             ..Default::default()
@@ -352,7 +355,7 @@ pub struct CdcService {
     /// 租户到任务的映射
     tenant_tasks: RwLock<HashMap<String, HashSet<String>>>,
     /// 租户使用量统讀
-        usage_stats: RwLock<HashMap<String, TenantUsage>>,
+    usage_stats: RwLock<HashMap<String, TenantUsage>>,
     /// 时间戳函数（便于测试固定时间戳）
     timestamp_fn: Box<dyn Fn() -> u64 + Send + Sync>,
     /// 累计任务创建次数（统计用＿
@@ -361,11 +364,8 @@ pub struct CdcService {
 
 impl CdcService {
     /// 创建 CDC 服务（使甀SystemTime 作为时间戳源＿
-pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
-        Self::with_timestamp_fn(
-            task_manager,
-            Box::new(current_millis),
-        )
+    pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
+        Self::with_timestamp_fn(task_manager, Box::new(current_millis))
     }
 
     /// 创建 CDC 服务，注入自定义时间戳函数（便于测试固定时间戳）
@@ -395,7 +395,7 @@ pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
     /// - `InvalidConfig`：配置不合法
     pub fn register_tenant(&self, config: TenantConfig) -> Result<(), ServiceError> {
         config.validate()?;
-        let mut tenants = self.tenants.write().unwrap();
+        let mut tenants = self.tenants.write();
         if tenants.contains_key(&config.tenant_id) {
             return Err(ServiceError::TenantAlreadyExists(config.tenant_id));
         }
@@ -403,13 +403,9 @@ pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
         let tenant_id = config.tenant_id.clone();
         let mut usage = TenantUsage::new();
         usage.last_reset_at = (self.timestamp_fn)();
-        self.usage_stats
-            .write()
-            .unwrap()
-            .insert(tenant_id.clone(), usage);
+        self.usage_stats.write().insert(tenant_id.clone(), usage);
         self.tenant_tasks
             .write()
-            .unwrap()
             .insert(tenant_id.clone(), HashSet::new());
         tenants.insert(tenant_id, config);
         Ok(())
@@ -425,7 +421,7 @@ pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
     pub fn unregister_tenant(&self, tenant_id: &str) -> Result<(), ServiceError> {
         // 先收集该租户的所有任劀ID
         let task_ids: Vec<String> = {
-            let tenant_tasks = self.tenant_tasks.read().unwrap();
+            let tenant_tasks = self.tenant_tasks.read();
             tenant_tasks
                 .get(tenant_id)
                 .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?
@@ -441,19 +437,19 @@ pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
 
         // 移除租户的所有映尀
         {
-            let mut tenants = self.tenants.write().unwrap();
+            let mut tenants = self.tenants.write();
             tenants
                 .remove(tenant_id)
                 .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?;
         }
-        self.tenant_tasks.write().unwrap().remove(tenant_id);
-        self.usage_stats.write().unwrap().remove(tenant_id);
+        self.tenant_tasks.write().remove(tenant_id);
+        self.usage_stats.write().remove(tenant_id);
         Ok(())
     }
 
     /// 获取租户配置
     pub fn get_tenant(&self, tenant_id: &str) -> Result<TenantConfig, ServiceError> {
-        let tenants = self.tenants.read().unwrap();
+        let tenants = self.tenants.read();
         tenants
             .get(tenant_id)
             .cloned()
@@ -461,8 +457,8 @@ pub fn new(task_manager: Arc<ReplicationTaskManager>) -> Self {
     }
 
     /// 列出所有租戀
-pub fn list_tenants(&self) -> Vec<TenantConfig> {
-        let tenants = self.tenants.read().unwrap();
+    pub fn list_tenants(&self) -> Vec<TenantConfig> {
+        let tenants = self.tenants.read();
         let mut list: Vec<TenantConfig> = tenants.values().cloned().collect();
         list.sort_by(|a, b| a.tenant_id.cmp(&b.tenant_id));
         list
@@ -471,12 +467,12 @@ pub fn list_tenants(&self) -> Vec<TenantConfig> {
     /// 更新租户等级
     ///
     /// **效果**：更新等级后，自动应用新等级的默认配额限刀
-pub fn update_tenant_tier(
+    pub fn update_tenant_tier(
         &self,
         tenant_id: &str,
         new_tier: TenantTier,
     ) -> Result<(), ServiceError> {
-        let mut tenants = self.tenants.write().unwrap();
+        let mut tenants = self.tenants.write();
         let config = tenants
             .get_mut(tenant_id)
             .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?;
@@ -507,7 +503,7 @@ pub fn update_tenant_tier(
     pub fn create_task(&self, request: CreateTaskRequest) -> Result<String, ServiceError> {
         // 1. 校验租户存在 + 配额检柀+ 白名单检查（持读锁）
         {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             let config = tenants
                 .get(&request.tenant_id)
                 .ok_or_else(|| ServiceError::TenantNotFound(request.tenant_id.clone()))?;
@@ -516,7 +512,6 @@ pub fn update_tenant_tier(
             let current_count = self
                 .tenant_tasks
                 .read()
-                .unwrap()
                 .get(&request.tenant_id)
                 .map(|s| s.len() as u32)
                 .unwrap_or(0);
@@ -528,8 +523,8 @@ pub fn update_tenant_tier(
                 });
             }
 
-            // target 白名单检查（通过 task_config.target_type＿    
-        if !config.allows_target(&request.task_config.target_type) {
+            // target 白名单检查（通过 task_config.target_type＿
+            if !config.allows_target(&request.task_config.target_type) {
                 return Err(ServiceError::InvalidConfig(format!(
                     "target type '{}' not in whitelist for tenant '{}'",
                     request.task_config.target_type, request.tenant_id
@@ -545,17 +540,15 @@ pub fn update_tenant_tier(
 
         // 3. 更新 tenant_tasks 映射 + 使用釀
         {
-            let mut tenant_tasks = self.tenant_tasks.write().unwrap();
+            let mut tenant_tasks = self.tenant_tasks.write();
             tenant_tasks
                 .entry(request.tenant_id.clone())
                 .or_default()
                 .insert(task_id.clone());
         }
         {
-            let mut usage_stats = self.usage_stats.write().unwrap();
-            let usage = usage_stats
-                .entry(request.tenant_id.clone())
-                .or_default();
+            let mut usage_stats = self.usage_stats.write();
+            let usage = usage_stats.entry(request.tenant_id.clone()).or_default();
             usage.task_count = usage.task_count.saturating_add(1);
         }
         self.total_tasks_created.fetch_add(1, Ordering::SeqCst);
@@ -567,20 +560,20 @@ pub fn update_tenant_tier(
     /// # 错误
     /// - `TenantNotFound`：租户不存在
     /// - `TaskNotFound`：任务不属于该租户或不存圀
-pub fn delete_task(&self, tenant_id: &str, task_id: &str) -> Result<(), ServiceError> {
+    pub fn delete_task(&self, tenant_id: &str, task_id: &str) -> Result<(), ServiceError> {
         self.validate_task_ownership(tenant_id, task_id)?;
         self.task_manager
             .remove_task(task_id)
             .map_err(ServiceError::from)?;
         // 更新映射 + 使用釀
         {
-            let mut tenant_tasks = self.tenant_tasks.write().unwrap();
+            let mut tenant_tasks = self.tenant_tasks.write();
             if let Some(tasks) = tenant_tasks.get_mut(tenant_id) {
                 tasks.remove(task_id);
             }
         }
         {
-            let mut usage_stats = self.usage_stats.write().unwrap();
+            let mut usage_stats = self.usage_stats.write();
             if let Some(usage) = usage_stats.get_mut(tenant_id) {
                 usage.task_count = usage.task_count.saturating_sub(1);
             }
@@ -634,18 +627,15 @@ pub fn delete_task(&self, tenant_id: &str, task_id: &str) -> Result<(), ServiceE
     pub fn list_tasks(&self, tenant_id: &str) -> Result<Vec<TaskInfo>, ServiceError> {
         // 校验租户存在
         {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             if !tenants.contains_key(tenant_id) {
                 return Err(ServiceError::TenantNotFound(tenant_id.to_string()));
             }
         }
         // 收集该租户的所有任劀ID
         let task_ids: HashSet<String> = {
-            let tenant_tasks = self.tenant_tasks.read().unwrap();
-            tenant_tasks
-                .get(tenant_id)
-                .cloned()
-                .unwrap_or_default()
+            let tenant_tasks = self.tenant_tasks.read();
+            tenant_tasks.get(tenant_id).cloned().unwrap_or_default()
         };
         // 什task_manager 获取所有任务信息，过滤出属于该租户皀
         let all_tasks = self.task_manager.list_tasks();
@@ -660,15 +650,15 @@ pub fn delete_task(&self, tenant_id: &str, task_id: &str) -> Result<(), ServiceE
     // -----------------------------------------------------------------
 
     /// 获取租户使用釀
-pub fn get_usage(&self, tenant_id: &str) -> Result<TenantUsage, ServiceError> {
+    pub fn get_usage(&self, tenant_id: &str) -> Result<TenantUsage, ServiceError> {
         // 校验租户存在
         {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             if !tenants.contains_key(tenant_id) {
                 return Err(ServiceError::TenantNotFound(tenant_id.to_string()));
             }
         }
-        let usage_stats = self.usage_stats.read().unwrap();
+        let usage_stats = self.usage_stats.read();
         Ok(usage_stats
             .get(tenant_id)
             .cloned()
@@ -680,14 +670,13 @@ pub fn get_usage(&self, tenant_id: &str) -> Result<TenantUsage, ServiceError> {
     /// - `TenantNotFound`：租户不存在
     /// - `TenantLimitExceeded`：任务数已达上限
     pub fn check_quota(&self, tenant_id: &str) -> Result<(), ServiceError> {
-        let tenants = self.tenants.read().unwrap();
+        let tenants = self.tenants.read();
         let config = tenants
             .get(tenant_id)
             .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?;
         let current_count = self
             .tenant_tasks
             .read()
-            .unwrap()
             .get(tenant_id)
             .map(|s| s.len() as u32)
             .unwrap_or(0);
@@ -709,7 +698,7 @@ pub fn get_usage(&self, tenant_id: &str) -> Result<TenantUsage, ServiceError> {
     /// # 参数
     /// - `tenant_id`：租戀ID
     /// - `events`：本次处理的事件敀    /// - `bytes`：本次处理的字节敀
-pub fn update_usage(
+    pub fn update_usage(
         &self,
         tenant_id: &str,
         events: u64,
@@ -717,17 +706,15 @@ pub fn update_usage(
     ) -> Result<(), ServiceError> {
         // 校验租户存在
         let max_throughput = {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             tenants
                 .get(tenant_id)
                 .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?
                 .max_throughput
         };
         let now = (self.timestamp_fn)();
-        let mut usage_stats = self.usage_stats.write().unwrap();
-        let usage = usage_stats
-            .entry(tenant_id.to_string())
-            .or_default();
+        let mut usage_stats = self.usage_stats.write();
+        let usage = usage_stats.entry(tenant_id.to_string()).or_default();
         usage.total_events_processed = usage.total_events_processed.saturating_add(events);
         usage.total_bytes_processed = usage.total_bytes_processed.saturating_add(bytes);
         // 计算吞吐量（events/sec）：总事件数 / 已运行秒敀
@@ -757,7 +744,7 @@ pub fn update_usage(
     /// - `TenantNotFound`：租户不存在
     pub fn reset_usage_if_needed(&self, tenant_id: &str) -> Result<(), ServiceError> {
         let retention_ms = {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             tenants
                 .get(tenant_id)
                 .ok_or_else(|| ServiceError::TenantNotFound(tenant_id.to_string()))?
@@ -765,10 +752,8 @@ pub fn update_usage(
                 * 3_600_000
         };
         let now = (self.timestamp_fn)();
-        let mut usage_stats = self.usage_stats.write().unwrap();
-        let usage = usage_stats
-            .entry(tenant_id.to_string())
-            .or_default();
+        let mut usage_stats = self.usage_stats.write();
+        let usage = usage_stats.entry(tenant_id.to_string()).or_default();
         let elapsed = now.saturating_sub(usage.last_reset_at);
         if elapsed >= retention_ms {
             usage.total_events_processed = 0;
@@ -784,19 +769,19 @@ pub fn update_usage(
     // -----------------------------------------------------------------
 
     /// 关联 P6-1 集群协调噀
-pub fn with_cluster(self, cluster: Arc<ClusterCoordinator>) -> Self {
-        *self.cluster.write().unwrap() = Some(cluster);
+    pub fn with_cluster(self, cluster: Arc<ClusterCoordinator>) -> Self {
+        *self.cluster.write() = Some(cluster);
         self
     }
 
     /// 设置集群（builder 模式，返囀Self 以支持链式调用）
     pub fn set_cluster(&self, cluster: Arc<ClusterCoordinator>) {
-        *self.cluster.write().unwrap() = Some(cluster);
+        *self.cluster.write() = Some(cluster);
     }
 
     /// 获取关联的集群（若存在）
     pub fn cluster(&self) -> Option<Arc<ClusterCoordinator>> {
-        self.cluster.read().unwrap().clone()
+        self.cluster.read().clone()
     }
 
     /// 将任务分配到集群节点
@@ -807,16 +792,13 @@ pub fn with_cluster(self, cluster: Arc<ClusterCoordinator>) -> Self {
     /// # 错误
     /// - `ClusterNotAssociated`：未关联集群
     /// - `Cluster`：集群分配失贀
-pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceError> {
+    pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceError> {
         let cluster = self
             .cluster
             .read()
-            .unwrap()
             .clone()
             .ok_or(ServiceError::ClusterNotAssociated)?;
-        cluster
-            .assign_task(task_id, "")
-            .map_err(ServiceError::from)
+        cluster.assign_task(task_id, "").map_err(ServiceError::from)
     }
 
     /// 迁移租户的所有任务到集群其他节点
@@ -830,7 +812,7 @@ pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceErr
     pub fn migrate_tenant_tasks(&self, tenant_id: &str) -> Result<Vec<String>, ServiceError> {
         // 校验租户存在
         {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             if !tenants.contains_key(tenant_id) {
                 return Err(ServiceError::TenantNotFound(tenant_id.to_string()));
             }
@@ -838,12 +820,11 @@ pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceErr
         let cluster = self
             .cluster
             .read()
-            .unwrap()
             .clone()
             .ok_or(ServiceError::ClusterNotAssociated)?;
         // 收集租户的所有任劀ID
         let task_ids: Vec<String> = {
-            let tenant_tasks = self.tenant_tasks.read().unwrap();
+            let tenant_tasks = self.tenant_tasks.read();
             tenant_tasks
                 .get(tenant_id)
                 .cloned()
@@ -854,15 +835,12 @@ pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceErr
         // 对每个任务，找当前分配节点之外的其他节点迁移
         let mut migrated = Vec::new();
         for task_id in &task_ids {
-            // 获取当前分配的节炀    
-        if let Some(current_node) = cluster.get_assignment(task_id) {
-                // 选择其他节点迁移（找列表中第一个非当前节点＿        
-        let nodes = cluster.list_nodes();
+            // 获取当前分配的节炀
+            if let Some(current_node) = cluster.get_assignment(task_id) {
+                // 选择其他节点迁移（找列表中第一个非当前节点＿
+                let nodes = cluster.list_nodes();
                 if let Some(target) = nodes.iter().find(|n| n.node_id != current_node) {
-                    if cluster
-                        .migrate_task(task_id, &target.node_id)
-                        .is_ok()
-                    {
+                    if cluster.migrate_task(task_id, &target.node_id).is_ok() {
                         migrated.push(task_id.clone());
                     }
                 }
@@ -880,21 +858,17 @@ pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceErr
     /// # 错误
     /// - `TenantNotFound`：租户不存在
     /// - `TaskNotFound`：任务不属于该租户或不存圀
-    fn validate_task_ownership(
-        &self,
-        tenant_id: &str,
-        task_id: &str,
-    ) -> Result<(), ServiceError> {
+    fn validate_task_ownership(&self, tenant_id: &str, task_id: &str) -> Result<(), ServiceError> {
         // 校验租户存在
         {
-            let tenants = self.tenants.read().unwrap();
+            let tenants = self.tenants.read();
             if !tenants.contains_key(tenant_id) {
                 return Err(ServiceError::TenantNotFound(tenant_id.to_string()));
             }
         }
         // 校验任务归属
         let belongs = {
-            let tenant_tasks = self.tenant_tasks.read().unwrap();
+            let tenant_tasks = self.tenant_tasks.read();
             tenant_tasks
                 .get(tenant_id)
                 .map(|tasks| tasks.contains(task_id))
@@ -907,7 +881,7 @@ pub fn assign_task_to_cluster(&self, task_id: &str) -> Result<String, ServiceErr
     }
 
     /// 获取累计任务创建次数（统计用＿
-pub fn total_tasks_created(&self) -> u64 {
+    pub fn total_tasks_created(&self) -> u64 {
         self.total_tasks_created.load(Ordering::SeqCst)
     }
 }
@@ -945,7 +919,6 @@ impl AuthService {
         let api_key = generate_api_key();
         self.api_keys
             .write()
-            .unwrap()
             .insert(api_key.clone(), tenant_id.to_string());
         api_key
     }
@@ -954,8 +927,8 @@ impl AuthService {
     ///
     /// # 错误
     /// - `Unauthorized`：API Key 不存圀
-pub fn revoke_api_key(&self, api_key: &str) -> Result<(), ServiceError> {
-        let mut keys = self.api_keys.write().unwrap();
+    pub fn revoke_api_key(&self, api_key: &str) -> Result<(), ServiceError> {
+        let mut keys = self.api_keys.write();
         if keys.remove(api_key).is_none() {
             return Err(ServiceError::Unauthorized);
         }
@@ -967,10 +940,8 @@ pub fn revoke_api_key(&self, api_key: &str) -> Result<(), ServiceError> {
     /// # 错误
     /// - `Unauthorized`：API Key 无效
     pub fn authenticate(&self, api_key: &str) -> Result<String, ServiceError> {
-        let keys = self.api_keys.read().unwrap();
-        keys.get(api_key)
-            .cloned()
-            .ok_or(ServiceError::Unauthorized)
+        let keys = self.api_keys.read();
+        keys.get(api_key).cloned().ok_or(ServiceError::Unauthorized)
     }
 
     /// 校验 API Key 对指定任务的访问权限
@@ -985,7 +956,7 @@ pub fn revoke_api_key(&self, api_key: &str) -> Result<(), ServiceError> {
     /// # 错误
     /// - `Unauthorized`：API Key 无效
     /// - `Forbidden`：任务不属于该租戀
-pub fn validate_access(
+    pub fn validate_access(
         &self,
         api_key: &str,
         task_id: &str,
@@ -994,7 +965,7 @@ pub fn validate_access(
         let tenant_id = self.authenticate(api_key)?;
         // 校验任务归属
         let belongs = {
-            let tenant_tasks = tenant_tasks.read().unwrap();
+            let tenant_tasks = tenant_tasks.read();
             tenant_tasks
                 .get(&tenant_id)
                 .map(|tasks| tasks.contains(task_id))
@@ -1011,7 +982,7 @@ pub fn validate_access(
 
     /// 获取已签发的 API Key 数量
     pub fn api_key_count(&self) -> usize {
-        self.api_keys.read().unwrap().len()
+        self.api_keys.read().len()
     }
 }
 
@@ -1052,7 +1023,11 @@ mod tests {
     // --- 测试辅助 ---
 
     /// 创建测试甀schema_registry + decoder + slot_mgr
-    fn test_setup() -> (Arc<SchemaRegistry>, Arc<crate::decoder::RowDecoder>, Arc<SlotManager>) {
+    fn test_setup() -> (
+        Arc<SchemaRegistry>,
+        Arc<crate::decoder::RowDecoder>,
+        Arc<SlotManager>,
+    ) {
         let registry = Arc::new(SchemaRegistry::new());
         let decoder = Arc::new(crate::decoder::RowDecoder::new(registry.clone()));
         let slot_mgr = Arc::new(SlotManager::in_memory());
@@ -1069,7 +1044,9 @@ mod tests {
     fn test_task_manager() -> Arc<ReplicationTaskManager> {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        Arc::new(ReplicationTaskManager::new(slot_mgr, decoder, registry, cdc_engine))
+        Arc::new(ReplicationTaskManager::new(
+            slot_mgr, decoder, registry, cdc_engine,
+        ))
     }
 
     /// 创建测试甀task config
@@ -1575,7 +1552,10 @@ mod tests {
             tenant_id: "t1".to_string(),
             task_config: test_task_config("task-3", writer),
         });
-        assert!(matches!(result, Err(ServiceError::TenantLimitExceeded { .. })));
+        assert!(matches!(
+            result,
+            Err(ServiceError::TenantLimitExceeded { .. })
+        ));
     }
 
     #[test]
@@ -1910,7 +1890,10 @@ mod tests {
                 .unwrap();
         }
         let result = service.check_quota("t1");
-        assert!(matches!(result, Err(ServiceError::TenantLimitExceeded { .. })));
+        assert!(matches!(
+            result,
+            Err(ServiceError::TenantLimitExceeded { .. })
+        ));
     }
 
     #[test]
@@ -2005,9 +1988,7 @@ mod tests {
     #[test]
     fn with_cluster_associates_cluster() {
         let task_manager = test_task_manager();
-        let cluster = Arc::new(
-            ClusterCoordinator::new(ClusterConfig::default()).unwrap(),
-        );
+        let cluster = Arc::new(ClusterCoordinator::new(ClusterConfig::default()).unwrap());
         let service = test_service(task_manager).with_cluster(cluster);
         assert!(service.cluster().is_some());
     }
@@ -2017,9 +1998,7 @@ mod tests {
         let task_manager = test_task_manager();
         let service = test_service(task_manager);
         assert!(service.cluster().is_none());
-        let cluster = Arc::new(
-            ClusterCoordinator::new(ClusterConfig::default()).unwrap(),
-        );
+        let cluster = Arc::new(ClusterCoordinator::new(ClusterConfig::default()).unwrap());
         service.set_cluster(cluster);
         assert!(service.cluster().is_some());
     }
@@ -2027,9 +2006,7 @@ mod tests {
     #[test]
     fn assign_task_to_cluster_success() {
         let task_manager = test_task_manager();
-        let cluster = Arc::new(
-            ClusterCoordinator::new(ClusterConfig::default()).unwrap(),
-        );
+        let cluster = Arc::new(ClusterCoordinator::new(ClusterConfig::default()).unwrap());
         cluster
             .register_node("node-1", "10.0.0.1:8080", 10)
             .unwrap();
@@ -2048,9 +2025,7 @@ mod tests {
     #[test]
     fn migrate_tenant_tasks_returns_migrated_ids() {
         let task_manager = test_task_manager();
-        let cluster = Arc::new(
-            ClusterCoordinator::new(ClusterConfig::default()).unwrap(),
-        );
+        let cluster = Arc::new(ClusterCoordinator::new(ClusterConfig::default()).unwrap());
         // 注册两个节点
         cluster
             .register_node("node-1", "10.0.0.1:8080", 10)
@@ -2067,7 +2042,7 @@ mod tests {
         cluster.assign_task("task-2", "").unwrap();
         // 手动将任务关联到租户（用亀migrate_tenant_tasks 找到任务＿
         {
-            let mut tenant_tasks = service.tenant_tasks.write().unwrap();
+            let mut tenant_tasks = service.tenant_tasks.write();
             tenant_tasks
                 .entry("t1".to_string())
                 .or_default()
@@ -2095,9 +2070,7 @@ mod tests {
     #[test]
     fn migrate_tenant_tasks_nonexistent_tenant_fails() {
         let task_manager = test_task_manager();
-        let cluster = Arc::new(
-            ClusterCoordinator::new(ClusterConfig::default()).unwrap(),
-        );
+        let cluster = Arc::new(ClusterCoordinator::new(ClusterConfig::default()).unwrap());
         let service = test_service(task_manager).with_cluster(cluster);
         let result = service.migrate_tenant_tasks("nonexistent");
         assert!(matches!(result, Err(ServiceError::TenantNotFound(_))));
@@ -2197,11 +2170,7 @@ mod tests {
         for _ in 0..5 {
             let service_clone = service.clone();
             handles.push(thread::spawn(move || {
-                service_clone.register_tenant(TenantConfig::new(
-                    "t1",
-                    "Tenant 1",
-                    TenantTier::Free,
-                ))
+                service_clone.register_tenant(TenantConfig::new("t1", "Tenant 1", TenantTier::Free))
             }));
         }
         let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();

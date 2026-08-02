@@ -21,9 +21,20 @@ fn main() {
 fn print_dialect<T: DialectRow>(name: &str, items: &[T]) {
     let total = items.len();
     let pass = items.iter().filter(|r| r.status().is_passed()).count();
-    let full = items.iter().filter(|r| r.status() == szrsql_dialect_compat::CompatStatus::Pass).count();
-    let rate = if total == 0 { 0.0 } else { (pass as f64 / total as f64) * 100.0 };
-    let full_rate = if total == 0 { 0.0 } else { (full as f64 / total as f64) * 100.0 };
+    let full = items
+        .iter()
+        .filter(|r| r.status() == szrsql_dialect_compat::CompatStatus::Pass)
+        .count();
+    let rate = if total == 0 {
+        0.0
+    } else {
+        (pass as f64 / total as f64) * 100.0
+    };
+    let full_rate = if total == 0 {
+        0.0
+    } else {
+        (full as f64 / total as f64) * 100.0
+    };
     println!("{name}: {pass}/{total} 通过 ({rate:.1}%), {full}/{total} 完全通过 ({full_rate:.1}%)");
 
     // 只打印失败项
@@ -43,22 +54,46 @@ trait DialectRow {
 }
 
 impl DialectRow for szrsql_dialect_compat::MysqlCompatResult {
-    fn status(&self) -> szrsql_dialect_compat::CompatStatus { self.status }
-    fn name(&self) -> &str { &self.name }
-    fn detail(&self) -> &str { &self.detail }
+    fn status(&self) -> szrsql_dialect_compat::CompatStatus {
+        self.status
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn detail(&self) -> &str {
+        &self.detail
+    }
 }
 impl DialectRow for szrsql_dialect_compat::OracleCompatResult {
-    fn status(&self) -> szrsql_dialect_compat::CompatStatus { self.status }
-    fn name(&self) -> &str { &self.name }
-    fn detail(&self) -> &str { &self.detail }
+    fn status(&self) -> szrsql_dialect_compat::CompatStatus {
+        self.status
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn detail(&self) -> &str {
+        &self.detail
+    }
 }
 impl DialectRow for szrsql_dialect_compat::SqlserverCompatResult {
-    fn status(&self) -> szrsql_dialect_compat::CompatStatus { self.status }
-    fn name(&self) -> &str { &self.name }
-    fn detail(&self) -> &str { &self.detail }
+    fn status(&self) -> szrsql_dialect_compat::CompatStatus {
+        self.status
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn detail(&self) -> &str {
+        &self.detail
+    }
 }
 impl DialectRow for szrsql_dialect_compat::SqliteCompatResult {
-    fn status(&self) -> szrsql_dialect_compat::CompatStatus { self.status }
-    fn name(&self) -> &str { &self.name }
-    fn detail(&self) -> &str { &self.detail }
+    fn status(&self) -> szrsql_dialect_compat::CompatStatus {
+        self.status
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn detail(&self) -> &str {
+        &self.detail
+    }
 }

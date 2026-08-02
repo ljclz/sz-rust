@@ -284,18 +284,26 @@ impl TcpNetwork {
     }
 
     /// 内部发送方法：序列化消息并通过 TCP 发送到目标节点
-    fn send_internal(&self, from: NodeId, to: NodeId, msg: RpcMessage) -> Result<(), TcpNetworkError> {
+    fn send_internal(
+        &self,
+        from: NodeId,
+        to: NodeId,
+        msg: RpcMessage,
+    ) -> Result<(), TcpNetworkError> {
         // 查找目标节点地址
         let addr = {
-            let peers = self.peers.lock().map_err(|_| TcpNetworkError::LockPoisoned)?;
+            let peers = self
+                .peers
+                .lock()
+                .map_err(|_| TcpNetworkError::LockPoisoned)?;
             peers.get(&to).copied()
         };
 
         let addr = addr.ok_or(TcpNetworkError::PeerNotFound(to))?;
 
         // 序列化消息
-        let encoded = bincode::serialize(&msg)
-            .map_err(|e| TcpNetworkError::Serialize(e.to_string()))?;
+        let encoded =
+            bincode::serialize(&msg).map_err(|e| TcpNetworkError::Serialize(e.to_string()))?;
 
         // 连接目标节点并发送（带超时）
         let stream_result = TcpStream::connect_timeout(&addr, Duration::from_secs(2));
@@ -307,8 +315,12 @@ impl TcpNetwork {
 
         // 写入 4 字节长度前缀 + 消息体
         let len = encoded.len() as u32;
-        stream.write_all(&len.to_be_bytes()).map_err(|e| TcpNetworkError::Io(e))?;
-        stream.write_all(&encoded).map_err(|e| TcpNetworkError::Io(e))?;
+        stream
+            .write_all(&len.to_be_bytes())
+            .map_err(|e| TcpNetworkError::Io(e))?;
+        stream
+            .write_all(&encoded)
+            .map_err(|e| TcpNetworkError::Io(e))?;
         stream.flush().map_err(|e| TcpNetworkError::Io(e))?;
 
         let _ = from; // from 用于日志，此处不记录
@@ -340,7 +352,10 @@ impl std::fmt::Debug for TcpNetwork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TcpNetwork")
             .field("node_id", &self.node_id)
-            .field("listen_addr", &self.listen_addr.lock().ok().and_then(|a| *a))
+            .field(
+                "listen_addr",
+                &self.listen_addr.lock().ok().and_then(|a| *a),
+            )
             .field("peer_count", &self.peer_count())
             .field("pending_count", &self.pending_count())
             .finish()
@@ -387,8 +402,8 @@ pub enum TcpNetworkError {
 mod tests {
     use super::*;
     use crate::raft::{
-        AppendEntriesRequest, AppendEntriesResponse, LogEntry, MessageType,
-        RequestVoteRequest, RequestVoteResponse,
+        AppendEntriesRequest, AppendEntriesResponse, LogEntry, MessageType, RequestVoteRequest,
+        RequestVoteResponse,
     };
 
     /// 构造测试用的 AppendEntriesRequest（带 N 条空 entries）
@@ -460,7 +475,10 @@ mod tests {
         assert_eq!(received.len(), 1, "节点 2 应收到 1 条消息");
         assert_eq!(received[0].from, 1);
         assert_eq!(received[0].to, 2);
-        assert!(matches!(received[0].message_type, MessageType::AppendEntriesRequest(_)));
+        assert!(matches!(
+            received[0].message_type,
+            MessageType::AppendEntriesRequest(_)
+        ));
     }
 
     /// 阶段 4：多条消息顺序传递
@@ -481,7 +499,11 @@ mod tests {
 
         // 发送 5 条消息（每条用不同的 term 区分）
         for i in 0..5u64 {
-            net1.send(1, 2, RpcMessage::new(1, 2, make_append_entries(i + 1, 1, vec![])));
+            net1.send(
+                1,
+                2,
+                RpcMessage::new(1, 2, make_append_entries(i + 1, 1, vec![])),
+            );
         }
 
         thread::sleep(Duration::from_millis(100));
@@ -517,7 +539,11 @@ mod tests {
         // 节点 1 → 节点 2 (RequestVote)
         net1.send(1, 2, RpcMessage::new(1, 2, make_request_vote(1, 1)));
         // 节点 2 → 节点 1 (RequestVoteResponse)
-        net2.send(2, 1, RpcMessage::new(2, 1, make_request_vote_response(1, true)));
+        net2.send(
+            2,
+            1,
+            RpcMessage::new(2, 1, make_request_vote_response(1, true)),
+        );
 
         thread::sleep(Duration::from_millis(50));
 
@@ -528,8 +554,14 @@ mod tests {
         assert_eq!(recv2.len(), 1, "节点 2 应收到 1 条消息");
         assert_eq!(recv1[0].from, 2);
         assert_eq!(recv2[0].from, 1);
-        assert!(matches!(recv1[0].message_type, MessageType::RequestVoteResponse(_)));
-        assert!(matches!(recv2[0].message_type, MessageType::RequestVoteRequest(_)));
+        assert!(matches!(
+            recv1[0].message_type,
+            MessageType::RequestVoteResponse(_)
+        ));
+        assert!(matches!(
+            recv2[0].message_type,
+            MessageType::RequestVoteRequest(_)
+        ));
     }
 
     /// 阶段 4：发送到未知 peer 应静默失败（不 panic）
@@ -537,7 +569,11 @@ mod tests {
     fn test_tcp_network_unknown_peer_no_panic() {
         let net1 = TcpNetwork::new(1);
         // 不添加 peer 2 的地址
-        net1.send(1, 2, RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])));
+        net1.send(
+            1,
+            2,
+            RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])),
+        );
         // 应静默失败，不 panic
         assert_eq!(net1.pending_count(), 0);
     }
@@ -558,7 +594,11 @@ mod tests {
 
         thread::sleep(Duration::from_millis(50));
 
-        net1.send(1, 2, RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])));
+        net1.send(
+            1,
+            2,
+            RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])),
+        );
         thread::sleep(Duration::from_millis(50));
 
         let first = net2.drain();
@@ -634,8 +674,16 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         // 节点 1 广播给节点 2 和节点 3
-        nets[0].send(1, 2, RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])));
-        nets[0].send(1, 3, RpcMessage::new(1, 3, make_append_entries(1, 1, vec![])));
+        nets[0].send(
+            1,
+            2,
+            RpcMessage::new(1, 2, make_append_entries(1, 1, vec![])),
+        );
+        nets[0].send(
+            1,
+            3,
+            RpcMessage::new(1, 3, make_append_entries(1, 1, vec![])),
+        );
 
         thread::sleep(Duration::from_millis(100));
 

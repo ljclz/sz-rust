@@ -103,7 +103,10 @@ impl SqliteAdapter {
     /// - `Err(AdapterError::Format)`：文件头部解码失败
     /// - `Err(AdapterError::BtreeParse)`：B-tree 页面解析失败
     /// - `Err(AdapterError::Io)`：文件读取失败
-    pub fn import_from_sqlite(&self, path: &Path) -> Result<Vec<(String, Vec<Value>)>, AdapterError> {
+    pub fn import_from_sqlite(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<(String, Vec<Value>)>, AdapterError> {
         let bytes = std::fs::read(path)?;
         if bytes.len() < HEADER_SIZE {
             return Err(AdapterError::Format(SqliteFormatError::BufferTooShort {
@@ -317,9 +320,8 @@ fn traverse_table_btree(
     }
 
     let page_buf = &bytes[page_start..page_start + page_size];
-    let page = BtreePage::decode(page_buf, header_offset).ok_or_else(|| {
-        AdapterError::BtreeParse(format!("failed to decode page {page_num}"))
-    })?;
+    let page = BtreePage::decode(page_buf, header_offset)
+        .ok_or_else(|| AdapterError::BtreeParse(format!("failed to decode page {page_num}")))?;
 
     let mut rows = Vec::new();
     match page.page_type {
@@ -337,23 +339,15 @@ fn traverse_table_btree(
             // 内部页：递归遍历所有子页
             for cell in &page.cells {
                 if let BtreeCell::TableInterior(interior) = cell {
-                    let child_rows = traverse_table_btree(
-                        bytes,
-                        interior.left_child_page,
-                        page_size,
-                        0,
-                    )?;
+                    let child_rows =
+                        traverse_table_btree(bytes, interior.left_child_page, page_size, 0)?;
                     rows.extend(child_rows);
                 }
             }
             // 遍历最右子页
             if page.right_most_pointer != 0 {
-                let child_rows = traverse_table_btree(
-                    bytes,
-                    page.right_most_pointer,
-                    page_size,
-                    0,
-                )?;
+                let child_rows =
+                    traverse_table_btree(bytes, page.right_most_pointer, page_size, 0)?;
                 rows.extend(child_rows);
             }
         }
@@ -428,7 +422,10 @@ mod tests {
         let path = tmp_dir.join("szrsql_sqlite_bridge_export_with_data_test.db");
 
         let tables = vec![
-            ("users".to_string(), vec![Value::Int64(1), Value::Text("alice".to_string())]),
+            (
+                "users".to_string(),
+                vec![Value::Int64(1), Value::Text("alice".to_string())],
+            ),
             ("orders".to_string(), vec![Value::Int64(100), Value::Null]),
         ];
 
@@ -455,12 +452,17 @@ mod tests {
         let path = tmp_dir.join("szrsql_sqlite_bridge_import_valid_test.db");
 
         // 先写入合法 SQLite 文件（无表）
-        adapter.export_to_sqlite(&[], &path).expect("export should succeed");
+        adapter
+            .export_to_sqlite(&[], &path)
+            .expect("export should succeed");
 
         // 导入应成功且返回空 Vec（sqlite_master 为空）
         let result = adapter.import_from_sqlite(&path);
         assert!(result.is_ok(), "import should succeed: {:?}", result);
-        assert!(result.unwrap().is_empty(), "empty database should return no tables");
+        assert!(
+            result.unwrap().is_empty(),
+            "empty database should return no tables"
+        );
 
         let _ = std::fs::remove_file(&path);
     }
@@ -510,13 +512,18 @@ mod tests {
         let tmp_dir = std::env::temp_dir();
         let path = tmp_dir.join("szrsql_sqlite_bridge_roundtrip_single_test.db");
 
-        let tables = vec![
-            ("users".to_string(), vec![Value::Int64(1), Value::Text("alice".to_string())]),
-        ];
+        let tables = vec![(
+            "users".to_string(),
+            vec![Value::Int64(1), Value::Text("alice".to_string())],
+        )];
 
-        adapter.export_to_sqlite(&tables, &path).expect("export should succeed");
+        adapter
+            .export_to_sqlite(&tables, &path)
+            .expect("export should succeed");
 
-        let imported = adapter.import_from_sqlite(&path).expect("import should succeed");
+        let imported = adapter
+            .import_from_sqlite(&path)
+            .expect("import should succeed");
         assert_eq!(imported.len(), 1, "should import 1 table");
         assert_eq!(imported[0].0, "users", "table name should match");
         // 导出的值被扁平化：[Int64(1), Text("alice")]
@@ -535,13 +542,20 @@ mod tests {
         let path = tmp_dir.join("szrsql_sqlite_bridge_roundtrip_multi_test.db");
 
         let tables = vec![
-            ("users".to_string(), vec![Value::Int64(1), Value::Text("alice".to_string())]),
+            (
+                "users".to_string(),
+                vec![Value::Int64(1), Value::Text("alice".to_string())],
+            ),
             ("orders".to_string(), vec![Value::Int64(100), Value::Null]),
         ];
 
-        adapter.export_to_sqlite(&tables, &path).expect("export should succeed");
+        adapter
+            .export_to_sqlite(&tables, &path)
+            .expect("export should succeed");
 
-        let imported = adapter.import_from_sqlite(&path).expect("import should succeed");
+        let imported = adapter
+            .import_from_sqlite(&path)
+            .expect("import should succeed");
         assert_eq!(imported.len(), 2, "should import 2 tables");
 
         let names: Vec<&str> = imported.iter().map(|(n, _)| n.as_str()).collect();
@@ -558,19 +572,24 @@ mod tests {
         let tmp_dir = std::env::temp_dir();
         let path = tmp_dir.join("szrsql_sqlite_bridge_roundtrip_types_test.db");
 
-        let tables = vec![
-            ("mixed".to_string(), vec![
+        let tables = vec![(
+            "mixed".to_string(),
+            vec![
                 Value::Int64(42),
                 Value::Text("hello".to_string()),
                 Value::Float64(3.5),
                 Value::Null,
                 Value::Blob(vec![0xDE, 0xAD]),
-            ]),
-        ];
+            ],
+        )];
 
-        adapter.export_to_sqlite(&tables, &path).expect("export should succeed");
+        adapter
+            .export_to_sqlite(&tables, &path)
+            .expect("export should succeed");
 
-        let imported = adapter.import_from_sqlite(&path).expect("import should succeed");
+        let imported = adapter
+            .import_from_sqlite(&path)
+            .expect("import should succeed");
         assert_eq!(imported.len(), 1);
         let vals = &imported[0].1;
         assert_eq!(vals.len(), 5);

@@ -34,6 +34,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Notify};
 
+use crate::pgwire::auth::SharedScramCredentials;
 use crate::pgwire::lifecycle::ShutdownState;
 
 // =====================================================================
@@ -49,17 +50,20 @@ pub type CancelRegistry = Arc<std::sync::Mutex<HashMap<i32, Arc<Notify>>>>;
 
 /// OPT-13：HTTP 管理端点的真实实现句柄。
 ///
-/// 注入 `HttpServer` 后，三个管理端点从 stub 升级为真实操作：
-/// - `/api/v1/cancel/{pid}` — 通过 `CancelRegistry` 查找并触发 `Notify::notify_one()`
-/// - `/api/v1/backup` — 通过 `Notify::notify_one()` 触发 main.rs 的增量快照保存
-/// - `/api/v1/config/reload` — 读取 `auth_file` 验证可加载性
+/// 注入 `HttpServer` 后，四个管理端点从 stub 升级为真实操作：
+/// - `GET  /api/v1/sessions` — 通过 `CancelRegistry` 列出真实活跃会话（pid 集合）
+/// - `POST /api/v1/cancel/{pid}` — 通过 `CancelRegistry` 查找并触发 `Notify::notify_one()`
+/// - `POST /api/v1/backup` — 通过 `Notify::notify_one()` 触发 main.rs 的增量快照保存
+/// - `POST /api/v1/config/reload` — 通过 `SharedScramCredentials` 热重载认证凭据
 pub struct ManagementHandle {
     /// 备份触发通知：HTTP 触发，main.rs 监听并执行 `save_incremental_snapshot`
     pub backup_notify: Option<Arc<Notify>>,
     /// 会话取消注册表：与 `PgwireServer` 共享同一实例
     pub cancel_registry: Option<CancelRegistry>,
-    /// 认证文件路径：用于 `/api/v1/config/reload` 验证可加载性
+    /// 认证文件路径：用于 `/api/v1/config/reload` 加载凭据
     pub auth_file: Option<PathBuf>,
+    /// P2-14：运行时可热重载的 SCRAM 凭据存储（与认证路径共享）
+    pub scram_reloader: Option<Arc<SharedScramCredentials>>,
 }
 
 impl ManagementHandle {
@@ -69,6 +73,7 @@ impl ManagementHandle {
             backup_notify: None,
             cancel_registry: None,
             auth_file: None,
+            scram_reloader: None,
         }
     }
 
@@ -87,6 +92,15 @@ impl ManagementHandle {
     /// 设置认证文件路径。
     pub fn with_auth_file(mut self, path: PathBuf) -> Self {
         self.auth_file = Some(path);
+        self
+    }
+
+    /// P2-14：注入可热重载的 SCRAM 凭据存储。
+    ///
+    /// 注入后 `/api/v1/config/reload` 将真正重载认证文件并更新运行时凭据
+    /// （新连接立即使用新凭据），而非仅验证文件可加载性。
+    pub fn with_scram_reloader(mut self, shared: Arc<SharedScramCredentials>) -> Self {
+        self.scram_reloader = Some(shared);
         self
     }
 }
@@ -580,7 +594,14 @@ async fn handle_connection(
     );
 
     // 路由请求
-    let response = route_request(&request, auth_token, metrics, cdc_service, management, shutdown_rx);
+    let response = route_request(
+        &request,
+        auth_token,
+        metrics,
+        cdc_service,
+        management,
+        shutdown_rx,
+    );
 
     // 发送响应
     stream.write_all(&response.to_bytes()).await?;
@@ -695,9 +716,37 @@ fn route_request(
             if !check_auth(request, auth_token) {
                 return HttpResponse::unauthorized();
             }
-            // Phase 4.5.9 占位：实际会话列表需要从 PgwireServer 获取
-            // 当前返回空列表，待后续集成真实会话管理
-            HttpResponse::ok_json(r#"{"sessions":[]}"#)
+            // P2-14：从 CancelRegistry 读取真实活跃会话（每个已建立连接注册一个 pid）
+            // 会话建立时插入 Arc<Notify>，会话结束移除；因此该集合即活跃会话集合。
+            match management {
+                Some(mgmt) => match &mgmt.cancel_registry {
+                    Some(registry) => {
+                        let sessions = match registry.lock() {
+                            Ok(map) => {
+                                let mut pids: Vec<i32> = map.keys().copied().collect();
+                                pids.sort_unstable();
+                                pids
+                            }
+                            Err(_) => Vec::new(),
+                        };
+                        let json = format!(
+                            r#"{{"sessions":{}}}"#,
+                            serde_json::to_string(&sessions).unwrap_or_else(|_| "[]".into())
+                        );
+                        HttpResponse::ok_json(&json)
+                    }
+                    None => HttpResponse::json(
+                        503,
+                        "Service Unavailable",
+                        r#"{"error":"cancel registry not configured"}"#,
+                    ),
+                },
+                None => HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    r#"{"error":"management handle not injected"}"#,
+                ),
+            }
         }
 
         // 取消指定会话
@@ -761,10 +810,10 @@ fn route_request(
                 Some(mgmt) => match &mgmt.backup_notify {
                     Some(notify) => {
                         notify.notify_one();
-                        tracing::info!("OPT-13: backup triggered via HTTP, snapshot saving asynchronously");
-                        HttpResponse::ok_json(
-                            r#"{"status":"backup triggered","async":true}"#,
-                        )
+                        tracing::info!(
+                            "OPT-13: backup triggered via HTTP, snapshot saving asynchronously"
+                        );
+                        HttpResponse::ok_json(r#"{"status":"backup triggered","async":true}"#)
                     }
                     None => HttpResponse::json(
                         503,
@@ -785,24 +834,68 @@ fn route_request(
             if !check_auth(request, auth_token) {
                 return HttpResponse::unauthorized();
             }
-            // OPT-13：读取认证文件验证可加载性
+            // P2-14：真正热重载认证凭据（而非仅验证可加载性）。
+            // 重载成功后，新连接立即使用新凭据（SharedScramCredentials 与认证路径共享）。
+            // 重载失败时内存保持原状，不破坏运行中认证。
             match management {
-                Some(mgmt) => match &mgmt.auth_file {
-                    Some(path) => match std::fs::read_to_string(path) {
-                        Ok(content) => {
-                            let valid = serde_json::from_str::<serde_json::Value>(&content).is_ok();
-                            if valid || content.trim().is_empty() {
-                                tracing::info!(path = %path.display(), bytes = content.len(), "OPT-13: config reload successful");
-                                HttpResponse::ok_json(&format!(r#"{{"status":"reloaded","file":"{}","bytes":{}}}"#, path.display(), content.len()))
-                            } else {
-                                HttpResponse::json(422, "Unprocessable Entity", r#"{"error":"auth file is not valid JSON"}"#)
-                            }
+                Some(mgmt) => match (&mgmt.auth_file, &mgmt.scram_reloader) {
+                    (Some(path), Some(shared)) => match shared.reload_from_file(path) {
+                        Ok(store) => {
+                            let users = store.credentials.len();
+                            tracing::info!(
+                                path = %path.display(),
+                                users,
+                                "P2-14: SCRAM credentials hot-reloaded via /api/v1/config/reload"
+                            );
+                            HttpResponse::ok_json(&format!(
+                                r#"{{"status":"reloaded","file":"{}","users":{users}}}"#,
+                                path.display()
+                            ))
                         }
-                        Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"{e}"}}"#)),
+                        Err(e) => HttpResponse::json(
+                            500,
+                            "Internal Server Error",
+                            &format!(r#"{{"error":"{e}"}}"#),
+                        ),
                     },
-                    None => HttpResponse::json(503, "Service Unavailable", r#"{"error":"auth file not configured"}"#),
+                    (Some(path), None) => {
+                        // 未注入共享存储：回退为仅验证文件可加载（不生效）
+                        match std::fs::read_to_string(path) {
+                            Ok(content) => {
+                                let valid =
+                                    serde_json::from_str::<serde_json::Value>(&content).is_ok();
+                                if valid || content.trim().is_empty() {
+                                    HttpResponse::ok_json(&format!(
+                                        r#"{{"status":"validated","file":"{}","bytes":{}}}"#,
+                                        path.display(),
+                                        content.len()
+                                    ))
+                                } else {
+                                    HttpResponse::json(
+                                        422,
+                                        "Unprocessable Entity",
+                                        r#"{"error":"auth file is not valid JSON"}"#,
+                                    )
+                                }
+                            }
+                            Err(e) => HttpResponse::json(
+                                500,
+                                "Internal Server Error",
+                                &format!(r#"{{"error":"{e}"}}"#),
+                            ),
+                        }
+                    }
+                    (None, _) => HttpResponse::json(
+                        503,
+                        "Service Unavailable",
+                        r#"{"error":"auth file not configured"}"#,
+                    ),
                 },
-                None => HttpResponse::json(503, "Service Unavailable", r#"{"error":"management handle not injected"}"#),
+                None => HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    r#"{"error":"management handle not injected"}"#,
+                ),
             }
         }
 
@@ -932,7 +1025,11 @@ fn cdc_route_request(
             let tenants = svc.list_tenants();
             match serde_json::to_string(&tenants) {
                 Ok(json) => HttpResponse::json(200, "OK", &json),
-                Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                Err(e) => HttpResponse::json(
+                    500,
+                    "Internal Server Error",
+                    &format!(r#"{{"error":"serialize failed: {e}"}}"#),
+                ),
             }
         }
 
@@ -941,7 +1038,11 @@ fn cdc_route_request(
             let config: TenantConfig = match serde_json::from_slice(&request.body) {
                 Ok(c) => c,
                 Err(e) => {
-                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid JSON body: {e}"}}"#));
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        &format!(r#"{{"error":"invalid JSON body: {e}"}}"#),
+                    );
                 }
             };
             match svc.register_tenant(config) {
@@ -954,12 +1055,22 @@ fn cdc_route_request(
         ("GET", p) if p.starts_with("/api/v1/cdc/tenants/") && !p.ends_with("/tier") => {
             let tenant_id = match last_path_segment(p) {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id"}"#,
+                    )
+                }
             };
             match svc.get_tenant(tenant_id) {
                 Ok(config) => match serde_json::to_string(&config) {
                     Ok(json) => HttpResponse::json(200, "OK", &json),
-                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                    Err(e) => HttpResponse::json(
+                        500,
+                        "Internal Server Error",
+                        &format!(r#"{{"error":"serialize failed: {e}"}}"#),
+                    ),
                 },
                 Err(e) => service_error_response(&e),
             }
@@ -969,7 +1080,13 @@ fn cdc_route_request(
         ("DELETE", p) if p.starts_with("/api/v1/cdc/tenants/") => {
             let tenant_id = match last_path_segment(p) {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id"}"#,
+                    )
+                }
             };
             match svc.unregister_tenant(tenant_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"tenant unregistered"}"#),
@@ -986,10 +1103,19 @@ fn cdc_route_request(
             if tenant_id.is_empty() {
                 return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#);
             }
-            let tier_str: String = match serde_json::from_slice::<serde_json::Value>(&request.body) {
-                Ok(v) => v.get("tier").and_then(|t| t.as_str()).map(String::from).unwrap_or_default(),
+            let tier_str: String = match serde_json::from_slice::<serde_json::Value>(&request.body)
+            {
+                Ok(v) => v
+                    .get("tier")
+                    .and_then(|t| t.as_str())
+                    .map(String::from)
+                    .unwrap_or_default(),
                 Err(e) => {
-                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid JSON body: {e}"}}"#));
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        &format!(r#"{{"error":"invalid JSON body: {e}"}}"#),
+                    );
                 }
             };
             let tier = match tier_str.as_str() {
@@ -997,7 +1123,11 @@ fn cdc_route_request(
                 "pro" => TenantTier::Pro,
                 "enterprise" => TenantTier::Enterprise,
                 other => {
-                    return HttpResponse::json(400, "Bad Request", &format!(r#"{{"error":"invalid tier: {other}"}}"#));
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        &format!(r#"{{"error":"invalid tier: {other}"}}"#),
+                    );
                 }
             };
             match svc.update_tenant_tier(tenant_id, tier) {
@@ -1012,31 +1142,59 @@ fn cdc_route_request(
         ("GET", "/api/v1/cdc/tasks") => {
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.list_tasks(tenant_id) {
                 Ok(tasks) => match serde_json::to_string(&tasks) {
                     Ok(json) => HttpResponse::json(200, "OK", &json),
-                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                    Err(e) => HttpResponse::json(
+                        500,
+                        "Internal Server Error",
+                        &format!(r#"{{"error":"serialize failed: {e}"}}"#),
+                    ),
                 },
                 Err(e) => service_error_response(&e),
             }
         }
 
         // 获取任务详情（?tenant_id=xxx）
-        ("GET", p) if p.starts_with("/api/v1/cdc/tasks/") && !p.contains("/start") && !p.contains("/stop") && !p.contains("/pause") && !p.contains("/resume") => {
+        ("GET", p)
+            if p.starts_with("/api/v1/cdc/tasks/")
+                && !p.contains("/start")
+                && !p.contains("/stop")
+                && !p.contains("/pause")
+                && !p.contains("/resume") =>
+        {
             let task_id = match last_path_segment(p) {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#),
+                None => {
+                    return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#)
+                }
             };
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.get_task(tenant_id, task_id) {
                 Ok(info) => match serde_json::to_string(&info) {
                     Ok(json) => HttpResponse::json(200, "OK", &json),
-                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                    Err(e) => HttpResponse::json(
+                        500,
+                        "Internal Server Error",
+                        &format!(r#"{{"error":"serialize failed: {e}"}}"#),
+                    ),
                 },
                 Err(e) => service_error_response(&e),
             }
@@ -1044,10 +1202,19 @@ fn cdc_route_request(
 
         // 启动任务（?tenant_id=xxx）
         ("POST", p) if p.ends_with("/start") && p.starts_with("/api/v1/cdc/tasks/") => {
-            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/start")).unwrap_or("");
+            let task_id = p
+                .strip_prefix("/api/v1/cdc/tasks/")
+                .and_then(|s| s.strip_suffix("/start"))
+                .unwrap_or("");
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.start_task(tenant_id, task_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"task started"}"#),
@@ -1057,10 +1224,19 @@ fn cdc_route_request(
 
         // 停止任务（?tenant_id=xxx）
         ("POST", p) if p.ends_with("/stop") && p.starts_with("/api/v1/cdc/tasks/") => {
-            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/stop")).unwrap_or("");
+            let task_id = p
+                .strip_prefix("/api/v1/cdc/tasks/")
+                .and_then(|s| s.strip_suffix("/stop"))
+                .unwrap_or("");
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.stop_task(tenant_id, task_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"task stopped"}"#),
@@ -1070,10 +1246,19 @@ fn cdc_route_request(
 
         // 暂停任务（?tenant_id=xxx）
         ("POST", p) if p.ends_with("/pause") && p.starts_with("/api/v1/cdc/tasks/") => {
-            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/pause")).unwrap_or("");
+            let task_id = p
+                .strip_prefix("/api/v1/cdc/tasks/")
+                .and_then(|s| s.strip_suffix("/pause"))
+                .unwrap_or("");
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.pause_task(tenant_id, task_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"task paused"}"#),
@@ -1083,10 +1268,19 @@ fn cdc_route_request(
 
         // 恢复任务（?tenant_id=xxx）
         ("POST", p) if p.ends_with("/resume") && p.starts_with("/api/v1/cdc/tasks/") => {
-            let task_id = p.strip_prefix("/api/v1/cdc/tasks/").and_then(|s| s.strip_suffix("/resume")).unwrap_or("");
+            let task_id = p
+                .strip_prefix("/api/v1/cdc/tasks/")
+                .and_then(|s| s.strip_suffix("/resume"))
+                .unwrap_or("");
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.resume_task(tenant_id, task_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"task resumed"}"#),
@@ -1098,11 +1292,19 @@ fn cdc_route_request(
         ("DELETE", p) if p.starts_with("/api/v1/cdc/tasks/") => {
             let task_id = match last_path_segment(p) {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#),
+                None => {
+                    return HttpResponse::json(400, "Bad Request", r#"{"error":"missing task_id"}"#)
+                }
             };
             let tenant_id = match query_param(query, "tenant_id") {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id query parameter"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id query parameter"}"#,
+                    )
+                }
             };
             match svc.delete_task(tenant_id, task_id) {
                 Ok(()) => HttpResponse::ok_json(r#"{"status":"task deleted"}"#),
@@ -1111,16 +1313,25 @@ fn cdc_route_request(
         }
 
         // ==================== 使用量查询 ====================
-
         ("GET", p) if p.starts_with("/api/v1/cdc/usage/") => {
             let tenant_id = match last_path_segment(p) {
                 Some(id) => id,
-                None => return HttpResponse::json(400, "Bad Request", r#"{"error":"missing tenant_id"}"#),
+                None => {
+                    return HttpResponse::json(
+                        400,
+                        "Bad Request",
+                        r#"{"error":"missing tenant_id"}"#,
+                    )
+                }
             };
             match svc.get_usage(tenant_id) {
                 Ok(usage) => match serde_json::to_string(&usage) {
                     Ok(json) => HttpResponse::json(200, "OK", &json),
-                    Err(e) => HttpResponse::json(500, "Internal Server Error", &format!(r#"{{"error":"serialize failed: {e}"}}"#)),
+                    Err(e) => HttpResponse::json(
+                        500,
+                        "Internal Server Error",
+                        &format!(r#"{{"error":"serialize failed: {e}"}}"#),
+                    ),
                 },
                 Err(e) => service_error_response(&e),
             }
@@ -1398,11 +1609,13 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let auth_token = Some("secret".to_string());
+        let registry: CancelRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let mgmt = Arc::new(ManagementHandle::new().with_cancel_registry(registry));
         let req = parse_http_request(
             b"GET /api/v1/sessions HTTP/1.1\r\nAuthorization: Bearer secret\r\n\r\n",
         )
         .unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &Some(mgmt), &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1431,8 +1644,10 @@ mod tests {
         let (tx, rx) = make_shutdown_rx();
         let metrics = MetricsRegistry::new();
         let auth_token = None;
+        let registry: CancelRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let mgmt = Arc::new(ManagementHandle::new().with_cancel_registry(registry));
         let req = parse_http_request(b"GET /api/v1/sessions HTTP/1.1\r\n\r\n").unwrap();
-        let resp = route_request(&req, &auth_token, &metrics, &None, &None, &rx);
+        let resp = route_request(&req, &auth_token, &metrics, &None, &Some(mgmt), &rx);
         let bytes = resp.to_bytes();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("200 OK"));
@@ -1780,7 +1995,9 @@ mod tests {
         let config = HttpConfig::new()
             .with_port(port)
             .with_auth_token("secret-token");
-        let server = HttpServer::new(config, Arc::clone(&metrics), rx);
+        let registry: CancelRegistry = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let mgmt = Arc::new(ManagementHandle::new().with_cancel_registry(registry));
+        let server = HttpServer::new(config, Arc::clone(&metrics), rx).with_management_handle(mgmt);
 
         let handle = tokio::spawn(async move { server.serve().await });
 

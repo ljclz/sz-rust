@@ -6,22 +6,22 @@
 //! 3. 验证错误处理：源端错误、目标端错误、状态机错误
 //! 4. 验证位点管理：ack_offset / confirmed_offset
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use szrsql_cdc::decoder::DecodedRow;
 use szrsql_cdc::schema::{ColumnDef, DataType, TableSchema};
-use szrsql_cdc::source::{
-    create_source_connector, SourceConfig, SourceConnector, SourceError, SourceEvent,
-    SourceEventProvider, SourceOffset, SchemaProvider, SnapshotProvider,
-};
 use szrsql_cdc::source::pg_source::PgSourceConnector;
 use szrsql_cdc::source::reverse::{
     ReverseReplicator, ReverseReplicatorError, ReverseReplicatorState,
 };
+use szrsql_cdc::source::{
+    create_source_connector, SchemaProvider, SnapshotProvider, SourceConfig, SourceConnector,
+    SourceError, SourceEvent, SourceEventProvider, SourceOffset,
+};
 use szrsql_cdc::target::{TargetWriter, WriterError};
 use szrsql_cdc::{CdcEventOp, ChangeEvent};
 use szrsql_types::value::Value as SzValue;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 // =====================================================================
 // 辅助函数
@@ -181,10 +181,8 @@ fn integration_create_source_connector_unsupported() {
 
 #[test]
 fn integration_pg_source_connect_disconnect_cycle() {
-    let connector = PgSourceConnector::new(SourceConfig::postgres(
-        "postgresql://localhost/db",
-    ))
-    .unwrap();
+    let connector =
+        PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
     assert!(!connector.is_connected());
     connector.connect().unwrap();
     assert!(connector.is_connected());
@@ -283,10 +281,8 @@ fn integration_pg_source_snapshot_via_provider() {
 
 #[test]
 fn integration_pg_source_ack_offset_advances() {
-    let connector = PgSourceConnector::new(SourceConfig::postgres(
-        "postgresql://localhost/db",
-    ))
-    .unwrap();
+    let connector =
+        PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
     connector.connect().unwrap();
 
     assert_eq!(connector.confirmed_offset().unwrap().lsn, 0);
@@ -300,10 +296,8 @@ fn integration_pg_source_ack_offset_advances() {
 
 #[test]
 fn integration_pg_source_health_check_state() {
-    let connector = PgSourceConnector::new(SourceConfig::postgres(
-        "postgresql://localhost/db",
-    ))
-    .unwrap();
+    let connector =
+        PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
     assert!(connector.health_check().is_err());
     connector.connect().unwrap();
     assert!(connector.health_check().is_ok());

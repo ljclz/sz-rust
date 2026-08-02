@@ -43,7 +43,9 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::ChangeEvent;
 
@@ -549,23 +551,23 @@ impl CountingCallback {
     }
 
     pub fn last_start_snapshot(&self) -> Option<BackpressureStatsSnapshot> {
-        self.last_start_snapshot.lock().unwrap().clone()
+        self.last_start_snapshot.lock().clone()
     }
 
     pub fn last_end_snapshot(&self) -> Option<BackpressureStatsSnapshot> {
-        self.last_end_snapshot.lock().unwrap().clone()
+        self.last_end_snapshot.lock().clone()
     }
 }
 
 impl BackpressureCallback for CountingCallback {
     fn on_backpressure_start(&self, stats: &BackpressureStatsSnapshot) {
         self.start_count.fetch_add(1, Ordering::SeqCst);
-        *self.last_start_snapshot.lock().unwrap() = Some(stats.clone());
+        *self.last_start_snapshot.lock() = Some(stats.clone());
     }
 
     fn on_backpressure_end(&self, stats: &BackpressureStatsSnapshot) {
         self.end_count.fetch_add(1, Ordering::SeqCst);
-        *self.last_end_snapshot.lock().unwrap() = Some(stats.clone());
+        *self.last_end_snapshot.lock() = Some(stats.clone());
     }
 
     fn on_event_dropped(&self, _event: &ChangeEvent) {
@@ -679,7 +681,7 @@ impl BoundedEventQueue {
 
     /// 注册回调
     pub fn register_callback(&self, callback: Arc<dyn BackpressureCallback>) {
-        let mut callbacks = self.callbacks.write().unwrap();
+        let mut callbacks = self.callbacks.write();
         // 去重：按 Arc 数据指针地址
         let target_addr = Arc::as_ptr(&callback) as *const () as usize;
         if !callbacks
@@ -695,7 +697,7 @@ impl BoundedEventQueue {
         &self,
         callback: &Arc<C>,
     ) -> bool {
-        let mut callbacks = self.callbacks.write().unwrap();
+        let mut callbacks = self.callbacks.write();
         let target_addr = Arc::as_ptr(callback) as *const () as usize;
         let original_len = callbacks.len();
         callbacks.retain(|c| Arc::as_ptr(c) as *const () as usize != target_addr);
@@ -704,12 +706,12 @@ impl BoundedEventQueue {
 
     /// 已注册的回调数量
     pub fn callback_count(&self) -> usize {
-        self.callbacks.read().unwrap().len()
+        self.callbacks.read().len()
     }
 
     /// 关闭队列（不再接受新事件，pop 仍可继续直到队列空）
     pub fn close(&self) {
-        let mut closed = self.closed.lock().unwrap();
+        let mut closed = self.closed.lock();
         *closed = true;
         // 唤醒所有等待的线程
         self.not_full.notify_all();
@@ -718,22 +720,22 @@ impl BoundedEventQueue {
 
     /// 是否已关闭
     pub fn is_closed(&self) -> bool {
-        *self.closed.lock().unwrap()
+        *self.closed.lock()
     }
 
     /// 当前队列大小
     pub fn len(&self) -> usize {
-        self.queue.lock().unwrap().len()
+        self.queue.lock().len()
     }
 
     /// 队列是否为空
     pub fn is_empty(&self) -> bool {
-        self.queue.lock().unwrap().is_empty()
+        self.queue.lock().is_empty()
     }
 
     /// 队列是否已满
     pub fn is_full(&self) -> bool {
-        self.queue.lock().unwrap().len() >= self.config.capacity
+        self.queue.lock().len() >= self.config.capacity
     }
 
     /// 容量
@@ -789,7 +791,7 @@ impl BoundedEventQueue {
             return Err(BackpressureError::QueueClosed);
         }
 
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         if queue.len() >= self.config.capacity {
             match self.config.strategy {
                 BackpressureStrategy::Block => {
@@ -830,9 +832,9 @@ impl BoundedEventQueue {
 
     /// 阻塞推送（Block 策略）
     fn push_blocking(&self, event: ChangeEvent) -> Result<(), BackpressureError> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         loop {
-            if *self.closed.lock().unwrap() {
+            if *self.closed.lock() {
                 return Err(BackpressureError::QueueClosed);
             }
             if queue.len() < self.config.capacity {
@@ -844,13 +846,13 @@ impl BoundedEventQueue {
                 return Ok(());
             }
             // 满时等待
-            queue = self.not_full.wait(queue).unwrap();
+            self.not_full.wait(&mut queue);
         }
     }
 
     /// 丢弃最旧事件推送（DropOldest 策略）
     fn push_drop_oldest(&self, event: ChangeEvent) -> Result<(), BackpressureError> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         if queue.len() >= self.config.capacity {
             if let Some(dropped) = queue.pop_front() {
                 self.stats.total_dropped.fetch_add(1, Ordering::SeqCst);
@@ -867,7 +869,7 @@ impl BoundedEventQueue {
 
     /// 拒绝推送（Reject 策略）
     fn push_reject(&self, event: ChangeEvent) -> Result<(), BackpressureError> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         if queue.len() >= self.config.capacity {
             self.stats.total_rejected.fetch_add(1, Ordering::SeqCst);
             self.notify_event_rejected(&event);
@@ -888,7 +890,7 @@ impl BoundedEventQueue {
     ///
     /// **注**：此策略可能导致队列超过 capacity，调用方应自行检查
     fn push_signal(&self, event: ChangeEvent) -> Result<(), BackpressureError> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         queue.push_back(event);
         let new_size = queue.len();
         drop(queue);
@@ -905,7 +907,7 @@ impl BoundedEventQueue {
     /// - `Some(event)`：成功弹出
     /// - `None`：队列已关闭且为空
     pub fn pop(&self) -> Option<ChangeEvent> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         loop {
             if let Some(event) = queue.pop_front() {
                 let new_size = queue.len();
@@ -915,10 +917,10 @@ impl BoundedEventQueue {
                 return Some(event);
             }
             // 队列为空
-            if *self.closed.lock().unwrap() {
+            if *self.closed.lock() {
                 return None;
             }
-            queue = self.not_empty.wait(queue).unwrap();
+            self.not_empty.wait(&mut queue);
         }
     }
 
@@ -928,7 +930,7 @@ impl BoundedEventQueue {
     /// - `Some(event)`：成功弹出
     /// - `None`：队列为空
     pub fn try_pop(&self) -> Option<ChangeEvent> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         if let Some(event) = queue.pop_front() {
             let new_size = queue.len();
             drop(queue);
@@ -944,7 +946,7 @@ impl BoundedEventQueue {
     ///
     /// **返回**：实际弹出的事件列表（可能少于 n）
     pub fn drain(&self, n: usize) -> Vec<ChangeEvent> {
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock();
         let take_n = n.min(queue.len());
         let events: Vec<ChangeEvent> = queue.drain(..take_n).collect();
         let new_size = queue.len();
@@ -971,7 +973,7 @@ impl BoundedEventQueue {
 
         // 状态转换检查：Normal → BackpressureActive
         if new_size >= self.config.high_watermark {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             if *state == BackpressureState::Normal {
                 *state = BackpressureState::BackpressureActive;
                 self.stats.state.store(1, Ordering::SeqCst);
@@ -994,7 +996,7 @@ impl BoundedEventQueue {
         // 注：使用 <= 而非 <，使 low_watermark 成为"达到即解除"的水位线，
         // 与 high_watermark 的">= 触发"对称，滞回区间为 (low, high) 开区间。
         if new_size <= self.config.low_watermark {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             if *state == BackpressureState::BackpressureActive {
                 *state = BackpressureState::Normal;
                 self.stats.state.store(0, Ordering::SeqCst);
@@ -1007,7 +1009,7 @@ impl BoundedEventQueue {
 
     /// 通知所有回调：背压触发
     fn notify_backpressure_start(&self, snapshot: &BackpressureStatsSnapshot) {
-        let callbacks = self.callbacks.read().unwrap();
+        let callbacks = self.callbacks.read();
         for callback in callbacks.iter() {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 callback.on_backpressure_start(snapshot);
@@ -1017,7 +1019,7 @@ impl BoundedEventQueue {
 
     /// 通知所有回调：背压解除
     fn notify_backpressure_end(&self, snapshot: &BackpressureStatsSnapshot) {
-        let callbacks = self.callbacks.read().unwrap();
+        let callbacks = self.callbacks.read();
         for callback in callbacks.iter() {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 callback.on_backpressure_end(snapshot);
@@ -1027,7 +1029,7 @@ impl BoundedEventQueue {
 
     /// 通知所有回调：事件被丢弃
     fn notify_event_dropped(&self, event: &ChangeEvent) {
-        let callbacks = self.callbacks.read().unwrap();
+        let callbacks = self.callbacks.read();
         for callback in callbacks.iter() {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 callback.on_event_dropped(event);
@@ -1037,7 +1039,7 @@ impl BoundedEventQueue {
 
     /// 通知所有回调：事件被拒绝
     fn notify_event_rejected(&self, event: &ChangeEvent) {
-        let callbacks = self.callbacks.read().unwrap();
+        let callbacks = self.callbacks.read();
         for callback in callbacks.iter() {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 callback.on_event_rejected(event);
@@ -2237,7 +2239,7 @@ mod tests {
                         break;
                     }
                 }
-                consumed_counts.lock().unwrap()[consumer_id] = my_count;
+                consumed_counts.lock()[consumer_id] = my_count;
             });
             consumer_handles.push(handle);
         }
@@ -2249,7 +2251,7 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let total_consumed: u64 = consumed_counts.lock().unwrap().iter().sum();
+        let total_consumed: u64 = consumed_counts.lock().iter().sum();
         assert_eq!(total_consumed, total_events);
     }
 
@@ -2946,7 +2948,10 @@ mod tests {
         assert!(stats.peak_size <= 100);
         // 背压触发依赖于生产者先于消费者填充队列，
         // 通过初始延迟确保队列达到高水位
-        assert!(stats.backpressure_count > 0,
-            "expected backpressure to trigger, peak_size={}", stats.peak_size);
+        assert!(
+            stats.backpressure_count > 0,
+            "expected backpressure to trigger, peak_size={}",
+            stats.peak_size
+        );
     }
 }

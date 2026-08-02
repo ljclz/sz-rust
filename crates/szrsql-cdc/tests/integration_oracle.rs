@@ -24,12 +24,12 @@
 // 兼容旧闭包/非参数化 SQL 方法（P0-2 已废弃，测试仍需验证向后兼容）
 #![allow(deprecated)]
 
+use std::sync::{Arc, Mutex};
 use szrsql_cdc::schema::{ColumnDef, DataType, TableSchema};
 use szrsql_cdc::target::oracle::OracleWriter;
 use szrsql_cdc::target::{TargetWriter, WriterError};
 use szrsql_cdc::ChangeEvent;
 use szrsql_types::value::Value as SzValue;
-use std::sync::{Arc, Mutex};
 
 // =====================================================================
 // 测试辅助
@@ -61,13 +61,17 @@ fn make_row(id: i64, name: &str, age: i32) -> szrsql_cdc::decoder::DecodedRow {
 }
 
 /// 创建收集执行的 SQL 的执行器
-fn make_collecting_executor() -> (Arc<Mutex<Vec<String>>>, Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>) {
+fn make_collecting_executor() -> (
+    Arc<Mutex<Vec<String>>>,
+    Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>,
+) {
     let sqls = Arc::new(Mutex::new(Vec::<String>::new()));
     let sqls_clone = sqls.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(move |sql| {
-        sqls_clone.lock().unwrap().push(sql.to_string());
-        Ok(())
-    });
+    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+        Arc::new(move |sql| {
+            sqls_clone.lock().unwrap().push(sql.to_string());
+            Ok(())
+        });
     (sqls, executor)
 }
 
@@ -85,25 +89,43 @@ fn oracle_end_to_end_insert_update_delete() {
     // 1. Insert
     let insert_row = make_row(1, "Alice", 30);
     let insert_event = ChangeEvent::insert(100, 5000, 1, Vec::new(), 1234567890);
-    writer.write_event(&insert_event, &schema, Some(&insert_row)).unwrap();
+    writer
+        .write_event(&insert_event, &schema, Some(&insert_row))
+        .unwrap();
 
     // 2. Update
     let update_row = make_row(1, "Bob", 25);
     let update_event = ChangeEvent::update(100, 5001, 1, Vec::new(), Vec::new(), 1234567891);
-    writer.write_event(&update_event, &schema, Some(&update_row)).unwrap();
+    writer
+        .write_event(&update_event, &schema, Some(&update_row))
+        .unwrap();
 
     // 3. Delete
     let delete_row = make_row(1, "Bob", 25);
     let delete_event = ChangeEvent::delete(100, 5002, 1, Vec::new(), 1234567892);
-    writer.write_event(&delete_event, &schema, Some(&delete_row)).unwrap();
+    writer
+        .write_event(&delete_event, &schema, Some(&delete_row))
+        .unwrap();
 
     let collected = sqls.lock().unwrap();
     assert_eq!(collected.len(), 3);
 
     // 验证 SQL 类型
-    assert!(collected[0].contains("MERGE INTO"), "first SQL should be MERGE: {}", collected[0]);
-    assert!(collected[1].contains("UPDATE"), "second SQL should be UPDATE: {}", collected[1]);
-    assert!(collected[2].contains("DELETE"), "third SQL should be DELETE: {}", collected[2]);
+    assert!(
+        collected[0].contains("MERGE INTO"),
+        "first SQL should be MERGE: {}",
+        collected[0]
+    );
+    assert!(
+        collected[1].contains("UPDATE"),
+        "second SQL should be UPDATE: {}",
+        collected[1]
+    );
+    assert!(
+        collected[2].contains("DELETE"),
+        "third SQL should be DELETE: {}",
+        collected[2]
+    );
 
     // 验证写入计数
     assert_eq!(writer.write_count(), 3);
@@ -166,7 +188,11 @@ fn oracle_ensure_table_idempotent() {
     writer.ensure_table(&schema).unwrap();
 
     let collected = sqls.lock().unwrap();
-    assert_eq!(collected.len(), 1, "ensure_table should only generate one CREATE TABLE");
+    assert_eq!(
+        collected.len(),
+        1,
+        "ensure_table should only generate one CREATE TABLE"
+    );
 }
 
 // =====================================================================
@@ -317,7 +343,10 @@ fn oracle_idempotent_insert_same_sql() {
 
     let sqls = writer.generated_sqls();
     assert_eq!(sqls.len(), 2);
-    assert_eq!(sqls[0], sqls[1], "idempotent insert should generate identical SQL");
+    assert_eq!(
+        sqls[0], sqls[1],
+        "idempotent insert should generate identical SQL"
+    );
 }
 
 // =====================================================================
@@ -329,10 +358,11 @@ fn oracle_health_check_uses_dual() {
     // Oracle 健康检查应使用 SELECT 1 FROM DUAL（不是 SELECT 1）
     let called = Arc::new(Mutex::new(String::new()));
     let called_clone = called.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(move |sql| {
-        *called_clone.lock().unwrap() = sql.to_string();
-        Ok(())
-    });
+    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+        Arc::new(move |sql| {
+            *called_clone.lock().unwrap() = sql.to_string();
+            Ok(())
+        });
     let writer = OracleWriter::with_executor("oracle://localhost:1521/freepdb1", executor).unwrap();
 
     writer.health_check().unwrap();
@@ -380,7 +410,9 @@ fn oracle_execute_ddl_drop_table() {
 fn oracle_executor_error_propagates() {
     // 执行器返回错误时应正确传播
     let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(|_sql| {
-        Err(WriterError::Sql("ORA-00942: table or view does not exist".to_string()))
+        Err(WriterError::Sql(
+            "ORA-00942: table or view does not exist".to_string(),
+        ))
     });
     let writer = OracleWriter::with_executor("oracle://localhost:1521/freepdb1", executor).unwrap();
     let schema = make_users_schema();

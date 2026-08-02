@@ -17,9 +17,9 @@
 
 use crate::CompatStatus;
 use serde::{Deserialize, Serialize};
+use szrsql_protocol::pgwire::auth::SCRAM_MECHANISM;
 use szrsql_protocol::pgwire::message::{Severity, SqlState};
 use szrsql_protocol::pgwire::startup::PROTOCOL_VERSION_3_0;
-use szrsql_protocol::pgwire::auth::SCRAM_MECHANISM;
 
 /// 单项协议合规性检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +65,11 @@ impl ProtocolConformance {
             name: "SQLSTATE 格式（5 字符）".to_string(),
             expected,
             actual,
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "SQLSTATE 符合 PG 规范的 5 字符格式".to_string()
             } else {
@@ -84,7 +88,11 @@ impl ProtocolConformance {
             name: "SUCCESSFUL_COMPLETION = 00000".to_string(),
             expected,
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "成功完成码与 PG 官方一致".to_string()
             } else {
@@ -103,7 +111,11 @@ impl ProtocolConformance {
             name: "Severity::Error = \"ERROR\"".to_string(),
             expected,
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "ERROR 严重性与 PG 官方一致".to_string()
             } else {
@@ -122,7 +134,11 @@ impl ProtocolConformance {
             name: "Severity::Fatal = \"FATAL\"".to_string(),
             expected,
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "FATAL 严重性与 PG 官方一致".to_string()
             } else {
@@ -141,7 +157,11 @@ impl ProtocolConformance {
             name: "Severity::Warning = \"WARNING\"".to_string(),
             expected,
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "WARNING 严重性与 PG 官方一致".to_string()
             } else {
@@ -160,7 +180,11 @@ impl ProtocolConformance {
             name: "Severity::Notice = \"NOTICE\"".to_string(),
             expected,
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "NOTICE 严重性与 PG 官方一致".to_string()
             } else {
@@ -179,7 +203,11 @@ impl ProtocolConformance {
             name: "协议版本号 = 196608 (v3.0)".to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "协议版本号与 PG v3.0 一致".to_string()
             } else {
@@ -198,7 +226,11 @@ impl ProtocolConformance {
             name: "SCRAM 机制名称 = \"SCRAM-SHA-256\"".to_string(),
             expected: expected.to_string(),
             actual: actual.to_string(),
-            status: if ok { CompatStatus::Pass } else { CompatStatus::Fail },
+            status: if ok {
+                CompatStatus::Pass
+            } else {
+                CompatStatus::Fail
+            },
             detail: if ok {
                 "SCRAM 机制名称与 RFC 5802 一致".to_string()
             } else {

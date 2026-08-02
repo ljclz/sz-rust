@@ -18,11 +18,13 @@
 //!
 //! # 并发安全
 //!
-//! `NotifyHub` 内部用 `std::sync::Mutex` 保护（通知操作是非阻塞的，临界区极短）。
+//! `NotifyHub` 内部用 `parking_lot::Mutex` 保护（通知操作是非阻塞的，临界区极短）。
 //! 所有方法都是同步的，可从 async 上下文中直接调用。
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 //  Notification
@@ -76,7 +78,7 @@ impl NotifyHub {
     ///
     /// 必须在 LISTEN 之前调用。若 pid 已存在则覆盖（清空原有订阅）。
     pub fn register(&self, pid: i32) {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         inner.subscriptions.insert(pid, Vec::new());
         inner.pending.insert(pid, Vec::new());
     }
@@ -85,7 +87,7 @@ impl NotifyHub {
     ///
     /// 必须在连接断开时调用以避免内存泄漏。
     pub fn unregister(&self, pid: i32) {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         inner.subscriptions.remove(&pid);
         inner.pending.remove(&pid);
     }
@@ -94,7 +96,7 @@ impl NotifyHub {
     ///
     /// PG 语义：重复 LISTEN 同一频道是幂等的（不会重复接收通知）。
     pub fn listen(&self, pid: i32, channel: &str) {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         let subs = inner.subscriptions.entry(pid).or_default();
         if !subs.iter().any(|c| c == channel) {
             subs.push(channel.to_string());
@@ -105,7 +107,7 @@ impl NotifyHub {
     ///
     /// PG 语义：未监听的频道执行 UNLISTEN 是幂等的（不报错）。
     pub fn unlisten(&self, pid: i32, channel: &str) {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         if let Some(subs) = inner.subscriptions.get_mut(&pid) {
             subs.retain(|c| c != channel);
         }
@@ -113,7 +115,7 @@ impl NotifyHub {
 
     /// `UNLISTEN *` — 取消当前会话监听所有频道。
     pub fn unlisten_all(&self, pid: i32) {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         if let Some(subs) = inner.subscriptions.get_mut(&pid) {
             subs.clear();
         }
@@ -121,7 +123,7 @@ impl NotifyHub {
 
     /// 返回当前会话监听的所有频道列表。
     pub fn listening_channels(&self, pid: i32) -> Vec<String> {
-        let inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let inner = self.inner.lock();
         inner.subscriptions.get(&pid).cloned().unwrap_or_default()
     }
 
@@ -134,7 +136,7 @@ impl NotifyHub {
     ///
     /// 返回接收通知的会话数（用于 CommandComplete 标签生成）。
     pub fn notify(&self, channel: &str, payload: &str, notifier_pid: i32) -> usize {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         let mut delivered = 0usize;
         // 收集所有监听该频道的 pid（按升序确保确定性）
         let mut listeners: Vec<i32> = inner
@@ -160,7 +162,7 @@ impl NotifyHub {
     /// server 层在每次 Query/Execute 响应后调用此方法，将通知编码为
     /// `BackendMessage::NotificationResponse` 发送给客户端。
     pub fn drain_pending(&self, pid: i32) -> Vec<Notification> {
-        let mut inner = self.inner.lock().expect("NotifyHub mutex poisoned");
+        let mut inner = self.inner.lock();
         inner
             .pending
             .get_mut(&pid)

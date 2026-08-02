@@ -28,7 +28,9 @@ use crate::wal::{WalError, WalOpType, WalReader, WalRecord, WalWriter};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 
 // =====================================================================
 // XorShift64 — 固定种子 PRNG（与 mvcc_fuzz / wal_fuzz / isolation_fuzz 同风格）
@@ -215,13 +217,13 @@ impl BankStore {
     /// 获取账户的 Arc<Mutex>（不存在则插入 0）
     fn get_or_create_account(&self, account: &str) -> Arc<Mutex<i64>> {
         {
-            let map = self.accounts.read().unwrap();
+            let map = self.accounts.read();
             if let Some(arc) = map.get(account) {
                 return Arc::clone(arc);
             }
         }
         // 双检锁：避免重复插入
-        let mut map = self.accounts.write().unwrap();
+        let mut map = self.accounts.write();
         map.entry(account.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(0)))
             .clone()
@@ -229,9 +231,9 @@ impl BankStore {
 
     /// 查询账户余额（不存在返回 0）
     fn balance(&self, account: &str) -> i64 {
-        let map = self.accounts.read().unwrap();
+        let map = self.accounts.read();
         match map.get(account) {
-            Some(arc) => *arc.lock().unwrap(),
+            Some(arc) => *arc.lock(),
             None => 0,
         }
     }
@@ -241,7 +243,7 @@ impl BankStore {
     /// 更新 total 计数器：delta = new - old
     fn set_balance(&self, account: &str, amount: i64) {
         let arc = self.get_or_create_account(account);
-        let mut guard = arc.lock().unwrap();
+        let mut guard = arc.lock();
         let old = *guard;
         *guard = amount;
         drop(guard);
@@ -258,7 +260,7 @@ impl BankStore {
 
     /// 账户数量
     fn account_count(&self) -> usize {
-        self.accounts.read().unwrap().len()
+        self.accounts.read().len()
     }
 
     /// 已提交事务数
@@ -308,13 +310,13 @@ impl BankStore {
 
         // 按账户名排序加锁，避免死锁
         let (mut from_guard, mut to_guard) = if from < to {
-            let g1 = from_arc.lock().unwrap();
-            let g2 = to_arc.lock().unwrap();
+            let g1 = from_arc.lock();
+            let g2 = to_arc.lock();
             (g1, g2)
         } else {
             // from > to，先锁 to 再锁 from
-            let g2 = to_arc.lock().unwrap();
-            let g1 = from_arc.lock().unwrap();
+            let g2 = to_arc.lock();
+            let g1 = from_arc.lock();
             // 重排为 (from_guard, to_guard)
             (g1, g2)
         };
@@ -434,7 +436,7 @@ impl BankStore {
         }
 
         // 从最终账户状态累加 total（避免自转账记录导致重复计数）
-        let total: i64 = accounts.values().map(|arc| *arc.lock().unwrap()).sum();
+        let total: i64 = accounts.values().map(|arc| *arc.lock()).sum();
 
         Ok(Self {
             accounts: RwLock::new(accounts),
@@ -459,7 +461,7 @@ fn account_name(idx: u32) -> String {
 ///
 /// 直接操作 accounts HashMap 并累加 total 计数器（单线程初始化，无需加锁）。
 fn init_accounts(store: &BankStore, n: u32, initial_balance: i64) {
-    let mut accounts = store.accounts.write().unwrap();
+    let mut accounts = store.accounts.write();
     let mut total: i64 = 0;
     for i in 0..n {
         accounts.insert(account_name(i), Arc::new(Mutex::new(initial_balance)));

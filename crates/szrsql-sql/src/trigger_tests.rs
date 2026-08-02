@@ -22,7 +22,9 @@ use crate::ast::{Statement, TableName, TriggerEvent, TriggerLevel, TriggerTiming
 use crate::parser::parse_one;
 use crate::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use szrsql_types::value::{ColumnType, Value};
 
 /// 触发器测试中记录的行类型
@@ -87,7 +89,7 @@ impl TriggerFunction for RecordingTrigger {
     fn call(&self, ctx: &TriggerContext) -> Result<TriggerOutcome, ExecutionError> {
         let new = ctx.new_row.cloned();
         let old = ctx.old_row.cloned();
-        self.rows.lock().unwrap().push((new, old));
+        self.rows.lock().push((new, old));
         Ok(TriggerOutcome::Continue)
     }
 }
@@ -617,7 +619,7 @@ fn test_trigger_update_01_before_row_old_new_access() {
         .with_trigger_registry(&registry);
     exec.execute_update(&plan, &mut table).unwrap();
 
-    let recorded = rows.lock().unwrap();
+    let recorded = rows.lock();
     assert_eq!(recorded.len(), 1);
     let (new_row, old_row) = &recorded[0];
     // NEW 行：id=1, name="new"
@@ -728,7 +730,7 @@ fn test_trigger_delete_01_before_row_old_access() {
     let result = exec.execute_delete(&plan, &mut table).unwrap();
     assert_eq!(result.affected_rows, 1);
 
-    let recorded = rows.lock().unwrap();
+    let recorded = rows.lock();
     assert_eq!(recorded.len(), 1);
     let (new_row, old_row) = &recorded[0];
     // DELETE 时 NEW 为 None
@@ -872,7 +874,7 @@ fn test_trigger_ordering_03_before_modify_propagates_to_after() {
     exec.execute_insert(&plan, &mut table).unwrap();
 
     // AFTER 触发器应看到修改后的 NEW 行
-    let recorded = rows.lock().unwrap();
+    let recorded = rows.lock();
     assert_eq!(recorded.len(), 1);
     let (new_row, _) = &recorded[0];
     assert_eq!(new_row.as_ref().unwrap()[1], Value::Text("modified".into()));

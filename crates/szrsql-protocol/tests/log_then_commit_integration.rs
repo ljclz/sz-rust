@@ -11,9 +11,9 @@
 //! 4. Transaction ID monotonically increasing
 //! 5. Multi-transaction WAL LSN ordering correct
 
+use std::sync::Arc;
 use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
 use szrsql_tx::wal::{WalOpType, WalReader, WalWriter};
-use std::sync::Arc;
 
 /// Helper: create temporary WAL file path under F:\test\data
 ///
@@ -196,7 +196,8 @@ async fn test_multiple_transactions_wal_ordering() {
 
     for i in 1..=5i64 {
         svc.execute_sql("BEGIN").await;
-        svc.execute_sql(&format!("INSERT INTO counter (val) VALUES ({i})")).await;
+        svc.execute_sql(&format!("INSERT INTO counter (val) VALUES ({i})"))
+            .await;
         svc.execute_sql("COMMIT").await;
     }
 
@@ -258,7 +259,11 @@ async fn test_commit_then_rollback_isolation() {
     let results = svc.execute_sql("SELECT * FROM t").await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
-            assert_eq!(rows.len(), 1, "only committed transaction's data should exist");
+            assert_eq!(
+                rows.len(),
+                1,
+                "only committed transaction's data should exist"
+            );
         }
         other => panic!("expected ResultSet, got {other:?}"),
     }
@@ -267,8 +272,14 @@ async fn test_commit_then_rollback_isolation() {
     let mut reader = WalReader::open(&wal_path).unwrap();
     let (records, _) = reader.read_all().unwrap();
 
-    let commit_count = records.iter().filter(|r| r.op_type == WalOpType::Commit).count();
-    let abort_count = records.iter().filter(|r| r.op_type == WalOpType::Abort).count();
+    let commit_count = records
+        .iter()
+        .filter(|r| r.op_type == WalOpType::Commit)
+        .count();
+    let abort_count = records
+        .iter()
+        .filter(|r| r.op_type == WalOpType::Abort)
+        .count();
     assert_eq!(commit_count, 1, "expected 1 Commit record");
     assert_eq!(abort_count, 1, "expected 1 Abort record");
 
@@ -297,7 +308,11 @@ async fn test_empty_transaction_writes_commit_record() {
         .iter()
         .filter(|r| r.op_type == WalOpType::Commit)
         .collect();
-    assert_eq!(commit_records.len(), 1, "empty transaction should still write Commit record");
+    assert_eq!(
+        commit_records.len(),
+        1,
+        "empty transaction should still write Commit record"
+    );
     assert_eq!(commit_records[0].tx_id, 1);
 
     let _ = std::fs::remove_file(&wal_path);
@@ -325,7 +340,11 @@ async fn test_wal_record_checksum_integrity() {
 
     // Each record's checksum should be non-zero
     for r in &records {
-        assert_ne!(r.checksum, 0, "checksum should be non-zero for record at LSN {}", r.lsn);
+        assert_ne!(
+            r.checksum, 0,
+            "checksum should be non-zero for record at LSN {}",
+            r.lsn
+        );
     }
 
     let _ = std::fs::remove_file(&wal_path);

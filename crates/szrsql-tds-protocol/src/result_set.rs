@@ -175,7 +175,11 @@ impl ColumnMetaData {
         // UserType（4 字节 BE，TDS 7.2+）
         buf.extend_from_slice(&0u32.to_be_bytes());
         // Flags（2 字节 BE）：位 0 = nullable
-        let flags: u16 = if self.nullable { 0x0001 } else { 0x0000 };
+        let flags: u16 = if self.nullable {
+            0x0001
+        } else {
+            0x0000
+        };
         buf.extend_from_slice(&flags.to_be_bytes());
         // TYPE_INFO
         buf.push(self.column_type as u8);
@@ -184,10 +188,7 @@ impl ColumnMetaData {
             TdsType::IntN => buf.push(self.int_byte_len.as_bytes()),
             TdsType::FloatN => buf.push(self.max_length as u8),
             TdsType::DateTimeN => buf.push(self.max_length as u8),
-            TdsType::BigVarChar
-            | TdsType::BigVarBin
-            | TdsType::NChar
-            | TdsType::NVarChar => {
+            TdsType::BigVarChar | TdsType::BigVarBin | TdsType::NChar | TdsType::NVarChar => {
                 // 最大长度（2 字节 LE）
                 buf.extend_from_slice(&self.max_length.to_le_bytes());
                 // 排序规则（4 字节，固定 0）
@@ -250,11 +251,19 @@ impl TdsRow {
             }
             Value::Bool(b) => {
                 if column.column_type == TdsType::Bit {
-                    buf.push(if *b { 1 } else { 0 });
+                    buf.push(if *b {
+                        1
+                    } else {
+                        0
+                    });
                 } else {
                     // 退化为 INTN 1 字节
                     buf.push(1);
-                    buf.push(if *b { 1 } else { 0 });
+                    buf.push(if *b {
+                        1
+                    } else {
+                        0
+                    });
                 }
             }
             Value::Int64(n) => {
@@ -413,21 +422,14 @@ impl ResultSetEncoder {
     }
 
     /// 编码完整结果集：ColumnMetaData + Row* + Done。
-    pub fn encode_result_set(
-        columns: &[ColumnMetaData],
-        rows: &[Vec<Value>],
-    ) -> Vec<Vec<u8>> {
+    pub fn encode_result_set(columns: &[ColumnMetaData], rows: &[Vec<Value>]) -> Vec<Vec<u8>> {
         let mut packets = Vec::with_capacity(2 + rows.len());
         packets.push(Self::encode_column_metadata(columns));
         for row in rows {
             let tds_row = TdsRow::encode(row, columns);
             packets.push(Self::encode_row(&tds_row));
         }
-        packets.push(Self::encode_done(
-            DoneStatus::FINAL,
-            0,
-            rows.len() as u64,
-        ));
+        packets.push(Self::encode_done(DoneStatus::FINAL, 0, rows.len() as u64));
         packets
     }
 }
@@ -672,7 +674,9 @@ mod tests {
 
     #[test]
     fn test_encode_row_token() {
-        let row = TdsRow { data: vec![1, 2, 3] };
+        let row = TdsRow {
+            data: vec![1, 2, 3],
+        };
         let bytes = ResultSetEncoder::encode_row(&row);
         assert_eq!(bytes[0], 0xD1);
         assert_eq!(&bytes[1..], &[1, 2, 3]);
@@ -760,7 +764,10 @@ mod tests {
         assert_eq!(EnvChangeType::from_byte(1), Some(EnvChangeType::PacketSize));
         assert_eq!(EnvChangeType::from_byte(4), Some(EnvChangeType::BeginTxn));
         assert_eq!(EnvChangeType::from_byte(5), Some(EnvChangeType::CommitTxn));
-        assert_eq!(EnvChangeType::from_byte(6), Some(EnvChangeType::RollbackTxn));
+        assert_eq!(
+            EnvChangeType::from_byte(6),
+            Some(EnvChangeType::RollbackTxn)
+        );
         assert_eq!(EnvChangeType::from_byte(7), Some(EnvChangeType::Database));
         assert_eq!(EnvChangeType::from_byte(8), Some(EnvChangeType::Language));
         assert_eq!(EnvChangeType::from_byte(9), Some(EnvChangeType::Charset));

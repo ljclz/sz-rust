@@ -26,7 +26,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 use szrsql_tx::wal::{WalOpType, WalRecord};
@@ -242,17 +243,17 @@ impl ReplicationPrimary {
 
     /// WAL 记录总数
     pub fn record_count(&self) -> usize {
-        self.wal_records.lock().unwrap().len()
+        self.wal_records.lock().len()
     }
 
     /// 已连接备库数
     pub fn replica_count(&self) -> usize {
-        self.replica_senders.lock().unwrap().len()
+        self.replica_senders.lock().len()
     }
 
     /// 获取指定备库的已确认 LSN
     pub fn confirmed_lsn(&self, replica_id: &str) -> Option<u64> {
-        self.confirmed_lsns.lock().unwrap().get(replica_id).copied()
+        self.confirmed_lsns.lock().get(replica_id).copied()
     }
 
     /// 接受备库连接
@@ -279,7 +280,7 @@ impl ReplicationPrimary {
 
         // 注册备库
         {
-            let mut senders = self.replica_senders.lock().unwrap();
+            let mut senders = self.replica_senders.lock();
             if senders.contains_key(replica_id) {
                 return Err(ReplicationError::ReplicaAlreadyExists(
                     replica_id.to_string(),
@@ -288,7 +289,7 @@ impl ReplicationPrimary {
             senders.insert(replica_id.to_string(), tx);
         }
         {
-            let mut confirmed = self.confirmed_lsns.lock().unwrap();
+            let mut confirmed = self.confirmed_lsns.lock();
             confirmed.insert(replica_id.to_string(), 0);
         }
 
@@ -301,7 +302,7 @@ impl ReplicationPrimary {
 
         // 推送存量记录（追平批次）
         let records: Vec<WalRecord> = {
-            let wal = self.wal_records.lock().unwrap();
+            let wal = self.wal_records.lock();
             wal.iter().filter(|r| r.lsn > start_lsn).cloned().collect()
         };
         if !records.is_empty() {
@@ -342,7 +343,7 @@ impl ReplicationPrimary {
 
         // 追加到 WAL 缓冲
         {
-            let mut wal = self.wal_records.lock().unwrap();
+            let mut wal = self.wal_records.lock();
             wal.extend(records.clone());
         }
         self.current_lsn.store(end_lsn, Ordering::SeqCst);
@@ -351,7 +352,7 @@ impl ReplicationPrimary {
             batch_size,
             start_lsn,
             end_lsn,
-            replica_count = self.replica_senders.lock().unwrap().len(),
+            replica_count = self.replica_senders.lock().len(),
             "appended WAL batch and fanning out to replicas"
         );
 
@@ -361,7 +362,7 @@ impl ReplicationPrimary {
             start_lsn,
             end_lsn,
         };
-        let senders = self.replica_senders.lock().unwrap();
+        let senders = self.replica_senders.lock();
         for tx in senders.values() {
             let _ = tx.send(msg.clone());
         }
@@ -375,7 +376,7 @@ impl ReplicationPrimary {
         let msg = ReplicationMessage::Heartbeat {
             current_lsn: current,
         };
-        let senders = self.replica_senders.lock().unwrap();
+        let senders = self.replica_senders.lock();
         let replica_count = senders.len();
         for tx in senders.values() {
             let _ = tx.send(msg.clone());
@@ -385,12 +386,15 @@ impl ReplicationPrimary {
 
     /// 优雅关闭：向所有备库发送 Eof
     pub fn shutdown(&self) {
-        let senders = self.replica_senders.lock().unwrap();
+        let senders = self.replica_senders.lock();
         let replica_count = senders.len();
         for tx in senders.values() {
             let _ = tx.send(ReplicationMessage::Eof);
         }
-        info!(replica_count, "primary graceful shutdown, Eof sent to all replicas");
+        info!(
+            replica_count,
+            "primary graceful shutdown, Eof sent to all replicas"
+        );
     }
 
     /// 模拟主库崩溃：关闭所有备库通道（不发 Eof），备库 recv 返回 None 后退出
@@ -398,25 +402,28 @@ impl ReplicationPrimary {
     /// 与 `shutdown` 的区别：`shutdown` 发送 Eof（优雅关闭），`crash` 直接关闭通道（模拟崩溃）。
     /// 主库 WAL 数据保留，可用于 `expected_pages` 一致性校验。
     pub fn crash(&self) {
-        let mut senders = self.replica_senders.lock().unwrap();
+        let mut senders = self.replica_senders.lock();
         let replica_count = senders.len();
         senders.clear();
-        warn!(replica_count, "primary crash simulated, channels closed without Eof");
+        warn!(
+            replica_count,
+            "primary crash simulated, channels closed without Eof"
+        );
     }
 
     /// 移除备库连接
     pub fn remove_replica(&self, replica_id: &str) -> Result<(), ReplicationError> {
-        let mut senders = self.replica_senders.lock().unwrap();
+        let mut senders = self.replica_senders.lock();
         if senders.remove(replica_id).is_none() {
             return Err(ReplicationError::ReplicaNotFound(replica_id.to_string()));
         }
-        self.confirmed_lsns.lock().unwrap().remove(replica_id);
+        self.confirmed_lsns.lock().remove(replica_id);
         Ok(())
     }
 
     /// 更新备库已确认 LSN（由备库通过外部机制反馈，如 RPC 回调）
     pub fn update_confirmed_lsn(&self, replica_id: &str, lsn: u64) {
-        let mut confirmed = self.confirmed_lsns.lock().unwrap();
+        let mut confirmed = self.confirmed_lsns.lock();
         confirmed.insert(replica_id.to_string(), lsn);
     }
 
@@ -425,14 +432,14 @@ impl ReplicationPrimary {
     /// 用于一致性校验：备库最终页状态应与此方法结果一致。
     pub fn expected_pages(&self, initial_pages: &[(u32, Vec<u8>)]) -> Vec<(u32, Vec<u8>)> {
         let mut pages = initial_pages.to_vec();
-        let wal = self.wal_records.lock().unwrap();
+        let wal = self.wal_records.lock();
         apply_records(&mut pages, &wal);
         pages
     }
 
     /// 向指定备库发送消息
     fn send_to_replica(&self, replica_id: &str, msg: ReplicationMessage) {
-        let senders = self.replica_senders.lock().unwrap();
+        let senders = self.replica_senders.lock();
         if let Some(tx) = senders.get(replica_id) {
             let _ = tx.send(msg);
         }

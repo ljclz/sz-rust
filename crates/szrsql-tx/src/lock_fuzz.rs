@@ -912,7 +912,8 @@ mod phase_2_12 {
     use crate::mvcc::{IsolationLevel, MvccError, MvccManager};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Mutex;
+    // P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+    use parking_lot::Mutex;
 
     // -----------------------------------------------------------------
     // 辅助：将 (table, row) 编码为 resource_id 和 key
@@ -976,7 +977,7 @@ mod phase_2_12 {
                     let key = encode_key(TABLE_ID, ROW_ID);
 
                     // SELECT FOR UPDATE 语义：读 + 注册写意图
-                    let current = *value.lock().unwrap();
+                    let current = *value.lock();
                     let _ = mgr.register_read(txn_id, &key);
                     let _ = mgr.register_write(txn_id, &key);
 
@@ -990,7 +991,7 @@ mod phase_2_12 {
                     match result {
                         Ok(()) => {
                             // 提交成功，持久化新值
-                            *value.lock().unwrap() = new_value;
+                            *value.lock() = new_value;
                             committed_count.fetch_add(1, Ordering::SeqCst);
                         }
                         Err(MvccError::WriteWriteConflict(_)) => {
@@ -1010,7 +1011,7 @@ mod phase_2_12 {
 
         let committed = committed_count.load(Ordering::SeqCst);
         let aborted = aborted_count.load(Ordering::SeqCst);
-        let final_value = *value.lock().unwrap();
+        let final_value = *value.lock();
 
         // 验证：恰好 1 个线程提交成功（first-committer-wins）
         assert_eq!(
@@ -1073,11 +1074,11 @@ mod phase_2_12 {
                     }
 
                     // 临界区：读-改-写（X 锁保护，其他事务无法进入）
-                    let current = *value.lock().unwrap();
+                    let current = *value.lock();
                     let new_value = current + 1;
                     // 模拟写入耗时
                     thread::sleep(Duration::from_millis(10));
-                    *value.lock().unwrap() = new_value;
+                    *value.lock() = new_value;
 
                     // COMMIT：释放 X 锁
                     lock_mgr.unlock_all(txn_id);
@@ -1090,7 +1091,7 @@ mod phase_2_12 {
             h.join().unwrap();
         }
 
-        let final_value = *value.lock().unwrap();
+        let final_value = *value.lock();
         let writes = write_count.load(Ordering::SeqCst);
 
         // 验证：所有线程都成功写入
@@ -1161,9 +1162,9 @@ mod phase_2_12 {
                     let _ = mvcc_mgr.register_write(txn.txn_id, &key);
 
                     // 临界区：读-改-写
-                    let current = *value.lock().unwrap();
+                    let current = *value.lock();
                     let new_value = current + 1;
-                    *value.lock().unwrap() = new_value;
+                    *value.lock() = new_value;
 
                     // COMMIT：先 MVCC commit，再释放 X 锁（Strict 2PL）
                     let result = mvcc_mgr.commit(txn.txn_id, 0);
@@ -1180,7 +1181,7 @@ mod phase_2_12 {
             h.join().unwrap();
         }
 
-        let final_value = *value.lock().unwrap();
+        let final_value = *value.lock();
         let success = success_count.load(Ordering::SeqCst);
 
         // 验证：所有线程都成功（X 锁串行化，每轮只有一个事务活跃，无并发写冲突）
@@ -1261,7 +1262,7 @@ mod phase_2_12 {
                         let _ = mvcc_mgr.register_write(txn.txn_id, &key);
 
                         let result = {
-                            let mut vals = values.lock().unwrap();
+                            let mut vals = values.lock();
                             match op {
                                 0 => {
                                     // SELECT FOR UPDATE：读 + 不修改（仅验证锁互斥）
@@ -1370,7 +1371,7 @@ mod phase_2_12 {
                 match r {
                     Ok(()) => {
                         // 获取 R2 后，txn1 写入
-                        values1.lock().unwrap().insert(2, 100);
+                        values1.lock().insert(2, 100);
                         lock_mgr1.unlock_all(1);
                         "committed"
                     }
@@ -1391,7 +1392,7 @@ mod phase_2_12 {
             let txn2_outcome = match r2 {
                 Ok(()) => {
                     // 获取 R1，txn2 写入
-                    values.lock().unwrap().insert(1, 200);
+                    values.lock().insert(1, 200);
                     lock_mgr.unlock_all(2);
                     "committed"
                 }
@@ -1408,7 +1409,7 @@ mod phase_2_12 {
             let h1_outcome = h1.join().unwrap();
 
             // 验证：恰好一个事务被中止，另一个提交
-            let final_values = values.lock().unwrap();
+            let final_values = values.lock();
             let v1 = *final_values.get(&1).unwrap_or(&0);
             let v2 = *final_values.get(&2).unwrap_or(&0);
 
@@ -1493,13 +1494,13 @@ mod phase_2_12 {
                             thread::sleep(Duration::from_micros(100));
                         }
 
-                        let current = *values.lock().unwrap().get(&row_id).unwrap_or(&0);
+                        let current = *values.lock().get(&row_id).unwrap_or(&0);
                         let new_value = current + 1;
 
                         let result = mvcc_mgr.commit(txn.txn_id, 0);
                         match result {
                             Ok(()) => {
-                                values.lock().unwrap().insert(row_id, new_value);
+                                values.lock().insert(row_id, new_value);
                                 committed_count.fetch_add(1, Ordering::SeqCst);
                             }
                             Err(MvccError::WriteWriteConflict(_)) => {
@@ -1520,7 +1521,7 @@ mod phase_2_12 {
 
         let committed = committed_count.load(Ordering::SeqCst);
         let aborted = aborted_count.load(Ordering::SeqCst);
-        let final_values = values.lock().unwrap();
+        let final_values = values.lock();
 
         // 验证：committed + aborted == 总操作数
         let total_ops = THREADS * OPS_PER_THREAD;

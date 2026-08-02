@@ -42,7 +42,9 @@
 //! ```
 
 use crate::ast::{InsertSource, OrderByExpr, Select, SetOperation, Statement};
-use crate::parser::{convert_statement, count_binary_op_keywords, ParseError, MAX_BINARY_OP_CHAIN, MAX_SQL_LEN};
+use crate::parser::{
+    convert_statement, count_binary_op_keywords, ParseError, MAX_BINARY_OP_CHAIN, MAX_SQL_LEN,
+};
 use regex::Regex;
 use sqlparser::dialect::{
     AnsiDialect, Dialect as SpDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
@@ -472,12 +474,16 @@ fn preprocess_oracle(sql: &str) -> String {
 
     // 18. CREATE SYNONYM name FOR target → SELECT 1（占位）
     // SzRSQL 不支持 SYNONYM，转换为无操作 SELECT 1 避免破坏批处理
-    let synonym_re = Regex::new(r"(?im)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b[^;]*;?").unwrap();
+    let synonym_re =
+        Regex::new(r"(?im)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\b[^;]*;?")
+            .unwrap();
     result = synonym_re.replace_all(&result, "SELECT 1;").to_string();
 
     // 19. DROP SYNONYM name → SELECT 1（占位）
     let drop_synonym_re = Regex::new(r"(?im)^\s*DROP\s+(?:PUBLIC\s+)?SYNONYM\b[^;]*;?").unwrap();
-    result = drop_synonym_re.replace_all(&result, "SELECT 1;").to_string();
+    result = drop_synonym_re
+        .replace_all(&result, "SELECT 1;")
+        .to_string();
 
     // 注：COMMENT ON 不再在此预处理中转换为 SELECT 1（占位）— Phase TDengine-P2
     // 已由 parser.rs 的 parse_comment 手动解析为 Statement::Comment，直接操作 catalog。
@@ -485,7 +491,10 @@ fn preprocess_oracle(sql: &str) -> String {
     // 21. CREATE SEQUENCE name START WITH m INCREMENT BY n → CREATE SEQUENCE name INCREMENT BY n START WITH m
     // Oracle 语法（START WITH 在前）→ PG 标准语法（INCREMENT BY 在前）
     // sqlparser 0.53 PostgreSqlDialect 要求 INCREMENT BY 在 START WITH 之前
-    let ora_seq_re = Regex::new(r"(?i)\bCREATE\s+SEQUENCE\s+(\w+)\s+START\s+WITH\s+(\d+)\s+INCREMENT\s+BY\s+(\d+)").unwrap();
+    let ora_seq_re = Regex::new(
+        r"(?i)\bCREATE\s+SEQUENCE\s+(\w+)\s+START\s+WITH\s+(\d+)\s+INCREMENT\s+BY\s+(\d+)",
+    )
+    .unwrap();
     result = ora_seq_re
         .replace_all(&result, "CREATE SEQUENCE $1 INCREMENT BY $3 START WITH $2")
         .to_string();
@@ -744,14 +753,16 @@ fn preprocess_sqlserver(sql: &str) -> String {
 
     // 11. CREATE SCHEMA name → SELECT 1（占位）
     // SzRSQL 不支持 CREATE SCHEMA（schema 概念简化为命名空间）
-    let create_schema_re =
-        Regex::new(r"(?im)^\s*CREATE\s+SCHEMA\b[^;]*;?").unwrap();
-    result = create_schema_re.replace_all(&result, "SELECT 1;").to_string();
+    let create_schema_re = Regex::new(r"(?im)^\s*CREATE\s+SCHEMA\b[^;]*;?").unwrap();
+    result = create_schema_re
+        .replace_all(&result, "SELECT 1;")
+        .to_string();
 
     // 12. CONVERT(type, expr) → CAST(expr AS type)
     // SQL Server CONVERT 函数 → PG CAST 函数
     // 简化：仅处理两个参数的 CONVERT（type, expr），不支持 style 参数
-    let convert_re = Regex::new(r"(?i)\bCONVERT\s*\(\s*(\w+(?:\([^)]*\))?)\s*,\s*([^)]+)\)").unwrap();
+    let convert_re =
+        Regex::new(r"(?i)\bCONVERT\s*\(\s*(\w+(?:\([^)]*\))?)\s*,\s*([^)]+)\)").unwrap();
     result = convert_re
         .replace_all(&result, "CAST($2 AS $1)")
         .to_string();
@@ -823,14 +834,18 @@ fn preprocess_sqlite(sql: &str) -> String {
                         return None;
                     }
                     // 列名可能带引号或前缀，提取纯列名
-                    let col_name = c.trim_matches(|ch: char| ch == '"' || ch == '`' || ch == '[' || ch == ']');
+                    let col_name =
+                        c.trim_matches(|ch: char| ch == '"' || ch == '`' || ch == '[' || ch == ']');
                     if col_name.is_empty() || col_name.contains(' ') {
                         return None;
                     }
                     Some(format!("{col_name} TEXT"))
                 })
                 .collect();
-            format!("CREATE TABLE {if_not_exists}{table_name} ({})", cols.join(", "))
+            format!(
+                "CREATE TABLE {if_not_exists}{table_name} ({})",
+                cols.join(", ")
+            )
         })
         .to_string();
 
@@ -919,7 +934,9 @@ pub fn detect_dialect(sql: &str) -> Dialect {
         || upper.contains("WITHOUT ROWID")
         || upper.contains("PRAGMA ")
         || upper.contains("GROUP_CONCAT(")
-        || Regex::new(r"\bINTEGER\s+PRIMARY\s+KEY\b").unwrap().is_match(&upper)
+        || Regex::new(r"\bINTEGER\s+PRIMARY\s+KEY\b")
+            .unwrap()
+            .is_match(&upper)
     {
         return Dialect::SQLite;
     }
@@ -1941,10 +1958,7 @@ mod tests {
 
     #[test]
     fn test_detect_sqlite_pragma() {
-        assert_eq!(
-            detect_dialect("PRAGMA foreign_keys = ON"),
-            Dialect::SQLite
-        );
+        assert_eq!(detect_dialect("PRAGMA foreign_keys = ON"), Dialect::SQLite);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "szrsql-dist"
 version.workspace = true
 edition.workspace = true
@@ -24,3 +24,7 @@ tracing = { workspace = true }
 # P0-6：Mutex 中毒修复（parking_lot 无中毒语义）
 parking_lot = { workspace = true }
 bincode = { workspace = true }
+
+[dev-dependencies]
+# P0-7：持久化往返测试使用 tempdir 创建临时日志文件
+tempfile = { workspace = true }

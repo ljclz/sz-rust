@@ -19,6 +19,7 @@
 //!
 //! 对应 `SzRSQL实施进度.md` Phase 3.8。
 
+pub mod catalog_tree;
 pub mod information_schema;
 pub mod lineage;
 pub mod multitenant;
@@ -28,7 +29,6 @@ pub mod rbac;
 pub mod rls;
 pub mod semantic_tag;
 pub mod system_tables;
-pub mod catalog_tree;
 
 use std::collections::HashMap;
 use szrsql_sql::ast::{ColumnDefinition, IndexColumn, TableConstraint, TableName};
@@ -326,10 +326,7 @@ impl Catalog for ManagedCatalog {
     }
 
     /// 获取视图定义 — 用于 pg_views 系统表
-    fn get_view(
-        &self,
-        name: &TableName,
-    ) -> Option<szrsql_sql::materialized_view::ViewDefinition> {
+    fn get_view(&self, name: &TableName) -> Option<szrsql_sql::materialized_view::ViewDefinition> {
         self.views.get(&self.table_key(name)).cloned()
     }
 }
@@ -609,10 +606,7 @@ impl ManagedCatalog {
     /// 列出表的所有约束（L8 新增：配合 add_table_constraint 持久化）
     pub fn list_table_constraints(&self, table: &TableName) -> Vec<TableConstraint> {
         let key = self.table_key(table);
-        self.constraints
-            .get(&key)
-            .cloned()
-            .unwrap_or_default()
+        self.constraints.get(&key).cloned().unwrap_or_default()
     }
 
     /// 删除表的所有约束（L8 新增：DROP TABLE cascade 时调用）

@@ -9,12 +9,12 @@
 //! 6. 并发 INSERT 不互相阻塞
 //! 7. auto-commit 模式不持有长期锁
 
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 use szrsql_protocol::pgwire::session::{ExecutorService, QueryResult};
 use szrsql_sql::executor::InMemoryTable;
 use szrsql_tx::lock::LockManager;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
 use tokio::sync::{Mutex, RwLock};
 
 /// 构造启用并发的 ExecutorService。
@@ -55,11 +55,19 @@ async fn test_shared_table_visibility_across_sessions() {
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
     let mut session_b = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE users (id BIGINT, name TEXT)").await;
-    session_a.execute_sql("INSERT INTO users (id, name) VALUES (1, 'alice')").await;
-    session_a.execute_sql("INSERT INTO users (id, name) VALUES (2, 'bob')").await;
+    session_a
+        .execute_sql("CREATE TABLE users (id BIGINT, name TEXT)")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO users (id, name) VALUES (1, 'alice')")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO users (id, name) VALUES (2, 'bob')")
+        .await;
 
-    let results = session_b.execute_sql("SELECT id, name FROM users ORDER BY id").await;
+    let results = session_b
+        .execute_sql("SELECT id, name FROM users ORDER BY id")
+        .await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
             assert_eq!(rows.len(), 2, "session B should see both rows");
@@ -67,7 +75,9 @@ async fn test_shared_table_visibility_across_sessions() {
         other => panic!("expected ResultSet, got {other:?}"),
     }
 
-    session_b.execute_sql("INSERT INTO users (id, name) VALUES (3, 'carol')").await;
+    session_b
+        .execute_sql("INSERT INTO users (id, name) VALUES (3, 'carol')")
+        .await;
     let results = session_a.execute_sql("SELECT COUNT(*) FROM users").await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
@@ -84,12 +94,20 @@ async fn test_cross_session_update_visibility() {
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
     let mut session_b = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)").await;
-    session_a.execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)").await;
+    session_a
+        .execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)")
+        .await;
 
-    session_a.execute_sql("UPDATE acct SET bal = 200 WHERE id = 1").await;
+    session_a
+        .execute_sql("UPDATE acct SET bal = 200 WHERE id = 1")
+        .await;
 
-    let results = session_b.execute_sql("SELECT bal FROM acct WHERE id = 1").await;
+    let results = session_b
+        .execute_sql("SELECT bal FROM acct WHERE id = 1")
+        .await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
             assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(200));
@@ -111,11 +129,17 @@ async fn test_strict_2pl_holds_lock_until_commit() {
 
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)").await;
-    session_a.execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)").await;
+    session_a
+        .execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)")
+        .await;
 
     session_a.execute_sql("BEGIN").await;
-    session_a.execute_sql("UPDATE acct SET bal = 200 WHERE id = 1").await;
+    session_a
+        .execute_sql("UPDATE acct SET bal = 200 WHERE id = 1")
+        .await;
 
     // 在另一个 tokio task 中运行 session B 的 UPDATE（应该阻塞）
     let shared_b = shared.clone();
@@ -125,7 +149,9 @@ async fn test_strict_2pl_holds_lock_until_commit() {
         let mut session_b = make_concurrent_service(shared_b, lm_b, counter_b);
         session_b.execute_sql("BEGIN").await;
         // 这个 UPDATE 应该阻塞，因为 session A 持有 X 锁
-        let results = session_b.execute_sql("UPDATE acct SET bal = 300 WHERE id = 1").await;
+        let results = session_b
+            .execute_sql("UPDATE acct SET bal = 300 WHERE id = 1")
+            .await;
         (session_b, results)
     });
 
@@ -136,13 +162,11 @@ async fn test_strict_2pl_holds_lock_until_commit() {
     session_a.execute_sql("COMMIT").await;
 
     // 等待 session B 完成
-    let (_, session_b_results) = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        session_b_handle,
-    )
-    .await
-    .expect("session B should complete within 10s after A commits")
-    .expect("session B task should not panic");
+    let (_, session_b_results) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), session_b_handle)
+            .await
+            .expect("session B should complete within 10s after A commits")
+            .expect("session B task should not panic");
 
     // session B 的 UPDATE 应该成功
     assert!(
@@ -152,7 +176,9 @@ async fn test_strict_2pl_holds_lock_until_commit() {
     );
 
     // 最终余额应该是 300（session B 最后修改）
-    let results = session_a.execute_sql("SELECT bal FROM acct WHERE id = 1").await;
+    let results = session_a
+        .execute_sql("SELECT bal FROM acct WHERE id = 1")
+        .await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
             assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(300));
@@ -175,11 +201,17 @@ async fn test_rollback_releases_lock() {
 
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)").await;
-    session_a.execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)").await;
+    session_a
+        .execute_sql("CREATE TABLE acct (id BIGINT, bal BIGINT)")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO acct (id, bal) VALUES (1, 100)")
+        .await;
 
     session_a.execute_sql("BEGIN").await;
-    session_a.execute_sql("UPDATE acct SET bal = 999 WHERE id = 1").await;
+    session_a
+        .execute_sql("UPDATE acct SET bal = 999 WHERE id = 1")
+        .await;
 
     let shared_b = shared.clone();
     let lm_b = lm.clone();
@@ -187,7 +219,9 @@ async fn test_rollback_releases_lock() {
     let session_b_handle = tokio::spawn(async move {
         let mut session_b = make_concurrent_service(shared_b, lm_b, counter_b);
         session_b.execute_sql("BEGIN").await;
-        let results = session_b.execute_sql("UPDATE acct SET bal = 200 WHERE id = 1").await;
+        let results = session_b
+            .execute_sql("UPDATE acct SET bal = 200 WHERE id = 1")
+            .await;
         (session_b, results)
     });
 
@@ -195,13 +229,11 @@ async fn test_rollback_releases_lock() {
 
     session_a.execute_sql("ROLLBACK").await;
 
-    let (mut session_b, session_b_results) = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        session_b_handle,
-    )
-    .await
-    .expect("session B should complete within 10s after A rolls back")
-    .expect("session B task should not panic");
+    let (mut session_b, session_b_results) =
+        tokio::time::timeout(std::time::Duration::from_secs(10), session_b_handle)
+            .await
+            .expect("session B should complete within 10s after A rolls back")
+            .expect("session B task should not panic");
 
     assert!(
         session_b_results[0].is_ok(),
@@ -211,7 +243,9 @@ async fn test_rollback_releases_lock() {
     // session B must COMMIT for the change to be visible to other sessions
     session_b.execute_sql("COMMIT").await;
 
-    let results = session_a.execute_sql("SELECT bal FROM acct WHERE id = 1").await;
+    let results = session_a
+        .execute_sql("SELECT bal FROM acct WHERE id = 1")
+        .await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
             assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(200));
@@ -227,13 +261,19 @@ async fn test_concurrent_inserts_dont_block() {
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
     let mut session_b = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE logs (id BIGINT, msg TEXT)").await;
+    session_a
+        .execute_sql("CREATE TABLE logs (id BIGINT, msg TEXT)")
+        .await;
 
     session_a.execute_sql("BEGIN").await;
     session_b.execute_sql("BEGIN").await;
 
-    session_a.execute_sql("INSERT INTO logs (id, msg) VALUES (1, 'from A')").await;
-    session_b.execute_sql("INSERT INTO logs (id, msg) VALUES (2, 'from B')").await;
+    session_a
+        .execute_sql("INSERT INTO logs (id, msg) VALUES (1, 'from A')")
+        .await;
+    session_b
+        .execute_sql("INSERT INTO logs (id, msg) VALUES (2, 'from B')")
+        .await;
 
     session_a.execute_sql("COMMIT").await;
     session_b.execute_sql("COMMIT").await;
@@ -254,15 +294,25 @@ async fn test_auto_commit_does_not_hold_lock() {
     let mut session_a = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
     let mut session_b = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
 
-    session_a.execute_sql("CREATE TABLE counter (id BIGINT, val BIGINT)").await;
-    session_a.execute_sql("INSERT INTO counter (id, val) VALUES (1, 0)").await;
+    session_a
+        .execute_sql("CREATE TABLE counter (id BIGINT, val BIGINT)")
+        .await;
+    session_a
+        .execute_sql("INSERT INTO counter (id, val) VALUES (1, 0)")
+        .await;
 
-    session_a.execute_sql("UPDATE counter SET val = 10 WHERE id = 1").await;
+    session_a
+        .execute_sql("UPDATE counter SET val = 10 WHERE id = 1")
+        .await;
 
-    let results = session_b.execute_sql("UPDATE counter SET val = 20 WHERE id = 1").await;
+    let results = session_b
+        .execute_sql("UPDATE counter SET val = 20 WHERE id = 1")
+        .await;
     assert!(results[0].is_ok(), "session B should not be blocked");
 
-    let results = session_a.execute_sql("SELECT val FROM counter WHERE id = 1").await;
+    let results = session_a
+        .execute_sql("SELECT val FROM counter WHERE id = 1")
+        .await;
     match &results[0] {
         Ok(QueryResult::ResultSet { rows, .. }) => {
             assert_eq!(rows[0][0], szrsql_types::value::Value::Int64(20));
@@ -273,8 +323,8 @@ async fn test_auto_commit_does_not_hold_lock() {
 
 #[tokio::test]
 async fn test_lock_timeout_returns_error() {
-    use szrsql_tx::lock::{LockError, LockMode};
     use std::time::Duration;
+    use szrsql_tx::lock::{LockError, LockMode};
 
     let lm = Arc::new(LockManager::new());
 
@@ -288,9 +338,14 @@ async fn test_lock_timeout_returns_error() {
     .unwrap();
 
     match result {
-        Err(LockError::Timeout { txn_id, waited_ms, .. }) => {
+        Err(LockError::Timeout {
+            txn_id, waited_ms, ..
+        }) => {
             assert_eq!(txn_id, 2);
-            assert!(waited_ms >= 150, "waited_ms should be >= 200ms, got {waited_ms}");
+            assert!(
+                waited_ms >= 150,
+                "waited_ms should be >= 200ms, got {waited_ms}"
+            );
         }
         other => panic!("expected Timeout error, got {other:?}"),
     }
@@ -309,10 +364,18 @@ async fn test_deadlock_detection_aborts_one_side() {
     let (shared, lm, counter) = make_shared_resources();
 
     let mut setup = make_concurrent_service(shared.clone(), lm.clone(), counter.clone());
-    setup.execute_sql("CREATE TABLE t1 (id BIGINT, v BIGINT)").await;
-    setup.execute_sql("CREATE TABLE t2 (id BIGINT, v BIGINT)").await;
-    setup.execute_sql("INSERT INTO t1 (id, v) VALUES (1, 0)").await;
-    setup.execute_sql("INSERT INTO t2 (id, v) VALUES (1, 0)").await;
+    setup
+        .execute_sql("CREATE TABLE t1 (id BIGINT, v BIGINT)")
+        .await;
+    setup
+        .execute_sql("CREATE TABLE t2 (id BIGINT, v BIGINT)")
+        .await;
+    setup
+        .execute_sql("INSERT INTO t1 (id, v) VALUES (1, 0)")
+        .await;
+    setup
+        .execute_sql("INSERT INTO t2 (id, v) VALUES (1, 0)")
+        .await;
     drop(setup);
 
     let shared_a = shared.clone();

@@ -299,8 +299,7 @@ impl LockManager {
         path.push(txn);
         for &(waiter, holder) in edges {
             if waiter == txn {
-                if let Some(cycle) =
-                    Self::dfs_detect_cycle_edges(edges, holder, gray, black, path)
+                if let Some(cycle) = Self::dfs_detect_cycle_edges(edges, holder, gray, black, path)
                 {
                     return Some(cycle);
                 }
@@ -362,7 +361,7 @@ impl LockManager {
                     resource,
                     from: LockMode::Exclusive,
                     to: mode,
-                })
+                });
             }
             Err(LockError::Conflict { .. }) => { /* 需要等待 */ }
             Err(other) => return Err(other),
@@ -397,7 +396,9 @@ impl LockManager {
         debug!(txn_id, resource, mode = ?mode, is_upgrade, "lock waiting");
 
         // **Phase 2.10: 死锁检测** — 进入等待队列后立即检查是否形成环
-        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
+        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id)
+            .is_some()
+        {
             // 检测到死锁，中止自身（从等待队列移除并返回 Deadlock 错误）
             if let Some(entry) = table.get_mut(&resource) {
                 entry
@@ -432,7 +433,9 @@ impl LockManager {
             }
 
             // **Phase 2.10: 周期性死锁检测** — 环可能在等待期间形成
-            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
+            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id)
+                .is_some()
+            {
                 if let Some(entry) = table.get_mut(&resource) {
                     entry
                         .waiters
@@ -552,7 +555,11 @@ impl LockManager {
                 self.condvars[idx].notify_all();
             }
         }
-        debug!(txn_id, released_count = total_released, "unlock_all released locks");
+        debug!(
+            txn_id,
+            released_count = total_released,
+            "unlock_all released locks"
+        );
     }
 
     /// 锁升级（S → X）
@@ -626,7 +633,9 @@ impl LockManager {
         debug!(txn_id, resource, "upgrade waiting for exclusive");
 
         // **Phase 2.10: 死锁检测** — 进入等待队列后立即检查
-        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
+        if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id)
+            .is_some()
+        {
             if let Some(entry) = table.get_mut(&resource) {
                 entry.waiters.retain(|w| w.txn_id != txn_id);
             }
@@ -661,7 +670,9 @@ impl LockManager {
             }
 
             // **Phase 2.10: 周期性死锁检测**
-            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id).is_some() {
+            if Self::detect_deadlock_from_edges(&self.snapshot_wait_for_edges(idx, &table), txn_id)
+                .is_some()
+            {
                 if let Some(entry) = table.get_mut(&resource) {
                     entry.waiters.retain(|w| w.txn_id != txn_id);
                 }

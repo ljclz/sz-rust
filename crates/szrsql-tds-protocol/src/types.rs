@@ -233,10 +233,7 @@ mod tests {
     #[test]
     fn test_type_from_value_int() {
         assert_eq!(TdsType::from_value(&Value::Int64(0)), TdsType::IntN);
-        assert_eq!(
-            TdsType::from_value(&Value::Int64(i64::MAX)),
-            TdsType::IntN
-        );
+        assert_eq!(TdsType::from_value(&Value::Int64(i64::MAX)), TdsType::IntN);
     }
 
     #[test]

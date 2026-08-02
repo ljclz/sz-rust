@@ -30,6 +30,7 @@ szrsql-protocol = { workspace = true }
 szrsql-optimizer = { workspace = true }
 szrsql-security = { workspace = true }
 szrsql-scheduler = { workspace = true }
+szrsql-ops = { workspace = true }
 szrsql-replication = { workspace = true }
 szrsql-dist = { workspace = true }
 szrsql-pgcompat = { workspace = true }

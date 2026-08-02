@@ -670,7 +670,11 @@ impl BackupManager {
         }
 
         for record in records {
-            tracing::trace!(lsn = record.lsn, page_id = record.page_id, "replaying WAL record");
+            tracing::trace!(
+                lsn = record.lsn,
+                page_id = record.page_id,
+                "replaying WAL record"
+            );
             match record.op_type {
                 WalOpType::Insert
                 | WalOpType::Update

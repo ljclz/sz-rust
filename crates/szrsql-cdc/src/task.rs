@@ -43,7 +43,9 @@ use crate::target::TargetWriter;
 use crate::{CdcEngine, CdcEventOp, CdcObserver, ChangeEvent};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -87,7 +89,10 @@ impl TaskState {
 
     /// 是否可停止
     pub fn can_stop(self) -> bool {
-        matches!(self, Self::Created | Self::Starting | Self::Running | Self::Paused | Self::Failed)
+        matches!(
+            self,
+            Self::Created | Self::Starting | Self::Running | Self::Paused | Self::Failed
+        )
     }
 
     /// 是否接收事件
@@ -248,13 +253,13 @@ impl TaskStats {
             bytes_processed: self.bytes_processed.load(Ordering::SeqCst),
             transactions_processed: self.transactions_processed.load(Ordering::SeqCst),
             error_count: self.error_count.load(Ordering::SeqCst),
-            last_error: self.last_error.lock().unwrap().clone(),
+            last_error: self.last_error.lock().clone(),
             last_write_at: self.last_write_at.load(Ordering::SeqCst),
             last_lsn: self.last_lsn.load(Ordering::SeqCst),
             confirmed_flush_lsn: self.confirmed_flush_lsn.load(Ordering::SeqCst),
             ddl_events_processed: self.ddl_events_processed.load(Ordering::SeqCst),
             ddl_error_count: self.ddl_error_count.load(Ordering::SeqCst),
-            last_ddl_error: self.last_ddl_error.lock().unwrap().clone(),
+            last_ddl_error: self.last_ddl_error.lock().clone(),
         }
     }
 
@@ -265,13 +270,13 @@ impl TaskStats {
         self.bytes_processed.store(0, Ordering::SeqCst);
         self.transactions_processed.store(0, Ordering::SeqCst);
         self.error_count.store(0, Ordering::SeqCst);
-        *self.last_error.lock().unwrap() = None;
+        *self.last_error.lock() = None;
         self.last_write_at.store(0, Ordering::SeqCst);
         self.last_lsn.store(0, Ordering::SeqCst);
         self.confirmed_flush_lsn.store(0, Ordering::SeqCst);
         self.ddl_events_processed.store(0, Ordering::SeqCst);
         self.ddl_error_count.store(0, Ordering::SeqCst);
-        *self.last_ddl_error.lock().unwrap() = None;
+        *self.last_ddl_error.lock() = None;
     }
 }
 
@@ -369,7 +374,9 @@ impl ReplicationTask {
         if let Some(filter) = &config.table_filter {
             let mut slots = slot_manager.list_slots();
             if let Some(slot) = slots.iter_mut().find(|s| s.slot_name == config.task_id) {
-                let filtered = slot.clone().with_table_filter(filter.iter().cloned().collect());
+                let filtered = slot
+                    .clone()
+                    .with_table_filter(filter.iter().cloned().collect());
                 let _ = filtered; // slot 已持久化，table_filter 通过 accepts_table 判断
             }
         }
@@ -414,7 +421,7 @@ impl ReplicationTask {
 
     /// 当前状态
     pub fn state(&self) -> TaskState {
-        *self.state.read().unwrap()
+        *self.state.read()
     }
 
     /// 表过滤（是否接受该表）
@@ -485,7 +492,7 @@ impl ReplicationTask {
 
     /// 启动任务
     pub fn start(&self) -> Result<(), TaskError> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         if !state.can_start() {
             return Err(TaskError::InvalidState {
                 task: self.config.task_id.clone(),
@@ -503,20 +510,20 @@ impl ReplicationTask {
 
         // 健康检查
         if let Err(e) = self.config.writer.health_check() {
-            let mut state = self.state.write().unwrap();
+            let mut state = self.state.write();
             *state = TaskState::Failed;
             self.record_error(format!("health check failed: {e}"));
             return Err(TaskError::Writer(e.to_string()));
         }
 
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         *state = TaskState::Running;
         Ok(())
     }
 
     /// 暂停任务
     pub fn pause(&self) -> Result<(), TaskError> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         if !state.can_pause() {
             return Err(TaskError::InvalidState {
                 task: self.config.task_id.clone(),
@@ -534,7 +541,7 @@ impl ReplicationTask {
 
     /// 恢复任务
     pub fn resume(&self) -> Result<(), TaskError> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         if !state.can_resume() {
             return Err(TaskError::InvalidState {
                 task: self.config.task_id.clone(),
@@ -558,7 +565,7 @@ impl ReplicationTask {
     /// 3. join 消费者线程（带超时，避免消费者卡死导致 stop 阻塞）
     /// 4. 暂停 slot
     pub fn stop(&self) -> Result<(), TaskError> {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         if !state.can_stop() {
             return Err(TaskError::InvalidState {
                 task: self.config.task_id.clone(),
@@ -573,7 +580,7 @@ impl ReplicationTask {
         self.event_queue.close();
 
         // join 消费者线程（带超时，避免消费者卡死导致 stop 阻塞）
-        let mut handle_guard = self.consumer_handle.lock().unwrap();
+        let mut handle_guard = self.consumer_handle.lock();
         if let Some(handle) = handle_guard.take() {
             join_with_timeout(handle, Duration::from_secs(5));
         }
@@ -587,12 +594,12 @@ impl ReplicationTask {
 
     /// 标记为失败（内部使用）
     pub fn fail(&self, reason: impl Into<String>) {
-        let mut state = self.state.write().unwrap();
+        let mut state = self.state.write();
         *state = TaskState::Failed;
         drop(state);
         // 关闭队列并 join 消费者，避免失败后线程泄漏
         self.event_queue.close();
-        let mut handle_guard = self.consumer_handle.lock().unwrap();
+        let mut handle_guard = self.consumer_handle.lock();
         if let Some(handle) = handle_guard.take() {
             join_with_timeout(handle, Duration::from_secs(5));
         }
@@ -603,7 +610,7 @@ impl ReplicationTask {
     /// 记录错误
     fn record_error(&self, msg: impl Into<String>) {
         self.stats.error_count.fetch_add(1, Ordering::SeqCst);
-        *self.stats.last_error.lock().unwrap() = Some(msg.into());
+        *self.stats.last_error.lock() = Some(msg.into());
     }
 
     // -----------------------------------------------------------------
@@ -621,7 +628,7 @@ impl ReplicationTask {
     ///
     /// **幂等**：若已有消费者线程在运行，直接返回 Ok（不重复启动）。
     pub fn spawn_consumer(self: &Arc<Self>) -> Result<(), TaskError> {
-        let mut handle_guard = self.consumer_handle.lock().unwrap();
+        let mut handle_guard = self.consumer_handle.lock();
         if handle_guard.is_some() {
             // 消费者线程已在运行
             return Ok(());
@@ -772,16 +779,18 @@ impl ReplicationTask {
             .map(|d| d.len())
             .or_else(|| event.old_row.as_ref().map(|d| d.len()))
             .unwrap_or(0);
-        if let Err(e) = self.config.writer.write_event(&event, &schema, row.as_ref()) {
+        if let Err(e) = self
+            .config
+            .writer
+            .write_event(&event, &schema, row.as_ref())
+        {
             self.record_error(format!("write_event failed: {e}"));
             // 写入失败不推进位点，等待重试
             return;
         }
 
         // 统计写入
-        self.stats
-            .events_written
-            .fetch_add(1, Ordering::SeqCst);
+        self.stats.events_written.fetch_add(1, Ordering::SeqCst);
         self.stats
             .bytes_processed
             .fetch_add(bytes as u64, Ordering::SeqCst);
@@ -790,9 +799,7 @@ impl ReplicationTask {
             .store(current_millis(), Ordering::SeqCst);
 
         // 记录到 slot（不持久化统计，定期 flush）
-        let _ = self
-            .slot_manager
-            .record_event(&self.config.task_id, bytes);
+        let _ = self.slot_manager.record_event(&self.config.task_id, bytes);
     }
 }
 
@@ -804,9 +811,7 @@ impl CdcObserver for ReplicationTask {
         }
 
         // 统计接收（含被快照过滤跳过的事件，保持与表过滤一致的"先统计后过滤"语义）
-        self.stats
-            .events_received
-            .fetch_add(1, Ordering::SeqCst);
+        self.stats.events_received.fetch_add(1, Ordering::SeqCst);
         self.stats.last_lsn.store(event.lsn, Ordering::SeqCst);
 
         // P7-3：将事件推入有界事件队列，由消费者线程异步处理
@@ -877,28 +882,26 @@ impl crate::schema::SchemaChangeObserver for ReplicationTask {
         let generator = crate::migration::DdlGenerator::new(self.config.dialect);
         let ddl: Option<crate::migration::DdlStatement> = match event.change_type {
             crate::schema::SchemaChangeType::CreateTable => {
-                event.new_schema.as_ref().map(|schema| {
-                    crate::migration::DdlStatement {
+                event
+                    .new_schema
+                    .as_ref()
+                    .map(|schema| crate::migration::DdlStatement {
                         kind: crate::migration::DdlKind::CreateTable,
                         table_name: schema.table_name.clone(),
                         sql: generator.generate_create_table(schema),
-                    }
-                })
+                    })
             }
             crate::schema::SchemaChangeType::AlterTableAddColumn => {
                 // 用 changed_column 精确定位新增列（避免假设新增列是最后一列）
-                if let (Some(schema), Some(col_name)) = (&event.new_schema, &event.changed_column)
-                {
+                if let (Some(schema), Some(col_name)) = (&event.new_schema, &event.changed_column) {
                     schema
                         .columns
                         .iter()
                         .find(|c| &c.name == col_name)
-                        .map(|col| {
-                            crate::migration::DdlStatement {
-                                kind: crate::migration::DdlKind::AddColumn,
-                                table_name: schema.table_name.clone(),
-                                sql: generator.generate_add_column(&schema.table_name, col),
-                            }
+                        .map(|col| crate::migration::DdlStatement {
+                            kind: crate::migration::DdlKind::AddColumn,
+                            table_name: schema.table_name.clone(),
+                            sql: generator.generate_add_column(&schema.table_name, col),
                         })
                 } else {
                     None
@@ -909,25 +912,23 @@ impl crate::schema::SchemaChangeObserver for ReplicationTask {
                 // 生产环境可通过配置启用
                 None
             }
-            crate::schema::SchemaChangeType::DropTable => {
-                Some(crate::migration::DdlStatement {
-                    kind: crate::migration::DdlKind::DropTable,
-                    table_name: table_name.to_string(),
-                    sql: generator.generate_drop_table(table_name),
-                })
-            }
+            crate::schema::SchemaChangeType::DropTable => Some(crate::migration::DdlStatement {
+                kind: crate::migration::DdlKind::DropTable,
+                table_name: table_name.to_string(),
+                sql: generator.generate_drop_table(table_name),
+            }),
         };
 
         // 执行 DDL
         if let Some(ddl) = ddl {
             if let Err(e) = self.config.writer.execute_ddl(&ddl.sql) {
                 self.stats.ddl_error_count.fetch_add(1, Ordering::SeqCst);
-                *self.stats.last_ddl_error.lock().unwrap() = Some(format!(
-                    "DDL execution failed: {} (sql: {})",
-                    e, ddl.sql
-                ));
+                *self.stats.last_ddl_error.lock() =
+                    Some(format!("DDL execution failed: {} (sql: {})", e, ddl.sql));
             } else {
-                self.stats.ddl_events_processed.fetch_add(1, Ordering::SeqCst);
+                self.stats
+                    .ddl_events_processed
+                    .fetch_add(1, Ordering::SeqCst);
             }
         }
     }
@@ -1032,7 +1033,7 @@ impl ReplicationTaskManager {
     /// 创建任务（初始状态 Created）
     pub fn create_task(&self, config: TaskConfig) -> Result<Arc<ReplicationTask>, TaskError> {
         let task_id = config.task_id.clone();
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write();
         if tasks.contains_key(&task_id) {
             return Err(TaskError::AlreadyExists(task_id));
         }
@@ -1097,7 +1098,9 @@ impl ReplicationTaskManager {
         // 1. 执行全量快照传输
         let snapshot_config = crate::snapshot::SnapshotConfig {
             // 应用任务的表过滤
-            table_filter: task.config_table_filter().map(|f| f.iter().cloned().collect()),
+            table_filter: task
+                .config_table_filter()
+                .map(|f| f.iter().cloned().collect()),
             ..Default::default()
         };
         let transfer = crate::snapshot::SnapshotTransfer::new(
@@ -1176,7 +1179,7 @@ impl ReplicationTaskManager {
             self.stop_task(task_id)?;
         }
         // 从存储移除
-        let mut tasks = self.tasks.write().unwrap();
+        let mut tasks = self.tasks.write();
         tasks.remove(task_id);
         drop(tasks);
         // 物理删除 slot
@@ -1190,7 +1193,6 @@ impl ReplicationTaskManager {
     pub fn get_task(&self, task_id: &str) -> Result<Arc<ReplicationTask>, TaskError> {
         self.tasks
             .read()
-            .unwrap()
             .get(task_id)
             .cloned()
             .ok_or_else(|| TaskError::NotFound(task_id.to_string()))
@@ -1200,7 +1202,6 @@ impl ReplicationTaskManager {
     pub fn list_tasks(&self) -> Vec<TaskInfo> {
         self.tasks
             .read()
-            .unwrap()
             .values()
             .map(|t| TaskInfo {
                 task_id: t.task_id().to_string(),
@@ -1242,7 +1243,7 @@ impl ReplicationTaskManager {
 
     /// 任务总数
     pub fn task_count(&self) -> usize {
-        self.tasks.read().unwrap().len()
+        self.tasks.read().len()
     }
 
     /// 按状态过滤任务
@@ -1370,10 +1371,7 @@ mod tests {
     /// 创建测试用 CdcEngine（固定时间戳）
     fn test_cdc_engine() -> Arc<CdcEngine> {
         let observer_mgr = Arc::new(crate::CdcObserverManager::new());
-        Arc::new(CdcEngine::with_timestamp_fn(
-            observer_mgr,
-            Box::new(|| 0),
-        ))
+        Arc::new(CdcEngine::with_timestamp_fn(observer_mgr, Box::new(|| 0)))
     }
 
     /// 创建测试用 task config
@@ -1457,13 +1455,8 @@ mod tests {
     fn task_new_initial_state_created() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep1", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep1", writer), slot_mgr, decoder, registry).unwrap();
         assert_eq!(task.state(), TaskState::Created);
         assert_eq!(task.task_id(), "rep1");
         assert_eq!(task.target_type(), "memory");
@@ -1473,12 +1466,7 @@ mod tests {
     fn task_empty_id_fails() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let result = ReplicationTask::new(
-            test_config("", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        );
+        let result = ReplicationTask::new(test_config("", writer), slot_mgr, decoder, registry);
         assert!(result.is_err());
     }
 
@@ -1519,13 +1507,8 @@ mod tests {
     fn task_invalid_state_transition_fails() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep1", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep1", writer), slot_mgr, decoder, registry).unwrap();
 
         // Created 状态不能 pause
         let result = task.pause();
@@ -1540,13 +1523,8 @@ mod tests {
     fn task_fail_marks_failed_state() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep1", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep1", writer), slot_mgr, decoder, registry).unwrap();
 
         task.fail("test failure");
         assert_eq!(task.state(), TaskState::Failed);
@@ -1581,13 +1559,8 @@ mod tests {
         register_test_table(&registry, 42, "users");
 
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep1", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep1", writer), slot_mgr, decoder, registry).unwrap();
 
         assert!(task.accepts_table(42));
         assert!(task.accepts_table_name("anything"));
@@ -1686,13 +1659,8 @@ mod tests {
     fn task_observer_skips_abort() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep1", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep1", writer), slot_mgr, decoder, registry).unwrap();
         task.start().unwrap();
 
         let event = ChangeEvent::abort(1, 100, 0);
@@ -1904,12 +1872,8 @@ mod tests {
         register_test_table(&registry, 42, "users");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -1934,7 +1898,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep1").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep1")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
@@ -1980,12 +1948,8 @@ mod tests {
         register_test_table(&registry, 100, "orders");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2025,7 +1989,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep_full").map(|i| i.stats.events_written >= 3).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_full")
+                    .map(|i| i.stats.events_written >= 3)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 3",
         );
@@ -2068,12 +2036,8 @@ mod tests {
         register_test_table(&registry, 100, "orders");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2096,7 +2060,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep_abort").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_abort")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
@@ -2131,12 +2099,8 @@ mod tests {
         register_test_table(&registry, 200, "products");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         // 创建只复制 orders 表的任务
         let writer = Arc::new(MemoryWriter::new());
@@ -2176,7 +2140,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep_filter").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_filter")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
@@ -2216,12 +2184,8 @@ mod tests {
         register_test_table(&registry, 300, "events");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         // 构造 Kafka Sink
         let producer = Arc::new(MockKafkaProducer::new());
@@ -2251,7 +2215,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep_kafka").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_kafka")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
@@ -2297,12 +2265,8 @@ mod tests {
         register_test_table(&registry, 100, "orders");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2319,17 +2283,18 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成（第一批事件）
         wait_for_stats(
-            || mgr.monitor_task("rep_pr").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_pr")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1 before pause",
         );
 
         // 暂停任务
         mgr.pause_task("rep_pr").unwrap();
-        assert_eq!(
-            mgr.get_task("rep_pr").unwrap().state(),
-            TaskState::Paused
-        );
+        assert_eq!(mgr.get_task("rep_pr").unwrap().state(), TaskState::Paused);
 
         // 第二批事件（Paused 状态，应被忽略）
         let row2 = encode_test_row(2, "second");
@@ -2344,17 +2309,11 @@ mod tests {
 
         // 验证 Paused 状态下事件被忽略
         let info = mgr.monitor_task("rep_pr").unwrap();
-        assert_eq!(
-            info.stats.events_written, 1,
-            "Paused 状态下不应写入新事件"
-        );
+        assert_eq!(info.stats.events_written, 1, "Paused 状态下不应写入新事件");
 
         // 恢复任务
         mgr.resume_task("rep_pr").unwrap();
-        assert_eq!(
-            mgr.get_task("rep_pr").unwrap().state(),
-            TaskState::Running
-        );
+        assert_eq!(mgr.get_task("rep_pr").unwrap().state(), TaskState::Running);
 
         // 第三批事件（恢复 Running 后应写入）
         let row3 = encode_test_row(3, "third");
@@ -2366,16 +2325,17 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成（恢复后第三批事件）
         wait_for_stats(
-            || mgr.monitor_task("rep_pr").map(|i| i.stats.events_written >= 2).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_pr")
+                    .map(|i| i.stats.events_written >= 2)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 2 after resume",
         );
 
         let info = mgr.monitor_task("rep_pr").unwrap();
-        assert_eq!(
-            info.stats.events_written, 2,
-            "恢复后应写入第三批事件"
-        );
+        assert_eq!(info.stats.events_written, 2, "恢复后应写入第三批事件");
 
         // MemoryWriter 应收到 2 个操作（第一批 + 第三批，第二批被忽略）
         assert_eq!(
@@ -2392,12 +2352,8 @@ mod tests {
         register_test_table(&registry, 100, "orders");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         // 创建 3 个任务，都复制 orders 表
         let mut writers = Vec::new();
@@ -2421,7 +2377,11 @@ mod tests {
         for i in 0..3 {
             let task_id = format!("rep_multi_{i}");
             wait_for_stats(
-                || mgr.monitor_task(&task_id).map(|info| info.stats.events_written >= 1).unwrap_or(false),
+                || {
+                    mgr.monitor_task(&task_id)
+                        .map(|info| info.stats.events_written >= 1)
+                        .unwrap_or(false)
+                },
                 2000,
                 &format!("events_written should reach 1 for {task_id}"),
             );
@@ -2462,7 +2422,10 @@ mod tests {
         crate::decoder::DecodedRow {
             columns: vec![
                 ("id".to_string(), szrsql_types::value::Value::Int64(id)),
-                ("name".to_string(), szrsql_types::value::Value::Text(name.to_string())),
+                (
+                    "name".to_string(),
+                    szrsql_types::value::Value::Text(name.to_string()),
+                ),
             ],
         }
     }
@@ -2492,12 +2455,8 @@ mod tests {
         register_test_table(&registry, 200, "products");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         // 1. 准备全量数据（3 行）
         let schema = make_test_schema(200, "products");
@@ -2506,9 +2465,8 @@ mod tests {
             make_decoded_row(2, "banana"),
             make_decoded_row(3, "cherry"),
         ];
-        let source = Arc::new(
-            MemoryRowSource::new(vec![schema.clone()]).with_data("products", full_data),
-        );
+        let source =
+            Arc::new(MemoryRowSource::new(vec![schema.clone()]).with_data("products", full_data));
 
         // 2. 创建任务（snapshot_first = true）
         let writer = Arc::new(MemoryWriter::new());
@@ -2527,10 +2485,7 @@ mod tests {
             snapshot_result.snapshot_lsn, 1000,
             "snapshot_lsn 应为 MemoryRowSource 返回的 1000"
         );
-        assert_eq!(
-            snapshot_result.total_rows, 3,
-            "全量快照应传输 3 行"
-        );
+        assert_eq!(snapshot_result.total_rows, 3, "全量快照应传输 3 行");
 
         // 验证 task 状态
         let task = mgr.get_task("rep_snap").unwrap();
@@ -2599,18 +2554,10 @@ mod tests {
         // 验证全量数据写入（前 3 个操作的 lsn=0，因为是快照阶段）
         let ops = writer_clone.operations();
         let snapshot_ops: Vec<_> = ops.iter().filter(|op| op.lsn == 0).collect();
-        assert_eq!(
-            snapshot_ops.len(),
-            3,
-            "应有 3 个快照操作（lsn=0）"
-        );
+        assert_eq!(snapshot_ops.len(), 3, "应有 3 个快照操作（lsn=0）");
         // 验证增量数据写入（第 4 个操作的 lsn=1500）
         let incremental_ops: Vec<_> = ops.iter().filter(|op| op.lsn == 1500).collect();
-        assert_eq!(
-            incremental_ops.len(),
-            1,
-            "应有 1 个增量操作（lsn=1500）"
-        );
+        assert_eq!(incremental_ops.len(), 1, "应有 1 个增量操作（lsn=1500）");
     }
 
     /// P4-1 端到端：未启用快照模式时（snapshot_first=false）正常 CDC
@@ -2622,12 +2569,8 @@ mod tests {
         register_test_table(&registry, 300, "events");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2637,7 +2580,11 @@ mod tests {
 
         // 验证 snapshot_lsn = 0（未启用）
         let task = mgr.get_task("rep_nosnap").unwrap();
-        assert_eq!(task.snapshot_lsn(), 0, "未启用快照模式时 snapshot_lsn 应为 0");
+        assert_eq!(
+            task.snapshot_lsn(),
+            0,
+            "未启用快照模式时 snapshot_lsn 应为 0"
+        );
 
         // 注入 lsn=100 的事件（应正常写入，不被过滤）
         let row = encode_test_row(1, "event1");
@@ -2649,7 +2596,11 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成
         wait_for_stats(
-            || mgr.monitor_task("rep_nosnap").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_nosnap")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
@@ -2667,13 +2618,9 @@ mod tests {
     fn should_skip_event_logic() {
         let (registry, decoder, slot_mgr) = test_setup();
         let writer: Arc<dyn TargetWriter> = Arc::new(MemoryWriter::new());
-        let task = ReplicationTask::new(
-            test_config("rep_skip", writer),
-            slot_mgr,
-            decoder,
-            registry,
-        )
-        .unwrap();
+        let task =
+            ReplicationTask::new(test_config("rep_skip", writer), slot_mgr, decoder, registry)
+                .unwrap();
 
         // 初始 snapshot_lsn=0，不过滤任何事件
         assert_eq!(task.snapshot_lsn(), 0);
@@ -2705,12 +2652,8 @@ mod tests {
         register_test_table(&registry, 400, "failing");
 
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let schema = make_test_schema(400, "failing");
         let source = Arc::new(MemoryRowSource::new(vec![schema]).with_data("failing", Vec::new()));
@@ -2767,16 +2710,13 @@ mod tests {
     fn e2e_ddl_create_table_synced_to_target() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
-        mgr.create_task(test_config("rep_ddl_create", writer)).unwrap();
+        mgr.create_task(test_config("rep_ddl_create", writer))
+            .unwrap();
         mgr.start_task("rep_ddl_create").unwrap();
 
         // 构造 CreateTable 事件
@@ -2817,14 +2757,8 @@ mod tests {
 
         // 验证统计
         let info = mgr.monitor_task("rep_ddl_create").unwrap();
-        assert_eq!(
-            info.stats.ddl_events_processed, 1,
-            "应处理 1 个 DDL 事件"
-        );
-        assert_eq!(
-            info.stats.ddl_error_count, 0,
-            "不应有 DDL 错误"
-        );
+        assert_eq!(info.stats.ddl_events_processed, 1, "应处理 1 个 DDL 事件");
+        assert_eq!(info.stats.ddl_error_count, 0, "不应有 DDL 错误");
     }
 
     /// P4-2 端到端：AlterTableAddColumn DDL 同步
@@ -2832,12 +2766,8 @@ mod tests {
     fn e2e_ddl_add_column_synced_to_target() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2890,16 +2820,13 @@ mod tests {
     fn e2e_ddl_drop_table_synced_to_target() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
-        mgr.create_task(test_config("rep_ddl_drop", writer)).unwrap();
+        mgr.create_task(test_config("rep_ddl_drop", writer))
+            .unwrap();
         mgr.start_task("rep_ddl_drop").unwrap();
 
         // 构造 DropTable 事件
@@ -2937,12 +2864,8 @@ mod tests {
     fn e2e_ddl_table_filter_excludes_non_whitelisted() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -2974,11 +2897,7 @@ mod tests {
         mgr.notify_schema_change(event);
 
         // 验证 MemoryWriter 未收到 DDL
-        assert_eq!(
-            writer_clone.ddl_count(),
-            0,
-            "非白名单表的 DDL 不应被同步"
-        );
+        assert_eq!(writer_clone.ddl_count(), 0, "非白名单表的 DDL 不应被同步");
 
         // 通知白名单表的 CreateTable 事件
         let included_schema = crate::schema::TableSchema {
@@ -2998,11 +2917,7 @@ mod tests {
         mgr.notify_schema_change(event);
 
         // 验证 MemoryWriter 收到 1 个 DDL
-        assert_eq!(
-            writer_clone.ddl_count(),
-            1,
-            "白名单表的 DDL 应被同步"
-        );
+        assert_eq!(writer_clone.ddl_count(), 1, "白名单表的 DDL 应被同步");
     }
 
     /// P4-2 端到端：MySQL 方言 DDL 生成
@@ -3012,12 +2927,8 @@ mod tests {
     fn e2e_ddl_mysql_dialect_generates_backtick_quotes() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -3062,16 +2973,13 @@ mod tests {
     fn e2e_ddl_stopped_task_ignores_events() {
         let (registry, decoder, slot_mgr) = test_setup();
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
-        mgr.create_task(test_config("rep_ddl_stop", writer)).unwrap();
+        mgr.create_task(test_config("rep_ddl_stop", writer))
+            .unwrap();
         mgr.start_task("rep_ddl_stop").unwrap();
 
         // 停止任务
@@ -3095,11 +3003,7 @@ mod tests {
         mgr.notify_schema_change(event);
 
         // 验证未收到 DDL（任务已停止，observer 已注销）
-        assert_eq!(
-            writer_clone.ddl_count(),
-            0,
-            "停止的任务不应接收 DDL 事件"
-        );
+        assert_eq!(writer_clone.ddl_count(), 0, "停止的任务不应接收 DDL 事件");
     }
 
     /// P4-2 端到端：DML + DDL 混合事件流
@@ -3110,12 +3014,8 @@ mod tests {
         let (registry, decoder, slot_mgr) = test_setup();
         register_test_table(&registry, 1000, "mixed_table");
         let cdc_engine = test_cdc_engine();
-        let mgr = ReplicationTaskManager::new(
-            slot_mgr,
-            decoder,
-            registry.clone(),
-            cdc_engine.clone(),
-        );
+        let mgr =
+            ReplicationTaskManager::new(slot_mgr, decoder, registry.clone(), cdc_engine.clone());
 
         let writer = Arc::new(MemoryWriter::new());
         let writer_clone = writer.clone();
@@ -3125,13 +3025,7 @@ mod tests {
         // 1. 发送 DML 事件（Insert）
         let row = encode_test_row(1, "data1");
         let records = vec![
-            szrsql_tx::wal::WalRecord::new(
-                2000,
-                50,
-                szrsql_tx::wal::WalOpType::Insert,
-                1000,
-                row,
-            ),
+            szrsql_tx::wal::WalRecord::new(2000, 50, szrsql_tx::wal::WalOpType::Insert, 1000, row),
             szrsql_tx::wal::WalRecord::new(2001, 50, szrsql_tx::wal::WalOpType::Commit, 0, vec![]),
         ];
         cdc_engine.on_commit(50, records);
@@ -3155,21 +3049,19 @@ mod tests {
 
         // P7-3：等待消费者线程异步处理完成（DML 事件）
         wait_for_stats(
-            || mgr.monitor_task("rep_mixed").map(|i| i.stats.events_written >= 1).unwrap_or(false),
+            || {
+                mgr.monitor_task("rep_mixed")
+                    .map(|i| i.stats.events_written >= 1)
+                    .unwrap_or(false)
+            },
             2000,
             "events_written should reach 1",
         );
 
         // 3. 验证 DML 和 DDL 都被处理
         let info = mgr.monitor_task("rep_mixed").unwrap();
-        assert_eq!(
-            info.stats.events_written, 1,
-            "应写入 1 个 DML 事件"
-        );
-        assert_eq!(
-            info.stats.ddl_events_processed, 1,
-            "应处理 1 个 DDL 事件"
-        );
+        assert_eq!(info.stats.events_written, 1, "应写入 1 个 DML 事件");
+        assert_eq!(info.stats.ddl_events_processed, 1, "应处理 1 个 DDL 事件");
         assert_eq!(
             info.stats.error_count + info.stats.ddl_error_count,
             0,
@@ -3177,15 +3069,7 @@ mod tests {
         );
 
         // MemoryWriter 应有 1 个 DML 操作 + 1 个 DDL
-        assert_eq!(
-            writer_clone.operation_count(),
-            1,
-            "应有 1 个 DML 操作"
-        );
-        assert_eq!(
-            writer_clone.ddl_count(),
-            1,
-            "应有 1 个 DDL"
-        );
+        assert_eq!(writer_clone.operation_count(), 1, "应有 1 个 DML 操作");
+        assert_eq!(writer_clone.ddl_count(), 1, "应有 1 个 DDL");
     }
 }

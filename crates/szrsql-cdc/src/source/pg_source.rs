@@ -34,13 +34,15 @@
 use crate::decoder::DecodedRow;
 use crate::schema::{ColumnDef, DataType, TableSchema};
 use crate::source::{
-    SchemaProvider, SourceConfig, SourceConnector, SourceError, SourceEvent, SourceEventProvider,
-    SourceOffset, SnapshotProvider,
+    SchemaProvider, SnapshotProvider, SourceConfig, SourceConnector, SourceError, SourceEvent,
+    SourceEventProvider, SourceOffset,
 };
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use szrsql_types::value::Value as SzValue;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 
 // =====================================================================
 // PgSourceConnector — PG 反向链路源端连接器
@@ -176,17 +178,23 @@ impl PgSourceConnector {
     /// - numeric / decimal → Real（近似映射）
     pub fn pg_type_to_szrsql(pg_type: &str) -> Result<DataType, SourceError> {
         // 处理带括号的类型（如 varchar(255) / numeric(10,2)）
-        let base_type = pg_type.split('(').next().unwrap_or(pg_type).trim().to_lowercase();
+        let base_type = pg_type
+            .split('(')
+            .next()
+            .unwrap_or(pg_type)
+            .trim()
+            .to_lowercase();
         match base_type.as_str() {
             "int2" | "smallint" | "int4" | "integer" | "serial" => Ok(DataType::Int32),
             "int8" | "bigint" | "bigserial" => Ok(DataType::Int64),
-            "text" | "varchar" | "char" | "bpchar" | "name" | "citext"
-            | "character varying" | "character" => Ok(DataType::Text),
+            "text" | "varchar" | "char" | "bpchar" | "name" | "citext" | "character varying"
+            | "character" => Ok(DataType::Text),
             "bytea" => Ok(DataType::Blob),
             "float4" | "real" | "float8" | "double" | "double precision" => Ok(DataType::Real),
             "bool" | "boolean" => Ok(DataType::Bool),
             "date" => Ok(DataType::Date),
-            "timestamp" | "timestamptz"
+            "timestamp"
+            | "timestamptz"
             | "timestamp without time zone"
             | "timestamp with time zone" => Ok(DataType::Timestamp),
             "json" | "jsonb" => Ok(DataType::Json),
@@ -248,9 +256,8 @@ impl PgSourceConnector {
                 break;
             }
 
-            let batch = (self.event_provider)().map_err(|e| {
-                SourceError::Internal(format!("event provider error: {}", e))
-            })?;
+            let batch = (self.event_provider)()
+                .map_err(|e| SourceError::Internal(format!("event provider error: {}", e)))?;
 
             match batch {
                 None => {
@@ -266,7 +273,7 @@ impl PgSourceConnector {
 
                     // 更新已确认位点（取批次中最大的 LSN）
                     if let Some(max_lsn) = events.iter().map(|e| e.lsn).max() {
-                        let mut offset = self.confirmed_offset.lock().unwrap();
+                        let mut offset = self.confirmed_offset.lock();
                         if max_lsn > offset.lsn {
                             offset.lsn = max_lsn;
                         }
@@ -310,7 +317,7 @@ impl SourceConnector for PgSourceConnector {
         };
 
         // 缓存发现的表结构（供后续 ensure_table 使用）
-        let mut cache = self.discovered_tables.lock().unwrap();
+        let mut cache = self.discovered_tables.lock();
         for schema in &result {
             cache.insert(schema.table_name.clone(), schema.clone());
         }
@@ -340,7 +347,11 @@ impl SourceConnector for PgSourceConnector {
             return Ok(0);
         }
 
-        let bs = if batch_size == 0 { rows.len() } else { batch_size };
+        let bs = if batch_size == 0 {
+            rows.len()
+        } else {
+            batch_size
+        };
         for chunk in rows.chunks(bs) {
             callback(chunk)?;
         }
@@ -354,7 +365,7 @@ impl SourceConnector for PgSourceConnector {
         }
         // 实际场景：执行 `SELECT pg_current_wal_lsn()::bigint`
         // 注入模式：返回已确认位点的 LSN
-        Ok(self.confirmed_offset.lock().unwrap().lsn)
+        Ok(self.confirmed_offset.lock().lsn)
     }
 
     fn start_cdc_stream(
@@ -366,12 +377,14 @@ impl SourceConnector for PgSourceConnector {
             return Err(SourceError::Connection("not connected".to_string()));
         }
         if self.streaming.load(Ordering::SeqCst) {
-            return Err(SourceError::Internal("cdc stream already running".to_string()));
+            return Err(SourceError::Internal(
+                "cdc stream already running".to_string(),
+            ));
         }
 
         // 设置起始位点
         {
-            let mut offset = self.confirmed_offset.lock().unwrap();
+            let mut offset = self.confirmed_offset.lock();
             if start_lsn > offset.lsn {
                 offset.lsn = start_lsn;
             }
@@ -396,7 +409,7 @@ impl SourceConnector for PgSourceConnector {
     }
 
     fn ack_offset(&self, offset: &SourceOffset) -> Result<(), SourceError> {
-        let mut current = self.confirmed_offset.lock().unwrap();
+        let mut current = self.confirmed_offset.lock();
         if offset.lsn >= current.lsn {
             *current = offset.clone();
         }
@@ -404,7 +417,7 @@ impl SourceConnector for PgSourceConnector {
     }
 
     fn confirmed_offset(&self) -> Result<SourceOffset, SourceError> {
-        Ok(self.confirmed_offset.lock().unwrap().clone())
+        Ok(self.confirmed_offset.lock().clone())
     }
 
     fn health_check(&self) -> Result<(), SourceError> {
@@ -423,8 +436,8 @@ impl SourceConnector for PgSourceConnector {
 mod tests {
     use super::*;
     use crate::source::{SourceConfig, SourceConnector, SourceError, SourceEvent, SourceOffset};
-    use szrsql_types::value::Value as SzValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use szrsql_types::value::Value as SzValue;
 
     fn make_row(id: i64, name: &str) -> DecodedRow {
         DecodedRow {
@@ -437,10 +450,8 @@ mod tests {
 
     #[test]
     fn pg_source_type_correct() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         assert_eq!(connector.source_type(), "postgres");
     }
 
@@ -453,19 +464,15 @@ mod tests {
 
     #[test]
     fn pg_source_schema_name_default_public() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         assert_eq!(connector.schema_name(), "public");
     }
 
     #[test]
     fn pg_source_connect_disconnect() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         assert!(!connector.is_connected());
         connector.connect().unwrap();
         assert!(connector.is_connected());
@@ -478,10 +485,8 @@ mod tests {
 
     #[test]
     fn pg_source_health_check_requires_connection() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         assert!(connector.health_check().is_err());
         connector.connect().unwrap();
         assert!(connector.health_check().is_ok());
@@ -489,10 +494,8 @@ mod tests {
 
     #[test]
     fn pg_source_discover_schemas_requires_connection() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         let result = connector.discover_schemas(&[]);
         assert!(result.is_err());
         match result {
@@ -503,10 +506,8 @@ mod tests {
 
     #[test]
     fn pg_source_discover_schemas_without_provider_returns_empty() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
         let schemas = connector.discover_schemas(&[]).unwrap();
         assert!(schemas.is_empty());
@@ -548,22 +549,20 @@ mod tests {
 
     #[test]
     fn pg_source_extract_snapshot_requires_connection() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         let result = connector.extract_snapshot("users", 100, &|_rows| Ok(()));
         assert!(result.is_err());
     }
 
     #[test]
     fn pg_source_extract_snapshot_without_provider_returns_zero() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
-        let count = connector.extract_snapshot("users", 100, &|_rows| Ok(())).unwrap();
+        let count = connector
+            .extract_snapshot("users", 100, &|_rows| Ok(()))
+            .unwrap();
         assert_eq!(count, 0);
     }
 
@@ -602,29 +601,23 @@ mod tests {
 
     #[test]
     fn pg_source_current_lsn_initially_zero() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
         assert_eq!(connector.current_lsn().unwrap(), 0);
     }
 
     #[test]
     fn pg_source_current_lsn_requires_connection() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         assert!(connector.current_lsn().is_err());
     }
 
     #[test]
     fn pg_source_ack_offset_updates_confirmed() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
 
         connector.ack_offset(&SourceOffset::new(100)).unwrap();
@@ -641,39 +634,29 @@ mod tests {
 
     #[test]
     fn pg_source_cdc_stream_requires_connection() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         let result = connector.start_cdc_stream(0, &|_events| Ok(()));
         assert!(result.is_err());
     }
 
     #[test]
     fn pg_source_cdc_stream_double_start_fails() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
 
         // 第一次启动（流为空立即结束）
-        connector
-            .start_cdc_stream(0, &|_events| Ok(()))
-            .unwrap();
+        connector.start_cdc_stream(0, &|_events| Ok(())).unwrap();
 
         // 再次启动应正常（前一次已结束）
-        connector
-            .start_cdc_stream(0, &|_events| Ok(()))
-            .unwrap();
+        connector.start_cdc_stream(0, &|_events| Ok(())).unwrap();
     }
 
     #[test]
     fn pg_source_cdc_stream_default_provider_immediately_ends() {
-        let connector = PgSourceConnector::new(SourceConfig::postgres(
-            "postgresql://localhost/db",
-        ))
-        .unwrap();
+        let connector =
+            PgSourceConnector::new(SourceConfig::postgres("postgresql://localhost/db")).unwrap();
         connector.connect().unwrap();
 
         let received = Arc::new(AtomicUsize::new(0));
@@ -788,9 +771,7 @@ mod tests {
         .unwrap();
         connector.connect().unwrap();
 
-        connector
-            .start_cdc_stream(500, &|_events| Ok(()))
-            .unwrap();
+        connector.start_cdc_stream(500, &|_events| Ok(())).unwrap();
         // start_lsn=500 应被记录
         assert_eq!(connector.confirmed_offset().unwrap().lsn, 500);
     }

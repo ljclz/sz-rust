@@ -73,9 +73,9 @@ pub struct SchemaDiff {
 impl SchemaDiff {
     /// 是否无差异
     pub fn is_empty(&self) -> bool {
-        self.tables.iter().all(|t| {
-            t.existence == TableExistence::Both && t.column_diffs.is_empty()
-        })
+        self.tables
+            .iter()
+            .all(|t| t.existence == TableExistence::Both && t.column_diffs.is_empty())
     }
 
     /// 差异表数量
@@ -191,7 +191,11 @@ impl SchemaComparer {
         let target_map: HashMap<&str, &TableSchema> =
             target.iter().map(|s| (s.table_name.as_str(), s)).collect();
 
-        let all_names: HashSet<&str> = source_map.keys().chain(target_map.keys()).copied().collect();
+        let all_names: HashSet<&str> = source_map
+            .keys()
+            .chain(target_map.keys())
+            .copied()
+            .collect();
 
         let mut tables = Vec::with_capacity(all_names.len());
 
@@ -243,9 +247,7 @@ impl SchemaComparer {
         // 检查类型/可空性差异
         for (name, src_col) in &source_cols {
             if let Some(tgt_col) = target_cols.get(*name) {
-                if src_col.data_type != tgt_col.data_type
-                    || src_col.nullable != tgt_col.nullable
-                {
+                if src_col.data_type != tgt_col.data_type || src_col.nullable != tgt_col.nullable {
                     diffs.push(ColumnDiff::TypeMismatch {
                         source: (*src_col).clone(),
                         target: (*tgt_col).clone(),
@@ -282,11 +284,7 @@ impl DdlGenerator {
     ///
     /// # 返回
     /// - `Vec<DdlStatement>`：按依赖顺序排列的 DDL 列表
-    pub fn generate(
-        &self,
-        diff: &SchemaDiff,
-        source_schemas: &[TableSchema],
-    ) -> Vec<DdlStatement> {
+    pub fn generate(&self, diff: &SchemaDiff, source_schemas: &[TableSchema]) -> Vec<DdlStatement> {
         let source_map: HashMap<&str, &TableSchema> = source_schemas
             .iter()
             .map(|s| (s.table_name.as_str(), s))
@@ -320,10 +318,8 @@ impl DdlGenerator {
                                 });
                             }
                             ColumnDiff::TypeMismatch { source, .. } => {
-                                let sql = self.generate_alter_column_type(
-                                    &table_diff.table_name,
-                                    source,
-                                );
+                                let sql =
+                                    self.generate_alter_column_type(&table_diff.table_name, source);
                                 ddls.push(DdlStatement {
                                     kind: DdlKind::AlterColumnType,
                                     table_name: table_diff.table_name.clone(),
@@ -350,9 +346,7 @@ impl DdlGenerator {
             Dialect::Postgres | Dialect::SQLite => {
                 self.generate_create_table_standard(schema, "IF NOT EXISTS")
             }
-            Dialect::MySQL => {
-                self.generate_create_table_standard(schema, "IF NOT EXISTS")
-            }
+            Dialect::MySQL => self.generate_create_table_standard(schema, "IF NOT EXISTS"),
             Dialect::Oracle => {
                 // Oracle 不支持 IF NOT EXISTS，用 PL/SQL 块或先检查
                 // 简化：直接 CREATE TABLE，依赖调用方捕获错误
@@ -370,11 +364,7 @@ impl DdlGenerator {
     }
 
     /// 生成标准 CREATE TABLE（按方言引用标识符）
-    fn generate_create_table_standard(
-        &self,
-        schema: &TableSchema,
-        if_not_exists: &str,
-    ) -> String {
+    fn generate_create_table_standard(&self, schema: &TableSchema, if_not_exists: &str) -> String {
         let table_name = self.quote_ident(&schema.table_name);
 
         let prefix = if if_not_exists.is_empty() {
@@ -389,7 +379,11 @@ impl DdlGenerator {
             .map(|c| {
                 let col_name = self.quote_ident(&c.name);
                 let pg_type = self.map_type(c.data_type);
-                let nullability = if c.nullable { "" } else { " NOT NULL" };
+                let nullability = if c.nullable {
+                    ""
+                } else {
+                    " NOT NULL"
+                };
                 format!("{col_name} {pg_type}{nullability}")
             })
             .collect();
@@ -402,7 +396,11 @@ impl DdlGenerator {
         let table = self.quote_ident(table_name);
         let column = self.quote_ident(&col.name);
         let col_type = self.map_type(col.data_type);
-        let nullability = if col.nullable { "" } else { " NOT NULL" };
+        let nullability = if col.nullable {
+            ""
+        } else {
+            " NOT NULL"
+        };
 
         match self.dialect {
             Dialect::Postgres | Dialect::SQLite => {
@@ -428,28 +426,28 @@ impl DdlGenerator {
 
         match self.dialect {
             Dialect::Postgres => {
-                format!(
-                    "ALTER TABLE {table} ALTER COLUMN {column} TYPE {col_type};"
-                )
+                format!("ALTER TABLE {table} ALTER COLUMN {column} TYPE {col_type};")
             }
             Dialect::MySQL => {
                 // MySQL 用 MODIFY COLUMN
-                let nullability = if col.nullable { "" } else { " NOT NULL" };
-                format!(
-                    "ALTER TABLE {table} MODIFY COLUMN {column} {col_type}{nullability};"
-                )
+                let nullability = if col.nullable {
+                    ""
+                } else {
+                    " NOT NULL"
+                };
+                format!("ALTER TABLE {table} MODIFY COLUMN {column} {col_type}{nullability};")
             }
             Dialect::SQLite => {
                 // SQLite 不支持 ALTER COLUMN TYPE，需要重建表
-                format!("-- SQLite 不支持 ALTER COLUMN TYPE，需重建表: {table}.{column} -> {col_type}")
+                format!(
+                    "-- SQLite 不支持 ALTER COLUMN TYPE，需重建表: {table}.{column} -> {col_type}"
+                )
             }
             Dialect::Oracle => {
                 format!("ALTER TABLE {table} MODIFY ({column} {col_type});")
             }
             Dialect::SqlServer => {
-                format!(
-                    "ALTER TABLE {table} ALTER COLUMN {column} {col_type};"
-                )
+                format!("ALTER TABLE {table} ALTER COLUMN {column} {col_type};")
             }
         }
     }
@@ -553,11 +551,7 @@ impl StructureMigration {
     /// # 参数
     /// - `ddls`：待执行的 DDL 列表
     /// - `executor`：DDL 执行回调
-    pub fn execute<F>(
-        &self,
-        ddls: Vec<DdlStatement>,
-        mut executor: F,
-    ) -> MigrationResult
+    pub fn execute<F>(&self, ddls: Vec<DdlStatement>, mut executor: F) -> MigrationResult
     where
         F: FnMut(&DdlStatement) -> Result<(), String>,
     {

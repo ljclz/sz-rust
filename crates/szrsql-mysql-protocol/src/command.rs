@@ -166,7 +166,9 @@ impl QueryCommand {
     pub fn parse(payload: &[u8]) -> Self {
         // COM_QUERY 的 payload 是 SQL 字符串（无长度前缀，直到包尾）
         let sql = String::from_utf8_lossy(payload).to_string();
-        Self { sql: sql.trim_end_matches('\0').to_string() }
+        Self {
+            sql: sql.trim_end_matches('\0').to_string(),
+        }
     }
 }
 

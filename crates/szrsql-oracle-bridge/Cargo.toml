@@ -20,6 +20,7 @@ chrono = { workspace = true }
 szrsql-types = { workspace = true }
 szrsql-sql = { workspace = true }
 szrsql-protocol = { workspace = true }
+szrsql-tx = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
 

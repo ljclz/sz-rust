@@ -191,178 +191,380 @@ impl SqliteCompat {
     /// 数据类型兼容性测试
     fn test_types() -> Vec<SqliteCompatResult> {
         vec![
-            Self::check("INTEGER 类型", SqliteCategory::Type,
-                "CREATE TABLE t (id INTEGER)"),
-            Self::check("INT 类型", SqliteCategory::Type,
-                "CREATE TABLE t (id INT)"),
-            Self::check("REAL 类型", SqliteCategory::Type,
-                "CREATE TABLE t (price REAL)"),
-            Self::check("DOUBLE 类型", SqliteCategory::Type,
-                "CREATE TABLE t (price DOUBLE)"),
-            Self::check("FLOAT 类型", SqliteCategory::Type,
-                "CREATE TABLE t (price FLOAT)"),
-            Self::check("TEXT 类型", SqliteCategory::Type,
-                "CREATE TABLE t (name TEXT)"),
-            Self::check("VARCHAR 类型", SqliteCategory::Type,
-                "CREATE TABLE t (name VARCHAR(255))"),
-            Self::check("CHAR 类型", SqliteCategory::Type,
-                "CREATE TABLE t (code CHAR(10))"),
-            Self::check("BLOB 类型", SqliteCategory::Type,
-                "CREATE TABLE t (data BLOB)"),
-            Self::check("NUMERIC 类型", SqliteCategory::Type,
-                "CREATE TABLE t (price NUMERIC(10, 2))"),
-            Self::check("DECIMAL 类型", SqliteCategory::Type,
-                "CREATE TABLE t (price DECIMAL(10, 2))"),
-            Self::check("BOOLEAN 类型", SqliteCategory::Type,
-                "CREATE TABLE t (is_active BOOLEAN)"),
-            Self::check("DATE 类型", SqliteCategory::Type,
-                "CREATE TABLE t (birthday DATE)"),
-            Self::check("DATETIME 类型", SqliteCategory::Type,
-                "CREATE TABLE t (created_at DATETIME)"),
-            Self::check("TIMESTAMP 类型", SqliteCategory::Type,
-                "CREATE TABLE t (updated_at TIMESTAMP)"),
-            Self::check("BIGINT 类型", SqliteCategory::Type,
-                "CREATE TABLE t (id BIGINT)"),
-            Self::check("JSON 类型", SqliteCategory::Type,
-                "CREATE TABLE t (data JSON)"),
+            Self::check(
+                "INTEGER 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (id INTEGER)",
+            ),
+            Self::check("INT 类型", SqliteCategory::Type, "CREATE TABLE t (id INT)"),
+            Self::check(
+                "REAL 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (price REAL)",
+            ),
+            Self::check(
+                "DOUBLE 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (price DOUBLE)",
+            ),
+            Self::check(
+                "FLOAT 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (price FLOAT)",
+            ),
+            Self::check(
+                "TEXT 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (name TEXT)",
+            ),
+            Self::check(
+                "VARCHAR 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (name VARCHAR(255))",
+            ),
+            Self::check(
+                "CHAR 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (code CHAR(10))",
+            ),
+            Self::check(
+                "BLOB 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (data BLOB)",
+            ),
+            Self::check(
+                "NUMERIC 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (price NUMERIC(10, 2))",
+            ),
+            Self::check(
+                "DECIMAL 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (price DECIMAL(10, 2))",
+            ),
+            Self::check(
+                "BOOLEAN 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (is_active BOOLEAN)",
+            ),
+            Self::check(
+                "DATE 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (birthday DATE)",
+            ),
+            Self::check(
+                "DATETIME 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (created_at DATETIME)",
+            ),
+            Self::check(
+                "TIMESTAMP 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (updated_at TIMESTAMP)",
+            ),
+            Self::check(
+                "BIGINT 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (id BIGINT)",
+            ),
+            Self::check(
+                "JSON 类型",
+                SqliteCategory::Type,
+                "CREATE TABLE t (data JSON)",
+            ),
         ]
     }
 
     /// 内置函数兼容性测试
     fn test_functions() -> Vec<SqliteCompatResult> {
         vec![
-            Self::check("DATE 函数", SqliteCategory::Function,
-                "SELECT DATE('2024-01-01')"),
-            Self::check("TIME 函数", SqliteCategory::Function,
-                "SELECT TIME('10:30:00')"),
-            Self::check("DATETIME 函数", SqliteCategory::Function,
-                "SELECT DATETIME('2024-01-01 10:30:00')"),
-            Self::check("STRFTIME 函数", SqliteCategory::Function,
-                "SELECT STRFTIME('%Y-%m-%d', '2024-01-01')"),
-            Self::check("CURRENT_DATE 函数", SqliteCategory::Function,
-                "SELECT CURRENT_DATE"),
-            Self::check("CURRENT_TIME 函数", SqliteCategory::Function,
-                "SELECT CURRENT_TIME"),
-            Self::check("CURRENT_TIMESTAMP 函数", SqliteCategory::Function,
-                "SELECT CURRENT_TIMESTAMP"),
-            Self::check("COUNT 函数", SqliteCategory::Function,
-                "SELECT COUNT(*) FROM users"),
-            Self::check("SUM/AVG/MAX/MIN 函数", SqliteCategory::Function,
-                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees"),
-            Self::check("GROUP_CONCAT 函数", SqliteCategory::Function,
-                "SELECT department, GROUP_CONCAT(name) FROM employees GROUP BY department"),
-            Self::check("LENGTH 函数", SqliteCategory::Function,
-                "SELECT LENGTH(name) FROM users"),
-            Self::check("UPPER/LOWER 函数", SqliteCategory::Function,
-                "SELECT UPPER(name), LOWER(name) FROM users"),
-            Self::check("SUBSTRING 函数", SqliteCategory::Function,
-                "SELECT SUBSTRING(name, 1, 3) FROM users"),
-            Self::check("TRIM 函数", SqliteCategory::Function,
-                "SELECT TRIM('  hello  ')"),
-            Self::check("COALESCE 函数", SqliteCategory::Function,
-                "SELECT COALESCE(name, 'unknown') FROM users"),
-            Self::check("IFNULL 函数", SqliteCategory::Function,
-                "SELECT IFNULL(name, 'unknown') FROM users"),
-            Self::check("NULLIF 函数", SqliteCategory::Function,
-                "SELECT NULLIF(a, b) FROM t"),
-            Self::check("CAST 函数", SqliteCategory::Function,
-                "SELECT CAST('123' AS INTEGER)"),
-            Self::check("CASE WHEN 表达式", SqliteCategory::Function,
-                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users"),
-            Self::check("JSON_EXTRACT 函数", SqliteCategory::Function,
-                "SELECT JSON_EXTRACT('{\"a\":1}', '$.a')"),
-            Self::check("JSON_ARRAY 函数", SqliteCategory::Function,
-                "SELECT JSON_ARRAY(1, 2, 3)"),
-            Self::check("JSON_OBJECT 函数", SqliteCategory::Function,
-                "SELECT JSON_OBJECT('a', 1, 'b', 2)"),
-            Self::check("ABS 函数", SqliteCategory::Function,
-                "SELECT ABS(-5)"),
-            Self::check("ROUND 函数", SqliteCategory::Function,
-                "SELECT ROUND(3.14159, 2)"),
+            Self::check(
+                "DATE 函数",
+                SqliteCategory::Function,
+                "SELECT DATE('2024-01-01')",
+            ),
+            Self::check(
+                "TIME 函数",
+                SqliteCategory::Function,
+                "SELECT TIME('10:30:00')",
+            ),
+            Self::check(
+                "DATETIME 函数",
+                SqliteCategory::Function,
+                "SELECT DATETIME('2024-01-01 10:30:00')",
+            ),
+            Self::check(
+                "STRFTIME 函数",
+                SqliteCategory::Function,
+                "SELECT STRFTIME('%Y-%m-%d', '2024-01-01')",
+            ),
+            Self::check(
+                "CURRENT_DATE 函数",
+                SqliteCategory::Function,
+                "SELECT CURRENT_DATE",
+            ),
+            Self::check(
+                "CURRENT_TIME 函数",
+                SqliteCategory::Function,
+                "SELECT CURRENT_TIME",
+            ),
+            Self::check(
+                "CURRENT_TIMESTAMP 函数",
+                SqliteCategory::Function,
+                "SELECT CURRENT_TIMESTAMP",
+            ),
+            Self::check(
+                "COUNT 函数",
+                SqliteCategory::Function,
+                "SELECT COUNT(*) FROM users",
+            ),
+            Self::check(
+                "SUM/AVG/MAX/MIN 函数",
+                SqliteCategory::Function,
+                "SELECT SUM(salary), AVG(salary), MAX(salary), MIN(salary) FROM employees",
+            ),
+            Self::check(
+                "GROUP_CONCAT 函数",
+                SqliteCategory::Function,
+                "SELECT department, GROUP_CONCAT(name) FROM employees GROUP BY department",
+            ),
+            Self::check(
+                "LENGTH 函数",
+                SqliteCategory::Function,
+                "SELECT LENGTH(name) FROM users",
+            ),
+            Self::check(
+                "UPPER/LOWER 函数",
+                SqliteCategory::Function,
+                "SELECT UPPER(name), LOWER(name) FROM users",
+            ),
+            Self::check(
+                "SUBSTRING 函数",
+                SqliteCategory::Function,
+                "SELECT SUBSTRING(name, 1, 3) FROM users",
+            ),
+            Self::check(
+                "TRIM 函数",
+                SqliteCategory::Function,
+                "SELECT TRIM('  hello  ')",
+            ),
+            Self::check(
+                "COALESCE 函数",
+                SqliteCategory::Function,
+                "SELECT COALESCE(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "IFNULL 函数",
+                SqliteCategory::Function,
+                "SELECT IFNULL(name, 'unknown') FROM users",
+            ),
+            Self::check(
+                "NULLIF 函数",
+                SqliteCategory::Function,
+                "SELECT NULLIF(a, b) FROM t",
+            ),
+            Self::check(
+                "CAST 函数",
+                SqliteCategory::Function,
+                "SELECT CAST('123' AS INTEGER)",
+            ),
+            Self::check(
+                "CASE WHEN 表达式",
+                SqliteCategory::Function,
+                "SELECT CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END FROM users",
+            ),
+            Self::check(
+                "JSON_EXTRACT 函数",
+                SqliteCategory::Function,
+                "SELECT JSON_EXTRACT('{\"a\":1}', '$.a')",
+            ),
+            Self::check(
+                "JSON_ARRAY 函数",
+                SqliteCategory::Function,
+                "SELECT JSON_ARRAY(1, 2, 3)",
+            ),
+            Self::check(
+                "JSON_OBJECT 函数",
+                SqliteCategory::Function,
+                "SELECT JSON_OBJECT('a', 1, 'b', 2)",
+            ),
+            Self::check("ABS 函数", SqliteCategory::Function, "SELECT ABS(-5)"),
+            Self::check(
+                "ROUND 函数",
+                SqliteCategory::Function,
+                "SELECT ROUND(3.14159, 2)",
+            ),
         ]
     }
 
     /// 运算符兼容性测试
     fn test_operators() -> Vec<SqliteCompatResult> {
         vec![
-            Self::check("GLOB 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE name GLOB 'A*'"),
-            Self::check("LIKE 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE name LIKE 'A%'"),
-            Self::check("BETWEEN 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE age BETWEEN 18 AND 65"),
-            Self::check("IN 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE id IN (1, 2, 3)"),
-            Self::check("IS NULL 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE name IS NULL"),
-            Self::check("IS NOT NULL 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE name IS NOT NULL"),
-            Self::check("AND 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE age > 18 AND age < 65"),
-            Self::check("OR 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE age < 18 OR age > 65"),
-            Self::check("NOT 运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE NOT (age > 65)"),
-            Self::check("|| 字符串拼接", SqliteCategory::Operator,
-                "SELECT 'a' || 'b' || 'c'"),
-            Self::check("比较运算符", SqliteCategory::Operator,
-                "SELECT * FROM users WHERE age >= 18 AND age <= 65"),
-            Self::check("算术运算符", SqliteCategory::Operator,
-                "SELECT 1 + 2 * 3 - 4 / 2"),
-            Self::check("位运算符 &", SqliteCategory::Operator,
-                "SELECT 5 & 3"),
-            Self::check("位运算符 |", SqliteCategory::Operator,
-                "SELECT 5 | 3"),
-            Self::check("位运算符 <<", SqliteCategory::Operator,
-                "SELECT 1 << 4"),
-            Self::check("MATCH 运算符 FTS5", SqliteCategory::Operator,
-                "SELECT * FROM docs WHERE docs MATCH 'hello'"),
+            Self::check(
+                "GLOB 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE name GLOB 'A*'",
+            ),
+            Self::check(
+                "LIKE 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE name LIKE 'A%'",
+            ),
+            Self::check(
+                "BETWEEN 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE age BETWEEN 18 AND 65",
+            ),
+            Self::check(
+                "IN 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE id IN (1, 2, 3)",
+            ),
+            Self::check(
+                "IS NULL 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE name IS NULL",
+            ),
+            Self::check(
+                "IS NOT NULL 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE name IS NOT NULL",
+            ),
+            Self::check(
+                "AND 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE age > 18 AND age < 65",
+            ),
+            Self::check(
+                "OR 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE age < 18 OR age > 65",
+            ),
+            Self::check(
+                "NOT 运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE NOT (age > 65)",
+            ),
+            Self::check(
+                "|| 字符串拼接",
+                SqliteCategory::Operator,
+                "SELECT 'a' || 'b' || 'c'",
+            ),
+            Self::check(
+                "比较运算符",
+                SqliteCategory::Operator,
+                "SELECT * FROM users WHERE age >= 18 AND age <= 65",
+            ),
+            Self::check(
+                "算术运算符",
+                SqliteCategory::Operator,
+                "SELECT 1 + 2 * 3 - 4 / 2",
+            ),
+            Self::check("位运算符 &", SqliteCategory::Operator, "SELECT 5 & 3"),
+            Self::check("位运算符 |", SqliteCategory::Operator, "SELECT 5 | 3"),
+            Self::check("位运算符 <<", SqliteCategory::Operator, "SELECT 1 << 4"),
+            Self::check(
+                "MATCH 运算符 FTS5",
+                SqliteCategory::Operator,
+                "SELECT * FROM docs WHERE docs MATCH 'hello'",
+            ),
         ]
     }
 
     /// 标识符兼容性测试
     fn test_identifiers() -> Vec<SqliteCompatResult> {
         vec![
-            Self::check("方括号标识符", SqliteCategory::Identifier,
-                "SELECT [id], [name] FROM [users]"),
-            Self::check("反引号标识符", SqliteCategory::Identifier,
-                "SELECT `id`, `name` FROM `users`"),
-            Self::check("双引号标识符", SqliteCategory::Identifier,
-                "SELECT \"id\", \"name\" FROM \"users\""),
-            Self::check("别名 AS", SqliteCategory::Identifier,
-                "SELECT id AS user_id, name AS user_name FROM users"),
-            Self::check("别名省略 AS", SqliteCategory::Identifier,
-                "SELECT id user_id, name user_name FROM users"),
-            Self::check("表别名", SqliteCategory::Identifier,
-                "SELECT u.id, u.name FROM users u"),
-            Self::check("限定列名", SqliteCategory::Identifier,
-                "SELECT users.id, users.name FROM users"),
-            Self::check("schema.table 限定", SqliteCategory::Identifier,
-                "SELECT * FROM main.users"),
-            Self::check("rowid 隐式列", SqliteCategory::Identifier,
-                "SELECT rowid, id FROM users"),
+            Self::check(
+                "方括号标识符",
+                SqliteCategory::Identifier,
+                "SELECT [id], [name] FROM [users]",
+            ),
+            Self::check(
+                "反引号标识符",
+                SqliteCategory::Identifier,
+                "SELECT `id`, `name` FROM `users`",
+            ),
+            Self::check(
+                "双引号标识符",
+                SqliteCategory::Identifier,
+                "SELECT \"id\", \"name\" FROM \"users\"",
+            ),
+            Self::check(
+                "别名 AS",
+                SqliteCategory::Identifier,
+                "SELECT id AS user_id, name AS user_name FROM users",
+            ),
+            Self::check(
+                "别名省略 AS",
+                SqliteCategory::Identifier,
+                "SELECT id user_id, name user_name FROM users",
+            ),
+            Self::check(
+                "表别名",
+                SqliteCategory::Identifier,
+                "SELECT u.id, u.name FROM users u",
+            ),
+            Self::check(
+                "限定列名",
+                SqliteCategory::Identifier,
+                "SELECT users.id, users.name FROM users",
+            ),
+            Self::check(
+                "schema.table 限定",
+                SqliteCategory::Identifier,
+                "SELECT * FROM main.users",
+            ),
+            Self::check(
+                "rowid 隐式列",
+                SqliteCategory::Identifier,
+                "SELECT rowid, id FROM users",
+            ),
         ]
     }
 
     /// PRAGMA 指令兼容性测试
     fn test_pragma() -> Vec<SqliteCompatResult> {
         vec![
-            Self::check("PRAGMA foreign_keys", SqliteCategory::Pragma,
-                "PRAGMA foreign_keys = ON"),
-            Self::check("PRAGMA foreign_keys OFF", SqliteCategory::Pragma,
-                "PRAGMA foreign_keys = OFF"),
-            Self::check("PRAGMA journal_mode", SqliteCategory::Pragma,
-                "PRAGMA journal_mode = WAL"),
-            Self::check("PRAGMA synchronous", SqliteCategory::Pragma,
-                "PRAGMA synchronous = NORMAL"),
-            Self::check("PRAGMA table_info", SqliteCategory::Pragma,
-                "PRAGMA table_info(users)"),
-            Self::check("PRAGMA database_list", SqliteCategory::Pragma,
-                "PRAGMA database_list"),
-            Self::check("PRAGMA compile_options", SqliteCategory::Pragma,
-                "PRAGMA compile_options"),
-            Self::check("PRAGMA user_version", SqliteCategory::Pragma,
-                "PRAGMA user_version = 1"),
+            Self::check(
+                "PRAGMA foreign_keys",
+                SqliteCategory::Pragma,
+                "PRAGMA foreign_keys = ON",
+            ),
+            Self::check(
+                "PRAGMA foreign_keys OFF",
+                SqliteCategory::Pragma,
+                "PRAGMA foreign_keys = OFF",
+            ),
+            Self::check(
+                "PRAGMA journal_mode",
+                SqliteCategory::Pragma,
+                "PRAGMA journal_mode = WAL",
+            ),
+            Self::check(
+                "PRAGMA synchronous",
+                SqliteCategory::Pragma,
+                "PRAGMA synchronous = NORMAL",
+            ),
+            Self::check(
+                "PRAGMA table_info",
+                SqliteCategory::Pragma,
+                "PRAGMA table_info(users)",
+            ),
+            Self::check(
+                "PRAGMA database_list",
+                SqliteCategory::Pragma,
+                "PRAGMA database_list",
+            ),
+            Self::check(
+                "PRAGMA compile_options",
+                SqliteCategory::Pragma,
+                "PRAGMA compile_options",
+            ),
+            Self::check(
+                "PRAGMA user_version",
+                SqliteCategory::Pragma,
+                "PRAGMA user_version = 1",
+            ),
         ]
     }
 }
@@ -375,13 +577,19 @@ mod tests {
     fn run_all_returns_nonempty() {
         let results = SqliteCompat::run_all();
         assert!(!results.is_empty(), "SQLite 检查项不应为空");
-        assert!(results.len() >= 50, "SQLite 检查项应至少 50 项，实际: {}", results.len());
+        assert!(
+            results.len() >= 50,
+            "SQLite 检查项应至少 50 项，实际: {}",
+            results.len()
+        );
     }
 
     #[test]
     fn basic_select_passes() {
         let results = SqliteCompat::run_all();
-        let select_basic = results.iter().find(|r| r.name == "SELECT 基本语法")
+        let select_basic = results
+            .iter()
+            .find(|r| r.name == "SELECT 基本语法")
             .expect("应包含 SELECT 基本语法 测试");
         assert_eq!(select_basic.status, CompatStatus::Pass);
     }
@@ -389,7 +597,9 @@ mod tests {
     #[test]
     fn bracket_identifier_passes() {
         let results = SqliteCompat::run_all();
-        let bracket = results.iter().find(|r| r.name == "方括号标识符")
+        let bracket = results
+            .iter()
+            .find(|r| r.name == "方括号标识符")
             .expect("应包含方括号标识符测试");
         assert_eq!(bracket.status, CompatStatus::Pass);
     }
@@ -397,7 +607,9 @@ mod tests {
     #[test]
     fn pragma_replaced_passes() {
         let results = SqliteCompat::run_all();
-        let pragma = results.iter().find(|r| r.name == "PRAGMA foreign_keys")
+        let pragma = results
+            .iter()
+            .find(|r| r.name == "PRAGMA foreign_keys")
             .expect("应包含 PRAGMA 测试");
         // PRAGMA 被预处理替换为 SELECT 1，应能解析
         assert_eq!(pragma.status, CompatStatus::Pass);

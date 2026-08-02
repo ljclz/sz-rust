@@ -41,7 +41,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // =====================================================================
@@ -351,15 +352,12 @@ impl SlotManager {
         if self.path.as_os_str().is_empty() {
             return Ok(()); // 内存模式
         }
-        let _guard = self.persist_lock.lock().unwrap();
+        let _guard = self.persist_lock.lock();
         let slots: Vec<ReplicationSlot> = {
-            let slots = self.slots.read().unwrap();
+            let slots = self.slots.read();
             slots.values().cloned().collect()
         };
-        let file = SlotFile {
-            version: 1,
-            slots,
-        };
+        let file = SlotFile { version: 1, slots };
         let json = serde_json::to_string_pretty(&file)?;
         let tmp = self.path.with_extension("tmp");
         // P8-4 安全加固：原子写入 + fsync 确保崩溃不丢位点
@@ -396,7 +394,7 @@ impl SlotManager {
         target_connection: impl Into<String>,
     ) -> Result<ReplicationSlot, SlotError> {
         let slot_name = slot_name.into();
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         if slots.contains_key(&slot_name) {
             return Err(SlotError::AlreadyExists(slot_name));
         }
@@ -409,7 +407,7 @@ impl SlotManager {
 
     /// 删除槽（标记为 Dropped，保留审计）
     pub fn drop_slot(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -420,7 +418,7 @@ impl SlotManager {
 
     /// 物理删除槽（从存储中彻底移除）
     pub fn remove_slot(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         if slots.remove(slot_name).is_none() {
             return Err(SlotError::NotFound(slot_name.to_string()));
         }
@@ -430,7 +428,7 @@ impl SlotManager {
 
     /// 激活槽（Inactive/Paused → Active）
     pub fn activate_slot(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -451,7 +449,7 @@ impl SlotManager {
 
     /// 暂停槽（Active → Paused）
     pub fn pause_slot(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -470,12 +468,8 @@ impl SlotManager {
     }
 
     /// 推进槽的 confirmed_flush_lsn
-    pub fn advance_flush_lsn(
-        &self,
-        slot_name: &str,
-        lsn: u64,
-    ) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+    pub fn advance_flush_lsn(&self, slot_name: &str, lsn: u64) -> Result<(), SlotError> {
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -491,12 +485,8 @@ impl SlotManager {
     }
 
     /// 记录事件处理（统计）
-    pub fn record_event(
-        &self,
-        slot_name: &str,
-        bytes: usize,
-    ) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+    pub fn record_event(&self, slot_name: &str, bytes: usize) -> Result<(), SlotError> {
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -508,7 +498,7 @@ impl SlotManager {
 
     /// 记录事务处理
     pub fn record_transaction(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -518,12 +508,8 @@ impl SlotManager {
     }
 
     /// 记录错误
-    pub fn record_error(
-        &self,
-        slot_name: &str,
-        msg: impl Into<String>,
-    ) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+    pub fn record_error(&self, slot_name: &str, msg: impl Into<String>) -> Result<(), SlotError> {
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -539,19 +525,18 @@ impl SlotManager {
 
     /// 获取槽信息（只读）
     pub fn get_slot(&self, slot_name: &str) -> Option<ReplicationSlot> {
-        self.slots.read().unwrap().get(slot_name).cloned()
+        self.slots.read().get(slot_name).cloned()
     }
 
     /// 列出所有槽（只读副本）
     pub fn list_slots(&self) -> Vec<ReplicationSlot> {
-        self.slots.read().unwrap().values().cloned().collect()
+        self.slots.read().values().cloned().collect()
     }
 
     /// 列出活跃槽
     pub fn list_active_slots(&self) -> Vec<ReplicationSlot> {
         self.slots
             .read()
-            .unwrap()
             .values()
             .filter(|s| s.state == SlotState::Active)
             .cloned()
@@ -560,14 +545,13 @@ impl SlotManager {
 
     /// 槽数量
     pub fn slot_count(&self) -> usize {
-        self.slots.read().unwrap().len()
+        self.slots.read().len()
     }
 
     /// 获取最小 restart_lsn（WAL 回收时使用：所有槽的 restart_lsn 最小值之前的 WAL 可回收）
     pub fn min_restart_lsn(&self) -> Option<u64> {
         self.slots
             .read()
-            .unwrap()
             .values()
             .filter(|s| s.state != SlotState::Dropped)
             .map(|s| s.restart_lsn)
@@ -578,14 +562,13 @@ impl SlotManager {
     pub fn retains_wal_at(&self, lsn: u64) -> bool {
         self.slots
             .read()
-            .unwrap()
             .values()
             .any(|s| s.state != SlotState::Dropped && s.retains_wal_at(lsn))
     }
 
     /// 重置槽（清除位点，重新从 0 开始）
     pub fn reset_slot(&self, slot_name: &str) -> Result<(), SlotError> {
-        let mut slots = self.slots.write().unwrap();
+        let mut slots = self.slots.write();
         let slot = slots
             .get_mut(slot_name)
             .ok_or_else(|| SlotError::NotFound(slot_name.to_string()))?;
@@ -930,7 +913,10 @@ mod tests {
         mgr.record_error("rep1", "connection timeout").unwrap();
         let slot = mgr.get_slot("rep1").unwrap();
         assert_eq!(slot.stats.error_count, 1);
-        assert_eq!(slot.stats.last_error, Some("connection timeout".to_string()));
+        assert_eq!(
+            slot.stats.last_error,
+            Some("connection timeout".to_string())
+        );
     }
 
     #[test]
@@ -970,7 +956,7 @@ mod tests {
                 .with_table_filter(vec!["users".to_string(), "orders".to_string()]);
             // 直接插入到内部存储
             {
-                let mut slots = mgr.slots.write().unwrap();
+                let mut slots = mgr.slots.write();
                 slots.insert("rep1".to_string(), slot);
             }
             mgr.persist().unwrap();

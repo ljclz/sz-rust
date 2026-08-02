@@ -74,14 +74,20 @@ fn init_pg_schema(client: &mut postgres::Client, schema_name: &str) {
 /// 构造 szrsql 测试 catalog：表 t(id BIGINT, name TEXT) + counter(n BIGINT)
 fn make_szrsql_catalog() -> InMemoryCatalog {
     let mut catalog = InMemoryCatalog::new();
-    catalog.add_simple_table("t", vec![("id", ColumnType::Int64), ("name", ColumnType::Text)]);
+    catalog.add_simple_table(
+        "t",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
     catalog.add_simple_table("counter", vec![("n", ColumnType::Int64)]);
     catalog
 }
 
 /// 构造 szrsql 测试表（与 PG 18 相同结构）
 fn make_szrsql_tables() -> (InMemoryTable, InMemoryTable) {
-    let t = InMemoryTable::with_columns("t", vec![("id", ColumnType::Int64), ("name", ColumnType::Text)]);
+    let t = InMemoryTable::with_columns(
+        "t",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
     let counter = InMemoryTable::with_columns("counter", vec![("n", ColumnType::Int64)]);
     (t, counter)
 }
@@ -182,15 +188,13 @@ fn exec_pg(client: &mut postgres::Client, sql: &str) -> Result<(i64, Vec<Vec<Str
             .map_err(|e| format!("pg query: {e}"))?;
         let result: Vec<Vec<String>> = rows
             .iter()
-            .map(|row| {
-                (0..row.len())
-                    .map(|i| pg_cell_to_string(row, i))
-                    .collect()
-            })
+            .map(|row| (0..row.len()).map(|i| pg_cell_to_string(row, i)).collect())
             .collect();
         Ok((result.len() as i64, result))
     } else {
-        let affected = client.execute(sql, &[]).map_err(|e| format!("pg execute: {e}"))?;
+        let affected = client
+            .execute(sql, &[])
+            .map_err(|e| format!("pg execute: {e}"))?;
         Ok((affected as i64, Vec::new()))
     }
 }
@@ -210,11 +214,13 @@ fn pg_cell_to_string(row: &postgres::Row, idx: usize) -> String {
     match *col_type {
         Type::INT8 => {
             let v: Option<i64> = row.get(idx);
-            v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())
+            v.map(|n| n.to_string())
+                .unwrap_or_else(|| "NULL".to_string())
         }
         Type::INT4 => {
             let v: Option<i32> = row.get(idx);
-            v.map(|n| n.to_string()).unwrap_or_else(|| "NULL".to_string())
+            v.map(|n| n.to_string())
+                .unwrap_or_else(|| "NULL".to_string())
         }
         Type::TEXT | Type::VARCHAR => {
             let v: Option<String> = row.get(idx);
@@ -249,7 +255,11 @@ struct XorShift64 {
 impl XorShift64 {
     fn new(seed: u64) -> Self {
         Self {
-            state: if seed == 0 { 0xDEADBEEFCAFEBABE } else { seed },
+            state: if seed == 0 {
+                0xDEADBEEFCAFEBABE
+            } else {
+                seed
+            },
         }
     }
 
@@ -274,7 +284,9 @@ impl XorShift64 {
     }
 }
 
-const NAMES: &[&str] = &["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry"];
+const NAMES: &[&str] = &[
+    "alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry",
+];
 
 // =====================================================================
 //  DML 序列生成器
@@ -355,8 +367,16 @@ fn compare_results(
 ) -> Result<(), String> {
     // 对于 SELECT COUNT(*)，结果是单行单列
     if matches!(op, DmlOp::SelectCount) {
-        let sz_val = sz_rows.first().and_then(|r| r.first()).cloned().unwrap_or_default();
-        let pg_val = pg_rows.first().and_then(|r| r.first()).cloned().unwrap_or_default();
+        let sz_val = sz_rows
+            .first()
+            .and_then(|r| r.first())
+            .cloned()
+            .unwrap_or_default();
+        let pg_val = pg_rows
+            .first()
+            .and_then(|r| r.first())
+            .cloned()
+            .unwrap_or_default();
         if sz_val != pg_val {
             return Err(format!(
                 "COUNT(*) mismatch for SQL [{sql}]: szrsql={sz_val}, pg={pg_val}"
@@ -443,7 +463,14 @@ fn diff_test_dml_sequence_100() {
         executed += 1;
 
         // 比对
-        if let Err(e) = compare_results(*op, sql, sz_result.0, &sz_result.1, pg_result.0, &pg_result.1) {
+        if let Err(e) = compare_results(
+            *op,
+            sql,
+            sz_result.0,
+            &sz_result.1,
+            pg_result.0,
+            &pg_result.1,
+        ) {
             mismatches.push(e);
         }
     }
@@ -459,7 +486,12 @@ fn diff_test_dml_sequence_100() {
             "差分比对失败：{}/{} 条 SQL 结果不一致（超过 10% 阈值）\n前 5 个不匹配：\n{}",
             mismatches.len(),
             executed,
-            mismatches.iter().take(5).cloned().collect::<Vec<_>>().join("\n")
+            mismatches
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 
@@ -467,7 +499,12 @@ fn diff_test_dml_sequence_100() {
         eprintln!(
             "[diff_test_dml_sequence_100] {} 个已知差异（在 10% 阈值内，可接受）：\n{}",
             mismatches.len(),
-            mismatches.iter().take(3).cloned().collect::<Vec<_>>().join("\n")
+            mismatches
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 }
@@ -503,7 +540,14 @@ fn diff_test_dml_sequence_1000() {
 
         executed += 1;
 
-        if let Err(e) = compare_results(*op, sql, sz_result.0, &sz_result.1, pg_result.0, &pg_result.1) {
+        if let Err(e) = compare_results(
+            *op,
+            sql,
+            sz_result.0,
+            &sz_result.1,
+            pg_result.0,
+            &pg_result.1,
+        ) {
             mismatches.push(e);
         }
     }
@@ -565,11 +609,19 @@ fn diff_test_select_only() {
         };
 
         let pg_result = exec_pg(&mut pg_client, &sql).expect("pg query failed");
-        let sz_result = exec_szrsql(&sql, &catalog, &mut table_t, &mut table_counter).expect("szrsql exec failed");
+        let sz_result = exec_szrsql(&sql, &catalog, &mut table_t, &mut table_counter)
+            .expect("szrsql exec failed");
 
         executed += 1;
 
-        if let Err(e) = compare_results(DmlOp::SelectAll, &sql, sz_result.0, &sz_result.1, pg_result.0, &pg_result.1) {
+        if let Err(e) = compare_results(
+            DmlOp::SelectAll,
+            &sql,
+            sz_result.0,
+            &sz_result.1,
+            pg_result.0,
+            &pg_result.1,
+        ) {
             mismatches.push(e);
         }
     }
@@ -584,7 +636,12 @@ fn diff_test_select_only() {
             "SELECT 差分比对失败：{}/{} 条查询结果不一致（超过 5% 阈值）\n{}",
             mismatches.len(),
             executed,
-            mismatches.iter().take(5).cloned().collect::<Vec<_>>().join("\n")
+            mismatches
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 }

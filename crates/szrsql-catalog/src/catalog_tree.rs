@@ -440,8 +440,12 @@ impl CatalogTree {
         self.next_id += 1;
         let name = catalog_path.name().to_string();
         let node = match kind {
-            NodeKind::Table => CatalogNode::new_table(node_id, name, parent_id, table_name.to_string()),
-            NodeKind::View => CatalogNode::new_view(node_id, name, parent_id, table_name.to_string()),
+            NodeKind::Table => {
+                CatalogNode::new_table(node_id, name, parent_id, table_name.to_string())
+            }
+            NodeKind::View => {
+                CatalogNode::new_view(node_id, name, parent_id, table_name.to_string())
+            }
             _ => unreachable!(),
         };
         self.nodes.insert(node_id, node);
@@ -803,7 +807,10 @@ mod tests {
         assert_eq!(node.name, "orders");
         assert_eq!(node.table_name.as_deref(), Some("orders"));
         assert_eq!(tree.get_path(tid).unwrap(), "/sales/orders");
-        assert_eq!(tree.find_path_by_table_name("orders").unwrap(), "/sales/orders");
+        assert_eq!(
+            tree.find_path_by_table_name("orders").unwrap(),
+            "/sales/orders"
+        );
     }
 
     #[test]
@@ -932,10 +939,7 @@ mod tests {
         assert!(tree.get_node_by_path("/a").is_none());
         assert!(tree.get_node_by_path("/c/a").is_some());
         assert!(tree.get_node_by_path("/c/a/b").is_some());
-        assert_eq!(
-            tree.find_path_by_table_name("t1").unwrap(),
-            "/c/a/b/t1"
-        );
+        assert_eq!(tree.find_path_by_table_name("t1").unwrap(), "/c/a/b/t1");
     }
 
     #[test]
@@ -1018,7 +1022,8 @@ mod tests {
 
         // 2. 挂载表
         tree.mount_table("/sales/orders", "orders").unwrap();
-        tree.mount_table("/sales/order_items", "order_items").unwrap();
+        tree.mount_table("/sales/order_items", "order_items")
+            .unwrap();
         tree.mount_table("/hr/employees", "employees").unwrap();
         tree.mount_table("/hr/departments", "departments").unwrap();
         tree.mount_table("/finance/invoices", "invoices").unwrap();
@@ -1030,10 +1035,14 @@ mod tests {
 
         // 4. 重组：将 order_items 移到 hr（模拟业务调整）
         tree.move_node("/sales/order_items", "/hr").unwrap();
-        assert_eq!(tree.find_path_by_table_name("order_items").unwrap(), "/hr/order_items");
+        assert_eq!(
+            tree.find_path_by_table_name("order_items").unwrap(),
+            "/hr/order_items"
+        );
 
         // 5. 创建视图
-        tree.mount_view("/sales/monthly_summary", "v_monthly").unwrap();
+        tree.mount_view("/sales/monthly_summary", "v_monthly")
+            .unwrap();
 
         // 6. 卸载已删除的表
         tree.unmount("/finance/invoices").unwrap();

@@ -182,7 +182,10 @@ impl OracleAdapter {
         debug!(script_len = script.len(), "import_from_oracle: start");
 
         let statements = split_statements(script);
-        debug!(stmt_count = statements.len(), "import_from_oracle: split into statements");
+        debug!(
+            stmt_count = statements.len(),
+            "import_from_oracle: split into statements"
+        );
 
         let mut tables: Vec<OracleTable> = Vec::new();
 
@@ -198,7 +201,9 @@ impl OracleAdapter {
             }
 
             let upper = trimmed.to_uppercase();
-            if upper.starts_with("CREATE TABLE") || upper.starts_with("CREATE GLOBAL TEMPORARY TABLE") {
+            if upper.starts_with("CREATE TABLE")
+                || upper.starts_with("CREATE GLOBAL TEMPORARY TABLE")
+            {
                 let table = parse_create_table(trimmed)?;
                 debug!(table_name = %table.name, col_count = table.columns.len(), "parsed CREATE TABLE");
                 tables.push(table);
@@ -260,7 +265,10 @@ impl OracleAdapter {
     /// - `Ok(String)`：转换并验证成功的 PG 兼容 SQL
     /// - `Err(AdapterError::Dialect)`：转换后 SQL 解析失败
     pub fn convert_sql(&self, sql: &str) -> Result<String, AdapterError> {
-        debug!(sql_len = sql.len(), "convert_sql: delegating to OracleDialect");
+        debug!(
+            sql_len = sql.len(),
+            "convert_sql: delegating to OracleDialect"
+        );
         let result = self.dialect.convert_sql(sql)?;
         Ok(result)
     }
@@ -473,9 +481,7 @@ fn parse_oracle_type_decl(s: &str) -> Result<(OracleType, &str), AdapterError> {
         .find(|c: char| !(c.is_ascii_alphanumeric()))
         .unwrap_or(s.len());
     if type_name_end == 0 {
-        return Err(AdapterError::SqlParse(format!(
-            "missing type name in: {s}"
-        )));
+        return Err(AdapterError::SqlParse(format!("missing type name in: {s}")));
     }
     let type_name = s[..type_name_end].to_uppercase();
     let rest = s[type_name_end..].trim_start();
@@ -499,16 +505,14 @@ fn parse_oracle_type_decl(s: &str) -> Result<(OracleType, &str), AdapterError> {
             rest,
         )),
         "VARCHAR2" | "VARCHAR" => {
-            let (args, rest) = try_consume_paren_args(rest).ok_or_else(|| {
-                AdapterError::SqlParse(format!("VARCHAR2 requires length: {s}"))
-            })?;
+            let (args, rest) = try_consume_paren_args(rest)
+                .ok_or_else(|| AdapterError::SqlParse(format!("VARCHAR2 requires length: {s}")))?;
             let (size, char_semantics) = parse_char_length_args(&args)?;
             Ok((OracleType::varchar2(size, char_semantics)?, rest))
         }
         "CHAR" | "CHARACTER" => {
-            let (args, rest) = try_consume_paren_args(rest).ok_or_else(|| {
-                AdapterError::SqlParse(format!("CHAR requires length: {s}"))
-            })?;
+            let (args, rest) = try_consume_paren_args(rest)
+                .ok_or_else(|| AdapterError::SqlParse(format!("CHAR requires length: {s}")))?;
             let (size, char_semantics) = parse_char_length_args(&args)?;
             Ok((
                 OracleType::Char {
@@ -532,9 +536,8 @@ fn parse_oracle_type_decl(s: &str) -> Result<(OracleType, &str), AdapterError> {
         "CLOB" => Ok((OracleType::Clob, rest)),
         "BLOB" => Ok((OracleType::Blob, rest)),
         "RAW" => {
-            let (args, rest) = try_consume_paren_args(rest).ok_or_else(|| {
-                AdapterError::SqlParse(format!("RAW requires length: {s}"))
-            })?;
+            let (args, rest) = try_consume_paren_args(rest)
+                .ok_or_else(|| AdapterError::SqlParse(format!("RAW requires length: {s}")))?;
             let size = args
                 .trim()
                 .parse::<u32>()
@@ -688,12 +691,7 @@ fn parse_insert(stmt: &str, tables: &mut [OracleTable]) -> Result<(), AdapterErr
         rest[rest.len() - after_values.len()..].trim_start()
     } else if upper.starts_with("SELECT") {
         // INSERT INTO ... SELECT：执行子查询并将结果插入目标表
-        return execute_insert_select(
-            &table_name,
-            _column_list.as_deref(),
-            rest,
-            tables,
-        );
+        return execute_insert_select(&table_name, _column_list.as_deref(), rest, tables);
     } else {
         return Err(AdapterError::SqlParse(format!(
             "missing VALUES in INSERT: {stmt}"
@@ -717,9 +715,7 @@ fn parse_insert(stmt: &str, tables: &mut [OracleTable]) -> Result<(), AdapterErr
         .iter_mut()
         .find(|t| t.name.eq_ignore_ascii_case(&table_name))
         .ok_or_else(|| {
-            AdapterError::SqlParse(format!(
-                "INSERT targets unknown table '{table_name}'"
-            ))
+            AdapterError::SqlParse(format!("INSERT targets unknown table '{table_name}'"))
         })?;
 
     for row in row_values {
@@ -978,9 +974,7 @@ impl SelectColResolver {
     /// 对源行求值，返回对应的 Value
     fn eval(&self, src_row: &[Value]) -> Value {
         match self {
-            SelectColResolver::Column(idx) => {
-                src_row.get(*idx).cloned().unwrap_or(Value::Null)
-            }
+            SelectColResolver::Column(idx) => src_row.get(*idx).cloned().unwrap_or(Value::Null),
             SelectColResolver::Literal(val) => val.clone(),
         }
     }
@@ -1097,9 +1091,7 @@ fn parse_value_tuples(s: &str) -> Result<Vec<Vec<String>>, AdapterError> {
     }
 
     if tuples.is_empty() {
-        return Err(AdapterError::SqlParse(format!(
-            "empty VALUES list: {s}"
-        )));
+        return Err(AdapterError::SqlParse(format!("empty VALUES list: {s}")));
     }
     Ok(tuples)
 }
@@ -1384,8 +1376,7 @@ mod tests {
     #[test]
     fn import_from_oracle_handles_escaped_quotes_in_string() {
         let adapter = OracleAdapter::new();
-        let script =
-            "CREATE TABLE t (s VARCHAR2(100)); INSERT INTO t VALUES ('it''s a test');";
+        let script = "CREATE TABLE t (s VARCHAR2(100)); INSERT INTO t VALUES ('it''s a test');";
         let tables = adapter.import_from_oracle(script).unwrap();
         assert_eq!(tables[0].rows[0][0], Value::Text("it's a test".to_string()));
     }
@@ -1412,7 +1403,10 @@ mod tests {
             other => panic!("expected Timestamp, got {other:?}"),
         }
         // HEXTORAW → Blob
-        assert_eq!(tables[0].rows[0][1], Value::Blob(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+        assert_eq!(
+            tables[0].rows[0][1],
+            Value::Blob(vec![0xDE, 0xAD, 0xBE, 0xEF])
+        );
     }
 
     #[test]
@@ -1550,10 +1544,7 @@ mod tests {
                     not_null: false,
                 },
             ],
-            rows: vec![vec![
-                Value::Int64(42),
-                Value::Text("Alice".to_string()),
-            ]],
+            rows: vec![vec![Value::Int64(42), Value::Text("Alice".to_string())]],
         };
         let sql = adapter.export_to_oracle(&[table]).unwrap();
         assert!(sql.contains("INSERT INTO t VALUES"));
@@ -1613,7 +1604,9 @@ mod tests {
         };
 
         // 导出为 Oracle SQL 脚本
-        let script = adapter.export_to_oracle(std::slice::from_ref(&original)).unwrap();
+        let script = adapter
+            .export_to_oracle(std::slice::from_ref(&original))
+            .unwrap();
 
         // 重新导入
         let imported = adapter.import_from_oracle(&script).unwrap();

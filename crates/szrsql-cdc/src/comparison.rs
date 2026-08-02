@@ -25,9 +25,9 @@
 
 use crate::decoder::DecodedRow;
 use crate::schema::TableSchema;
-use szrsql_types::value::Value as SzValue;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use szrsql_types::value::Value as SzValue;
 
 // =====================================================================
 // 行 checksum 计算（基于 FNV-1a 64bit，无外部依赖）
@@ -375,16 +375,21 @@ impl DataComparison {
     }
 
     /// 比对单张表
-    fn compare_table(&self, schema: &TableSchema) -> Result<TableComparisonResult, ComparisonError> {
+    fn compare_table(
+        &self,
+        schema: &TableSchema,
+    ) -> Result<TableComparisonResult, ComparisonError> {
         let start = std::time::Instant::now();
         let pk_name = schema
             .columns
             .first()
             .map(|c| c.name.as_str())
-            .ok_or_else(|| ComparisonError::SchemaMismatch(format!(
-                "table {} has no columns",
-                schema.table_name
-            )))?;
+            .ok_or_else(|| {
+                ComparisonError::SchemaMismatch(format!(
+                    "table {} has no columns",
+                    schema.table_name
+                ))
+            })?;
 
         let source_count = self.source.count_rows(&schema.table_name)?;
         let target_count = self.target.count_rows(&schema.table_name)?;
@@ -406,7 +411,9 @@ impl DataComparison {
         loop {
             // 补充源端批次（仅当未耗尽且当前批次已消费完时）
             if !source_exhausted && source_idx >= source_batch.len() {
-                source_batch = self.source.read_batch(schema, source_pk.as_ref(), self.config.batch_size)?;
+                source_batch =
+                    self.source
+                        .read_batch(schema, source_pk.as_ref(), self.config.batch_size)?;
                 source_idx = 0;
                 if source_batch.is_empty() {
                     source_exhausted = true;
@@ -415,7 +422,9 @@ impl DataComparison {
 
             // 补充目标端批次（仅当未耗尽且当前批次已消费完时）
             if !target_exhausted && target_idx >= target_batch.len() {
-                target_batch = self.target.read_batch(schema, target_pk.as_ref(), self.config.batch_size)?;
+                target_batch =
+                    self.target
+                        .read_batch(schema, target_pk.as_ref(), self.config.batch_size)?;
                 target_idx = 0;
                 if target_batch.is_empty() {
                     target_exhausted = true;
@@ -670,8 +679,16 @@ impl MemoryComparisonSource {
     pub fn with_data(mut self, table_name: impl Into<String>, mut rows: Vec<DecodedRow>) -> Self {
         // 按 pk 升序排序
         rows.sort_by(|a, b| {
-            let pk_a = a.columns.first().map(|(_, v)| v.clone()).unwrap_or(SzValue::Null);
-            let pk_b = b.columns.first().map(|(_, v)| v.clone()).unwrap_or(SzValue::Null);
+            let pk_a = a
+                .columns
+                .first()
+                .map(|(_, v)| v.clone())
+                .unwrap_or(SzValue::Null);
+            let pk_b = b
+                .columns
+                .first()
+                .map(|(_, v)| v.clone())
+                .unwrap_or(SzValue::Null);
             compare_values(&pk_a, &pk_b)
         });
         self.data.insert(table_name.into(), rows);
@@ -700,10 +717,12 @@ impl ComparisonSource for MemoryComparisonSource {
             .columns
             .first()
             .map(|c| c.name.as_str())
-            .ok_or_else(|| ComparisonError::SchemaMismatch(format!(
-                "table {} has no columns",
-                schema.table_name
-            )))?;
+            .ok_or_else(|| {
+                ComparisonError::SchemaMismatch(format!(
+                    "table {} has no columns",
+                    schema.table_name
+                ))
+            })?;
 
         let start_idx = match last_pk {
             None => 0,
@@ -741,20 +760,11 @@ impl ComparisonSource for MemoryComparisonSource {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RepairAction {
     /// 在目标端插入缺失行（对应 SourceOnly）
-    Insert {
-        table: String,
-        row: DecodedRow,
-    },
+    Insert { table: String, row: DecodedRow },
     /// 在目标端更新不一致行（对应 ContentMismatch）
-    Update {
-        table: String,
-        row: DecodedRow,
-    },
+    Update { table: String, row: DecodedRow },
     /// 在目标端删除多余行（对应 TargetOnly）
-    Delete {
-        table: String,
-        pk_value: SzValue,
-    },
+    Delete { table: String, pk_value: SzValue },
 }
 
 /// 修复策略
@@ -988,10 +998,12 @@ impl DataComparison {
             .columns
             .first()
             .map(|c| c.name.as_str())
-            .ok_or_else(|| ComparisonError::SchemaMismatch(format!(
-                "table {} has no columns",
-                schema.table_name
-            )))?;
+            .ok_or_else(|| {
+                ComparisonError::SchemaMismatch(format!(
+                    "table {} has no columns",
+                    schema.table_name
+                ))
+            })?;
 
         // 增量模式下，count_rows 无法精确反映增量行数，这里用全表行数作为参考
         let source_count = self.source.count_rows(&schema.table_name)?;
@@ -1017,7 +1029,9 @@ impl DataComparison {
         loop {
             // 补充源端批次（仅当未耗尽且当前批次已消费完时）
             if !source_exhausted && source_idx >= source_batch.len() {
-                source_batch = self.source.read_batch(schema, source_pk.as_ref(), self.config.batch_size)?;
+                source_batch =
+                    self.source
+                        .read_batch(schema, source_pk.as_ref(), self.config.batch_size)?;
                 source_idx = 0;
                 if source_batch.is_empty() {
                     source_exhausted = true;
@@ -1026,7 +1040,9 @@ impl DataComparison {
 
             // 补充目标端批次（仅当未耗尽且当前批次已消费完时）
             if !target_exhausted && target_idx >= target_batch.len() {
-                target_batch = self.target.read_batch(schema, target_pk.as_ref(), self.config.batch_size)?;
+                target_batch =
+                    self.target
+                        .read_batch(schema, target_pk.as_ref(), self.config.batch_size)?;
                 target_idx = 0;
                 if target_batch.is_empty() {
                     target_exhausted = true;
@@ -1193,10 +1209,20 @@ impl ComparisonReport {
         md.push_str(&format!("- 生成时间: {} (Unix ms)\n", self.generated_at));
         md.push_str(&format!(
             "- 总体一致性: {}\n",
-            if self.result.all_consistent { "✅ 一致" } else { "❌ 存在差异" }
+            if self.result.all_consistent {
+                "✅ 一致"
+            } else {
+                "❌ 存在差异"
+            }
         ));
-        md.push_str(&format!("- 源端总行数: {}\n", self.result.total_source_rows));
-        md.push_str(&format!("- 目标端总行数: {}\n", self.result.total_target_rows));
+        md.push_str(&format!(
+            "- 源端总行数: {}\n",
+            self.result.total_source_rows
+        ));
+        md.push_str(&format!(
+            "- 目标端总行数: {}\n",
+            self.result.total_target_rows
+        ));
         md.push_str(&format!("- 差异行数: {}\n", self.result.total_diffs));
         md.push_str(&format!("- 比对耗时: {} ms\n\n", self.result.elapsed_ms));
 
@@ -1216,7 +1242,11 @@ impl ComparisonReport {
                 t.target_rows,
                 t.compared_rows,
                 t.diff_count,
-                if t.is_consistent { "✅" } else { "❌" },
+                if t.is_consistent {
+                    "✅"
+                } else {
+                    "❌"
+                },
                 t.elapsed_ms,
             ));
         }
@@ -1348,7 +1378,8 @@ mod tests {
         let schema = make_schema(1, "users");
         let rows = vec![make_row(1, "A"), make_row(2, "B"), make_row(3, "C")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1366,7 +1397,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(2, "B"), make_row(3, "C")];
         let target_rows = vec![make_row(1, "A"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1384,7 +1416,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(2, "B")];
         let target_rows = vec![make_row(1, "A"), make_row(2, "B"), make_row(3, "C")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1401,7 +1434,8 @@ mod tests {
         let source_rows = vec![make_row(1, "Alice"), make_row(2, "Bob")];
         let target_rows = vec![make_row(1, "Alice"), make_row(2, "Bobby")]; // name 不同
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1409,7 +1443,10 @@ mod tests {
 
         assert!(!result.all_consistent);
         assert_eq!(result.total_diffs, 1);
-        assert_eq!(result.tables[0].differences[0].kind, DiffKind::ContentMismatch);
+        assert_eq!(
+            result.tables[0].differences[0].kind,
+            DiffKind::ContentMismatch
+        );
         assert!(result.tables[0].differences[0]
             .mismatched_columns
             .contains(&"name".to_string()));
@@ -1421,7 +1458,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(3, "C"), make_row(5, "E")];
         let target_rows = vec![make_row(2, "B"), make_row(3, "C"), make_row(6, "F")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1473,7 +1511,8 @@ mod tests {
         let source_rows: Vec<DecodedRow> = (1..=100).map(|i| make_row(i, "src")).collect();
         let target_rows: Vec<DecodedRow> = vec![];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let config = ComparisonConfig {
@@ -1490,10 +1529,12 @@ mod tests {
     #[test]
     fn comparison_batch_iteration() {
         let schema = make_schema(1, "users");
-        let source_rows: Vec<DecodedRow> = (1..=25).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let source_rows: Vec<DecodedRow> =
+            (1..=25).map(|i| make_row(i, &format!("u{i}"))).collect();
         let target_rows = source_rows.clone();
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let config = ComparisonConfig {
@@ -1535,8 +1576,8 @@ mod tests {
         let source = MemoryComparisonSource::new(vec![schema1.clone(), schema2])
             .with_data("users", vec![make_row(1, "A")])
             .with_data("orders", vec![make_row(10, "o1")]);
-        let target = MemoryComparisonSource::new(vec![schema1])
-            .with_data("users", vec![make_row(1, "A")]);
+        let target =
+            MemoryComparisonSource::new(vec![schema1]).with_data("users", vec![make_row(1, "A")]);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
         let result = cmp.compare().unwrap();
@@ -1550,7 +1591,10 @@ mod tests {
         assert!(values_equal(&SzValue::Null, &SzValue::Null));
         assert!(values_equal(&SzValue::Int64(42), &SzValue::Int64(42)));
         assert!(!values_equal(&SzValue::Int64(42), &SzValue::Int64(43)));
-        assert!(values_equal(&SzValue::Text("hi".to_string()), &SzValue::Text("hi".to_string())));
+        assert!(values_equal(
+            &SzValue::Text("hi".to_string()),
+            &SzValue::Text("hi".to_string())
+        ));
         assert!(values_equal(&SzValue::Bool(true), &SzValue::Bool(true)));
         assert!(!values_equal(&SzValue::Bool(true), &SzValue::Bool(false)));
     }
@@ -1558,9 +1602,18 @@ mod tests {
     #[test]
     fn compare_values_ordering() {
         use std::cmp::Ordering;
-        assert_eq!(compare_values(&SzValue::Int64(1), &SzValue::Int64(2)), Ordering::Less);
-        assert_eq!(compare_values(&SzValue::Int64(2), &SzValue::Int64(1)), Ordering::Greater);
-        assert_eq!(compare_values(&SzValue::Int64(1), &SzValue::Int64(1)), Ordering::Equal);
+        assert_eq!(
+            compare_values(&SzValue::Int64(1), &SzValue::Int64(2)),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_values(&SzValue::Int64(2), &SzValue::Int64(1)),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_values(&SzValue::Int64(1), &SzValue::Int64(1)),
+            Ordering::Equal
+        );
     }
 
     #[test]
@@ -1636,7 +1689,8 @@ mod tests {
         let source_rows = vec![make_row(1, "Alice"), make_row(2, "Bob")];
         let target_rows = vec![make_row(1, "Alice"), make_row(2, "Bobby")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let config = ComparisonConfig {
@@ -1665,14 +1719,18 @@ mod tests {
             }
         }
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
         let result = cmp.compare().unwrap();
 
         assert_eq!(result.total_diffs, 1);
-        assert_eq!(result.tables[0].differences[0].kind, DiffKind::ContentMismatch);
+        assert_eq!(
+            result.tables[0].differences[0].kind,
+            DiffKind::ContentMismatch
+        );
     }
 
     // =================================================================
@@ -1683,10 +1741,12 @@ mod tests {
     fn incremental_compare_from_pk() {
         // 增量比对：从 pk > 5 开始，应只比对 6..=10 的行
         let schema = make_schema(1, "users");
-        let source_rows: Vec<DecodedRow> = (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let source_rows: Vec<DecodedRow> =
+            (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
         let target_rows = source_rows.clone();
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1709,7 +1769,8 @@ mod tests {
         let source_rows: Vec<DecodedRow> = (1..=5).map(|i| make_row(i, "u")).collect();
         let target_rows = source_rows.clone();
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1725,11 +1786,14 @@ mod tests {
     fn incremental_compare_detects_diffs_after_pk() {
         // pk <= 5 一致；pk > 5 中 pk=7 有差异
         let schema = make_schema(1, "users");
-        let source_rows: Vec<DecodedRow> = (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
-        let mut target_rows: Vec<DecodedRow> = (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let source_rows: Vec<DecodedRow> =
+            (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let mut target_rows: Vec<DecodedRow> =
+            (1..=10).map(|i| make_row(i, &format!("u{i}"))).collect();
         target_rows[6] = make_row(7, "modified"); // 修改 pk=7 的行
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1741,7 +1805,10 @@ mod tests {
 
         assert!(!result.base.all_consistent);
         assert_eq!(result.base.total_diffs, 1);
-        assert_eq!(result.base.tables[0].differences[0].kind, DiffKind::ContentMismatch);
+        assert_eq!(
+            result.base.tables[0].differences[0].kind,
+            DiffKind::ContentMismatch
+        );
     }
 
     #[test]
@@ -1752,7 +1819,8 @@ mod tests {
         let mut target_rows: Vec<DecodedRow> = (1..=10).map(|i| make_row(i, "src")).collect();
         target_rows[2] = make_row(3, "modified"); // pk=3 差异（在增量范围外）
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1784,7 +1852,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(3, "C"), make_row(5, "E")];
         let target_rows = vec![make_row(1, "A"), make_row(2, "B"), make_row(5, "modified")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1801,9 +1870,18 @@ mod tests {
         assert!(!plan.is_empty());
 
         // 验证动作类型
-        let has_insert = plan.actions.iter().any(|a| matches!(a, RepairAction::Insert { .. }));
-        let has_update = plan.actions.iter().any(|a| matches!(a, RepairAction::Update { .. }));
-        let has_delete = plan.actions.iter().any(|a| matches!(a, RepairAction::Delete { .. }));
+        let has_insert = plan
+            .actions
+            .iter()
+            .any(|a| matches!(a, RepairAction::Insert { .. }));
+        let has_update = plan
+            .actions
+            .iter()
+            .any(|a| matches!(a, RepairAction::Update { .. }));
+        let has_delete = plan
+            .actions
+            .iter()
+            .any(|a| matches!(a, RepairAction::Delete { .. }));
         assert!(has_insert && has_update && has_delete);
     }
 
@@ -1817,7 +1895,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(3, "C"), make_row(5, "E")];
         let target_rows = vec![make_row(1, "A"), make_row(2, "B"), make_row(5, "modified")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1837,7 +1916,8 @@ mod tests {
         let source_rows = vec![make_row(1, "A"), make_row(3, "C")];
         let target_rows = vec![make_row(1, "A"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1856,7 +1936,8 @@ mod tests {
         let schema = make_schema(1, "users");
         let rows = vec![make_row(1, "A"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1874,7 +1955,8 @@ mod tests {
         let source_rows = vec![make_row(42, "Alice")];
         let target_rows: Vec<DecodedRow> = vec![];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1901,7 +1983,8 @@ mod tests {
         let source_rows: Vec<DecodedRow> = vec![];
         let target_rows = vec![make_row(99, "Bob")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1927,7 +2010,8 @@ mod tests {
         let schema = make_schema(1, "users");
         let rows = vec![make_row(1, "A"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1950,7 +2034,8 @@ mod tests {
         let source_rows = vec![make_row(1, "Alice"), make_row(3, "C")];
         let target_rows = vec![make_row(1, "Alice"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1970,7 +2055,8 @@ mod tests {
         let schema = make_schema(1, "users");
         let rows = vec![make_row(1, "A")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", rows.clone());
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -1999,7 +2085,8 @@ mod tests {
         let source_rows = vec![make_row(1, "Alice"), make_row(3, "C")];
         let target_rows = vec![make_row(1, "Alice"), make_row(2, "B")];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -2064,7 +2151,8 @@ mod tests {
             make_row(4, "Dave"),
         ];
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -2098,11 +2186,14 @@ mod tests {
         // 增量比对 + 修复计划工作流
         let schema = make_schema(1, "users");
         // 源端 1..=20，目标端 1..=20，但 pk=15 内容不一致
-        let source_rows: Vec<DecodedRow> = (1..=20).map(|i| make_row(i, &format!("u{i}"))).collect();
-        let mut target_rows: Vec<DecodedRow> = (1..=20).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let source_rows: Vec<DecodedRow> =
+            (1..=20).map(|i| make_row(i, &format!("u{i}"))).collect();
+        let mut target_rows: Vec<DecodedRow> =
+            (1..=20).map(|i| make_row(i, &format!("u{i}"))).collect();
         target_rows[14] = make_row(15, "modified");
 
-        let source = MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
+        let source =
+            MemoryComparisonSource::new(vec![schema.clone()]).with_data("users", source_rows);
         let target = MemoryComparisonSource::new(vec![schema]).with_data("users", target_rows);
 
         let cmp = DataComparison::new(source, target, ComparisonConfig::default());
@@ -2122,6 +2213,9 @@ mod tests {
         // 生成修复计划
         let plan = cmp.generate_repair_plan(&result.base, RepairStrategy::SourceWins);
         assert_eq!(plan.total_updates, 1);
-        assert!(plan.actions.iter().all(|a| matches!(a, RepairAction::Update { .. })));
+        assert!(plan
+            .actions
+            .iter()
+            .all(|a| matches!(a, RepairAction::Update { .. })));
     }
 }

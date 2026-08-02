@@ -323,7 +323,10 @@ impl BtreePage {
 
     /// 是否为内部页。
     pub fn is_interior(&self) -> bool {
-        matches!(self.page_type, PAGE_TYPE_TABLE_INTERIOR | PAGE_TYPE_INDEX_INTERIOR)
+        matches!(
+            self.page_type,
+            PAGE_TYPE_TABLE_INTERIOR | PAGE_TYPE_INDEX_INTERIOR
+        )
     }
 
     /// 是否为索引页。
@@ -365,24 +368,19 @@ impl BtreePage {
 
         // 读取页面头字段
         let page_type = buf[header_offset];
-        let first_freeblock = u16::from_be_bytes([
-            buf[header_offset + 1],
-            buf[header_offset + 2],
-        ]);
-        let cell_count = u16::from_be_bytes([
-            buf[header_offset + 3],
-            buf[header_offset + 4],
-        ]);
-        let cell_content_start_raw = u16::from_be_bytes([
-            buf[header_offset + 5],
-            buf[header_offset + 6],
-        ]);
+        let first_freeblock = u16::from_be_bytes([buf[header_offset + 1], buf[header_offset + 2]]);
+        let cell_count = u16::from_be_bytes([buf[header_offset + 3], buf[header_offset + 4]]);
+        let cell_content_start_raw =
+            u16::from_be_bytes([buf[header_offset + 5], buf[header_offset + 6]]);
         // 0 表示 65536
         let cell_content_start = cell_content_start_raw;
         let fragmented_free_bytes = buf[header_offset + 7];
 
         // 判断页面类型并读取 right_most_pointer
-        let is_interior = matches!(page_type, PAGE_TYPE_TABLE_INTERIOR | PAGE_TYPE_INDEX_INTERIOR);
+        let is_interior = matches!(
+            page_type,
+            PAGE_TYPE_TABLE_INTERIOR | PAGE_TYPE_INDEX_INTERIOR
+        );
         let header_size = if is_interior {
             INTERIOR_HEADER_SIZE
         } else {
@@ -413,10 +411,8 @@ impl BtreePage {
 
         let mut cell_pointers = Vec::with_capacity(n);
         for i in 0..n {
-            let ptr = u16::from_be_bytes([
-                buf[cell_ptr_start + 2 * i],
-                buf[cell_ptr_start + 2 * i + 1],
-            ]);
+            let ptr =
+                u16::from_be_bytes([buf[cell_ptr_start + 2 * i], buf[cell_ptr_start + 2 * i + 1]]);
             cell_pointers.push(ptr as usize);
         }
 
@@ -517,17 +513,24 @@ impl BtreePage {
         // 计算 cell_content_start
         let cell_content_start_val = if cell_bytes.is_empty() {
             // 空页面：cell_content_start = page_size（或 0 表示 65536）
-            if page_size >= 65536 { 0 } else { page_size as u16 }
+            if page_size >= 65536 {
+                0
+            } else {
+                page_size as u16
+            }
         } else {
-            if content_end >= 65536 { 0 } else { content_end as u16 }
+            if content_end >= 65536 {
+                0
+            } else {
+                content_end as u16
+            }
         };
 
         // 写入页面头
         buf[header_offset] = self.page_type;
         buf[header_offset + 1..header_offset + 3]
             .copy_from_slice(&self.first_freeblock.to_be_bytes());
-        buf[header_offset + 3..header_offset + 5]
-            .copy_from_slice(&(n as u16).to_be_bytes());
+        buf[header_offset + 3..header_offset + 5].copy_from_slice(&(n as u16).to_be_bytes());
         buf[header_offset + 5..header_offset + 7]
             .copy_from_slice(&cell_content_start_val.to_be_bytes());
         buf[header_offset + 7] = self.fragmented_free_bytes;
@@ -692,10 +695,7 @@ mod tests {
         let values = vec![Value::Int64(42), Value::Text("hello".to_string())];
         let payload = encode_record(&values);
 
-        let cell = TableLeafCell {
-            rowid: 1,
-            payload,
-        };
+        let cell = TableLeafCell { rowid: 1, payload };
         let mut page = BtreePage::new_table_leaf();
         page.cells.push(BtreeCell::TableLeaf(cell));
 
@@ -711,7 +711,10 @@ mod tests {
             // 验证 record 内容
             use crate::record::decode_record;
             let decoded_values = decode_record(&leaf.payload).expect("record decode");
-            assert_eq!(decoded_values, vec![Value::Int64(42), Value::Text("hello".to_string())]);
+            assert_eq!(
+                decoded_values,
+                vec![Value::Int64(42), Value::Text("hello".to_string())]
+            );
         } else {
             panic!("expected TableLeaf cell");
         }
@@ -725,10 +728,8 @@ mod tests {
         for i in 1..=5 {
             let values = vec![Value::Int64(i)];
             let payload = encode_record(&values);
-            page.cells.push(BtreeCell::TableLeaf(TableLeafCell {
-                rowid: i,
-                payload,
-            }));
+            page.cells
+                .push(BtreeCell::TableLeaf(TableLeafCell { rowid: i, payload }));
         }
 
         let page_size = 4096;
@@ -818,7 +819,7 @@ mod tests {
         // cell_content_start 应在偏移 5 处读取（2 字节大端）
         let cs = u16::from_be_bytes([encoded[5], encoded[6]]);
         assert!(cs > 8 + 2); // 大于 header + cell_ptr_array
-        assert!(cs < 4096);  // 小于 page_size
+        assert!(cs < 4096); // 小于 page_size
     }
 
     #[test]
@@ -847,10 +848,8 @@ mod tests {
         let mut page = BtreePage::new_table_leaf();
         for i in 1..=3 {
             let payload = encode_record(&[Value::Int64(i)]);
-            page.cells.push(BtreeCell::TableLeaf(TableLeafCell {
-                rowid: i,
-                payload,
-            }));
+            page.cells
+                .push(BtreeCell::TableLeaf(TableLeafCell { rowid: i, payload }));
         }
 
         let encoded = page.encode(4096, 0);
@@ -860,10 +859,9 @@ mod tests {
         // 读取 cell pointer array
         let ptr_start = 8; // header_size for leaf
         for i in 0..3 {
-            let ptr = u16::from_be_bytes([
-                encoded[ptr_start + 2 * i],
-                encoded[ptr_start + 2 * i + 1],
-            ]) as usize;
+            let ptr =
+                u16::from_be_bytes([encoded[ptr_start + 2 * i], encoded[ptr_start + 2 * i + 1]])
+                    as usize;
             // 每个指针应指向有效的 cell 数据
             assert!(ptr > ptr_start + 6); // 大于 header + cell_ptr_array
             assert!(ptr < 4096);
@@ -971,9 +969,7 @@ mod tests {
 
     #[test]
     fn index_leaf_cell_empty_payload() {
-        let cell = IndexLeafCell {
-            payload: vec![],
-        };
+        let cell = IndexLeafCell { payload: vec![] };
         let encoded = cell.encode();
         let decoded = IndexLeafCell::decode(&encoded).expect("decode should succeed");
         assert_eq!(decoded, cell);

@@ -38,6 +38,22 @@
 //! Leader 只 commit 当前 term 的日志条目，避免通过旧 term 日志 commit 导致
 //! 已 commit 日志被覆盖的安全性违规。
 //!
+//! # P0-7：日志持久化
+//!
+//! Raft 协议要求 `current_term`、`voted_for`、`log` 必须持久化到磁盘才能安全
+//! 响应 RPC。本模块通过 `RaftNode::with_log_path` 启用磁盘持久化：
+//!
+//! - 所有修改 persistent 状态的方法（`become_follower`、`become_candidate`、
+//!   `handle_request_vote`、`handle_append_entries`、`propose`、
+//!   `create_snapshot`、`install_snapshot`、`write_cnew_entry`、
+//!   `propose_membership_change_v2`）在变更后调用 `save_persistent_state`。
+//! - `save_persistent_state` 序列化 `PersistentState` 为 JSON，原子写入
+//!   （先写 `.tmp` 临时文件再 `rename`，避免半写损坏）。
+//! - `RaftNode::load_from_file` 从磁盘恢复状态；文件不存在或反序列化失败时
+//!   以新节点启动（term=0, voted_for=None, 空日志）。
+//! - `log_path = None`（默认）时为纯内存模式，`save_persistent_state` 为
+//!   no-op，保持向后兼容。
+//!
 //! 对应 `SzRSQL实施进度.md` Phase 8.1。
 
 use std::collections::{HashMap, HashSet};
@@ -226,7 +242,10 @@ impl RaftLog {
 
     /// 返回最后一条日志的任期号（空日志返回 snapshot_last_term 或 0）
     pub fn last_log_term(&self) -> LogTerm {
-        self.entries.last().map(|e| e.term).unwrap_or(self.snapshot_last_term)
+        self.entries
+            .last()
+            .map(|e| e.term)
+            .unwrap_or(self.snapshot_last_term)
     }
 
     /// 按索引获取日志条目（索引从 1 开始，0 返回 None）
@@ -297,7 +316,11 @@ impl RaftLog {
     /// OPT-2：若 from <= snapshot_last_index，自动调整为 snapshot_last_index+1。
     pub fn slice(&self, from: Index, to: Index) -> &[LogEntry] {
         // from=0 等价于 from=1（index 0 不存在）
-        let from = if from == 0 { 1 } else { from };
+        let from = if from == 0 {
+            1
+        } else {
+            from
+        };
         // to=0 表示空范围
         if to == 0 || from >= to {
             return &[];
@@ -949,6 +972,8 @@ pub struct RaftNode {
     /// - `None`：集群处于稳定配置，无变更进行中
     /// - `Some`：`Cold,new` 或 `Cnew` 配置条目已写入日志，正在等待多数派提交
     joint: Option<JointConsensus>,
+    /// P0-7：持久化日志文件路径（None 表示纯内存模式，Some 表示启用磁盘持久化）
+    log_path: Option<std::path::PathBuf>,
 }
 
 impl RaftNode {
@@ -971,9 +996,80 @@ impl RaftNode {
             rng,
             membership_state: MembershipChangeState::Stable,
             joint: None,
+            log_path: None, // P0-7：默认纯内存模式
         };
         node.reset_election_timer();
         node
+    }
+
+    // --- P0-7：磁盘持久化 ---
+
+    /// P0-7：设置持久化日志文件路径，启用磁盘持久化
+    ///
+    /// 设置后，所有修改 persistent 状态的操作会自动保存到磁盘。
+    /// 节点启动时调用 `RaftNode::load_from_file(path, id, config)` 从磁盘恢复状态。
+    pub fn with_log_path<P: Into<std::path::PathBuf>>(mut self, path: P) -> Self {
+        self.log_path = Some(path.into());
+        // 立即保存当前状态
+        let _ = self.save_persistent_state();
+        self
+    }
+
+    /// P0-7：从磁盘文件加载持久化状态创建节点
+    ///
+    /// 文件不存在时创建新节点（term=0, voted_for=None, 空日志）。
+    pub fn load_from_file<P: Into<std::path::PathBuf>>(
+        path: P,
+        id: NodeId,
+        config: Config,
+    ) -> Self {
+        let path = path.into();
+        let mut node = RaftNode::new(id, config);
+        node.log_path = Some(path.clone());
+
+        // 尝试从文件加载
+        if path.exists() {
+            match std::fs::read(&path) {
+                Ok(data) => match serde_json::from_slice::<PersistentState>(&data) {
+                    Ok(persistent) => {
+                        node.persistent = persistent;
+                        tracing::info!(
+                            node_id = id,
+                            term = node.persistent.current_term,
+                            log_len = node.persistent.log.len(),
+                            "P0-7: loaded persistent state from disk"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, path = %path.display(), "P0-7: failed to deserialize persistent state, starting fresh");
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, path = %path.display(), "P0-7: failed to read persistent state file, starting fresh");
+                }
+            }
+        }
+        node
+    }
+
+    /// P0-7：保存持久化状态到磁盘
+    ///
+    /// 序列化 PersistentState 为 JSON，原子写入（先写临时文件再 rename）。
+    /// 失败时记录 warning 日志，不中断流程（与 PG 类似，fsync 失败会导致节点退出）。
+    fn save_persistent_state(&self) -> std::io::Result<()> {
+        let path = match &self.log_path {
+            Some(p) => p,
+            None => return Ok(()), // 纯内存模式，不保存
+        };
+
+        // 原子写入：先写 .tmp 文件，再 rename
+        let tmp_path = path.with_extension("tmp");
+        let data = serde_json::to_vec(&self.persistent)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        std::fs::write(&tmp_path, &data)?;
+        std::fs::rename(&tmp_path, path)?;
+        Ok(())
     }
 
     // --- 查询方法 ---
@@ -1067,6 +1163,8 @@ impl RaftNode {
             return Err(RaftError::LogNotFound(index));
         };
         self.persistent.log.compact(index, term)?;
+        // P0-7：日志已修改（compact），持久化到磁盘
+        let _ = self.save_persistent_state();
         // 防止 last_applied 回退（snapshot 后 last_applied 应 >= snapshot_last_index）
         if self.volatile.last_applied < index {
             self.volatile.last_applied = index;
@@ -1080,6 +1178,8 @@ impl RaftNode {
     /// 替换本地 snapshot 并截断日志。同时推进 commit_index 和 last_applied。
     pub fn install_snapshot(&mut self, last_index: Index, last_term: LogTerm) {
         self.persistent.log.install_snapshot(last_index, last_term);
+        // P0-7：日志已修改（install_snapshot），持久化到磁盘
+        let _ = self.save_persistent_state();
         // 推进 commit_index / last_applied 到 snapshot 位置
         if self.volatile.commit_index < last_index {
             self.volatile.commit_index = last_index;
@@ -1161,12 +1261,18 @@ impl RaftNode {
         if term > self.persistent.current_term {
             self.persistent.current_term = term;
             self.persistent.voted_for = None;
+            // P0-7：persistent 状态变更，持久化到磁盘
+            let _ = self.save_persistent_state();
         }
         self.votes_received.clear();
         self.leader_state = None;
         self.reset_election_timer();
         tracing::Span::current().record("term", self.persistent.current_term);
-        trace!(node_id = self.id, term = self.persistent.current_term, "became follower");
+        trace!(
+            node_id = self.id,
+            term = self.persistent.current_term,
+            "became follower"
+        );
     }
 
     /// 转为 Candidate
@@ -1177,11 +1283,17 @@ impl RaftNode {
         self.state = RaftState::Candidate;
         self.persistent.current_term += 1;
         self.persistent.voted_for = Some(self.id);
+        // P0-7：persistent 状态变更，持久化到磁盘
+        let _ = self.save_persistent_state();
         self.votes_received.clear();
         self.votes_received.insert(self.id);
         self.leader_state = None;
         self.reset_election_timer();
-        trace!(node_id = self.id, term = self.persistent.current_term, "became candidate");
+        trace!(
+            node_id = self.id,
+            term = self.persistent.current_term,
+            "became candidate"
+        );
     }
 
     /// 转为 Leader
@@ -1309,6 +1421,8 @@ impl RaftNode {
 
         // 投票
         self.persistent.voted_for = Some(req.candidate_id);
+        // P0-7：persistent 状态变更，持久化到磁盘
+        let _ = self.save_persistent_state();
         self.reset_election_timer();
 
         RequestVoteResponse {
@@ -1406,6 +1520,12 @@ impl RaftNode {
                 }
                 break;
             }
+        }
+
+        // P0-7：日志可能已修改（truncate/append），持久化到磁盘
+        // 心跳（entries 为空）不会修改日志，跳过保存
+        if !req.entries.is_empty() {
+            let _ = self.save_persistent_state();
         }
 
         // Phase 8.2：处理配置变更条目，更新本地联合共识状态
@@ -1550,6 +1670,8 @@ impl RaftNode {
             .persistent
             .log
             .append_entry(self.persistent.current_term, command);
+        // P0-7：日志已修改，持久化到磁盘
+        let _ = self.save_persistent_state();
         tracing::Span::current().record("index", index);
         trace!(node_id = self.id, index, "entry proposed");
         Ok(index)
@@ -1928,6 +2050,8 @@ impl RaftNode {
             Vec::new(),
             Some(cnew_entry),
         );
+        // P0-7：日志已修改（追加 Cnew 配置条目），持久化到磁盘
+        let _ = self.save_persistent_state();
         if let Some(j) = &mut self.joint {
             j.cnew_entry_index = cnew_index;
         }
@@ -1994,6 +2118,8 @@ impl RaftNode {
             Vec::new(),
             Some(entry),
         );
+        // P0-7：日志已修改（追加 Cold,new 联合配置条目），持久化到磁盘
+        let _ = self.save_persistent_state();
 
         // 设置联合共识状态
         self.joint = Some(JointConsensus {
@@ -4812,5 +4938,128 @@ mod tests {
         assert!(log.is_empty());
         assert_eq!(log.last_log_index(), 5);
         assert_eq!(log.last_log_term(), 1);
+    }
+
+    // -----------------------------------------------------------------
+    //  P0-7：Raft 日志持久化测试
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_p0_7_raft_log_persistence_roundtrip() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("raft_log.json");
+
+        // 创建节点并启用持久化
+        let config = Config::default();
+        let mut node = RaftNode::new(1, config.clone()).with_log_path(&log_path);
+
+        // 修改 persistent 状态
+        // become_candidate：current_term 0→1，voted_for=Some(1)
+        node.become_candidate();
+        // become_leader：单节点直接成为 Leader（不修改 persistent）
+        node.become_leader();
+        // propose：追加日志条目（修改 persistent.log）
+        let index = node
+            .propose(vec![0x01, 0x02])
+            .expect("propose should succeed on leader");
+
+        // 验证文件存在
+        assert!(
+            log_path.exists(),
+            "log file should exist after modifications"
+        );
+
+        // 从文件加载
+        let loaded = RaftNode::load_from_file(&log_path, 1, config);
+        assert_eq!(loaded.current_term(), 1, "loaded term should match");
+        assert_eq!(
+            loaded.persistent.voted_for,
+            Some(1),
+            "loaded voted_for should match"
+        );
+        assert_eq!(
+            loaded.persistent.log.last_log_index(),
+            index,
+            "loaded log index should match"
+        );
+        assert_eq!(
+            loaded.persistent.log.len(),
+            1,
+            "loaded log should have 1 entry"
+        );
+        // 验证日志条目内容
+        let entry = loaded
+            .persistent
+            .log
+            .get(index)
+            .expect("entry should exist");
+        assert_eq!(entry.term, 1, "loaded entry term should match");
+        assert_eq!(
+            entry.command,
+            vec![0x01, 0x02],
+            "loaded entry command should match"
+        );
+    }
+
+    #[test]
+    fn test_p0_7_raft_log_persistence_load_nonexistent_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("nonexistent.json");
+
+        let config = Config::default();
+        let node = RaftNode::load_from_file(&log_path, 1, config);
+
+        // 文件不存在时应创建新节点
+        assert_eq!(node.current_term(), 0, "fresh node term should be 0");
+        assert_eq!(
+            node.persistent.voted_for, None,
+            "fresh node voted_for should be None"
+        );
+        assert_eq!(
+            node.persistent.log.len(),
+            0,
+            "fresh node log should be empty"
+        );
+    }
+
+    #[test]
+    fn test_p0_7_raft_log_persistence_become_follower() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let log_path = dir.path().join("raft_follower.json");
+
+        // 创建节点（term=0），启用持久化
+        let config = Config::default();
+        let mut node = RaftNode::new(1, config.clone()).with_log_path(&log_path);
+
+        // become_follower(5)：term 0→5，voted_for=None
+        node.become_follower(5);
+        assert_eq!(node.current_term(), 5);
+
+        // 从文件加载，验证 term 持久化
+        let loaded = RaftNode::load_from_file(&log_path, 1, config);
+        assert_eq!(
+            loaded.current_term(),
+            5,
+            "term should be persisted after become_follower"
+        );
+        assert_eq!(
+            loaded.persistent.voted_for, None,
+            "voted_for should be None"
+        );
+    }
+
+    #[test]
+    fn test_p0_7_raft_log_persistence_in_memory_mode() {
+        // 默认纯内存模式：不设置 log_path，save_persistent_state 为 no-op
+        let mut node = RaftNode::new(1, Config::default());
+        node.become_candidate();
+        node.become_leader();
+        let _ = node.propose(vec![0x01]).unwrap();
+        // 纯内存模式下不应 panic，状态正常
+        assert_eq!(node.current_term(), 1);
+        assert_eq!(node.log_len(), 1);
     }
 }

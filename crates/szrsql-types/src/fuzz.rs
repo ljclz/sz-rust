@@ -511,7 +511,10 @@ fn arb_column_type() -> BoxedStrategy<ColumnType> {
         Just(ColumnType::Bool),
         Just(ColumnType::Date),
         Just(ColumnType::Timestamp),
-        (0u8..=18u8).prop_map(|scale| ColumnType::Decimal { precision: 38, scale }),
+        (0u8..=18u8).prop_map(|scale| ColumnType::Decimal {
+            precision: 38,
+            scale
+        }),
         Just(ColumnType::Json),
         Just(ColumnType::TsVector),
         Just(ColumnType::TsQuery),

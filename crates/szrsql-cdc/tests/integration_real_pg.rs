@@ -78,7 +78,9 @@ const DST_TABLE2: &str = "cdc_rt_dst_orders";
 fn cleanup_all(client: &mut postgres::Client) {
     let tables = [SRC_TABLE, DST_TABLE, SRC_TABLE2, DST_TABLE2];
     for t in tables {
-        let _ = client.batch_execute(&format!("DROP TRIGGER IF EXISTS _szrsql_cdc_trg_{t} ON {t};"));
+        let _ = client.batch_execute(&format!(
+            "DROP TRIGGER IF EXISTS _szrsql_cdc_trg_{t} ON {t};"
+        ));
         let _ = client.batch_execute(&format!("DROP TABLE IF EXISTS {t} CASCADE;"));
     }
     // 清空 CDC 日志表（保留表结构，便于下次使用）
@@ -139,12 +141,8 @@ fn integration_real_pg_schema_discovery() {
     create_src_table(&mut client, SRC_TABLE);
 
     // 创建源端连接器
-    let source = PgRealSourceConnector::connect(
-        PG_URL,
-        SourceConfig::postgres(PG_URL),
-        NoTls,
-    )
-    .expect("PgRealSourceConnector::connect failed");
+    let source = PgRealSourceConnector::connect(PG_URL, SourceConfig::postgres(PG_URL), NoTls)
+        .expect("PgRealSourceConnector::connect failed");
     source.connect().expect("source.connect failed");
 
     // 发现 schema
@@ -197,12 +195,8 @@ fn integration_real_pg_snapshot_extraction() {
         client.batch_execute(&sql).expect("insert failed");
     }
 
-    let source = PgRealSourceConnector::connect(
-        PG_URL,
-        SourceConfig::postgres(PG_URL),
-        NoTls,
-    )
-    .expect("source connect failed");
+    let source = PgRealSourceConnector::connect(PG_URL, SourceConfig::postgres(PG_URL), NoTls)
+        .expect("source connect failed");
     source.connect().expect("source.connect failed");
     source
         .discover_schemas(&[SRC_TABLE.to_string()])
@@ -228,10 +222,7 @@ fn integration_real_pg_snapshot_extraction() {
     // 验证第一行的 id 列
     let first_row = &rows[0];
     assert!(
-        first_row
-            .columns
-            .iter()
-            .any(|(n, _)| n == "id"),
+        first_row.columns.iter().any(|(n, _)| n == "id"),
         "第一行应包含 id 列"
     );
 
@@ -257,12 +248,8 @@ fn integration_real_pg_cdc_trigger_install() {
     cleanup_all(&mut client);
     create_src_table(&mut client, SRC_TABLE);
 
-    let source = PgRealSourceConnector::connect(
-        PG_URL,
-        SourceConfig::postgres(PG_URL),
-        NoTls,
-    )
-    .expect("source connect failed");
+    let source = PgRealSourceConnector::connect(PG_URL, SourceConfig::postgres(PG_URL), NoTls)
+        .expect("source connect failed");
     source.connect().expect("source.connect failed");
 
     // 安装触发器
@@ -371,8 +358,7 @@ fn integration_real_pg_cdc_insert_roundtrip() {
                             timestamp: ev.timestamp,
                             schema_version: None,
                         };
-                        if let Err(e) =
-                            writer_inner.write_event(&change, &dst_schema, Some(after))
+                        if let Err(e) = writer_inner.write_event(&change, &dst_schema, Some(after))
                         {
                             eprintln!("[rt] write_event failed: {e}");
                         } else {
@@ -542,9 +528,7 @@ fn integration_real_pg_writer_ensure_table_and_write() {
     };
 
     // ensure_table
-    writer
-        .ensure_table(&schema)
-        .expect("ensure_table failed");
+    writer.ensure_table(&schema).expect("ensure_table failed");
 
     // 验证表存在
     let count: i64 = client
@@ -674,7 +658,9 @@ fn integration_real_pg_health_check() {
     let source = PgRealSourceConnector::connect(PG_URL, SourceConfig::postgres(PG_URL), NoTls)
         .expect("source connect failed");
     source.connect().expect("source.connect failed");
-    source.health_check().expect("source health_check should pass");
+    source
+        .health_check()
+        .expect("source health_check should pass");
 }
 
 /// 集成测试 9：位点管理 — ack_offset / confirmed_offset 支持断点续传
@@ -697,16 +683,12 @@ fn integration_real_pg_offset_management() {
     source.connect().expect("source.connect failed");
 
     // 初始位点应为 0
-    let initial = source
-        .confirmed_offset()
-        .expect("confirmed_offset failed");
+    let initial = source.confirmed_offset().expect("confirmed_offset failed");
     assert_eq!(initial.lsn, 0, "初始位点应为 0");
 
     // 设置位点
     let new_offset = SourceOffset::new(12345);
-    source
-        .ack_offset(&new_offset)
-        .expect("ack_offset failed");
+    source.ack_offset(&new_offset).expect("ack_offset failed");
 
     // 验证位点已更新
     let confirmed = source
@@ -763,7 +745,10 @@ fn integration_real_pg_current_lsn() {
 
     // current_lsn 应 > 0
     let after_lsn = source.current_lsn().expect("current_lsn 2 failed");
-    assert!(after_lsn > 0, "插入后 current_lsn 应 > 0，实际: {after_lsn}");
+    assert!(
+        after_lsn > 0,
+        "插入后 current_lsn 应 > 0，实际: {after_lsn}"
+    );
 
     // 清理
     source
@@ -943,9 +928,7 @@ fn integration_real_pg_writer_execute_ddl() {
     let writer = PgRealWriter::new(writer_client).expect("PgRealWriter::new failed");
 
     // 执行 CREATE TABLE DDL
-    let ddl = format!(
-        "CREATE TABLE IF NOT EXISTS {DST_TABLE} (id BIGINT PRIMARY KEY, val TEXT);"
-    );
+    let ddl = format!("CREATE TABLE IF NOT EXISTS {DST_TABLE} (id BIGINT PRIMARY KEY, val TEXT);");
     writer.execute_ddl(&ddl).expect("execute_ddl failed");
 
     // 验证表已创建

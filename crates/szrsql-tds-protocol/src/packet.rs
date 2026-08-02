@@ -264,8 +264,10 @@ impl PacketCodec {
         }
 
         Ok(TdsPacket {
-            packet_type: last_packet_type
-                .ok_or(PacketError::Incomplete { expected: 1, got: 0 })?,
+            packet_type: last_packet_type.ok_or(PacketError::Incomplete {
+                expected: 1,
+                got: 0,
+            })?,
             status: last_status,
             payload: aggregated_payload,
         })
@@ -404,10 +406,19 @@ mod tests {
 
     #[test]
     fn test_packet_type_from_byte_known() {
-        assert_eq!(TdsPacketType::from_byte(0x01), Some(TdsPacketType::SqlBatch));
-        assert_eq!(TdsPacketType::from_byte(0x04), Some(TdsPacketType::Response));
+        assert_eq!(
+            TdsPacketType::from_byte(0x01),
+            Some(TdsPacketType::SqlBatch)
+        );
+        assert_eq!(
+            TdsPacketType::from_byte(0x04),
+            Some(TdsPacketType::Response)
+        );
         assert_eq!(TdsPacketType::from_byte(0x10), Some(TdsPacketType::Login7));
-        assert_eq!(TdsPacketType::from_byte(0x11), Some(TdsPacketType::PreLogin));
+        assert_eq!(
+            TdsPacketType::from_byte(0x11),
+            Some(TdsPacketType::PreLogin)
+        );
         assert_eq!(
             TdsPacketType::from_byte(0x12),
             Some(TdsPacketType::TokenlessStream)
@@ -561,7 +572,9 @@ mod tests {
 
         let (mut client, mut server) = duplex(1024);
         let original = TdsPacket::new(TdsPacketType::SqlBatch, b"SELECT 1".to_vec()).unwrap();
-        PacketCodec::write_packet(&mut server, &original).await.unwrap();
+        PacketCodec::write_packet(&mut server, &original)
+            .await
+            .unwrap();
 
         let received = PacketCodec::read_packet(&mut client).await.unwrap();
         assert_eq!(received, original);
@@ -591,7 +604,9 @@ mod tests {
         let (mut client, mut server) = duplex(64 * 1024 * 2);
         let big_payload = vec![0xABu8; MAX_PAYLOAD_LEN + 100];
         let original = TdsPacket::new(TdsPacketType::Response, big_payload.clone()).unwrap();
-        PacketCodec::write_packet(&mut server, &original).await.unwrap();
+        PacketCodec::write_packet(&mut server, &original)
+            .await
+            .unwrap();
 
         let received = PacketCodec::read_packet(&mut client).await.unwrap();
         assert_eq!(received.packet_type, TdsPacketType::Response);

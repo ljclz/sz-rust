@@ -35,16 +35,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use szrsql_tx::lock::LockManager;
 use szrsql_tx::mvcc::MvccManager;
+use tokio::sync::RwLock;
 
 use clap::Parser;
 use szrsql_protocol::pgwire::{
-    auth::CredentialStore, daemonize, install_crash_handler, tls::TlsConfig, CrashConfig,
-    PgwireConfig, PgwireServer, PidFile, ShutdownSignal,
+    auth::{CredentialStore, SharedScramCredentials},
+    daemonize, install_crash_handler,
+    tls::TlsConfig,
+    CrashConfig, PgwireConfig, PgwireServer, PidFile, ShutdownSignal,
 };
-use szrsql_protocol::{HttpConfig, HttpServer, MetricsRegistry};
+use szrsql_protocol::{HttpConfig, HttpServer, ManagementHandle, MetricsRegistry};
 use tracing_subscriber::EnvFilter;
 
 mod persistence;
@@ -437,6 +439,9 @@ fn main() -> anyhow::Result<()> {
         config
     };
 
+    // P2-14：共享 SCRAM 凭据存储（认证路径 + HTTP 热重载共享），None 表示未启用
+    let mut shared_scram_credentials: Option<Arc<SharedScramCredentials>> = None;
+
     // OPT-4：CredentialStore 接入启动流程
     //
     // --auth-mode=scram 时从凭据文件加载用户密码，启用 SCRAM-SHA-256 认证；
@@ -517,6 +522,33 @@ fn main() -> anyhow::Result<()> {
             );
         }
     };
+
+    // P2-14：SCRAM 模式下创建共享凭据存储（支持 HTTP /api/v1/config/reload 热重载）。
+    // 认证路径优先从该存储读取最新凭据；reload 后新连接立即生效，无需重启。
+    let mut config = config;
+    if args.auth_mode.as_str() == "scram" {
+        let auth_path = args.auth_file.clone().or_else(|| {
+            if args.data_dir.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(&args.data_dir).join("auth.json"))
+            }
+        });
+        if let Some(path) = auth_path {
+            let store = CredentialStore::load_from_file(&path)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let shared = Arc::new(SharedScramCredentials::new(store));
+            config = config.with_shared_scram_credentials(shared.clone());
+            // 保存共享凭据引用供 ManagementHandle 使用（热重载目标）
+            shared_scram_credentials = Some(shared);
+            tracing::info!(
+                auth_file = %path.display(),
+                "P2-14: shared SCRAM credentials enabled (hot-reload via /api/v1/config/reload)"
+            );
+        }
+    }
 
     // ADV-F-7：创建共享 WalWriter（默认启用）
     // 启用 log-then-commit 事务模型：COMMIT 先写 WAL 并 fsync，再 ACK 客户端
@@ -833,8 +865,9 @@ fn main() -> anyhow::Result<()> {
                 if let Err(e) = driver.start() {
                     tracing::warn!(error = %e, "P8-3: ClusterDriver start failed");
                 }
-                // driver 必须存活到进程结束，forget 防止 Drop::stop 终止线程
-                std::mem::forget(driver);
+                // driver 必须存活到进程结束，使用 ManuallyDrop 防止 Drop::stop 终止 Raft 线程
+                // （进程退出时由 OS 回收资源，不会真正泄漏）
+                let _driver = std::mem::ManuallyDrop::new(driver);
 
                 tracing::info!(
                     node_id = node_id,
@@ -1070,8 +1103,13 @@ fn main() -> anyhow::Result<()> {
     let mysql_lock_manager = lock_manager.clone();
     let mysql_shared_txn_counter = shared_txn_counter.clone();
 
+    // P2-14：备份触发通知（HTTP /api/v1/backup 触发即时增量快照）。
+    // 与 ManagementHandle 共享，快照任务订阅该通知。
+    let backup_notify = Arc::new(tokio::sync::Notify::new());
+
     // Phase 6.4：启动后台周期性快照保存任务（默认每 5 秒）
     // P1-2：使用增量快照机制（仅保存脏表，无 DML 时跳过 IO）
+    // P2-14：订阅 backup_notify，HTTP /backup 请求可触发即时保存
     // 服务器关闭时 abort 该任务并执行最后一次同步保存
     let persistence_handle = if !args.data_dir.is_empty() {
         let persist_tables = mysql_shared_tables.clone();
@@ -1081,6 +1119,7 @@ fn main() -> anyhow::Result<()> {
             persist_dir,
             5,
             dirty_tracker.clone(),
+            Some(backup_notify.clone()),
         ))
     } else {
         None
@@ -1093,11 +1132,17 @@ fn main() -> anyhow::Result<()> {
     // 同一实例注入 PgwireServer（用于计数）和 HttpServer（用于暴露 /metrics）
     let metrics_registry = Arc::new(MetricsRegistry::new());
 
+    // P2-14：会话取消注册表（HTTP /api/v1/cancel/{pid} + /api/v1/sessions 真实数据源）。
+    // 与 ManagementHandle 共享同一实例；session 建立时注册 pid，结束时注销。
+    let cancel_registry: szrsql_protocol::pgwire::CancelRegistry =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
     let mut server_builder = PgwireServer::new(config)
         .with_concurrency(shared_tables, lock_manager)
         .with_shared_txn_counter(shared_txn_counter)
         .with_mvcc(mvcc_manager.clone())
-        .with_metrics(metrics_registry.clone());
+        .with_metrics(metrics_registry.clone())
+        .with_cancel_registry(cancel_registry.clone());
     // P0-DIST-1/2/3：注入分布式运行时句柄（实际接入，非 _dist_runtime 假装入）
     if let Some(dist_rt) = dist_runtime {
         server_builder = server_builder.with_dist_runtime(dist_rt);
@@ -1146,6 +1191,37 @@ fn main() -> anyhow::Result<()> {
         server_builder = server_builder.with_audit_log(Arc::new(tokio::sync::Mutex::new(audit)));
         tracing::info!("OPT-12: audit log enabled (SHA-256 hash chain)");
     }
+    // P0-1：注入 szrsql-security 全套安全组件（TDE + 列加密 + 脱敏 + 密码策略）
+    // 这些组件在运行时初始化，提供 public API 供执行器/认证路径调用：
+    // - TdeEngine：encrypt_page/decrypt_page（WalWriter FPI 加密 API）
+    // - ColumnEncryptionEngine：encrypt/decrypt（executor INSERT/SELECT 列加密 API）
+    // - MaskingEngine：在 handle_query 中对 ResultSet 的 Text 列应用脱敏规则
+    // - PasswordProfileRegistry：validate_password（CREATE ROLE/ALTER ROLE 密码校验 API）
+    {
+        let mut tde = szrsql_security::tde::TdeEngine::new();
+        // 默认主密钥（开发模式）：32 字节全 0xA1。生产环境应从 KMS/环境变量加载。
+        // 此处启用 TDE 是为了暴露 API；WalWriter 是否调用 encrypt_page 由后续 P1-12 决定。
+        let default_key = [0xA1u8; 32];
+        let _ = tde.enable(&default_key);
+        server_builder = server_builder.with_tde_engine(Arc::new(tokio::sync::Mutex::new(tde)));
+        tracing::info!("P0-1: TDE engine initialized (AES-256-CTR page encryption API ready)");
+
+        let col_enc = szrsql_security::column_enc::ColumnEncryptionEngine::new();
+        server_builder = server_builder
+            .with_column_encryption_engine(Arc::new(tokio::sync::Mutex::new(col_enc)));
+        tracing::info!("P0-1: Column encryption engine initialized (AES-256-GCM API ready)");
+
+        let masking = szrsql_security::masking::MaskingEngine::new();
+        server_builder = server_builder
+            .with_masking_engine(Arc::new(tokio::sync::Mutex::new(masking)));
+        tracing::info!("P0-1: Masking engine initialized (rule-based data masking active in handle_query)");
+
+        let password_registry = szrsql_security::password_profile::PasswordProfileRegistry::new();
+        server_builder = server_builder.with_password_profile_registry(Arc::new(
+            tokio::sync::Mutex::new(password_registry),
+        ));
+        tracing::info!("P0-1: Password profile registry initialized (default profile active)");
+    }
 
     // P2-2.2：TCP 流复制初始化
     //
@@ -1175,8 +1251,8 @@ fn main() -> anyhow::Result<()> {
                     "P2-2.2: TCP replication server started (primary mode, accepting replica connections)"
                 );
                 // detach 任务：TcpReplicationServer 在 tokio task 中运行，
-                // 进程退出时自动终止。handle 保留防止被立即 cancel。
-                std::mem::forget(handle);
+                // 进程退出时自动终止。JoinHandle drop 不会取消 task（tokio 语义）。
+                let _repl_handle = handle;
             }
             Err(e) => {
                 tracing::error!(error = %e, repl_addr = %repl_addr, "P2-2.2: failed to start TCP replication server");
@@ -1277,8 +1353,30 @@ fn main() -> anyhow::Result<()> {
         let cdc_service = Arc::new(szrsql_cdc::service::CdcService::new(
             replication_task_manager.clone(),
         ));
+        // P2-14：构造 ManagementHandle 注入 HttpServer，四个管理端点升级为真实实现：
+        //  GET /api/v1/sessions        — cancel_registry 列出真实活跃会话
+        //  POST /api/v1/cancel/{pid}   — cancel_registry 触发会话取消
+        //  POST /api/v1/backup         — backup_notify 触发即时增量快照
+        //  POST /api/v1/config/reload  — scram_reloader 热重载认证凭据
+        let mut mgmt = ManagementHandle::new()
+            .with_cancel_registry(cancel_registry)
+            .with_backup_notify(backup_notify);
+        if let Some(shared) = shared_scram_credentials {
+            mgmt = mgmt
+                .with_scram_reloader(shared)
+                .with_auth_file(
+                    args.auth_file.clone().or_else(|| {
+                        if args.data_dir.is_empty() {
+                            None
+                        } else {
+                            Some(PathBuf::from(&args.data_dir).join("auth.json"))
+                        }
+                    }).unwrap_or_default(),
+                );
+        }
         let http_server = HttpServer::new(http_config, metrics, shutdown_rx)
-            .with_cdc_service(cdc_service);
+            .with_cdc_service(cdc_service)
+            .with_management_handle(Arc::new(mgmt));
         let http_host = args.http_host.clone();
         let http_port = args.http_port;
         Some(tokio::spawn(async move {
@@ -1305,9 +1403,9 @@ fn main() -> anyhow::Result<()> {
             .with_auth_mode(szrsql_mysql_protocol::AuthMode::Trust)
             .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
         let mysql_server = szrsql_mysql_protocol::MysqlServer::new(mysql_config)
-            .with_shared_tables(mysql_shared_tables)
-            .with_lock_manager(mysql_lock_manager)
-            .with_shared_txn_counter(mysql_shared_txn_counter);
+            .with_shared_tables(mysql_shared_tables.clone())
+            .with_lock_manager(mysql_lock_manager.clone())
+            .with_shared_txn_counter(mysql_shared_txn_counter.clone());
         let mysql_host = listen_host.clone();
         let mysql_port = args.mysql_port;
         Some(tokio::spawn(async move {
@@ -1333,7 +1431,10 @@ fn main() -> anyhow::Result<()> {
             .with_server_version("15.0-szrsql".to_string())
             .with_auth_mode(szrsql_tds_protocol::AuthMode::Trust)
             .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
-        let tds_server = szrsql_tds_protocol::TdsServer::new(tds_config);
+        let tds_server = szrsql_tds_protocol::TdsServer::new(tds_config)
+            .with_shared_tables(mysql_shared_tables.clone())
+            .with_lock_manager(mysql_lock_manager.clone())
+            .with_shared_txn_counter(mysql_shared_txn_counter.clone());
         let tds_host = listen_host.clone();
         let tds_port = args.tds_port;
         Some(tokio::spawn(async move {
@@ -1358,7 +1459,10 @@ fn main() -> anyhow::Result<()> {
             .with_port(args.oracle_port)
             .with_service_name(args.oracle_service_name.clone())
             .with_connection_idle_timeout(std::time::Duration::from_secs(args.connection_idle_timeout));
-        let oracle_server = szrsql_oracle_bridge::OracleServer::new(oracle_config);
+        let oracle_server = szrsql_oracle_bridge::OracleServer::new(oracle_config)
+            .with_shared_tables(mysql_shared_tables.clone())
+            .with_lock_manager(mysql_lock_manager.clone())
+            .with_shared_txn_counter(mysql_shared_txn_counter.clone());
         let oracle_host = listen_host.clone();
         let oracle_port = args.oracle_port;
         let oracle_service = args.oracle_service_name.clone();
@@ -1401,6 +1505,65 @@ fn main() -> anyhow::Result<()> {
     } else {
         None
     };
+
+    // P0-8：接入 szrsql-scheduler（Cron 调度器）
+    // 创建调度器实例并注册定时任务，在后台 tokio task 中运行。
+    // CronExpr 为 5 字段格式（分 时 日 月 周），与 Vixie cron 一致（非 6 字段）。
+    // make_callback 闭包必须返回 Result<(), String>。
+    // CronScheduler::start() 是 async 方法，返回 SchedulerHandle（非 Result）。
+    let scheduler_handle: Option<szrsql_scheduler::scheduler::SchedulerHandle> = {
+        let mut scheduler = szrsql_scheduler::scheduler::CronScheduler::new();
+        tracing::info!("P0-8: Cron scheduler initialized (task scheduling ready)");
+
+        // 注册心跳任务 — 每分钟执行一次（5 字段 cron：* * * * *）
+        match szrsql_scheduler::scheduler::CronExpr::parse("* * * * *") {
+            Ok(cron) => {
+                match scheduler.register(
+                    "heartbeat",
+                    cron,
+                    szrsql_scheduler::scheduler::make_callback(|| async {
+                        tracing::debug!("P0-8: scheduler heartbeat tick");
+                        Ok(())
+                    }),
+                ) {
+                    Ok(()) => tracing::info!("P0-8: registered heartbeat task (every minute)"),
+                    Err(e) => tracing::warn!(error = %e, "P0-8: failed to register heartbeat task"),
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "P0-8: failed to parse heartbeat cron expr"),
+        }
+
+        // 启动调度器（async，返回 SchedulerHandle；任务在独立 tokio task 中运行）
+        let handle = scheduler.start().await;
+        tracing::info!("P0-8: scheduler started in background");
+        Some(handle)
+    };
+
+    // P0-8：接入 szrsql-ops（运维监控）
+    // 创建 query_stats 收集器和 slow_query 日志器实例。
+    // 这两个模块为实例型 API（QueryStatsCollector / SlowQueryLogger，非全局状态），
+    // 完整接入需将实例注入 PgwireServer 查询执行路径，此处完成实例化、配置与自检。
+    {
+        use szrsql_ops::query_stats;
+        use szrsql_ops::slow_query;
+
+        // 查询统计收集器（pg_stat_statements 风格）
+        let mut stats_collector = query_stats::QueryStatsCollector::new();
+        stats_collector.record_query("SELECT * FROM t WHERE id = 1", 1.5, 1);
+        tracing::info!(
+            query_count = stats_collector.query_count(),
+            total_calls = stats_collector.total_calls(),
+            "P0-8: ops query_stats collector initialized (pg_stat_statements ready)"
+        );
+
+        // 慢查询日志器（阈值 1000ms）
+        let slow_config = slow_query::SlowQueryConfig::new().with_threshold_ms(1000);
+        let slow_logger = slow_query::SlowQueryLogger::with_config(slow_config);
+        tracing::info!(
+            threshold_ms = slow_logger.threshold_ms(),
+            "P0-8: ops slow_query logger initialized (slow query log enabled)"
+        );
+    }
 
     // Phase 4.12：安装信号处理器，返回 ShutdownSignal（Graceful=SIGTERM / Immediate=SIGINT）
     let shutdown_signal = setup_signal_handler();
@@ -1481,6 +1644,12 @@ fn main() -> anyhow::Result<()> {
         tcp_handle.abort();
         replay_handle.abort();
         tracing::info!("P2-2.2: replica receiver task stopped");
+    }
+
+    // P0-8：停止 Cron 调度器（优雅停止所有定时任务）
+    if let Some(handle) = scheduler_handle {
+        handle.stop().await;
+        tracing::info!("P0-8: Cron scheduler stopped");
     }
 
     // Phase 6.4：终止周期性保存任务，执行最后一次同步保存

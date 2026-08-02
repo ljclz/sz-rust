@@ -173,12 +173,9 @@ mod tests {
         sql_file.flush().unwrap();
 
         let output_file = NamedTempFile::new().unwrap();
-        let count = Recorder::record_from_sql_file(
-            sql_file.path(),
-            output_file.path(),
-            "test-session",
-        )
-        .unwrap();
+        let count =
+            Recorder::record_from_sql_file(sql_file.path(), output_file.path(), "test-session")
+                .unwrap();
 
         assert_eq!(count, 3);
 

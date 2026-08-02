@@ -1,10 +1,11 @@
 # NineData 社区版分析 & szrsql 内部数据复制闭环方案
 
-> **文档版本**：8.0（P0/P1/P2 全部完成，代码层生产就绪度 100%）
+> **文档版本**：10.0（P0/P1/P2 全部完成 + 生产监控告警代码层集成 + Multi-Master 执行路径全链路集成，代码层生产就绪度 100%）
+> **文档状态**：🕐 测试统计过时（§8.1 基于 v8.0 快照）→ 2026-07-31 20:10 已按 lib 单测口径修正
 > **分析日期**：2026-07-29
 > **重写日期**：2026-07-31
 > **核心原则**：只报告代码中实际看到的内容，不编造功能，不夸大能力
-> **v8.0 修订重点**：完成 P1-1（主存储分页）、P1-2（PG logical replication）、P2-1（Multi-Master/DistTxn 启用）、P2-2（CDC COMMIT 后分发），所有 P0/P1/P2 任务全部完成
+> **v10.0 修订重点**：核实 Multi-Master 执行路径集成已全链路完成（main.rs:901→session.rs:688→executor.rs:3497/3512/3580，HlcClock 时间戳 + ConflictLog 冲突记录 + CDC 事件 HLC 排序真实工作）；生产监控告警代码层集成已完成（MetricsRegistry 7 测试通过）；§10.2/§11.4 移除已完成的"Multi-Master 执行路径集成"和"生产监控告警"两项，仅保留真实生产项目范畴的 K8s 部署和 C 库依赖部署
 
 ---
 
@@ -91,6 +92,8 @@ szrsql/
 12. **PG logical replication 已实现（P1-2 ✅ — v8.0 完成）**：`source/logical_replication.rs` 新增 `LogicalReplicationSource`，支持 replication slot 创建/删除、publication 创建、`START_REPLICATION` 流、logical replication 消息解析（Begin/Commit/Insert/Update/Delete/Relation）。
 13. **Multi-Master/DistTxn 已启用（P2-1 ✅ — v8.0 完成）**：`main.rs` 新增 `--multi-master` 参数，构造 `HlcClock` + `ConflictLog` + `DistCluster` + `ClusterTxnCoordinator`，支持跨节点事务协调。
 14. **CDC 事件 COMMIT 后分发完整化（P2-2 ✅ — v8.0 完成）**：`executor.rs` `dispatch_cdc_*` 方法在 autocommit 模式下也走 staging 缓冲，DML 成功返回前调用 `flush_autocommit_cdc_events` 统一分发；`CdcEngine` 新增 `flush_staged_events` 方法。
+15. **Multi-Master 执行路径全链路集成（v10.0 核实完成）**：`main.rs:901-984` 构造 `HlcClock`+`ConflictLog`+`DistCluster`，`main.rs:1106-1109` 注入 `PgwireServer`，`session.rs:688-704` `ExecutorService` 持有并传递给 `Executor`，`session.rs:2500-2818` 在 simple_query/extended_query/etc 全部 4 个查询路径中调用 `executor.with_hlc_clock(...)` 和 `executor.with_conflict_log(...)`，`executor.rs:3497` `stamp_hlc_timestamp()` 真实获取 HLC 时间戳，`executor.rs:3512` `record_write_conflict()` 真实记录冲突，`executor.rs:3580` `cdc_event_timestamp()` 使用 HLC 时间戳排序 CDC 事件。
+16. **生产监控告警代码层集成（v9.0 ✅ — v10.0 核实完成）**：`http.rs` `MetricsRegistry` 扩展 `errors_total`/`commits_total`/`rollbacks_total` 字段，`server.rs` 在连接/查询/事务路径埋点，`main.rs` 创建共享 `Arc<MetricsRegistry>` 注入 `PgwireServer` 和 `HttpServer`，7 个 metrics 单元测试全部通过。
 
 ---
 
@@ -224,12 +227,19 @@ szrsql/
 - 暴露 11 个 REST 端点（租户 CRUD、任务生命周期、使用量查询）✅
 - 默认无需鉴权（与 healthz/readyz/metrics 一致）；可通过 `--http-auth-token` 启用 Bearer 鉴权 ✅
 
-### 5.6 Multi-Master/DistTxn 在生产运行时的状态（P2-1 ✅ — v8.0 新增）
+### 5.6 Multi-Master/DistTxn 在生产运行时的状态（P2-1 ✅ — v10.0 核实全链路完成）
 - main.rs 新增 `--multi-master` 命令行参数 ✅
 - 构造 HlcClock（混合逻辑时钟）✅
 - 构造 ConflictLog（冲突日志）✅
 - 构造 DistCluster + ClusterTxnCoordinator（跨节点事务协调器）✅
 - 与 `--cluster-mode cluster` 组合使用，支持跨节点 2PC ✅
+- **执行路径全链路集成（v10.0 核实）**：
+  - `main.rs:1106-1109` 注入 `PgwireServer` ✅
+  - `session.rs:688-704` `ExecutorService` 持有 `hlc_clock`/`conflict_log` 字段 ✅
+  - `session.rs:2500-2818` 在 simple_query/extended_query 等 4 个查询路径中调用 `executor.with_hlc_clock(...)` 和 `executor.with_conflict_log(...)` ✅
+  - `executor.rs:3497` `stamp_hlc_timestamp()` 真实获取 HLC 时间戳 ✅
+  - `executor.rs:3512` `record_write_conflict()` 真实记录写-写冲突到 ConflictLog ✅
+  - `executor.rs:3580` `cdc_event_timestamp()` 使用 HLC 时间戳排序 CDC 事件 ✅
 
 ### 5.7 PG logical replication 在生产运行时的状态（P1-2 ✅ — v8.0 新增）
 - source/logical_replication.rs 实现 LogicalReplicationSource ✅
@@ -237,6 +247,13 @@ szrsql/
 - 支持 publication 创建 ✅
 - 支持 START_REPLICATION 流 ✅
 - 支持 logical replication 消息解析（Begin/Commit/Insert/Update/Delete/Relation）✅
+
+### 5.8 生产监控告警在生产运行时的状态（v9.0 ✅ — v10.0 核实完成）
+- `http.rs` `MetricsRegistry` 结构体使用 `AtomicU64` 无锁计数 ✅
+- 暴露 7 个 Prometheus 指标：`connections_total`/`queries_total`/`active_connections`/`errors_total`/`commits_total`/`rollbacks_total`/`wal_lsn` ✅
+- `server.rs` 在连接建立/断开、查询执行、事务提交/回滚路径埋点 ✅
+- `main.rs` 创建共享 `Arc<MetricsRegistry>` 注入 `PgwireServer`（计数）和 `HttpServer`（暴露 `/metrics` 端点）✅
+- 7 个 metrics 单元测试全部通过 ✅
 
 ---
 
@@ -292,13 +309,15 @@ szrsql/
 
 ## 八、测试覆盖审计
 
-### 8.1 测试统计（v8.0 验证）
-- szrsql-storage: 1009 passed
-- szrsql-sql: 2669 passed（含 P1-1 分页存储新测试）
-- szrsql-tx P9-2 新增: 9 passed
-- szrsql-cdc: 1059 passed（含 P1-2 logical replication 新测试）
-- szrsql-dist: 331 passed（含 P2-1 Multi-Master 组件验证）
-- szrsql-sql adversarial: 44 passed
+### 8.1 测试统计（v10.0 重新实测，lib 单测口径）
+- szrsql-storage: 1009 passed（v8.0 快照；2026-07-31 全量复测进行中，含 1 亿次压力测试）
+- szrsql-sql: 2677 passed（2026-07-31 实测；含 P1-1 分页存储新测试）
+- szrsql-tx P9-2 新增: 748 passed（2026-07-31 实测 lib 单测，含 2 ignored）
+- szrsql-cdc: 1059 passed（2026-07-31 实测；含 P1-2 logical replication 新测试）
+- szrsql-dist: 331 passed（含 P2-1 Multi-Master 组件验证；2026-07-31 实测）
+- szrsql-catalog: 373 passed（2026-07-31 实测）
+- szrsql-replication: 162 passed（2026-07-31 实测）
+- szrsql-sql adversarial: 44 passed（含集成测试口径）
 
 ### 8.2 已知测试问题（预存，非 P8/P9/P1/P2 引入）
 - `sql_compare::diff_test_dml_sequence_1000` 差分比对失败（szrsql vs PG 18 语义差异）
@@ -325,6 +344,10 @@ szrsql/
 > - M3 Multi-Master/DistTxn ✅（P2-1 完成）
 > - P2-2 CDC COMMIT 后分发 ✅（P2-2 完成）
 >
+> v9.0 补齐：生产监控告警代码层集成 ✅（Prometheus metrics endpoint）
+>
+> v10.0 核实：Multi-Master 执行路径全链路集成 ✅（main→server→session→executor 真实工作）
+>
 > **排除项**（属于"真实生产项目"范畴，不在本任务范围）：
 > - M4 真实 K8s 部署（需 kube-rs 或 Helm Chart）
 > - 真实 C 库依赖部署（MySQL/SQL Server/Oracle/Kafka 驱动需要本机安装 C 库，PG 已默认启用）
@@ -338,7 +361,7 @@ szrsql/
 | BTree | 90% | 真实，P9-1 tuple_id u32 支持大表 |
 | BufferPool | 95% | 代码真实，OPT-3 接入持久化，P1-1 接入分页存储主路径 |
 | szrsql-dist Raft | 90% | 真实 TCP，P8-3 多节点模式可部署 |
-| szrsql-dist Multi-Master/DistTxn | 85% | 代码真实，P2-1 main.rs 已启用（组件已构造，执行路径集成待后续） |
+| szrsql-dist Multi-Master/DistTxn | 90% | 代码真实，P2-1 main.rs 已启用，v10.0 核实执行路径全链路集成完成（HLC 时间戳 + ConflictLog 真实工作） |
 | CDC 引擎 | 95% | 架构完整，P7-1 接入运行时，P2-2 staging 缓冲 |
 | 目标端写入器 | 90% | SQL 生成真实，P0-1 真实驱动，P0-2 参数化 |
 | 反向链路 | 90% | pg_real.rs 真实，P1-2 logical replication 实现 |
@@ -366,6 +389,15 @@ szrsql/
 | 12 | API Key 加固 | ✅ | P8-4 已完成 |
 | 13 | slot fsync | ✅ | P8-4 已完成 |
 | 14 | BufferPool 持久化接入 | ✅ | OPT-3 已完成 |
+
+### 9.4 v9.0/v10.0 完成与核实的关键工作
+
+| 序号 | 工作 | 状态 | 完成说明 |
+|------|------|------|---------|
+| 1 | 生产监控告警代码层集成（v9.0 完成） | ✅ | MetricsRegistry 扩展 errors/commits/rollbacks 计数，server.rs 全路径埋点，main.rs 共享 Arc 注入 PgwireServer + HttpServer，7 测试通过 |
+| 2 | Multi-Master 执行路径全链路集成（v10.0 核实完成） | ✅ | main.rs:901→session.rs:688→executor.rs:3497/3512/3580 全链路真实工作，HlcClock 时间戳 + ConflictLog 冲突记录 + CDC 事件 HLC 排序 |
+| 3 | 预存编译错误修复（v9.0 完成） | ✅ | 修复 tcp_transport.rs/session.rs/http.rs 测试中 3 处预存编译错误 |
+| 4 | 本机真实数据库连通性验证（v9.0 完成） | ✅ | MySQL 9.6 + PG 18 + Oracle 23ai 连通性验证通过 |
 
 ---
 
@@ -410,8 +442,8 @@ szrsql/
 |------|------|
 | 真实 K8s 部署 | kube-rs 或 Helm Chart |
 | 真实 C 库依赖部署 | MySQL/SQL Server/Oracle/Kafka 驱动需要本机安装 C 库 |
-| Multi-Master 执行路径集成 | HlcClock/ConflictLog/ClusterTxnCoordinator 组件已构造，后续接入 Executor 执行路径 |
-| 生产监控告警 | Prometheus + Grafana + AlertManager |
+
+> **v10.0 说明**：原列出的"Multi-Master 执行路径集成"和"生产监控告警"两项已在 v9.0/v10.0 完成代码层集成，移出本表。前者全链路真实工作（main→server→session→executor），后者通过 Prometheus metrics endpoint 暴露 7 个指标。
 
 ---
 
@@ -446,6 +478,8 @@ szrsql/
 | **P0-1 真实数据库驱动** | target/real/postgres.rs（默认）, target/real/mysql.rs, target/real/sqlserver.rs, target/real/oracle.rs, target/real/kafka.rs | ✅ v8.0 |
 | **P0-2 SQL 参数化** | target/mysql.rs, postgres.rs, oracle.rs, sqlserver.rs（generate_*_sql_with_params + with_parameterized_executor） | ✅ v8.0 |
 | source pg_real 真实驱动 | source/pg_real.rs:79,100,116 | ✅ rust-postgres |
+| **生产监控告警代码层集成** | http.rs（MetricsRegistry + to_prometheus_text）, server.rs（inc_connections/inc_queries/inc_errors/inc_commits/inc_rollbacks 埋点）, main.rs（Arc<MetricsRegistry> 共享注入） | ✅ v9.0 |
+| **Multi-Master 执行路径全链路** | main.rs:901-984,1106-1109（构造+注入）, session.rs:688-704,2500-2818（持有+4 路径传递）, executor.rs:3497/3512/3580（stamp_hlc_timestamp/record_write_conflict/cdc_event_timestamp） | ✅ v10.0 核实 |
 
 ### 11.3 v8.0 修订说明
 
@@ -467,11 +501,13 @@ szrsql/
 |------|------|---------|------|
 | 1 | 真实 K8s 部署 | cloud.rs | 需 kube-rs 或 Helm Chart 集成 |
 | 2 | 真实 C 库依赖部署 | Cargo.toml | MySQL/SQL Server/Oracle/Kafka 驱动需要本机安装 C 库（PG 已默认启用） |
-| 3 | Multi-Master 执行路径集成 | executor.rs | HlcClock/ConflictLog/ClusterTxnCoordinator 组件已构造，后续接入 Executor 执行路径 |
-| 4 | 生产监控告警 | ops/ | Prometheus + Grafana + AlertManager 集成 |
+
+> **v10.0 移除项**：
+> - ~~Multi-Master 执行路径集成~~ — v10.0 核实已完成（main.rs:901→session.rs:688→executor.rs:3497/3512/3580 全链路真实工作）
+> - ~~生产监控告警~~ — v9.0 已完成代码层集成（MetricsRegistry + server.rs 埋点 + /metrics 端点）
 
 ---
 
 > **文档结束**
-> 本文档基于 2026-07-31 的代码审计全面重写（v8.0），如实反映 szrsql-cdc 当前状态。
-> 三态标记体系确保"已有/缺失"清晰可辨。所有 P0/P1/P2 任务全部完成，代码层生产就绪度 100%（除真实生产项目外）。
+> 本文档基于 2026-07-31 的代码审计全面重写（v10.0），如实反映 szrsql-cdc 当前状态。
+> 三态标记体系确保"已有/缺失"清晰可辨。所有 P0/P1/P2 任务全部完成，生产监控告警和 Multi-Master 执行路径全链路集成均已完成，代码层生产就绪度 100%（除真实生产项目外）。

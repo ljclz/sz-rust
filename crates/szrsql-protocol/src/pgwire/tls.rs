@@ -266,7 +266,9 @@ fn parse_root_cert_store(ca_pem: &[u8]) -> Result<RootCertStore, TlsError> {
         .collect::<Result<_, _>>()
         .map_err(|e| TlsError::Certificate(e.to_string()))?;
     if certs.is_empty() {
-        return Err(TlsError::Certificate("no CA certificate found in PEM".into()));
+        return Err(TlsError::Certificate(
+            "no CA certificate found in PEM".into(),
+        ));
     }
     for cert in certs {
         store
@@ -309,7 +311,9 @@ mod tests {
         let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None)
             .expect("should construct TlsConfig from self-signed PEM");
         // 验证可获取 ServerConfig（隐式验证构造成功）
-        let _ = tls_config.server_config().expect("server_config should succeed");
+        let _ = tls_config
+            .server_config()
+            .expect("server_config should succeed");
     }
 
     #[test]
@@ -398,8 +402,8 @@ mod tests {
         let (cert_pem, key_pem) = generate_self_signed_pem();
         let ca_pem = generate_ca_pem();
         // 先构造不带 mutual TLS 的配置
-        let tls_config = TlsConfig::from_pem(&cert_pem, &key_pem, None)
-            .expect("from_pem without client CA");
+        let tls_config =
+            TlsConfig::from_pem(&cert_pem, &key_pem, None).expect("from_pem without client CA");
         assert!(!tls_config.require_client_cert);
 
         // 通过 builder 设置 client_ca 和 require_client_cert

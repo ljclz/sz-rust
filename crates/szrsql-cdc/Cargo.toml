@@ -31,6 +31,8 @@ chrono = { workspace = true }
 postgres = { version = "0.19", features = ["with-chrono-0_4", "with-serde_json-1"] }
 # P8-4 安全加固：API Key 随机生成（256 bit 熵）
 rand = { workspace = true }
+# P0-6：Mutex/RwLock 中毒修复（parking_lot 无中毒语义，避免 .unwrap() 级联 panic）
+parking_lot = { workspace = true }
 
 # P0-1：真实数据库驱动（按需启用，通过 feature flag 控制）
 # MySQL：纯 Rust 实现，无 C 库依赖

@@ -33,8 +33,9 @@ pub mod types;
 pub use auth::{AuthError, AuthMode, AuthSession};
 pub use command::{Command, CommandError, RpcCommand, RpcParam};
 pub use handshake::{HandshakeError, Login7, PreLogin, PreLoginOption, PreLoginOptionType};
-pub use packet::{PacketCodec, PacketError, TdsPacket, TdsPacketStatus, TdsPacketType,
-    HEADER_LEN, MAX_PACKET_LEN};
+pub use packet::{
+    PacketCodec, PacketError, TdsPacket, TdsPacketStatus, TdsPacketType, HEADER_LEN, MAX_PACKET_LEN,
+};
 pub use result_set::{
     encode_envchange, ColumnMetaData, DoneStatus, EnvChangeType, ResultSetEncoder, TdsRow,
 };

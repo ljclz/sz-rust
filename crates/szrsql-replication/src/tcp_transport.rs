@@ -317,9 +317,7 @@ impl TcpReplicationClient {
                 Some(message) => {
                     let is_eof = matches!(message, ReplicationMessage::Eof);
                     if tx.send(message).is_err() {
-                        warn!(
-                            "P2-2.2: replica channel closed, disconnecting from primary"
-                        );
+                        warn!("P2-2.2: replica channel closed, disconnecting from primary");
                         return Ok(());
                     }
                     if is_eof {
@@ -427,8 +425,7 @@ pub async fn write_frame<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let payload = serialize(message)
-        .map_err(|e| TcpTransportError::Serialize(e.to_string()))?;
+    let payload = serialize(message).map_err(|e| TcpTransportError::Serialize(e.to_string()))?;
     let len = payload.len() as u32;
     stream.write_all(&len.to_be_bytes()).await?;
     stream.write_all(&payload).await?;
@@ -444,9 +441,7 @@ where
 ///
 /// # 参数
 /// - `stream` — TCP 流（或任何实现 `AsyncRead + Unpin` 的对象）
-pub async fn read_frame<R>(
-    stream: &mut R,
-) -> Result<Option<ReplicationMessage>, TcpTransportError>
+pub async fn read_frame<R>(stream: &mut R) -> Result<Option<ReplicationMessage>, TcpTransportError>
 where
     R: AsyncRead + Unpin,
 {
@@ -468,8 +463,8 @@ where
     }
     let mut payload = vec![0u8; len];
     stream.read_exact(&mut payload).await?;
-    let message: ReplicationMessage = deserialize(&payload)
-        .map_err(|e| TcpTransportError::Deserialize(e.to_string()))?;
+    let message: ReplicationMessage =
+        deserialize(&payload).map_err(|e| TcpTransportError::Deserialize(e.to_string()))?;
     Ok(Some(message))
 }
 
@@ -608,18 +603,20 @@ mod tests {
 
         // 启动客户端连接
         let (tx, mut rx) = mpsc::unbounded_channel::<ReplicationMessage>();
-        let client_handle = tokio::spawn(async move {
-            TcpReplicationClient::new(actual_addr).run(tx).await
-        });
+        let client_handle =
+            tokio::spawn(async move { TcpReplicationClient::new(actual_addr).run(tx).await });
 
         // 等待接收 WalBatch
-        let msg = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            rx.recv(),
-        ).await.expect("timeout waiting for message");
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout waiting for message");
 
         match msg {
-            Some(ReplicationMessage::WalBatch { records, start_lsn, end_lsn: end }) => {
+            Some(ReplicationMessage::WalBatch {
+                records,
+                start_lsn,
+                end_lsn: end,
+            }) => {
                 assert!(!records.is_empty());
                 // WalRecord::new(1, 1, ...) 的 lsn=1，所以 start_lsn=1
                 assert_eq!(start_lsn, 1);
@@ -632,13 +629,14 @@ mod tests {
         let records2 = vec![WalRecord::new(2, 2, WalOpType::Update, 1, vec![0xCC; 50])];
         let end_lsn2 = primary.append_records(records2);
 
-        let msg2 = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            rx.recv(),
-        ).await.expect("timeout waiting for second message");
+        let msg2 = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout waiting for second message");
 
         match msg2 {
-            Some(ReplicationMessage::WalBatch { records, end_lsn, .. }) => {
+            Some(ReplicationMessage::WalBatch {
+                records, end_lsn, ..
+            }) => {
                 assert_eq!(records.len(), 1);
                 assert_eq!(end_lsn, end_lsn2);
             }
@@ -668,17 +666,18 @@ mod tests {
 
         // 并发写入和读取，避免缓冲区满死锁
         let (mut server, mut client) = tokio::io::duplex(65536);
-        let write_handle = tokio::spawn(async move {
-            write_frame(&mut server, &original).await
-        });
-        let read_handle = tokio::spawn(async move {
-            read_frame(&mut client).await
-        });
+        let write_handle = tokio::spawn(async move { write_frame(&mut server, &original).await });
+        let read_handle = tokio::spawn(async move { read_frame(&mut client).await });
 
         write_handle.await.unwrap().unwrap();
         let decoded = read_handle.await.unwrap().unwrap().unwrap();
 
-        if let ReplicationMessage::WalBatch { records, start_lsn, end_lsn } = decoded {
+        if let ReplicationMessage::WalBatch {
+            records,
+            start_lsn,
+            end_lsn,
+        } = decoded
+        {
             assert_eq!(records.len(), 10000);
             assert_eq!(start_lsn, 0);
             assert_eq!(end_lsn, 9999);
@@ -698,7 +697,10 @@ mod tests {
         let result = client
             .connect_with_retry(2, std::time::Duration::from_millis(10), tx)
             .await;
-        assert!(result.is_err(), "should fail to connect to unavailable primary");
+        assert!(
+            result.is_err(),
+            "should fail to connect to unavailable primary"
+        );
     }
 
     /// 测试 make_wal_batch 辅助函数
@@ -707,7 +709,11 @@ mod tests {
         let records = vec![WalRecord::new(1, 1, WalOpType::Insert, 0, vec![])];
         let msg = make_wal_batch(records, 1, 1);
         match msg {
-            ReplicationMessage::WalBatch { records, start_lsn, end_lsn } => {
+            ReplicationMessage::WalBatch {
+                records,
+                start_lsn,
+                end_lsn,
+            } => {
                 assert_eq!(records.len(), 1);
                 assert_eq!(start_lsn, 1);
                 assert_eq!(end_lsn, 1);

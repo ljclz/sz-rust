@@ -15,7 +15,9 @@
 //! 6. **大容量验证**：总计 170000 个 DML 事件 + 3 个 Commit 事件
 
 use crate::{CdcEngine, CdcEventOp, CdcObserver, CdcObserverManager, ChangeEvent};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+// P0-6：使用 parking_lot 替代 std::sync，消除中毒 panic 风险
+use parking_lot::Mutex;
 use szrsql_tx::wal::{WalOpType, WalRecord};
 
 /// 分类收集型观察者 — 按 op 分类统计 + 保留所有事件
@@ -43,7 +45,7 @@ impl CategorizingObserver {
     }
 
     fn events(&self) -> Vec<ChangeEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 
     fn insert_count(&self) -> u64 {
@@ -94,7 +96,7 @@ impl CdcObserver for CategorizingObserver {
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
         }
-        self.events.lock().unwrap().push(event);
+        self.events.lock().push(event);
     }
 }
 
