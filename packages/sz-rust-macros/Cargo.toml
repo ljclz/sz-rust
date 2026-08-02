@@ -23,9 +23,12 @@ proc-macro = true
 name = "sz_rust_macros"
 path = "src/lib.rs"
 
-[dev-dependencies]
-sz-orm-core.workspace = true
-sz-rust-core.workspace = true
+# NOTE: sz-rust-core / sz-orm-core are NOT dev-dependencies here.
+# The #[controller] / #[model] macros expand to absolute paths
+# (::sz_rust_core::... / ::sz_orm_core::...), so integration tests that
+# exercise the generated code would create a circular dependency with
+# sz-rust-core (which depends on this crate). Macro behaviour is instead
+# verified indirectly through sz-rust-core's own test suite.
 
 [package.metadata.cargo-machete]
 ignored = ["proc-macro2"]
