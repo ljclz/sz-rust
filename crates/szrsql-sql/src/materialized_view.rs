@@ -855,7 +855,7 @@ impl MaterializedViewStore {
 
     /// 当前物化视图存储行数（含已删除的行）
     pub fn row_count(&self) -> usize {
-        self.storage.rows().len()
+        self.storage.total_row_count()
     }
 
     /// 活跃行数（排除 tombstone）— Phase 6.12

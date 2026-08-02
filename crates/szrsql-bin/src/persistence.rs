@@ -55,6 +55,18 @@ pub fn default_snapshot_path(data_dir: &Path) -> PathBuf {
     data_dir.join("tables.json")
 }
 
+/// P1-5：FNV-1a 32-bit 表名哈希（与 `Executor::table_name_to_id` 算法一致）。
+///
+/// 用于 WAL 行级回放时通过 `page_id`（= table_id）反查目标表名。
+fn table_name_to_id(table_name: &str) -> u32 {
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in table_name.as_bytes() {
+        hash ^= *byte as u32;
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    hash
+}
+
 /// 从磁盘加载快照，返回表名 → InMemoryTable 的映射。
 ///
 /// 若文件不存在，返回空 HashMap（首次启动，无数据可恢复）。
@@ -394,12 +406,13 @@ pub async fn save_incremental_snapshot(
 pub fn apply_wal_table_data(
     tables: &mut HashMap<String, Arc<Mutex<InMemoryTable>>>,
     records: &[WalRecord],
-) -> usize {
+) -> (usize, std::collections::HashSet<u32>) {
     use std::collections::HashMap as StdHashMap;
 
     // 暂存每个事务的 TableData（tx_id → 表名 + 表数据）
     let mut pending: StdHashMap<u32, Vec<(String, InMemoryTable)>> = StdHashMap::new();
     let mut applied_count = 0usize;
+    let mut committed_txns = std::collections::HashSet::new();
 
     for record in records {
         match record.op_type {
@@ -419,6 +432,7 @@ pub fn apply_wal_table_data(
                         tables.insert(table_name, Arc::new(Mutex::new(table)));
                         applied_count += 1;
                     }
+                    committed_txns.insert(record.tx_id);
                 }
             }
             WalOpType::Abort => {
@@ -439,10 +453,270 @@ pub fn apply_wal_table_data(
         );
     }
 
+    (applied_count, committed_txns)
+}
+
+// =====================================================================
+//  P1-5：行级 WAL 回放（增量崩溃恢复）
+// =====================================================================
+
+/// P1-5：将 WAL 中的行级变更（Insert/Update/Delete）应用到表集合。
+///
+/// # 设计
+///
+/// 与 `apply_wal_table_data`（全表快照回放）互补：
+/// - `TableData` 记录提供崩溃时点的表全量快照（粗粒度）
+/// - 行级记录（Insert/Update/Delete）提供细粒度增量变更
+///
+/// 两者联合使用可大幅缩短大表恢复时间：
+/// 1. 先调用 `apply_wal_table_data` 恢复最近一次全量快照
+/// 2. 再调用本函数，仅回放**没有 TableData 快照的事务**产生的行级变更
+///    （有 TableData 的事务其行级变更已被快照覆盖，跳过避免重复应用）
+///
+/// # ACID 语义
+///
+/// - 行级记录按 `tx_id` 缓冲，仅在遇到对应 `Commit` 记录后才应用
+/// - `Abort` 记录导致该事务的所有行级变更被丢弃
+/// - 崩溃时未完成的事务（无 Commit/Abort）其行级变更留在缓冲区，最终丢弃
+///
+/// # 行级记录格式
+///
+/// `WalRowChange` 载荷（`record.data`）由 `WalRecord::decode_insert/update/delete` 解码：
+/// - **Insert**：`[row_id: u32][new_len: u32][new_payload(JSON Vec<Value>)]`
+/// - **Update**：`[row_id: u32][old_len: u32][old_payload][new_len: u32][new_payload]`
+/// - **Delete**：`[row_id: u32][old_len: u32][old_payload]`
+///
+/// 其中 `row_id` 对应 `InMemoryTable` 的 `tuple_id`，`new_payload` 为
+/// `serde_json` 序列化的 `Vec<Value>`（与 `serialize_row_for_cdc` 格式一致）。
+///
+/// # 参数
+///
+/// - `tables`：已加载的表集合（通常由快照 + TableData 回放建立基础状态）
+/// - `records`：WAL 回放的所有记录
+/// - `table_data_txns`：已有 TableData 快照的事务 ID 集合（其行级变更跳过，避免重复）
+///
+/// # 返回
+///
+/// 成功应用的行级变更数（Insert + Update + Delete 总条数）
+pub async fn apply_wal_row_level(
+    tables: &mut HashMap<String, Arc<Mutex<InMemoryTable>>>,
+    records: &[WalRecord],
+    table_data_txns: &std::collections::HashSet<u32>,
+) -> usize {
+    use std::collections::HashMap as StdHashMap;
+    use szrsql_tx::wal::WalRowChange;
+
+    // 构建 table_id → table_name 反向映射（FNV-1a 哈希，与写入时一致）
+    // FNV-1a 32-bit 与 Executor::table_name_to_id 算法相同
+    let table_id_map: StdHashMap<u32, String> = tables
+        .keys()
+        .map(|name| {
+            let id = table_name_to_id(name);
+            (id, name.clone())
+        })
+        .collect();
+
+    // 按 tx_id 缓冲的行级变更（tx_id → Vec<(op_type, table_id, row_id, new_payload)>)
+    // 仅缓冲没有 TableData 快照的事务（有快照的事务跳过，避免重复应用）
+    let mut pending: StdHashMap<u32, Vec<(WalOpType, u32, usize, Vec<u8>)>> = StdHashMap::new();
+    let mut applied_count = 0usize;
+
+    for record in records {
+        // 跳过已有 TableData 快照的事务（其行级变更已被快照覆盖）
+        if table_data_txns.contains(&record.tx_id) {
+            continue;
+        }
+
+        let table_id = record.page_id;
+
+        match record.op_type {
+            WalOpType::Insert => match WalRowChange::decode_insert(table_id, &record.data) {
+                Ok(change) => {
+                    pending.entry(record.tx_id).or_default().push((
+                        WalOpType::Insert,
+                        table_id,
+                        change.row_id,
+                        change.new_payload,
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        tx_id = record.tx_id,
+                        lsn = record.lsn,
+                        error = %e,
+                        "apply_wal_row_level: failed to decode Insert record"
+                    );
+                }
+            },
+            WalOpType::Update => {
+                match WalRowChange::decode_update(table_id, &record.data) {
+                    Ok(change) => {
+                        // Update 回放仅需 new_payload（用新值替换指定 tuple_id 的行内容）
+                        pending.entry(record.tx_id).or_default().push((
+                            WalOpType::Update,
+                            table_id,
+                            change.row_id,
+                            change.new_payload,
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            tx_id = record.tx_id,
+                            lsn = record.lsn,
+                            error = %e,
+                            "apply_wal_row_level: failed to decode Update record"
+                        );
+                    }
+                }
+            }
+            WalOpType::Delete => {
+                match WalRowChange::decode_delete(table_id, &record.data) {
+                    Ok(change) => {
+                        // Delete 回放：payload 为空，仅用 row_id 标记删除
+                        pending.entry(record.tx_id).or_default().push((
+                            WalOpType::Delete,
+                            table_id,
+                            change.row_id,
+                            Vec::new(),
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            tx_id = record.tx_id,
+                            lsn = record.lsn,
+                            error = %e,
+                            "apply_wal_row_level: failed to decode Delete record"
+                        );
+                    }
+                }
+            }
+            WalOpType::Commit => {
+                // 事务提交：应用该事务的所有行级变更
+                if let Some(changes) = pending.remove(&record.tx_id) {
+                    for (op, tid, row_id, payload) in changes {
+                        applied_count +=
+                            apply_one_row_change(tables, &table_id_map, op, tid, row_id, payload)
+                                .await;
+                    }
+                }
+            }
+            WalOpType::Abort => {
+                // 事务回滚：丢弃该事务的行级变更
+                pending.remove(&record.tx_id);
+            }
+            _ => {} // TableData/Checkpoint/FullPageImage 由其他路径处理
+        }
+    }
+
+    // 剩余 pending 中的事务未提交（崩溃时事务未完成），丢弃
+    if !pending.is_empty() {
+        tracing::warn!(
+            uncommitted_txn_count = pending.len(),
+            "WAL row-level replay: discarded changes from uncommitted transactions"
+        );
+    }
+
     applied_count
 }
 
-/// 解码 TableData 记录的 data 字段。
+/// 将单条行级变更应用到表集合。
+///
+/// `table_id` 为 WAL 记录 `page_id` 字段（FNV-1a 表名哈希），
+/// 通过 `table_id_map` 反查目标表名后执行对应操作。
+///
+/// 返回 1 表示成功应用，0 表示失败（表不存在 / 反序列化失败 / 行不存在）。
+async fn apply_one_row_change(
+    tables: &mut HashMap<String, Arc<Mutex<InMemoryTable>>>,
+    table_id_map: &std::collections::HashMap<u32, String>,
+    op: WalOpType,
+    table_id: u32,
+    row_id: usize,
+    payload: Vec<u8>,
+) -> usize {
+    let table_name = match table_id_map.get(&table_id) {
+        Some(name) => name.clone(),
+        None => {
+            tracing::warn!(
+                table_id,
+                "apply_one_row_change: table_id not found in map (table dropped or never created)"
+            );
+            return 0;
+        }
+    };
+
+    let table_arc = match tables.get(&table_name) {
+        Some(arc) => arc.clone(),
+        None => {
+            tracing::warn!(
+                table = %table_name,
+                "apply_one_row_change: table not found in tables map"
+            );
+            return 0;
+        }
+    };
+
+    let row: Vec<szrsql_types::value::Value> = if op == WalOpType::Delete {
+        // Delete 回放无需行内容（payload 为空），仅用 row_id 定位目标行
+        Vec::new()
+    } else {
+        match serde_json::from_slice(&payload) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    table = %table_name,
+                    row_id,
+                    error = %e,
+                    "apply_one_row_change: failed to deserialize row payload"
+                );
+                return 0;
+            }
+        }
+    };
+
+    // `table_arc.lock()` 返回 tokio 异步锁的 Future；调用方为 async 上下文，
+    // 直接 await 即可（main.rs 在 runtime.block_on(async{}) 中调用）。
+    let mut table = table_arc.lock().await;
+    match op {
+        WalOpType::Insert => {
+            // Insert 回放：在指定 tuple_id 处插入行（xmin=0 表示已提交）
+            table.insert_at_tuple_id(row_id as u32, row, 0);
+            1
+        }
+        WalOpType::Update => {
+            // Update 回放：替换指定 tuple_id 处的行内容
+            if table.update_row(row_id, row) {
+                1
+            } else {
+                tracing::warn!(
+                    table = %table_name,
+                    row_id,
+                    "apply_one_row_change: Update target row not found"
+                );
+                0
+            }
+        }
+        WalOpType::Delete => {
+            // Delete 回放：标记指定 tuple_id 处的行为删除（xmax=u32::MAX）。
+            // 幂等处理：若行已被标记删除（如快照已含该删除），仍计为已应用，
+            // 避免重复回放时因 deleted 集合已含该 tuple_id 而误报失败。
+            if table.delete_row(row_id) {
+                1
+            } else {
+                // delete_row 返回 false 有两种情况：(a) 行已删除（幂等，计为成功）
+                // (b) 行不存在（真实错误）。此处保守计为成功，因为 WAL 记录本身
+                // 即表示该删除已发生；若行从未存在则说明 WAL 与数据不一致，
+                // 跳过比报错更适合崩溃恢复场景。
+                tracing::warn!(
+                    table = %table_name,
+                    row_id,
+                    "apply_one_row_change: Delete target already deleted or missing (idempotent)"
+                );
+                1
+            }
+        }
+        _ => 0,
+    }
+}
 ///
 /// 格式：u32 LE 表名长度 + 表名 UTF-8 + 表数据 JSON
 fn decode_table_data(data: &[u8]) -> Option<(String, InMemoryTable)> {
@@ -772,7 +1046,7 @@ mod tests {
         let mut loaded_tables = load_snapshot(tmp.path()).unwrap();
         let wal_records = WalReplayer::replay_all(&wal_path).unwrap();
         assert!(!wal_records.is_empty());
-        let applied = apply_wal_table_data(&mut loaded_tables, &wal_records);
+        let (applied, _) = apply_wal_table_data(&mut loaded_tables, &wal_records);
         assert_eq!(applied, 1, "应应用 1 个 TableData 记录");
 
         // 步骤 4：验证最终 users 表有 2 行数据（WAL 覆盖了快照）
@@ -829,7 +1103,7 @@ mod tests {
         // 回放
         let mut loaded_tables: HashMap<String, Arc<Mutex<InMemoryTable>>> = HashMap::new();
         let records = WalReplayer::replay_all(&wal_path).unwrap();
-        let applied = apply_wal_table_data(&mut loaded_tables, &records);
+        let (applied, _) = apply_wal_table_data(&mut loaded_tables, &records);
         assert_eq!(applied, 1, "仅 Commit 事务的 TableData 被应用");
 
         // 验证：temp 表不应存在（Abort），real 表应存在（Commit）
@@ -875,7 +1149,7 @@ mod tests {
         // 回放
         let mut loaded_tables: HashMap<String, Arc<Mutex<InMemoryTable>>> = HashMap::new();
         let records = WalReplayer::replay_all(&wal_path).unwrap();
-        let applied = apply_wal_table_data(&mut loaded_tables, &records);
+        let (applied, _) = apply_wal_table_data(&mut loaded_tables, &records);
         assert_eq!(applied, 0, "未提交事务的 TableData 不应被应用");
         assert!(
             !loaded_tables.contains_key("uncommitted"),
@@ -946,7 +1220,7 @@ mod tests {
         // 回放
         let mut loaded_tables: HashMap<String, Arc<Mutex<InMemoryTable>>> = HashMap::new();
         let records = WalReplayer::replay_all(&wal_path).unwrap();
-        let applied = apply_wal_table_data(&mut loaded_tables, &records);
+        let (applied, _) = apply_wal_table_data(&mut loaded_tables, &records);
         assert_eq!(applied, 3, "3 个已提交事务的 TableData 都应被应用");
         assert!(loaded_tables.contains_key("users"));
         assert!(loaded_tables.contains_key("orders"));
@@ -1021,7 +1295,7 @@ mod tests {
             assert_eq!(g.rows().len(), 1, "快照加载后 users 表应有 1 行");
         }
         let records = WalReplayer::replay_all(&wal_path).unwrap();
-        let applied = apply_wal_table_data(&mut loaded_tables, &records);
+        let (applied, _) = apply_wal_table_data(&mut loaded_tables, &records);
         assert_eq!(applied, 1);
 
         // 步骤 4：验证 users 表已被 WAL 版本覆盖（2 行）
@@ -1029,5 +1303,296 @@ mod tests {
         assert_eq!(g.rows().len(), 2, "WAL 回放后 users 表应有 2 行");
         assert_eq!(g.rows()[0][0], Value::Int64(500));
         assert_eq!(g.rows()[1][0], Value::Int64(600));
+    }
+
+    // =================================================================
+    //  P1-5：行级 WAL 回放测试
+    // =================================================================
+
+    /// E2E-R1：行级 Insert 回放 — 崩溃恢复后新增行出现。
+    ///
+    /// 场景：快照有 1 行 → 事务插入第 2 行（写行级 Insert WAL）→ 崩溃
+    /// 恢复：快照 1 行 + 行级回放 = 2 行
+    #[tokio::test]
+    async fn e2e_row_level_replay_insert() {
+        use szrsql_sql::executor::{InMemoryTable, Row};
+        use szrsql_tx::wal::{WalRecord, WalReplayer, WalRowChange, WalWriter};
+        use szrsql_types::value::Value;
+
+        let tmp = TempDir::new().unwrap();
+
+        // 步骤 1：创建快照（users 表 2 行：tuple_id=0 值 100，tuple_id=1 值 200）
+        let mut snap_table = make_test_table("users", 100);
+        snap_table.insert(vec![Value::Int64(200)]);
+        let shared: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
+            Arc::new(RwLock::new(HashMap::from([(
+                "users".into(),
+                Arc::new(Mutex::new(snap_table)),
+            )])));
+        save_snapshot(&shared, tmp.path()).await.unwrap();
+
+        // 步骤 2：写入行级 Insert WAL 记录（模拟事务插入 tuple_id=2 的新行）
+        let wal_path = tmp.path().join("row_insert.wal");
+        let writer = WalWriter::create_new(&wal_path).unwrap();
+        let table_id = table_name_to_id("users");
+        let new_row: Row = vec![Value::Int64(300)];
+        let new_payload = serde_json::to_vec(&new_row).unwrap();
+        let change = WalRowChange::for_insert(table_id, 2, new_payload);
+        let record = WalRecord::new_row_insert(42, &change);
+        writer.append(record).unwrap();
+        writer
+            .append(WalRecord::new(0, 42, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 步骤 3：加载快照 + 行级回放
+        let mut loaded_tables = load_snapshot(tmp.path()).unwrap();
+        {
+            let g = loaded_tables.get("users").unwrap().lock().await;
+            assert_eq!(g.rows().len(), 2, "快照加载后应有 2 行");
+        }
+        let records = WalReplayer::replay_all(&wal_path).unwrap();
+        let empty_set = std::collections::HashSet::new();
+        let row_applied = apply_wal_row_level(&mut loaded_tables, &records, &empty_set).await;
+        assert_eq!(row_applied, 1, "应应用 1 条行级 Insert");
+
+        // 步骤 4：验证新行已插入
+        let g = loaded_tables.get("users").unwrap().lock().await;
+        assert_eq!(g.rows().len(), 3, "行级回放后应有 3 行");
+    }
+
+    /// E2E-R2：行级 Update 回放 — 崩溃恢复后行内容被更新。
+    #[tokio::test]
+    async fn e2e_row_level_replay_update() {
+        use szrsql_sql::executor::{InMemoryTable, Row};
+        use szrsql_tx::wal::{WalRecord, WalReplayer, WalRowChange, WalWriter};
+        use szrsql_types::value::Value;
+
+        let tmp = TempDir::new().unwrap();
+
+        // 步骤 1：创建快照（users 表 1 行，tuple_id=0，值为 100）
+        let snap_table = make_test_table("users", 100);
+        let shared: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
+            Arc::new(RwLock::new(HashMap::from([(
+                "users".into(),
+                Arc::new(Mutex::new(snap_table)),
+            )])));
+        save_snapshot(&shared, tmp.path()).await.unwrap();
+
+        // 步骤 2：写入行级 Update WAL 记录（将 tuple_id=0 的值更新为 999）
+        let wal_path = tmp.path().join("row_update.wal");
+        let writer = WalWriter::create_new(&wal_path).unwrap();
+        let table_id = table_name_to_id("users");
+        let new_row: Row = vec![Value::Int64(999)];
+        let new_payload = serde_json::to_vec(&new_row).unwrap();
+        let change = WalRowChange::for_update(table_id, 0, vec![], new_payload);
+        let record = WalRecord::new_row_update(55, &change);
+        writer.append(record).unwrap();
+        writer
+            .append(WalRecord::new(0, 55, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 步骤 3：加载快照 + 行级回放
+        let mut loaded_tables = load_snapshot(tmp.path()).unwrap();
+        let records = WalReplayer::replay_all(&wal_path).unwrap();
+        let empty_set = std::collections::HashSet::new();
+        let row_applied = apply_wal_row_level(&mut loaded_tables, &records, &empty_set).await;
+        assert_eq!(row_applied, 1, "应应用 1 条行级 Update");
+
+        // 步骤 4：验证行值已被更新
+        let g = loaded_tables.get("users").unwrap().lock().await;
+        assert_eq!(g.rows().len(), 1, "Update 不改变行数");
+        assert_eq!(
+            g.rows()[0][0],
+            Value::Int64(999),
+            "行级 Update 回放后值应为 999"
+        );
+    }
+
+    /// E2E-R3：行级 Delete 回放 — 崩溃恢复后行被标记删除。
+    #[tokio::test]
+    async fn e2e_row_level_replay_delete() {
+        use szrsql_sql::executor::InMemoryTable;
+        use szrsql_tx::wal::{WalRecord, WalReplayer, WalRowChange, WalWriter};
+        use szrsql_types::value::Value;
+
+        let tmp = TempDir::new().unwrap();
+
+        // 步骤 1：创建快照（users 表 2 行，tuple_id=0 和 1）
+        let mut snap_table = make_test_table("users", 100);
+        snap_table.insert(vec![Value::Int64(200)]);
+        let shared: Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>> =
+            Arc::new(RwLock::new(HashMap::from([(
+                "users".into(),
+                Arc::new(Mutex::new(snap_table)),
+            )])));
+        save_snapshot(&shared, tmp.path()).await.unwrap();
+
+        // 步骤 2：写入行级 Delete WAL 记录（删除 tuple_id=0 的行）
+        let wal_path = tmp.path().join("row_delete.wal");
+        let writer = WalWriter::create_new(&wal_path).unwrap();
+        let table_id = table_name_to_id("users");
+        let change = WalRowChange::for_delete(table_id, 0, vec![]);
+        let record = WalRecord::new_row_delete(77, &change);
+        writer.append(record).unwrap();
+        writer
+            .append(WalRecord::new(0, 77, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 步骤 3：加载快照 + 行级回放
+        let mut loaded_tables = load_snapshot(tmp.path()).unwrap();
+        let records = WalReplayer::replay_all(&wal_path).unwrap();
+        let empty_set = std::collections::HashSet::new();
+        let row_applied = apply_wal_row_level(&mut loaded_tables, &records, &empty_set).await;
+        assert_eq!(row_applied, 1, "应应用 1 条行级 Delete");
+
+        // 步骤 4：验证删除的行不再可见（delete_row 标记 xmax，rows() 过滤已删除）
+        let g = loaded_tables.get("users").unwrap().lock().await;
+        assert_eq!(
+            g.rows().len(),
+            1,
+            "行级 Delete 回放后可见行应为 1（tuple_id=0 被删除）"
+        );
+        assert_eq!(g.rows()[0][0], Value::Int64(200));
+    }
+
+    /// E2E-R4：Abort 事务的行级变更不被应用。
+    #[tokio::test]
+    async fn e2e_row_level_replay_abort_not_applied() {
+        use szrsql_sql::executor::{InMemoryTable, Row};
+        use szrsql_tx::wal::{WalRecord, WalReplayer, WalRowChange, WalWriter};
+        use szrsql_types::value::Value;
+
+        let tmp = TempDir::new().unwrap();
+        let wal_path = tmp.path().join("abort_row.wal");
+        let writer = WalWriter::create_new(&wal_path).unwrap();
+
+        // 事务 1（Abort）：Insert 不应被应用
+        let table_id = table_name_to_id("users");
+        let bad_row: Row = vec![Value::Int64(9999)];
+        let change = WalRowChange::for_insert(table_id, 10, serde_json::to_vec(&bad_row).unwrap());
+        writer
+            .append(WalRecord::new_row_insert(200, &change))
+            .unwrap();
+        writer
+            .append(WalRecord::new(0, 200, WalOpType::Abort, 0, vec![]))
+            .unwrap();
+
+        // 事务 2（Commit）：Insert 应被应用
+        let good_row: Row = vec![Value::Int64(42)];
+        let change2 =
+            WalRowChange::for_insert(table_id, 11, serde_json::to_vec(&good_row).unwrap());
+        writer
+            .append(WalRecord::new_row_insert(201, &change2))
+            .unwrap();
+        writer
+            .append(WalRecord::new(0, 201, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 创建空表（无快照，行级 Insert 需要表存在才能应用）
+        let mut loaded_tables: HashMap<String, Arc<Mutex<InMemoryTable>>> = HashMap::new();
+        // 创建 users 表（空），使行级 Insert 有目标
+        let empty_table = make_test_table("users", 0);
+        // 清除默认行，保持空表
+        loaded_tables.insert("users".to_string(), Arc::new(Mutex::new(empty_table)));
+
+        let records = WalReplayer::replay_all(&wal_path).unwrap();
+        let empty_set = std::collections::HashSet::new();
+        let row_applied = apply_wal_row_level(&mut loaded_tables, &records, &empty_set).await;
+        assert_eq!(row_applied, 1, "仅 Commit 事务的行级 Insert 被应用");
+
+        let g = loaded_tables.get("users").unwrap().lock().await;
+        // Abort 的 9999 不应出现，Commit 的 42 应出现
+        let has_9999 = g.rows().iter().any(|r| matches!(&r[0], Value::Int64(9999)));
+        let has_42 = g.rows().iter().any(|r| matches!(&r[0], Value::Int64(42)));
+        assert!(!has_9999, "Abort 事务的行不应被应用");
+        assert!(has_42, "Commit 事务的行应被应用");
+    }
+
+    /// E2E-R5：TableData + 行级联合回放 — TableData 事务的行级变更跳过（不重复应用）。
+    ///
+    /// 场景：
+    /// - 事务 10：写 TableData（全量快照，users = [1,2]）+ Commit
+    /// - 事务 11：写行级 Insert（users 新增行 3）+ Commit
+    /// 回放：TableData 重建 users=[1,2]，行级 Insert 追加行 3 → users=[1,2,3]
+    /// 事务 10 的行级 Insert（若存在）应被跳过（已被 TableData 覆盖）
+    #[tokio::test]
+    async fn e2e_row_level_with_table_data_skip_committed_txn() {
+        use szrsql_sql::executor::Row;
+        use szrsql_tx::wal::{WalRecord, WalReplayer, WalRowChange, WalWriter};
+        use szrsql_types::value::Value;
+
+        let tmp = TempDir::new().unwrap();
+        let wal_path = tmp.path().join("mixed.wal");
+        let writer = WalWriter::create_new(&wal_path).unwrap();
+        let table_id = table_name_to_id("users");
+
+        // 事务 10：TableData（全量快照 users=[100]）
+        writer
+            .append(WalRecord::new(
+                0,
+                10,
+                WalOpType::TableData,
+                0,
+                encode_table_data("users", &make_test_table("users", 100)),
+            ))
+            .unwrap();
+        writer
+            .append(WalRecord::new(0, 10, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+
+        // 事务 10 的行级 Insert（模拟：与 TableData 同一事务，应被跳过）
+        let dup_row: Row = vec![Value::Int64(9999)];
+        let dup_change =
+            WalRowChange::for_insert(table_id, 99, serde_json::to_vec(&dup_row).unwrap());
+        writer
+            .append(WalRecord::new_row_insert(10, &dup_change))
+            .unwrap();
+
+        // 事务 11：行级 Insert（新增行 300，tuple_id=2）
+        let new_row: Row = vec![Value::Int64(300)];
+        let new_change =
+            WalRowChange::for_insert(table_id, 2, serde_json::to_vec(&new_row).unwrap());
+        writer
+            .append(WalRecord::new_row_insert(11, &new_change))
+            .unwrap();
+        writer
+            .append(WalRecord::new(0, 11, WalOpType::Commit, 0, vec![]))
+            .unwrap();
+
+        writer.flush().unwrap();
+        drop(writer);
+
+        // 回放：先 TableData，再行级
+        let mut loaded_tables = load_snapshot(tmp.path()).unwrap_or_default();
+        let records = WalReplayer::replay_all(&wal_path).unwrap();
+        let (td_applied, committed_txns) = apply_wal_table_data(&mut loaded_tables, &records);
+        assert_eq!(td_applied, 1, "1 个 TableData 被应用");
+        assert!(
+            committed_txns.contains(&10),
+            "事务 10 应标记为已提交 TableData"
+        );
+
+        let row_applied = apply_wal_row_level(&mut loaded_tables, &records, &committed_txns).await;
+        // 事务 10 的行级 Insert 被跳过（在 committed_txns 中）
+        // 事务 11 的行级 Insert 被应用
+        assert_eq!(
+            row_applied, 1,
+            "仅事务 11 的行级 Insert 被应用（事务 10 的跳过）"
+        );
+
+        // 验证：9999（事务 10 的行级，应跳过）不应出现
+        let g = loaded_tables.get("users").unwrap().lock().await;
+        let has_9999 = g.rows().iter().any(|r| matches!(&r[0], Value::Int64(9999)));
+        let has_300 = g.rows().iter().any(|r| matches!(&r[0], Value::Int64(300)));
+        assert!(!has_9999, "TableData 事务的行级变更应被跳过");
+        assert!(has_300, "事务 11 的新增行应被应用");
     }
 }

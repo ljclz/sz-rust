@@ -703,12 +703,49 @@ fn main() -> anyhow::Result<()> {
     // 顺序：先加载 JSON 快照（基础数据）→ 再回放 WAL TableData（增量提交）
     // WAL 回放保证 ACID：仅应用紧随其后有 Commit 记录的 TableData，
     // Abort 记录后的 TableData 被丢弃，未完成事务的 TableData 也不会应用。
+    let mut committed_table_data_txns = std::collections::HashSet::new();
     if !wal_records.is_empty() {
-        let applied = persistence::apply_wal_table_data(&mut loaded_tables, &wal_records);
+        let (applied, committed_txns) = persistence::apply_wal_table_data(&mut loaded_tables, &wal_records);
+        committed_table_data_txns = committed_txns;
         tracing::info!(
             applied_table_count = applied,
             "WAL TableData records applied to loaded tables (crash recovery)"
         );
+    }
+
+    // P1-5：应用 WAL 中的行级变更（Insert/Update/Delete）到已加载的表集合。
+    //
+    // 与 TableData 全量快照互补：TableData 提供粗粒度基础状态，
+    // 行级记录提供细粒度增量变更。已有 TableData 快照的事务其行级变更跳过，
+    // 避免重复应用。大表恢复时间与变更量成正比，无需全量快照。
+    if !wal_records.is_empty() && !committed_table_data_txns.is_empty() {
+        // 仅当存在已提交 TableData 事务时才调用（否则行级记录无基础表可应用）
+        let row_applied = persistence::apply_wal_row_level(
+            &mut loaded_tables,
+            &wal_records,
+            &committed_table_data_txns,
+        )
+        .await;
+        tracing::info!(
+            row_applied,
+            "WAL row-level changes applied to loaded tables (crash recovery, P1-5)"
+        );
+    } else if !wal_records.is_empty() {
+        // 无 TableData 快照但有行级记录：尝试应用所有行级变更
+        // （适用于快照已覆盖所有表但增量变更未包含 TableData 的场景）
+        let empty_set = std::collections::HashSet::new();
+        let row_applied = persistence::apply_wal_row_level(
+            &mut loaded_tables,
+            &wal_records,
+            &empty_set,
+        )
+        .await;
+        if row_applied > 0 {
+            tracing::info!(
+                row_applied,
+                "WAL row-level changes applied (no TableData snapshots present)"
+            );
+        }
     }
 
     // OPT-3：接入 BufferPool 存储磁盘化

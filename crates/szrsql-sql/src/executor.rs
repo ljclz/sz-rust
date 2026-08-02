@@ -1216,6 +1216,31 @@ impl InMemoryTable {
         tuple_id as usize
     }
 
+    /// P1-5：WAL 行级回放专用 — 在指定 tuple_id 处插入行（不分配新 ID）。
+    ///
+    /// 与 `insert_with_xmin` 不同，此方法**不递增 `next_tuple_id`**，而是直接将行
+    /// 写入给定的 tuple_id 位置。用于崩溃恢复时重建与 WAL 记录中 row_id 一致的行索引，
+    /// 使后续 Update/Delete 回放能通过原始 row_id 正确定位到同一行。
+    ///
+    /// # 参数
+    /// - `tuple_id`：目标行 ID（回放时对应 WAL 记录的 `page_id` 字段）
+    /// - `row`：行数据（由 WAL `new_payload` 反序列化得到）
+    /// - `xmin`：创建该行的事务 ID（恢复时通常传 0，表示已提交行）
+    pub fn insert_at_tuple_id(&mut self, tuple_id: u32, row: Row, xmin: u32) {
+        let pk_bytes = self.extract_pk_bytes(&row);
+        let key = encode_tuple_id_key(tuple_id);
+        let value = btree_value_codec::encode(xmin, 0, &row);
+        if let Err(e) = self.btree.insert(key, value) {
+            tracing::warn!(
+                tuple_id,
+                error = ?e,
+                "insert_at_tuple_id: BTree insert failed"
+            );
+        }
+        self.maybe_cache_row(tuple_id, row);
+        self.update_pk_index(tuple_id as usize, pk_bytes);
+    }
+
     /// 将行加入热缓存（有界，超出上限时随机淘汰）
     fn maybe_cache_row(&mut self, tuple_id: u32, row: Row) {
         if self.row_cache.len() >= self.row_cache_max {
@@ -1938,12 +1963,25 @@ impl InMemoryTable {
             .ok()
             .into_iter()
             .flatten();
-        for (_key, value) in cursor {
+        for (key, value) in cursor {
+            let tuple_id = decode_tuple_id_key(&key) as u32;
+            // 跳过已删除行（tombstone 过滤）
+            if self.deleted.contains(&tuple_id) {
+                continue;
+            }
             if let Ok((_xmin, _xmax, row)) = btree_value_codec::decode(&value) {
                 result.push(row);
             }
         }
         result
+    }
+
+    /// B+Tree 中存储的总条目数（含 tombstone 已删除行）。
+    ///
+    /// 与 [`InMemoryTable::rows`] 不同，此方法不过滤 `deleted` 集合，
+    /// 反映存储引擎的物理条目数，用于需要区分活跃行与 tombstone 的场景。
+    pub fn total_row_count(&self) -> usize {
+        self.btree.len()
     }
 
     /// 取表名 — 用于持久化时作为 HashMap key
@@ -3972,7 +4010,8 @@ impl<'a> Executor<'a> {
     /// P7-1：将表名转为稳定的 table_id（FNV-1a 哈希，u32 范围）
     ///
     /// 用于 CDC 事件中的 table_id 字段，保证同一表名在进程内得到相同 ID。
-    fn table_name_to_id(table_name: &str) -> u32 {
+    /// P1-5 起公开供 WAL 行级回放使用（通过 table_id 反查目标表）。
+    pub fn table_name_to_id(table_name: &str) -> u32 {
         // FNV-1a 32-bit 哈希
         let mut hash: u32 = 0x811c9dc5;
         for byte in table_name.as_bytes() {
