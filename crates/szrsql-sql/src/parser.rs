@@ -1914,7 +1914,10 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
             alias: alias.map(convert_table_alias),
         }),
         SpTableFactor::Derived {
-            subquery, alias, ..
+            lateral,
+            subquery,
+            alias,
+            ..
         } => {
             let subquery = convert_query(*subquery)?;
             let alias = alias
@@ -1923,6 +1926,7 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
             Ok(TableFactor::Derived {
                 subquery: Box::new(subquery),
                 alias,
+                lateral,
             })
         }
         SpTableFactor::Function {
@@ -1985,6 +1989,7 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
             Ok(TableFactor::Derived {
                 subquery: Box::new(select),
                 alias,
+                lateral: false,
             })
         }
         other => Err(ParseError::Unsupported(format!(

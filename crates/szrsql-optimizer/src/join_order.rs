@@ -75,6 +75,7 @@ impl JoinOrderOptimizer {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 // 先递归优化子树
                 let left = self.optimize_recursive(*left);
@@ -87,6 +88,9 @@ impl JoinOrderOptimizer {
                         condition,
                         left: Box::new(left),
                         right: Box::new(right),
+                        lateral: false,
+                        lateral_subquery: None,
+                        right_schema: None,
                     };
                     self.try_reorder(joined)
                 } else {
@@ -95,6 +99,9 @@ impl JoinOrderOptimizer {
                         condition,
                         left: Box::new(left),
                         right: Box::new(right),
+                        lateral: false,
+                        lateral_subquery: None,
+                        right_schema: None,
                     }
                 }
             }
@@ -314,6 +321,7 @@ fn extract_recursive(
             condition,
             left,
             right,
+            ..
         } => {
             // Outer JOIN 不支持重排
             if !matches!(join_type, JoinType::Inner | JoinType::Cross) {
@@ -595,6 +603,9 @@ fn build_join_with_edges(
         condition,
         left: Box::new(left_plan),
         right: Box::new(right_plan),
+        lateral: false,
+        lateral_subquery: None,
+        right_schema: None,
     })
 }
 
@@ -761,6 +772,9 @@ mod tests {
             condition: JoinCondition::On(cond),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -771,6 +785,9 @@ mod tests {
             condition: JoinCondition::None,
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -781,6 +798,9 @@ mod tests {
             condition: JoinCondition::On(cond),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 

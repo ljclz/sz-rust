@@ -332,9 +332,14 @@ impl SqlRewriter {
                 name: self.rewrite_table_name(name),
                 alias,
             },
-            TableFactor::Derived { subquery, alias } => TableFactor::Derived {
+            TableFactor::Derived {
+                subquery,
+                alias,
+                lateral,
+            } => TableFactor::Derived {
                 subquery: Box::new(self.rewrite_select(*subquery)),
                 alias,
+                lateral,
             },
             TableFactor::TableFunction { name, args, alias } => TableFactor::TableFunction {
                 name,

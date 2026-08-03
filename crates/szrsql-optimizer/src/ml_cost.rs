@@ -913,6 +913,9 @@ impl JobBenchmarkGenerator {
                     }),
                     left: Box::new(plan),
                     right: Box::new(right_plan),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 };
             }
 
@@ -1092,6 +1095,9 @@ mod tests {
             }),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -1106,6 +1112,9 @@ mod tests {
             }),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -1116,6 +1125,9 @@ mod tests {
             condition: JoinCondition::None,
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 

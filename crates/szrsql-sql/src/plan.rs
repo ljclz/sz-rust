@@ -1324,6 +1324,23 @@ pub enum LogicalPlan {
         left: Box<LogicalPlan>,
         /// 右子计划
         right: Box<LogicalPlan>,
+        /// P3-2: LATERAL 标志 — 为 true 时右侧可引用左侧列，
+        /// 执行器需逐左行重评估右侧（NestedLoop 模式）。
+        lateral: bool,
+        /// P3-2: LATERAL 原始子查询 AST。
+        ///
+        /// 当 `lateral=true` 时，右侧派生表的子查询引用了左侧列，
+        /// 无法在规划阶段预规划（左侧列在规划期不可见）。
+        /// 此字段保存原始 `Select` AST，执行器在运行时逐左行代换绑定值后重规划。
+        /// `lateral=false` 时此字段为 None，右侧由 `right` 字段预规划。
+        lateral_subquery: Option<Box<Select>>,
+        /// P3-2: LATERAL 右 Schema 快照。
+        ///
+        /// 当 `lateral=true` 时，`right` 字段为 `LogicalPlan::Empty` 占位，
+        /// 无法从 `right` 推导输出 Schema。此字段在规划阶段通过 catalog 预规划一次
+        /// 右侧子查询（不代换绑定值）得到右 Schema，供执行器投影阶段列名解析使用。
+        /// `lateral=false` 时此字段为 None，执行器从 `right` 推导。
+        right_schema: Option<TableSchema>,
     },
     /// 聚合（GROUP BY + 聚合函数）
     Aggregate {
@@ -2913,6 +2930,9 @@ impl<'a> Planner<'a> {
                 condition: JoinCondition::None,
                 left: Box::new(plan),
                 right: Box::new(right),
+                lateral: false,
+                lateral_subquery: None,
+                right_schema: None,
             };
             for join in twj.joins.iter() {
                 plan = self.apply_join(plan, join)?;
@@ -2975,7 +2995,9 @@ impl<'a> Planner<'a> {
                     schema,
                 })
             }
-            TableFactor::Derived { subquery, alias } => {
+            TableFactor::Derived {
+                subquery, alias, ..
+            } => {
                 // 子查询作为派生表
                 let inner = self.plan_select(subquery.as_ref().clone())?;
                 let derived_schema = plan_schema(&inner);
@@ -3001,12 +3023,38 @@ impl<'a> Planner<'a> {
     }
 
     fn apply_join(&self, left: LogicalPlan, join: &Join) -> Result<LogicalPlan, PlanError> {
-        let right = self.plan_table_factor(&join.relation)?;
+        // P3-2: LATERAL JOIN — 右侧表因子若为 LATERAL 派生表，
+        // 其子查询引用了左侧列，无法在规划阶段预规划（左侧列在规划期不可见）。
+        // 保存原始 Select AST 到 lateral_subquery，执行器逐左行代换绑定值后重规划。
+        let lateral = matches!(&join.relation, TableFactor::Derived { lateral: true, .. });
+        let (right, lateral_subquery, right_schema) = if lateral {
+            if let TableFactor::Derived {
+                subquery, alias, ..
+            } = &join.relation
+            {
+                // 用 Empty 占位；执行器会用 lateral_subquery 重规划
+                // 预规划一次（不代换绑定值）以获取右 Schema，供执行器投影阶段列名解析
+                let placeholder = self.plan_select_inner(*subquery.clone(), vec![])?;
+                let mut schema = plan_schema(&placeholder);
+                // 将 schema 表名替换为别名（与 plan_select_inner 对 Derived 的处理一致）
+                schema.name = TableName::new(alias.name.clone());
+                (LogicalPlan::Empty, Some(subquery.clone()), Some(schema))
+            } else {
+                let r = self.plan_table_factor(&join.relation)?;
+                (r, None, None)
+            }
+        } else {
+            let r = self.plan_table_factor(&join.relation)?;
+            (r, None, None)
+        };
         Ok(LogicalPlan::Join {
             join_type: join.join_type,
             condition: join.condition.clone(),
             left: Box::new(left),
             right: Box::new(right),
+            lateral,
+            lateral_subquery,
+            right_schema,
         })
     }
 

@@ -71,6 +71,7 @@ impl PredicatePushdown {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = Self::apply_recursive(*left);
                 let right = Self::apply_recursive(*right);
@@ -79,6 +80,9 @@ impl PredicatePushdown {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -151,6 +155,7 @@ impl PredicatePushdown {
                 condition,
                 left,
                 right,
+                ..
             } => Self::pushdown_to_join(predicate, join_type, condition, left, right),
             LogicalPlan::Sort { order_by, input } => {
                 let inner = Self::pushdown_filter(predicate, *input);
@@ -271,6 +276,9 @@ impl PredicatePushdown {
             condition,
             left: Box::new(new_left),
             right: Box::new(new_right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
 
         // 若有剩余谓词，包裹 Filter
@@ -501,6 +509,9 @@ mod tests {
             condition: JoinCondition::On(condition),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -515,6 +526,9 @@ mod tests {
             condition: JoinCondition::On(condition),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -1045,6 +1059,9 @@ mod tests {
             condition: JoinCondition::On(equi_join_cond("a", "id", "b", "id")),
             left: Box::new(a),
             right: Box::new(b),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
         let pred = AExpr::BinaryOp {
             left: Box::new(gt_pred("a", "x", 10)),
@@ -1077,6 +1094,9 @@ mod tests {
             condition: JoinCondition::On(equi_join_cond("a", "id", "b", "id")),
             left: Box::new(a),
             right: Box::new(b),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
         let filter = build_filter_plan(gt_pred("a", "x", 10), join);
 
@@ -1103,6 +1123,9 @@ mod tests {
             condition: JoinCondition::On(equi_join_cond("a", "id", "b", "id")),
             left: Box::new(a),
             right: Box::new(b),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
         let filter = build_filter_plan(eq_pred("b", "y", 5), join);
 
@@ -1226,6 +1249,7 @@ impl ProjectionPruning {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = Self::apply_recursive(*left, table_cols);
                 let right = Self::apply_recursive(*right, table_cols);
@@ -1234,6 +1258,9 @@ impl ProjectionPruning {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -1498,6 +1525,7 @@ impl<'a, 'c> SubqueryFlattening<'a, 'c> {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = self.apply_recursive(*left);
                 let right = self.apply_recursive(*right);
@@ -1506,6 +1534,9 @@ impl<'a, 'c> SubqueryFlattening<'a, 'c> {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -1648,6 +1679,9 @@ impl<'a, 'c> SubqueryFlattening<'a, 'c> {
             condition,
             left: Box::new(input),
             right: Box::new(sub_plan),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         })
     }
 
@@ -1721,6 +1755,9 @@ impl<'a, 'c> SubqueryFlattening<'a, 'c> {
             condition,
             left: Box::new(input),
             right: Box::new(sub_plan),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         })
     }
 
@@ -1815,6 +1852,9 @@ mod projection_pruning_tests {
             condition: JoinCondition::On(cond),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 
@@ -2930,6 +2970,7 @@ impl<'a, 'c> IndexSelection<'a, 'c> {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = self.apply_recursive(*left);
                 let right = self.apply_recursive(*right);
@@ -2938,6 +2979,9 @@ impl<'a, 'c> IndexSelection<'a, 'c> {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -3575,6 +3619,7 @@ impl CommonSubexpressionElimination {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = Self::apply_recursive(*left, counts, next_id, memo, wrapped);
                 let right = Self::apply_recursive(*right, counts, next_id, memo, wrapped);
@@ -3583,6 +3628,9 @@ impl CommonSubexpressionElimination {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -3781,6 +3829,7 @@ impl<'a> HtapColumnarRewrite<'a> {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let left = self.apply_recursive(*left);
                 let right = self.apply_recursive(*right);
@@ -3789,6 +3838,9 @@ impl<'a> HtapColumnarRewrite<'a> {
                     condition,
                     left: Box::new(left),
                     right: Box::new(right),
+                    lateral: false,
+                    lateral_subquery: None,
+                    right_schema: None,
                 }
             }
             LogicalPlan::Aggregate {
@@ -3953,6 +4005,9 @@ mod cse_tests {
             condition: JoinCondition::On(make_eq("id", 0)),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         }
     }
 

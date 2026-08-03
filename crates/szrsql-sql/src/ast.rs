@@ -1667,6 +1667,8 @@ pub enum TableFactor {
         subquery: Box<Select>,
         /// 别名（必填）
         alias: TableAlias,
+        /// P3-2: LATERAL 标志 — 为 true 时右侧可引用左侧表的列
+        lateral: bool,
     },
     /// 表函数 `func(args) AS alias`
     TableFunction {

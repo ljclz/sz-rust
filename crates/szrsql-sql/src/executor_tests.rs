@@ -35,8 +35,9 @@
 //! - GROUP BY 多列（1）：两列组合分组
 //! - GROUP BY + HAVING（2）：HAVING 过滤、HAVING 引用多聚合
 //! - 聚合混合（2）：聚合 + WHERE + GROUP BY + HAVING、聚合 + JOIN
+//! - LATERAL JOIN（P3-2，4）：INNER JOIN、LEFT JOIN 保留未匹配、聚合 + LATERAL、LATERAL + LIMIT
 //!
-//! 共 104 个测试用例。
+//! 共 108 个测试用例。
 
 #![allow(clippy::approx_constant)]
 
@@ -2944,7 +2945,7 @@ fn test_agg_mixed_02_agg_with_join() {
     orders.insert(vec![Value::Int64(20), Value::Int64(2)]);
     orders.insert(vec![Value::Int64(21), Value::Int64(2)]);
 
-    let mut exec = Executor::new();
+    let mut exec = Executor::new().with_catalog(&catalog);
     exec.register_table(&users);
     exec.register_table(&orders);
     let result = exec.execute(&plan).unwrap();
@@ -3786,4 +3787,201 @@ fn test_p3_1_rollup_with_having_filters_grand_total() {
         0,
         "所有行 COUNT<=6 均不满足 >100，应输出 0 行"
     );
+}
+
+// =====================================================================
+//  LATERAL JOIN 测试（P3-2）— SQL:2016 T-72
+// =====================================================================
+
+/// 构建 LATERAL JOIN 测试用 catalog：users + orders
+fn make_lateral_catalog() -> InMemoryCatalog {
+    let mut cat = InMemoryCatalog::new();
+    cat.add_simple_table(
+        "users",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
+    cat.add_simple_table(
+        "orders",
+        vec![
+            ("id", ColumnType::Int64),
+            ("user_id", ColumnType::Int64),
+            ("amount", ColumnType::Int64),
+        ],
+    );
+    cat
+}
+
+/// users 表：alice(1), bob(2), carol(3)
+fn make_lateral_users() -> InMemoryTable {
+    let mut t = InMemoryTable::with_columns(
+        "users",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
+    t.insert(vec![Value::Int64(1), Value::Text("alice".into())]);
+    t.insert(vec![Value::Int64(2), Value::Text("bob".into())]);
+    t.insert(vec![Value::Int64(3), Value::Text("carol".into())]);
+    t
+}
+
+/// orders 表：alice 2 单，bob 1 单，carol 0 单
+fn make_lateral_orders() -> InMemoryTable {
+    let mut t = InMemoryTable::with_columns(
+        "orders",
+        vec![
+            ("id", ColumnType::Int64),
+            ("user_id", ColumnType::Int64),
+            ("amount", ColumnType::Int64),
+        ],
+    );
+    t.insert(vec![Value::Int64(1), Value::Int64(1), Value::Int64(100)]);
+    t.insert(vec![Value::Int64(2), Value::Int64(1), Value::Int64(200)]);
+    t.insert(vec![Value::Int64(3), Value::Int64(2), Value::Int64(300)]);
+    t
+}
+
+#[test]
+fn test_p3_2_lateral_inner_join_basic() {
+    // SELECT u.name, o.amount FROM users u
+    //   JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id) o ON true
+    // 预期：alice 2 行(100,200)，bob 1 行(300)，carol 0 行 → 共 3 行
+    let catalog = make_lateral_catalog();
+    let plan = plan_sql(
+        "SELECT u.name, o.amount \
+         FROM users u \
+         JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id) AS o ON true",
+        &catalog,
+    );
+    let users = make_lateral_users();
+    let orders = make_lateral_orders();
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&users);
+    exec.register_table(&orders);
+    let result = exec.execute(&plan).unwrap();
+
+    assert_eq!(result.len(), 3, "LATERAL INNER JOIN 应得 3 行");
+    // 验证 alice 的两笔订单
+    let alice_amounts: Vec<i64> = result
+        .iter()
+        .filter(|r| matches!(&r[0], Value::Text(s) if s == "alice"))
+        .filter_map(|r| match &r[1] {
+            Value::Int64(v) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    assert!(alice_amounts.contains(&100));
+    assert!(alice_amounts.contains(&200));
+    // 验证 bob 的一笔订单
+    let bob_amounts: Vec<i64> = result
+        .iter()
+        .filter(|r| matches!(&r[0], Value::Text(s) if s == "bob"))
+        .filter_map(|r| match &r[1] {
+            Value::Int64(v) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bob_amounts, vec![300]);
+    // carol 无订单，INNER JOIN 不出现
+    assert!(!result
+        .iter()
+        .any(|r| matches!(&r[0], Value::Text(s) if s == "carol")));
+}
+
+#[test]
+fn test_p3_2_lateral_left_join_preserves_unmatched_left() {
+    // LEFT JOIN LATERAL：carol 无订单，右列应填 NULL
+    let catalog = make_lateral_catalog();
+    let plan = plan_sql(
+        "SELECT u.name, o.amount \
+         FROM users u \
+         LEFT JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id) AS o ON true",
+        &catalog,
+    );
+    let users = make_lateral_users();
+    let orders = make_lateral_orders();
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&users);
+    exec.register_table(&orders);
+    let result = exec.execute(&plan).unwrap();
+
+    // 3 users × 各自行数：alice 2 + bob 1 + carol 1(NULL) = 4 行
+    assert_eq!(result.len(), 4, "LATERAL LEFT JOIN 应得 4 行");
+    // carol 的 amount 应为 NULL
+    let carol_row = result
+        .iter()
+        .find(|r| matches!(&r[0], Value::Text(s) if s == "carol"))
+        .expect("应包含 carol");
+    assert!(
+        matches!(&carol_row[1], Value::Null),
+        "carol 无订单，amount 应为 NULL"
+    );
+}
+
+#[test]
+fn test_p3_2_lateral_join_with_aggregation() {
+    // 聚合 LATERAL：每用户订单总额
+    // SELECT u.name, SUM(o.amount) FROM users u
+    //   LEFT JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id) o ON true
+    //   GROUP BY u.name
+    let catalog = make_lateral_catalog();
+    let plan = plan_sql(
+        "SELECT u.name, SUM(o.amount) \
+         FROM users u \
+         LEFT JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id) AS o ON true \
+         GROUP BY u.name",
+        &catalog,
+    );
+    let users = make_lateral_users();
+    let orders = make_lateral_orders();
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&users);
+    exec.register_table(&orders);
+    let result = exec.execute(&plan).unwrap();
+
+    assert_eq!(result.len(), 3, "应有 3 个用户分组");
+    let mut sums: std::collections::HashMap<String, Option<i64>> = std::collections::HashMap::new();
+    for row in &result {
+        if let (Value::Text(name), sum) = (&row[0], &row[1]) {
+            let v = match sum {
+                Value::Int64(x) => Some(*x),
+                Value::Null => None,
+                _ => None,
+            };
+            sums.insert(name.clone(), v);
+        }
+    }
+    assert_eq!(sums.get("alice"), Some(&Some(300)), "alice SUM = 100+200");
+    assert_eq!(sums.get("bob"), Some(&Some(300)), "bob SUM = 300");
+    // carol 无订单 → LATERAL LEFT JOIN 右列填 NULL → SUM(NULL) = NULL（SQL 标准语义）
+    assert_eq!(sums.get("carol"), Some(&None), "carol 无订单 SUM = NULL");
+}
+
+#[test]
+fn test_p3_2_lateral_join_subquery_with_limit() {
+    // LATERAL + LIMIT：每用户取最近 1 笔订单（按 id 降序）
+    // SELECT u.name, o.amount FROM users u
+    //   JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id ORDER BY id DESC LIMIT 1) o ON true
+    let catalog = make_lateral_catalog();
+    let plan = plan_sql(
+        "SELECT u.name, o.amount \
+         FROM users u \
+         JOIN LATERAL (SELECT * FROM orders WHERE orders.user_id = u.id ORDER BY id DESC LIMIT 1) AS o ON true",
+        &catalog,
+    );
+    let users = make_lateral_users();
+    let orders = make_lateral_orders();
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&users);
+    exec.register_table(&orders);
+    let result = exec.execute(&plan).unwrap();
+
+    // alice 最近单 = 200 (id=2), bob = 300 (id=3)
+    assert_eq!(result.len(), 2, "每用户 LIMIT 1 → 2 行");
+    let mut m: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for row in &result {
+        if let (Value::Text(name), Value::Int64(amt)) = (&row[0], &row[1]) {
+            m.insert(name.clone(), *amt);
+        }
+    }
+    assert_eq!(m.get("alice"), Some(&200), "alice 最近单 = 200");
+    assert_eq!(m.get("bob"), Some(&300), "bob 最近单 = 300");
 }

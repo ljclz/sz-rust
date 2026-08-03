@@ -274,6 +274,7 @@ impl<'a> ExplainBuilder<'a> {
                 condition,
                 left,
                 right,
+                ..
             } => {
                 let algo = "Nested Loop"; // 当前执行器仅实现 NestedLoop
                 let jtype = match join_type {
@@ -945,6 +946,9 @@ mod tests {
             condition: szrsql_sql::ast::JoinCondition::On(make_eq("id", 0)),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
         let output = explain(&join, &model);
 

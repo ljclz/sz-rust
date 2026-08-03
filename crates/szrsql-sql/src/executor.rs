@@ -873,6 +873,9 @@ pub fn resolve_sequences_in_plan(
             condition,
             left,
             right,
+            lateral,
+            lateral_subquery,
+            right_schema,
         } => {
             let new_left = Box::new(resolve_sequences_in_plan(left, seq_store)?);
             let new_right = Box::new(resolve_sequences_in_plan(right, seq_store)?);
@@ -881,6 +884,9 @@ pub fn resolve_sequences_in_plan(
                 condition: condition.clone(),
                 left: new_left,
                 right: new_right,
+                lateral: *lateral,
+                lateral_subquery: lateral_subquery.clone(),
+                right_schema: right_schema.clone(),
             })
         }
         // 其他节点（Scan / Empty / DDL / DML）直接克隆 — 它们不包含需要序列解析的表达式
@@ -7139,7 +7145,19 @@ impl<'a> Executor<'a> {
                 condition,
                 left,
                 right,
-            } => self.execute_join(*join_type, condition, left, right),
+                lateral,
+                lateral_subquery,
+                right_schema,
+                ..
+            } => self.execute_join(
+                *join_type,
+                condition,
+                left,
+                right,
+                *lateral,
+                lateral_subquery.as_deref(),
+                right_schema.as_ref(),
+            ),
             LogicalPlan::Aggregate {
                 grouping_sets,
                 aggregates,
@@ -7793,9 +7811,23 @@ impl<'a> Executor<'a> {
 
         // 若 input 为 JOIN，使用 JoinedRowContext 以正确路由 `t1.col` / `t2.col`
         // 限定名查找（避免 ExecRowContext 在重复列名时总是命中左表列）
-        if let LogicalPlan::Join { left, right, .. } = input {
+        if let LogicalPlan::Join {
+            left,
+            right,
+            lateral,
+            right_schema,
+            ..
+        } = input
+        {
             let left_schema = input_schema(left)?;
-            let right_schema = input_schema(right)?;
+            let right_schema_val = if *lateral {
+                right_schema.clone().unwrap_or_else(|| TableSchema {
+                    name: TableName::new("__lateral_right__"),
+                    columns: vec![],
+                })
+            } else {
+                input_schema(right)?
+            };
             let left_col_count = left_schema.columns.len();
             let mut result = Vec::with_capacity(rows.len());
             for row in rows {
@@ -7803,7 +7835,7 @@ impl<'a> Executor<'a> {
                 let ctx = JoinedRowContext::new(
                     &left_schema,
                     left_slice,
-                    &right_schema,
+                    &right_schema_val,
                     Some(right_slice),
                 );
                 match ExprEvaluator::eval(&predicate, &ctx)? {
@@ -8018,9 +8050,24 @@ impl<'a> Executor<'a> {
 
         // 若 input 为 JOIN，使用 JoinedRowContext 以正确路由 `t1.col` / `t2.col`
         // 限定名查找（避免 ExecRowContext 在重复列名时总是命中左表列）
-        if let LogicalPlan::Join { left, right, .. } = input {
+        if let LogicalPlan::Join {
+            left,
+            right,
+            lateral,
+            right_schema,
+            ..
+        } = input
+        {
             let left_schema = input_schema(left)?;
-            let right_schema = input_schema(right)?;
+            // P3-2: LATERAL JOIN 的 right 为 Empty 占位，右 Schema 由 right_schema 字段提供
+            let right_schema_val = if *lateral {
+                right_schema.clone().unwrap_or_else(|| TableSchema {
+                    name: TableName::new("__lateral_right__"),
+                    columns: vec![],
+                })
+            } else {
+                input_schema(right)?
+            };
             let left_col_count = left_schema.columns.len();
             let mut result = Vec::with_capacity(rows.len());
             for row in rows {
@@ -8028,7 +8075,7 @@ impl<'a> Executor<'a> {
                 let ctx = JoinedRowContext::new(
                     &left_schema,
                     left_slice,
-                    &right_schema,
+                    &right_schema_val,
                     Some(right_slice),
                 );
                 let mut out_row = Vec::with_capacity(exprs.len());
@@ -8379,6 +8426,10 @@ impl<'a> Executor<'a> {
     ///   - 若 expr 为单一等值 `t1.col = t2.col` 或 AND 链的等值谓词 → HashJoin
     ///   - 否则（含非等值、OR、复杂表达式）→ NestedLoop
     ///
+    /// **LATERAL JOIN（P3-2）**：当 `lateral=true` 时，`right` 为占位 Empty 计划，
+    /// `lateral_subquery` 保存原始 Select AST。执行器逐左行将左侧列值代换为字面量
+    /// 注入右侧子查询，重新规划并执行，再与当前左行做 NestedLoop 连接。
+    ///
     /// **输出 Schema**：左表列 ++ 右表列（与 `plan_schema` 推导保持一致）
     /// **输出 Row**：左行 ++ 右行（外连接未匹配侧用 NULL 填充）
     pub fn execute_join(
@@ -8387,7 +8438,24 @@ impl<'a> Executor<'a> {
         condition: &JoinCondition,
         left: &LogicalPlan,
         right: &LogicalPlan,
+        lateral: bool,
+        lateral_subquery: Option<&Select>,
+        right_schema: Option<&TableSchema>,
     ) -> Result<Vec<Row>, ExecutionError> {
+        // LATERAL JOIN（P3-2）：逐左行重规划右侧
+        if lateral {
+            let left_rows = self.execute(left)?;
+            let left_schema = input_schema(left)?;
+            return self.execute_lateral_join(
+                join_type,
+                condition,
+                &left_rows,
+                &left_schema,
+                lateral_subquery.expect("lateral=true requires lateral_subquery"),
+                right_schema,
+            );
+        }
+
         // 物化左右两侧
         let left_rows = self.execute(left)?;
         let right_rows = self.execute(right)?;
@@ -8436,6 +8504,114 @@ impl<'a> Executor<'a> {
             &left_schema,
             &right_schema,
         )
+    }
+
+    /// LATERAL JOIN 执行 — 逐左行重规划右侧子查询
+    ///
+    /// 算法：
+    /// 1. 对每条左行，将左行各列值代换为字面量注入 `lateral_subquery`
+    /// 2. 重新规划（`Planner`）并执行右侧子查询
+    /// 3. 将右结果与当前左行做 NestedLoop 连接（按 JOIN 条件）
+    /// 4. LEFT OUTER：右为空或无匹配时，用 NULL 填充右列输出左行
+    ///
+    /// 仅支持 INNER / LEFT OUTER（RIGHT/FULL 语义在 LATERAL 下极罕见，留待后续）。
+    fn execute_lateral_join(
+        &self,
+        join_type: JoinType,
+        condition: &JoinCondition,
+        left_rows: &[Row],
+        left_schema: &TableSchema,
+        subquery: &Select,
+        right_schema: Option<&TableSchema>,
+    ) -> Result<Vec<Row>, ExecutionError> {
+        use crate::plan::Planner;
+
+        // 右 Schema 列名集合（小写），用于作用域感知的绑定代换
+        let right_columns: HashSet<String> = right_schema
+            .map(|s| s.columns.iter().map(|c| c.name.to_lowercase()).collect())
+            .unwrap_or_default();
+        // 左表别名/表名，用于限定名代换匹配
+        let left_table_name = left_schema.name.name.as_str();
+
+        let mut result = Vec::new();
+
+        for left_row in left_rows {
+            // 构建左行绑定：col_name → Value
+            let bindings = Self::schema_row_to_bindings(left_schema, left_row);
+
+            // 将绑定代换进子查询副本（SELECT 投影 / WHERE / GROUP BY / HAVING 等）
+            let mut substituted = subquery.clone();
+            substitute_lateral_bindings_in_select(
+                &mut substituted,
+                &bindings,
+                &right_columns,
+                left_table_name,
+            );
+
+            // 重新规划右侧子查询
+            let catalog = self.catalog.ok_or_else(|| {
+                ExecutionError::Unsupported(
+                    "LATERAL JOIN requires a catalog for re-planning the right subquery".into(),
+                )
+            })?;
+            let planner = Planner::new(catalog);
+            let right_plan = planner.plan_statement(Statement::Select(Box::new(substituted)))?;
+            let right_rows = self.execute(&right_plan)?;
+            let right_schema = input_schema(&right_plan)?;
+            let right_col_count = right_schema.columns.len();
+
+            // 解析 JOIN 条件（右 Schema 在 LATERAL 下各次迭代应一致）
+            let condition_expr = build_join_condition_expr(condition, left_schema, &right_schema)?;
+
+            if right_rows.is_empty() {
+                // 右侧为空：INNER 不输出；LEFT OUTER 用 NULL 填充
+                if matches!(join_type, JoinType::LeftOuter) {
+                    let mut row = left_row.clone();
+                    row.extend(std::iter::repeat_n(Value::Null, right_col_count));
+                    result.push(row);
+                }
+                continue;
+            }
+
+            // 逐右行做条件匹配（NestedLoop 单左行版）
+            let mut matched = false;
+            for right_row in &right_rows {
+                if join_condition_match(
+                    &condition_expr,
+                    left_schema,
+                    left_row,
+                    &right_schema,
+                    Some(right_row),
+                ) {
+                    let mut row = left_row.clone();
+                    row.extend(right_row.iter().cloned());
+                    result.push(row);
+                    matched = true;
+                }
+            }
+
+            // LEFT OUTER：无匹配时 NULL 填充右列
+            if !matched && matches!(join_type, JoinType::LeftOuter) {
+                let mut row = left_row.clone();
+                row.extend(std::iter::repeat_n(Value::Null, right_col_count));
+                result.push(row);
+            }
+        }
+
+        Ok(result)
+    }
+
+    // -----------------------------------------------------------------
+    //  LATERAL JOIN 辅助函数
+    // -----------------------------------------------------------------
+
+    /// 将 Schema + Row 转换为列名 → 值的绑定映射（用于 LATERAL 代换）
+    fn schema_row_to_bindings(schema: &TableSchema, row: &Row) -> HashMap<String, Value> {
+        let mut bindings = HashMap::with_capacity(schema.columns.len());
+        for (col, val) in schema.columns.iter().zip(row.iter()) {
+            bindings.insert(col.name.clone(), val.clone());
+        }
+        bindings
     }
 
     // -----------------------------------------------------------------
@@ -12735,6 +12911,8 @@ fn input_schema(plan: &LogicalPlan) -> Result<TableSchema, ExecutionError> {
             join_type,
             left,
             right,
+            lateral,
+            right_schema,
             ..
         } => {
             // SEMI/ANTI JOIN 输出 Schema = 仅左表列（右表列不输出）
@@ -12747,7 +12925,17 @@ fn input_schema(plan: &LogicalPlan) -> Result<TableSchema, ExecutionError> {
             }
             // 普通 JOIN 输出 Schema = 左表列 ++ 右表列（与 plan_schema 推导一致）
             let mut l = input_schema(left)?;
-            let r = input_schema(right)?;
+            // P3-2: LATERAL JOIN 的 right 为 Empty 占位，右 Schema 由 right_schema 字段提供
+            let r = if *lateral {
+                right_schema.clone().unwrap_or_else(|| {
+                    input_schema(right).unwrap_or_else(|_| TableSchema {
+                        name: TableName::new("__lateral_right__"),
+                        columns: vec![],
+                    })
+                })
+            } else {
+                input_schema(right)?
+            };
             l.columns.extend(r.columns);
             l.name = TableName::new("__join__");
             Ok(l)
@@ -12786,6 +12974,191 @@ fn input_schema(plan: &LogicalPlan) -> Result<TableSchema, ExecutionError> {
             "cannot derive schema for plan: {:?}",
             std::mem::discriminant(plan)
         ))),
+    }
+}
+
+// =====================================================================
+//  LATERAL JOIN 表达式代换辅助函数
+// =====================================================================
+
+/// 将左行绑定代换进表达式 AST（递归遍历所有表达式节点）
+///
+/// # 作用域规则（与 PG 语义一致）
+///
+/// LATERAL 子查询中的列名解析遵循「内层优先」原则：
+/// - **不限定名**（`col`）：优先解析为子查询自身 FROM 表的列；仅当该列名
+///   不属于右表任何列时，才回退到左表绑定值。
+/// - **限定名**（`alias.col`）：仅当表前缀与左表别名匹配时才代换为绑定值；
+///   表前缀匹配右表或其他表时保留原样。
+///
+/// # 参数
+///
+/// - `right_columns`：右子查询输出列名集合（小写），用于判断不限定名归属
+/// - `left_table_name`：左表别名（或表名），用于限定名代换匹配
+fn substitute_lateral_bindings(
+    expr: &mut Expr,
+    bindings: &HashMap<String, Value>,
+    right_columns: &HashSet<String>,
+    left_table_name: &str,
+) {
+    match expr {
+        Expr::Identifier(parts) => {
+            if parts.is_empty() {
+                return;
+            }
+            if parts.len() == 1 {
+                // 不限定列名：仅当该列名不属于右表时，才代换为左表绑定值
+                // （PG 语义：不限定名优先解析为子查询自身 FROM 表的列）
+                let name = &parts[0];
+                let name_lc = name.to_lowercase();
+                if !right_columns.contains(&name_lc) {
+                    if let Some(val) = bindings.get(&name_lc) {
+                        *expr = Expr::Literal(val.clone());
+                    }
+                }
+            } else {
+                // 限定名 table.col：仅当表前缀匹配左表别名时才代换
+                let table = &parts[0];
+                let col = &parts[parts.len() - 1];
+                let col_lc = col.to_lowercase();
+                if table.eq_ignore_ascii_case(left_table_name) {
+                    if let Some(val) = bindings.get(&col_lc) {
+                        *expr = Expr::Literal(val.clone());
+                    }
+                }
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            substitute_lateral_bindings(left, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings(right, bindings, right_columns, left_table_name);
+        }
+        Expr::UnaryOp { expr: inner, .. } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+        }
+        Expr::Function { args, .. } => {
+            for arg in args {
+                substitute_lateral_bindings(arg, bindings, right_columns, left_table_name);
+            }
+        }
+        Expr::Case {
+            operand,
+            when_then,
+            else_expr,
+        } => {
+            if let Some(op) = operand {
+                substitute_lateral_bindings(op, bindings, right_columns, left_table_name);
+            }
+            for (w, t) in when_then {
+                substitute_lateral_bindings(w, bindings, right_columns, left_table_name);
+                substitute_lateral_bindings(t, bindings, right_columns, left_table_name);
+            }
+            if let Some(e) = else_expr {
+                substitute_lateral_bindings(e, bindings, right_columns, left_table_name);
+            }
+        }
+        Expr::Cast { expr: inner, .. } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+        }
+        Expr::InList {
+            expr: inner, list, ..
+        } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+            for item in list {
+                substitute_lateral_bindings(item, bindings, right_columns, left_table_name);
+            }
+        }
+        Expr::InSubquery {
+            expr: inner,
+            subquery,
+            ..
+        } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings_in_select(
+                subquery,
+                bindings,
+                right_columns,
+                left_table_name,
+            );
+        }
+        Expr::Between {
+            expr: inner,
+            low,
+            high,
+            ..
+        } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings(low, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings(high, bindings, right_columns, left_table_name);
+        }
+        Expr::Like {
+            expr: inner,
+            pattern,
+            ..
+        } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings(pattern, bindings, right_columns, left_table_name);
+        }
+        Expr::IsNull { expr: inner, .. } => {
+            substitute_lateral_bindings(inner, bindings, right_columns, left_table_name);
+        }
+        Expr::Exists { subquery, .. } => {
+            substitute_lateral_bindings_in_select(
+                subquery,
+                bindings,
+                right_columns,
+                left_table_name,
+            );
+        }
+        Expr::IsDistinctFrom { left, right, .. } => {
+            substitute_lateral_bindings(left, bindings, right_columns, left_table_name);
+            substitute_lateral_bindings(right, bindings, right_columns, left_table_name);
+        }
+        Expr::Subquery(sub) => {
+            substitute_lateral_bindings_in_select(sub, bindings, right_columns, left_table_name);
+        }
+        // 叶子节点（Literal、Wildcard、Parameter 等）无需代换
+        _ => {}
+    }
+}
+
+/// 将左行绑定代换进 Select 的所有表达式节点
+fn substitute_lateral_bindings_in_select(
+    select: &mut Select,
+    bindings: &HashMap<String, Value>,
+    right_columns: &HashSet<String>,
+    left_table_name: &str,
+) {
+    // SELECT 投影
+    for item in &mut select.projection {
+        match item {
+            SelectItem::UnnamedExpr(expr) | SelectItem::ExprWithAlias { expr, .. } => {
+                substitute_lateral_bindings(expr, bindings, right_columns, left_table_name);
+            }
+            _ => {}
+        }
+    }
+    // WHERE
+    if let Some(ref mut w) = select.where_clause {
+        substitute_lateral_bindings(w, bindings, right_columns, left_table_name);
+    }
+    // GROUP BY
+    for expr in &mut select.group_by {
+        substitute_lateral_bindings(expr, bindings, right_columns, left_table_name);
+    }
+    // HAVING
+    if let Some(ref mut h) = select.having {
+        substitute_lateral_bindings(h, bindings, right_columns, left_table_name);
+    }
+    // ORDER BY
+    for order in &mut select.order_by {
+        substitute_lateral_bindings(&mut order.expr, bindings, right_columns, left_table_name);
+    }
+    // LIMIT / OFFSET
+    if let Some(ref mut l) = select.limit {
+        substitute_lateral_bindings(l, bindings, right_columns, left_table_name);
+    }
+    if let Some(ref mut o) = select.offset {
+        substitute_lateral_bindings(o, bindings, right_columns, left_table_name);
     }
 }
 
@@ -13379,9 +13752,14 @@ fn substitute_parameters_in_table_factor(
 ) -> Result<TableFactor, ExecutionError> {
     Ok(match tf {
         TableFactor::Table { name, alias } => TableFactor::Table { name, alias },
-        TableFactor::Derived { subquery, alias } => TableFactor::Derived {
+        TableFactor::Derived {
+            subquery,
+            alias,
+            lateral,
+        } => TableFactor::Derived {
             subquery: Box::new(substitute_parameters_in_select(*subquery, parameters)?),
             alias,
+            lateral,
         },
         TableFactor::TableFunction { name, args, alias } => {
             let mut new_args = Vec::with_capacity(args.len());

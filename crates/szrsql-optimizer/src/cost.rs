@@ -251,6 +251,7 @@ impl CostModel {
                 condition,
                 left,
                 right,
+                ..
             } => self.estimate_join(*join_type, condition, left, right),
             LogicalPlan::Aggregate {
                 grouping_sets,
@@ -926,6 +927,9 @@ mod tests {
             }),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
         let cost = model.estimate(&plan);
         // 默认 cardinality = 1000 each
@@ -1305,6 +1309,9 @@ mod tests {
             }),
             left: Box::new(left),
             right: Box::new(right),
+            lateral: false,
+            lateral_subquery: None,
+            right_schema: None,
         };
 
         let cost = model.estimate(&plan);

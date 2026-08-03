@@ -1324,6 +1324,7 @@ fn try_execute_cte_system_table(
                 name: cte_alias_name.clone(),
                 column_aliases: None,
             },
+            lateral: false,
         };
         // 替换主表
         if let TableFactor::Table { name, .. } = &new_select.from[0].relation {
@@ -1576,7 +1577,9 @@ fn materialize_system_table_factor(
             let rows = kind.compute_rows(&adapter, current_db, stats);
             Some((column_names, rows))
         }
-        TableFactor::Derived { subquery, alias } => {
+        TableFactor::Derived {
+            subquery, alias, ..
+        } => {
             // Navicat 兼容：子查询作为 JOIN 的左表或右表
             // 递归执行子查询（必须是系统表查询），再应用子查询自身的投影
             let sub_stmt = Statement::Select(subquery.clone());
