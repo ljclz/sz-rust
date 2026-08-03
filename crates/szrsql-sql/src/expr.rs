@@ -2829,6 +2829,98 @@ impl ExprEvaluator {
                     }),
                 }
             }
+            // SQL:2023 JSON 路径函数 — JSON_VALUE / JSON_EXISTS / JSON_QUERY
+            // 路径语法：$.key / $[n] / $[*]（SQL/JSON path 子集）
+            "json_value" => {
+                if arg_vals.len() < 2 || arg_vals.len() > 3 {
+                    return Err(EvalError::InvalidFunctionArgs(format!(
+                        "json_value expects 2 or 3 args (json, path, [returning]), got {}",
+                        arg_vals.len()
+                    )));
+                }
+                let json_val = match &arg_vals[0] {
+                    Value::Null => return Ok(Value::Null),
+                    Value::Json(j) => j.clone(),
+                    Value::Text(s) => serde_json::from_str(s)
+                        .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "json/text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let path = match &arg_vals[1] {
+                    Value::Text(s) => s,
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text path",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let result = json_path_first(&json_val, path);
+                match result {
+                    Some(serde_json::Value::Null) | None => Ok(Value::Null),
+                    Some(v) => Ok(value_from_json(v)),
+                }
+            }
+            "json_exists" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let json_val = match &arg_vals[0] {
+                    Value::Null => return Ok(Value::Bool(false)),
+                    Value::Json(j) => j.clone(),
+                    Value::Text(s) => serde_json::from_str(s)
+                        .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "json/text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let path = match &arg_vals[1] {
+                    Value::Text(s) => s,
+                    Value::Null => return Ok(Value::Bool(false)),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text path",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                Ok(Value::Bool(json_path_exists(&json_val, path)))
+            }
+            "json_query" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                let json_val = match &arg_vals[0] {
+                    Value::Null => return Ok(Value::Null),
+                    Value::Json(j) => j.clone(),
+                    Value::Text(s) => serde_json::from_str(s)
+                        .map_err(|e| EvalError::CastFailed(format!("invalid JSON: {e}")))?,
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "json/text",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                let path = match &arg_vals[1] {
+                    Value::Text(s) => s,
+                    Value::Null => return Ok(Value::Null),
+                    other => {
+                        return Err(EvalError::TypeMismatch {
+                            expected: "text path",
+                            actual: value_type_name(other),
+                        })
+                    }
+                };
+                match json_path_first(&json_val, path) {
+                    Some(v) => Ok(Value::Json(v.clone())),
+                    None => Ok(Value::Null),
+                }
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -2840,6 +2932,90 @@ impl ExprEvaluator {
             }
         }
     }
+}
+
+// =====================================================================
+//  SQL/JSON 路径求值辅助函数
+// =====================================================================
+
+/// 将 serde_json::Value 转为 szrsql Value（用于 JSON_VALUE 的 returning 语义）。
+fn value_from_json(v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int64(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float64(f)
+            } else {
+                Value::Null
+            }
+        }
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        // 复合 JSON 标量化为字符串（SQL/JSON 标准语义）
+        other => Value::Text(other.to_string()),
+    }
+}
+
+/// 解析 SQL/JSON 路径并求值，返回第一个匹配项。
+///
+/// 支持的路径子集：
+/// - `$` — 根节点
+/// - `$.key` — 对象字段访问
+/// - `$[n]` — 数组索引访问（支持负数，-1 为末尾）
+/// - `$.key[n]` — 对象字段后再取数组元素（如 `$.items[1]`）
+/// - `$[*]` — 通配符，返回第一个数组元素
+///
+/// 路径不以 `$` 开头时自动补全（兼容 PG `->` 语义）。
+fn json_path_first<'j>(root: &'j serde_json::Value, path: &str) -> Option<&'j serde_json::Value> {
+    let path = path.trim();
+    let mut current = root;
+    // 按 '.' 分割路径段；去掉开头的 '$'
+    let without_root = path.strip_prefix('$').unwrap_or(path);
+    for seg in without_root.split('.').filter(|s| !s.is_empty()) {
+        // 每段格式：key[index][index]...  或纯 [index][index]...
+        let mut chars = seg.chars().peekable();
+        // 读取 key 部分（直到第一个 '[' 或段尾）
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if c == '[' { break; }
+            key.push(c);
+            chars.next();
+        }
+        // 1. 对象字段访问
+        if !key.is_empty() {
+            current = current.as_object().and_then(|o| o.get(&key))?;
+        }
+        // 2. 连续数组索引访问 [n][m]...
+        let rest: String = chars.collect();
+        let mut scans = rest.as_str();
+        while !scans.is_empty() {
+            if !scans.starts_with('[') { return None; }
+            let close = scans.find(']')?;
+            let inner = &scans[1..close];
+            current = if inner == "*" {
+                current.as_array().and_then(|a| a.first())?
+            } else if let Ok(idx) = inner.parse::<i64>() {
+                let arr = current.as_array()?;
+                let real_idx = if idx >= 0 {
+                    idx as usize
+                } else {
+                    (arr.len() as i64 + idx) as usize
+                };
+                arr.get(real_idx)?
+            } else {
+                return None;
+            };
+            scans = &scans[close + 1..];
+        }
+    }
+    Some(current)
+}
+
+/// 判断 SQL/JSON 路径是否存在匹配项（用于 JSON_EXISTS）。
+fn json_path_exists(root: &serde_json::Value, path: &str) -> bool {
+    json_path_first(root, path).is_some()
 }
 
 // =====================================================================
@@ -3736,5 +3912,156 @@ mod tests {
             distinct: false,
         };
         assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Int64(5));
+    }
+
+    // =================================================================
+    //  SQL/JSON 路径函数测试（P3-5）
+    // =================================================================
+
+    fn json_lit(s: &str) -> Expr {
+        Expr::Literal(Value::Json(serde_json::from_str(s).unwrap()))
+    }
+
+    #[test]
+    fn test_json_value_object_key() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                json_lit(r#"{"name": "alice", "age": 30}"#),
+                Expr::Literal(Value::Text("$.name".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("alice".into()));
+    }
+
+    #[test]
+    fn test_json_value_nested_key() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                json_lit(r#"{"user": {"name": "bob", "addr": {"city": "shanghai"}}}"#),
+                Expr::Literal(Value::Text("$.user.addr.city".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("shanghai".into()));
+    }
+
+    #[test]
+    fn test_json_value_array_index() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                json_lit(r#"{"items": [10, 20, 30]}"#),
+                Expr::Literal(Value::Text("$.items[1]".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Int64(20));
+    }
+
+    #[test]
+    fn test_json_value_negative_index() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                json_lit(r#"["a", "b", "c"]"#),
+                Expr::Literal(Value::Text("$[-1]".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("c".into()));
+    }
+
+    #[test]
+    fn test_json_value_null_on_missing() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                json_lit(r#"{"a": 1}"#),
+                Expr::Literal(Value::Text("$.missing".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn test_json_value_null_input() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_value".into(),
+            args: vec![
+                Expr::Literal(Value::Null),
+                Expr::Literal(Value::Text("$.a".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn test_json_exists_true() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_exists".into(),
+            args: vec![
+                json_lit(r#"{"name": "alice"}"#),
+                Expr::Literal(Value::Text("$.name".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_json_exists_false() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_exists".into(),
+            args: vec![
+                json_lit(r#"{"name": "alice"}"#),
+                Expr::Literal(Value::Text("$.missing".into())),
+            ],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_json_query_object() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_query".into(),
+            args: vec![
+                json_lit(r#"{"user": {"name": "alice", "age": 30}}"#),
+                Expr::Literal(Value::Text("$.user".into())),
+            ],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert!(matches!(result, Value::Json(j) if j.get("name") == Some(&serde_json::Value::String("alice".into()))));
+    }
+
+    #[test]
+    fn test_json_query_array_wildcard() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "json_query".into(),
+            args: vec![
+                json_lit(r#"{"items": [1, 2, 3]}"#),
+                Expr::Literal(Value::Text("$.items[*]".into())),
+            ],
+            distinct: false,
+        };
+        // 通配符返回第一个数组元素
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Json(serde_json::Value::Number(1.into())));
     }
 }
