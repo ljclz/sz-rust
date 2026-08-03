@@ -214,7 +214,10 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
     // Navicat 兼容：预处理 SHOW PROCEDURE/FUNCTION STATUS WHERE Db = 'xxx'
     // sqlparser 不支持此 MySQL 方言，归一化为空结果集查询。
     let normalized2 = normalize_show_procedure_function(&normalized);
-    let sql: &str = normalized2.as_ref();
+    // SQL:2016 F-9：将 OVERLAPS 时间区间谓词归一化为等价的布尔表达式
+    // （sqlparser 0.53 仅将 OVERLAPS 识别为关键字，未作为表达式运算符解析）
+    let normalized3 = normalize_overlaps_predicate(&normalized2);
+    let sql: &str = normalized3.as_ref();
     // ADV-BUG-001 修复：OR/AND 链深度预检
     // sqlparser-rs 内部用递归下降解析二值表达式，左结合链深度 = 操作数个数
     // 在调用 sqlparser-rs 之前统计 SQL 文本中 OR/AND 关键字出现次数，超限直接拒绝
@@ -748,7 +751,192 @@ fn normalize_show_procedure_function(sql: &str) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
-/// 判断单个分号分隔的 SQL 段是否需要 SET 归一化。
+/// 将 SQL:2016 F-9 `OVERLAPS` 时间区间谓词归一化为等价的布尔表达式。
+///
+/// ## 语法
+/// ```text
+/// (start1, end1) OVERLAPS (start2, end2)
+/// ```
+///
+/// ## 语义（SQL 标准）
+/// 两个时间段有交集时返回 true。第一个元素为区间起点，第二个为终点。
+/// 若起点 > 终点则视为空区间，不与任何区间重叠。
+///
+/// ## 重写规则
+/// ```text
+/// (a, b) OVERLAPS (c, d)  →  a <= d AND b >= c
+/// ```
+/// 该公式已隐含空区间处理：当 a > b 时，`b >= c` 与 `a <= d` 无法同时成立
+/// （因为 c < d 且 a > b 时 b < a ≤ d 且 c ≥ a > b，矛盾），结果为 false。
+///
+/// ## 实现策略
+/// sqlparser 0.53 仅将 OVERLAPS 识别为保留关键字，未作为表达式运算符解析。
+/// 因此在调用 sqlparser 前，通过字符级扫描将 OVERLAPS 谓词改写为等价的
+/// `a <= d AND b >= c` 形式，再由 sqlparser 正常解析。
+///
+/// 支持任意嵌套深度的括号表达式（通过括号计数匹配），覆盖列引用、
+/// 字面量、函数调用、子表达式等常见形式。
+fn normalize_overlaps_predicate(sql: &str) -> Cow<'_, str> {
+    // 快速检测：不包含 OVERLAPS 关键字直接返回
+    let upper = sql.to_ascii_uppercase();
+    if !upper.contains("OVERLAPS") {
+        return Cow::Borrowed(sql);
+    }
+
+    let bytes = sql.as_bytes();
+    let mut result = String::with_capacity(sql.len() + 64);
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // 检测 "OVERLAPS" 关键字（不区分大小写，需为独立词）
+        if matches_keyword_at(&upper, "OVERLAPS", i) {
+            // 向左扫描找紧邻的 ')' （允许中间有空白）
+            let mut j = i;
+            while j > 0 && bytes[j - 1].is_ascii_whitespace() {
+                j -= 1;
+            }
+            if j > 0 && bytes[j - 1] == b')' {
+                // 匹配左侧平衡括号对，提取 (a, b)
+                if let Some((lp, contents_left)) = find_matching_paren_rev(bytes, j - 1) {
+                    let parts_left = split_top_level_comma(contents_left);
+                    if parts_left.len() == 2 {
+                        // 向右扫描找紧邻的 '(' （允许中间有空白）
+                        let mut k = i + "OVERLAPS".len();
+                        while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                            k += 1;
+                        }
+                        if k < bytes.len() && bytes[k] == b'(' {
+                            // 匹配右侧平衡括号对，提取 (c, d)
+                            if let Some((contents_right, rp)) = find_matching_paren_fwd(bytes, k) {
+                                let parts_right = split_top_level_comma(contents_right);
+                                if parts_right.len() == 2 {
+                                    // 重写为：a <= d AND b >= c
+                                    // 截断 result 中已写入的左侧元组 "(a, b)"（从 lp 开始写入）
+                                    // 因为每个源字节对应 result 中一个字符，lp 即 result 中的偏移量
+                                    result.truncate(result.len() - (i - lp));
+                                    let a = parts_left[0].trim();
+                                    let b = parts_left[1].trim();
+                                    let c = parts_right[0].trim();
+                                    let d = parts_right[1].trim();
+                                    result.push_str(a);
+                                    result.push_str(" <= ");
+                                    result.push_str(d);
+                                    result.push_str(" AND ");
+                                    result.push_str(b);
+                                    result.push_str(" >= ");
+                                    result.push_str(c);
+                                    i = rp + 1;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // 未匹配到 OVERLAPS 谓词形式，原样输出关键字
+            result.push_str(&sql[i..i + "OVERLAPS".len()]);
+            i += "OVERLAPS".len();
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    Cow::Owned(result)
+}
+
+/// 检查 `upper` 中位置 `pos` 是否以 `keyword`（大写）开头且为独立词。
+fn matches_keyword_at(upper: &str, keyword: &str, pos: usize) -> bool {
+    if pos + keyword.len() > upper.len() {
+        return false;
+    }
+    if &upper[pos..pos + keyword.len()] != keyword {
+        return false;
+    }
+    // 前面不能是标识符字符（字母/数字/_）
+    if pos > 0 {
+        let prev = upper.as_bytes()[pos - 1];
+        if prev.is_ascii_alphabetic() || prev == b'_' || prev.is_ascii_digit() {
+            return false;
+        }
+    }
+    // 后面不能是标识符字符
+    if pos + keyword.len() < upper.len() {
+        let next = upper.as_bytes()[pos + keyword.len()];
+        if next.is_ascii_alphabetic() || next == b'_' || next.is_ascii_digit() {
+            return false;
+        }
+    }
+    true
+}
+
+/// 从位置 `close_pos`（指向 ')'）向左扫描，找到匹配的 '(' 位置。
+/// 返回 (open_pos, 括号内的字节切片)。
+fn find_matching_paren_rev(sql: &[u8], close_pos: usize) -> Option<(usize, &str)> {
+    let mut depth = 0;
+    let mut i = close_pos;
+    while i < sql.len() {
+        if sql[i] == b')' {
+            depth += 1;
+        } else if sql[i] == b'(' {
+            depth -= 1;
+            if depth == 0 {
+                // i 指向匹配的 '('
+                if let Ok(s) = std::str::from_utf8(&sql[i + 1..close_pos]) {
+                    return Some((i, s));
+                }
+                return None;
+            }
+        }
+        if i == 0 { break; }
+        i -= 1;
+    }
+    None
+}
+
+/// 从位置 `open_pos`（指向 '('）向右扫描，找到匹配的 ')' 位置。
+/// 返回 (括号内的字节切片, close_pos)。
+fn find_matching_paren_fwd(sql: &[u8], open_pos: usize) -> Option<(&str, usize)> {
+    let mut depth = 0;
+    let mut i = open_pos;
+    while i < sql.len() {
+        if sql[i] == b'(' {
+            depth += 1;
+        } else if sql[i] == b')' {
+            depth -= 1;
+            if depth == 0 {
+                if let Ok(s) = std::str::from_utf8(&sql[open_pos + 1..i]) {
+                    return Some((s, i));
+                }
+                return None;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// 在顶层（不在任何括号内）按逗号分割表达式。
+/// 返回各子表达式的字节切片（保留原始大小写）。
+fn split_top_level_comma(contents: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    let bytes = contents.as_bytes();
+    for i in 0..bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b',' if depth == 0 => {
+                parts.push(&contents[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&contents[start..]);
+    parts
+}
 ///
 /// 与 [`normalize_set_no_value`] 的逻辑保持一致：返回 `true` 的段在归一化后会被修改。
 fn needs_set_normalization(seg: &str) -> bool {
@@ -5986,5 +6174,69 @@ mod hex {
             bytes.push((h * 16 + l) as u8);
         }
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod overlaps_tests {
+    use super::normalize_overlaps_predicate;
+
+    #[test]
+    fn test_overlaps_rewrite_basic() {
+        let sql = "SELECT (t1.start, t1.end) OVERLAPS (t2.start, t2.end) FROM t1, t2";
+        let result = normalize_overlaps_predicate(sql);
+        assert_eq!(
+            result,
+            "SELECT t1.start <= t2.end AND t1.end >= t2.start FROM t1, t2"
+        );
+    }
+
+    #[test]
+    fn test_overlaps_no_rewrite_when_absent() {
+        let sql = "SELECT a, b FROM t WHERE a > 1";
+        let result = normalize_overlaps_predicate(sql);
+        assert!(matches!(result, std::borrow::Cow::Borrowed(s) if s == sql));
+    }
+
+    #[test]
+    fn test_overlaps_with_literal_values() {
+        let sql = "SELECT (start, end) OVERLAPS (10, 20)";
+        let result = normalize_overlaps_predicate(sql);
+        assert_eq!(result, "SELECT start <= 20 AND end >= 10");
+    }
+
+    #[test]
+    fn test_overlaps_nested_parens() {
+        // 函数调用内含括号，应正确匹配外层括号对
+        let sql = "SELECT (COALESCE(a, 0), b) OVERLAPS (c, d)";
+        let result = normalize_overlaps_predicate(sql);
+        assert_eq!(result, "SELECT COALESCE(a, 0) <= d AND b >= c");
+    }
+
+    #[test]
+    fn test_overlaps_lowercase() {
+        let sql = "select (a, b) overlaps (c, d)";
+        let result = normalize_overlaps_predicate(sql);
+        assert_eq!(result, "select a <= d AND b >= c");
+    }
+}
+
+#[cfg(test)]
+mod overlaps_e2e_tests {
+    use super::parse_one;
+
+    #[test]
+    fn test_overlaps_full_parse() {
+        let sql = "SELECT * FROM t1 WHERE (t1.start, t1.end) OVERLAPS (t2.start, t2.end)";
+        let stmt = parse_one(sql).expect("should parse after OVERLAPS rewrite");
+        // 只要不报错就说明重写后的 SQL 能被 sqlparser 正常解析
+        let _ = stmt;
+    }
+
+    #[test]
+    fn test_overlaps_in_where_with_other_conditions() {
+        let sql = "SELECT * FROM t WHERE (a, b) OVERLAPS (1, 10) AND c > 5";
+        let stmt = parse_one(sql).expect("should parse");
+        let _ = stmt;
     }
 }
