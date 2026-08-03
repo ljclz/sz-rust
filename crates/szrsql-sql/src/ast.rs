@@ -1331,6 +1331,26 @@ impl ColumnDefinition {
     }
 }
 
+/// DEFERRABLE 模式 — SQL:2016 F-9
+///
+/// 控制外键约束的检查时机：
+/// - `Immediate`：每条 DML 语句执行时立即检查（默认行为）
+/// - `Deferred`：推迟到事务 COMMIT 时统一检查
+///
+/// PG 语义：
+/// - `DEFERRABLE` 单独出现 = `DEFERRABLE INITIALLY IMMEDIATE`（可延迟，但默认立即检查）
+/// - `DEFERRABLE INITIALLY DEFERRED` = 默认延迟到 COMMIT 检查
+/// - `NOT DEFERRABLE` = 不允许延迟，始终立即检查
+/// - 非 DEFERRABLE 约束（未指定）= 始终立即检查（等价于 NOT DEFERRABLE）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum DeferrableMode {
+    /// 立即检查（默认）— 每条 DML 后立即校验
+    #[default]
+    Immediate,
+    /// 延迟检查 — 入队，COMMIT 时统一校验
+    Deferred,
+}
+
 /// 列级外键引用
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ForeignKeyReference {
@@ -1342,6 +1362,12 @@ pub struct ForeignKeyReference {
     pub on_delete: Option<ReferenceAction>,
     /// ON UPDATE 动作
     pub on_update: Option<ReferenceAction>,
+    /// DEFERRABLE 模式 — P3-3 (SQL:2016 F-9)
+    ///
+    /// `None` 表示未声明 DEFERRABLE（等价于 NOT DEFERRABLE，始终立即检查）。
+    /// `Some(Immediate)` = DEFERRABLE INITIALLY IMMEDIATE（可 SET CONSTRAINTS 切换）
+    /// `Some(Deferred)` = DEFERRABLE INITIALLY DEFERRED（默认延迟到 COMMIT）
+    pub deferrable_mode: Option<DeferrableMode>,
 }
 
 /// 参照动作

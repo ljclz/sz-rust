@@ -169,6 +169,12 @@ pub struct ForeignKeyConstraint {
     pub columns: Vec<String>,
     /// 引用信息
     pub reference: ForeignKeyReference,
+    /// DEFERRABLE 模式 — P3-3 (SQL:2016 F-9)
+    ///
+    /// `None` = 未声明 DEFERRABLE（始终立即检查）
+    /// `Some(Immediate)` = DEFERRABLE INITIALLY IMMEDIATE
+    /// `Some(Deferred)` = DEFERRABLE INITIALLY DEFERRED（延迟到 COMMIT）
+    pub deferrable_mode: Option<crate::ast::DeferrableMode>,
 }
 
 /// 引用方信息（反向索引条目）— Phase 3.29
@@ -668,6 +674,7 @@ impl InMemoryCatalog {
                         name: fk_name.clone(),
                         columns: fk_cols.clone(),
                         reference: reference.clone(),
+                        deferrable_mode: reference.deferrable_mode.clone(),
                     },
                 )?;
             }
@@ -682,6 +689,7 @@ impl InMemoryCatalog {
                         name: None,
                         columns: vec![col.name.clone()],
                         reference: reference.clone(),
+                        deferrable_mode: reference.deferrable_mode.clone(),
                     },
                 )?;
             }

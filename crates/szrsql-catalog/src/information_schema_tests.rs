@@ -90,6 +90,7 @@ fn make_fk(ref_table: &str) -> ForeignKeyReference {
         columns: None,
         on_delete: None,
         on_update: None,
+        deferrable_mode: None,
     }
 }
 
@@ -99,6 +100,7 @@ fn make_fk_cascade(ref_table: &str) -> ForeignKeyReference {
         columns: None,
         on_delete: Some(ReferenceAction::Cascade),
         on_update: Some(ReferenceAction::Cascade),
+        deferrable_mode: None,
     }
 }
 
@@ -465,6 +467,7 @@ fn test_table_constraints_foreign_key() {
                             columns: None,
                             on_delete: None,
                             on_update: None,
+                            deferrable_mode: None,
                         },
                     ),
                 ],

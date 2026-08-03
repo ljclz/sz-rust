@@ -312,7 +312,9 @@ fn test_adv_dat_006_fk_insert_invalid_reference() {
             columns: Some(vec!["id".to_string()]),
             on_delete: None,
             on_update: None,
+            deferrable_mode: None,
         },
+        deferrable_mode: None,
     };
     catalog
         .add_foreign_key(&TableName::new("child"), fk)
@@ -374,7 +376,9 @@ fn test_adv_dat_006b_fk_valid_reference() {
             columns: Some(vec!["id".to_string()]),
             on_delete: None,
             on_update: None,
+            deferrable_mode: None,
         },
+        deferrable_mode: None,
     };
     catalog
         .add_foreign_key(&TableName::new("child"), fk)
@@ -667,7 +671,9 @@ fn test_adv_dat_010_cascade_delete_multi_level() {
                     columns: Some(vec!["id".to_string()]),
                     on_delete: Some(ReferenceAction::Cascade),
                     on_update: None,
+                    deferrable_mode: None,
                 },
+                deferrable_mode: None,
             },
         )
         .expect("add FK parent→grandparent");
@@ -684,7 +690,9 @@ fn test_adv_dat_010_cascade_delete_multi_level() {
                     columns: Some(vec!["id".to_string()]),
                     on_delete: Some(ReferenceAction::Cascade),
                     on_update: None,
+                    deferrable_mode: None,
                 },
+                deferrable_mode: None,
             },
         )
         .expect("add FK child→parent");

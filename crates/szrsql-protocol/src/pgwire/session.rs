@@ -32,7 +32,7 @@ use szrsql_sql::ast::{
 use szrsql_sql::executor::{
     DmlResult, ExecutionError, Executor, InMemorySequenceStore, InMemoryTable, MutableTable,
     PreparedStatementStore, SequenceStore, SessionState, SharedSequenceState, TableSnapshot,
-    TableStorage, TempTableStore, TransactionHistory,
+    TableStorage, TempTableStore, TransactionHistory, DeferredFkCheck,
 };
 use szrsql_sql::parser::{parse_sql, ParseError};
 use szrsql_sql::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner, TableSchema};
@@ -381,6 +381,11 @@ pub struct ExecutorService {
     /// - INSERT/UPDATE/DELETE 执行后添加表名
     /// - COMMIT 时将这些表的全量数据写入 WAL，确保崩溃后可恢复
     txn_modified_tables: HashSet<String>,
+    /// P3-3：跨语句延迟外键约束检查队列（SQL:2016 F-9 DEFERRABLE）。
+    ///
+    /// 事务期间所有 DML 语句产生的 DEFERRED FK 检查项累积到此处。
+    /// COMMIT 前统一校验；ROLLBACK 时清空。
+    deferred_fk_checks: Vec<DeferredFkCheck>,
     /// 当前事务 ID（BEGIN 时分配，COMMIT/ROLLBACK 后清空）。
     ///
     /// 用于 WAL Commit/Abort 记录的 `tx_id` 字段。从 1 开始递增，0 表示无事务。
@@ -539,6 +544,7 @@ impl ExecutorService {
             allow_multi_statement: false,
             wal_writer: None,
             txn_modified_tables: HashSet::new(),
+            deferred_fk_checks: Vec::new(),
             current_txn_id: 0,
             next_txn_id: 1,
             shared_tables: None,
@@ -1791,6 +1797,26 @@ impl ExecutorService {
         let committed_dirty_tables: Vec<String> =
             self.txn_modified_tables.iter().cloned().collect();
 
+        // P3-3: 在写入 WAL 前，先校验所有延迟的 DEFERRABLE FK 约束。
+        // 若任一延迟检查失败，事务必须回滚（不写 WAL、不提交 MVCC）。
+        // 这保证了"COMMIT 时统一校验"的 SQL:2016 F-9 语义。
+        if !self.deferred_fk_checks.is_empty() {
+            let mut checker = Executor::new()
+                .with_catalog(&self.catalog)
+                .with_sql_functions_from_catalog(&self.catalog);
+            if let Some(mvcc) = &self.mvcc {
+                checker = checker.with_mvcc(mvcc, self.current_txn_id);
+            }
+            // 将 session 持有的延迟检查项注入 checker 的队列
+            for item in self.deferred_fk_checks.drain(..) {
+                checker.enqueue_deferred_fk(item.schema, item.row, item.fk);
+            }
+            // flush 会校验所有入队项，失败则返回错误
+            checker.flush_deferred_constraints().map_err(|e| {
+                SessionError::Transaction(format!("deferred foreign key constraint violation: {e}"))
+            })?;
+        }
+
         if let Some(writer) = &self.wal_writer {
             // P0-1 修复：阶段 0 — 写入修改表的全量数据到 WAL（用于崩溃恢复）
             //
@@ -2053,6 +2079,8 @@ impl ExecutorService {
             }
         }
         self.txn_state = TransactionState::Idle;
+        // P3-3：回滚时丢弃所有待验证的 DEFERRED FK 检查（不再需要验证）
+        self.deferred_fk_checks.clear();
 
         // ADV-F-7：写入 WAL Abort 记录
         if let Some(writer) = &self.wal_writer {
@@ -3036,6 +3064,10 @@ impl ExecutorService {
             returning_rows,
         } = executor.execute_insert(plan, &mut *table_guard)?;
 
+        // P3-3: 将本条 DML 产生的 DEFERRED FK 检查项转移到 session 级队列，
+        // 供 COMMIT 时统一校验。
+        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
+
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());
 
@@ -3127,6 +3159,9 @@ impl ExecutorService {
             returning_rows,
         } = executor.execute_update(plan, &mut *table_guard)?;
 
+        // P3-3: 转移 DEFERRED FK 检查项到 session 级队列
+        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
+
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());
 
@@ -3213,6 +3248,9 @@ impl ExecutorService {
             affected_rows,
             returning_rows,
         } = executor.execute_delete(plan, &mut *table_guard)?;
+
+        // P3-3: 转移 DEFERRED FK 检查项到 session 级队列
+        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
 
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());

@@ -245,7 +245,9 @@ fn test_fk_add_foreign_key_api() {
                     columns: Some(vec!["id".to_string()]),
                     on_delete: Some(ReferenceAction::Cascade),
                     on_update: Some(ReferenceAction::NoAction),
+                    deferrable_mode: None,
                 },
+                deferrable_mode: None,
             },
         )
         .unwrap();
@@ -298,7 +300,7 @@ fn test_fk_insert_null_skipped() {
     // FK 列为 NULL → 跳过校验（MATCH SIMPLE 语义）
     let (catalog, _parent, mut child) = make_parent_child_setup();
 
-    let exec = Executor::new().with_catalog(&catalog);
+    let mut exec = Executor::new().with_catalog(&catalog);
     // pid 为 NULL → 即使父表为空也应成功
     let plan = plan_sql("INSERT INTO child (cid) VALUES (10)", &catalog);
     let result = exec.execute_insert(&plan, &mut child).unwrap();
@@ -334,7 +336,7 @@ fn test_fk_insert_composite_partial_null_skipped() {
         ],
     );
 
-    let exec = Executor::new().with_catalog(&catalog);
+    let mut exec = Executor::new().with_catalog(&catalog);
     // ca=NULL, cb=2 → 跳过校验
     let plan = plan_sql("INSERT INTO child (cid, cb) VALUES (10, 2)", &catalog);
     let result = exec.execute_insert(&plan, &mut child).unwrap();
@@ -355,7 +357,7 @@ fn test_fk_insert_without_catalog_no_validation() {
     );
 
     // Executor 未设置 catalog（即使 catalog 中有表但无 FK 元数据也不校验）
-    let exec = Executor::new();
+    let mut exec = Executor::new();
     let plan = plan_sql("INSERT INTO child VALUES (10, 999)", &catalog);
     // 应该成功（无 FK 校验）
     let result = exec.execute_insert(&plan, &mut child).unwrap();
@@ -791,11 +793,179 @@ fn test_validator_resolve_column_indices() {
             columns: Some(vec!["id".to_string()]),
             on_delete: None,
             on_update: None,
+            deferrable_mode: None,
         },
+        deferrable_mode: None,
     };
 
     let row = vec![Value::Int64(1)];
     let lookup = |_: &str| None;
     let err = ForeignKeyValidator::validate_insert(&schema, &row, &[fk], &lookup).unwrap_err();
     assert!(matches!(err, ExecutionError::ColumnNotFound(_)));
+}
+
+// =====================================================================
+//  DEFERRABLE FK 测试（P3-3，SQL:2016 F-9）
+// =====================================================================
+
+/// 创建父子表 + catalog，子表 FK 声明为 DEFERRABLE INITIALLY DEFERRED
+fn make_deferred_fk_setup() -> (InMemoryCatalog, InMemoryTable, InMemoryTable) {
+    let mut catalog = InMemoryCatalog::new();
+
+    let parent_plan = plan_sql(
+        "CREATE TABLE parent (id INT PRIMARY KEY, name TEXT)",
+        &catalog,
+    );
+    catalog.register_from_create_plan(&parent_plan).unwrap();
+
+    // DEFERRABLE INITIALLY DEFERRED：FK 校验推迟到 COMMIT
+    let child_plan = plan_sql(
+        "CREATE TABLE child (cid INT PRIMARY KEY, pid INT REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)",
+        &catalog,
+    );
+    catalog.register_from_create_plan(&child_plan).unwrap();
+
+    let parent_table = InMemoryTable::with_columns(
+        "parent",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
+    let child_table = InMemoryTable::with_columns(
+        "child",
+        vec![("cid", ColumnType::Int64), ("pid", ColumnType::Int64)],
+    );
+
+    (catalog, parent_table, child_table)
+}
+
+/// 创建父子表 + catalog，子表 FK 声明为 DEFERRABLE INITIALLY IMMEDIATE（默认行为）
+fn make_immediate_fk_setup() -> (InMemoryCatalog, InMemoryTable, InMemoryTable) {
+    let mut catalog = InMemoryCatalog::new();
+
+    let parent_plan = plan_sql(
+        "CREATE TABLE parent (id INT PRIMARY KEY, name TEXT)",
+        &catalog,
+    );
+    catalog.register_from_create_plan(&parent_plan).unwrap();
+
+    // DEFERRABLE INITIALLY IMMEDIATE：FK 校验仍在每条语句执行时立即进行
+    let child_plan = plan_sql(
+        "CREATE TABLE child (cid INT PRIMARY KEY, pid INT REFERENCES parent(id) DEFERRABLE INITIALLY IMMEDIATE)",
+        &catalog,
+    );
+    catalog.register_from_create_plan(&child_plan).unwrap();
+
+    let parent_table = InMemoryTable::with_columns(
+        "parent",
+        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
+    );
+    let child_table = InMemoryTable::with_columns(
+        "child",
+        vec![("cid", ColumnType::Int64), ("pid", ColumnType::Int64)],
+    );
+
+    (catalog, parent_table, child_table)
+}
+
+#[test]
+fn test_deferrable_fk_insert_child_before_parent_then_flush_ok() {
+    // DEFERRABLE INITIALLY DEFERRED：先插入子行（父行不存在）→ 成功入队
+    // 再插入父行 → flush 时校验通过
+    let (catalog, mut parent, mut child) = make_deferred_fk_setup();
+
+    // 阶段 1：父表为空，插入子行 pid=99 → 应成功（入队，不立即校验）
+    let deferred_items;
+    {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&parent);
+        let plan = plan_sql("INSERT INTO child VALUES (10, 99)", &catalog);
+        let result = exec.execute_insert(&plan, &mut child).unwrap();
+        assert_eq!(result.affected_rows, 1);
+        assert_eq!(child.row_count(), 1);
+        // 队列中有一条待校验记录
+        deferred_items = exec.drain_deferred_constraints();
+        assert_eq!(deferred_items.len(), 1);
+    } // exec 析构，parent 的不可变借用释放
+
+    // 阶段 2：插入父行 id=99
+    parent.insert(vec![Value::Int64(99), Value::Text("alice".into())]);
+
+    // 阶段 3：COMMIT 时 flush → 父行存在，校验通过
+    {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&parent);
+        let item = deferred_items.into_iter().next().unwrap();
+        exec.enqueue_deferred_fk(item.schema, item.row, item.fk);
+        exec.flush_deferred_constraints().unwrap();
+    }
+}
+
+#[test]
+fn test_deferrable_fk_insert_child_no_parent_flush_fails() {
+    // DEFERRABLE INITIALLY DEFERRED：先插入子行（父行不存在）→ 成功入队
+    // COMMIT 时 flush → 父行仍不存在 → 校验失败
+    let (catalog, parent, mut child) = make_deferred_fk_setup();
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&parent);
+
+    // 父表为空，插入子行 pid=99 → 成功入队
+    let plan = plan_sql("INSERT INTO child VALUES (10, 99)", &catalog);
+    let result = exec.execute_insert(&plan, &mut child).unwrap();
+    assert_eq!(result.affected_rows, 1);
+
+    // COMMIT 时 flush → 父行不存在 → ForeignKeyViolation
+    let err = exec.flush_deferred_constraints().unwrap_err();
+    assert!(
+        matches!(err, ExecutionError::ForeignKeyViolation(_)),
+        "expected ForeignKeyViolation, got: {err:?}"
+    );
+}
+
+#[test]
+fn test_deferrable_fk_immediate_still_rejects() {
+    // DEFERRABLE INITIALLY IMMEDIATE：插入子行（父行不存在）→ 立即拒绝
+    let (catalog, parent, mut child) = make_immediate_fk_setup();
+
+    let mut exec = Executor::new().with_catalog(&catalog);
+    exec.register_table(&parent);
+
+    // 父表为空，插入子行 pid=99 → 立即拒绝
+    let plan = plan_sql("INSERT INTO child VALUES (10, 99)", &catalog);
+    let err = exec.execute_insert(&plan, &mut child).unwrap_err();
+    assert!(
+        matches!(err, ExecutionError::ForeignKeyViolation(_)),
+        "expected ForeignKeyViolation, got: {err:?}"
+    );
+    assert_eq!(child.row_count(), 0);
+    // 无延迟队列条目
+    assert!(exec.drain_deferred_constraints().is_empty());
+}
+
+#[test]
+fn test_deferrable_fk_clear_on_rollback() {
+    // 模拟回滚场景：子行入队后调用 clear_deferred_constraints → 队列清空
+    let (catalog, parent, mut child) = make_deferred_fk_setup();
+
+    // 阶段 1：父表为空，插入子行 → 入队
+    let deferred_items;
+    {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&parent);
+        let plan = plan_sql("INSERT INTO child VALUES (10, 99)", &catalog);
+        let result = exec.execute_insert(&plan, &mut child).unwrap();
+        assert_eq!(result.affected_rows, 1);
+        deferred_items = exec.drain_deferred_constraints();
+        assert_eq!(deferred_items.len(), 1);
+    }
+
+    // 阶段 2：回滚 — 重新入队后 clear
+    {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&parent);
+        let item = deferred_items.into_iter().next().unwrap();
+        exec.enqueue_deferred_fk(item.schema, item.row, item.fk);
+        // 回滚：清空队列
+        exec.clear_deferred_constraints();
+        assert!(exec.drain_deferred_constraints().is_empty());
+    }
 }

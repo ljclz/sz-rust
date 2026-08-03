@@ -625,6 +625,7 @@ fn test_pg_constraint_foreign_key() {
         columns: Some(vec!["id".into()]),
         on_delete: Some(ReferenceAction::Cascade),
         on_update: None,
+        deferrable_mode: None,
     };
     catalog
         .create_table(
@@ -862,6 +863,7 @@ fn test_foreign_key_reference_ddl() {
         columns: Some(vec!["id".into()]),
         on_delete: Some(ReferenceAction::Cascade),
         on_update: Some(ReferenceAction::SetNull),
+        deferrable_mode: None,
     };
     let ddl = foreign_key_reference_ddl(&fk);
     assert!(ddl.contains("REFERENCES users (id)"));

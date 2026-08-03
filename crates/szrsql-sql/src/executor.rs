@@ -3720,6 +3720,26 @@ pub struct Executor<'a> {
     /// 当扫描/排序/聚合的输入行数 ≥ 此阈值时，使用 rayon 多线程并行执行。
     /// 默认值 10_000；设为 0 则始终串行执行（用于测试可预测性）。
     parallel_threshold: usize,
+    /// P3-3：延迟外键约束检查队列（SQL:2016 F-9 DEFERRABLE）。
+    ///
+    /// 当 FK 约束声明为 `DEFERRABLE INITIALLY DEFERRED` 时，
+    /// INSERT/UPDATE/DELETE 操作不立即校验该约束，而是将待检查项入队。
+    /// 事务 COMMIT 前调用 `flush_deferred_constraints()` 统一校验：
+    /// 全部通过 → 提交成功；任一失败 → 事务回滚。
+    ///
+    /// 使用 `RefCell` 以便在 `execute(&self, ...)` 的不可变借用下实现队列写入。
+    deferred_fk_queue: RefCell<Vec<DeferredFkCheck>>,
+}
+
+/// P3-3：一条待延迟校验的外键约束检查项
+#[derive(Debug, Clone)]
+pub struct DeferredFkCheck {
+    /// 子表（写入方）Schema
+    pub schema: TableSchema,
+    /// 待校验的行
+    pub row: Row,
+    /// 延迟的外键约束
+    pub fk: ForeignKeyConstraint,
 }
 
 // =====================================================================
@@ -3933,6 +3953,8 @@ impl<'a> Executor<'a> {
             plpgsql_registry: None,
             // P2-18：默认 10K 行阈值触发并行执行
             parallel_threshold: 10_000,
+            // P3-3：延迟 FK 约束队列为空
+            deferred_fk_queue: RefCell::new(Vec::new()),
         }
     }
 
@@ -4236,6 +4258,73 @@ impl<'a> Executor<'a> {
     pub fn with_parallel_threshold(mut self, threshold: usize) -> Self {
         self.parallel_threshold = threshold;
         self
+    }
+
+    /// P3-3：清空延迟 FK 约束队列（用于 ROLLBACK 时丢弃未提交的延迟检查）。
+    ///
+    /// 事务回滚时调用，丢弃所有已入队但未校验的 DEFERRED FK 检查项。
+    pub fn clear_deferred_constraints(&self) {
+        self.deferred_fk_queue.borrow_mut().clear();
+    }
+
+    /// P3-3：取出并清空延迟 FK 约束队列，供 session 层接管。
+    ///
+    /// 事务期间跨语句累积的 DEFERRED FK 检查项需要由 session 持有到 COMMIT。
+    /// 每次 DML 执行后调用，将执行器内的队列转移到 session 的 `deferred_fk_checks`。
+    pub fn drain_deferred_constraints(&self) -> Vec<DeferredFkCheck> {
+        std::mem::take(&mut self.deferred_fk_queue.borrow_mut())
+    }
+
+    /// P3-3：刷新（校验）所有延迟的 FK 约束检查项。
+    ///
+    /// 事务 COMMIT 前调用。遍历 `deferred_fk_queue` 中的每一项，
+    /// 对每条待校验行执行 FK 引用完整性检查：
+    /// - 全部通过 → 清空队列，返回 Ok
+    /// - 任一失败 → 清空队列（不再重复检查），返回 Err
+    ///
+    /// 校验时使用 Executor 已绑定的 catalog 做引用表查找。
+    /// 若 catalog 未绑定，所有 FK 检查视为通过（与立即检查模式行为一致）。
+    pub fn flush_deferred_constraints(&self) -> Result<(), ExecutionError> {
+        let queue = self.deferred_fk_queue.borrow();
+        if queue.is_empty() {
+            return Ok(());
+        }
+        // catalog 未绑定时无法做引用表查找，所有延迟检查视为通过
+        if self.catalog.is_none() {
+            drop(queue);
+            self.deferred_fk_queue.borrow_mut().clear();
+            return Ok(());
+        }
+        // 使用 executor 自身已注册的表查找父表（lookup_table 返回 &dyn TableStorage，
+        // 与 validate_insert 的 LookupFn 签名一致）。
+        let lookup = |name: &str| -> Option<&dyn TableStorage> {
+            self.lookup_table(name)
+        };
+        for item in queue.iter() {
+            ForeignKeyValidator::validate_insert(&item.schema, &item.row, &[item.fk.clone()], &lookup)?;
+        }
+        drop(queue);
+        self.deferred_fk_queue.borrow_mut().clear();
+        Ok(())
+    }
+
+    /// P3-3：将一条 FK 检查项加入延迟队列。
+    ///
+    /// 仅当 `fk.deferrable_mode == Some(Deferred)` 时入队；
+    /// 其他情况（Immediate / None）不入队，由调用方立即校验。
+    pub fn enqueue_deferred_fk(
+        &self,
+        schema: TableSchema,
+        row: Row,
+        fk: ForeignKeyConstraint,
+    ) {
+        if fk.deferrable_mode == Some(crate::ast::DeferrableMode::Deferred) {
+            self.deferred_fk_queue.borrow_mut().push(DeferredFkCheck {
+                schema,
+                row,
+                fk,
+            });
+        }
     }
 
     /// P1-9：计算行级锁资源 ID。
@@ -8856,11 +8945,31 @@ impl<'a> Executor<'a> {
             Some(cat) => cat.get_check_constraints(table_name),
             None => Vec::new(),
         };
+        // P3-3: 将 FK 约束按 DEFERRABLE 模式拆分为立即校验和延迟校验两组。
+        // - immediate_fks：未声明 DEFERRABLE / DEFERRABLE INITIALLY IMMEDIATE → 立即校验
+        // - deferred_fks：DEFERRABLE INITIALLY DEFERRED → 入队，COMMIT 时统一校验
+        let immediate_fks: Vec<ForeignKeyConstraint> = fks
+            .iter()
+            .filter(|fk| fk.deferrable_mode != Some(crate::ast::DeferrableMode::Deferred))
+            .cloned()
+            .collect();
+        let deferred_fks: Vec<ForeignKeyConstraint> = fks
+            .iter()
+            .filter(|fk| fk.deferrable_mode == Some(crate::ast::DeferrableMode::Deferred))
+            .cloned()
+            .collect();
         let validate_fk = |row: &Row| -> Result<(), ExecutionError> {
-            if !fks.is_empty() {
-                ForeignKeyValidator::validate_insert(schema, row, &fks, &|name| {
+            // 立即校验：非 DEFERRABLE 或 INITIALLY IMMEDIATE 的 FK
+            if !immediate_fks.is_empty() {
+                ForeignKeyValidator::validate_insert(schema, row, &immediate_fks, &|name| {
                     self.lookup_table(name)
                 })?;
+            }
+            // 延迟校验：DEFERRABLE INITIALLY DEFERRED 的 FK 入队
+            if !deferred_fks.is_empty() {
+                for fk in &deferred_fks {
+                    self.enqueue_deferred_fk(schema.clone(), row.clone(), fk.clone());
+                }
             }
             Ok(())
         };
@@ -9348,6 +9457,17 @@ impl<'a> Executor<'a> {
             Some(cat) => cat.get_check_constraints(table_name),
             None => Vec::new(),
         };
+        // P3-3: 按 DEFERRABLE 模式拆分 FK 约束
+        let immediate_fks: Vec<ForeignKeyConstraint> = fks
+            .iter()
+            .filter(|fk| fk.deferrable_mode != Some(crate::ast::DeferrableMode::Deferred))
+            .cloned()
+            .collect();
+        let deferred_fks: Vec<ForeignKeyConstraint> = fks
+            .iter()
+            .filter(|fk| fk.deferrable_mode == Some(crate::ast::DeferrableMode::Deferred))
+            .cloned()
+            .collect();
 
         let has_returning = returning.is_some();
         let mut returning_rows: Vec<Row> = Vec::new();
@@ -9397,14 +9517,21 @@ impl<'a> Executor<'a> {
                 FireResult::ContinueWith(None) => new_row,
             };
             // Phase 3.29: 校验新行不违反 FK（仅当 FK 列改变时）
-            if !fks.is_empty() {
+            // P3-3: 立即校验非 DEFERRED FK，DEFERRED FK 入队（COMMIT 时统一校验）
+            if !immediate_fks.is_empty() {
                 ForeignKeyValidator::validate_update(
                     schema,
                     &row,
                     &final_new_row,
-                    &fks,
+                    &immediate_fks,
                     &|name| self.lookup_table(name),
                 )?;
+            }
+            // DEFERRED FK: 入队待 COMMIT 时校验（validate_update 内部仅检查实际改变的 FK 列）
+            if !deferred_fks.is_empty() {
+                for fk in &deferred_fks {
+                    self.enqueue_deferred_fk(schema.clone(), final_new_row.clone(), fk.clone());
+                }
             }
             // Phase 3.30: 校验新行不违反 CHECK
             if !checks.is_empty() {

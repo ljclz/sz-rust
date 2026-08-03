@@ -3025,7 +3025,7 @@ fn apply_column_option(
             referred_columns,
             on_delete,
             on_update,
-            ..
+            characteristics,
         } => {
             def.references = Some(ForeignKeyReference {
                 table: convert_object_name(foreign_table)?,
@@ -3036,6 +3036,7 @@ fn apply_column_option(
                 },
                 on_delete: on_delete.map(convert_referential_action),
                 on_update: on_update.map(convert_referential_action),
+                deferrable_mode: characteristics.and_then(convert_constraint_characteristics),
             });
         }
         ColumnOption::Generated {
@@ -3099,6 +3100,26 @@ fn convert_referential_action(action: sqlparser::ast::ReferentialAction) -> Refe
     }
 }
 
+/// P3-3: 将 sqlparser 的 ConstraintCharacteristics 转换为 Option<DeferrableMode>。
+///
+/// 映射规则：
+/// - `deferrable=None` → `None`（未声明 DEFERRABLE，始终立即检查）
+/// - `deferrable=Some(true), initially=None` → `Some(Immediate)`（DEFERRABLE 默认 IMMEDIATE）
+/// - `deferrable=Some(true), initially=Immediate` → `Some(Immediate)`
+/// - `deferrable=Some(true), initially=Deferred` → `Some(Deferred)`
+/// - `deferrable=Some(false)` → `None`（NOT DEFERRABLE）
+fn convert_constraint_characteristics(
+    c: sqlparser::ast::ConstraintCharacteristics,
+) -> Option<crate::ast::DeferrableMode> {
+    match c.deferrable {
+        Some(false) | None => None,
+        Some(true) => Some(match c.initially {
+            Some(sqlparser::ast::DeferrableInitial::Deferred) => crate::ast::DeferrableMode::Deferred,
+            _ => crate::ast::DeferrableMode::Immediate,
+        }),
+    }
+}
+
 fn convert_table_constraint(c: SpTableConstraint) -> Result<TableConstraint, ParseError> {
     Ok(match c {
         SpTableConstraint::PrimaryKey { name, columns, .. } => TableConstraint::PrimaryKey {
@@ -3116,6 +3137,7 @@ fn convert_table_constraint(c: SpTableConstraint) -> Result<TableConstraint, Par
             referred_columns,
             on_delete,
             on_update,
+            characteristics,
             ..
         } => TableConstraint::ForeignKey {
             name: name.map(|i| i.value),
@@ -3129,6 +3151,7 @@ fn convert_table_constraint(c: SpTableConstraint) -> Result<TableConstraint, Par
                 },
                 on_delete: on_delete.map(convert_referential_action),
                 on_update: on_update.map(convert_referential_action),
+                deferrable_mode: characteristics.and_then(convert_constraint_characteristics),
             },
         },
         SpTableConstraint::Check { name, expr } => TableConstraint::Check {
