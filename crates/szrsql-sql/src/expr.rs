@@ -2921,6 +2921,73 @@ impl ExprEvaluator {
                     None => Ok(Value::Null),
                 }
             }
+            // P3-7: SQL/JSON JSON_ARRAY — 构造 JSON 数组
+            // 语法：JSON_ARRAY([value [, value...]])
+            // NULL 处理：默认 ABSENT ON NULL（跳过 NULL 元素）；
+            // 传入字面量 '__NULL_ON_NULL__' sentinel 时切换为 NULL ON NULL（任一参数为 NULL 则整体返回 NULL）。
+            "json_array" => {
+                let null_on_null = arg_vals.iter().any(|v| {
+                    matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__")
+                });
+                let real_args: Vec<&Value> = arg_vals.iter()
+                    .filter(|v| !matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__" || s == "__ABSENT_ON_NULL__"))
+                    .collect();
+                if null_on_null && real_args.iter().any(|v| matches!(v, Value::Null)) {
+                    return Ok(Value::Null);
+                }
+                let elems: Vec<Value> = real_args.iter()
+                    .filter(|v| !matches!(v, Value::Null))
+                    .map(|v| (*v).clone())
+                    .collect();
+                Ok(Value::Json(serde_json::Value::Array(
+                    elems.iter().map(value_to_json).collect()
+                )))
+            }
+            // P3-7: SQL/JSON JSON_OBJECT — 构造 JSON 对象
+            // 语法（简化）：JSON_OBJECT(key, value [, key, value ...])
+            // key 必须为 Text；value 可为任意类型。
+            // NULL 处理：默认 ABSENT ON NULL（跳过值为 NULL 的 key-value 对）；
+            // 传入 '__NULL_ON_NULL__' sentinel 时，任一 value 为 NULL 则整体返回 NULL。
+            "json_object" => {
+                let null_on_null = arg_vals.iter().any(|v| {
+                    matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__")
+                });
+                let real_args: Vec<&Value> = arg_vals.iter()
+                    .filter(|v| !matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__" || s == "__ABSENT_ON_NULL__"))
+                    .collect();
+                if real_args.len() % 2 != 0 {
+                    return Err(EvalError::InvalidFunctionArgs(format!(
+                        "json_object requires an even number of key-value args, got {}",
+                        real_args.len()
+                    )));
+                }
+                if null_on_null {
+                    for (_, v) in real_args.chunks(2).map(|c| (&c[0], &c[1])) {
+                        if matches!(v, Value::Null) {
+                            return Ok(Value::Null);
+                        }
+                    }
+                }
+                let mut obj = serde_json::Map::new();
+                for chunk in real_args.chunks(2) {
+                    let (key, val) = (&chunk[0], &chunk[1]);
+                    if matches!(val, Value::Null) {
+                        continue; // ABSENT ON NULL
+                    }
+                    let k = match key {
+                        Value::Text(s) => s.clone(),
+                        Value::Null => continue,
+                        other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "text key",
+                                actual: value_type_name(other),
+                            });
+                        }
+                    };
+                    obj.insert(k, value_to_json(val));
+                }
+                Ok(Value::Json(serde_json::Value::Object(obj)))
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -3032,6 +3099,29 @@ fn value_to_string(v: &Value) -> String {
         Value::Null => String::new(),
         Value::Timestamp(us) => format_timestamp_iso(*us),
         other => format!("{:?}", other),
+    }
+}
+
+/// 将 szrsql Value 转换为 serde_json::Value（用于 JSON_ARRAY / JSON_OBJECT 构造）。
+/// NULL 映射为 JSON null；复合类型（Array/Json）递归展开。
+fn value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int64(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+        Value::Float64(f) => match serde_json::Number::from_f64(*f) {
+            Some(n) => serde_json::Value::Number(n),
+            None => serde_json::Value::Null,
+        },
+        Value::Text(s) => serde_json::Value::String(s.clone()),
+        Value::Timestamp(us) => {
+            serde_json::Value::String(format_timestamp_iso(*us))
+        }
+        Value::Array(elems) => serde_json::Value::Array(
+            elems.iter().map(value_to_json).collect()
+        ),
+        Value::Json(j) => j.clone(),
+        other => serde_json::Value::String(format!("{:?}", other)),
     }
 }
 

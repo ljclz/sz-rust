@@ -976,3 +976,115 @@ fn test_arithmetic_no_panic_on_overflow_mul() {
     let result = eval(&e);
     assert!(result.is_err(), "expected overflow error, got {result:?}");
 }
+
+// =====================================================================
+//  P3-7 JSON_ARRAY / JSON_OBJECT
+// =====================================================================
+
+fn lit_json(s: &str) -> Expr {
+    let v: serde_json::Value = serde_json::from_str(s).expect("valid JSON literal");
+    Expr::Literal(Value::Json(v))
+}
+
+#[test]
+fn test_json_array_empty() {
+    // JSON_ARRAY() → []
+    let e = func("json_array", vec![]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!([])));
+}
+
+#[test]
+fn test_json_array_single_value() {
+    // JSON_ARRAY(1) → [1]
+    let e = func("json_array", vec![lit_i64(1)]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!([1])));
+}
+
+#[test]
+fn test_json_array_multiple_values() {
+    // JSON_ARRAY(1, 'hello', true) → [1, "hello", true]
+    let e = func("json_array", vec![lit_i64(1), lit_text("hello"), lit_bool(true)]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!([1, "hello", true])));
+}
+
+#[test]
+fn test_json_array_null_absent_on_null() {
+    // 默认 ABSENT ON NULL：NULL 元素被跳过
+    let e = func("json_array", vec![lit_i64(1), lit_null(), lit_text("x")]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!([1, "x"])));
+}
+
+#[test]
+fn test_json_array_null_on_null_returns_null() {
+    // NULL ON NULL：任一参数为 NULL → 整体返回 NULL
+    let e = func("json_array", vec![
+        lit_i64(1),
+        lit_null(),
+        lit_text("__NULL_ON_NULL__"),
+    ]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Null);
+}
+
+#[test]
+fn test_json_array_nested_json() {
+    // JSON_ARRAY 嵌套 JSON 对象
+    let e = func("json_array", vec![lit_json(r#"{"a":1}"#)]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!([{"a": 1}])));
+}
+
+#[test]
+fn test_json_object_basic() {
+    // JSON_OBJECT('name', 'alice', 'age', 30) → {"name":"alice","age":30}
+    let e = func("json_object", vec![
+        lit_text("name"), lit_text("alice"),
+        lit_text("age"), lit_i64(30),
+    ]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!({"name": "alice", "age": 30})));
+}
+
+#[test]
+fn test_json_object_odd_args_errors() {
+    // 奇数个参数 → 错误
+    let e = func("json_object", vec![lit_text("k"), lit_text("v"), lit_text("orphan")]);
+    let r = eval(&e);
+    assert!(r.is_err(), "expected error for odd args, got {r:?}");
+}
+
+#[test]
+fn test_json_object_absent_on_null() {
+    // 默认 ABSENT ON NULL：值为 NULL 的 key 被跳过
+    let e = func("json_object", vec![
+        lit_text("a"), lit_i64(1),
+        lit_text("b"), lit_null(),
+        lit_text("c"), lit_text("x"),
+    ]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Json(serde_json::json!({"a": 1, "c": "x"})));
+}
+
+#[test]
+fn test_json_object_null_on_null_returns_null() {
+    // NULL ON NULL：任一 value 为 NULL → 整体返回 NULL
+    let e = func("json_object", vec![
+        lit_text("a"), lit_i64(1),
+        lit_text("b"), lit_null(),
+        lit_text("__NULL_ON_NULL__"),
+    ]);
+    let r = eval(&e).unwrap();
+    assert_eq!(r, Value::Null);
+}
+
+#[test]
+fn test_json_object_non_text_key_errors() {
+    // key 非 Text → 类型错误
+    let e = func("json_object", vec![lit_i64(1), lit_text("v")]);
+    let r = eval(&e);
+    assert!(r.is_err(), "expected type error for non-text key, got {r:?}");
+}
