@@ -1259,6 +1259,7 @@ mod tests {
             limit: None,
             offset: None,
             set_op: None,
+            grouping_sets: None,
         }
     }
 

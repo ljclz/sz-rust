@@ -745,14 +745,19 @@ pub fn resolve_sequences_in_plan(
             })
         }
         LogicalPlan::Aggregate {
-            group_exprs,
+            grouping_sets,
             aggregates,
             having,
             input,
         } => {
-            let mut new_group = Vec::with_capacity(group_exprs.len());
-            for e in group_exprs {
-                new_group.push(resolve_sequence_calls(e, seq_store)?);
+            // P3-1: 每个分组集中的每个表达式都需要解析序列调用
+            let mut new_grouping_sets = Vec::with_capacity(grouping_sets.len());
+            for set in grouping_sets {
+                let mut new_set = Vec::with_capacity(set.len());
+                for e in set {
+                    new_set.push(resolve_sequence_calls(e, seq_store)?);
+                }
+                new_grouping_sets.push(new_set);
             }
             let new_having = having
                 .as_ref()
@@ -774,7 +779,7 @@ pub fn resolve_sequences_in_plan(
                 });
             }
             Ok(LogicalPlan::Aggregate {
-                group_exprs: new_group,
+                grouping_sets: new_grouping_sets,
                 aggregates: new_aggs,
                 having: new_having,
                 input: new_input,
@@ -7136,11 +7141,11 @@ impl<'a> Executor<'a> {
                 right,
             } => self.execute_join(*join_type, condition, left, right),
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
-            } => self.execute_aggregate(group_exprs, aggregates, having, input),
+            } => self.execute_aggregate(grouping_sets, aggregates, having, input),
             LogicalPlan::SetOp {
                 op,
                 quantifier,
@@ -8040,12 +8045,13 @@ impl<'a> Executor<'a> {
         // 需将它们替换为已物化的字面量再求值（聚合值已在 Aggregate 输出行的
         // [group_count..] 区间）
         if let LogicalPlan::Aggregate {
-            group_exprs,
+            grouping_sets,
             aggregates,
             ..
         } = input
         {
-            let group_count = group_exprs.len();
+            // P3-1: 输出行中 GROUP BY 列数 = 最大分组集的列数
+            let group_count = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
             let schema = input_schema(input)?;
             let mut result = Vec::with_capacity(rows.len());
             for row in rows {
@@ -8448,16 +8454,21 @@ impl<'a> Executor<'a> {
     /// **无 GROUP BY + 有聚合**：单组（所有行聚为一组），输出 1 行
     /// **空组**：无 GROUP BY 时即使 input 为空也输出 1 行（COUNT=0, SUM/AVG/MIN/MAX=NULL）；
     ///          有 GROUP BY 时空输入输出 0 行
+    ///
+    /// **P3-1 多分组集**：`grouping_sets` 中每个内层 Vec 是一个分组集。
+    /// 每个分组集独立分组并输出聚合行；不属于当前集的 GROUP BY 列填充 NULL。
+    /// 例：GROUPING SETS ((a,b), (c)) → 输出 [a,b,NULL,agg...] 和 [NULL,NULL,c,agg...]
     pub fn execute_aggregate(
         &self,
-        group_exprs: &[Expr],
+        grouping_sets: &[Vec<Expr>],
         aggregates: &[AggregateExpr],
         having: &Option<Expr>,
         input: &LogicalPlan,
     ) -> Result<Vec<Row>, ExecutionError> {
         // P2-15 列存快速路径：无 GROUP BY、无 HAVING、直接列存扫描时，
         // 绕过行存物化，直接调用 `ColumnarTable::aggregate()` 的 batch-mode SIMD 聚合。
-        if group_exprs.is_empty() && having.is_none() && !aggregates.iter().any(|a| a.distinct) {
+        let is_plain_single_set = grouping_sets.len() == 1 && grouping_sets[0].is_empty();
+        if is_plain_single_set && having.is_none() && !aggregates.iter().any(|a| a.distinct) {
             if let LogicalPlan::ColumnarScan { table, schema, .. } = input {
                 if let Some(rows) = self.try_columnar_aggregate(table, schema, aggregates)? {
                     return Ok(rows);
@@ -8467,133 +8478,141 @@ impl<'a> Executor<'a> {
 
         let input_rows = self.execute(input)?;
         let input_schema = input_schema(input)?;
-        let group_count = group_exprs.len();
         let agg_count = aggregates.len();
+        // P3-1: 输出行中 GROUP BY 列数 = 最大分组集的列数
+        let max_group_count = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
 
-        // 1. 分组：group_key → Vec<Row>
-        let mut groups: HashMap<String, Vec<Row>> = HashMap::new();
-        let mut group_keys_order: Vec<String> = Vec::new();
-        let mut group_key_values: HashMap<String, Vec<Value>> = HashMap::new();
-
-        for row in &input_rows {
-            let ctx = ExecRowContext::new(&input_schema, row);
-            let mut key_parts = Vec::with_capacity(group_count);
-            let mut key_values = Vec::with_capacity(group_count);
-            for g_expr in group_exprs {
-                let v = ExprEvaluator::eval(g_expr, &ctx)?;
-                key_parts.push(format!("{v:?}"));
-                key_values.push(v.clone());
-            }
-            let key = key_parts.join("|");
-            if !groups.contains_key(&key) {
-                group_keys_order.push(key.clone());
-                group_key_values.insert(key.clone(), key_values);
-            }
-            groups.entry(key).or_default().push(row.clone());
-        }
-
-        // 2. 计算每组聚合值
         let mut result_rows: Vec<Row> = Vec::new();
 
-        // 无 GROUP BY 且 input 为空：仍输出 1 行（COUNT=0, 其他=NULL）
-        if group_count == 0 && groups.is_empty() {
-            let mut out_row = Vec::with_capacity(agg_count);
-            for agg in aggregates {
-                out_row.push(compute_empty_aggregate(agg));
-            }
-            // HAVING 过滤
-            if let Some(having_expr) = having {
-                let schema = aggregate_output_schema(group_exprs, aggregates)?;
-                let ctx = ExecRowContext::new(&schema, &out_row);
-                let substituted =
-                    substitute_aggregates(having_expr, aggregates, &out_row, group_count);
-                match ExprEvaluator::eval(&substituted, &ctx)? {
-                    Value::Bool(true) => {}
-                    _ => return Ok(Vec::new()),
-                }
-            }
-            result_rows.push(out_row);
-        }
+        // P3-1: 对每个分组集独立分组并输出聚合行
+        for grouping_set in grouping_sets {
+            let set_group_count = grouping_set.len();
 
-        // P2-18：分组数 ≥ 阈值时并行计算每组聚合值
-        let input_schema_for_closure = input_schema.clone();
-        let aggregates_for_closure = aggregates.to_vec();
-        if group_keys_order.len() >= self.parallel_threshold && self.parallel_threshold > 0 {
-            use rayon::iter::{IntoParallelIterator, ParallelIterator};
-            let agg_results: Vec<(String, Vec<Value>)> = group_keys_order
-                .into_par_iter()
-                .map(|key| {
-                    let group_rows = groups.get(&key).unwrap();
-                    let mut agg_values = Vec::with_capacity(agg_count);
-                    for agg in &aggregates_for_closure {
-                        let v =
-                            compute_aggregate(agg, group_rows, &input_schema_for_closure).unwrap();
+            // 1. 按当前分组集的表达式分组
+            let mut groups: HashMap<String, Vec<Row>> = HashMap::new();
+            let mut group_keys_order: Vec<String> = Vec::new();
+            let mut group_key_values: HashMap<String, Vec<Value>> = HashMap::new();
+
+            // P3-1: 计算当前分组集每个表达式在输出行中的列位置。
+            // 例：输出列为 [dept, region]，当前集为 [region] → 位置 [1]
+            // 这样 region 值才会放到第 1 列而非第 0 列。
+            // 取最大分组集作为列名/列顺序基准（与 aggregate_output_schema 保持一致）。
+            let col_names: Vec<&Expr> = grouping_sets
+                .iter()
+                .max_by(|a, b| a.len().cmp(&b.len()))
+                .map(|s| s.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .collect();
+            let key_positions: Vec<usize> = grouping_set
+                .iter()
+                .map(|g_expr| col_names.iter().position(|c| **c == *g_expr).unwrap_or(0))
+                .collect();
+
+            for row in &input_rows {
+                let ctx = ExecRowContext::new(&input_schema, row);
+                let mut key_parts = Vec::with_capacity(set_group_count);
+                let mut key_values = Vec::with_capacity(set_group_count);
+                for g_expr in grouping_set {
+                    let v = ExprEvaluator::eval(g_expr, &ctx)?;
+                    key_parts.push(format!("{v:?}"));
+                    key_values.push(v.clone());
+                }
+                let key = key_parts.join("|");
+                if !groups.contains_key(&key) {
+                    group_keys_order.push(key.clone());
+                    group_key_values.insert(key.clone(), key_values);
+                }
+                groups.entry(key).or_default().push(row.clone());
+            }
+
+            // 2. 无 GROUP BY 且 input 为空：仍输出 1 行（COUNT=0, 其他=NULL）
+            if set_group_count == 0 && groups.is_empty() {
+                let mut out_row = Vec::with_capacity(max_group_count + agg_count);
+                // P3-1: 填充 NULL 至 max_group_count
+                for _ in 0..max_group_count {
+                    out_row.push(Value::Null);
+                }
+                for agg in aggregates {
+                    out_row.push(compute_empty_aggregate(agg));
+                }
+                // HAVING 过滤
+                if let Some(having_expr) = having {
+                    let schema = aggregate_output_schema(grouping_sets, aggregates)?;
+                    let ctx = ExecRowContext::new(&schema, &out_row);
+                    let substituted =
+                        substitute_aggregates(having_expr, aggregates, &out_row, max_group_count);
+                    match ExprEvaluator::eval(&substituted, &ctx)? {
+                        Value::Bool(true) => {}
+                        // P3-1 BUGFIX: 仅跳过当前分组集，不要 return 清空所有结果
+                        _ => continue,
+                    }
+                }
+                result_rows.push(out_row);
+                continue;
+            }
+
+            // 3. 计算每组聚合值
+            let input_schema_for_closure = input_schema.clone();
+            let aggregates_for_closure = aggregates.to_vec();
+
+            // P2-18：分组数 ≥ 阈值时并行计算
+            if group_keys_order.len() >= self.parallel_threshold && self.parallel_threshold > 0 {
+                use rayon::iter::{IntoParallelIterator, ParallelIterator};
+                let agg_results: Vec<(String, Vec<Value>)> = group_keys_order
+                    .into_par_iter()
+                    .map(|key| {
+                        let group_rows = groups.get(&key).unwrap();
+                        let mut agg_values = Vec::with_capacity(agg_count);
+                        for agg in &aggregates_for_closure {
+                            let v = compute_aggregate(agg, group_rows, &input_schema_for_closure)
+                                .unwrap();
+                            agg_values.push(v);
+                        }
+                        (key, agg_values)
+                    })
+                    .collect();
+                for (key, agg_values) in agg_results {
+                    let key_values = group_key_values.get(&key).unwrap();
+                    let row = build_grouped_output_row(
+                        key_values,
+                        &key_positions,
+                        max_group_count,
+                        &agg_values,
+                        having,
+                        aggregates,
+                        max_group_count,
+                    )?;
+                    // P3-1 BUGFIX: HAVING 过滤后 row 为空则跳过
+                    if !row.is_empty() {
+                        result_rows.push(row);
+                    }
+                }
+            } else {
+                for key in &group_keys_order {
+                    let group_rows = groups.get(key).unwrap();
+                    let key_values = group_key_values.get(key).unwrap();
+
+                    let mut agg_values: Vec<Value> = Vec::with_capacity(agg_count);
+                    for agg in aggregates {
+                        let v = compute_aggregate(agg, group_rows, &input_schema)?;
                         agg_values.push(v);
                     }
-                    (key, agg_values)
-                })
-                .collect();
-            for (key, agg_values) in agg_results {
-                let key_values = group_key_values.get(&key).unwrap();
-                let mut out_row = Vec::with_capacity(group_count + agg_count);
-                out_row.extend(key_values.iter().cloned());
-                out_row.extend(agg_values.iter().cloned());
 
-                // HAVING 过滤
-                if let Some(having_expr) = having {
-                    let schema = aggregate_output_schema(group_exprs, aggregates)?;
-                    let ctx = ExecRowContext::new(&schema, &out_row);
-                    let substituted =
-                        substitute_aggregates(having_expr, aggregates, &out_row, group_count);
-                    match ExprEvaluator::eval(&substituted, &ctx)? {
-                        Value::Bool(true) => {}
-                        Value::Bool(false) | Value::Null => continue,
-                        other => {
-                            return Err(ExecutionError::EvalError(format!(
-                                "HAVING predicate must evaluate to bool, got {:?}",
-                                other
-                            )));
-                        }
+                    let row = build_grouped_output_row(
+                        key_values,
+                        &key_positions,
+                        max_group_count,
+                        &agg_values,
+                        having,
+                        aggregates,
+                        max_group_count,
+                    )?;
+                    // P3-1 BUGFIX: HAVING 过滤后 row 为空则跳过
+                    if !row.is_empty() {
+                        result_rows.push(row);
                     }
                 }
-                result_rows.push(out_row);
-            }
-        } else {
-            for key in &group_keys_order {
-                let group_rows = groups.get(key).unwrap();
-                let key_values = group_key_values.get(key).unwrap();
-
-                // 计算每个聚合
-                let mut agg_values: Vec<Value> = Vec::with_capacity(agg_count);
-                for agg in aggregates {
-                    let v = compute_aggregate(agg, group_rows, &input_schema)?;
-                    agg_values.push(v);
-                }
-
-                // 构造输出行 = [group_values..., agg_values...]
-                let mut out_row = Vec::with_capacity(group_count + agg_count);
-                out_row.extend(key_values.iter().cloned());
-                out_row.extend(agg_values.iter().cloned());
-
-                // HAVING 过滤
-                if let Some(having_expr) = having {
-                    let schema = aggregate_output_schema(group_exprs, aggregates)?;
-                    let ctx = ExecRowContext::new(&schema, &out_row);
-                    let substituted =
-                        substitute_aggregates(having_expr, aggregates, &out_row, group_count);
-                    match ExprEvaluator::eval(&substituted, &ctx)? {
-                        Value::Bool(true) => {}
-                        Value::Bool(false) | Value::Null => continue,
-                        other => {
-                            return Err(ExecutionError::EvalError(format!(
-                                "HAVING predicate must evaluate to bool, got {:?}",
-                                other
-                            )));
-                        }
-                    }
-                }
-
-                result_rows.push(out_row);
             }
         }
 
@@ -10961,12 +10980,100 @@ impl<'a> Default for Executor<'a> {
 /// - GROUP BY 列名：取表达式的最后一个标识符部分（如 `t1.id` → `id`）
 /// - 聚合列名：取 alias 或 func_name
 /// - 所有列类型暂设为 `ColumnType::Null`（执行器不依赖类型）
+///
+/// P3-1: 构造多分组集聚合输出行。
+///
+/// 将当前分组集的 key_values 按 `key_positions` 放置到对应列（缺失列填 NULL），
+/// 再追加聚合值，最后应用 HAVING 过滤。
+///
+/// - `key_values`: 当前分组集的分组键值
+/// - `key_positions`: 每个键值在输出行 GROUP BY 区的列索引（0-based）
+/// - `max_group_count`: 输出行 GROUP BY 区宽度（最大分组集列数）
+fn build_grouped_output_row(
+    key_values: &[Value],
+    key_positions: &[usize],
+    max_group_count: usize,
+    agg_values: &[Value],
+    having: &Option<Expr>,
+    aggregates: &[AggregateExpr],
+    group_count_for_having: usize,
+) -> Result<Vec<Value>, ExecutionError> {
+    // P3-1: 按位置放置 key 值，未覆盖的列填 NULL
+    let mut out_row: Vec<Value> = vec![Value::Null; max_group_count];
+    for (value, pos) in key_values.iter().zip(key_positions.iter()) {
+        if *pos < max_group_count {
+            out_row[*pos] = value.clone();
+        }
+    }
+    out_row.extend(agg_values.iter().cloned());
+
+    // HAVING 过滤
+    if let Some(having_expr) = having {
+        // P3-1: 构造与输出行宽度匹配的 schema（max_group_count 个 group 列 + agg 列）
+        // 由于此处无法访问全部 grouping_sets，用 set_group_count 构造占位 schema；
+        // 实际 HAVING 只引用聚合列，group 列仅用于位置对齐
+        let mut schema_cols = Vec::with_capacity(max_group_count + agg_values.len());
+        for i in 0..max_group_count {
+            schema_cols.push(ColumnDefinition::new(
+                format!("__g{i}"),
+                szrsql_types::value::ColumnType::Null,
+            ));
+        }
+        for a in aggregates {
+            let name = a.alias.clone().unwrap_or_else(|| a.func_name.clone());
+            schema_cols.push(ColumnDefinition::new(
+                name,
+                szrsql_types::value::ColumnType::Null,
+            ));
+        }
+        let schema = TableSchema {
+            name: TableName::new("__aggregate__"),
+            columns: schema_cols,
+        };
+        let ctx = ExecRowContext::new(&schema, &out_row);
+        let substituted =
+            substitute_aggregates(having_expr, aggregates, &out_row, group_count_for_having);
+        match ExprEvaluator::eval(&substituted, &ctx)? {
+            Value::Bool(true) => {}
+            Value::Bool(false) | Value::Null => return Ok(Vec::new()),
+            other => {
+                return Err(ExecutionError::EvalError(format!(
+                    "HAVING predicate must evaluate to bool, got {:?}",
+                    other
+                )));
+            }
+        }
+    }
+    Ok(out_row)
+}
+
 fn aggregate_output_schema(
-    group_exprs: &[Expr],
+    grouping_sets: &[Vec<Expr>],
     aggregates: &[AggregateExpr],
 ) -> Result<TableSchema, ExecutionError> {
-    let mut cols = Vec::with_capacity(group_exprs.len() + aggregates.len());
-    for g in group_exprs {
+    // P3-1: 输出列数 = 最大分组集的列数 + 聚合列数。
+    // 较小分组集的输出行在缺失列位置填充 NULL。
+    let max_group_count = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
+    let mut cols = Vec::with_capacity(max_group_count + aggregates.len());
+
+    // 取第一个分组集的表达式作为列名来源（所有集的列名应一致）
+    // P3-1 BUGFIX: ROLLUP/CUBE 的第一个集可能是空集 ()，此时 first() 拿不到列名。
+    // 改为取「最大且非空」的分组集作为列名来源，确保 GROUP BY 列名正确生成。
+    // 使用 max_by 而非 max_by_key，保证同等长度时优先取更早出现的集（通常是
+    // 包含全部列的那个集），避免 CUBE(a,b) 中 (b) 集与 (a,b) 集等长时选错。
+    let name_exprs: &[Expr] = grouping_sets
+        .iter()
+        .max_by(|a, b| {
+            a.len().cmp(&b.len()).then_with(|| {
+                // 同等长度：优先前面的（索引小的），保持列顺序稳定
+                let ai = grouping_sets.iter().position(|s| s == *a).unwrap_or(0);
+                let bi = grouping_sets.iter().position(|s| s == *b).unwrap_or(0);
+                bi.cmp(&ai) // 反转：索引小的优先
+            })
+        })
+        .map(|s| s.as_slice())
+        .unwrap_or(&[]);
+    for g in name_exprs {
         let name = if let Expr::Identifier(parts) = g {
             parts.last().cloned().unwrap_or_default()
         } else {
@@ -10974,6 +11081,13 @@ fn aggregate_output_schema(
         };
         cols.push(ColumnDefinition::new(
             name,
+            szrsql_types::value::ColumnType::Null,
+        ));
+    }
+    // 若所有分组集均为空（全聚合），则无 GROUP BY 列
+    for _ in name_exprs.len()..max_group_count {
+        cols.push(ColumnDefinition::new(
+            "__grouping__".to_string(),
             szrsql_types::value::ColumnType::Null,
         ));
     }
@@ -11395,6 +11509,26 @@ fn substitute_aggregates(
         // Phase 6.2: 窗口函数由 Window 节点单独求值后由 substitute_window_functions 处理，
         // 此处保持原样（避免被聚合 substitute 误改）
         Expr::WindowFunction { .. } => expr.clone(),
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归替换子表达式中的聚合
+        Expr::GroupingSets(sets) => Expr::GroupingSets(
+            sets.iter()
+                .map(|set| {
+                    set.iter()
+                        .map(|e| substitute_aggregates(e, aggregates, row, group_count))
+                        .collect()
+                })
+                .collect(),
+        ),
+        Expr::Cube(cols) => Expr::Cube(
+            cols.iter()
+                .map(|e| substitute_aggregates(e, aggregates, row, group_count))
+                .collect(),
+        ),
+        Expr::Rollup(cols) => Expr::Rollup(
+            cols.iter()
+                .map(|e| substitute_aggregates(e, aggregates, row, group_count))
+                .collect(),
+        ),
     }
 }
 
@@ -11643,6 +11777,26 @@ fn substitute_window_functions(
         | Expr::IsDistinctFrom { .. }
         | Expr::SimilarTo { .. }
         | Expr::Substring { .. } => expr.clone(),
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归替换子表达式中的窗口函数
+        Expr::GroupingSets(sets) => Expr::GroupingSets(
+            sets.iter()
+                .map(|set| {
+                    set.iter()
+                        .map(|e| substitute_window_functions(e, window_funcs, row, input_col_count))
+                        .collect()
+                })
+                .collect(),
+        ),
+        Expr::Cube(cols) => Expr::Cube(
+            cols.iter()
+                .map(|e| substitute_window_functions(e, window_funcs, row, input_col_count))
+                .collect(),
+        ),
+        Expr::Rollup(cols) => Expr::Rollup(
+            cols.iter()
+                .map(|e| substitute_window_functions(e, window_funcs, row, input_col_count))
+                .collect(),
+        ),
     }
 }
 
@@ -12599,10 +12753,10 @@ fn input_schema(plan: &LogicalPlan) -> Result<TableSchema, ExecutionError> {
             Ok(l)
         }
         LogicalPlan::Aggregate {
-            group_exprs,
+            grouping_sets,
             aggregates,
             ..
-        } => aggregate_output_schema(group_exprs, aggregates),
+        } => aggregate_output_schema(grouping_sets, aggregates),
         LogicalPlan::Empty | LogicalPlan::Dual => Ok(TableSchema {
             name: TableName::new("empty"),
             columns: Vec::new(),
@@ -13512,6 +13666,32 @@ fn substitute_parameters_in_expr(expr: Expr, parameters: &[Value]) -> Result<Exp
                 None => None,
             },
         }),
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归替换参数
+        Expr::GroupingSets(sets) => {
+            let mut new_sets = Vec::with_capacity(sets.len());
+            for set in sets {
+                let mut new_set = Vec::with_capacity(set.len());
+                for e in set {
+                    new_set.push(substitute_parameters_in_expr(e, parameters)?);
+                }
+                new_sets.push(new_set);
+            }
+            Ok(Expr::GroupingSets(new_sets))
+        }
+        Expr::Cube(cols) => {
+            let mut new_cols = Vec::with_capacity(cols.len());
+            for e in cols {
+                new_cols.push(substitute_parameters_in_expr(e, parameters)?);
+            }
+            Ok(Expr::Cube(new_cols))
+        }
+        Expr::Rollup(cols) => {
+            let mut new_cols = Vec::with_capacity(cols.len());
+            for e in cols {
+                new_cols.push(substitute_parameters_in_expr(e, parameters)?);
+            }
+            Ok(Expr::Rollup(new_cols))
+        }
     }
 }
 

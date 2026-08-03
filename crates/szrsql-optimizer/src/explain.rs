@@ -304,15 +304,28 @@ impl<'a> ExplainBuilder<'a> {
                 )
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 having,
                 input,
                 ..
             } => {
                 let mut details = Vec::new();
-                if !group_exprs.is_empty() {
-                    let g: Vec<String> = group_exprs.iter().map(Self::expr_to_string).collect();
-                    details.push(format!("Group Key: {}", g.join(", ")));
+                // P3-1: 多分组集 — 显示各集的分组键
+                if grouping_sets.len() == 1 {
+                    let set = &grouping_sets[0];
+                    if !set.is_empty() {
+                        let g: Vec<String> = set.iter().map(Self::expr_to_string).collect();
+                        details.push(format!("Group Key: {}", g.join(", ")));
+                    }
+                } else if grouping_sets.len() > 1 {
+                    for (i, set) in grouping_sets.iter().enumerate() {
+                        if set.is_empty() {
+                            details.push(format!("Grouping Set {i}: ()"));
+                        } else {
+                            let g: Vec<String> = set.iter().map(Self::expr_to_string).collect();
+                            details.push(format!("Grouping Set {i}: ({})", g.join(", ")));
+                        }
+                    }
                 }
                 if let Some(h) = having {
                     details.push(format!("Having: ({})", Self::expr_to_string(h)));
@@ -948,7 +961,7 @@ mod tests {
     fn test_explain_aggregate_node() {
         let model = make_cost_model();
         let plan = LogicalPlan::Aggregate {
-            group_exprs: vec![AExpr::Identifier(vec!["dept".to_string()])],
+            grouping_sets: vec![vec![AExpr::Identifier(vec!["dept".to_string()])]],
             having: None,
             aggregates: Vec::new(),
             input: Box::new(scan_t()),

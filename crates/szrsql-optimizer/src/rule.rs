@@ -82,14 +82,14 @@ impl PredicatePushdown {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = Self::apply_recursive(*input);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -1237,14 +1237,14 @@ impl ProjectionPruning {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = Self::apply_recursive(*input, table_cols);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -1328,13 +1328,16 @@ fn collect_required_columns(plan: &LogicalPlan, out: &mut HashMap<String, HashSe
             collect_required_columns(input, out);
         }
         LogicalPlan::Aggregate {
-            group_exprs,
+            grouping_sets,
             aggregates,
             having,
             input,
         } => {
-            for expr in group_exprs {
-                collect_expr_column_refs_grouped(expr, out);
+            // P3-1: 多分组集 — 收集所有集的列引用
+            for set in grouping_sets {
+                for expr in set {
+                    collect_expr_column_refs_grouped(expr, out);
+                }
             }
             for agg in aggregates {
                 for arg in &agg.args {
@@ -1506,14 +1509,14 @@ impl<'a, 'c> SubqueryFlattening<'a, 'c> {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = self.apply_recursive(*input);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -1940,7 +1943,7 @@ mod projection_pruning_tests {
         // SELECT a.g, COUNT(*) FROM a GROUP BY a.g
         let scan = build_scan_with_columns("a", Some("a"), &["g", "v1", "v2"]);
         let agg = LogicalPlan::Aggregate {
-            group_exprs: vec![col("a", "g")],
+            grouping_sets: vec![vec![col("a", "g")]],
             aggregates: vec![szrsql_sql::plan::AggregateExpr {
                 func_name: "count".to_string(),
                 distinct: false,
@@ -1961,7 +1964,7 @@ mod projection_pruning_tests {
         // SELECT a.g, COUNT(*) FROM a GROUP BY a.g HAVING a.g > 5
         let scan = build_scan_with_columns("a", Some("a"), &["g", "v1"]);
         let agg = LogicalPlan::Aggregate {
-            group_exprs: vec![col("a", "g")],
+            grouping_sets: vec![vec![col("a", "g")]],
             aggregates: vec![szrsql_sql::plan::AggregateExpr {
                 func_name: "count".to_string(),
                 distinct: false,
@@ -2154,7 +2157,7 @@ mod projection_pruning_tests {
         // 预期：a 裁剪为 {c0, c1}
         let scan = build_scan_with_columns("a", Some("a"), &["c0", "c1", "c2"]);
         let agg = LogicalPlan::Aggregate {
-            group_exprs: vec![],
+            grouping_sets: vec![vec![]],
             aggregates: vec![szrsql_sql::plan::AggregateExpr {
                 func_name: "sum".to_string(),
                 distinct: false,
@@ -2289,6 +2292,7 @@ mod subquery_flattening_tests {
             limit: None,
             offset: None,
             set_op: None,
+            grouping_sets: None,
         }
     }
 
@@ -2614,6 +2618,7 @@ mod subquery_flattening_tests {
             limit: None,
             offset: None,
             set_op: None,
+            grouping_sets: None,
         };
         let exists_pred = AExpr::Exists {
             subquery: Box::new(subquery),
@@ -2936,14 +2941,14 @@ impl<'a, 'c> IndexSelection<'a, 'c> {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = self.apply_recursive(*input);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -3581,14 +3586,14 @@ impl CommonSubexpressionElimination {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = Self::apply_recursive(*input, counts, next_id, memo, wrapped);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -3787,14 +3792,14 @@ impl<'a> HtapColumnarRewrite<'a> {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = self.apply_recursive(*input);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),
@@ -4073,7 +4078,7 @@ mod cse_tests {
     fn test_cse_recursive_through_aggregate() {
         // Aggregate(Join(t, t)) → 内部 Join 的 Scan 被替换
         let plan = LogicalPlan::Aggregate {
-            group_exprs: vec![AExpr::Identifier(vec!["id".to_string()])],
+            grouping_sets: vec![vec![AExpr::Identifier(vec!["id".to_string()])]],
             aggregates: vec![],
             having: None,
             input: Box::new(inner_join(scan_t(), scan_t())),

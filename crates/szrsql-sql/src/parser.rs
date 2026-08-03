@@ -1794,14 +1794,9 @@ fn convert_set_expr_to_select(set_expr: &SpSetExpr) -> Result<Select, ParseError
                 .map(convert_table_with_joins)
                 .collect::<Result<Vec<_>, _>>()?;
             let where_clause = convert_option_expr(select.selection.clone())?;
-            let group_by = match &select.group_by {
-                sqlparser::ast::GroupByExpr::Expressions(exprs, _) => exprs
-                    .iter()
-                    .cloned()
-                    .map(convert_expr)
-                    .collect::<Result<Vec<_>, _>>()?,
-                _ => Vec::new(),
-            };
+            // P3-1: 检测 GROUPING SETS / CUBE / ROLLUP（sqlparser 将它们解析为
+            // GroupByExpr::Expressions 内的特殊 Expr 变体）。
+            let (group_by, grouping_sets) = convert_group_by(&select.group_by)?;
             let having = convert_option_expr(select.having.clone())?;
             Ok(Select {
                 with: None,
@@ -1810,6 +1805,7 @@ fn convert_set_expr_to_select(set_expr: &SpSetExpr) -> Result<Select, ParseError
                 from,
                 where_clause,
                 group_by,
+                grouping_sets,
                 having,
                 order_by: Vec::new(),
                 limit: None,
@@ -1856,6 +1852,7 @@ fn convert_set_expr_to_select(set_expr: &SpSetExpr) -> Result<Select, ParseError
                 from: left_select.from.clone(),
                 where_clause: left_select.where_clause.clone(),
                 group_by: left_select.group_by.clone(),
+                grouping_sets: left_select.grouping_sets.clone(),
                 having: left_select.having.clone(),
                 order_by: Vec::new(),
                 limit: None,
@@ -1966,6 +1963,7 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
                 from: vec![twj],
                 where_clause: None,
                 group_by: Vec::new(),
+                grouping_sets: None,
                 having: None,
                 order_by: Vec::new(),
                 limit: None,
@@ -2150,6 +2148,83 @@ fn convert_option_expr(opt: Option<SpExpr>) -> Result<Option<Expr>, ParseError> 
         Some(e) => Ok(Some(convert_expr(e)?)),
         None => Ok(None),
     }
+}
+
+/// P3-1: 将 sqlparser GroupByExpr 转换为 SzRSQL 的 (group_by, grouping_sets) 对。
+///
+/// sqlparser 将 GROUPING SETS / CUBE / ROLLUP 解析为 `GroupByExpr::Expressions` 中
+/// 的特殊 `Expr` 变体（`Expr::GroupingSets` / `Expr::Cube` / `Expr::Rollup`），
+/// 而不是独立的 GroupByExpr 变体。本函数负责识别这些变体并提取为 `grouping_sets`。
+///
+/// 返回值：
+/// - `(Vec::new(), Some(sets))`：多分组集聚合
+/// - `(exprs, None)`：普通 GROUP BY
+#[allow(clippy::type_complexity)]
+fn convert_group_by(
+    group_by: &sqlparser::ast::GroupByExpr,
+) -> Result<(Vec<Expr>, Option<Vec<Vec<Expr>>>), ParseError> {
+    match group_by {
+        sqlparser::ast::GroupByExpr::Expressions(exprs, _) => {
+            // 先尝试将每个表达式转为 SzRSQL Expr
+            let converted: Vec<Expr> = exprs
+                .iter()
+                .cloned()
+                .map(convert_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // 检测是否有 GroupingSets/Cube/Rollup 变体（只允许单独出现）。
+            // sqlparser 将三者均解析为 Vec<Vec<Expr>>：
+            //   GROUPING SETS((a,b),(c))  → GroupingSets([[a,b],[c]])
+            //   CUBE(a,b)                 → Cube([[a],[b]])
+            //   ROLLUP(a,b)               → Rollup([[a],[b]])
+            if converted.len() == 1 {
+                match &converted[0] {
+                    Expr::GroupingSets(sets) => return Ok((Vec::new(), Some(sets.clone()))),
+                    Expr::Cube(cols) => {
+                        // SzRSQL AST 层 Cube 存储扁平列列表，直接展开为所有子集
+                        return Ok((Vec::new(), Some(expand_cube(cols))));
+                    }
+                    Expr::Rollup(cols) => {
+                        return Ok((Vec::new(), Some(expand_rollup(cols))));
+                    }
+                    _ => {}
+                }
+            }
+            Ok((converted, None))
+        }
+        sqlparser::ast::GroupByExpr::All(_) => Ok((Vec::new(), None)),
+    }
+}
+
+/// P3-1: 将 CUBE(a, b, c) 展开为所有子集组合（2^n 个分组集）。
+///
+/// 例：CUBE(a, b) → [(), (a), (b), (a, b)]
+fn expand_cube(cols: &[Expr]) -> Vec<Vec<Expr>> {
+    let mut sets: Vec<Vec<Expr>> = vec![Vec::new()];
+    for col in cols {
+        let mut new_sets = Vec::with_capacity(sets.len());
+        for set in &sets {
+            let mut extended = set.clone();
+            extended.push(col.clone());
+            new_sets.push(extended);
+        }
+        sets.extend(new_sets);
+    }
+    sets
+}
+
+/// P3-1: 将 ROLLUP(a, b, c) 展开为前缀链（n+1 个分组集）。
+///
+/// 例：ROLLUP(a, b, c) → [(), (a), (a, b), (a, b, c)]
+fn expand_rollup(cols: &[Expr]) -> Vec<Vec<Expr>> {
+    let mut sets = Vec::with_capacity(cols.len() + 1);
+    let mut current = Vec::with_capacity(cols.len());
+    sets.push(Vec::new()); // 全聚合
+    for col in cols {
+        current.push(col.clone());
+        sets.push(current.clone());
+    }
+    sets
 }
 
 fn convert_expr(expr: SpExpr) -> Result<Expr, ParseError> {
@@ -2465,6 +2540,37 @@ fn convert_expr_inner(expr: SpExpr, depth: usize) -> Result<Expr, ParseError> {
             op: convert_binary_op(compare_op)?,
             right: Box::new(convert_expr_inner(*right, depth + 1)?),
         }),
+        // P3-1: GROUPING SETS / CUBE / ROLLUP 作为表达式变体（在 GROUP BY 子句中出现）
+        SpExpr::GroupingSets(sets) => Ok(Expr::GroupingSets(
+            sets.iter()
+                .map(|inner| {
+                    inner
+                        .iter()
+                        .cloned()
+                        .map(convert_expr)
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        // AST 层 Cube/Rollup 存储扁平列列表（规划阶段展开为 GroupingSets）
+        SpExpr::Cube(sets) => {
+            let cols: Vec<Expr> = sets
+                .iter()
+                .flat_map(|inner| inner.iter())
+                .cloned()
+                .map(convert_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::Cube(cols))
+        }
+        SpExpr::Rollup(sets) => {
+            let cols: Vec<Expr> = sets
+                .iter()
+                .flat_map(|inner| inner.iter())
+                .cloned()
+                .map(convert_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::Rollup(cols))
+        }
         SpExpr::Nested(e) => convert_expr_inner(*e, depth + 1),
         SpExpr::Wildcard(_) => Ok(Expr::Wildcard),
         SpExpr::QualifiedWildcard(obj, _) => {

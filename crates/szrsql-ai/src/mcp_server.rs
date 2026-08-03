@@ -2677,6 +2677,16 @@ fn count_params_in_expr(expr: &szrsql_sql::ast::Expr) -> usize {
         Expr::AnyOp { left, right, .. } | Expr::AllOp { left, right, .. } => {
             count_params_in_expr(left).max(count_params_in_expr(right))
         }
+        // P3-1: GROUP BY constructs — no parameter placeholders
+        Expr::GroupingSets(sets) => sets
+            .iter()
+            .flat_map(|s| s.iter())
+            .map(count_params_in_expr)
+            .max()
+            .unwrap_or(0),
+        Expr::Cube(cols) | Expr::Rollup(cols) => {
+            cols.iter().map(count_params_in_expr).max().unwrap_or(0)
+        }
     }
 }
 

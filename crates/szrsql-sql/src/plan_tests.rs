@@ -170,11 +170,13 @@ fn test_select_group_by_with_aggregate() {
     match plan {
         LogicalPlan::Projection { input, .. } => match *input {
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 ..
             } => {
-                assert_eq!(group_exprs.len(), 1);
+                // P3-1: 普通 GROUP BY 包装为单分组集
+                assert_eq!(grouping_sets.len(), 1);
+                assert_eq!(grouping_sets[0].len(), 1);
                 assert_eq!(aggregates.len(), 1);
                 assert_eq!(aggregates[0].func_name, "count");
             }

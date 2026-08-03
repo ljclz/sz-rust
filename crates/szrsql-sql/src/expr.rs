@@ -793,6 +793,17 @@ impl ExprEvaluator {
             Expr::WindowFunction { name, .. } => Err(EvalError::Unsupported(format!(
                 "window function '{name}' must be materialized by Window node before evaluation"
             ))),
+            // P3-1: GROUPING SETS / CUBE / ROLLUP 是 GROUP BY 子句构造，
+            // 不应在表达式求值路径中出现（由规划器展开为分组集列表）。
+            Expr::GroupingSets(_) => Err(EvalError::Unsupported(
+                "GROUPING SETS is a GROUP BY clause construct, not an expression".into(),
+            )),
+            Expr::Cube(_) => Err(EvalError::Unsupported(
+                "CUBE is a GROUP BY clause construct, not an expression".into(),
+            )),
+            Expr::Rollup(_) => Err(EvalError::Unsupported(
+                "ROLLUP is a GROUP BY clause construct, not an expression".into(),
+            )),
         }
     }
 

@@ -118,14 +118,14 @@ impl JoinOrderOptimizer {
                 }
             }
             LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input,
             } => {
                 let input = self.optimize_recursive(*input);
                 LogicalPlan::Aggregate {
-                    group_exprs,
+                    grouping_sets,
                     aggregates,
                     having,
                     input: Box::new(input),

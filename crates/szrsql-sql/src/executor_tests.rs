@@ -3454,3 +3454,336 @@ fn test_p0_dist_delete() {
         assert_eq!(rt.kv_len().unwrap(), 1);
     }
 }
+
+// =====================================================================
+//  P3-1: GROUPING SETS / CUBE / ROLLUP 端到端测试
+// =====================================================================
+
+/// 构建 ROLLUP/CUBE 测试用 catalog：sales2(dept, region, amount)
+fn make_gs_catalog() -> InMemoryCatalog {
+    let mut catalog = InMemoryCatalog::new();
+    catalog.add_simple_table(
+        "sales2",
+        vec![
+            ("dept", ColumnType::Text),
+            ("region", ColumnType::Text),
+            ("amount", ColumnType::Int64),
+        ],
+    );
+    catalog
+}
+
+/// 构建 ROLLUP/CUBE 测试用表：6 行
+/// - A/东/100  A/西/200  B/东/300
+/// - B/西/400  A/东/500  B/东/600
+fn make_gs_table() -> InMemoryTable {
+    let mut t = InMemoryTable::with_columns(
+        "sales2",
+        vec![
+            ("dept", ColumnType::Text),
+            ("region", ColumnType::Text),
+            ("amount", ColumnType::Int64),
+        ],
+    );
+    for (d, r, a) in [
+        ("A", "东", 100),
+        ("A", "西", 200),
+        ("B", "东", 300),
+        ("B", "西", 400),
+        ("A", "东", 500),
+        ("B", "东", 600),
+    ] {
+        t.insert(vec![
+            Value::Text(d.into()),
+            Value::Text(r.into()),
+            Value::Int64(a),
+        ]);
+    }
+    t
+}
+
+fn register_gs<'a>(exec: &mut Executor<'a>, t: &'a InMemoryTable) {
+    exec.register_table(t);
+}
+
+#[test]
+fn test_p3_1_rollup_single_column() {
+    // ROLLUP(dept) → 分组集: (), (dept)  → 2 行输出
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, COUNT(*), SUM(amount) FROM sales2 GROUP BY ROLLUP(dept)",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    // ROLLUP(dept) → 分组集: (), (dept) → 3 行（汇总 + A + B）
+    assert_eq!(result.len(), 3, "ROLLUP(dept) 应输出 3 行");
+
+    let mut total_count = 0i64;
+    let mut total_sum = 0i64;
+    let mut by_dept: std::collections::HashMap<String, (i64, i64)> =
+        std::collections::HashMap::new();
+
+    for row in &result {
+        match (&row[0], &row[1], &row[2]) {
+            (Value::Null, Value::Int64(c), Value::Int64(s)) => {
+                // 汇总行（空分组集）
+                total_count = *c;
+                total_sum = *s;
+            }
+            (Value::Text(d), Value::Int64(c), Value::Int64(s)) => {
+                by_dept.insert(d.clone(), (*c, *s));
+            }
+            other => panic!("unexpected row: {:?}", other),
+        }
+    }
+    assert_eq!(total_count, 6, "汇总行 COUNT(*) 应为 6");
+    assert_eq!(
+        total_sum, 2100,
+        "汇总行 SUM(amount) 应为 100+200+300+400+500+600=2100"
+    );
+    assert_eq!(by_dept.get("A"), Some(&(3, 800)), "dept A: 3行, sum=800");
+    assert_eq!(by_dept.get("B"), Some(&(3, 1300)), "dept B: 3行, sum=1300");
+}
+
+#[test]
+fn test_p3_1_cube_single_column() {
+    // CUBE(dept) 单列 → 等价于 ROLLUP(dept) → 3 行（汇总 + A + B）
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, COUNT(*) FROM sales2 GROUP BY CUBE(dept)",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+    assert_eq!(
+        result.len(),
+        3,
+        "CUBE(dept) 单列应输出 3 行（汇总+deptA+deptB）"
+    );
+}
+
+#[test]
+fn test_p3_1_grouping_sets_explicit() {
+    // GROUPING SETS ((dept), ()) → 显式两个分组集
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, COUNT(*) FROM sales2 GROUP BY GROUPING SETS ((dept), ())",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+    assert_eq!(
+        result.len(),
+        3,
+        "GROUPING SETS ((dept),()) 应输出 3 行（2个dept + 1个汇总）"
+    );
+}
+
+#[test]
+fn test_p3_1_rollup_two_columns() {
+    // ROLLUP(dept, region) → 分组集: (), (dept), (dept, region)
+    // max_group_count = 2，输出统一为 2 列分组键 + 聚合列
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, region, COUNT(*), SUM(amount) FROM sales2 GROUP BY ROLLUP(dept, region)",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    // 3 个分组集：
+    //   ()         → 1 行 (NULL, NULL)
+    //   (dept)     → 2 行 (A, NULL), (B, NULL)
+    //   (dept,region) → A/东, A/西, B/东, B/西 → 4 行
+    // 共 7 行
+    assert_eq!(result.len(), 7, "ROLLUP(dept, region) 应输出 7 行");
+
+    let mut rows_by_key: std::collections::HashMap<(Option<String>, Option<String>), (i64, i64)> =
+        result
+            .iter()
+            .map(|r| {
+                let d = match &r[0] {
+                    Value::Text(s) => Some(s.clone()),
+                    Value::Null => None,
+                    other => panic!("dept 应为 Text 或 NULL: {:?}", other),
+                };
+                let reg = match &r[1] {
+                    Value::Text(s) => Some(s.clone()),
+                    Value::Null => None,
+                    other => panic!("region 应为 Text 或 NULL: {:?}", other),
+                };
+                let c = match &r[2] {
+                    Value::Int64(v) => *v,
+                    other => panic!("count 应为 Int64: {:?}", other),
+                };
+                let s = match &r[3] {
+                    Value::Int64(v) => *v,
+                    other => panic!("sum 应为 Int64: {:?}", other),
+                };
+                ((d, reg), (c, s))
+            })
+            .collect();
+
+    // 汇总行
+    assert_eq!(rows_by_key.remove(&(None, None)), Some((6, 2100)));
+    // (dept) 级
+    assert_eq!(
+        rows_by_key.remove(&(Some("A".into()), None)),
+        Some((3, 800))
+    );
+    assert_eq!(
+        rows_by_key.remove(&(Some("B".into()), None)),
+        Some((3, 1300))
+    );
+    // (dept, region) 级
+    assert_eq!(
+        rows_by_key.remove(&(Some("A".into()), Some("东".into()))),
+        Some((2, 600))
+    ); // 100+500
+    assert_eq!(
+        rows_by_key.remove(&(Some("A".into()), Some("西".into()))),
+        Some((1, 200))
+    );
+    assert_eq!(
+        rows_by_key.remove(&(Some("B".into()), Some("东".into()))),
+        Some((2, 900))
+    ); // 300+600
+    assert_eq!(
+        rows_by_key.remove(&(Some("B".into()), Some("西".into()))),
+        Some((1, 400))
+    );
+    assert!(rows_by_key.is_empty(), "不应有多余行: {:?}", rows_by_key);
+}
+
+#[test]
+fn test_p3_1_cube_two_columns() {
+    // CUBE(dept, region) → 2^2 = 4 个分组集: (), (dept), (region), (dept, region)
+    // max_group_count = 2
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, region, COUNT(*) FROM sales2 GROUP BY CUBE(dept, region)",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    // 4 个分组集：
+    //   ()            → 1 行
+    //   (dept)        → 2 行 (A), (B)
+    //   (region)      → 2 行 (东), (西)
+    //   (dept,region) → 4 行
+    // 共 9 行
+    assert_eq!(result.len(), 9, "CUBE(dept, region) 应输出 9 行");
+
+    let mut null_dept_region_count = 0i64; // (NULL, region) 行的合计
+    for row in &result {
+        match (&row[0], &row[1], &row[2]) {
+            (Value::Null, Value::Null, Value::Int64(c)) => assert_eq!(*c, 6, "汇总行 COUNT 应为 6"),
+            (Value::Null, Value::Text(r), Value::Int64(c)) => {
+                // region 级汇总
+                match r.as_str() {
+                    "东" => {
+                        null_dept_region_count += *c;
+                        assert_eq!(*c, 4, "region=东 应有 4 行(A东2+B东2)");
+                    }
+                    "西" => assert_eq!(*c, 2, "region=西 应有 2 行(A西1+B西1)"),
+                    _ => panic!("未知 region: {}", r),
+                }
+            }
+            (Value::Text(d), Value::Null, Value::Int64(c)) => match d.as_str() {
+                "A" => assert_eq!(*c, 3),
+                "B" => assert_eq!(*c, 3),
+                _ => panic!("未知 dept: {}", d),
+            },
+            _ => {} // (dept, region) 级行
+        }
+    }
+    assert_eq!(null_dept_region_count, 4, "东 region 汇总应为 4 行");
+}
+
+#[test]
+fn test_p3_1_grouping_sets_multiple_sets() {
+    // GROUPING SETS ((dept, region), (dept)) → 2 个分组集
+    // set1 (dept,region): 4 行, set2 (dept): 2 行 → 共 6 行
+    // 两个集最大列数 = 2，set2 输出 (dept, NULL)
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, region, COUNT(*) FROM sales2 GROUP BY GROUPING SETS ((dept, region), (dept))",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    assert_eq!(
+        result.len(),
+        6,
+        "GROUPING SETS ((dept,region),(dept)) 应输出 6 行"
+    );
+
+    let mut has_dept_null_region = false;
+    for row in &result {
+        if let (Value::Text(_), Value::Null, Value::Int64(_)) = (&row[0], &row[1], &row[2]) {
+            has_dept_null_region = true; // (dept) 集的 NULL 填充
+        }
+    }
+    assert!(has_dept_null_region, "(dept) 集应产生 region=NULL 的填充行");
+}
+
+#[test]
+fn test_p3_1_rollup_with_having() {
+    // ROLLUP + HAVING：过滤聚合结果
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, COUNT(*), SUM(amount) FROM sales2 GROUP BY ROLLUP(dept) HAVING COUNT(*) > 2",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    // 汇总行 COUNT=6 > 2 ✓；dept A COUNT=3 > 2 ✓；dept B COUNT=3 > 2 ✓ → 3 行全保留
+    assert_eq!(result.len(), 3, "HAVING COUNT(*)>2 应保留全部 3 行");
+    for row in &result {
+        let c = match row[1] {
+            Value::Int64(v) => v,
+            _ => panic!(),
+        };
+        assert!(c > 2, "HAVING 应过滤掉 COUNT<=2 的行");
+    }
+}
+
+#[test]
+fn test_p3_1_rollup_with_having_filters_grand_total() {
+    // HAVING 过滤掉汇总行（COUNT=6 > 100 为假）
+    let catalog = make_gs_catalog();
+    let plan = plan_sql(
+        "SELECT dept, COUNT(*) FROM sales2 GROUP BY ROLLUP(dept) HAVING COUNT(*) > 100",
+        &catalog,
+    );
+    let t = make_gs_table();
+    let mut exec = Executor::new();
+    register_gs(&mut exec, &t);
+    let result = exec.execute(&plan).unwrap();
+
+    // 汇总行 COUNT=6 不满足 >100 → 过滤掉；dept A/B 各 COUNT=3 也不满足 → 全部过滤
+    assert_eq!(
+        result.len(),
+        0,
+        "所有行 COUNT<=6 均不满足 >100，应输出 0 行"
+    );
+}

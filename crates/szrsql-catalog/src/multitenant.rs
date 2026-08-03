@@ -534,7 +534,11 @@ impl SqlRewriter {
             leaf @ (Expr::Literal(_)
             | Expr::Identifier(_)
             | Expr::Wildcard
-            | Expr::Parameter(_)) => leaf,
+            | Expr::Parameter(_)
+            // P3-1: GROUP BY constructs — no subqueries, pass through
+            | Expr::GroupingSets(_)
+            | Expr::Cube(_)
+            | Expr::Rollup(_)) => leaf,
         }
     }
 

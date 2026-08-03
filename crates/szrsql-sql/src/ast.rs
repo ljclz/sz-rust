@@ -1512,6 +1512,12 @@ pub struct Select {
     pub where_clause: Option<Expr>,
     /// GROUP BY 列
     pub group_by: Vec<Expr>,
+    /// GROUPING SETS / CUBE / ROLLUP 分组集 — P3-1
+    ///
+    /// None 表示普通 GROUP BY（使用 `group_by` 字段）。
+    /// Some 表示多分组集聚合，此时 `group_by` 字段忽略，以本字段为准。
+    /// 每个内层 Vec 是一个分组集（一组 GROUP BY 表达式）。
+    pub grouping_sets: Option<Vec<Vec<Expr>>>,
     /// HAVING 条件
     pub having: Option<Expr>,
     /// ORDER BY 列
@@ -1597,6 +1603,25 @@ pub struct SetOperation {
     pub left: Box<Select>,
     /// 右侧 SELECT
     pub right: Box<Select>,
+}
+
+/// GROUPING SETS / CUBE / ROLLUP 分组集类型 — P3-1
+///
+/// 对应 SQL:2016 F-9 分析查询扩展。
+/// - `Plain(exprs)`：普通 GROUP BY 列表，等价于单个分组集 `[exprs]`
+/// - `GroupingSets(sets)`：`GROUP BY GROUPING SETS (set1, set2, ...)`
+/// - `Cube(exprs)`：`GROUP BY CUBE(a, b, c)` → 所有子集组合（2^n 个分组集）
+/// - `Rollup(exprs)`：`GROUP BY ROLLUP(a, b, c)` → 前缀链（n+1 个分组集）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GroupingSet {
+    /// 普通 GROUP BY 列表示（回退路径）
+    Plain(Vec<Expr>),
+    /// GROUPING SETS：每个内层 Vec 是一个分组集
+    GroupingSets(Vec<Vec<Expr>>),
+    /// CUBE：对给定列求所有子集组合
+    Cube(Vec<Expr>),
+    /// ROLLUP：对给定列求前缀链
+    Rollup(Vec<Expr>),
 }
 
 /// SELECT 投影项
@@ -1977,6 +2002,21 @@ pub enum Expr {
         /// 右操作数（数组表达式）
         right: Box<Expr>,
     },
+    /// P3-1: GROUPING SETS — `GROUP BY GROUPING SETS ((a,b), (c), ())`
+    ///
+    /// 内层 Vec 是一个分组集（一组 GROUP BY 表达式）。
+    /// 由解析器从 sqlparser AST 转换而来，执行器展开为多个分组集迭代。
+    GroupingSets(Vec<Vec<Expr>>),
+    /// P3-1: CUBE — `GROUP BY CUBE(a, b, c)`
+    ///
+    /// 规划阶段已由 `expand_cube()` 展开为 `GroupingSets`，
+    /// 保留此变体以支持 AST 层的直接表示（如子查询中的表达式）。
+    Cube(Vec<Expr>),
+    /// P3-1: ROLLUP — `GROUP BY ROLLUP(a, b, c)`
+    ///
+    /// 规划阶段已由 `expand_rollup()` 展开为 `GroupingSets`，
+    /// 保留此变体以支持 AST 层的直接表示。
+    Rollup(Vec<Expr>),
     /// 窗口函数 `func(args) OVER (window_spec)` — Phase 6.2
     ///
     /// 与 `Expr::Function` 分离，避免被聚合函数识别逻辑误判

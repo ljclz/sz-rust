@@ -253,8 +253,14 @@ impl CostModel {
                 right,
             } => self.estimate_join(*join_type, condition, left, right),
             LogicalPlan::Aggregate {
-                group_exprs, input, ..
-            } => self.estimate_aggregate(group_exprs.len(), input),
+                grouping_sets,
+                input,
+                ..
+            } => {
+                // P3-1: 多分组集取最大集大小作为分组列数估计
+                let n = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
+                self.estimate_aggregate(n, input)
+            }
             LogicalPlan::Sort { input, .. } => self.estimate_sort(input),
             LogicalPlan::Limit { limit, input, .. } => self.estimate_limit(limit.as_ref(), input),
             LogicalPlan::Distinct { input, .. } => self.estimate_distinct(input),
@@ -999,7 +1005,7 @@ mod tests {
         // SELECT count(*) FROM t GROUP BY c1
         let scan = build_scan_plan("t", 2);
         let plan = LogicalPlan::Aggregate {
-            group_exprs: vec![AExpr::Identifier(vec!["c0".into()])],
+            grouping_sets: vec![vec![AExpr::Identifier(vec!["c0".into()])]],
             aggregates: vec![],
             having: None,
             input: Box::new(scan),
@@ -1016,7 +1022,7 @@ mod tests {
 
         let scan = build_scan_plan("t", 2);
         let plan = LogicalPlan::Aggregate {
-            group_exprs: vec![],
+            grouping_sets: vec![vec![]],
             aggregates: vec![],
             having: None,
             input: Box::new(scan),

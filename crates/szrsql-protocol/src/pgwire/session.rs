@@ -5005,17 +5005,16 @@ fn derive_output_columns(plan: &LogicalPlan, rows: &[Vec<Value>]) -> Vec<ResultC
 
         LogicalPlan::Aggregate {
             aggregates,
-            group_exprs,
+            grouping_sets,
             input,
             ..
         } => {
             // GROUP BY 列 + 聚合函数列
-            // 推导输入 schema（用于 SUM/AVG/MIN/MAX 等基于输入列类型的聚合）
+            // P3-1: 多分组集统一输出 schema，列数 = 最大分组集大小
             let input_schema = derive_input_schema(input);
-            let mut cols: Vec<ResultColumn> = group_exprs
-                .iter()
-                .enumerate()
-                .map(|(i, _)| ResultColumn {
+            let group_count = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
+            let mut cols: Vec<ResultColumn> = (0..group_count)
+                .map(|i| ResultColumn {
                     name: format!("col_{i}"),
                     column_type: ColumnType::Text,
                 })

@@ -1162,7 +1162,7 @@ mod tests {
     /// 创建 Aggregate 计划
     fn aggregate_plan(input: LogicalPlan) -> LogicalPlan {
         LogicalPlan::Aggregate {
-            group_exprs: vec![AExpr::Identifier(vec!["id".to_string()])],
+            grouping_sets: vec![vec![AExpr::Identifier(vec!["id".to_string()])]],
             aggregates: Vec::new(),
             having: None,
             input: Box::new(input),

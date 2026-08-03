@@ -1327,8 +1327,12 @@ pub enum LogicalPlan {
     },
     /// 聚合（GROUP BY + 聚合函数）
     Aggregate {
-        /// GROUP BY 表达式
-        group_exprs: Vec<Expr>,
+        /// P3-1: 分组集列表 — 每个内层 Vec 是一个分组集（一组 GROUP BY 表达式）。
+        ///
+        /// 普通 GROUP BY a, b → `[[a, b]]`（单分组集，等价于旧 `group_exprs`）。
+        /// GROUPING SETS((a,b),(c)) → `[[a,b],[c]]`。
+        /// ROLLUP/CUBE 在规划阶段已展开为多分组集。
+        grouping_sets: Vec<Vec<Expr>>,
         /// 聚合函数 + 别名（提取自 SELECT 投影）
         aggregates: Vec<AggregateExpr>,
         /// HAVING 条件
@@ -2626,7 +2630,6 @@ impl<'a> Planner<'a> {
         if has_aggregates {
             // 提取聚合表达式
             let mut aggregates = Vec::new();
-            let group_exprs = select.group_by.clone();
 
             for item in &select.projection {
                 if let Some(expr) = select_item_expr(item) {
@@ -2636,8 +2639,16 @@ impl<'a> Planner<'a> {
 
             let having = select.having;
 
+            // P3-1: 构建分组集列表。
+            // - grouping_sets=Some → 直接使用（GROUPING SETS / CUBE / ROLLUP 已展开）
+            // - grouping_sets=None → 普通 GROUP BY，包装为单分组集
+            let grouping_sets: Vec<Vec<Expr>> = match select.grouping_sets {
+                Some(sets) => sets,
+                None => vec![select.group_by.clone()],
+            };
+
             plan = LogicalPlan::Aggregate {
-                group_exprs,
+                grouping_sets,
                 aggregates,
                 having,
                 input: Box::new(plan),
@@ -3324,6 +3335,9 @@ fn expr_contains_aggregate(expr: &Expr) -> bool {
                 || from.as_ref().is_some_and(|e| expr_contains_aggregate(e))
                 || for_len.as_ref().is_some_and(|e| expr_contains_aggregate(e))
         }
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归检查子表达式
+        Expr::GroupingSets(sets) => sets.iter().any(|s| s.iter().any(expr_contains_aggregate)),
+        Expr::Cube(cols) | Expr::Rollup(cols) => cols.iter().any(expr_contains_aggregate),
     }
 }
 
@@ -3438,6 +3452,19 @@ fn extract_aggregates(expr: &Expr, out: &mut Vec<AggregateExpr>) {
                 extract_aggregates(e, out);
             }
         }
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归提取子表达式中的聚合
+        Expr::GroupingSets(sets) => {
+            for set in sets {
+                for e in set {
+                    extract_aggregates(e, out);
+                }
+            }
+        }
+        Expr::Cube(cols) | Expr::Rollup(cols) => {
+            for e in cols {
+                extract_aggregates(e, out);
+            }
+        }
     }
 }
 
@@ -3548,6 +3575,19 @@ fn extract_window_functions(expr: &Expr, out: &mut Vec<WindowFunctionExpr>) {
                 extract_window_functions(e, out);
             }
         }
+        // P3-1: GROUPING SETS / CUBE / ROLLUP — 递归提取子表达式中的窗口函数
+        Expr::GroupingSets(sets) => {
+            for set in sets {
+                for e in set {
+                    extract_window_functions(e, out);
+                }
+            }
+        }
+        Expr::Cube(cols) | Expr::Rollup(cols) => {
+            for e in cols {
+                extract_window_functions(e, out);
+            }
+        }
     }
 }
 
@@ -3628,17 +3668,26 @@ pub fn plan_schema(plan: &LogicalPlan) -> TableSchema {
         }
         LogicalPlan::Aggregate {
             aggregates,
-            group_exprs,
+            grouping_sets,
             ..
         } => {
+            // P3-1: 输出列数 = 最大分组集的列数 + 聚合列数
+            let max_group_count = grouping_sets.iter().map(|s| s.len()).max().unwrap_or(0);
             let mut cols = Vec::new();
-            for g in group_exprs {
+            let name_exprs: &[Expr] = grouping_sets.first().map(|s| s.as_slice()).unwrap_or(&[]);
+            for g in name_exprs {
                 if let Expr::Identifier(parts) = g {
                     cols.push(ColumnDefinition::new(
                         parts.last().cloned().unwrap_or_default(),
                         ColumnType::Null,
                     ));
                 }
+            }
+            for _ in name_exprs.len()..max_group_count {
+                cols.push(ColumnDefinition::new(
+                    "__grouping__".to_string(),
+                    ColumnType::Null,
+                ));
             }
             for a in aggregates {
                 let name = a.alias.clone().unwrap_or_else(|| a.func_name.clone());
@@ -3827,14 +3876,18 @@ fn format_plan_impl(plan: &LogicalPlan, indent: usize, buf: &mut String) {
             format_plan_impl(right, indent + 1, buf);
         }
         LogicalPlan::Aggregate {
-            group_exprs,
+            grouping_sets,
             aggregates,
             input,
             ..
         } => {
+            // P3-1: 显示分组集数量和各集大小
+            let set_sizes: Vec<String> =
+                grouping_sets.iter().map(|s| s.len().to_string()).collect();
             buf.push_str(&format!(
-                "{pad}Aggregate: groups={} aggs={}\n",
-                group_exprs.len(),
+                "{pad}Aggregate: sets={} [{}] aggs={}\n",
+                grouping_sets.len(),
+                set_sizes.join(","),
                 aggregates.len()
             ));
             format_plan_impl(input, indent + 1, buf);
