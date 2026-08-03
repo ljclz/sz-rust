@@ -475,6 +475,7 @@ mod tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 
@@ -491,6 +492,7 @@ mod tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 
@@ -1193,6 +1195,7 @@ impl ProjectionPruning {
                 table,
                 alias,
                 schema,
+                system_time_as_of: _,
             } => {
                 // 按别名优先、表名其次查找所需列
                 let key = alias
@@ -1216,6 +1219,7 @@ impl ProjectionPruning {
                                 name: schema.name,
                                 columns: pruned_columns,
                             },
+                            system_time_as_of: None,
                         };
                     }
                 }
@@ -1223,6 +1227,7 @@ impl ProjectionPruning {
                     table,
                     alias,
                     schema,
+                    system_time_as_of: None,
                 }
             }
             LogicalPlan::Projection {
@@ -1823,6 +1828,7 @@ mod projection_pruning_tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 
@@ -2306,6 +2312,7 @@ mod subquery_flattening_tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 
@@ -2322,6 +2329,7 @@ mod subquery_flattening_tests {
                 relation: TableFactor::Table {
                     name: TableName::new(table),
                     alias: Some(TableAlias::new(table)),
+                    system_time_as_of: None,
                 },
                 joins: vec![],
             }],
@@ -2648,6 +2656,7 @@ mod subquery_flattening_tests {
                 relation: TableFactor::Table {
                     name: TableName::new("b"),
                     alias: Some(TableAlias::new("b")),
+                    system_time_as_of: None,
                 },
                 joins: vec![],
             }],
@@ -3050,6 +3059,7 @@ impl<'a, 'c> IndexSelection<'a, 'c> {
                 table,
                 alias,
                 schema,
+                system_time_as_of: _,
             } => (table.clone(), alias.clone(), schema.clone()),
             _ => {
                 // input 不是 Scan → 保持 Filter
@@ -3249,6 +3259,7 @@ mod index_selection_tests {
                     ColumnDefinition::new("name", ColumnType::Text),
                 ],
             },
+            system_time_as_of: None,
         }
     }
 
@@ -3361,6 +3372,7 @@ mod index_selection_tests {
                 name: TableName::new("t"),
                 columns: vec![ColumnDefinition::new("id", ColumnType::Int64)],
             },
+            system_time_as_of: None,
         };
         let filter = LogicalPlan::Filter {
             predicate: make_eq("id", 5),
@@ -3911,6 +3923,7 @@ impl<'a> HtapColumnarRewrite<'a> {
                 table,
                 alias,
                 schema,
+                system_time_as_of: _,
             } => {
                 // HTAP 路由决策：表有列存副本 → 走 ColumnarScan
                 if self.catalog.has_columnar_store(&table) {
@@ -3924,6 +3937,7 @@ impl<'a> HtapColumnarRewrite<'a> {
                         table,
                         alias,
                         schema,
+                        system_time_as_of: None,
                     }
                 }
             }
@@ -3970,6 +3984,7 @@ mod cse_tests {
             table: TableName::new("t"),
             alias: None,
             schema: schema_t(),
+            system_time_as_of: None,
         }
     }
 
@@ -3979,6 +3994,7 @@ mod cse_tests {
             table: TableName::new("u"),
             alias: None,
             schema: schema_u(),
+            system_time_as_of: None,
         }
     }
 
@@ -3988,6 +4004,7 @@ mod cse_tests {
             table: TableName::new("t"),
             alias: Some(alias.to_string()),
             schema: schema_t(),
+            system_time_as_of: None,
         }
     }
 

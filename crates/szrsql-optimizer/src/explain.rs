@@ -210,6 +210,7 @@ impl<'a> ExplainBuilder<'a> {
                 table,
                 alias,
                 schema,
+                system_time_as_of: _,
             } => {
                 let mut details = Vec::new();
                 if let Some(a) = alias {
@@ -666,6 +667,7 @@ mod tests {
             table: TableName::new("t"),
             alias: None,
             schema: schema_t(),
+            system_time_as_of: None,
         }
     }
 
@@ -940,6 +942,7 @@ mod tests {
                 name: TableName::new("u"),
                 columns: vec![ColumnDefinition::new("id", ColumnType::Int64)],
             },
+            system_time_as_of: None,
         };
         let join = LogicalPlan::Join {
             join_type: JoinType::Inner,

@@ -7203,7 +7203,15 @@ impl<'a> Executor<'a> {
                 table,
                 schema,
                 alias: _,
-            } => self.execute_scan(table, schema),
+                system_time_as_of,
+            } => {
+                let rows = self.execute_scan(table, schema)?;
+                if let Some(ts_expr) = system_time_as_of {
+                    self.apply_temporal_filter(rows, ts_expr, schema)
+                } else {
+                    Ok(rows)
+                }
+            }
             LogicalPlan::ColumnarScan {
                 table,
                 schema,
@@ -7376,6 +7384,66 @@ impl<'a> Executor<'a> {
             result.extend(rows);
         }
         Ok(result)
+    }
+
+    /// 时间旅行过滤（SQL:2011 F-751 TEMPORAL 表）
+    ///
+    /// `FOR SYSTEM_TIME AS OF <ts>` 语义：仅返回在时刻 `ts` 有效的行版本。
+    /// 约定：时间表的行包含 `row_start`/`row_end`（或 `sys_start`/`sys_end`）
+    /// 两个 TIMESTAMP 列，分别表示行版本的生效时间和失效时间（左闭右开）。
+    ///
+    /// 过滤条件：`row_start <= ts AND ts < row_end`
+    /// 若行缺少有效性列或类型不匹配，该行被跳过（不报错，兼容非时间表）。
+    fn apply_temporal_filter(
+        &self,
+        rows: Vec<Row>,
+        ts_expr: &Expr,
+        schema: &TableSchema,
+    ) -> Result<Vec<Row>, ExecutionError> {
+        // 1. 求值时间点（ts_expr 通常为字面量 TIMESTAMP，不依赖行上下文）
+        let ts_val = eval_expr_in_row(ts_expr, &Vec::new(), schema)
+            .map_err(|e| ExecutionError::EvalError(e.to_string()))?;
+        let ts_us = match ts_val {
+            Value::Timestamp(us) => us,
+            Value::Null => return Ok(Vec::new()),
+            _ => {
+                return Err(ExecutionError::EvalError(format!(
+                    "SYSTEM_TIME AS OF requires a TIMESTAMP expression, got {ts_val:?}"
+                )))
+            }
+        };
+
+        // 2. 在 schema 中查找有效性列索引（支持 row_start/row_end 和 sys_start/sys_end 两种命名）
+        let find_col = |name: &str| -> Option<usize> {
+            schema
+                .columns
+                .iter()
+                .position(|c| c.name.eq_ignore_ascii_case(name))
+        };
+        let start_idx = ["row_start", "sys_start"].iter().find_map(|n| find_col(n));
+        let end_idx = ["row_end", "sys_end"].iter().find_map(|n| find_col(n));
+
+        let (start_idx, end_idx) = match (start_idx, end_idx) {
+            (Some(s), Some(e)) => (s, e),
+            // 无有效性列：退化为返回全部行（兼容普通表误用 SYSTEM_TIME）
+            _ => return Ok(rows),
+        };
+
+        // 3. 过滤：row_start <= ts AND ts < row_end
+        Ok(rows
+            .into_iter()
+            .filter(|row| {
+                let start_ok = row.get(start_idx).and_then(|v| match v {
+                    Value::Timestamp(us) => Some(*us),
+                    _ => None,
+                }).map_or(false, |s| s <= ts_us);
+                let end_ok = row.get(end_idx).and_then(|v| match v {
+                    Value::Timestamp(us) => Some(*us),
+                    _ => None,
+                }).map_or(false, |e| ts_us < e);
+                start_ok && end_ok
+            })
+            .collect())
     }
 
     // -----------------------------------------------------------------
@@ -13878,7 +13946,15 @@ fn substitute_parameters_in_table_factor(
     parameters: &[Value],
 ) -> Result<TableFactor, ExecutionError> {
     Ok(match tf {
-        TableFactor::Table { name, alias } => TableFactor::Table { name, alias },
+        TableFactor::Table {
+            name,
+            alias,
+            system_time_as_of: _,
+        } => TableFactor::Table {
+            name,
+            alias,
+            system_time_as_of: None,
+        },
         TableFactor::Derived {
             subquery,
             alias,

@@ -2109,7 +2109,11 @@ fn execute_system_catalog_join(
 /// 获取 TableFactor 的别名（若无则用表名）。
 fn table_factor_alias(factor: &TableFactor) -> String {
     match factor {
-        TableFactor::Table { name, alias } => {
+        TableFactor::Table {
+            name,
+            alias,
+            system_time_as_of: _,
+        } => {
             if let Some(a) = alias {
                 a.name.clone()
             } else {

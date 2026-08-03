@@ -1012,6 +1012,7 @@ impl JobBenchmarkGenerator {
                     ColumnDefinition::new("name", ColumnType::Text),
                 ],
             },
+            system_time_as_of: None,
         }
     }
 }
@@ -1073,6 +1074,7 @@ mod tests {
                     ColumnDefinition::new("name", ColumnType::Text),
                 ],
             },
+            system_time_as_of: None,
         }
     }
 

@@ -240,6 +240,7 @@ fn test_adv_dat_005_index_consistency_after_insert() {
         table: TableName::new("t"),
         alias: None,
         schema: table.schema().clone(),
+        system_time_as_of: None,
     };
     let rows = exec.execute(&scan_plan).expect("scan should succeed");
     assert_eq!(rows.len(), 3, "scan should return 3 rows");

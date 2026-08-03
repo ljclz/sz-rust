@@ -2097,10 +2097,24 @@ fn convert_table_with_joins(twj: SpTableWithJoins) -> Result<TableWithJoins, Par
 
 fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
     match tf {
-        SpTableFactor::Table { name, alias, .. } => Ok(TableFactor::Table {
-            name: convert_object_name(name)?,
-            alias: alias.map(convert_table_alias),
-        }),
+        SpTableFactor::Table {
+            name,
+            alias,
+            version,
+            ..
+        } => {
+            let system_time_as_of = match version {
+                Some(sqlparser::ast::TableVersion::ForSystemTimeAsOf(expr)) => {
+                    Some(Box::new(convert_expr(expr)?))
+                }
+                _ => None,
+            };
+            Ok(TableFactor::Table {
+                name: convert_object_name(name)?,
+                alias: alias.map(convert_table_alias),
+                system_time_as_of,
+            })
+        }
         SpTableFactor::Derived {
             lateral,
             subquery,

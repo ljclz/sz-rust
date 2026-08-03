@@ -85,6 +85,7 @@ fn make_scan(table_name: &str, columns: Vec<(&str, ColumnType)>) -> LogicalPlan 
         table: table_name_obj,
         alias: None,
         schema,
+        system_time_as_of: None,
     }
 }
 
@@ -3984,4 +3985,119 @@ fn test_p3_2_lateral_join_subquery_with_limit() {
     }
     assert_eq!(m.get("alice"), Some(&200), "alice 最近单 = 200");
     assert_eq!(m.get("bob"), Some(&300), "bob 最近单 = 300");
+}
+
+// =====================================================================
+//  P3-6 TEMPORAL 表 (SYSTEM_TIME AS OF) 测试
+// =====================================================================
+
+/// 构建时间表：id BIGINT, name TEXT, row_start TIMESTAMP, row_end TIMESTAMP
+fn make_temporal_table() -> InMemoryTable {
+    InMemoryTable::with_columns(
+        "emp",
+        vec![
+            ("id", ColumnType::Int64),
+            ("name", ColumnType::Text),
+            ("row_start", ColumnType::Timestamp),
+            ("row_end", ColumnType::Timestamp),
+        ],
+    )
+}
+
+/// ts_us 辅助构造器
+fn ts(us: i64) -> Value {
+    Value::Timestamp(us)
+}
+
+/// 构建带 system_time_as_of 的 Scan 计划
+fn make_temporal_scan(table_name: &str, ts_us: i64) -> LogicalPlan {
+    LogicalPlan::Scan {
+        table: TableName::new(table_name),
+        alias: None,
+        schema: TableSchema {
+            name: TableName::new(table_name),
+            columns: vec![
+                crate::ast::ColumnDefinition::new("id", ColumnType::Int64),
+                crate::ast::ColumnDefinition::new("name", ColumnType::Text),
+                crate::ast::ColumnDefinition::new("row_start", ColumnType::Timestamp),
+                crate::ast::ColumnDefinition::new("row_end", ColumnType::Timestamp),
+            ],
+        },
+        system_time_as_of: Some(Box::new(Expr::Literal(Value::Timestamp(ts_us)))),
+    }
+}
+
+#[test]
+fn test_temporal_as_of_returns_only_valid_rows() {
+    // 三行：row1 在 ts=50 有效，row2 在 ts=50 已失效，row3 在 ts=50 尚未生效
+    let mut table = make_temporal_table();
+    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), ts(10), ts(100)]); // row_start=10, row_end=100 → 50 有效
+    table.insert(vec![Value::Int64(2), Value::Text("bob".into()), ts(10), ts(40)]);    // row_start=10, row_end=40  → 50 无效
+    table.insert(vec![Value::Int64(3), Value::Text("carol".into()), ts(60), ts(100)]); // row_start=60, row_end=100 → 50 无效
+
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let plan = make_temporal_scan("emp", 50);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 1, "仅 row1 在 ts=50 有效");
+    assert_eq!(rows[0][0], Value::Int64(1));
+}
+
+#[test]
+fn test_temporal_as_of_boundary_inclusive_start() {
+    // row_start = ts 恰好等于边界 → 应包含（左闭）
+    let mut table = make_temporal_table();
+    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), ts(10), ts(100)]); // row_start=10
+
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let plan = make_temporal_scan("emp", 10);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 1, "ts = row_start 边界应包含（左闭）");
+}
+
+#[test]
+fn test_temporal_as_of_boundary_exclusive_end() {
+    // ts 恰好等于 row_end → 应排除（右开）
+    let mut table = make_temporal_table();
+    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), ts(10), ts(50)]); // row_end=50
+
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let plan = make_temporal_scan("emp", 50);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 0, "ts = row_end 边界应排除（右开）");
+}
+
+#[test]
+fn test_temporal_as_of_multiple_valid_rows() {
+    // 两行在同一时刻均有效
+    let mut table = make_temporal_table();
+    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), ts(10), ts(100)]);
+    table.insert(vec![Value::Int64(2), Value::Text("bob".into()), ts(20), ts(80)]);
+
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let plan = make_temporal_scan("emp", 50);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 2, "两行在 ts=50 均有效");
+}
+
+#[test]
+fn test_temporal_as_of_none_returns_all_rows() {
+    // system_time_as_of = None → 返回全部行（退化路径）
+    let mut table = make_temporal_table();
+    table.insert(vec![Value::Int64(1), Value::Text("alice".into()), ts(10), ts(100)]);
+    table.insert(vec![Value::Int64(2), Value::Text("bob".into()), ts(20), ts(80)]);
+
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let plan = make_scan("emp", vec![
+        ("id", ColumnType::Int64),
+        ("name", ColumnType::Text),
+        ("row_start", ColumnType::Timestamp),
+        ("row_end", ColumnType::Timestamp),
+    ]);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 2, "无 SYSTEM_TIME 应返回全部行");
 }

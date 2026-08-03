@@ -1686,6 +1686,9 @@ pub enum TableFactor {
         name: TableName,
         /// 别名
         alias: Option<TableAlias>,
+        /// P3-6：SQL:2011 F-751 时间旅行查询 — `FOR SYSTEM_TIME AS OF <expr>`
+        /// 表达式求值结果为时间戳，执行器据此过滤行版本
+        system_time_as_of: Option<Box<Expr>>,
     },
     /// 子查询 `(SELECT ...) AS alias`
     Derived {

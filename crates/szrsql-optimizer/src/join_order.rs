@@ -747,6 +747,7 @@ mod tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 

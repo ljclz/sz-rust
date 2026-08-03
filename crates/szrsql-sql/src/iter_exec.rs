@@ -699,6 +699,7 @@ mod tests {
                 },
                 alias: None,
                 schema,
+                system_time_as_of: None,
             }),
         };
 

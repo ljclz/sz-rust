@@ -311,6 +311,7 @@ impl CostModel {
                 name: TableName::new(table_name.clone()),
                 columns: Vec::new(),
             },
+            system_time_as_of: None,
         };
         let selectivity = self.estimate_selectivity(predicate, &dummy_scan);
         let matched_rows = ((row_count as f64) * selectivity).round() as usize;
@@ -778,6 +779,7 @@ mod tests {
                 name: TableName::new(table_name),
                 columns,
             },
+            system_time_as_of: None,
         }
     }
 

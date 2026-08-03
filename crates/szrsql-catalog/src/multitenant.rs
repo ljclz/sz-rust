@@ -328,9 +328,14 @@ impl SqlRewriter {
     /// Rewrite a TableFactor (Table / Derived / TableFunction)
     fn rewrite_table_factor(&self, factor: TableFactor) -> TableFactor {
         match factor {
-            TableFactor::Table { name, alias } => TableFactor::Table {
+            TableFactor::Table {
+                name,
+                alias,
+                system_time_as_of: _,
+            } => TableFactor::Table {
                 name: self.rewrite_table_name(name),
                 alias,
+                system_time_as_of: None,
             },
             TableFactor::Derived {
                 subquery,

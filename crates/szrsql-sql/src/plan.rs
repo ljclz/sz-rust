@@ -1266,6 +1266,9 @@ pub enum LogicalPlan {
         alias: Option<String>,
         /// 表 Schema（执行器/优化器使用）
         schema: TableSchema,
+        /// P3-6：SQL:2011 F-751 时间旅行 — `FOR SYSTEM_TIME AS OF <expr>`
+        /// 执行器据此过滤行版本（row_start <= ts < row_end）
+        system_time_as_of: Option<Box<Expr>>,
     },
     /// 列存扫描 — P2-15 向量化执行引擎
     ///
@@ -2952,7 +2955,11 @@ impl<'a> Planner<'a> {
 
     fn plan_table_factor(&self, tf: &TableFactor) -> Result<LogicalPlan, PlanError> {
         match tf {
-            TableFactor::Table { name, alias } => {
+            TableFactor::Table {
+                name,
+                alias,
+                system_time_as_of,
+            } => {
                 // Phase 6.1: 优先检查 CTE 作用域
                 if let Some((_cte_plan, cte_schema)) = self.lookup_cte(&name.name) {
                     return Ok(LogicalPlan::CteRef {
@@ -3001,6 +3008,7 @@ impl<'a> Planner<'a> {
                     table: name.clone(),
                     alias: alias.as_ref().map(|a| a.name.clone()),
                     schema,
+                    system_time_as_of: system_time_as_of.clone(),
                 })
             }
             TableFactor::Derived {
@@ -3265,6 +3273,7 @@ impl<'a> Planner<'a> {
                     table: table.clone(),
                     alias: alias.clone(),
                     schema: schema.clone(),
+                    system_time_as_of: None,
                 }),
             })
         });
@@ -3301,6 +3310,7 @@ impl<'a> Planner<'a> {
                     table: table.clone(),
                     alias: alias.clone(),
                     schema: schema.clone(),
+                    system_time_as_of: None,
                 }),
             })
         });

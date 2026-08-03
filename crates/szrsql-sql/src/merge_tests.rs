@@ -564,6 +564,7 @@ fn test_merge_error_01_when_matched_then_insert_disallowed() {
     let source_tf = TableFactor::Table {
         name: TableName::new("s"),
         alias: None,
+        system_time_as_of: None,
     };
     // ON: t.id = s.id
     let on = Expr::BinaryOp {
@@ -609,6 +610,7 @@ fn test_merge_error_02_when_not_matched_then_update_disallowed() {
     let source_tf = TableFactor::Table {
         name: TableName::new("s"),
         alias: None,
+        system_time_as_of: None,
     };
     let on = Expr::BinaryOp {
         left: Box::new(Expr::Identifier(vec!["t".into(), "id".into()])),
