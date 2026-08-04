@@ -22,7 +22,7 @@
 //! | `fuzz_route_config_load_safety` | `routing::load_routes_from_yaml_str` | 随机 YAML 不 panic |
 //! | `fuzz_json_response_serialization` | `response::ApiResponse` | 随机数据序列化不 panic |
 //! | `fuzz_error_code_conversion` | `error::ErrorCode::from` / `BaseException::new` | 随机 i32 不 panic |
-//! | `fuzz_config_parse_safety` | `serde_yml::from_str::<AppConfig>` | 随机 YAML 配置不 panic |
+//! | `fuzz_config_parse_safety` | `serde_yaml::from_str::<AppConfig>` | 随机 YAML 配置不 panic |
 //! | `fuzz_validate_rules` | `validate::Validate::check_rule` | 随机规则不 panic |
 //! | `fuzz_cookie_jar_safety` | `cookie::CookieJar` | 随机 Cookie 名/值/选项不 panic |
 //! | `fuzz_middleware_chain_safety` | `middleware::MiddlewareChain` | 随机中间件链操作不 panic |
@@ -283,7 +283,7 @@ fn fuzz_error_code_conversion() {
 /// 随机噪音）不会引发 panic。
 ///
 /// 注意：`config.rs` 没有提供 `from_yaml_str` 公开 API，只有 `load_from_dir`。
-/// 这里直接使用 `serde_yml::from_str::<AppConfig>` 测试反序列化层。
+/// 这里直接使用 `serde_yaml::from_str::<AppConfig>` 测试反序列化层。
 #[test]
 fn fuzz_config_parse_safety() {
     let mut rng = Rng::new(202);
@@ -292,13 +292,13 @@ fn fuzz_config_parse_safety() {
         let len = rng.next_usize(200);
         let yaml = rng.next_string(len);
         // 随机字符串几乎都不是合法 YAML，会返回 Err，这是预期行为
-        let _ = serde_yml::from_str::<AppConfig>(&yaml);
+        let _ = serde_yaml::from_str::<AppConfig>(&yaml);
     }
 
     // 边界值：空字符串、纯空白
     let boundary_inputs = ["", " ", "\n", "\t", "---", "..."];
     for input in &boundary_inputs {
-        let _ = serde_yml::from_str::<AppConfig>(input);
+        let _ = serde_yaml::from_str::<AppConfig>(input);
     }
 
     // 部分合法字段 + 随机噪音：验证不 panic（随机字符串可能包含 YAML 特殊字符，
@@ -312,7 +312,7 @@ fn fuzz_config_parse_safety() {
             app_host, default_app, auto_multi_app
         );
         // 只验证不 panic，不验证字段相等性（随机字符串可能破坏 YAML 结构）
-        let _ = serde_yml::from_str::<AppConfig>(&yaml);
+        let _ = serde_yaml::from_str::<AppConfig>(&yaml);
     }
 
     // 合法完整配置：验证解析成功且 default 值生效
@@ -325,7 +325,7 @@ database:
   default: "mysql"
   auto_timestamp: true
 "#;
-    let config = serde_yml::from_str::<AppConfig>(valid_yaml).expect("合法 YAML 应解析成功");
+    let config = serde_yaml::from_str::<AppConfig>(valid_yaml).expect("合法 YAML 应解析成功");
     assert_eq!(config.app.app_host, "https://example.com");
     assert_eq!(config.app.default_app, "api");
     assert!(config.app.auto_multi_app);

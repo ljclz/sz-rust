@@ -40,7 +40,7 @@ pub enum ConfigError {
         path: String,
         /// 底层解析错误
         #[source]
-        source: serde_yml::Error,
+        source: serde_yaml::Error,
     },
 }
 
@@ -456,7 +456,7 @@ fn load_section<T: DeserializeOwned + Default>(path: &Path, default: T) -> Resul
         path: path.display().to_string(),
         source: e,
     })?;
-    serde_yml::from_str(&content).map_err(|e| ConfigError::Parse {
+    serde_yaml::from_str(&content).map_err(|e| ConfigError::Parse {
         path: path.display().to_string(),
         source: e,
     })
@@ -717,7 +717,7 @@ app_map:
   oapc: oapc
   admin: admin
 "#;
-        let app: AppSection = serde_yml::from_str(yaml).unwrap();
+        let app: AppSection = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(app.app_host, "https://example.com");
         assert_eq!(app.default_app, "api");
         assert!(app.auto_multi_app);
@@ -1029,7 +1029,7 @@ app_map:
     #[test]
     fn test_parse_error() {
         let bad_yaml = "default: mysql\n  bad: : : indent";
-        let result: Result<DatabaseSection, _> = serde_yml::from_str(bad_yaml);
+        let result: Result<DatabaseSection, _> = serde_yaml::from_str(bad_yaml);
         // 无效 YAML 应该返回错误（或被 serde 宽容处理）
         // 这里只验证不 panic
         let _ = result;

@@ -67,7 +67,7 @@ http-body-util = "0.1"
 # 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-serde_yml = "0.0.12"
+serde_yaml = "0.9.34"
 toml = "0.8"
 
 # 日志与追踪

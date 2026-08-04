@@ -408,7 +408,7 @@ mod tests {
         }
 
         let content = std::fs::read_to_string(&log_path).unwrap();
-        let section: LogSection = serde_yml::from_str(&content).unwrap();
+        let section: LogSection = serde_yaml::from_str(&content).unwrap();
 
         // 验证默认通道为 file
         assert_eq!(section.default, "file");
