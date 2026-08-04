@@ -875,7 +875,7 @@ mod tests {
     fn test_login7_decode_length_mismatch() {
         // 声明长度 100 但实际只有 50 字节
         let mut buf = 100u32.to_be_bytes().to_vec();
-        buf.extend_from_slice(&vec![0u8; 46]);
+        buf.extend_from_slice(&[0u8; 46]);
         let result = Login7::decode(&buf);
         assert!(matches!(result, Err(HandshakeError::Protocol(_))));
     }

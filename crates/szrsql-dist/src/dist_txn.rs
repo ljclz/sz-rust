@@ -1021,7 +1021,7 @@ mod tests {
         let start_ts = txn.begin();
 
         let mutation = Mutation::put(b"k1".to_vec(), b"v1".to_vec());
-        txn.prewrite_all(&[mutation.clone()], start_ts).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&mutation), start_ts).unwrap();
         let commit_ts = txn.commit(&[mutation], start_ts).unwrap();
         assert!(commit_ts > start_ts);
 
@@ -1065,7 +1065,7 @@ mod tests {
         let start_ts = txn.begin();
 
         let mutation = Mutation::put(b"rk1".to_vec(), b"rv1".to_vec());
-        txn.prewrite_all(&[mutation.clone()], start_ts).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&mutation), start_ts).unwrap();
 
         // 回滚
         txn.rollback(&[mutation], start_ts).unwrap();
@@ -1086,7 +1086,7 @@ mod tests {
         let mut txn_a = DistTxnClient::new(&mut runtime);
         let ts_a = txn_a.begin();
         let m_a = Mutation::put(b"ck1".to_vec(), b"v_a".to_vec());
-        txn_a.prewrite_all(&[m_a.clone()], ts_a).unwrap();
+        txn_a.prewrite_all(std::slice::from_ref(&m_a), ts_a).unwrap();
         txn_a.commit(&[m_a], ts_a).unwrap();
 
         // 事务 B：使用更早的 start_ts 写入同一键，应冲突
@@ -1136,13 +1136,13 @@ mod tests {
         let mut txn = DistTxnClient::new(&mut runtime);
         let ts1 = txn.begin();
         let m_put = Mutation::put(b"dk1".to_vec(), b"dv1".to_vec());
-        txn.prewrite_all(&[m_put.clone()], ts1).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m_put), ts1).unwrap();
         txn.commit(&[m_put], ts1).unwrap();
 
         // 删除
         let ts2 = txn.begin();
         let m_del = Mutation::delete(b"dk1".to_vec());
-        txn.prewrite_all(&[m_del.clone()], ts2).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m_del), ts2).unwrap();
         txn.commit(&[m_del], ts2).unwrap();
 
         // 读取应返回 None
@@ -1346,7 +1346,7 @@ mod tests {
         let mut txn_a = DistTxnClient::new(&mut runtime);
         let ts_a = txn_a.begin();
         let m_a = Mutation::put(b"charlie".to_vec(), b"v_a".to_vec());
-        txn_a.prewrite_all(&[m_a.clone()], ts_a).unwrap();
+        txn_a.prewrite_all(std::slice::from_ref(&m_a), ts_a).unwrap();
         txn_a.commit(&[m_a], ts_a).unwrap();
 
         // 事务 B：使用更早的 start_ts 写同一键，应冲突
@@ -1376,7 +1376,7 @@ mod tests {
         assert!(start_ts > 0, "begin 应返回有效时间戳");
 
         let m = Mutation::put(b"ck1".to_vec(), b"cv1".to_vec());
-        txn.prewrite_all(&[m.clone()], start_ts).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m), start_ts).unwrap();
         let commit_ts = txn.commit(&[m], start_ts).unwrap();
         assert!(commit_ts > start_ts);
 
@@ -1426,7 +1426,7 @@ mod tests {
         let start_ts = txn.begin();
 
         let m = Mutation::put(b"rk1".to_vec(), b"rv1".to_vec());
-        txn.prewrite_all(&[m.clone()], start_ts).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m), start_ts).unwrap();
         txn.rollback(&[m], start_ts).unwrap();
 
         // 读取应返回 None（未提交）
@@ -1446,13 +1446,13 @@ mod tests {
         // 先写入
         let ts1 = txn.begin();
         let m_put = Mutation::put(b"dk1".to_vec(), b"dv1".to_vec());
-        txn.prewrite_all(&[m_put.clone()], ts1).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m_put), ts1).unwrap();
         txn.commit(&[m_put], ts1).unwrap();
 
         // 删除
         let ts2 = txn.begin();
         let m_del = Mutation::delete(b"dk1".to_vec());
-        txn.prewrite_all(&[m_del.clone()], ts2).unwrap();
+        txn.prewrite_all(std::slice::from_ref(&m_del), ts2).unwrap();
         txn.commit(&[m_del], ts2).unwrap();
 
         // 读取应返回 None
@@ -1470,7 +1470,7 @@ mod tests {
         let mut txn_a = ClusterTxnCoordinator::new(&mut cluster);
         let ts_a = txn_a.begin();
         let m_a = Mutation::put(b"wck1".to_vec(), b"v_a".to_vec());
-        txn_a.prewrite_all(&[m_a.clone()], ts_a).unwrap();
+        txn_a.prewrite_all(std::slice::from_ref(&m_a), ts_a).unwrap();
         txn_a.commit(&[m_a], ts_a).unwrap();
 
         // 事务 B：使用更早的 start_ts 写同一键，应冲突
@@ -1572,7 +1572,7 @@ mod tests {
         let mut txn_a = ClusterTxnCoordinator::new(&mut cluster);
         let ts_a = txn_a.begin();
         let m_a = Mutation::put(b"sk1".to_vec(), b"v1".to_vec());
-        txn_a.prewrite_all(&[m_a.clone()], ts_a).unwrap();
+        txn_a.prewrite_all(std::slice::from_ref(&m_a), ts_a).unwrap();
         let commit_ts_a = txn_a.commit(&[m_a], ts_a).unwrap();
 
         // 事务 B：在 commit_ts_a 之后读取，应看到 v1

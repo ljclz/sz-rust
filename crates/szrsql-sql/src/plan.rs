@@ -674,7 +674,7 @@ impl InMemoryCatalog {
                         name: fk_name.clone(),
                         columns: fk_cols.clone(),
                         reference: reference.clone(),
-                        deferrable_mode: reference.deferrable_mode.clone(),
+                        deferrable_mode: reference.deferrable_mode,
                     },
                 )?;
             }
@@ -689,7 +689,7 @@ impl InMemoryCatalog {
                         name: None,
                         columns: vec![col.name.clone()],
                         reference: reference.clone(),
-                        deferrable_mode: reference.deferrable_mode.clone(),
+                        deferrable_mode: reference.deferrable_mode,
                     },
                 )?;
             }
@@ -1257,6 +1257,7 @@ impl Catalog for InMemoryCatalog {
 
 /// 逻辑计划节点 — 树形结构
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum LogicalPlan {
     /// 表扫描（含可选列投影，None 表示全表）
     Scan {
@@ -3046,7 +3047,11 @@ impl<'a> Planner<'a> {
             TableFactor::TableFunction { .. } => Err(PlanError::Unsupported(
                 "table function not yet supported in planner".into(),
             )),
-            TableFactor::MatchRecognize { table, clause, alias: _ } => {
+            TableFactor::MatchRecognize {
+                table,
+                clause,
+                alias: _,
+            } => {
                 // P4-1: 规划 MATCH_RECOGNIZE — 先规划内层表，再包装 MatchRecognize 节点
                 let inner_plan = self.plan_table_factor(table)?;
                 let input_schema = plan_schema(&inner_plan);
@@ -3060,8 +3065,11 @@ impl<'a> Planner<'a> {
                     })
                     .collect();
                 // 用 Projection 暴露所有输出列名（输入列保留原名 + MEASURES 新列）
-                let mut all_names: Vec<String> =
-                    input_schema.columns.iter().map(|c| c.name.clone()).collect();
+                let mut all_names: Vec<String> = input_schema
+                    .columns
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect();
                 all_names.extend(measure_cols.iter().map(|c| c.name.clone()));
                 let proj_exprs: Vec<(Expr, Option<String>)> = all_names
                     .iter()
@@ -4154,9 +4162,7 @@ fn table_factor_references_table(tf: &TableFactor, target: &str) -> bool {
         TableFactor::Derived { subquery, .. } => select_references_table(subquery, target),
         TableFactor::TableFunction { .. } => false,
         // P4-1: 递归到 MATCH_RECOGNIZE 内层表
-        TableFactor::MatchRecognize { table, .. } => {
-            table_factor_references_table(table, target)
-        }
+        TableFactor::MatchRecognize { table, .. } => table_factor_references_table(table, target),
     }
 }
 

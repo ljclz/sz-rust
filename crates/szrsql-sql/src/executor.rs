@@ -4297,11 +4297,14 @@ impl<'a> Executor<'a> {
         }
         // 使用 executor 自身已注册的表查找父表（lookup_table 返回 &dyn TableStorage，
         // 与 validate_insert 的 LookupFn 签名一致）。
-        let lookup = |name: &str| -> Option<&dyn TableStorage> {
-            self.lookup_table(name)
-        };
+        let lookup = |name: &str| -> Option<&dyn TableStorage> { self.lookup_table(name) };
         for item in queue.iter() {
-            ForeignKeyValidator::validate_insert(&item.schema, &item.row, &[item.fk.clone()], &lookup)?;
+            ForeignKeyValidator::validate_insert(
+                &item.schema,
+                &item.row,
+                std::slice::from_ref(&item.fk),
+                &lookup,
+            )?;
         }
         drop(queue);
         self.deferred_fk_queue.borrow_mut().clear();
@@ -4312,18 +4315,11 @@ impl<'a> Executor<'a> {
     ///
     /// 仅当 `fk.deferrable_mode == Some(Deferred)` 时入队；
     /// 其他情况（Immediate / None）不入队，由调用方立即校验。
-    pub fn enqueue_deferred_fk(
-        &self,
-        schema: TableSchema,
-        row: Row,
-        fk: ForeignKeyConstraint,
-    ) {
+    pub fn enqueue_deferred_fk(&self, schema: TableSchema, row: Row, fk: ForeignKeyConstraint) {
         if fk.deferrable_mode == Some(crate::ast::DeferrableMode::Deferred) {
-            self.deferred_fk_queue.borrow_mut().push(DeferredFkCheck {
-                schema,
-                row,
-                fk,
-            });
+            self.deferred_fk_queue
+                .borrow_mut()
+                .push(DeferredFkCheck { schema, row, fk });
         }
     }
 
@@ -7437,14 +7433,20 @@ impl<'a> Executor<'a> {
         Ok(rows
             .into_iter()
             .filter(|row| {
-                let start_ok = row.get(start_idx).and_then(|v| match v {
-                    Value::Timestamp(us) => Some(*us),
-                    _ => None,
-                }).map_or(false, |s| s <= ts_us);
-                let end_ok = row.get(end_idx).and_then(|v| match v {
-                    Value::Timestamp(us) => Some(*us),
-                    _ => None,
-                }).map_or(false, |e| ts_us < e);
+                let start_ok = row
+                    .get(start_idx)
+                    .and_then(|v| match v {
+                        Value::Timestamp(us) => Some(*us),
+                        _ => None,
+                    })
+                    .is_some_and(|s| s <= ts_us);
+                let end_ok = row
+                    .get(end_idx)
+                    .and_then(|v| match v {
+                        Value::Timestamp(us) => Some(*us),
+                        _ => None,
+                    })
+                    .is_some_and(|e| ts_us < e);
                 start_ok && end_ok
             })
             .collect())
@@ -7967,7 +7969,10 @@ impl<'a> Executor<'a> {
                 let v = ExprEvaluator::eval(expr, &ctx)?;
                 key_parts.push(format!("{v:?}"));
             }
-            partitions.entry(key_parts.join("\x1F")).or_default().push(idx);
+            partitions
+                .entry(key_parts.join("\x1F"))
+                .or_default()
+                .push(idx);
         }
 
         // ── 2. 各分区内按 ORDER BY 排序 ──
@@ -7984,57 +7989,52 @@ impl<'a> Executor<'a> {
             }
             all
         };
-        let sorted_partitions: Vec<Vec<usize>> = partitions.into_iter().map(|(_, mut idxs)| {
-            if !clause.order_by.is_empty() {
-                idxs.sort_by(|a, b| {
-                    let ka = &order_keys_all[*a];
-                    let kb = &order_keys_all[*b];
-                    for ((va, da), (vb, _db)) in ka.iter().zip(kb.iter()) {
-                        match compare_values(va, vb) {
-                            ord if *da => {
-                                return if ord == std::cmp::Ordering::Equal {
-                                    continue
-                                } else {
-                                    ord.reverse()
-                                };
-                            }
-                            ord => {
-                                return if ord == std::cmp::Ordering::Equal {
-                                    continue
-                                } else {
-                                    ord
-                                };
+        let sorted_partitions: Vec<Vec<usize>> = partitions
+            .into_values()
+            .map(|mut idxs| {
+                if !clause.order_by.is_empty() {
+                    idxs.sort_by(|a, b| {
+                        let ka = &order_keys_all[*a];
+                        let kb = &order_keys_all[*b];
+                        for ((va, da), (vb, _db)) in ka.iter().zip(kb.iter()) {
+                            match compare_values(va, vb) {
+                                ord if *da => {
+                                    return if ord == std::cmp::Ordering::Equal {
+                                        continue;
+                                    } else {
+                                        ord.reverse()
+                                    };
+                                }
+                                ord => {
+                                    return if ord == std::cmp::Ordering::Equal {
+                                        continue;
+                                    } else {
+                                        ord
+                                    };
+                                }
                             }
                         }
-                    }
-                    std::cmp::Ordering::Equal
-                });
-            }
-            idxs
-        }).collect();
+                        std::cmp::Ordering::Equal
+                    });
+                }
+                idxs
+            })
+            .collect();
 
         // ── 3. 收集所有 DEFINE 条件
-        let define_map: HashMap<String, Expr> =
-            clause.symbols.iter().cloned().collect();
+        let define_map: HashMap<String, Expr> = clause.symbols.iter().cloned().collect();
 
         // ── 4. 对每个分区运行模式匹配 ──
         let mut output_rows: Vec<Row> = Vec::new();
 
         for sorted_idxs in &sorted_partitions {
-            let partition_rows: Vec<&Row> =
-                sorted_idxs.iter().map(|i| &rows[*i]).collect();
+            let partition_rows: Vec<&Row> = sorted_idxs.iter().map(|i| &rows[*i]).collect();
             let n = partition_rows.len();
             let mut pos: usize = 0;
 
             while pos < n {
                 // 贪心回溯匹配：从 pos 开始找最长匹配
-                match find_match(
-                    &clause.pattern,
-                    &define_map,
-                    &partition_rows,
-                    pos,
-                    &schema,
-                ) {
+                match find_match(&clause.pattern, &define_map, &partition_rows, pos, &schema) {
                     Some((end_pos, bindings)) => {
                         emit_match_rows(
                             &clause.measures,
@@ -8050,14 +8050,16 @@ impl<'a> Executor<'a> {
                         pos = match &clause.after_match_skip {
                             None | Some(AfterMatchSkip::PastLastRow) => end_pos,
                             Some(AfterMatchSkip::ToNextRow) => pos + 1,
-                            Some(AfterMatchSkip::ToFirst(sym)) => {
-                                bindings.get(sym).and_then(|idxs| idxs.first().copied())
-                                    .map(|i| i + 1).unwrap_or(end_pos)
-                            }
-                            Some(AfterMatchSkip::ToLast(sym)) => {
-                                bindings.get(sym).and_then(|idxs| idxs.last().copied())
-                                    .map(|i| i + 1).unwrap_or(end_pos)
-                            }
+                            Some(AfterMatchSkip::ToFirst(sym)) => bindings
+                                .get(sym)
+                                .and_then(|idxs| idxs.first().copied())
+                                .map(|i| i + 1)
+                                .unwrap_or(end_pos),
+                            Some(AfterMatchSkip::ToLast(sym)) => bindings
+                                .get(sym)
+                                .and_then(|idxs| idxs.last().copied())
+                                .map(|i| i + 1)
+                                .unwrap_or(end_pos),
                         };
                     }
                     None => {
@@ -8723,6 +8725,7 @@ impl<'a> Executor<'a> {
     ///
     /// **输出 Schema**：左表列 ++ 右表列（与 `plan_schema` 推导保持一致）
     /// **输出 Row**：左行 ++ 右行（外连接未匹配侧用 NULL 填充）
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_join(
         &self,
         join_type: JoinType,
@@ -11111,10 +11114,7 @@ fn match_pattern_expr(
             let row = partition_rows[start];
             let ctx = ExecRowContext::new(schema, row);
             let matched = if let Some(cond) = define_map.get(name) {
-                matches!(
-                    ExprEvaluator::eval(cond, &ctx),
-                    Ok(Value::Bool(true))
-                )
+                matches!(ExprEvaluator::eval(cond, &ctx), Ok(Value::Bool(true)))
             } else {
                 // 无 DEFINE 条件：匹配任意行
                 true
@@ -11189,8 +11189,14 @@ fn match_pattern_expr(
         PatternExpr::Alternation(branches) => {
             let saved = bindings.clone();
             for branch in branches {
-                match match_pattern_expr(branch, partition_rows, start, bindings, define_map, schema)
-                {
+                match match_pattern_expr(
+                    branch,
+                    partition_rows,
+                    start,
+                    bindings,
+                    define_map,
+                    schema,
+                ) {
                     Some(pos) => return Some(pos),
                     None => *bindings = saved.clone(),
                 }
@@ -11211,13 +11217,19 @@ fn find_match(
     schema: &TableSchema,
 ) -> Option<(usize, HashMap<String, Vec<usize>>)> {
     let mut bindings = HashMap::new();
-    match match_pattern_expr(pattern, partition_rows, start, &mut bindings, define_map, schema) {
-        Some(end) => Some((end, bindings)),
-        None => None,
-    }
+    match_pattern_expr(
+        pattern,
+        partition_rows,
+        start,
+        &mut bindings,
+        define_map,
+        schema,
+    )
+    .map(|end| (end, bindings))
 }
 
 /// 根据匹配结果生成输出行
+#[allow(clippy::too_many_arguments)]
 fn emit_match_rows(
     measures: &[(Expr, String)],
     rows_per_match: &crate::ast::RowsPerMatch,
@@ -11253,10 +11265,10 @@ fn emit_match_rows(
         }
         RowsPerMatch::AllRows => {
             // ALL ROWS PER MATCH：每个匹配行输出一行
-            for idx in match_start..match_end {
-                let mut new_row = partition_rows[idx].clone();
+            for partition_row in &partition_rows[match_start..match_end] {
+                let mut new_row = (*partition_row).clone();
                 for (measure_expr, _alias) in measures {
-                    let ctx = ExecRowContext::new(schema, partition_rows[idx]);
+                    let ctx = ExecRowContext::new(schema, partition_row);
                     let v = ExprEvaluator::eval(measure_expr, &ctx).unwrap_or(Value::Null);
                     new_row.push(v);
                 }

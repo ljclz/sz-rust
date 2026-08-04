@@ -167,7 +167,7 @@ mod tests {
         let mut sql_file = NamedTempFile::new().unwrap();
         writeln!(sql_file, "-- comment").unwrap();
         writeln!(sql_file, "SELECT 1;").unwrap();
-        writeln!(sql_file, "").unwrap();
+        writeln!(sql_file).unwrap();
         writeln!(sql_file, "SELECT 2;").unwrap();
         writeln!(sql_file, "INSERT INTO t VALUES (1, 'a');").unwrap();
         sql_file.flush().unwrap();

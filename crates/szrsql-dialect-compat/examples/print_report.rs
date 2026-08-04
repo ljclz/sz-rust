@@ -164,6 +164,7 @@ where
     results.iter().map(mapper).collect()
 }
 
+#[allow(dead_code)]
 fn print_section(
     title: &str,
     items: &[(
@@ -182,7 +183,7 @@ fn print_section(
         .filter(|i| i.3 == szrsql_dialect_compat::CompatStatus::Pass)
         .count();
     println!("小计: {pass}/{total} 通过 (含部分), {full}/{total} 完全通过\n");
-    println!("{:<5} {:<40} {:<15} {}", "状态", "名称", "分类", "说明");
+    println!("状态   名称                                      分类            说明");
     for (name, category, _sql, status, detail) in items {
         println!(
             "[{:<4}] {:<40} {:<15} {}",

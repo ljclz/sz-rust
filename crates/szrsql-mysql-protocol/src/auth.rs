@@ -225,8 +225,8 @@ mod tests {
 
         // 重新计算期望值
         let mut hasher = Sha1::new();
-        hasher.update(&salt);
-        hasher.update(&stored_hash);
+        hasher.update(salt);
+        hasher.update(stored_hash);
         let expected = hasher.finalize();
 
         assert_eq!(&received_sha1[..], &expected[..]);

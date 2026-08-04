@@ -548,8 +548,8 @@ mod tests {
 
     #[test]
     fn extract_sql_case_insensitive_keyword() {
-        let payload = [b's', b'e', b'l', b'e', b'c', b't', b' ', b'*'];
-        let sql = extract_sql_from_ttc_payload(&payload);
+        let payload = b"select *";
+        let sql = extract_sql_from_ttc_payload(payload);
         assert_eq!(sql, Some("select *".to_string()));
     }
 

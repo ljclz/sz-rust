@@ -22,6 +22,9 @@ use szrsql_cdc::target::{TargetWriter, WriterError};
 use szrsql_cdc::ChangeEvent;
 use szrsql_types::value::Value as SzValue;
 
+/// 收集型 executor：记录所有收到的 SQL 语句
+type CollectingExecutor = Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>;
+
 // =====================================================================
 // 测试辅助
 // =====================================================================
@@ -49,13 +52,10 @@ fn make_row(id: i64, name: &str, age: i32) -> szrsql_cdc::decoder::DecodedRow {
     }
 }
 
-fn make_collecting_executor() -> (
-    Arc<Mutex<Vec<String>>>,
-    Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>,
-) {
+fn make_collecting_executor() -> (Arc<Mutex<Vec<String>>>, CollectingExecutor) {
     let sqls = Arc::new(Mutex::new(Vec::<String>::new()));
     let sqls_clone = sqls.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+    let executor: CollectingExecutor =
         Arc::new(move |sql| {
             sqls_clone.lock().unwrap().push(sql.to_string());
             Ok(())
@@ -295,7 +295,7 @@ fn sqlserver_health_check_uses_select_1() {
     // SQL Server 健康检查用 SELECT 1（不需要 FROM DUAL）
     let called = Arc::new(Mutex::new(String::new()));
     let called_clone = called.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+    let executor: CollectingExecutor =
         Arc::new(move |sql| {
             *called_clone.lock().unwrap() = sql.to_string();
             Ok(())
@@ -344,7 +344,7 @@ fn sqlserver_execute_ddl_drop_table() {
 
 #[test]
 fn sqlserver_executor_error_propagates() {
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+    let executor: CollectingExecutor =
         Arc::new(|_sql| Err(WriterError::Sql("Invalid object name 'users'".to_string())));
     let writer = SqlServerWriter::with_executor("sqlserver://localhost:1433", executor).unwrap();
     let schema = make_users_schema();

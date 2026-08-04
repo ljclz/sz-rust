@@ -1178,8 +1178,8 @@ fn test_vector_column_type() {
 
 #[test]
 fn test_cosine_distance_function() {
-    let a = VectorValue::new(vec![1.0, 0.0]);
-    let b = VectorValue::new(vec![0.0, 1.0]);
+    let _a = VectorValue::new(vec![1.0, 0.0]);
+    let _b = VectorValue::new(vec![0.0, 1.0]);
     let e = func("cosine_distance", vec![lit_vector(vec![1.0, 0.0]), lit_vector(vec![0.0, 1.0])]);
     if let Value::Float64(f) = eval(&e).unwrap() {
         assert!((f - 1.0).abs() < 1e-9, "got {f}");

@@ -31,6 +31,9 @@ use szrsql_cdc::target::{TargetWriter, WriterError};
 use szrsql_cdc::ChangeEvent;
 use szrsql_types::value::Value as SzValue;
 
+/// 收集型 executor：记录所有收到的 SQL 语句
+type CollectingExecutor = Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>;
+
 // =====================================================================
 // 测试辅助
 // =====================================================================
@@ -63,11 +66,11 @@ fn make_row(id: i64, name: &str, age: i32) -> szrsql_cdc::decoder::DecodedRow {
 /// 创建收集执行的 SQL 的执行器
 fn make_collecting_executor() -> (
     Arc<Mutex<Vec<String>>>,
-    Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync>,
+    CollectingExecutor,
 ) {
     let sqls = Arc::new(Mutex::new(Vec::<String>::new()));
     let sqls_clone = sqls.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+    let executor: CollectingExecutor =
         Arc::new(move |sql| {
             sqls_clone.lock().unwrap().push(sql.to_string());
             Ok(())
@@ -358,7 +361,7 @@ fn oracle_health_check_uses_dual() {
     // Oracle 健康检查应使用 SELECT 1 FROM DUAL（不是 SELECT 1）
     let called = Arc::new(Mutex::new(String::new()));
     let called_clone = called.clone();
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> =
+    let executor: CollectingExecutor =
         Arc::new(move |sql| {
             *called_clone.lock().unwrap() = sql.to_string();
             Ok(())
@@ -409,7 +412,7 @@ fn oracle_execute_ddl_drop_table() {
 #[test]
 fn oracle_executor_error_propagates() {
     // 执行器返回错误时应正确传播
-    let executor: Arc<dyn Fn(&str) -> Result<(), WriterError> + Send + Sync> = Arc::new(|_sql| {
+    let executor: CollectingExecutor = Arc::new(|_sql| {
         Err(WriterError::Sql(
             "ORA-00942: table or view does not exist".to_string(),
         ))

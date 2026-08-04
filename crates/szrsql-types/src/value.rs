@@ -778,24 +778,12 @@ impl VectorValue {
         let mut data = Vec::new();
         for part in inner.split(',') {
             let trimmed = part.trim();
-            let v: f64 = trimmed.parse().map_err(|e| {
-                format!("cannot parse '{trimmed}' as f64 in vector: {e}")
-            })?;
+            let v: f64 = trimmed
+                .parse()
+                .map_err(|e| format!("cannot parse '{trimmed}' as f64 in vector: {e}"))?;
             data.push(v);
         }
         Ok(Self { data })
-    }
-
-    /// 格式化为 `[1.0, 2.0, 3.0]` 形式
-    pub fn to_string(&self) -> String {
-        format!(
-            "[{}]",
-            self.data
-                .iter()
-                .map(|v| v.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
     }
 
     /// 余弦距离：`1 - cos(θ)`，范围 [0, 2]，越小越相似
@@ -803,7 +791,12 @@ impl VectorValue {
         if self.data.is_empty() || other.data.is_empty() {
             return f64::NAN;
         }
-        let dot: f64 = self.data.iter().zip(other.data.iter()).map(|(a, b)| a * b).sum();
+        let dot: f64 = self
+            .data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(a, b)| a * b)
+            .sum();
         let mag_a: f64 = self.data.iter().map(|a| a * a).sum::<f64>().sqrt();
         let mag_b: f64 = other.data.iter().map(|b| b * b).sum::<f64>().sqrt();
         if mag_a == 0.0 || mag_b == 0.0 {
@@ -824,7 +817,25 @@ impl VectorValue {
 
     /// 点积（内积）：`Σ(aᵢ × bᵢ)`
     pub fn dot_product(&self, other: &Self) -> f64 {
-        self.data.iter().zip(other.data.iter()).map(|(a, b)| a * b).sum()
+        self.data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(a, b)| a * b)
+            .sum()
+    }
+}
+
+impl std::fmt::Display for VectorValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.data
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 

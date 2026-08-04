@@ -30,9 +30,9 @@ use szrsql_sql::ast::{
     Statement, TableConstraint, TableName, TransactionAccess, TransactionIsolation,
 };
 use szrsql_sql::executor::{
-    DmlResult, ExecutionError, Executor, InMemorySequenceStore, InMemoryTable, MutableTable,
-    PreparedStatementStore, SequenceStore, SessionState, SharedSequenceState, TableSnapshot,
-    TableStorage, TempTableStore, TransactionHistory, DeferredFkCheck,
+    DeferredFkCheck, DmlResult, ExecutionError, Executor, InMemorySequenceStore, InMemoryTable,
+    MutableTable, PreparedStatementStore, SequenceStore, SessionState, SharedSequenceState,
+    TableSnapshot, TableStorage, TempTableStore, TransactionHistory,
 };
 use szrsql_sql::parser::{parse_sql, ParseError};
 use szrsql_sql::plan::{Catalog, InMemoryCatalog, LogicalPlan, PlanError, Planner, TableSchema};
@@ -3067,7 +3067,8 @@ impl ExecutorService {
 
         // P3-3: 将本条 DML 产生的 DEFERRED FK 检查项转移到 session 级队列，
         // 供 COMMIT 时统一校验。
-        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
+        self.deferred_fk_checks
+            .extend(executor.drain_deferred_constraints());
 
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());
@@ -3161,7 +3162,8 @@ impl ExecutorService {
         } = executor.execute_update(plan, &mut *table_guard)?;
 
         // P3-3: 转移 DEFERRED FK 检查项到 session 级队列
-        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
+        self.deferred_fk_checks
+            .extend(executor.drain_deferred_constraints());
 
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());
@@ -3251,7 +3253,8 @@ impl ExecutorService {
         } = executor.execute_delete(plan, &mut *table_guard)?;
 
         // P3-3: 转移 DEFERRED FK 检查项到 session 级队列
-        self.deferred_fk_checks.extend(executor.drain_deferred_constraints());
+        self.deferred_fk_checks
+            .extend(executor.drain_deferred_constraints());
 
         // P0-1: 记录事务期间修改的表名（用于 WAL 崩溃恢复）
         self.txn_modified_tables.insert(table.name.clone());
@@ -5374,7 +5377,7 @@ mod tests {
         // SAVEPOINT sp1
         let results = svc.execute_sql("SAVEPOINT sp1").await;
         let sp_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag == "SAVEPOINT sp1");
-        assert!(sp_ok, "SAVEPOINT should succeed, got {:?}", &results[0]);
+        assert!(sp_ok, "SAVEPOINT should succeed, got {:?}", results[0]);
 
         // INSERT id=2（sp1 之后）
         svc.execute_sql("INSERT INTO t (id) VALUES (2)").await;
@@ -5384,7 +5387,7 @@ mod tests {
         // ROLLBACK TO sp1 → id=2 应消失
         let results = svc.execute_sql("ROLLBACK TO SAVEPOINT sp1").await;
         let r_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag == "ROLLBACK TO SAVEPOINT sp1");
-        assert!(r_ok, "ROLLBACK TO should succeed, got {:?}", &results[0]);
+        assert!(r_ok, "ROLLBACK TO should succeed, got {:?}", results[0]);
         let rows = row_count(&svc.execute_sql("SELECT * FROM t").await);
         assert_eq!(rows, 1, "should see 1 row after rollback to sp1");
 
@@ -5394,7 +5397,7 @@ mod tests {
         // RELEASE sp1
         let results = svc.execute_sql("RELEASE SAVEPOINT sp1").await;
         let rel_ok = matches!(&results[0], Ok(QueryResult::TransactionComplete { tag, in_transaction: true }) if tag.starts_with("RELEASE"));
-        assert!(rel_ok, "RELEASE should succeed, got {:?}", &results[0]);
+        assert!(rel_ok, "RELEASE should succeed, got {:?}", results[0]);
 
         // COMMIT → id=1 和 id=3 应持久化
         svc.execute_sql("COMMIT").await;
@@ -6295,7 +6298,7 @@ mod tests {
 
         // 验证分布式 KV 中有已提交数据（通过 DistTxnClient 快照读）
         let mut rt = handle.write();
-        let mut txn = DistTxnClient::new(&mut *rt);
+        let mut txn = DistTxnClient::new(&mut rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();
         let value = txn.get(&key, read_ts);
@@ -6334,7 +6337,7 @@ mod tests {
 
         // 验证分布式 KV 中没有数据
         let mut rt = handle.write();
-        let mut txn = DistTxnClient::new(&mut *rt);
+        let mut txn = DistTxnClient::new(&mut rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();
         let value = txn.get(&key, read_ts);
@@ -6370,7 +6373,7 @@ mod tests {
 
         // 验证分布式 KV 中有数据（即时 2PC 已提交）
         let mut rt = handle.write();
-        let mut txn = DistTxnClient::new(&mut *rt);
+        let mut txn = DistTxnClient::new(&mut rt);
         let read_ts = txn.begin();
         let key = b"t:0".to_vec();
         let value = txn.get(&key, read_ts).unwrap();
@@ -6424,7 +6427,7 @@ mod tests {
         assert!(
             results[0].is_ok(),
             "CREATE FUNCTION plpgsql should succeed: {:?}",
-            &results[0]
+            results[0]
         );
 
         // 调用函数
@@ -6438,7 +6441,7 @@ mod tests {
                     &rows[0][0],
                     &szrsql_types::value::Value::Int64(5),
                     "add(2,3) should return 5, got {:?}",
-                    &rows[0][0]
+                    rows[0][0]
                 );
             }
             other => panic!("expected ResultSet, got {other:?}"),
@@ -6545,13 +6548,13 @@ mod tests {
         let r = svc
             .execute_sql("CREATE TABLE mv_base (id BIGINT, val TEXT)")
             .await;
-        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", r[0]);
 
         // 2. 插入初始数据
         let r = svc
             .execute_sql("INSERT INTO mv_base (id, val) VALUES (1, 'alpha'), (2, 'beta')")
             .await;
-        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", r[0]);
 
         // 3. 创建物化视图（默认 WITH DATA，创建时立即填充）
         let r = svc
@@ -6562,7 +6565,7 @@ mod tests {
         assert!(
             r[0].is_ok(),
             "CREATE MATERIALIZED VIEW should succeed: {:?}",
-            &r[0]
+            r[0]
         );
 
         // 4. SELECT 物化视图 → 应通过 execute_materialized_view_scan 返回物化数据
@@ -6587,23 +6590,23 @@ mod tests {
         let r = svc
             .execute_sql("CREATE TABLE mv_base2 (id BIGINT, val TEXT)")
             .await;
-        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", r[0]);
         let r = svc
             .execute_sql("INSERT INTO mv_base2 (id, val) VALUES (1, 'one')")
             .await;
-        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", r[0]);
 
         // 2. 创建物化视图
         let r = svc
             .execute_sql("CREATE MATERIALIZED VIEW mv_b2 AS SELECT * FROM mv_base2")
             .await;
-        assert!(r[0].is_ok(), "CREATE MV should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE MV should succeed: {:?}", r[0]);
 
         // 3. 基表新增一行
         let r = svc
             .execute_sql("INSERT INTO mv_base2 (id, val) VALUES (2, 'two')")
             .await;
-        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", r[0]);
 
         // 4. 物化视图仍只返回 1 行（REFRESH 前的快照）
         let r = svc.execute_sql("SELECT * FROM mv_b2 ORDER BY id").await;
@@ -6623,7 +6626,7 @@ mod tests {
         assert!(
             r[0].is_ok(),
             "REFRESH MATERIALIZED VIEW should succeed: {:?}",
-            &r[0]
+            r[0]
         );
 
         let r = svc.execute_sql("SELECT * FROM mv_b2 ORDER BY id").await;
@@ -6646,14 +6649,14 @@ mod tests {
         let r = svc
             .execute_sql("CREATE TABLE mv_agg_src (grp TEXT, val BIGINT)")
             .await;
-        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", r[0]);
         let r = svc
             .execute_sql(
                 "INSERT INTO mv_agg_src (grp, val) VALUES \
                  ('a', 10), ('a', 20), ('b', 30), ('b', 40)",
             )
             .await;
-        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", r[0]);
 
         // 2. 创建聚合物化视图
         let r = svc
@@ -6665,7 +6668,7 @@ mod tests {
         assert!(
             r[0].is_ok(),
             "CREATE MATERIALIZED VIEW with aggregation should succeed: {:?}",
-            &r[0]
+            r[0]
         );
 
         // 3. SELECT 物化视图 → 应返回聚合后的 2 行
@@ -6687,7 +6690,7 @@ mod tests {
         let r = svc
             .execute_sql("INSERT INTO mv_agg_src (grp, val) VALUES ('a', 100)")
             .await;
-        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "INSERT should succeed: {:?}", r[0]);
 
         let r = svc
             .execute_sql("SELECT grp, total FROM mv_agg WHERE grp = 'a'")
@@ -6718,7 +6721,7 @@ mod tests {
         let r = svc
             .execute_sql("CREATE TABLE qs_t (id BIGINT, name TEXT)")
             .await;
-        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", r[0]);
 
         // 执行两条归一化后相同的查询
         let r1 = svc.execute_sql("SELECT * FROM qs_t WHERE id = 1").await;
@@ -6753,7 +6756,7 @@ mod tests {
 
         // 创建基表
         let r = svc.execute_sql("CREATE TABLE sq_t (id BIGINT)").await;
-        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", &r[0]);
+        assert!(r[0].is_ok(), "CREATE TABLE should succeed: {:?}", r[0]);
 
         // 执行一条查询（耗时几乎必然 > 1ms）
         let r = svc.execute_sql("SELECT * FROM sq_t").await;
@@ -6767,7 +6770,7 @@ mod tests {
             guard.total_logged()
         );
         assert!(
-            guard.entries().len() >= 1,
+            !guard.entries().is_empty(),
             "entries buffer should contain at least 1 entry"
         );
         // 验证记录的 SQL 包含我们的查询

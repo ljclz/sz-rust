@@ -1071,7 +1071,9 @@ fn find_matching_paren_rev(sql: &[u8], close_pos: usize) -> Option<(usize, &str)
                 return None;
             }
         }
-        if i == 0 { break; }
+        if i == 0 {
+            break;
+        }
         i -= 1;
     }
     None
@@ -2411,9 +2413,7 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
                 Some(sqlparser::ast::AfterMatchSkip::PastLastRow) => {
                     Some(AfterMatchSkip::PastLastRow)
                 }
-                Some(sqlparser::ast::AfterMatchSkip::ToNextRow) => {
-                    Some(AfterMatchSkip::ToNextRow)
-                }
+                Some(sqlparser::ast::AfterMatchSkip::ToNextRow) => Some(AfterMatchSkip::ToNextRow),
                 Some(sqlparser::ast::AfterMatchSkip::ToFirst(ident)) => {
                     Some(AfterMatchSkip::ToFirst(ident.value))
                 }
@@ -2448,7 +2448,9 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
 }
 
 /// P4-1: 将 sqlparser 的 MatchRecognizePattern 转换为 SzRSQL PatternExpr
-fn convert_match_pattern(pat: sqlparser::ast::MatchRecognizePattern) -> Result<PatternExpr, ParseError> {
+fn convert_match_pattern(
+    pat: sqlparser::ast::MatchRecognizePattern,
+) -> Result<PatternExpr, ParseError> {
     use sqlparser::ast::MatchRecognizePattern as SpPat;
     use sqlparser::ast::MatchRecognizeSymbol as SpSym;
     use sqlparser::ast::RepetitionQuantifier as SpQuant;
@@ -2468,11 +2470,17 @@ fn convert_match_pattern(pat: sqlparser::ast::MatchRecognizePattern) -> Result<P
             syms.iter().map(|s| format!("{s}")).collect::<Vec<_>>()
         ))),
         SpPat::Concat(items) => Ok(PatternExpr::Concat(
-            items.into_iter().map(convert_match_pattern).collect::<Result<_, _>>()?,
+            items
+                .into_iter()
+                .map(convert_match_pattern)
+                .collect::<Result<_, _>>()?,
         )),
         SpPat::Group(inner) => Ok(PatternExpr::Group(Box::new(convert_match_pattern(*inner)?))),
         SpPat::Alternation(items) => Ok(PatternExpr::Alternation(
-            items.into_iter().map(convert_match_pattern).collect::<Result<_, _>>()?,
+            items
+                .into_iter()
+                .map(convert_match_pattern)
+                .collect::<Result<_, _>>()?,
         )),
         SpPat::Repetition(inner, quant) => {
             let q = match quant {
@@ -3483,8 +3491,8 @@ fn convert_column_def(col: SpColumnDef) -> Result<ColumnDefinition, ParseError> 
         // 排除已知常见类型别名（int/text/bool/serial 等）
         match name_str.as_str() {
             "int" | "integer" | "bigint" | "text" | "varchar" | "bool" | "boolean" | "double"
-            | "float" | "real" | "serial" | "bigserial" | "smallserial" | "vector"
-            | "tsvector" | "tsquery" => None,
+            | "float" | "real" | "serial" | "bigserial" | "smallserial" | "vector" | "tsvector"
+            | "tsquery" => None,
             _ => Some(name_str),
         }
     } else {
@@ -3617,7 +3625,9 @@ fn convert_constraint_characteristics(
     match c.deferrable {
         Some(false) | None => None,
         Some(true) => Some(match c.initially {
-            Some(sqlparser::ast::DeferrableInitial::Deferred) => crate::ast::DeferrableMode::Deferred,
+            Some(sqlparser::ast::DeferrableInitial::Deferred) => {
+                crate::ast::DeferrableMode::Deferred
+            }
             _ => crate::ast::DeferrableMode::Immediate,
         }),
     }

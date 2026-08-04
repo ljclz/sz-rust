@@ -1114,13 +1114,12 @@ async fn test_adv_net_006b_concurrent_cancel_requests() {
     // 并发发送 20 个 CancelRequest
     let mut handles = Vec::new();
     for i in 0..20 {
-        let port = port;
         handles.push(tokio::spawn(async move {
             let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
                 .await
                 .expect("connect");
             // 使用 encode_cancel_request 构造完整请求
-            let cancel_bytes = encode_cancel_request(i as i32, 0);
+            let cancel_bytes = encode_cancel_request(i, 0);
             let _ = stream.write_all(&cancel_bytes).await;
             let _ = stream.flush().await;
             // 不等待响应，直接关闭
@@ -1306,7 +1305,6 @@ async fn test_adv_net_009b_concurrent_connections() {
     let mut handles = Vec::new();
 
     for conn_id in 0..n_conns {
-        let port = port;
         handles.push(tokio::spawn(async move {
             let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
                 .await

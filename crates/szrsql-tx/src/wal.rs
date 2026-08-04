@@ -5063,7 +5063,7 @@ mod tests {
         // 写入一条 FPI 记录（page_id=42，data=全 0xAB）
         let page_data = vec![0xABu8; 64];
         let record = WalRecord::new(0, 1, WalOpType::FullPageImage, 42, page_data.clone());
-        let lsn = writer.append(record).unwrap();
+        let _lsn = writer.append(record).unwrap();
 
         // 刷盘后读取原始文件内容
         writer.flush().unwrap();
@@ -5085,10 +5085,10 @@ mod tests {
         );
 
         // 验证 checksum 覆盖的是加密后的数据（而非明文）
-        let mut rec = WalRecord::decode(&mut &raw[..]).unwrap();
+        let mut rec = WalRecord::decode(&raw[..]).unwrap();
         rec.update_checksum();
         // 重新解码后 checksum 应与文件中一致（因为 checksum 基于密文计算）
-        let file_rec = WalRecord::decode(&mut &raw[..]).unwrap();
+        let file_rec = WalRecord::decode(&raw[..]).unwrap();
         assert_eq!(
             rec.checksum, file_rec.checksum,
             "checksum should cover encrypted data"

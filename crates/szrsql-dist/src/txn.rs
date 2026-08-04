@@ -2825,6 +2825,7 @@ mod tests {
     #[derive(Clone, Debug)]
     struct TxnHistoryEntry {
         /// 事务开始时间戳
+        #[allow(dead_code)]
         start_ts: u64,
         /// 事务提交时间戳
         commit_ts: u64,

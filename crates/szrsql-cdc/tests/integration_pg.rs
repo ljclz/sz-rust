@@ -136,7 +136,7 @@ fn integration_pg_ddl_create_table() {
             let exec = executor.clone();
             move |sql: &str| {
                 exec.execute(sql)
-                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                    .map_err(szrsql_cdc::target::WriterError::Sql)
             }
         }),
     )
@@ -192,7 +192,7 @@ fn integration_pg_ddl_drop_table() {
             let exec = executor.clone();
             move |sql: &str| {
                 exec.execute(sql)
-                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                    .map_err(szrsql_cdc::target::WriterError::Sql)
             }
         }),
     )
@@ -253,7 +253,7 @@ fn integration_pg_ddl_alter_add_column() {
             let exec = executor.clone();
             move |sql: &str| {
                 exec.execute(sql)
-                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                    .map_err(szrsql_cdc::target::WriterError::Sql)
             }
         }),
     )
@@ -338,7 +338,7 @@ fn integration_pg_schema_change_event_e2e() {
                 let exec = executor.clone();
                 move |sql: &str| {
                     exec.execute(sql)
-                        .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                        .map_err(szrsql_cdc::target::WriterError::Sql)
                 }
             }),
         )
@@ -428,7 +428,7 @@ fn integration_pg_ddl_idempotent() {
             let exec = executor.clone();
             move |sql: &str| {
                 exec.execute(sql)
-                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                    .map_err(szrsql_cdc::target::WriterError::Sql)
             }
         }),
     )
@@ -511,7 +511,7 @@ fn integration_pg_dialect_syntax_correct() {
             let exec = executor.clone();
             move |sql: &str| {
                 exec.execute(sql)
-                    .map_err(|e| szrsql_cdc::target::WriterError::Sql(e))
+                    .map_err(szrsql_cdc::target::WriterError::Sql)
             }
         }),
     )

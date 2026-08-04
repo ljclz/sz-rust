@@ -4181,7 +4181,7 @@ fn test_match_recognize_one_row_per_match() {
     // AAPL 价格序列: 10, 8, 12, 7, 14
     // 匹配1: A=day2(8), B=day3(12)
     // 匹配2: A=day4(7), B=day5(14)
-    let (catalog, table) = make_stock_plan();
+    let (_catalog, table) = make_stock_plan();
     let scan = make_scan("stock", vec![
         ("symbol", ColumnType::Text),
         ("day", ColumnType::Int64),
@@ -4203,7 +4203,7 @@ fn test_match_recognize_one_row_per_match() {
 #[test]
 fn test_match_recognize_all_rows_per_match() {
     // ALL ROWS PER MATCH: 每个匹配行输出一行
-    let (catalog, table) = make_stock_plan();
+    let (_catalog, table) = make_stock_plan();
     let mut clause = make_mr_clause();
     clause.rows_per_match = RowsPerMatch::AllRows;
     let scan = make_scan("stock", vec![
@@ -4273,7 +4273,7 @@ fn test_match_recognize_empty_input() {
 #[test]
 fn test_match_recognize_repetition_zero_or_more() {
     // PATTERN (A B*): B 重复零次或多次
-    let (catalog, table) = make_stock_plan();
+    let (_catalog, table) = make_stock_plan();
     let mut clause = make_mr_clause();
     clause.pattern = PatternExpr::Concat(vec![
         PatternExpr::Symbol("A".into()),
@@ -4294,5 +4294,5 @@ fn test_match_recognize_repetition_zero_or_more() {
     let mut exec = Executor::new();
     exec.register_table(&table);
     let rows = exec.execute(&plan).unwrap();
-    assert!(rows.len() >= 1, "至少应有 1 个匹配");
+    assert!(!rows.is_empty(), "至少应有 1 个匹配");
 }

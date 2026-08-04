@@ -13,11 +13,11 @@
 //! 对应 `SzRSQL实施进度.md` Phase 3.3。
 
 use crate::ast::*;
-use unicode_normalization::UnicodeNormalization;
 use szrsql_types::value::{
     TsQuery, TsVector, Value, TS_WEIGHT_A, TS_WEIGHT_B, TS_WEIGHT_C, TS_WEIGHT_D,
 };
 use thiserror::Error;
+use unicode_normalization::UnicodeNormalization;
 
 // =====================================================================
 //  错误类型
@@ -2927,21 +2927,22 @@ impl ExprEvaluator {
             // NULL 处理：默认 ABSENT ON NULL（跳过 NULL 元素）；
             // 传入字面量 '__NULL_ON_NULL__' sentinel 时切换为 NULL ON NULL（任一参数为 NULL 则整体返回 NULL）。
             "json_array" => {
-                let null_on_null = arg_vals.iter().any(|v| {
-                    matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__")
-                });
+                let null_on_null = arg_vals
+                    .iter()
+                    .any(|v| matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__"));
                 let real_args: Vec<&Value> = arg_vals.iter()
                     .filter(|v| !matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__" || s == "__ABSENT_ON_NULL__"))
                     .collect();
                 if null_on_null && real_args.iter().any(|v| matches!(v, Value::Null)) {
                     return Ok(Value::Null);
                 }
-                let elems: Vec<Value> = real_args.iter()
+                let elems: Vec<Value> = real_args
+                    .iter()
                     .filter(|v| !matches!(v, Value::Null))
                     .map(|v| (*v).clone())
                     .collect();
                 Ok(Value::Json(serde_json::Value::Array(
-                    elems.iter().map(value_to_json).collect()
+                    elems.iter().map(value_to_json).collect(),
                 )))
             }
             // P3-7: SQL/JSON JSON_OBJECT — 构造 JSON 对象
@@ -2950,13 +2951,13 @@ impl ExprEvaluator {
             // NULL 处理：默认 ABSENT ON NULL（跳过值为 NULL 的 key-value 对）；
             // 传入 '__NULL_ON_NULL__' sentinel 时，任一 value 为 NULL 则整体返回 NULL。
             "json_object" => {
-                let null_on_null = arg_vals.iter().any(|v| {
-                    matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__")
-                });
+                let null_on_null = arg_vals
+                    .iter()
+                    .any(|v| matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__"));
                 let real_args: Vec<&Value> = arg_vals.iter()
                     .filter(|v| !matches!(v, Value::Text(s) if s == "__NULL_ON_NULL__" || s == "__ABSENT_ON_NULL__"))
                     .collect();
-                if real_args.len() % 2 != 0 {
+                if !real_args.len().is_multiple_of(2) {
                     return Err(EvalError::InvalidFunctionArgs(format!(
                         "json_object requires an even number of key-value args, got {}",
                         real_args.len()
@@ -3030,7 +3031,7 @@ impl ExprEvaluator {
                 // XMLELEMENT(NAME name [, content...])
                 // 简化：第一个参数为元素名，其余为内容
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 match &arg_vals[0] {
                     Value::Null => Ok(Value::Null),
@@ -3044,7 +3045,9 @@ impl ExprEvaluator {
                                 .map(|v| match v {
                                     Value::Null => String::new(),
                                     Value::Xml(x) => x.clone(),
-                                    other => xml_sanitize_text(&value_to_text(other).unwrap_or_default()),
+                                    other => {
+                                        xml_sanitize_text(&value_to_text(other).unwrap_or_default())
+                                    }
                                 })
                                 .collect();
                             Ok(Value::Xml(format!("<{safe_name}>{content}</{safe_name}>")))
@@ -3058,7 +3061,7 @@ impl ExprEvaluator {
             }
             "xmlconcat" => {
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 let mut result = String::new();
                 for v in &arg_vals {
@@ -3094,7 +3097,7 @@ impl ExprEvaluator {
                 // XMLFOREST(name1 AS alias1, name2 AS alias2, ...)
                 // 简化：奇数位为元素名，偶数位为内容；或每参数作为独立元素（name=value 用 '=' 分隔）
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 let mut result = String::new();
                 // 支持两种调用方式：
@@ -3139,7 +3142,7 @@ impl ExprEvaluator {
             "xmlserialize" => {
                 // xmlserialize(xml_value AS TEXT) — 1 或 2 参数
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 match &arg_vals[0] {
                     Value::Null => Ok(Value::Null),
@@ -3152,7 +3155,7 @@ impl ExprEvaluator {
                 // NORMALIZE(str [, form]) — SQL:2011 F-9 Unicode 规范化
                 // form: 'NFC'（默认）、'NFD'、'NFKC'、'NFKD'
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 match &arg_vals[0] {
                     Value::Null => Ok(Value::Null),
@@ -3192,7 +3195,7 @@ impl ExprEvaluator {
             "isnormalized" => {
                 // IS_NORMALIZED(str [, form]) — 返回布尔值
                 if arg_vals.is_empty() {
-                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                    return Err(EvalError::InvalidFunctionArgs(fname.to_string()));
                 }
                 match &arg_vals[0] {
                     Value::Null => Ok(Value::Null),
@@ -3287,7 +3290,9 @@ fn json_path_first<'j>(root: &'j serde_json::Value, path: &str) -> Option<&'j se
         // 读取 key 部分（直到第一个 '[' 或段尾）
         let mut key = String::new();
         while let Some(&c) = chars.peek() {
-            if c == '[' { break; }
+            if c == '[' {
+                break;
+            }
             key.push(c);
             chars.next();
         }
@@ -3299,7 +3304,9 @@ fn json_path_first<'j>(root: &'j serde_json::Value, path: &str) -> Option<&'j se
         let rest: String = chars.collect();
         let mut scans = rest.as_str();
         while !scans.is_empty() {
-            if !scans.starts_with('[') { return None; }
+            if !scans.starts_with('[') {
+                return None;
+            }
             let close = scans.find(']')?;
             let inner = &scans[1..close];
             current = if inner == "*" {
@@ -3355,12 +3362,8 @@ fn value_to_json(v: &Value) -> serde_json::Value {
             None => serde_json::Value::Null,
         },
         Value::Text(s) => serde_json::Value::String(s.clone()),
-        Value::Timestamp(us) => {
-            serde_json::Value::String(format_timestamp_iso(*us))
-        }
-        Value::Array(elems) => serde_json::Value::Array(
-            elems.iter().map(value_to_json).collect()
-        ),
+        Value::Timestamp(us) => serde_json::Value::String(format_timestamp_iso(*us)),
+        Value::Array(elems) => serde_json::Value::Array(elems.iter().map(value_to_json).collect()),
         Value::Json(j) => j.clone(),
         other => serde_json::Value::String(format!("{:?}", other)),
     }
@@ -3635,8 +3638,15 @@ fn tsquery_contains_term(q: &TsQuery, term: &str) -> bool {
 fn is_aggregate_function(name: &str) -> bool {
     matches!(
         name,
-        "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg" | "group_concat"
-        | "xmlagg"
+        "count"
+            | "sum"
+            | "avg"
+            | "min"
+            | "max"
+            | "array_agg"
+            | "string_agg"
+            | "group_concat"
+            | "xmlagg"
     )
 }
 
@@ -4158,7 +4168,7 @@ mod tests {
         let val = ExprEvaluator::eval(&e, &ctx).unwrap();
         assert!(matches!(val, Value::Int64(_)));
         if let Value::Int64(us) = val {
-            assert!(us >= 0 && us < 86_400_000_000);
+            assert!((0..86_400_000_000).contains(&us));
         }
     }
 
@@ -4307,7 +4317,10 @@ mod tests {
             ],
             distinct: false,
         };
-        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("alice".into()));
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Text("alice".into())
+        );
     }
 
     #[test]
@@ -4321,7 +4334,10 @@ mod tests {
             ],
             distinct: false,
         };
-        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("shanghai".into()));
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Text("shanghai".into())
+        );
     }
 
     #[test]
@@ -4349,7 +4365,10 @@ mod tests {
             ],
             distinct: false,
         };
-        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Text("c".into()));
+        assert_eq!(
+            ExprEvaluator::eval(&e, &ctx).unwrap(),
+            Value::Text("c".into())
+        );
     }
 
     #[test]
@@ -4420,7 +4439,9 @@ mod tests {
             distinct: false,
         };
         let result = ExprEvaluator::eval(&e, &ctx).unwrap();
-        assert!(matches!(result, Value::Json(j) if j.get("name") == Some(&serde_json::Value::String("alice".into()))));
+        assert!(
+            matches!(result, Value::Json(j) if j.get("name") == Some(&serde_json::Value::String("alice".into())))
+        );
     }
 
     #[test]
@@ -4467,7 +4488,10 @@ mod tests {
             distinct: false,
         };
         let result = ExprEvaluator::eval(&e, &ctx).unwrap();
-        assert_eq!(result, Value::Xml("<title>SQL/XML Guide</title>".to_string()));
+        assert_eq!(
+            result,
+            Value::Xml("<title>SQL/XML Guide</title>".to_string())
+        );
     }
 
     #[test]
@@ -4538,7 +4562,10 @@ mod tests {
             distinct: false,
         };
         let result = ExprEvaluator::eval(&e, &ctx).unwrap();
-        assert_eq!(result, Value::Xml("<name>Alice</name><age>30</age>".to_string()));
+        assert_eq!(
+            result,
+            Value::Xml("<name>Alice</name><age>30</age>".to_string())
+        );
     }
 
     #[test]
@@ -4607,7 +4634,9 @@ mod normalize_tests {
     struct EmptyContext;
     impl EvalContext for EmptyContext {
         fn lookup_column(&self, _name: &str) -> Result<Value, super::EvalError> {
-            Err(super::EvalError::Unsupported(format!("column not found: {_name}")))
+            Err(super::EvalError::Unsupported(format!(
+                "column not found: {_name}"
+            )))
         }
     }
 

@@ -212,7 +212,7 @@ mod tests {
     fn header_size_large_record() {
         // 构造一个需要多字节 header_size 的记录
         // 需要足够多的值使得 serial_types 部分超过 127 字节
-        let values: Vec<Value> = (0..100).map(|i| Value::Int64(i)).collect();
+        let values: Vec<Value> = (0..100).map(Value::Int64).collect();
         let buf = encode_record(&values);
         let (header_size, _) = decode_varint(&buf).expect("decode header_size");
         // 100 个 Int64 值，每个 serial_type 至少 1 字节 varint

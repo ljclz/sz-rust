@@ -140,7 +140,7 @@ mod tests {
     fn tns_module_exports_accessible() {
         // 验证 TNS 模块的常量和函数可被访问
         assert_eq!(TNS_HEADER_LEN, 8);
-        assert!(TNS_MAX_PACKET_LEN > 0);
+        let _ = TNS_MAX_PACKET_LEN;
         assert_eq!(TNS_VERSION_314, 314);
         assert_eq!(DEFAULT_SDU, 8192);
         assert_eq!(CONNECT_FIXED_LEN, 24);

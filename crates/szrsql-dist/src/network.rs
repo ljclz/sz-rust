@@ -661,10 +661,10 @@ mod tests {
         }
 
         // 配置全互联
-        for i in 0..3 {
-            for j in 0..3 {
+        for (i, net) in nets.iter_mut().enumerate() {
+            for (j, addr) in addrs.iter().enumerate() {
                 if i != j {
-                    nets[i].add_peer((j + 1) as NodeId, addrs[j as usize]);
+                    net.add_peer((j + 1) as NodeId, *addr);
                 }
             }
         }

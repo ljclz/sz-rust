@@ -213,6 +213,7 @@ fn execute_op(table: &mut InMemoryTable, rng: &mut XorShift64, next_id: &mut i64
 
 /// 单个采样点
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct Sample {
     /// 采样时间偏移（秒，相对于测试开始）
     elapsed_secs: u64,

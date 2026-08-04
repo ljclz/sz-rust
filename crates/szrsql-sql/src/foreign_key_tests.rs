@@ -321,7 +321,7 @@ fn test_fk_insert_null_skipped() {
     // FK 列为 NULL → 跳过校验（MATCH SIMPLE 语义）
     let (catalog, _parent, mut child) = make_parent_child_setup();
 
-    let mut exec = Executor::new().with_catalog(&catalog);
+    let exec = Executor::new().with_catalog(&catalog);
     // pid 为 NULL → 即使父表为空也应成功
     let plan = plan_sql("INSERT INTO child (cid) VALUES (10)", &catalog);
     let result = exec.execute_insert(&plan, &mut child).unwrap();
@@ -357,7 +357,7 @@ fn test_fk_insert_composite_partial_null_skipped() {
         ],
     );
 
-    let mut exec = Executor::new().with_catalog(&catalog);
+    let exec = Executor::new().with_catalog(&catalog);
     // ca=NULL, cb=2 → 跳过校验
     let plan = plan_sql("INSERT INTO child (cid, cb) VALUES (10, 2)", &catalog);
     let result = exec.execute_insert(&plan, &mut child).unwrap();
@@ -378,7 +378,7 @@ fn test_fk_insert_without_catalog_no_validation() {
     );
 
     // Executor 未设置 catalog（即使 catalog 中有表但无 FK 元数据也不校验）
-    let mut exec = Executor::new();
+    let exec = Executor::new();
     let plan = plan_sql("INSERT INTO child VALUES (10, 999)", &catalog);
     // 应该成功（无 FK 校验）
     let result = exec.execute_insert(&plan, &mut child).unwrap();

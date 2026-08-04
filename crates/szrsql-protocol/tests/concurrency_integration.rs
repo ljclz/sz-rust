@@ -17,6 +17,13 @@ use szrsql_sql::executor::InMemoryTable;
 use szrsql_tx::lock::LockManager;
 use tokio::sync::{Mutex, RwLock};
 
+/// 测试共享资源集合
+type SharedResources = (
+    Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
+    Arc<LockManager>,
+    Arc<AtomicU32>,
+);
+
 /// 构造启用并发的 ExecutorService。
 ///
 /// ADV-CONC-1：必须注入共享事务 ID 计数器，确保跨 session 分配全局唯一 txn_id，
@@ -36,11 +43,7 @@ fn make_concurrent_service(
 }
 
 /// 创建一组共享资源（shared_tables + LockManager + txn_counter），供测试使用。
-fn make_shared_resources() -> (
-    Arc<RwLock<HashMap<String, Arc<Mutex<InMemoryTable>>>>>,
-    Arc<LockManager>,
-    Arc<AtomicU32>,
-) {
+fn make_shared_resources() -> SharedResources {
     (
         Arc::new(RwLock::new(HashMap::new())),
         Arc::new(LockManager::new()),
