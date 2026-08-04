@@ -4545,6 +4545,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-addon-example"
+version = "1.0.0"
+dependencies = [
+ "sz-rust-core",
+]
+
+[[package]]
 name = "sz-rust-addons-crm"
 version = "0.3.0"
 dependencies = [

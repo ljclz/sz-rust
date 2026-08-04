@@ -44,6 +44,59 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 初始化 Addon 热加载器（条件编译：启用 hot-reload feature 时生效）
+    // 扫描 addons/ 目录中的 .dll/.so/.dylib 文件，动态加载并调用 addon_init 入口
+    // 安全说明：libloading 的 unsafe 已收敛于 sz_rust_core::runtime::hot_reload 内部
+    #[cfg(feature = "hot-reload")]
+    {
+        use sz_rust_core::runtime::hot_reload::HotAddonLoader;
+        let mut loader = HotAddonLoader::new();
+        loader.add_scan_dir("addons");
+        let results = loader.scan();
+        let loaded: Vec<_> = results
+            .iter()
+            .filter_map(
+                |(name, r)| {
+                    if r.is_ok() {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect();
+        let failed: Vec<_> = results
+            .iter()
+            .filter_map(|(name, r)| {
+                if let Err(e) = r {
+                    Some(format!("{}: {}", name, e))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if loaded.is_empty() {
+            tracing::info!("Addon 热加载：addons/ 目录中未找到共享库（.dll/.so/.dylib）");
+        } else {
+            tracing::info!(
+                "Addon 热加载已启用，已加载 {} 个插件: {:?}",
+                loaded.len(),
+                loaded
+            );
+        }
+        if !failed.is_empty() {
+            tracing::warn!(
+                "Addon 热加载：{} 个插件加载失败: {:?}",
+                failed.len(),
+                failed
+            );
+        }
+    }
+    #[cfg(not(feature = "hot-reload"))]
+    {
+        tracing::info!("Addon 热加载未启用（如需动态插件加载，启用 hot-reload feature）");
+    }
+
     // 初始化 OTLP 分布式追踪（条件编译：启用 otlp / otlp-http feature 时生效）
     // 配置通过 OTEL_* 环境变量传入（对齐 OpenTelemetry 规范）
     #[cfg(feature = "otlp")]

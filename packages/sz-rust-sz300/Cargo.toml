@@ -37,6 +37,9 @@ once_cell.workspace = true
 
 [features]
 default = []
+# Addon 热加载：运行时动态加载 .dll/.so/.dylib 插件（libloading 后端）
+# 启用后，启动时自动扫描 addons/ 目录并加载所有共享库
+hot-reload = ["sz-rust-core/hot-reload"]
 real-broker = ["sz-rust-core/real-broker"]
 # 启用 OTLP gRPC 分布式追踪导出（需要 OpenTelemetry Collector，端口 4317）
 otlp = ["sz-rust-observability/otlp"]
