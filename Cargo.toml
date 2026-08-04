@@ -93,6 +93,9 @@ rayon = "1.10"
 # 正则表达式（用于 LIKE 模式匹配）
 regex = "1"
 
+# P4-4：UNICODE NORMALIZE 函数（Unicode 规范化形式 NFC/NFD/NFKC/NFKD）
+unicode-normalization = "0.1"
+
 # 测试依赖（property-based testing）
 proptest = "1"
 

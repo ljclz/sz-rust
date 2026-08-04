@@ -13,6 +13,7 @@
 //! 对应 `SzRSQL实施进度.md` Phase 3.3。
 
 use crate::ast::*;
+use unicode_normalization::UnicodeNormalization;
 use szrsql_types::value::{
     TsQuery, TsVector, Value, TS_WEIGHT_A, TS_WEIGHT_B, TS_WEIGHT_C, TS_WEIGHT_D,
 };
@@ -3147,6 +3148,87 @@ impl ExprEvaluator {
                     other => Ok(Value::Text(value_to_text(other).unwrap_or_default())),
                 }
             }
+            "normalize" => {
+                // NORMALIZE(str [, form]) — SQL:2011 F-9 Unicode 规范化
+                // form: 'NFC'（默认）、'NFD'、'NFKC'、'NFKD'
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(s) => {
+                        let form = if arg_vals.len() >= 2 {
+                            match &arg_vals[1] {
+                                Value::Text(f) | Value::Enum(f) => f.to_ascii_uppercase(),
+                                other => {
+                                    return Err(EvalError::TypeMismatch {
+                                        expected: "text normalization form",
+                                        actual: value_type_name(other),
+                                    })
+                                }
+                            }
+                        } else {
+                            "NFC".to_string()
+                        };
+                        let normalized = match form.as_str() {
+                            "NFC" => s.chars().nfc().collect::<String>(),
+                            "NFD" => s.chars().nfd().collect::<String>(),
+                            "NFKC" => s.chars().nfkc().collect::<String>(),
+                            "NFKD" => s.chars().nfkd().collect::<String>(),
+                            other => {
+                                return Err(EvalError::InvalidFunctionArgs(format!(
+                                    "{fname}: unknown normalization form '{other}', expected NFC/NFD/NFKC/NFKD"
+                                )))
+                            }
+                        };
+                        Ok(Value::Text(normalized))
+                    }
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "isnormalized" => {
+                // IS_NORMALIZED(str [, form]) — 返回布尔值
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(s) => {
+                        let form = if arg_vals.len() >= 2 {
+                            match &arg_vals[1] {
+                                Value::Text(f) | Value::Enum(f) => f.to_ascii_uppercase(),
+                                other => {
+                                    return Err(EvalError::TypeMismatch {
+                                        expected: "text normalization form",
+                                        actual: value_type_name(other),
+                                    })
+                                }
+                            }
+                        } else {
+                            "NFC".to_string()
+                        };
+                        let result = match form.as_str() {
+                            "NFC" => s.chars().nfc().collect::<String>() == *s,
+                            "NFD" => s.chars().nfd().collect::<String>() == *s,
+                            "NFKC" => s.chars().nfkc().collect::<String>() == *s,
+                            "NFKD" => s.chars().nfkd().collect::<String>() == *s,
+                            other => {
+                                return Err(EvalError::InvalidFunctionArgs(format!(
+                                    "is_normalized: unknown normalization form '{other}'"
+                                )))
+                            }
+                        };
+                        Ok(Value::Bool(result))
+                    }
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -4505,6 +4587,153 @@ mod tests {
         // XMLSERIALIZE with NULL
         let e = Expr::Function {
             name: "xmlserialize".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+    }
+}
+
+// =====================================================================
+// P4-4 NORMALIZE / Unicode 规范化测试
+// =====================================================================
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::{Expr, ExprEvaluator, Value};
+    use crate::expr::EvalContext;
+
+    /// 简单求值上下文（空行，用于无列引用的函数求值）
+    struct EmptyContext;
+    impl EvalContext for EmptyContext {
+        fn lookup_column(&self, _name: &str) -> Result<Value, super::EvalError> {
+            Err(super::EvalError::Unsupported(format!("column not found: {_name}")))
+        }
+    }
+
+    fn text(s: &str) -> Expr {
+        Expr::Literal(Value::Text(s.into()))
+    }
+
+    fn norm_expr(input: &str, form: Option<&str>) -> Expr {
+        let mut args = vec![text(input)];
+        if let Some(f) = form {
+            args.push(text(f));
+        }
+        Expr::Function {
+            name: "normalize".into(),
+            args,
+            distinct: false,
+        }
+    }
+
+    fn is_normalized_expr(input: &str, form: Option<&str>) -> Expr {
+        let mut args = vec![text(input)];
+        if let Some(f) = form {
+            args.push(text(f));
+        }
+        Expr::Function {
+            name: "isnormalized".into(),
+            args,
+            distinct: false,
+        }
+    }
+
+    #[test]
+    fn test_normalize_nfc_default() {
+        let ctx = EmptyContext;
+        // "é" 的 NFD 形式：e + 组合重音符 (U+0301)
+        let nfd = "e\u{0301}";
+        let e = norm_expr(nfd, None);
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        // NFC 规范化后应等于预组合的 é (U+00E9)
+        if let Value::Text(s) = result {
+            assert_eq!(s, "é");
+            assert_eq!(s.len(), 2); // U+00E9 is 2 bytes in UTF-8
+        } else {
+            panic!("expected Text, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_normalize_nfd() {
+        let ctx = EmptyContext;
+        // 预组合的 é (U+00E9) → NFD 分解为 e + 组合重音符
+        let e = norm_expr("é", Some("NFD"));
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        if let Value::Text(s) = result {
+            assert_eq!(s, "e\u{0301}");
+            assert_eq!(s.len(), 3); // e (1 byte) + combining accent (2 bytes)
+        } else {
+            panic!("expected Text, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_normalize_nfkc() {
+        let ctx = EmptyContext;
+        // ﬁ (U+FB01, 连字) → NFKC 分解为 "fi"
+        let e = norm_expr("\u{FB01}", Some("NFKC"));
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        if let Value::Text(s) = result {
+            assert_eq!(s, "fi");
+        } else {
+            panic!("expected Text, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_normalize_null() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "normalize".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn test_normalize_empty_args() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "normalize".into(),
+            args: vec![],
+            distinct: false,
+        };
+        assert!(ExprEvaluator::eval(&e, &ctx).is_err());
+    }
+
+    #[test]
+    fn test_normalize_unknown_form() {
+        let ctx = EmptyContext;
+        let e = norm_expr("hello", Some("XYZ"));
+        assert!(ExprEvaluator::eval(&e, &ctx).is_err());
+    }
+
+    #[test]
+    fn test_is_normalized_true() {
+        let ctx = EmptyContext;
+        // "é" (U+00E9) 已是 NFC 形式
+        let e = is_normalized_expr("é", Some("NFC"));
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_is_normalized_false() {
+        let ctx = EmptyContext;
+        // e + 组合重音符 (NFD 形式) 不是 NFC
+        let e = is_normalized_expr("e\u{0301}", Some("NFC"));
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_is_normalized_null() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "isnormalized".into(),
             args: vec![Expr::Literal(Value::Null)],
             distinct: false,
         };

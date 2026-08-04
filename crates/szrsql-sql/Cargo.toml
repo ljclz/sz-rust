@@ -24,6 +24,8 @@ bytes = { workspace = true }
 sqlparser = { workspace = true }
 regex = { workspace = true }
 rand = { workspace = true }
+# P4-4：UNICODE NORMALIZE 函数
+unicode-normalization = { workspace = true }
 tracing = { workspace = true }
 # P0-6：Mutex 中毒修复（parking_lot 无中毒语义）
 parking_lot = { workspace = true }
