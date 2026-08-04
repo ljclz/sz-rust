@@ -3,6 +3,8 @@
 //! 覆盖 Order / OrderItem 模型（Model + ModelExt trait）与 services::row_to_json 转换函数。
 //! 服务层 DB 方法（OrderService::list 等）依赖真实连接池，需通过 mocks 或 DB 集成测试覆盖，
 //! 本文件聚焦纯逻辑层（模型映射 + 行转 JSON）。
+//!
+//! P2 补充（2026-08-04）：row_to_json 边界类型全覆盖 + auth_service 空凭证校验（不依赖 DB）。
 
 use std::collections::HashMap;
 use sz_rust_core::orm::{Model, ModelExt, Value as OrmValue};
@@ -310,4 +312,150 @@ fn row_to_json_preserves_keys() {
     assert!(obj.contains_key("total_fen"));
     assert_eq!(obj["order_no"], "ORD001");
     assert_eq!(obj["total_fen"], 9999);
+}
+
+// ─────────────────────────────────────────────
+// row_to_json — 边界类型全覆盖（P2 补充）
+// ─────────────────────────────────────────────
+
+#[test]
+fn row_to_json_null_value() {
+    let mut row = HashMap::new();
+    row.insert("deleted".into(), OrmValue::Null);
+    let json = row_to_json(&row);
+    assert!(json["deleted"].is_null());
+}
+
+#[test]
+fn row_to_json_bool_value() {
+    let mut row = HashMap::new();
+    row.insert("active".into(), OrmValue::Bool(false));
+    let json = row_to_json(&row);
+    assert_eq!(json["active"], false);
+}
+
+#[test]
+fn row_to_json_bytes_value_hex_encoded() {
+    let mut row = HashMap::new();
+    row.insert("hash".into(), OrmValue::Bytes(vec![0xde, 0xad, 0xbe, 0xef]));
+    let json = row_to_json(&row);
+    assert_eq!(json["hash"], "deadbeef");
+}
+
+#[test]
+fn row_to_json_bytes_empty() {
+    let mut row = HashMap::new();
+    row.insert("empty".into(), OrmValue::Bytes(vec![]));
+    let json = row_to_json(&row);
+    assert_eq!(json["empty"], "");
+}
+
+#[test]
+fn row_to_json_array_value() {
+    let mut row = HashMap::new();
+    row.insert(
+        "tags".into(),
+        OrmValue::Array(vec![OrmValue::String("a".into()), OrmValue::I64(42)]),
+    );
+    let json = row_to_json(&row);
+    assert_eq!(json["tags"][0], "a");
+    assert_eq!(json["tags"][1], 42);
+}
+
+#[test]
+fn row_to_json_object_value() {
+    let mut inner = HashMap::new();
+    inner.insert("k".into(), OrmValue::String("v".into()));
+    let mut row = HashMap::new();
+    row.insert("meta".into(), OrmValue::Object(inner));
+    let json = row_to_json(&row);
+    assert_eq!(json["meta"]["k"], "v");
+}
+
+#[test]
+fn row_to_json_f64_value() {
+    let mut row = HashMap::new();
+    row.insert("price".into(), OrmValue::F64(19.99));
+    let json = row_to_json(&row);
+    assert_eq!(json["price"], 19.99);
+}
+
+#[test]
+fn row_to_json_f32_value() {
+    let mut row = HashMap::new();
+    row.insert("ratio".into(), OrmValue::F32(0.5));
+    let json = row_to_json(&row);
+    assert_eq!(json["ratio"], 0.5);
+}
+
+#[test]
+fn row_to_json_uuid_date_datetime_string_variants() {
+    let mut row = HashMap::new();
+    row.insert(
+        "uuid".into(),
+        OrmValue::Uuid("550e8400-e29b-41d4-a716-446655440000".into()),
+    );
+    row.insert("birth".into(), OrmValue::Date("2026-08-04".into()));
+    row.insert(
+        "created".into(),
+        OrmValue::DateTime("2026-08-04 12:00:00".into()),
+    );
+    row.insert("at".into(), OrmValue::Time("12:00:00".into()));
+    row.insert("extra".into(), OrmValue::Json("{\"k\":\"v\"}".into()));
+    row.insert("dec".into(), OrmValue::Decimal("99.99".into()));
+    let json = row_to_json(&row);
+    assert_eq!(json["uuid"], "550e8400-e29b-41d4-a716-446655440000");
+    assert_eq!(json["birth"], "2026-08-04");
+    assert_eq!(json["created"], "2026-08-04 12:00:00");
+    assert_eq!(json["at"], "12:00:00");
+    assert_eq!(json["extra"], "{\"k\":\"v\"}");
+    assert_eq!(json["dec"], "99.99");
+}
+
+#[test]
+fn row_to_json_unknown_variant_falls_back_to_null() {
+    // non_exhaustive 通配符：未来新增变体应回退为 Null
+    // 通过构造一个包含所有已知变体的行来间接验证无 panic
+    let mut row = HashMap::new();
+    row.insert("a".into(), OrmValue::I8(1));
+    row.insert("b".into(), OrmValue::I16(2));
+    row.insert("c".into(), OrmValue::U8(3));
+    row.insert("d".into(), OrmValue::U16(4));
+    row.insert("e".into(), OrmValue::U32(5));
+    row.insert("f".into(), OrmValue::U64(6));
+    let json = row_to_json(&row);
+    assert_eq!(json["a"], 1);
+    assert_eq!(json["b"], 2);
+    assert_eq!(json["c"], 3);
+    assert_eq!(json["d"], 4);
+    assert_eq!(json["e"], 5);
+    assert_eq!(json["f"], 6);
+}
+
+// ─────────────────────────────────────────────
+// auth_service — 空凭证校验（纯逻辑，不依赖 DB）
+// ─────────────────────────────────────────────
+
+/// authenticate_async：用户名为空时直接返回错误（不访问 DB）
+#[tokio::test]
+async fn authenticate_async_empty_username_returns_error() {
+    let result = sz_rust_sz300::services::auth_service::authenticate_async("", "password").await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
+}
+
+/// authenticate_async：用户名为纯空白时直接返回错误（不访问 DB）
+#[tokio::test]
+async fn authenticate_async_whitespace_username_returns_error() {
+    let result = sz_rust_sz300::services::auth_service::authenticate_async("   ", "password").await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
+}
+
+/// authenticate_async：密码为空时直接返回错误（不访问 DB）
+#[tokio::test]
+async fn authenticate_async_empty_password_returns_error() {
+    let result = sz_rust_sz300::services::auth_service::authenticate_async("admin", "").await;
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
 }
