@@ -1,0 +1,25 @@
+[package]
+name = "sz-rust-orm-ext-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "ORM 扩展层 facade（P3）— model/hooks/relation 基于 sz-rust-orm-facade 的框架层抽象"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["orm", "model", "relation", "thinkphp"]
+categories = ["database"]
+
+[dependencies]
+# 核心：sz-rust-orm-facade（统一 re-export sz-orm-* 全家桶）
+sz-rust-orm-facade = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# relation/ 单元测试直接使用 sz-orm-core 类型（Model 派生等）
+sz-orm-core = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

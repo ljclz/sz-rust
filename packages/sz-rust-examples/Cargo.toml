@@ -35,3 +35,15 @@ path = "src/bin/quick_start.rs"
 [[bin]]
 name = "crud_demo"
 path = "src/bin/crud_demo.rs"
+
+[[bin]]
+name = "blog_demo"
+path = "src/bin/blog_demo.rs"
+
+[[bin]]
+name = "ecommerce_demo"
+path = "src/bin/ecommerce_demo.rs"
+
+[[bin]]
+name = "iot_demo"
+path = "src/bin/iot_demo.rs"

@@ -85,6 +85,7 @@ fn test_sql_string_returns_static_str() {
 #[test]
 fn test_query_macro_valid_select() {
     use sz_rust_core::query;
+    // query! 返回 sz_orm_core::queryable::Query 对象（包装校验后的 SQL）
     let sql = query!("SELECT * FROM users WHERE id = 1");
-    assert_eq!(sql, "SELECT * FROM users WHERE id = 1");
+    assert_eq!(sql.sql(), "SELECT * FROM users WHERE id = 1");
 }

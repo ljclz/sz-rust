@@ -1,0 +1,26 @@
+[package]
+name = "sz-rust-auth-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Auth facade for sz-rust framework — WeChat, OAuth2, Gateway"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["wechat", "oauth", "gateway", "websocket", "thinkphp"]
+categories = ["web-programming"]
+
+[dependencies]
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+sha1 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

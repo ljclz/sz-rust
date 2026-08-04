@@ -60,6 +60,44 @@ let result = conn.transaction(|txn| {
 
 sz-orm-core 已实现嵌套事务（SAVEPOINT + 深度限制），sz-rust 直接使用，无需额外处理。
 
+## 决策替代方案
+
+### 方案 A：自研 `#[transactional]` 属性宏（拒绝）
+
+```rust
+// 设想的注解式事务
+#[transactional]
+async fn create_user(&self, data: CreateUserDTO) -> Result<User> {
+    // 方法内所有 DB 操作自动在事务中执行
+    // 返回 Err 时自动 rollback
+}
+```
+
+**拒绝原因**（已在决策中详述）：
+- PHP 端无对应物：PHP 没有注解式事务，所有事务都是显式 `startTrans/commit/rollback`
+- Rust async 限制：`#[transactional]` 宏需要注入 `async fn` 的 body，但 Rust 的 async trait 语义让宏实现复杂
+- sz-orm-core 已提供闭包事务：闭包事务已经足够简洁，且类型安全
+
+### 方案 B：sz-rust 自研事务管理器（拒绝）
+
+在 sz-rust-core 中实现独立的事务管理器，管理连接池和事务生命周期。
+
+**拒绝原因**：
+- sz-orm-core 已经实现了完整的事务管理（包括 SAVEPOINT 嵌套事务）
+- 自研事务管理器需要重新实现连接池 acquire 持锁不 await close 等复杂机制
+- 两套事务机制会导致业务代码困惑
+
+### 方案 C：手动事务（仅 begin/commit/rollback，无闭包）（拒绝）
+
+只提供 `conn.begin()` / `conn.commit()` / `conn.rollback()`，不提供闭包事务。
+
+**拒绝原因**：
+- PHP 端 `Db::transaction(function() { ... })` 的闭包事务是常用模式，缺少它会导致迁移困难
+- 手动事务容易忘记 `rollback`（异常路径），闭包事务通过 `Result` 自动处理
+- 闭包事务的代码更简洁，`Ok` 自动 commit，`Err` 自动 rollback
+
+**最终选择**：完全委托 sz-orm-core + 闭包事务。不自研任何事务机制，通过 re-export 提供 sz-orm-core 的事务 API。
+
 ## 后果
 
 ### 正面后果
@@ -95,3 +133,5 @@ sz-orm-core 已实现嵌套事务（SAVEPOINT + 深度限制），sz-rust 直接
    - 嵌套死锁 Bug → 检查 sz-orm-core 的 SAVEPOINT 深度限制
    - 连接泄漏 Bug → 检查事务期间是否 acquire 了新连接
    - 钩子中止 Bug → 检查 `before_insert` 等钩子是否返回 `Err`（会触发 rollback）
+   - **Err 被 `?` 吞掉** → 闭包事务内 `some_op()?` 返回 Err 会触发 rollback，但若外层用 `.unwrap_or(default)` 吞掉 Err，调用方误以为成功
+   - **嵌套事务超深** → SAVEPOINT 深度超过 sz-orm-core 限制（默认 8 层），返回错误而非创建 SAVEPOINT，导致内层操作在非事务上下文中执行

@@ -73,8 +73,36 @@ num_cpus.workspace = true
 sz-rust-macros.workspace = true
 # H-6 修复：addons 加载器提升为正式依赖，使 sz_rust_core::addons 可重导出
 sz-rust-addons-loader.workspace = true
+# P2 拆包：ORM facade（下游业务包通过此 crate 统一访问 sz-orm-* 全家桶）
+sz-rust-orm-facade.workspace = true
+# P3 拆包：ORM 扩展层 facade（model/hooks/relation 框架层抽象）
+sz-rust-orm-ext-facade.workspace = true
+# P3 拆包：路由层 facade（router/routing/websocket_route/openapi 三层路由机制）
+sz-rust-router-facade.workspace = true
+# P3 拆包：MVC 层 facade（controller/guard/view 控制器与视图抽象）
+sz-rust-mvc-facade.workspace = true
+# P2 拆包：HTTP facade（response/error/request 基础模块，下游可直接依赖以减少耦合）
+sz-rust-http-facade.workspace = true
+# P2 拆包：Cache facade（CacheDriver trait + Memory/Redis/Memcached/MultiLevel 驱动）
+sz-rust-cache-facade.workspace = true
+# P2 拆包：State facade（session/cookie/env/event/i18n/mail/notify 应用状态模块）
+sz-rust-state-facade.workspace = true
+# P3 拆包：Middleware facade（auth/sanctum/jwt_blacklist 等 14 个中间件 + log 门面）
+sz-rust-middleware-facade.workspace = true
+# P2 拆包：Infra facade（config/validate/static_files/upload/debug_page 基础设施模块）
+sz-rust-infra-facade.workspace = true
+# P2 拆包：Auth facade（wechat/oauth/gateway 认证与网关模块）
+sz-rust-auth-facade.workspace = true
+# P2 拆包：Pay facade（支付聚合抽象层，Alipay/WechatPay 统一抽象）
+sz-rust-pay-facade.workspace = true
 # Redis Session 持久化（可选）
 redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"], optional = true }
+# P2: GraphQL 集成（sz-orm-graphql facade）
+sz-orm-graphql = { workspace = true, optional = true }
+# P2: gRPC 支持（sz-orm-grpc facade）
+sz-orm-grpc = { workspace = true, optional = true }
+# P2: Addon 热加载探索（运行时动态加载 .dylib/.so/.dll）
+libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -92,6 +120,14 @@ default = []
 real-broker = ["sz-orm-mqtt/real-broker"]
 # 启用 Redis Session 持久化驱动
 redis-session = ["redis"]
+# P2: GraphQL facade — 通过 sz_rust_core::orm::graphql 访问
+graphql = ["dep:sz-orm-graphql", "sz-rust-orm-facade/graphql"]
+# P2: gRPC facade — 通过 sz_rust_core::orm::grpc 访问
+grpc = ["dep:sz-orm-grpc", "sz-rust-orm-facade/grpc"]
+# P2: Addon 热加载探索
+hot-reload = ["dep:libloading"]
+# P2 全量功能开关（同时启用 graphql + grpc + hot-reload）
+p2-addons = ["graphql", "grpc", "hot-reload"]
 
 [lib]
 name = "sz_rust_core"

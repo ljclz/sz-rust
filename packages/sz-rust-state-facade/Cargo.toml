@@ -1,0 +1,28 @@
+[package]
+name = "sz-rust-state-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "State facade for sz-rust framework — session, cookie, env, event, i18n, mail, notify"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["session", "cookie", "i18n", "event", "thinkphp"]
+categories = ["web-programming"]
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures = { workspace = true }
+
+[lints]
+workspace = true

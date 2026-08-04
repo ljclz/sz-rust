@@ -42,6 +42,10 @@ pub mod spawn;
 pub mod websocket;
 pub mod worker;
 
+// P2: Addon 热加载探索（可选 feature: hot-reload）
+#[cfg(feature = "hot-reload")]
+pub mod hot_reload;
+
 pub use mqtt::{MqttRuntime, MqttRuntimeConfig};
 pub use queue::{QueueConsumer, QueueRuntime, QueueRuntimeConfig};
 pub use scheduler::SchedulerRuntime;

@@ -1,0 +1,25 @@
+[package]
+name = "sz-rust-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 框架能力 MCP server — 将路由解析/参数化查询/OpenAPI 生成等框架能力封装为 MCP tools，供 AI Agent 调用"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["mcp", "ai", "agent", "tools"]
+categories = ["development-tools"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# facade 直连（下游最佳实践：按需依赖，减少编译耦合）
+sz-rust-router-facade = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+sz-rust-pay-facade = { workspace = true }
+
+[lints]
+workspace = true

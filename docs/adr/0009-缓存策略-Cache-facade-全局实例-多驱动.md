@@ -74,6 +74,43 @@ Rust 端通过 `CacheValue::Number` 标记 + `get::<String>()` 返回 string 来
 - 超时后直接调用 callback（防止永久阻塞）
 - 锁释放后再次读取缓存
 
+## 决策替代方案
+
+### 方案 A：直接使用 `moka` 或 `redis` crate（拒绝）
+
+```rust
+// 直接使用 moka::sync::Cache 或 redis::Client
+let cache = moka::sync::Cache::new(10000);
+cache.insert("key", "value");
+```
+
+**拒绝原因**：
+- 无法对齐 PHP `Cache::set()` / `Cache::get()` 的静态 API 风格
+- 无法支持多驱动切换（Memory / Redis），业务代码会直接依赖具体实现
+- PHP 迁移时业务代码需要大量修改（从 `Cache::get()` 改为 `cache.get()`）
+- 无法复刻 PHP 的 `is_numeric` 短路序列化策略和 `remember` 锁机制
+
+### 方案 B：仅实现 Memory 驱动（拒绝）
+
+只实现内存缓存，不支持 Redis 等外部缓存。
+
+**拒绝原因**：
+- 生产环境需要 Redis 实现多进程共享缓存
+- PHP 端的 `think\cache\driver\Redis` 是生产环境默认驱动
+- 仅 Memory 驱动无法支持分布式部署（多实例缓存不一致）
+
+### 方案 C：不复刻 PHP 源码 bug（拒绝）
+
+修复 PHP `unserialize` 的 `is_numeric` bug，让数字值正确还原为数字类型。
+
+**拒绝原因**：
+- PHP 端业务代码可能依赖这个 bug 行为（如 `Cache::get('count')` 返回 string 而非 int）
+- 迁移期间 PHP 和 Rust 并存，缓存数据可能跨语言共享
+- 修复 bug 会导致 PHP 端的类型判断逻辑在 Rust 端行为不一致
+- 有意的 bug 复刻必须有注释说明，防止后续开发者"修复"
+
+**最终选择**：Cache facade + 全局实例 + 多驱动 + PHP 源码 bug 复刻。通过 `OnceLock<Cache>` 提供伪静态 API，通过 `CacheManager` 支持多驱动，通过 `CacheValue::Number` 标记复刻 PHP bug。
+
 ## 后果
 
 ### 正面后果
@@ -110,3 +147,5 @@ Rust 端通过 `CacheValue::Number` 标记 + `get::<String>()` 返回 string 来
    - remember 锁死锁 Bug → 检查锁的 200ms 轮询和 5 秒超时是否正确实现
    - 全局状态 Bug → 检查测试是否重置了 `OnceLock<Cache>`
    - 驱动未找到 Bug → 检查 `CacheManager::register_store()` 是否在启动时注册了所有驱动
+   - **PHP bug 复刻被"修复"** → 复刻 PHP `unserialize` bug 的代码必须有 `// PHP 源码 bug 复刻` 注释，后续开发者可能误以为是 bug 而"修复"，导致 PHP 迁移后行为不一致
+   - **`is_numeric` 边界差异** → PHP `"1e5"` 是 numeric（返回 string `"100000"`），Rust 端 `CacheValue::Number` 标记仅覆盖整数/浮点数解析，科学计数法字符串可能走 `serde_json` 反序列化路径，行为不一致

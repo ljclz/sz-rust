@@ -520,7 +520,10 @@ async fn test_r5_p8_remember_cache_hit() {
     //   // 'existing' (不调用 callback)
     let cache = make_cache();
     cache.set("key", "existing", None).unwrap();
-    let val: String = cache.remember("key", None, || "new".to_string()).await.unwrap();
+    let val: String = cache
+        .remember("key", None, || "new".to_string())
+        .await
+        .unwrap();
     assert_eq!(val, "existing");
 }
 

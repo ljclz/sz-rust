@@ -76,6 +76,46 @@ fn render_json(&self, code: i32, msg: impl Into<String>, data: Value) -> Value {
 
 对齐 PHP 行为：`renderError` 返回 HTTP 200，业务错误通过 `code` 字段区分（`code=0` 表示失败）。
 
+## 决策替代方案
+
+### 方案 A：继承式 BaseController 结构体（拒绝）
+
+```rust
+// 业务控制器继承 BaseController 结构体
+struct UserController {
+    base: BaseController,
+}
+```
+
+**拒绝原因**：
+- Rust 没有类继承，结构体组合比继承更灵活
+- 继承链 `$this->request` 在 Rust 中无直接等价物
+- trait 默认方法已经能提供"继承"的代码复用，无需结构体嵌套
+
+### 方案 B：每个控制器手动实现所有方法（拒绝）
+
+每个业务控制器手写 `render_json` / `render_success` / `post_data` 等方法。
+
+**拒绝原因**：
+- 大量重复代码，每个控制器都要写 7-8 个相同方法
+- 方法签名不一致风险高，不同控制器可能参数顺序不同
+- 后续修改响应格式需要修改所有控制器
+
+### 方案 C：宏生成控制器方法（拒绝）
+
+```rust
+// 通过宏自动生成控制器方法
+#[derive_controller_methods]
+struct UserController;
+```
+
+**拒绝原因**：
+- 宏的调试体验差，展开后的代码难以阅读
+- trait 默认方法已经足够简洁，宏是过度设计
+- 宏生成的方法难以自定义（业务需要覆盖某个方法时需要特殊处理）
+
+**最终选择**：`SzController` trait + 默认方法。业务控制器只需空 `impl SzController for UserController {}` 即可获得全部方法，需要自定义时覆盖特定方法即可。
+
 ## 后果
 
 ### 正面后果
@@ -111,3 +151,5 @@ fn render_json(&self, code: i32, msg: impl Into<String>, data: Value) -> Value {
    - 参数解析 Bug → 检查 `packages/sz-rust-core/src/request.rs` 的 `fetch_post_data()` / `fetch_query_data()`
    - 响应格式 Bug → 检查 `packages/sz-rust-core/src/response.rs` 的 `ApiResponse::success()` / `error_with_code()`
    - 方法未找到 Bug → 检查控制器是否 `impl SzController for XxxController {}`（即使是空 impl 也需要）
+   - **字段顺序静默错误** → 若 `serde_json` 未启用 `preserve_order` feature，`Map` 使用 BTreeMap，字段顺序变为字母序（`code → data → msg`），PHP 客户端解析异常
+   - **trait 方法被意外覆盖** → 业务控制器若定义了与 `SzController` 同名的方法（如 `render_json`），会覆盖默认实现，需确认覆盖逻辑是否正确

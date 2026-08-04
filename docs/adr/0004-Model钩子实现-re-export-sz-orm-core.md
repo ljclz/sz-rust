@@ -79,6 +79,37 @@ before_write → before_save → before_validate → validate → after_validate
 
 保持 PHP 原生顺序兼容，新增的 4 个事件插入到合理位置。
 
+## 决策替代方案
+
+### 方案 A：sz-rust 自研 HookDispatcher（拒绝）
+
+在 sz-rust-core 中重新实现一套 `HookDispatcher`、`HookEvent`、`HookRegistry`。
+
+**拒绝原因**：
+- sz-orm-core 已经实现了完整的 16 事件钩子机制，重复实现是浪费
+- 两套钩子机制会导致业务代码困惑（用哪一套？）
+- sz-orm-core 的钩子严格对齐 PHP 行为（包括 bug），自研难以保证一致性
+
+### 方案 B：仅 re-export，不提供增强工具（拒绝）
+
+只 re-export sz-orm-core 的类型，不提供 `ALL_EVENTS` 常量、字符串映射、`HookExecutionRecorder` 等增强工具。
+
+**拒绝原因**：
+- 业务代码需要手动维护事件列表，容易遗漏新增事件
+- PHP 迁移时需要字符串 ↔ 枚举的双向映射，缺少工具会增加迁移成本
+- `HookExecutionRecorder` 是测试钩子顺序的关键工具，缺少它难以编写 PHP 行为对比测试
+
+### 方案 C：使用第三方事件库（如 tokio::sync::broadcast）（拒绝）
+
+用 tokio 的广播通道实现钩子回调。
+
+**拒绝原因**：
+- 广播通道是异步消息传递，与 sz-orm-core 的同步钩子语义不兼容
+- 无法保证钩子执行顺序（PHP 要求 `before_write` 在 `before_insert` 之前）
+- 钩子需要能中止操作（返回 `Err`），广播通道不支持这种语义
+
+**最终选择**：re-export sz-orm-core + 增强工具。既不重复实现，又提供 PHP 迁移所需的便利工具。
+
 ## 后果
 
 ### 正面后果
@@ -115,3 +146,5 @@ before_write → before_save → before_validate → validate → after_validate
    - 顺序错误 Bug → 检查 `sz-orm-core/src/hooks/dispatcher.rs` 的事件触发顺序
    - 钩子中止 Bug → 检查 `HookFn` 返回的 `HookResult` 是否为 `Err`
    - 上下文丢失 Bug → 检查 `HookContext` 是否正确传入 `HookDispatcher::insert(ctx, callback)`
+   - **模型未注册 Hookable** → 业务模型忘记 `impl Hookable for User {}`，`HookDispatcher::insert::<User, _>()` 编译通过但钩子不触发
+   - **ALL_EVENTS 与 sz-orm-core 不同步** → sz-orm-core 新增事件后，`ALL_EVENTS` 常量未更新，新事件无法通过字符串名称注册

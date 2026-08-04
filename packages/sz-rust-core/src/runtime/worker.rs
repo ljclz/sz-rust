@@ -169,6 +169,10 @@ impl fmt::Display for WorkerConfig {
 mod tests {
     use super::*;
 
+    /// env 测试全局互斥锁：`std::env::set_var/remove_var` 非线程安全，
+    /// 并行测试共享进程环境变量会互相污染（P3 竞态修复：test_from_env_* 串行化）
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_new_defaults_to_cpu_count() {
         let config = WorkerConfig::new();
@@ -238,6 +242,8 @@ mod tests {
     #[test]
     fn test_from_env_default() {
         // 清除环境变量确保使用默认值
+        // 注意：env 读写非线程安全，多个 env 测试并行时需互斥串行（P3 竞态修复）
+        let _guard = ENV_TEST_LOCK.lock();
         std::env::remove_var("SZ_RUST_WORKER_NUM");
         let config = WorkerConfig::from_env();
         assert_eq!(config.worker_num(), num_cpus::get());
@@ -245,6 +251,7 @@ mod tests {
 
     #[test]
     fn test_from_env_custom() {
+        let _guard = ENV_TEST_LOCK.lock();
         std::env::set_var("SZ_RUST_WORKER_NUM", "12");
         let config = WorkerConfig::from_env();
         assert_eq!(config.worker_num(), 12);
@@ -253,6 +260,7 @@ mod tests {
 
     #[test]
     fn test_from_env_invalid_falls_back_to_default() {
+        let _guard = ENV_TEST_LOCK.lock();
         std::env::set_var("SZ_RUST_WORKER_NUM", "not-a-number");
         let config = WorkerConfig::from_env();
         assert_eq!(config.worker_num(), num_cpus::get());

@@ -228,3 +228,5 @@ impl Drop for OtlpGuard {
    - OTLP 导出失败 Bug → 检查 `otlp` feature 是否启用，OTLP exporter 初始化是否成功，`OtlpGuard` 是否在正确作用域持有
    - Span 丢失 Bug → 检查 `OtlpGuard::drop` 是否在进程退出时触发 flush，flush 超时是否过短
    - 跨服务 trace_id 不一致 Bug → 检查出站 HTTP 客户端是否调用了 `inject_context()` 注入 `traceparent` header
+   - **trace_id/span_id 全零** → W3C 规范规定 trace_id 和 span_id 禁止全零，生成时需用加密安全的随机数（`getrandom` crate），不可用 `rand::random()` 的种子为 0 的实例
+   - **`OtlpGuard` 作用域错误** → `OtlpGuard` 在子函数中创建会在函数返回时 Drop，导致 exporter 过早关闭，最后一批 span 丢失；必须在 `main()` 函数作用域持有

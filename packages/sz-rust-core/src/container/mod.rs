@@ -82,7 +82,10 @@ pub enum Lifetime {
 ///
 /// 用于 [`Container::make_with_scope`] 区分不同请求的作用域实例。
 /// 同一 `ScopeId` 内的 `make_with_scope` 调用返回同一实例。
-pub type ScopeId = u64;
+///
+/// P3 解环：定义迁移至 sz-rust-middleware-facade（与 `request_scope` 状态同处一地），
+/// 此处 re-export 保留 `sz_rust_core::container::ScopeId` 向后兼容路径。
+pub use sz_rust_middleware_facade::ScopeId;
 
 /// 服务工厂函数类型
 ///
@@ -677,10 +680,7 @@ impl Container {
                     .chain(std::iter::once(type_name))
                     .collect();
                 drop(constructing);
-                panic!(
-                    "DI 容器检测到循环依赖: {}",
-                    chain.join(" -> ")
-                );
+                panic!("DI 容器检测到循环依赖: {}", chain.join(" -> "));
             }
         }
 
