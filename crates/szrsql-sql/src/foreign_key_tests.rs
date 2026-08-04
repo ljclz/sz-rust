@@ -5,11 +5,11 @@
 //! - INSERT 子表校验（5）：合法插入、非法插入拒绝、NULL 跳过、复合 FK 部分NULL、无 catalog 不校验
 //! - UPDATE 子表校验（3）：合法 FK 更新、非法 FK 更新拒绝、非 FK 列更新不校验
 //! - DELETE 父表 RESTRICT（3）：RESTRICT 拒绝、NO ACTION 拒绝、无引用成功
-//! - DELETE CASCADE（3）：CASCADE 删子行、SET NULL 置 NULL、SET DEFAULT 回退 SET NULL
-//! - UPDATE 父表 CASCADE（3）：CASCADE 更新子 FK、SET NULL 置 NULL、RESTRICT 拒绝
+//! - DELETE CASCADE（4）：CASCADE 删子行、SET NULL 置 NULL、SET DEFAULT 用列默认值、SET DEFAULT 无默认值回退 NULL
+//! - UPDATE 父表 CASCADE（4）：CASCADE 更新子 FK、SET NULL 置 NULL、SET DEFAULT 用列默认值、RESTRICT 拒绝
 //! - 复合 FK（2）：多列 FK INSERT 校验、多列 FK DELETE CASCADE
 //!
-//! 共 23 个测试用例。
+//! 共 25 个测试用例。
 
 use crate::ast::*;
 use crate::executor::{ExecutionError, Executor, InMemoryTable, MutableTable, TableStorage};
@@ -76,6 +76,14 @@ fn make_parent_child_setup() -> (InMemoryCatalog, InMemoryTable, InMemoryTable) 
 fn make_parent_child_with_on_delete(
     action: &str,
 ) -> (InMemoryCatalog, InMemoryTable, InMemoryTable) {
+    make_parent_child_with_on_delete_and_default(action, None)
+}
+
+/// 创建父子表 + catalog，使用指定 ON DELETE 动作，可选列 DEFAULT 值
+fn make_parent_child_with_on_delete_and_default(
+    action: &str,
+    default_value: Option<i64>,
+) -> (InMemoryCatalog, InMemoryTable, InMemoryTable) {
     let mut catalog = InMemoryCatalog::new();
 
     let parent_plan = plan_sql(
@@ -84,20 +92,33 @@ fn make_parent_child_with_on_delete(
     );
     catalog.register_from_create_plan(&parent_plan).unwrap();
 
+    let default_clause = default_value
+        .map(|v| format!(" DEFAULT {v}"))
+        .unwrap_or_default();
     let child_sql = format!(
-        "CREATE TABLE child (cid INT PRIMARY KEY, pid INT REFERENCES parent(id) ON DELETE {action})"
+        "CREATE TABLE child (cid INT PRIMARY KEY, pid INT{default_clause} REFERENCES parent(id) ON DELETE {action})"
     );
     let child_plan = plan_sql(&child_sql, &catalog);
     catalog.register_from_create_plan(&child_plan).unwrap();
 
-    let parent_table = InMemoryTable::with_columns(
-        "parent",
-        vec![("id", ColumnType::Int64), ("name", ColumnType::Text)],
-    );
-    let child_table = InMemoryTable::with_columns(
-        "child",
-        vec![("cid", ColumnType::Int64), ("pid", ColumnType::Int64)],
-    );
+    let parent_table = InMemoryTable::new(TableSchema {
+        name: TableName::new("parent"),
+        columns: vec![
+            ColumnDefinition::new("id", ColumnType::Int64),
+            ColumnDefinition::new("name", ColumnType::Text),
+        ],
+    });
+    let child_pid_default = default_value.map(Value::Int64).map(Expr::Literal);
+    let child_table = InMemoryTable::new(TableSchema {
+        name: TableName::new("child"),
+        columns: vec![
+            ColumnDefinition::new("cid", ColumnType::Int64),
+            ColumnDefinition {
+                default: child_pid_default,
+                ..ColumnDefinition::new("pid", ColumnType::Int64)
+            },
+        ],
+    });
 
     (catalog, parent_table, child_table)
 }
@@ -545,9 +566,42 @@ fn test_fk_delete_set_null() {
 }
 
 #[test]
-fn test_fk_delete_set_default_fallback() {
-    // ON DELETE SET DEFAULT → 当前回退为 SET NULL
-    let (catalog, mut parent, mut child) = make_parent_child_with_on_delete("SET DEFAULT");
+fn test_fk_delete_set_default_uses_column_default() {
+    // ON DELETE SET DEFAULT + 列有 DEFAULT 99 → 子表 pid 应被设为 99
+    let (catalog, mut parent, mut child) =
+        make_parent_child_with_on_delete_and_default("SET DEFAULT", Some(99));
+    parent.insert(vec![Value::Int64(1), Value::Text("a".into())]);
+    child.insert(vec![Value::Int64(10), Value::Int64(1)]);
+
+    let (result, cascades) = {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&child);
+        let plan = plan_sql("DELETE FROM parent WHERE id = 1", &catalog);
+        exec.execute_delete_with_cascades(&plan, &mut parent)
+            .unwrap()
+    };
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(cascades.len(), 1);
+
+    match &cascades[0] {
+        CascadeOp::UpdateChildRow { updates, .. } => {
+            assert_eq!(updates[0].1, Value::Int64(99)); // 列真实默认值
+        }
+        other => panic!("expected UpdateChildRow, got {other:?}"),
+    }
+
+    // 应用级联并验证子表实际值
+    let mut tables: [(&str, &mut dyn MutableTable); 1] = [("child", &mut child)];
+    Executor::apply_cascade_ops(cascades, &mut tables).unwrap();
+    let active: Vec<_> = child.scan_iter().collect();
+    assert_eq!(active[0][1], Value::Int64(99));
+}
+
+#[test]
+fn test_fk_delete_set_default_fallback_to_null() {
+    // ON DELETE SET DEFAULT + 列无 DEFAULT → 回退为 SET NULL
+    let (catalog, mut parent, mut child) =
+        make_parent_child_with_on_delete_and_default("SET DEFAULT", None);
     parent.insert(vec![Value::Int64(1), Value::Text("a".into())]);
     child.insert(vec![Value::Int64(10), Value::Int64(1)]);
 
@@ -562,7 +616,12 @@ fn test_fk_delete_set_default_fallback() {
 
     // 应有 1 个 UpdateChildRow（回退为 SET NULL）
     assert_eq!(cascades.len(), 1);
-    assert!(matches!(cascades[0], CascadeOp::UpdateChildRow { .. }));
+    match &cascades[0] {
+        CascadeOp::UpdateChildRow { updates, .. } => {
+            assert_eq!(updates[0].1, Value::Null); // 无默认值时回退 NULL
+        }
+        other => panic!("expected UpdateChildRow, got {other:?}"),
+    }
 }
 
 // =====================================================================
@@ -635,6 +694,68 @@ fn test_fk_update_set_null() {
 
     let active: Vec<_> = child.scan_iter().collect();
     assert_eq!(active[0][1], Value::Null);
+}
+
+#[test]
+fn test_fk_update_set_default_uses_column_default() {
+    // ON UPDATE SET DEFAULT + 列有 DEFAULT 99 → 父表 PK 改变，子表 pid 应被设为 99
+    let mut catalog = InMemoryCatalog::new();
+    catalog
+        .register_from_create_plan(&plan_sql(
+            "CREATE TABLE parent (id INT PRIMARY KEY, name TEXT)",
+            &catalog,
+        ))
+        .unwrap();
+    catalog
+        .register_from_create_plan(&plan_sql(
+            "CREATE TABLE child (cid INT PRIMARY KEY, pid INT DEFAULT 99 REFERENCES parent(id) ON UPDATE SET DEFAULT)",
+            &catalog,
+        ))
+        .unwrap();
+
+    let parent = InMemoryTable::new(TableSchema {
+        name: TableName::new("parent"),
+        columns: vec![
+            ColumnDefinition::new("id", ColumnType::Int64),
+            ColumnDefinition::new("name", ColumnType::Text),
+        ],
+    });
+    let child = InMemoryTable::new(TableSchema {
+        name: TableName::new("child"),
+        columns: vec![
+            ColumnDefinition::new("cid", ColumnType::Int64),
+            ColumnDefinition {
+                default: Some(Expr::Literal(Value::Int64(99))),
+                ..ColumnDefinition::new("pid", ColumnType::Int64)
+            },
+        ],
+    });
+    let mut parent = parent;
+    let mut child = child;
+    parent.insert(vec![Value::Int64(1), Value::Text("a".into())]);
+    child.insert(vec![Value::Int64(10), Value::Int64(1)]);
+
+    let (result, cascades) = {
+        let mut exec = Executor::new().with_catalog(&catalog);
+        exec.register_table(&child);
+        let plan = plan_sql("UPDATE parent SET id = 100 WHERE id = 1", &catalog);
+        exec.execute_update_with_cascades(&plan, &mut parent)
+            .unwrap()
+    };
+    assert_eq!(result.affected_rows, 1);
+    assert_eq!(cascades.len(), 1);
+
+    match &cascades[0] {
+        CascadeOp::UpdateChildRow { updates, .. } => {
+            assert_eq!(updates[0].1, Value::Int64(99)); // 列真实默认值
+        }
+        other => panic!("expected UpdateChildRow, got {other:?}"),
+    }
+
+    let mut tables: [(&str, &mut dyn MutableTable); 1] = [("child", &mut child)];
+    Executor::apply_cascade_ops(cascades, &mut tables).unwrap();
+    let active: Vec<_> = child.scan_iter().collect();
+    assert_eq!(active[0][1], Value::Int64(99));
 }
 
 #[test]

@@ -16,7 +16,18 @@
 //! - `RESTRICT`：立即报错
 //! - `CASCADE`：DELETE 父行时删除所有引用子行；UPDATE 父 PK 时更新子表 FK
 //! - `SET NULL`：将子表 FK 列设为 NULL
-//! - `SET DEFAULT`：将子表 FK 列设为默认值（当前未支持默认值，回退为 SET NULL）
+//! - `SET DEFAULT`：将子表 FK 列设为列定义中的 DEFAULT 值（字面量默认值已支持；
+//!   表达式默认值回退为 NULL，因运行时求值需要完整表达式引擎）
+//!
+//! # NO ACTION vs RESTRICT 说明
+//!
+//! SQL 标准中二者有微妙差异：
+//! - `RESTRICT`：立即检查，且不可被 DEFERRABLE 推迟。
+//! - `NO ACTION`（默认）：允许检查推迟到语句末/事务末；与 `DEFERRABLE` 配合时
+//!   可在事务提交前插入子行再插入父行。
+//!
+//! 当前实现将 NO ACTION 等同 RESTRICT（立即检查），未与 DEFERRABLE 机制联动。
+//! 完整的 NO ACTION 延迟语义留待后续阶段（需与 P3-3 DEFERRABLE 约束机制打通）。
 //!
 //! 对应 `SzRSQL实施进度.md` Phase 3.29。
 
@@ -123,7 +134,7 @@ impl ForeignKeyValidator {
     /// - `RESTRICT` / `NO ACTION`：若子表有引用行，报错
     /// - `CASCADE`：收集子表待删除行
     /// - `SET NULL`：收集子表待 NULL 化的行
-    /// - `SET DEFAULT`：当前回退为 SET NULL
+    /// - `SET DEFAULT`：收集子表待设为列 DEFAULT 值的行（字面量默认值）
     ///
     /// 返回需要应用到子表的级联操作列表。
     pub fn collect_delete_cascades<'c>(
@@ -192,10 +203,29 @@ impl ForeignKeyValidator {
                                 row_id: child_row_id,
                             });
                         }
-                        ReferenceAction::SetNull | ReferenceAction::SetDefault => {
+                        ReferenceAction::SetNull => {
                             let updates: Vec<(usize, Value)> = child_col_indices
                                 .iter()
                                 .map(|&idx| (idx, Value::Null))
+                                .collect();
+                            ops.push(CascadeOp::UpdateChildRow {
+                                table: ref_key.child_table.name.to_lowercase(),
+                                row_id: child_row_id,
+                                updates,
+                            });
+                        }
+                        ReferenceAction::SetDefault => {
+                            // 使用列定义中的 DEFAULT 值（字面量）；无字面量默认值时回退为 NULL
+                            let updates: Vec<(usize, Value)> = child_col_indices
+                                .iter()
+                                .map(|&idx| {
+                                    let default_val = child_schema
+                                        .columns
+                                        .get(idx)
+                                        .and_then(Self::resolve_default_value)
+                                        .unwrap_or(Value::Null);
+                                    (idx, default_val)
+                                })
                                 .collect();
                             ops.push(CascadeOp::UpdateChildRow {
                                 table: ref_key.child_table.name.to_lowercase(),
@@ -221,7 +251,7 @@ impl ForeignKeyValidator {
     /// - `RESTRICT` / `NO ACTION`：若子表有引用旧行，报错
     /// - `CASCADE`：更新子表 FK 列为新值
     /// - `SET NULL`：将子表 FK 列设为 NULL
-    /// - `SET DEFAULT`：当前回退为 SET NULL
+    /// - `SET DEFAULT`：将子表 FK 列设为列 DEFAULT 值（字面量默认值）
     pub fn collect_update_cascades<'c>(
         parent_schema: &TableSchema,
         updated_rows: &[(usize, Row, Row)], // (row_id, old_row, new_row)
@@ -300,10 +330,29 @@ impl ForeignKeyValidator {
                                 updates,
                             });
                         }
-                        ReferenceAction::SetNull | ReferenceAction::SetDefault => {
+                        ReferenceAction::SetNull => {
                             let updates: Vec<(usize, Value)> = child_col_indices
                                 .iter()
                                 .map(|&idx| (idx, Value::Null))
+                                .collect();
+                            ops.push(CascadeOp::UpdateChildRow {
+                                table: ref_key.child_table.name.to_lowercase(),
+                                row_id: child_row_id,
+                                updates,
+                            });
+                        }
+                        ReferenceAction::SetDefault => {
+                            // 使用列定义中的 DEFAULT 值（字面量）；无字面量默认值时回退为 NULL
+                            let updates: Vec<(usize, Value)> = child_col_indices
+                                .iter()
+                                .map(|&idx| {
+                                    let default_val = child_schema
+                                        .columns
+                                        .get(idx)
+                                        .and_then(Self::resolve_default_value)
+                                        .unwrap_or(Value::Null);
+                                    (idx, default_val)
+                                })
                                 .collect();
                             ops.push(CascadeOp::UpdateChildRow {
                                 table: ref_key.child_table.name.to_lowercase(),
@@ -323,6 +372,17 @@ impl ForeignKeyValidator {
     // -----------------------------------------------------------------
     //  辅助方法
     // -----------------------------------------------------------------
+
+    /// 解析列的 DEFAULT 值为运行时 `Value` — Phase 3.8 / 3.29
+    ///
+    /// 仅支持字面量默认值（`Expr::Literal`）；表达式默认值（如 `DEFAULT (a+1)`）
+    /// 需要完整表达式求值引擎，当前返回 `None`，调用方应回退为 NULL。
+    fn resolve_default_value(col: &crate::ast::ColumnDefinition) -> Option<Value> {
+        match &col.default {
+            Some(crate::ast::Expr::Literal(v)) => Some(v.clone()),
+            _ => None,
+        }
+    }
 
     /// 检查父表中是否存在被引用的值 — Phase 3.29
     fn check_parent_exists<'c>(
