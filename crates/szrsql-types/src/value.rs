@@ -51,6 +51,10 @@ pub enum Value {
     ///
     /// 存储为 `Vec<f64>`，支持余弦相似度、L2 距离、点积等运算。
     Vector(VectorValue),
+    /// XML 类型 — SQL/XML 标准（Phase P4-2）
+    ///
+    /// 存储为 XML 文档字符串，支持 XMLELEMENT / XMLCONCAT / XMLCOMMENT 等函数。
+    Xml(String),
 }
 
 // =====================================================================
@@ -862,6 +866,8 @@ pub enum ColumnType {
     TsQuery,
     /// AI 嵌入向量 — `VECTOR(dims)`，dims 为维度数（Phase P4-5）
     Vector(usize),
+    /// XML 文档 — SQL/XML 标准（Phase P4-2）
+    Xml,
 }
 
 // =====================================================================
@@ -926,6 +932,7 @@ impl Value {
             Value::TsVector(_) => ColumnType::TsVector,
             Value::TsQuery(_) => ColumnType::TsQuery,
             Value::Vector(v) => ColumnType::Vector(v.dims()),
+            Value::Xml(_) => ColumnType::Xml,
         }
     }
 
@@ -1057,6 +1064,8 @@ impl Value {
             (Value::TsQuery(q), ColumnType::Text) => Ok(Value::Text(q.to_pg_string())),
             // Vector → Text（`[1.0, 2.0, 3.0]` 格式）
             (Value::Vector(v), ColumnType::Text) => Ok(Value::Text(v.to_string())),
+            // Xml → Text（XML 文档字符串）
+            (Value::Xml(x), ColumnType::Text) => Ok(Value::Text(x)),
             // 其他组合 → 隐式不允许
             _ => Err(CastError::ImplicitNotAllowed),
         }
@@ -1164,6 +1173,8 @@ impl Value {
                 .map_err(|e| CastError::Impossible {
                     reason: format!("cannot parse '{s}' as vector: {e}"),
                 }),
+            // Text → Xml（直接存储为 XML 文档字符串）
+            (Value::Text(s), ColumnType::Xml) => Ok(Value::Xml(s)),
             // 其他组合即使显式也不允许（如 Int64 → Array）
             _ => Err(CastError::ImplicitNotAllowed),
         }

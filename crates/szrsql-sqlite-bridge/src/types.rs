@@ -87,7 +87,8 @@ impl SqliteType {
             | Value::Json(_)
             | Value::TsVector(_)
             | Value::TsQuery(_)
-            | Value::Vector(_) => SqliteType::Text,
+            | Value::Vector(_)
+            | Value::Xml(_) => SqliteType::Text,
             // 二进制
             Value::Blob(_) => SqliteType::Blob,
         }

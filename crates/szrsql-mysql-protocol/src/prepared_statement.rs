@@ -303,6 +303,11 @@ fn value_to_sql_literal(value: &Value) -> String {
             let escaped = v.to_string().replace('\'', "''");
             format!("'{}'", escaped)
         }
+        // SQL/XML: XML 以文本字面量输出
+        Value::Xml(x) => {
+            let escaped = x.replace('\'', "''");
+            format!("'{}'", escaped)
+        }
     }
 }
 
@@ -914,6 +919,10 @@ fn encode_binary_value(value: &Value, buf: &mut Vec<u8>) {
         // P4-5: 向量以文本格式输出
         Value::Vector(v) => {
             write_lenenc_string(buf, v.to_string().as_bytes());
+        }
+        // SQL/XML: XML 以文本格式输出
+        Value::Xml(x) => {
+            write_lenenc_string(buf, x.as_bytes());
         }
     }
 }

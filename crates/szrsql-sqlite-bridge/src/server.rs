@@ -339,6 +339,7 @@ fn value_to_json(v: Value) -> serde_json::Value {
         Value::TsVector(_) => serde_json::Value::String("[tsvector]".to_string()),
         Value::TsQuery(_) => serde_json::Value::String("[tsquery]".to_string()),
         Value::Vector(v) => serde_json::Value::String(format!("[vector({})]", v.dims())),
+        Value::Xml(_) => serde_json::Value::String("[xml]".to_string()),
     }
 }
 

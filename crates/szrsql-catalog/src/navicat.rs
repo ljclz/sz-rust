@@ -148,6 +148,7 @@ pub fn column_type_to_oid(ct: &ColumnType) -> i64 {
         ColumnType::TsVector => pg_type_oid::TEXT, // Phase 3.33: tsvector 暂映射 TEXT
         ColumnType::TsQuery => pg_type_oid::TEXT, // Phase 3.33: tsquery 暂映射 TEXT
         ColumnType::Vector(_) => pg_type_oid::TEXT, // Phase P4-5: vector 暂映射 TEXT
+        ColumnType::Xml => pg_type_oid::TEXT, // SQL/XML: XML 暂映射 TEXT
     }
 }
 
@@ -170,6 +171,7 @@ pub fn column_type_to_name(ct: &ColumnType) -> &'static str {
         ColumnType::TsVector => "tsvector",
         ColumnType::TsQuery => "tsquery",
         ColumnType::Vector(_) => "vector",
+        ColumnType::Xml => "xml",
     }
 }
 
@@ -3015,6 +3017,7 @@ pub fn column_type_display(ct: &ColumnType) -> String {
         ColumnType::TsVector => "tsvector".into(),
         ColumnType::TsQuery => "tsquery".into(),
         ColumnType::Vector(d) => format!("vector({d})"),
+        ColumnType::Xml => "xml".into(),
     }
 }
 

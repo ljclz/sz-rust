@@ -272,6 +272,9 @@ pub fn value_to_string(v: &Value, null_string: &str) -> String {
         Value::TsQuery(tq) => tq.to_pg_string(),
         // P4-5: 向量以文本格式输出
         Value::Vector(v) => v.to_string(),
+
+        // SQL/XML: XML 以文本格式输出
+        Value::Xml(x) => x.clone(),
     }
 }
 

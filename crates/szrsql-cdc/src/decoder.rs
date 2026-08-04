@@ -441,6 +441,7 @@ fn serialize_value(value: &SzValue) -> Vec<u8> {
         SzValue::TsVector(_) => Vec::new(),
         SzValue::TsQuery(_) => Vec::new(),
         SzValue::Vector(_) => Vec::new(),
+        SzValue::Xml(_) => Vec::new(),
     }
 }
 
@@ -475,6 +476,7 @@ pub fn value_to_json(value: &SzValue) -> serde_json::Value {
         SzValue::TsVector(_) => serde_json::Value::Null,
         SzValue::TsQuery(_) => serde_json::Value::Null,
         SzValue::Vector(_) => serde_json::Value::Null,
+        SzValue::Xml(x) => serde_json::Value::String(x.clone()),
     }
 }
 

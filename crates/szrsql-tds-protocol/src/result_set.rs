@@ -367,6 +367,12 @@ impl TdsRow {
                 buf.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
                 buf.extend_from_slice(&utf16);
             }
+            // SQL/XML: XML 以 UTF-16 LE 文本输出
+            Value::Xml(x) => {
+                let utf16 = encode_utf16_le(x);
+                buf.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
+                buf.extend_from_slice(&utf16);
+            }
         }
         buf
     }

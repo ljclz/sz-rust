@@ -80,6 +80,7 @@ pub fn column_type_oid(ct: &ColumnType) -> u32 {
         ColumnType::Array(_) => oid::ANY_ARRAY,
         ColumnType::Range(_) => oid::UNKNOWN,
         ColumnType::Vector(_) => oid::TEXT, // P4-5: 向量类型无原生 PG OID，降级 TEXT
+        ColumnType::Xml => oid::TEXT, // SQL/XML: XML 降级 TEXT（PG XML OID 142 未暴露）
     }
 }
 
@@ -106,6 +107,7 @@ pub fn column_type_size(ct: &ColumnType) -> i16 {
         | ColumnType::TsVector
         | ColumnType::TsQuery
         | ColumnType::Vector(_) => -1,
+        ColumnType::Xml => -1,
     }
 }
 
@@ -157,6 +159,9 @@ pub fn value_to_text(value: &Value) -> Option<String> {
 
         // P4-5: 向量以文本格式传输
         Value::Vector(v) => Some(v.to_string()),
+
+        // SQL/XML: XML 以文本格式传输
+        Value::Xml(x) => Some(x.clone()),
     }
 }
 
@@ -221,7 +226,8 @@ pub fn value_to_binary(value: &Value) -> Option<Vec<u8>> {
         | Value::TsVector(_)
         | Value::TsQuery(_)
         | Value::Range(_)
-        | Value::Vector(_) => None,
+        | Value::Vector(_)
+        | Value::Xml(_) => None,
     }
 }
 

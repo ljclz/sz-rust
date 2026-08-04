@@ -93,7 +93,7 @@ impl MysqlType {
             Value::Array(_) => MysqlType::Json, // 数组序列化为 JSON
             Value::Enum(_) => MysqlType::Enum,
             Value::Range(_) => MysqlType::String,
-            Value::TsVector(_) | Value::TsQuery(_) | Value::Vector(_) => MysqlType::LongBlob,
+            Value::TsVector(_) | Value::TsQuery(_) | Value::Vector(_) | Value::Xml(_) => MysqlType::LongBlob,
         }
     }
 
@@ -155,7 +155,8 @@ impl MysqlType {
             ColumnType::Timestamp => MysqlType::DateTime,
             ColumnType::Decimal { .. } => MysqlType::NewDecimal,
             ColumnType::Json => MysqlType::Json,
-            ColumnType::TsVector | ColumnType::TsQuery | ColumnType::Vector(_) => MysqlType::LongBlob,
+            ColumnType::TsVector | ColumnType::TsQuery | ColumnType::Vector(_)
+            | ColumnType::Xml => MysqlType::LongBlob,
             ColumnType::Enum(_) => MysqlType::Enum,
             ColumnType::Array(_) => MysqlType::Json,
             ColumnType::Range(_) => MysqlType::String,

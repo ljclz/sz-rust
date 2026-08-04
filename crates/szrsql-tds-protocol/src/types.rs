@@ -89,7 +89,8 @@ impl TdsType {
             Value::Array(_) => TdsType::NVarChar,
             Value::Enum(_) => TdsType::NVarChar,
             Value::Range(_) => TdsType::NVarChar,
-            Value::TsVector(_) | Value::TsQuery(_) | Value::Vector(_) => TdsType::Text,
+            Value::TsVector(_) | Value::TsQuery(_) | Value::Vector(_)
+            | Value::Xml(_) => TdsType::Text,
         }
     }
 

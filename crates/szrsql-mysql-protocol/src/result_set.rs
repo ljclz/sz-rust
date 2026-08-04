@@ -129,6 +129,9 @@ impl ResultSetEncoder {
             Value::TsQuery(_) => b"".to_vec(),
             // P4-5: 向量以文本格式输出
             Value::Vector(v) => v.to_string().into_bytes(),
+
+            // SQL/XML: XML 以文本格式输出
+            Value::Xml(x) => x.as_bytes().to_vec(),
         }
     }
 

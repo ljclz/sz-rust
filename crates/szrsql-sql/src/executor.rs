@@ -32,7 +32,7 @@
 
 use crate::ast::*;
 use crate::check_constraint::CheckConstraintValidator;
-use crate::expr::{EvalContext, EvalError, ExprEvaluator};
+use crate::expr::{xml_sanitize_text, EvalContext, EvalError, ExprEvaluator};
 use crate::foreign_key::{CascadeOp, ForeignKeyValidator};
 use crate::iter_exec::build_iter_plan;
 use crate::plan::{
@@ -7984,7 +7984,7 @@ impl<'a> Executor<'a> {
             }
             all
         };
-        let mut sorted_partitions: Vec<Vec<usize>> = partitions.into_iter().map(|(_, mut idxs)| {
+        let sorted_partitions: Vec<Vec<usize>> = partitions.into_iter().map(|(_, mut idxs)| {
             if !clause.order_by.is_empty() {
                 idxs.sort_by(|a, b| {
                     let ka = &order_keys_all[*a];
@@ -11475,6 +11475,7 @@ fn column_type_to_sql(ty: &szrsql_types::value::ColumnType) -> String {
         ColumnType::TsVector => "TSVECTOR".into(),
         ColumnType::TsQuery => "TSQUERY".into(),
         ColumnType::Vector(d) => format!("VECTOR({d})"),
+        ColumnType::Xml => "XML".into(),
     }
 }
 
@@ -12017,6 +12018,34 @@ fn compute_aggregate(
                 return Ok(Value::Null);
             }
             Ok(Value::Text(parts.join(",")))
+        }
+        // SQL/XML (ISO 9075-14): XMLAGG(xml_value) — XML 文档聚合
+        // 将所有非 NULL XML 值拼接为一个 XML 文档；空组或全 NULL → NULL
+        "xmlagg" => {
+            let mut result = String::new();
+            let mut has_value = false;
+            for v in &values {
+                match v {
+                    Value::Null => {}
+                    Value::Xml(x) => {
+                        result.push_str(x);
+                        has_value = true;
+                    }
+                    Value::Text(s) => {
+                        result.push_str(&xml_sanitize_text(s));
+                        has_value = true;
+                    }
+                    other => {
+                        result.push_str(&value_to_text(other.clone()));
+                        has_value = true;
+                    }
+                }
+            }
+            if !has_value {
+                Ok(Value::Null)
+            } else {
+                Ok(Value::Xml(result))
+            }
         }
         other => Err(ExecutionError::Unsupported(format!(
             "aggregate function `{other}`"

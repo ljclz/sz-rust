@@ -310,7 +310,8 @@ impl OracleType {
             | Value::Json(_)
             | Value::TsVector(_)
             | Value::TsQuery(_)
-            | Value::Vector(_) => Self::Clob,
+            | Value::Vector(_)
+            | Value::Xml(_) => Self::Clob,
         }
     }
 
@@ -389,7 +390,8 @@ impl OracleType {
             | Value::Json(_)
             | Value::TsVector(_)
             | Value::TsQuery(_)
-            | Value::Vector(_) => {
+            | Value::Vector(_)
+            | Value::Xml(_) => {
                 let json = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
                 format_oracle_string(&json)
             }

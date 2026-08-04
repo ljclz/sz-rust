@@ -326,6 +326,7 @@ fn sql_data_type(ct: &ColumnType) -> String {
         ColumnType::TsVector => "tsvector".into(),
         ColumnType::TsQuery => "tsquery".into(),
         ColumnType::Vector(_) => "VECTOR".into(),
+        ColumnType::Xml => "XML".into(),
     }
 }
 

@@ -106,6 +106,10 @@ fn hash_value<H: Hasher>(value: &SzValue, hasher: &mut H) {
             // TsQuery 哈希占位（实际使用少）
             0u8.hash(hasher);
         }
+        SzValue::Xml(x) => {
+            // XML 文档按字符串哈希
+            x.hash(hasher);
+        }
     }
 }
 

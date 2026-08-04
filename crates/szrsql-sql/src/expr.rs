@@ -3024,6 +3024,129 @@ impl ExprEvaluator {
                     }),
                 }
             }
+            // SQL/XML (ISO 9075-14): XML 构造与操作函数
+            "xmlelement" => {
+                // XMLELEMENT(NAME name [, content...])
+                // 简化：第一个参数为元素名，其余为内容
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(name) | Value::Enum(name) => {
+                        let safe_name = xml_sanitize_tag(name);
+                        if arg_vals.len() == 1 {
+                            Ok(Value::Xml(format!("<{safe_name}/>")))
+                        } else {
+                            let content: String = arg_vals[1..]
+                                .iter()
+                                .map(|v| match v {
+                                    Value::Null => String::new(),
+                                    Value::Xml(x) => x.clone(),
+                                    other => xml_sanitize_text(&value_to_text(other).unwrap_or_default()),
+                                })
+                                .collect();
+                            Ok(Value::Xml(format!("<{safe_name}>{content}</{safe_name}>")))
+                        }
+                    }
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text element name",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "xmlconcat" => {
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                let mut result = String::new();
+                for v in &arg_vals {
+                    match v {
+                        Value::Null => {} // SQL/XML: NULL 参数被跳过
+                        Value::Xml(x) => result.push_str(x),
+                        Value::Text(s) => result.push_str(&xml_sanitize_text(s)),
+                        other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "xml or text",
+                                actual: value_type_name(other),
+                            });
+                        }
+                    }
+                }
+                Ok(Value::Xml(result))
+            }
+            "xmlcomment" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(s) => {
+                        let safe = s.replace("--", "- -").replace('>', "&gt;");
+                        Ok(Value::Xml(format!("<!--{safe}-->")))
+                    }
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "xmlforest" => {
+                // XMLFOREST(name1 AS alias1, name2 AS alias2, ...)
+                // 简化：奇数位为元素名，偶数位为内容；或每参数作为独立元素（name=value 用 '=' 分隔）
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                let mut result = String::new();
+                // 支持两种调用方式：
+                // 1. xmlforest(a AS name1, b AS name2) — 参数数必为偶数，奇数位=name 偶数位=value
+                // 2. xmlforest(name1, val1, name2, val2, ...)
+                for i in (0..arg_vals.len()).step_by(2) {
+                    let name = match &arg_vals[i] {
+                        Value::Text(n) | Value::Enum(n) => xml_sanitize_tag(n),
+                        Value::Null => return Ok(Value::Null),
+                        other => {
+                            return Err(EvalError::TypeMismatch {
+                                expected: "text column name",
+                                actual: value_type_name(other),
+                            });
+                        }
+                    };
+                    let content = if i + 1 < arg_vals.len() {
+                        match &arg_vals[i + 1] {
+                            Value::Null => String::new(),
+                            Value::Xml(x) => x.clone(),
+                            other => xml_sanitize_text(&value_to_text(other).unwrap_or_default()),
+                        }
+                    } else {
+                        String::new()
+                    };
+                    result.push_str(&format!("<{name}>{content}</{name}>"));
+                }
+                Ok(Value::Xml(result))
+            }
+            "xmlparse" => {
+                check_arg_count(&fname, &arg_vals, 1)?;
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Text(s) => Ok(Value::Xml(s.clone())),
+                    Value::Xml(x) => Ok(Value::Xml(x.clone())),
+                    other => Err(EvalError::TypeMismatch {
+                        expected: "text",
+                        actual: value_type_name(other),
+                    }),
+                }
+            }
+            "xmlserialize" => {
+                // xmlserialize(xml_value AS TEXT) — 1 或 2 参数
+                if arg_vals.is_empty() {
+                    return Err(EvalError::InvalidFunctionArgs(format!("{}", fname)));
+                }
+                match &arg_vals[0] {
+                    Value::Null => Ok(Value::Null),
+                    Value::Xml(x) => Ok(Value::Text(x.clone())),
+                    Value::Text(s) => Ok(Value::Text(s.clone())),
+                    other => Ok(Value::Text(value_to_text(other).unwrap_or_default())),
+                }
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -3301,12 +3424,50 @@ fn parse_date_string(s: &str) -> Option<i64> {
 fn check_arg_count(fname: &str, args: &[Value], expected: usize) -> Result<(), EvalError> {
     if args.len() != expected {
         Err(EvalError::InvalidFunctionArgs(format!(
-            "{fname} expects {expected} arg(s), got {}",
+            "{fname} expects {expected} args, got {}",
             args.len()
         )))
     } else {
         Ok(())
     }
+}
+
+// =====================================================================
+//  SQL/XML 辅助函数
+// =====================================================================
+
+/// XML 标签名净化：移除非法字符（标签名只能含字母/数字/连字符/下划线/点/冒号，
+/// 且必须以字母或下划线开头）。
+fn xml_sanitize_tag(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return "xml".to_string();
+    }
+    let mut result = String::with_capacity(trimmed.len());
+    for (i, c) in trimmed.chars().enumerate() {
+        if i == 0 {
+            if c.is_ascii_alphabetic() || c == '_' {
+                result.push(c);
+            } else {
+                result.push('_');
+                result.push(c);
+            }
+        } else if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':') {
+            result.push(c);
+        } else {
+            result.push('_');
+        }
+    }
+    result
+}
+
+/// XML 文本内容净化：转义 XML 特殊字符。
+pub(crate) fn xml_sanitize_text(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// 检查函数参数数量 ≥ min_count（用于可选参数场景）
@@ -3393,6 +3554,7 @@ fn is_aggregate_function(name: &str) -> bool {
     matches!(
         name,
         "count" | "sum" | "avg" | "min" | "max" | "array_agg" | "string_agg" | "group_concat"
+        | "xmlagg"
     )
 }
 
@@ -3414,6 +3576,7 @@ fn value_type_name(v: &Value) -> &'static str {
         Value::TsVector(_) => "tsvector",
         Value::TsQuery(_) => "tsquery",
         Value::Vector(_) => "vector",
+        Value::Xml(_) => "xml",
     }
 }
 
@@ -3450,6 +3613,7 @@ fn value_to_text(v: &Value) -> Option<String> {
         Value::Vector(v) => Some(v.to_string()),
         Value::Null => None,
         Value::Array(_) | Value::Range(_) | Value::Json(_) => None,
+        Value::Xml(x) => Some(x.clone()),
     }
 }
 
@@ -4191,5 +4355,159 @@ mod tests {
         // 通配符返回第一个数组元素
         let result = ExprEvaluator::eval(&e, &ctx).unwrap();
         assert_eq!(result, Value::Json(serde_json::Value::Number(1.into())));
+    }
+
+    // =================================================================
+    //  P4-2 SQL/XML 函数测试
+    // =================================================================
+
+    #[test]
+    fn test_xmlelement_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlelement".into(),
+            args: vec![Expr::Literal(Value::Text("book".into()))],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<book/>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlelement_with_content() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlelement".into(),
+            args: vec![
+                Expr::Literal(Value::Text("title".into())),
+                Expr::Literal(Value::Text("SQL/XML Guide".into())),
+            ],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<title>SQL/XML Guide</title>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlelement_null_name() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlelement".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn test_xmlconcat_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlconcat".into(),
+            args: vec![
+                Expr::Literal(Value::Xml("<a>1</a>".into())),
+                Expr::Literal(Value::Xml("<b>2</b>".into())),
+            ],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<a>1</a><b>2</b>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlconcat_skips_null() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlconcat".into(),
+            args: vec![
+                Expr::Literal(Value::Xml("<a/>".into())),
+                Expr::Literal(Value::Null),
+                Expr::Literal(Value::Xml("<b/>".into())),
+            ],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<a/><b/>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlcomment_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlcomment".into(),
+            args: vec![Expr::Literal(Value::Text("hello world".into()))],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<!--hello world-->".to_string()));
+    }
+
+    #[test]
+    fn test_xmlforest_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlforest".into(),
+            args: vec![
+                Expr::Literal(Value::Text("name".into())),
+                Expr::Literal(Value::Text("Alice".into())),
+                Expr::Literal(Value::Text("age".into())),
+                Expr::Literal(Value::Int64(30)),
+            ],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<name>Alice</name><age>30</age>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlparse_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlparse".into(),
+            args: vec![Expr::Literal(Value::Text("<root/>".into()))],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Xml("<root/>".to_string()));
+    }
+
+    #[test]
+    fn test_xmlserialize_basic() {
+        let ctx = EmptyContext;
+        let e = Expr::Function {
+            name: "xmlserialize".into(),
+            args: vec![Expr::Literal(Value::Xml("<doc/>".into()))],
+            distinct: false,
+        };
+        let result = ExprEvaluator::eval(&e, &ctx).unwrap();
+        assert_eq!(result, Value::Text("<doc/>".to_string()));
+    }
+
+    #[test]
+    fn test_xml_functions_null_handling() {
+        let ctx = EmptyContext;
+        // XMLCOMMENT with NULL
+        let e = Expr::Function {
+            name: "xmlcomment".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+
+        // XMLPARSE with NULL
+        let e = Expr::Function {
+            name: "xmlparse".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
+
+        // XMLSERIALIZE with NULL
+        let e = Expr::Function {
+            name: "xmlserialize".into(),
+            args: vec![Expr::Literal(Value::Null)],
+            distinct: false,
+        };
+        assert_eq!(ExprEvaluator::eval(&e, &ctx).unwrap(), Value::Null);
     }
 }
