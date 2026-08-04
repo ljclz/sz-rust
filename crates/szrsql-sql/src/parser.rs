@@ -2194,9 +2194,118 @@ fn convert_table_factor(tf: SpTableFactor) -> Result<TableFactor, ParseError> {
                 lateral: false,
             })
         }
+        SpTableFactor::MatchRecognize {
+            table,
+            partition_by,
+            order_by,
+            measures,
+            rows_per_match,
+            after_match_skip,
+            pattern,
+            symbols,
+            alias,
+            ..
+        } => {
+            let sp_table = convert_table_factor(*table)?;
+            let mr_partition_by = partition_by
+                .into_iter()
+                .map(convert_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            let mr_order_by = order_by
+                .into_iter()
+                .map(convert_order_by_expr)
+                .collect::<Result<Vec<_>, _>>()?;
+            let mr_measures = measures
+                .into_iter()
+                .map(|m| convert_expr(m.expr).map(|e| (e, m.alias.value)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mr_rows_per_match = match rows_per_match {
+                Some(sqlparser::ast::RowsPerMatch::OneRow) => RowsPerMatch::OneRow,
+                Some(sqlparser::ast::RowsPerMatch::AllRows(_)) => RowsPerMatch::AllRows,
+                None => RowsPerMatch::OneRow,
+            };
+            let mr_after_match_skip = match after_match_skip {
+                Some(sqlparser::ast::AfterMatchSkip::PastLastRow) => {
+                    Some(AfterMatchSkip::PastLastRow)
+                }
+                Some(sqlparser::ast::AfterMatchSkip::ToNextRow) => {
+                    Some(AfterMatchSkip::ToNextRow)
+                }
+                Some(sqlparser::ast::AfterMatchSkip::ToFirst(ident)) => {
+                    Some(AfterMatchSkip::ToFirst(ident.value))
+                }
+                Some(sqlparser::ast::AfterMatchSkip::ToLast(ident)) => {
+                    Some(AfterMatchSkip::ToLast(ident.value))
+                }
+                None => None,
+            };
+            let mr_pattern = convert_match_pattern(pattern)?;
+            let mut mr_symbols = Vec::with_capacity(symbols.len());
+            for s in symbols {
+                mr_symbols.push((s.symbol.value, convert_expr(s.definition)?));
+            }
+            Ok(TableFactor::MatchRecognize {
+                table: Box::new(sp_table),
+                clause: MatchRecognizeClause {
+                    partition_by: mr_partition_by,
+                    order_by: mr_order_by,
+                    measures: mr_measures,
+                    rows_per_match: mr_rows_per_match,
+                    after_match_skip: mr_after_match_skip,
+                    pattern: mr_pattern,
+                    symbols: mr_symbols,
+                },
+                alias: alias.map(convert_table_alias),
+            })
+        }
         other => Err(ParseError::Unsupported(format!(
             "unsupported table factor: {other:?}"
         ))),
+    }
+}
+
+/// P4-1: 将 sqlparser 的 MatchRecognizePattern 转换为 SzRSQL PatternExpr
+fn convert_match_pattern(pat: sqlparser::ast::MatchRecognizePattern) -> Result<PatternExpr, ParseError> {
+    use sqlparser::ast::MatchRecognizePattern as SpPat;
+    use sqlparser::ast::MatchRecognizeSymbol as SpSym;
+    use sqlparser::ast::RepetitionQuantifier as SpQuant;
+    match pat {
+        SpPat::Symbol(SpSym::Named(ident)) => Ok(PatternExpr::Symbol(ident.value)),
+        SpPat::Symbol(SpSym::Start) => Err(ParseError::Unsupported(
+            "MATCH_RECOGNIZE pattern ^ (start anchor) is not supported".into(),
+        )),
+        SpPat::Symbol(SpSym::End) => Err(ParseError::Unsupported(
+            "MATCH_RECOGNIZE pattern $ (end anchor) is not supported".into(),
+        )),
+        SpPat::Exclude(_) => Err(ParseError::Unsupported(
+            "MATCH_RECOGNIZE pattern {{- symbol -}} (exclude) is not supported".into(),
+        )),
+        SpPat::Permute(syms) => Err(ParseError::Unsupported(format!(
+            "MATCH_RECOGNIZE PERMUTE({:?}) is not supported",
+            syms.iter().map(|s| format!("{s}")).collect::<Vec<_>>()
+        ))),
+        SpPat::Concat(items) => Ok(PatternExpr::Concat(
+            items.into_iter().map(convert_match_pattern).collect::<Result<_, _>>()?,
+        )),
+        SpPat::Group(inner) => Ok(PatternExpr::Group(Box::new(convert_match_pattern(*inner)?))),
+        SpPat::Alternation(items) => Ok(PatternExpr::Alternation(
+            items.into_iter().map(convert_match_pattern).collect::<Result<_, _>>()?,
+        )),
+        SpPat::Repetition(inner, quant) => {
+            let q = match quant {
+                SpQuant::ZeroOrMore => Quantifier::ZeroOrMore,
+                SpQuant::OneOrMore => Quantifier::OneOrMore,
+                other => {
+                    return Err(ParseError::Unsupported(format!(
+                        "MATCH_RECOGNIZE quantifier `{other:?}` is not supported (only * and + are supported)"
+                    )));
+                }
+            };
+            Ok(PatternExpr::Repetition(
+                Box::new(convert_match_pattern(*inner)?),
+                q,
+            ))
+        }
     }
 }
 

@@ -2214,6 +2214,7 @@ impl ExecutorService {
             | LogicalPlan::Join { .. }
             | LogicalPlan::Aggregate { .. }
             | LogicalPlan::Window { .. }
+            | LogicalPlan::MatchRecognize { .. }
             | LogicalPlan::Sort { .. }
             | LogicalPlan::Limit { .. }
             | LogicalPlan::Distinct { .. }

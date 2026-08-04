@@ -1378,6 +1378,16 @@ pub enum LogicalPlan {
         /// 子计划
         input: Box<LogicalPlan>,
     },
+    /// P4-1: MATCH_RECOGNIZE 行模式匹配（SQL:2016 复杂事件处理）
+    ///
+    /// 在输入流上按 PARTITION BY 分组、ORDER BY 排序后，
+    /// 用正则模式匹配行序列，输出匹配结果（含 MEASURES 计算列）。
+    MatchRecognize {
+        /// 匹配子句
+        clause: crate::ast::MatchRecognizeClause,
+        /// 子计划（输入流）
+        input: Box<LogicalPlan>,
+    },
     /// 排序（ORDER BY）
     Sort {
         /// 排序键
@@ -1945,6 +1955,7 @@ impl LogicalPlan {
             | LogicalPlan::Filter { input, .. }
             | LogicalPlan::Aggregate { input, .. }
             | LogicalPlan::Window { input, .. }
+            | LogicalPlan::MatchRecognize { input, .. }
             | LogicalPlan::Sort { input, .. }
             | LogicalPlan::Limit { input, .. }
             | LogicalPlan::Distinct { input, .. }
@@ -3035,6 +3046,37 @@ impl<'a> Planner<'a> {
             TableFactor::TableFunction { .. } => Err(PlanError::Unsupported(
                 "table function not yet supported in planner".into(),
             )),
+            TableFactor::MatchRecognize { table, clause, alias: _ } => {
+                // P4-1: 规划 MATCH_RECOGNIZE — 先规划内层表，再包装 MatchRecognize 节点
+                let inner_plan = self.plan_table_factor(table)?;
+                let input_schema = plan_schema(&inner_plan);
+                // 输出列：输入列 ++ MEASURES 计算列
+                let measure_cols: Vec<ColumnDefinition> = clause
+                    .measures
+                    .iter()
+                    .map(|(expr, alias)| {
+                        let ct = derive_expr_column_type(expr, &input_schema);
+                        ColumnDefinition::new(alias.clone(), ct)
+                    })
+                    .collect();
+                // 用 Projection 暴露所有输出列名（输入列保留原名 + MEASURES 新列）
+                let mut all_names: Vec<String> =
+                    input_schema.columns.iter().map(|c| c.name.clone()).collect();
+                all_names.extend(measure_cols.iter().map(|c| c.name.clone()));
+                let proj_exprs: Vec<(Expr, Option<String>)> = all_names
+                    .iter()
+                    .map(|n| (Expr::Identifier(vec![n.clone()]), Some(n.clone())))
+                    .collect();
+                let mr_plan = LogicalPlan::MatchRecognize {
+                    clause: clause.clone(),
+                    input: Box::new(inner_plan),
+                };
+                Ok(LogicalPlan::Projection {
+                    exprs: proj_exprs,
+                    output_names: all_names,
+                    input: Box::new(mr_plan),
+                })
+            }
         }
     }
 
@@ -3726,6 +3768,15 @@ pub fn plan_schema(plan: &LogicalPlan) -> TableSchema {
         | LogicalPlan::Sort { input, .. }
         | LogicalPlan::Limit { input, .. }
         | LogicalPlan::Distinct { input, .. } => plan_schema(input),
+        LogicalPlan::MatchRecognize { clause, input } => {
+            // P4-1: 输出 = 输入列 ++ MEASURES 计算列
+            let mut inner = plan_schema(input);
+            for (expr, alias) in &clause.measures {
+                let ct = derive_expr_column_type(expr, &inner);
+                inner.columns.push(ColumnDefinition::new(alias.clone(), ct));
+            }
+            inner
+        }
         LogicalPlan::Join { left, right, .. } => {
             let mut l = plan_schema(left);
             let r = plan_schema(right);
@@ -4102,6 +4153,10 @@ fn table_factor_references_table(tf: &TableFactor, target: &str) -> bool {
         TableFactor::Table { name, .. } => name.name.to_lowercase() == target,
         TableFactor::Derived { subquery, .. } => select_references_table(subquery, target),
         TableFactor::TableFunction { .. } => false,
+        // P4-1: 递归到 MATCH_RECOGNIZE 内层表
+        TableFactor::MatchRecognize { table, .. } => {
+            table_factor_references_table(table, target)
+        }
     }
 }
 

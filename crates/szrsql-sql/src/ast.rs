@@ -1708,6 +1708,87 @@ pub enum TableFactor {
         /// 别名
         alias: Option<TableAlias>,
     },
+    /// P4-1: MATCH_RECOGNIZE 行模式匹配（SQL:2016 复杂事件处理）
+    ///
+    /// 语法：`table MATCH_RECOGNIZE ( PARTITION BY ... ORDER BY ... MEASURES ...
+    ///         ONE ROW PER MATCH AFTER MATCH SKIP ... PATTERN (...) DEFINE ... )`
+    MatchRecognize {
+        /// 被匹配的表
+        table: Box<TableFactor>,
+        /// 行模式匹配子句
+        clause: MatchRecognizeClause,
+        /// 可选别名
+        alias: Option<TableAlias>,
+    },
+}
+
+// =====================================================================
+//  MATCH_RECOGNIZE AST 类型（P4-1）
+// =====================================================================
+
+/// MATCH_RECOGNIZE 子句
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MatchRecognizeClause {
+    /// PARTITION BY 表达式
+    pub partition_by: Vec<Expr>,
+    /// ORDER BY 表达式
+    pub order_by: Vec<OrderByExpr>,
+    /// MEASURES：(表达式, 别名)
+    pub measures: Vec<(Expr, String)>,
+    /// 每匹配输出模式
+    pub rows_per_match: RowsPerMatch,
+    /// AFTER MATCH SKIP 选项
+    pub after_match_skip: Option<AfterMatchSkip>,
+    /// 模式表达式
+    pub pattern: PatternExpr,
+    /// 符号定义：(符号名, 条件表达式)
+    pub symbols: Vec<(String, Expr)>,
+}
+
+/// ROWS PER MATCH 选项
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RowsPerMatch {
+    /// ONE ROW PER MATCH（默认）
+    OneRow,
+    /// ALL ROWS PER MATCH
+    AllRows,
+}
+
+/// AFTER MATCH SKIP 选项
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AfterMatchSkip {
+    /// PAST LAST ROW
+    PastLastRow,
+    /// TO NEXT ROW
+    ToNextRow,
+    /// TO FIRST <symbol>
+    ToFirst(String),
+    /// TO LAST <symbol>
+    ToLast(String),
+}
+
+/// 模式表达式（正则表达式变体）
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PatternExpr {
+    /// 命名符号，如 `A`
+    Symbol(String),
+    /// 连接：`A B C`
+    Concat(Vec<PatternExpr>),
+    /// 选择：`A | B`
+    Alternation(Vec<PatternExpr>),
+    /// 分组：`( pattern )`
+    Group(Box<PatternExpr>),
+    /// 重复：`pattern*` 或 `pattern+`
+    Repetition(Box<PatternExpr>, Quantifier),
+}
+
+/// 量词
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Quantifier {
+    /// `*` 零次或多次
+    ZeroOrMore,
+    /// `+` 一次或多次
+    OneOrMore,
 }
 
 /// 表别名（含可选列别名）

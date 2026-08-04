@@ -7281,6 +7281,10 @@ impl<'a> Executor<'a> {
                 window_funcs,
                 input,
             } => self.execute_window(window_funcs, input),
+            // P4-1: MATCH_RECOGNIZE 行模式匹配
+            LogicalPlan::MatchRecognize { clause, input } => {
+                self.execute_match_recognize(clause, input)
+            }
             // Phase 6.3: ORDER BY 排序
             LogicalPlan::Sort { order_by, input } => self.execute_sort(order_by, input),
             // Phase 6.15: 物化视图扫描
@@ -7934,6 +7938,136 @@ impl<'a> Executor<'a> {
             out.push(new_row);
         }
         Ok(out)
+    }
+
+    // -----------------------------------------------------------------
+    //  MATCH_RECOGNIZE（P4-1）— 行模式匹配（SQL:2016 CEP）
+    // -----------------------------------------------------------------
+
+    fn execute_match_recognize(
+        &self,
+        clause: &crate::ast::MatchRecognizeClause,
+        input: &LogicalPlan,
+    ) -> Result<Vec<Row>, ExecutionError> {
+        use crate::ast::AfterMatchSkip;
+        use std::collections::HashMap;
+
+        let rows = self.execute(input)?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        let schema = input_schema(input)?;
+
+        // ── 1. 分区：按 PARTITION BY 分组 ──
+        let mut partitions: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, row) in rows.iter().enumerate() {
+            let ctx = ExecRowContext::new(&schema, row);
+            let mut key_parts = Vec::with_capacity(clause.partition_by.len());
+            for expr in &clause.partition_by {
+                let v = ExprEvaluator::eval(expr, &ctx)?;
+                key_parts.push(format!("{v:?}"));
+            }
+            partitions.entry(key_parts.join("\x1F")).or_default().push(idx);
+        }
+
+        // ── 2. 各分区内按 ORDER BY 排序 ──
+        let order_keys_all: Vec<Vec<(Value, bool)>> = {
+            let mut all = Vec::with_capacity(rows.len());
+            for row in &rows {
+                let ctx = ExecRowContext::new(&schema, row);
+                let mut okeys = Vec::with_capacity(clause.order_by.len());
+                for obe in &clause.order_by {
+                    let v = ExprEvaluator::eval(&obe.expr, &ctx)?;
+                    okeys.push((v, !obe.asc));
+                }
+                all.push(okeys);
+            }
+            all
+        };
+        let mut sorted_partitions: Vec<Vec<usize>> = partitions.into_iter().map(|(_, mut idxs)| {
+            if !clause.order_by.is_empty() {
+                idxs.sort_by(|a, b| {
+                    let ka = &order_keys_all[*a];
+                    let kb = &order_keys_all[*b];
+                    for ((va, da), (vb, _db)) in ka.iter().zip(kb.iter()) {
+                        match compare_values(va, vb) {
+                            ord if *da => {
+                                return if ord == std::cmp::Ordering::Equal {
+                                    continue
+                                } else {
+                                    ord.reverse()
+                                };
+                            }
+                            ord => {
+                                return if ord == std::cmp::Ordering::Equal {
+                                    continue
+                                } else {
+                                    ord
+                                };
+                            }
+                        }
+                    }
+                    std::cmp::Ordering::Equal
+                });
+            }
+            idxs
+        }).collect();
+
+        // ── 3. 收集所有 DEFINE 条件
+        let define_map: HashMap<String, Expr> =
+            clause.symbols.iter().cloned().collect();
+
+        // ── 4. 对每个分区运行模式匹配 ──
+        let mut output_rows: Vec<Row> = Vec::new();
+
+        for sorted_idxs in &sorted_partitions {
+            let partition_rows: Vec<&Row> =
+                sorted_idxs.iter().map(|i| &rows[*i]).collect();
+            let n = partition_rows.len();
+            let mut pos: usize = 0;
+
+            while pos < n {
+                // 贪心回溯匹配：从 pos 开始找最长匹配
+                match find_match(
+                    &clause.pattern,
+                    &define_map,
+                    &partition_rows,
+                    pos,
+                    &schema,
+                ) {
+                    Some((end_pos, bindings)) => {
+                        emit_match_rows(
+                            &clause.measures,
+                            &clause.rows_per_match,
+                            &partition_rows,
+                            pos,
+                            end_pos,
+                            &bindings,
+                            &schema,
+                            &mut output_rows,
+                        )?;
+                        // AFTER MATCH SKIP
+                        pos = match &clause.after_match_skip {
+                            None | Some(AfterMatchSkip::PastLastRow) => end_pos,
+                            Some(AfterMatchSkip::ToNextRow) => pos + 1,
+                            Some(AfterMatchSkip::ToFirst(sym)) => {
+                                bindings.get(sym).and_then(|idxs| idxs.first().copied())
+                                    .map(|i| i + 1).unwrap_or(end_pos)
+                            }
+                            Some(AfterMatchSkip::ToLast(sym)) => {
+                                bindings.get(sym).and_then(|idxs| idxs.last().copied())
+                                    .map(|i| i + 1).unwrap_or(end_pos)
+                            }
+                        };
+                    }
+                    None => {
+                        pos += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(output_rows)
     }
 
     // -----------------------------------------------------------------
@@ -10949,6 +11083,188 @@ impl<'a> Executor<'a> {
             })?;
         Ok(snapshot.active_rows())
     }
+}
+
+// =====================================================================
+//  MATCH_RECOGNIZE 匹配器（P4-1）— 模块级辅助函数
+// =====================================================================
+
+/// 匹配模式表达式：从 partition_rows[start] 开始尝试匹配
+///
+/// 返回 `Some(end_pos)` 表示匹配成功，`end_pos` 为匹配结束后的下一位置。
+/// `bindings` 记录每个 symbol 匹配的行索引（相对于 partition_rows）。
+fn match_pattern_expr(
+    pattern: &crate::ast::PatternExpr,
+    partition_rows: &[&Row],
+    start: usize,
+    bindings: &mut HashMap<String, Vec<usize>>,
+    define_map: &HashMap<String, Expr>,
+    schema: &TableSchema,
+) -> Option<usize> {
+    use crate::ast::PatternExpr;
+    use crate::ast::Quantifier;
+    match pattern {
+        PatternExpr::Symbol(name) => {
+            if start >= partition_rows.len() {
+                return None;
+            }
+            let row = partition_rows[start];
+            let ctx = ExecRowContext::new(schema, row);
+            let matched = if let Some(cond) = define_map.get(name) {
+                matches!(
+                    ExprEvaluator::eval(cond, &ctx),
+                    Ok(Value::Bool(true))
+                )
+            } else {
+                // 无 DEFINE 条件：匹配任意行
+                true
+            };
+            if matched {
+                bindings.entry(name.clone()).or_default().push(start);
+                Some(start + 1)
+            } else {
+                None
+            }
+        }
+        PatternExpr::Concat(items) => {
+            let mut pos = start;
+            let mut saved = bindings.clone();
+            for item in items {
+                match match_pattern_expr(item, partition_rows, pos, bindings, define_map, schema) {
+                    Some(next) => {
+                        saved = bindings.clone();
+                        pos = next;
+                    }
+                    None => {
+                        *bindings = saved;
+                        return None;
+                    }
+                }
+            }
+            Some(pos)
+        }
+        PatternExpr::Repetition(inner, quantifier) => {
+            let min_count = match quantifier {
+                Quantifier::ZeroOrMore => 0,
+                Quantifier::OneOrMore => 1,
+            };
+            // 贪心：收集所有可能的匹配位置
+            let mut positions: Vec<(usize, HashMap<String, Vec<usize>>)> = Vec::new();
+            let mut pos = start;
+            let mut b = bindings.clone();
+            // 0 次匹配（始终可行）
+            positions.push((pos, b.clone()));
+            loop {
+                let mut b2 = b.clone();
+                match match_pattern_expr(inner, partition_rows, pos, &mut b2, define_map, schema) {
+                    Some(next) if next > pos => {
+                        positions.push((next, b2.clone()));
+                        pos = next;
+                        b = b2;
+                    }
+                    _ => break,
+                }
+            }
+            // 返回最大匹配（贪心），由调用方（Concat）决定是否接受
+            if positions.len() > min_count {
+                let (last_pos, last_b) = positions.last().unwrap();
+                *bindings = last_b.clone();
+                Some(*last_pos)
+            } else if positions.len() == min_count {
+                if min_count == 0 {
+                    *bindings = b.clone();
+                    Some(start)
+                } else {
+                    let (p, bnd) = &positions[0];
+                    *bindings = bnd.clone();
+                    Some(*p)
+                }
+            } else {
+                None
+            }
+        }
+        PatternExpr::Group(inner) => {
+            match_pattern_expr(inner, partition_rows, start, bindings, define_map, schema)
+        }
+        PatternExpr::Alternation(branches) => {
+            let saved = bindings.clone();
+            for branch in branches {
+                match match_pattern_expr(branch, partition_rows, start, bindings, define_map, schema)
+                {
+                    Some(pos) => return Some(pos),
+                    None => *bindings = saved.clone(),
+                }
+            }
+            None
+        }
+    }
+}
+
+/// 查找匹配：从 partition_rows[start] 开始，尝试匹配整个 pattern
+///
+/// 返回 `Some((end_pos, bindings))`，其中 bindings 记录每个 symbol 匹配的行索引。
+fn find_match(
+    pattern: &crate::ast::PatternExpr,
+    define_map: &HashMap<String, Expr>,
+    partition_rows: &[&Row],
+    start: usize,
+    schema: &TableSchema,
+) -> Option<(usize, HashMap<String, Vec<usize>>)> {
+    let mut bindings = HashMap::new();
+    match match_pattern_expr(pattern, partition_rows, start, &mut bindings, define_map, schema) {
+        Some(end) => Some((end, bindings)),
+        None => None,
+    }
+}
+
+/// 根据匹配结果生成输出行
+fn emit_match_rows(
+    measures: &[(Expr, String)],
+    rows_per_match: &crate::ast::RowsPerMatch,
+    partition_rows: &[&Row],
+    match_start: usize,
+    match_end: usize,
+    bindings: &HashMap<String, Vec<usize>>,
+    schema: &TableSchema,
+    output: &mut Vec<Row>,
+) -> Result<(), ExecutionError> {
+    use crate::ast::RowsPerMatch;
+    match rows_per_match {
+        RowsPerMatch::OneRow => {
+            // ONE ROW PER MATCH：每个匹配输出一行 = 输入列 + MEASURES 列
+            let repr_idx = bindings
+                .values()
+                .flatten()
+                .copied()
+                .max()
+                .unwrap_or(match_start);
+            let repr_row = if repr_idx < partition_rows.len() {
+                partition_rows[repr_idx]
+            } else {
+                return Ok(());
+            };
+            let mut new_row = repr_row.clone();
+            for (measure_expr, _alias) in measures {
+                let ctx = ExecRowContext::new(schema, repr_row);
+                let v = ExprEvaluator::eval(measure_expr, &ctx).unwrap_or(Value::Null);
+                new_row.push(v);
+            }
+            output.push(new_row);
+        }
+        RowsPerMatch::AllRows => {
+            // ALL ROWS PER MATCH：每个匹配行输出一行
+            for idx in match_start..match_end {
+                let mut new_row = partition_rows[idx].clone();
+                for (measure_expr, _alias) in measures {
+                    let ctx = ExecRowContext::new(schema, partition_rows[idx]);
+                    let v = ExprEvaluator::eval(measure_expr, &ctx).unwrap_or(Value::Null);
+                    new_row.push(v);
+                }
+                output.push(new_row);
+            }
+        }
+    }
+    Ok(())
 }
 
 // =====================================================================
@@ -13973,6 +14289,31 @@ fn substitute_parameters_in_table_factor(
             TableFactor::TableFunction {
                 name,
                 args: new_args,
+                alias,
+            }
+        }
+        // P4-1: 递归到 MATCH_RECOGNIZE 内层表并代换子句中的参数
+        TableFactor::MatchRecognize {
+            table,
+            clause,
+            alias,
+        } => {
+            let mut new_clause = clause.clone();
+            for expr in &mut new_clause.partition_by {
+                *expr = substitute_parameters_in_expr(expr.clone(), parameters)?;
+            }
+            for obe in &mut new_clause.order_by {
+                obe.expr = substitute_parameters_in_expr(obe.expr.clone(), parameters)?;
+            }
+            for (expr, _) in &mut new_clause.measures {
+                *expr = substitute_parameters_in_expr(expr.clone(), parameters)?;
+            }
+            for (_, expr) in &mut new_clause.symbols {
+                *expr = substitute_parameters_in_expr(expr.clone(), parameters)?;
+            }
+            TableFactor::MatchRecognize {
+                table: Box::new(substitute_parameters_in_table_factor(*table, parameters)?),
+                clause: new_clause,
                 alias,
             }
         }

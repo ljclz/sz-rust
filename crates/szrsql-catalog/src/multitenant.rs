@@ -29,9 +29,9 @@
 //! Corresponds to `SzRSQL实施进度.md` Phase 3.9.
 
 use szrsql_sql::ast::{
-    Assignment, Expr, ForeignKeyReference, InsertSource, OnConflict, OrderByExpr, Select,
-    SelectItem, Statement, TableConstraint, TableFactor, TableName, TableWithJoins, WindowSpec,
-    WithClause,
+    Assignment, Expr, ForeignKeyReference, InsertSource, MatchRecognizeClause, OnConflict,
+    OrderByExpr, Select, SelectItem, Statement, TableConstraint, TableFactor, TableName,
+    TableWithJoins, WindowSpec, WithClause,
 };
 
 // =====================================================================
@@ -349,6 +349,43 @@ impl SqlRewriter {
             TableFactor::TableFunction { name, args, alias } => TableFactor::TableFunction {
                 name,
                 args: args.into_iter().map(|a| self.rewrite_expr(a)).collect(),
+                alias,
+            },
+            // P4-1: 递归重写 MATCH_RECOGNIZE 内层表与子句表达式
+            TableFactor::MatchRecognize {
+                table,
+                clause,
+                alias,
+            } => TableFactor::MatchRecognize {
+                table: Box::new(self.rewrite_table_factor(*table)),
+                clause: MatchRecognizeClause {
+                    partition_by: clause
+                        .partition_by
+                        .iter()
+                        .map(|e| self.rewrite_expr(e.clone()))
+                        .collect(),
+                    order_by: clause
+                        .order_by
+                        .iter()
+                        .map(|o| OrderByExpr {
+                            expr: self.rewrite_expr(o.expr.clone()),
+                            ..o.clone()
+                        })
+                        .collect(),
+                    measures: clause
+                        .measures
+                        .iter()
+                        .map(|(e, a)| (self.rewrite_expr(e.clone()), a.clone()))
+                        .collect(),
+                    rows_per_match: clause.rows_per_match.clone(),
+                    after_match_skip: clause.after_match_skip.clone(),
+                    pattern: clause.pattern.clone(),
+                    symbols: clause
+                        .symbols
+                        .iter()
+                        .map(|(s, e)| (s.clone(), self.rewrite_expr(e.clone())))
+                        .collect(),
+                },
                 alias,
             },
         }

@@ -2308,6 +2308,10 @@ fn collect_tables_from_table_factor(tf: &szrsql_sql::ast::TableFactor, out: &mut
             collect_tables_from_select(subquery, out);
         }
         TableFactor::TableFunction { .. } => {}
+        // P4-1: MATCH_RECOGNIZE 递归收集内层表名
+        TableFactor::MatchRecognize { table, .. } => {
+            collect_tables_from_table_factor(table, out);
+        }
     }
 }
 
@@ -2587,6 +2591,8 @@ fn count_params_in_table_factor(tf: &szrsql_sql::ast::TableFactor) -> usize {
         TableFactor::TableFunction { args, .. } => {
             args.iter().map(count_params_in_expr).max().unwrap_or(0)
         }
+        // P4-1: MATCH_RECOGNIZE 递归统计内层表中的参数
+        TableFactor::MatchRecognize { table, .. } => count_params_in_table_factor(table),
     }
 }
 

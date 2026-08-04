@@ -4101,3 +4101,198 @@ fn test_temporal_as_of_none_returns_all_rows() {
     let rows = exec.execute(&plan).unwrap();
     assert_eq!(rows.len(), 2, "无 SYSTEM_TIME 应返回全部行");
 }
+
+// =====================================================================
+//  MATCH_RECOGNIZE（P4-1）— 行模式匹配测试（直接构造 LogicalPlan）
+// =====================================================================
+
+use crate::ast::{
+    AfterMatchSkip, MatchRecognizeClause, OrderByExpr, PatternExpr, Quantifier,
+    RowsPerMatch,
+};
+
+fn make_stock_plan() -> (InMemoryCatalog, InMemoryTable) {
+    let mut catalog = InMemoryCatalog::new();
+    catalog.add_simple_table(
+        "stock",
+        vec![
+            ("symbol", ColumnType::Text),
+            ("day", ColumnType::Int64),
+            ("price", ColumnType::Int64),
+        ],
+    );
+    let mut table = InMemoryTable::with_columns(
+        "stock",
+        vec![
+            ("symbol", ColumnType::Text),
+            ("day", ColumnType::Int64),
+            ("price", ColumnType::Int64),
+        ],
+    );
+    // AAPL 价格序列: 10, 8, 12, 7, 14
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(1), Value::Int64(10)]);
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(2), Value::Int64(8)]);
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(3), Value::Int64(12)]);
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(4), Value::Int64(7)]);
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(5), Value::Int64(14)]);
+    (catalog, table)
+}
+
+fn make_mr_clause() -> MatchRecognizeClause {
+    MatchRecognizeClause {
+        partition_by: vec![col("symbol")],
+        order_by: vec![OrderByExpr {
+            expr: col("day"),
+            asc: true,
+            nulls_first: false,
+        }],
+        measures: vec![
+            (
+                Expr::Identifier(vec!["A".into(), "price".into()]),
+                "low_price".into(),
+            ),
+            (
+                Expr::Identifier(vec!["B".into(), "price".into()]),
+                "high_price".into(),
+            ),
+        ],
+        rows_per_match: RowsPerMatch::OneRow,
+        after_match_skip: Some(AfterMatchSkip::PastLastRow),
+        pattern: PatternExpr::Concat(vec![
+            PatternExpr::Symbol("A".into()),
+            PatternExpr::Symbol("B".into()),
+        ]),
+        symbols: vec![
+            (
+                "A".into(),
+                binary(col("price"), BinaryOp::Lt, lit_i64(10)),
+            ),
+            (
+                "B".into(),
+                binary(col("price"), BinaryOp::Gt, lit_i64(10)),
+            ),
+        ],
+    }
+}
+
+#[test]
+fn test_match_recognize_one_row_per_match() {
+    // PATTERN (A B): A=低价(<10), B=高价(>10)
+    // AAPL 价格序列: 10, 8, 12, 7, 14
+    // 匹配1: A=day2(8), B=day3(12)
+    // 匹配2: A=day4(7), B=day5(14)
+    let (catalog, table) = make_stock_plan();
+    let scan = make_scan("stock", vec![
+        ("symbol", ColumnType::Text),
+        ("day", ColumnType::Int64),
+        ("price", ColumnType::Int64),
+    ]);
+    let plan = LogicalPlan::MatchRecognize {
+        clause: make_mr_clause(),
+        input: Box::new(scan),
+    };
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let rows = exec.execute(&plan).unwrap();
+    // ONE ROW PER MATCH: 每个匹配输出一行
+    assert_eq!(rows.len(), 2, "期望 2 个匹配");
+    // 输出列 = 输入列(3) + MEASURES(2) = 5
+    assert_eq!(rows[0].len(), 5);
+}
+
+#[test]
+fn test_match_recognize_all_rows_per_match() {
+    // ALL ROWS PER MATCH: 每个匹配行输出一行
+    let (catalog, table) = make_stock_plan();
+    let mut clause = make_mr_clause();
+    clause.rows_per_match = RowsPerMatch::AllRows;
+    let scan = make_scan("stock", vec![
+        ("symbol", ColumnType::Text),
+        ("day", ColumnType::Int64),
+        ("price", ColumnType::Int64),
+    ]);
+    let plan = LogicalPlan::MatchRecognize {
+        clause,
+        input: Box::new(scan),
+    };
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let rows = exec.execute(&plan).unwrap();
+    // 匹配1: A(day2) + B(day3) = 2行; 匹配2: A(day4) + B(day5) = 2行
+    assert_eq!(rows.len(), 4, "ALL ROWS PER MATCH 应输出 4 行");
+}
+
+#[test]
+fn test_match_recognize_no_match_returns_empty() {
+    // 无匹配时返回空结果
+    let (_catalog, mut table) = make_stock_plan();
+    table.clear();
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(1), Value::Int64(10)]);
+    table.insert(vec![Value::Text("AAPL".into()), Value::Int64(2), Value::Int64(11)]);
+    let scan = make_scan("stock", vec![
+        ("symbol", ColumnType::Text),
+        ("day", ColumnType::Int64),
+        ("price", ColumnType::Int64),
+    ]);
+    let plan = LogicalPlan::MatchRecognize {
+        clause: make_mr_clause(),
+        input: Box::new(scan),
+    };
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 0, "无匹配应返回空结果");
+}
+
+#[test]
+fn test_match_recognize_empty_input() {
+    // 空表 → 空结果
+    let table = InMemoryTable::with_columns(
+        "stock",
+        vec![
+            ("symbol", ColumnType::Text),
+            ("day", ColumnType::Int64),
+            ("price", ColumnType::Int64),
+        ],
+    );
+    let scan = make_scan("stock", vec![
+        ("symbol", ColumnType::Text),
+        ("day", ColumnType::Int64),
+        ("price", ColumnType::Int64),
+    ]);
+    let plan = LogicalPlan::MatchRecognize {
+        clause: make_mr_clause(),
+        input: Box::new(scan),
+    };
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let rows = exec.execute(&plan).unwrap();
+    assert_eq!(rows.len(), 0, "空表应返回空结果");
+}
+
+#[test]
+fn test_match_recognize_repetition_zero_or_more() {
+    // PATTERN (A B*): B 重复零次或多次
+    let (catalog, table) = make_stock_plan();
+    let mut clause = make_mr_clause();
+    clause.pattern = PatternExpr::Concat(vec![
+        PatternExpr::Symbol("A".into()),
+        PatternExpr::Repetition(
+            Box::new(PatternExpr::Symbol("B".into())),
+            Quantifier::ZeroOrMore,
+        ),
+    ]);
+    let scan = make_scan("stock", vec![
+        ("symbol", ColumnType::Text),
+        ("day", ColumnType::Int64),
+        ("price", ColumnType::Int64),
+    ]);
+    let plan = LogicalPlan::MatchRecognize {
+        clause,
+        input: Box::new(scan),
+    };
+    let mut exec = Executor::new();
+    exec.register_table(&table);
+    let rows = exec.execute(&plan).unwrap();
+    assert!(rows.len() >= 1, "至少应有 1 个匹配");
+}

@@ -1487,6 +1487,8 @@ fn contains_system_table_factor(factor: &TableFactor) -> bool {
         // Navicat 兼容：表函数（如 pg_available_extension_versions()）
         // 视为系统表引用，避免 table not found 错误
         TableFactor::TableFunction { name, .. } => is_system_function(name),
+        // P4-1: MATCH_RECOGNIZE 包装的是用户表，不会直接引用系统表
+        TableFactor::MatchRecognize { .. } => false,
     }
 }
 
@@ -1609,6 +1611,8 @@ fn materialize_system_table_factor(
             };
             Some((col_names, Vec::new()))
         }
+        // P4-1: MATCH_RECOGNIZE 不是系统表，无法物化
+        TableFactor::MatchRecognize { .. } => None,
     }
 }
 
@@ -2127,6 +2131,10 @@ fn table_factor_alias(factor: &TableFactor) -> String {
             } else {
                 name.clone()
             }
+        }
+        // P4-1: MATCH_RECOGNIZE 使用内层表的别名（或表名）
+        TableFactor::MatchRecognize { alias, .. } => {
+            alias.as_ref().map(|a| a.name.clone()).unwrap_or_default()
         }
     }
 }
