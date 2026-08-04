@@ -279,7 +279,7 @@ fn read_database_connections() -> Result<(String, Vec<serde_json::Value>), CliEr
     }
 
     let content = std::fs::read_to_string(&path)?;
-    let yaml: serde_yml::Value = serde_yml::from_str(&content)
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|e| CliError::Generic(format!("数据库配置解析失败: {}", e)))?;
     let json = serde_json::to_value(yaml)
         .map_err(|e| CliError::Generic(format!("YAML→JSON 转换失败: {}", e)))?;
@@ -375,8 +375,8 @@ fn parse_config_file(content: &str, ext: &str) -> Result<serde_json::Value, CliE
         "json" => serde_json::from_str(content)
             .map_err(|e| CliError::Generic(format!("JSON 配置解析失败: {}", e))),
         "yaml" | "yml" => {
-            // YAML 解析：使用 serde_yml 转 JSON
-            let yaml: serde_yml::Value = serde_yml::from_str(content)
+            // YAML 解析：使用 serde_yaml 转 JSON
+            let yaml: serde_yaml::Value = serde_yaml::from_str(content)
                 .map_err(|e| CliError::Generic(format!("YAML 配置解析失败: {}", e)))?;
             serde_json::to_value(yaml)
                 .map_err(|e| CliError::Generic(format!("YAML→JSON 转换失败: {}", e)))
