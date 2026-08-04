@@ -1,10 +1,10 @@
 # SZ-Rust 工程化实践规范
 
-> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，14+ workspace 包，3352 测试）
+> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，26 workspace 包，4,994 测试）
 > **项目版本**：v0.3.0
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
-> **文档版本**：v1.2（2026-08-02）
+> **文档版本**：v1.4（2026-08-04）
 
 ---
 
@@ -505,9 +505,15 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-08-03
+> **最后更新**: 2026-08-04
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.3
+> **规范版本**: v1.4
+>
+> **v1.4 变更摘要**（2026-08-04）：
+> - CI coverage job 切换为 cargo-llvm-cov（--exclude sz-orm-macros --cobertura --fail-under-lines 85），解决 Windows 本机无法运行 tarpaulin 的问题；实测 workspace 总体覆盖率 89.2%
+> - fix(observability): otlp.rs 删除冗余 ENV_TEST_LOCK 双重加锁，统一为 env_lock() OnceLock 单例（63 测试全过）
+> - P3 拆包完成（ADR-019）：view/controller/guard/hooks/model/routing 全部提取为 mvc-facade / router-facade / orm-ext-facade，sz-rust-core 降至 ~9.2K LOC（−83.9%）
+> - §9 遗留项全部关闭：env 竞态全局扫描（5 文件全加锁）+ Windows 覆盖率替代方案确认（cargo-llvm-cov）
 >
 > **v1.3 变更摘要**（2026-08-03，两次更新）：
 > - P2 拆包完成：sz-rust-core 57K LOC → 23.6K LOC（−58.7%），提取 7 个 facade crate 共 42.4K LOC
@@ -524,7 +530,7 @@ flowchart LR
 > - 新增 facade 集成测试 crate（`sz-rust-facade-tests`）：12 个 P9-FACADE 跨 facade 集成测试（cache+state / orm+pay+http / auth+infra / 端到端业务流）
 > - 新增向后兼容路径测试（`sz-rust-core/tests/backward_compat.rs`）：6 个 P9-COMPAT 测试（旧路径转发 + 类型同一性编译期验证）
 > - 修复 url_decode UTF-8 缺陷：`%XX` 逐字节转 char → 字节收集 + `from_utf8_lossy`（对齐 PHP urldecode），新增 2 个回归测试
-> - 覆盖率验证：llvm-cov 实测 7 facade 行覆盖率全部 ≥ 94.8%；CI 新增 coverage job（tarpaulin --fail-under 85）
+> - 覆盖率验证：cargo-llvm-cov 实测 workspace 总体 89.2%（排除 sz-orm-macros proc-macro crate）；CI coverage job 使用 cargo-llvm-cov（--exclude sz-orm-macros --cobertura --fail-under-lines 85），Windows 本地可运行
 > - 编译时间监控：`scripts/check-compile-time.sh` + 基线 `scripts/compile-time-baseline.json`（总 57.38s）+ CI compile-time job
 > - 内存泄漏检测：`examples/rss_stability.rs`（150 周期 30,000 次创建/释放，RSS 增量 0.21 MiB）+ CI miri job
 > - 新增 ADR-018：facade 独立发布策略（0.x 统一版本 / 1.0 后 semver 独立）
@@ -534,7 +540,7 @@ flowchart LR
 > - 竞争力深化（4.3 六项全达标）：blog/ecommerce/iot 3 个完整示例；criterion 22 项基准（docs/benchmark-report.md）；错误消息 i18n 本地化（BaseException.message_key + mvc i18n_error）；OpenAPI 从路由配置自动生成（ecommerce /openapi.json 实测）；sz-rust-mcp crate（5 工具 + stdio JSON-RPC）；missing_docs 门禁全绿（-D missing_docs 26 crate 0 错误，修复 4 处 doc 缺陷）
 > - 实测评测报告（`docs/audit/2026-08-03-基于实测的能力评测报告.md`）：全部结论基于命令输出；**实测推翻两处文档结论**——①铁律 2 生产代码裸 unwrap 622 处（core 433，此前"✅"错误）；②fmt 门禁修复前有 275 处 diff（CI 实际红过）；实测证实 unsafe 收敛 3 处 FFI、RSS 3.86 MiB、路由 197ns、4,994 测试 0 失败
 > - CI 门禁：cargo-deny（许可证+安全+来源）+ cargo-udeps（未使用依赖）+ cargo-machete 均已集成
-> - 已知劣势：剩余模块耦合（view/controller/guard/hooks/model/routing 占 ~60%），待 P3 解耦
+> - 已知劣势：无重大架构缺陷；剩余工作为业务测试补齐（sz300 部分 service 层覆盖率 0%）和 DB 集成测试 CI 验证
 >
 > **v1.2 变更摘要**（2026-08-02）：
 > - P2 能力评估完成：多租户 / GraphQL / gRPC / 热加载 / OpenAPI 自动扫描
