@@ -17,7 +17,7 @@
 //! addons/
 //! ├── operate/           ← 编译为 liboperate.so
 //! │   ├── Cargo.toml     ← [lib] crate-type = ["cdylib"]
-//! │   └── src/lib.rs     ← #[no_mangle] pub extern "C" fn addon_init()
+//! │   └── src/lib.rs     ← #[unsafe(no_mangle)] pub extern "Rust" fn addon_init()
 //! └── crm/               ← 编译为 libcrm.so
 //!     └── ...
 //!
@@ -26,14 +26,16 @@
 //!     → 发现 .so/.dylib/.dll
 //!     → libloading::Library::new() 动态加载
 //!     → dlsym("addon_init") 获取初始化符号
-//!     → 调用 addon_init(&mut RouterBuilder) 注册路由
+//!     → 调用 addon_init() 获取插件元数据
 //! ```
 //!
 //! ## 安全约束
 //!
 //! - **版本对齐**：插件与主应用必须使用完全相同版本的 `sz-rust-core`，
 //!   否则 `RouterBuilder<S>` 的内存布局可能不一致，导致 UB。
-//! - **ABI 稳定**：`addon_init` 使用 C ABI（`extern "C"`），不传递 Rust 特有类型。
+//! - **ABI 正确**：`addon_init` 使用 Rust ABI（`extern "Rust"`），同进程内动态加载，
+//!   可安全传递 `String` 等 Rust 特有类型；`#[unsafe(no_mangle)]` 保证符号名不被混淆，
+//!   使 `dlsym` 可按明文名称查找。
 //! - **生命周期**：插件 `Library` 持有 `'static` 生命周期，卸载后其注册的路由
 //!   仍可能被 axum 引用 → 当前实现仅支持**加载**，不支持安全卸载。
 //!
@@ -67,8 +69,8 @@
 //! use sz_rust_core::runtime::hot_reload::AddonInitResult;
 //!
 //! /// 插件入口 — 主应用通过 dlsym 调用此函数
-//! #[no_mangle]
-//! pub extern "C" fn addon_init() -> AddonInitResult {
+//! #[unsafe(no_mangle)]
+//! pub extern "Rust" fn addon_init() -> AddonInitResult {
 //!     AddonInitResult {
 //!         name: "operate".to_string(),
 //!         version: "1.0.0".to_string(),
@@ -110,11 +112,17 @@ pub struct AddonInitResult {
 /// 插件清单（从 `addon_init` 返回值 + 文件系统元数据合并）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotAddonManifest {
+    /// 插件名称（用于路由前缀，如 `/addons/{name}/...`）
     pub name: String,
+    /// 插件版本（语义化版本，如 `"1.0.0"`）
     pub version: String,
+    /// 插件描述
     pub description: Option<String>,
+    /// 动态库文件路径
     pub file_path: PathBuf,
+    /// 插件依赖的其他插件名称列表
     pub dependencies: Vec<String>,
+    /// 加载时间（UTC）
     pub loaded_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -129,30 +137,40 @@ pub struct LoadedAddon {
 /// 热加载错误类型
 #[derive(Debug, Error)]
 pub enum HotReloadError {
+    /// 动态库加载失败
     #[error("动态库加载失败: {0}")]
     LibraryLoad(#[from] libloading::Error),
 
+    /// 找不到 `addon_init` 符号（插件未实现入口函数）
     #[error("找不到 addon_init 符号（插件未实现入口函数）")]
     MissingInitSymbol,
 
+    /// `addon_init` 调用失败（插件 panic 被捕获）
     #[error("addon_init 调用失败: {0}")]
     InitFailed(String),
 
+    /// 插件目录扫描失败
     #[error("插件目录扫描失败: {0}")]
     ScanFailed(String),
 
+    /// 插件名称冲突（同名插件已加载）
     #[error("插件名称冲突: {0}")]
     NameConflict(String),
 
+    /// 插件依赖缺失
     #[error("插件依赖缺失: {0} 依赖 {1}（未加载）")]
     MissingDependency(String, String),
 }
 
+/// 单个插件的扫描结果：`(插件名, 加载结果)`
+pub type AddonScanResult = (String, Result<HotAddonManifest, HotReloadError>);
+
 /// addon_init 函数指针类型
 ///
-/// 使用 `unsafe extern "C"` 因为 libloading 的 `get` 方法需要 unsafe。
-/// 调用方保证符号存在且签名正确。
-type AddonInitFn = unsafe extern "C" fn() -> AddonInitResult;
+/// 使用 `extern "Rust"` 而非 `extern "C"`：插件与主应用同进程运行，
+/// Rust ABI 可安全传递 `String`/`Vec` 等 Rust 特有类型，避免 FFI 未定义行为。
+/// `#[unsafe(no_mangle)]` 保证符号名不被混淆，`libloading::get` 可按明文查找。
+type AddonInitFn = extern "Rust" fn() -> AddonInitResult;
 
 // ============================================================================
 // HotAddonLoader
@@ -203,7 +221,7 @@ impl HotAddonLoader {
     ///
     /// 返回 `(name, Result<manifest, error>)` 列表。
     /// 单个插件加载失败不影响其他插件。
-    pub fn scan(&mut self) -> Vec<(String, Result<HotAddonManifest, HotReloadError>)> {
+    pub fn scan(&mut self) -> Vec<AddonScanResult> {
         let mut results = Vec::new();
         let dirs = self.scan_dirs.clone();
 
@@ -221,10 +239,7 @@ impl HotAddonLoader {
     }
 
     /// 扫描单个目录
-    fn scan_dir(
-        &mut self,
-        dir: &Path,
-    ) -> Result<Vec<(String, Result<HotAddonManifest, HotReloadError>)>, HotReloadError> {
+    fn scan_dir(&mut self, dir: &Path) -> Result<Vec<AddonScanResult>, HotReloadError> {
         let mut results = Vec::new();
 
         let entries = std::fs::read_dir(dir).map_err(|e| {
@@ -277,17 +292,17 @@ impl HotAddonLoader {
         let library = unsafe { Library::new(path) }?;
 
         // 2. 查找 addon_init 符号
-        //    # Safety: 符号存在且类型正确时安全。
+        //    # Safety: libloading::get 将原始指针转为函数指针，符号存在且类型正确时安全。
         //    若符号不存在，返回 MissingInitSymbol 错误。
         let init_symbol: libloading::Symbol<AddonInitFn> = unsafe { library.get(b"addon_init\0") }
             .map_err(|_| HotReloadError::MissingInitSymbol)?;
 
         // 3. 调用 addon_init
-        //    # Safety: 插件保证 addon_init 是纯函数（不访问已释放内存）。
-        //    使用 catch_unwind 防止插件 panic 穿透 FFI 边界（否则为 UB）。
+        //    extern "Rust" 函数指针调用本身是安全的（同进程 Rust ABI）。
+        //    使用 catch_unwind 防止插件 panic 穿透动态库边界（否则为 UB）。
         //    AssertUnwindSafe 在此安全：函数指针不捕获任何 Rust 状态。
-        let init_result = panic::catch_unwind(AssertUnwindSafe(|| unsafe { init_symbol() }))
-            .map_err(|payload| {
+        let init_result =
+            panic::catch_unwind(AssertUnwindSafe(*init_symbol)).map_err(|payload| {
                 let msg = if let Some(s) = payload.downcast_ref::<&str>() {
                     s.to_string()
                 } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -344,7 +359,8 @@ impl HotAddonLoader {
         }
     }
 
-    /// 获取注册表 Arc（供框架内部使用）
+    /// 获取注册表 Arc（供框架内部使用，如 axum 路由挂载）
+    #[allow(dead_code)]
     pub(crate) fn registry(&self) -> Arc<RwLock<HashMap<String, LoadedAddon>>> {
         self.registry.clone()
     }

@@ -1,0 +1,14 @@
+[package]
+name = "sz-rust-addon-example"
+version = "1.0.0"
+edition = "2024"
+description = "sz-rust 热加载 Addon 示例模板"
+publish = false
+
+[lib]
+# cdylib 是动态库的标准 crate-type，跨平台（.dll / .so / .dylib）
+crate-type = ["cdylib"]
+
+[dependencies]
+# Addon 只需依赖 core，使用其导出的 AddonInitResult
+sz-rust-core = { path = "../../sz-rust-core", features = ["hot-reload"] }

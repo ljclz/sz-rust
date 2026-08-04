@@ -17,6 +17,7 @@ members = [
     "packages/sz-rust-facade-tests",
     "packages/sz-rust-macros",
     "packages/sz-rust-examples",
+    "packages/sz-rust-examples/addon-hot-reload-example",
     "packages/sz-rust-addons-loader",
     "packages/sz-rust-addons-operate",
     "packages/sz-rust-addons-crm",
