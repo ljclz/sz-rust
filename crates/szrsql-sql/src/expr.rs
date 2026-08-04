@@ -2988,6 +2988,42 @@ impl ExprEvaluator {
                 }
                 Ok(Value::Json(serde_json::Value::Object(obj)))
             }
+            // P4-5: 向量距离函数（SQL 替代 pgvector 的 <-> / <=> / <+> 运算符）
+            "cosine_distance" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                match (&arg_vals[0], &arg_vals[1]) {
+                    (Value::Vector(a), Value::Vector(b)) => {
+                        Ok(Value::Float64(a.cosine_distance(b)))
+                    }
+                    (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+                    _ => Err(EvalError::TypeMismatch {
+                        expected: "vector",
+                        actual: "non-vector arguments",
+                    }),
+                }
+            }
+            "l2_distance" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                match (&arg_vals[0], &arg_vals[1]) {
+                    (Value::Vector(a), Value::Vector(b)) => Ok(Value::Float64(a.l2_distance(b))),
+                    (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+                    _ => Err(EvalError::TypeMismatch {
+                        expected: "vector",
+                        actual: "non-vector arguments",
+                    }),
+                }
+            }
+            "dot_product" => {
+                check_arg_count(&fname, &arg_vals, 2)?;
+                match (&arg_vals[0], &arg_vals[1]) {
+                    (Value::Vector(a), Value::Vector(b)) => Ok(Value::Float64(a.dot_product(b))),
+                    (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+                    _ => Err(EvalError::TypeMismatch {
+                        expected: "vector",
+                        actual: "non-vector arguments",
+                    }),
+                }
+            }
             _ => {
                 // P0-SQL-8 修复：内建函数表中未命中时，回退到 UDF 注册系统查询。
                 // try_call_udf 返回 None 表示 UDF 也不存在，此时按原逻辑返回 FunctionNotFound；
@@ -3377,6 +3413,7 @@ fn value_type_name(v: &Value) -> &'static str {
         Value::Json(_) => "json",
         Value::TsVector(_) => "tsvector",
         Value::TsQuery(_) => "tsquery",
+        Value::Vector(_) => "vector",
     }
 }
 
@@ -3410,6 +3447,7 @@ fn value_to_text(v: &Value) -> Option<String> {
         Value::Blob(b) => Some(format!("blob({b:?})")),
         Value::TsVector(t) => Some(t.to_pg_string()),
         Value::TsQuery(q) => Some(q.to_pg_string()),
+        Value::Vector(v) => Some(v.to_string()),
         Value::Null => None,
         Value::Array(_) | Value::Range(_) | Value::Json(_) => None,
     }

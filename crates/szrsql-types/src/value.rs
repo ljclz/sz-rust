@@ -1,7 +1,7 @@
 //! SzRSQL 标量值类型 — 对应 `SzRSQL技术实现方案.md` 9.1 节。
 //!
 //! 设计要点：
-//! - 15 个变体覆盖 SQL 标准类型 + 数组/枚举/范围/JSON/全文检索
+//! - 16 个变体覆盖 SQL 标准类型 + 数组/枚举/范围/JSON/全文检索/向量
 //! - `Decimal(i128, u8)` 用定点数表示，避免 f64 精度损失
 //! - `Date(i32)` / `Timestamp(i64)` 用整数偏移，避免时区/日历库依赖
 //! - `Json(serde_json::Value)` 直接复用生态，避免重新发明
@@ -47,6 +47,10 @@ pub enum Value {
     TsVector(TsVector),
     /// PG tsquery — 全文检索查询表达式（Phase 3.33）
     TsQuery(TsQuery),
+    /// 向量类型 — AI 嵌入向量（Phase P4-5）
+    ///
+    /// 存储为 `Vec<f64>`，支持余弦相似度、L2 距离、点积等运算。
+    Vector(VectorValue),
 }
 
 // =====================================================================
@@ -733,10 +737,96 @@ impl TsQueryParser {
 }
 
 // =====================================================================
-//  列类型（用于类型转换的目标类型）
+//  向量类型（Phase P4-5）
 // =====================================================================
 
-/// 列类型枚举 — 用于 Schema 定义和类型转换
+/// AI 嵌入向量 — 存储为 `Vec<f64>`，支持相似度运算
+///
+/// 语法：`CAST('[1.0, 2.0, 3.0]' AS VECTOR(3))` 或列定义 `emb VECTOR(3)`。
+/// 维度在 `ColumnType::Vector(dims)` 中声明，运行时校验实际向量维度匹配。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VectorValue {
+    /// 向量分量（f64 列表）
+    pub data: Vec<f64>,
+}
+
+impl VectorValue {
+    /// 从 f64 向量构造
+    pub fn new(data: Vec<f64>) -> Self {
+        Self { data }
+    }
+
+    /// 维度（分量数）
+    pub fn dims(&self) -> usize {
+        self.data.len()
+    }
+
+    /// 从文本字面量解析 — 支持 `'[1.0, 2.0, 3.0]'` 和 `'[1,2,3]'` 格式
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+        if !s.starts_with('[') || !s.ends_with(']') {
+            return Err(format!("vector literal must be bracketed: {s}"));
+        }
+        let inner = s[1..s.len() - 1].trim();
+        if inner.is_empty() {
+            return Ok(Self { data: Vec::new() });
+        }
+        let mut data = Vec::new();
+        for part in inner.split(',') {
+            let trimmed = part.trim();
+            let v: f64 = trimmed.parse().map_err(|e| {
+                format!("cannot parse '{trimmed}' as f64 in vector: {e}")
+            })?;
+            data.push(v);
+        }
+        Ok(Self { data })
+    }
+
+    /// 格式化为 `[1.0, 2.0, 3.0]` 形式
+    pub fn to_string(&self) -> String {
+        format!(
+            "[{}]",
+            self.data
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+
+    /// 余弦距离：`1 - cos(θ)`，范围 [0, 2]，越小越相似
+    pub fn cosine_distance(&self, other: &Self) -> f64 {
+        if self.data.is_empty() || other.data.is_empty() {
+            return f64::NAN;
+        }
+        let dot: f64 = self.data.iter().zip(other.data.iter()).map(|(a, b)| a * b).sum();
+        let mag_a: f64 = self.data.iter().map(|a| a * a).sum::<f64>().sqrt();
+        let mag_b: f64 = other.data.iter().map(|b| b * b).sum::<f64>().sqrt();
+        if mag_a == 0.0 || mag_b == 0.0 {
+            return f64::NAN;
+        }
+        1.0 - dot / (mag_a * mag_b)
+    }
+
+    /// L2（欧氏）距离：`sqrt(Σ(aᵢ - bᵢ)²)`
+    pub fn l2_distance(&self, other: &Self) -> f64 {
+        self.data
+            .iter()
+            .zip(other.data.iter())
+            .map(|(a, b)| (a - b).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    /// 点积（内积）：`Σ(aᵢ × bᵢ)`
+    pub fn dot_product(&self, other: &Self) -> f64 {
+        self.data.iter().zip(other.data.iter()).map(|(a, b)| a * b).sum()
+    }
+}
+
+// =====================================================================
+//  列类型（用于类型转换的目标类型）
+// =====================================================================
 ///
 /// 注意：与 `Value` 不同，`ColumnType` 描述的是"类型"而不是"值"。
 /// 例如 `ColumnType::Decimal { precision: 10, scale: 2 }` 描述一个
@@ -770,6 +860,8 @@ pub enum ColumnType {
     TsVector,
     /// PG tsquery — 全文检索查询表达式（Phase 3.33）
     TsQuery,
+    /// AI 嵌入向量 — `VECTOR(dims)`，dims 为维度数（Phase P4-5）
+    Vector(usize),
 }
 
 // =====================================================================
@@ -833,6 +925,7 @@ impl Value {
             Value::Json(_) => ColumnType::Json,
             Value::TsVector(_) => ColumnType::TsVector,
             Value::TsQuery(_) => ColumnType::TsQuery,
+            Value::Vector(v) => ColumnType::Vector(v.dims()),
         }
     }
 
@@ -962,6 +1055,8 @@ impl Value {
             (Value::TsVector(t), ColumnType::Text) => Ok(Value::Text(t.to_pg_string())),
             // TsQuery → Text（PG 文本格式）
             (Value::TsQuery(q), ColumnType::Text) => Ok(Value::Text(q.to_pg_string())),
+            // Vector → Text（`[1.0, 2.0, 3.0]` 格式）
+            (Value::Vector(v), ColumnType::Text) => Ok(Value::Text(v.to_string())),
             // 其他组合 → 隐式不允许
             _ => Err(CastError::ImplicitNotAllowed),
         }
@@ -1062,6 +1157,12 @@ impl Value {
                 .map(Value::TsQuery)
                 .map_err(|e| CastError::Impossible {
                     reason: format!("cannot parse '{s}' as tsquery: {e}"),
+                }),
+            // Text → Vector（`'[1.0, 2.0, 3.0]'` 格式解析）
+            (Value::Text(s), ColumnType::Vector(_)) => VectorValue::parse(&s)
+                .map(Value::Vector)
+                .map_err(|e| CastError::Impossible {
+                    reason: format!("cannot parse '{s}' as vector: {e}"),
                 }),
             // 其他组合即使显式也不允许（如 Int64 → Array）
             _ => Err(CastError::ImplicitNotAllowed),

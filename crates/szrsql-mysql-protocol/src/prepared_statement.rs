@@ -298,6 +298,11 @@ fn value_to_sql_literal(value: &Value) -> String {
             format!("'{}'", escaped)
         }
         Value::TsQuery(_) => "NULL".to_string(),
+        // P4-5: 向量以文本字面量输出
+        Value::Vector(v) => {
+            let escaped = v.to_string().replace('\'', "''");
+            format!("'{}'", escaped)
+        }
     }
 }
 
@@ -905,6 +910,10 @@ fn encode_binary_value(value: &Value, buf: &mut Vec<u8>) {
         }
         Value::TsQuery(_) => {
             write_lenenc_string(buf, b"");
+        }
+        // P4-5: 向量以文本格式输出
+        Value::Vector(v) => {
+            write_lenenc_string(buf, v.to_string().as_bytes());
         }
     }
 }

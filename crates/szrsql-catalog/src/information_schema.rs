@@ -325,6 +325,7 @@ fn sql_data_type(ct: &ColumnType) -> String {
         ColumnType::Json => "json".into(),
         ColumnType::TsVector => "tsvector".into(),
         ColumnType::TsQuery => "tsquery".into(),
+        ColumnType::Vector(_) => "VECTOR".into(),
     }
 }
 

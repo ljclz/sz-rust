@@ -360,6 +360,13 @@ impl TdsRow {
             Value::TsQuery(_) => {
                 buf.extend_from_slice(&0u16.to_le_bytes());
             }
+            // P4-5: 向量以 UTF-16 LE 文本输出
+            Value::Vector(v) => {
+                let s = v.to_string();
+                let utf16 = encode_utf16_le(&s);
+                buf.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
+                buf.extend_from_slice(&utf16);
+            }
         }
         buf
     }

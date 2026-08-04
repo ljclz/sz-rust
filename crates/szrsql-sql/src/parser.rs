@@ -3022,7 +3022,7 @@ fn convert_data_type(dt: DataType) -> Result<ColumnType, ParseError> {
                 .collect();
             ColumnType::Enum(values)
         }
-        DataType::Custom(name, _) => {
+        DataType::Custom(name, modifiers) => {
             // 自定义类型尝试匹配常见名称
             let name_str = convert_object_name_to_string(&name).to_lowercase();
             match name_str.as_str() {
@@ -3036,6 +3036,14 @@ fn convert_data_type(dt: DataType) -> Result<ColumnType, ParseError> {
                 // Phase 3.33: PG 全文检索类型
                 "tsvector" => ColumnType::TsVector,
                 "tsquery" => ColumnType::TsQuery,
+                // Phase P4-5: AI 嵌入向量类型 `VECTOR(dims)`
+                "vector" => {
+                    let dims = modifiers
+                        .first()
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .unwrap_or(0);
+                    ColumnType::Vector(dims)
+                }
                 // Phase F-10: PG 网络类型 / 几何类型 / XML — 统一存为 Text
                 // - inet/cidr/macaddr：网络地址以字符串表示
                 // - point/line/circle 等：几何类型存为字符串（无 PostGIS 支持）
@@ -3183,7 +3191,8 @@ fn convert_column_def(col: SpColumnDef) -> Result<ColumnDefinition, ParseError> 
         // 排除已知常见类型别名（int/text/bool/serial 等）
         match name_str.as_str() {
             "int" | "integer" | "bigint" | "text" | "varchar" | "bool" | "boolean" | "double"
-            | "float" | "real" | "serial" | "bigserial" | "smallserial" => None,
+            | "float" | "real" | "serial" | "bigserial" | "smallserial" | "vector"
+            | "tsvector" | "tsquery" => None,
             _ => Some(name_str),
         }
     } else {

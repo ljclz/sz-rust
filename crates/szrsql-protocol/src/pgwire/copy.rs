@@ -270,6 +270,8 @@ pub fn value_to_string(v: &Value, null_string: &str) -> String {
         Value::Range(r) => format!("{r:?}"),
         Value::TsVector(tv) => tv.to_pg_string(),
         Value::TsQuery(tq) => tq.to_pg_string(),
+        // P4-5: 向量以文本格式输出
+        Value::Vector(v) => v.to_string(),
     }
 }
 

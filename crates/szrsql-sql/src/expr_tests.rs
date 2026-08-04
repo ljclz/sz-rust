@@ -16,7 +16,7 @@
 
 use super::expr::{EvalError, ExprEvaluator, RowContext};
 use crate::ast::{BinaryOp, Expr, UnaryOp};
-use szrsql_types::value::{ColumnType, Value};
+use szrsql_types::value::{ColumnType, Value, VectorValue};
 
 // =====================================================================
 //  辅助函数
@@ -40,6 +40,10 @@ fn lit_bool(b: bool) -> Expr {
 
 fn lit_null() -> Expr {
     Expr::Literal(Value::Null)
+}
+
+fn lit_vector(data: Vec<f64>) -> Expr {
+    Expr::Literal(Value::Vector(VectorValue::new(data)))
 }
 
 fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
@@ -1087,4 +1091,136 @@ fn test_json_object_non_text_key_errors() {
     let e = func("json_object", vec![lit_i64(1), lit_text("v")]);
     let r = eval(&e);
     assert!(r.is_err(), "expected type error for non-text key, got {r:?}");
+}
+
+// =====================================================================
+//  向量类型与距离函数（P4-5）
+// =====================================================================
+
+#[test]
+fn test_vector_value_parse() {
+    let v = VectorValue::parse("[1.0, 2.0, 3.0]").unwrap();
+    assert_eq!(v.dims(), 3);
+    assert_eq!(v.data, vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn test_vector_value_to_string() {
+    let v = VectorValue::new(vec![1.5, 2.5]);
+    assert_eq!(v.to_string(), "[1.5, 2.5]");
+}
+
+#[test]
+fn test_vector_cosine_distance() {
+    // 相同向量 → 余弦距离 0
+    let a = VectorValue::new(vec![1.0, 0.0]);
+    let b = VectorValue::new(vec![1.0, 0.0]);
+    assert!((a.cosine_distance(&b) - 0.0).abs() < 1e-9);
+
+    // 正交向量 → 余弦距离 1
+    let a = VectorValue::new(vec![1.0, 0.0]);
+    let b = VectorValue::new(vec![0.0, 1.0]);
+    assert!((a.cosine_distance(&b) - 1.0).abs() < 1e-9);
+
+    // 反向向量 → 余弦距离 2
+    let a = VectorValue::new(vec![1.0, 0.0]);
+    let b = VectorValue::new(vec![-1.0, 0.0]);
+    assert!((a.cosine_distance(&b) - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn test_vector_l2_distance() {
+    let a = VectorValue::new(vec![0.0, 0.0]);
+    let b = VectorValue::new(vec![3.0, 4.0]);
+    assert!((a.l2_distance(&b) - 5.0).abs() < 1e-9);
+
+    // 相同向量 → 0
+    let a = VectorValue::new(vec![1.0, 2.0]);
+    assert!((a.l2_distance(&a) - 0.0).abs() < 1e-9);
+}
+
+#[test]
+fn test_vector_dot_product() {
+    let a = VectorValue::new(vec![1.0, 2.0, 3.0]);
+    let b = VectorValue::new(vec![4.0, 5.0, 6.0]);
+    assert!((a.dot_product(&b) - 32.0).abs() < 1e-9); // 1*4+2*5+3*6=32
+}
+
+#[test]
+fn test_vector_cast_text_to_vector() {
+    let e = Expr::Cast {
+        expr: Box::new(lit_text("[1.0, 2.0, 3.0]")),
+        data_type: ColumnType::Vector(3),
+    };
+    match eval(&e) {
+        Ok(Value::Vector(v)) => assert_eq!(v.data, vec![1.0, 2.0, 3.0]),
+        other => panic!("expected Vector, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_vector_cast_vector_to_text() {
+    let e = Expr::Cast {
+        expr: Box::new(lit_vector(vec![1.0, 2.0])),
+        data_type: ColumnType::Text,
+    };
+    match eval(&e) {
+        Ok(Value::Text(s)) => assert_eq!(s, "[1, 2]"),
+        other => panic!("expected Text, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_vector_column_type() {
+    let v = Value::Vector(VectorValue::new(vec![1.0, 2.0, 3.0]));
+    assert_eq!(v.column_type(), ColumnType::Vector(3));
+}
+
+#[test]
+fn test_cosine_distance_function() {
+    let a = VectorValue::new(vec![1.0, 0.0]);
+    let b = VectorValue::new(vec![0.0, 1.0]);
+    let e = func("cosine_distance", vec![lit_vector(vec![1.0, 0.0]), lit_vector(vec![0.0, 1.0])]);
+    if let Value::Float64(f) = eval(&e).unwrap() {
+        assert!((f - 1.0).abs() < 1e-9, "got {f}");
+    } else { panic!("expected Float64"); }
+}
+
+#[test]
+fn test_l2_distance_function() {
+    let e = func("l2_distance", vec![lit_vector(vec![0.0, 0.0]), lit_vector(vec![3.0, 4.0])]);
+    if let Value::Float64(f) = eval(&e).unwrap() {
+        assert!((f - 5.0).abs() < 1e-9, "got {f}");
+    } else { panic!("expected Float64"); }
+}
+
+#[test]
+fn test_dot_product_function() {
+    let e = func("dot_product", vec![lit_vector(vec![1.0, 2.0]), lit_vector(vec![3.0, 4.0])]);
+    if let Value::Float64(f) = eval(&e).unwrap() {
+        assert!((f - 11.0).abs() < 1e-9, "got {f}");
+    } else { panic!("expected Float64"); } // 1*3+2*4=11
+}
+
+#[test]
+fn test_vector_distance_null_propagation() {
+    // 任一 NULL → NULL
+    let e = func("cosine_distance", vec![lit_null(), lit_vector(vec![1.0, 0.0])]);
+    assert_eq!(eval(&e).unwrap(), Value::Null);
+
+    let e = func("l2_distance", vec![lit_vector(vec![1.0, 0.0]), lit_null()]);
+    assert_eq!(eval(&e).unwrap(), Value::Null);
+
+    let e = func("dot_product", vec![lit_null(), lit_null()]);
+    assert_eq!(eval(&e).unwrap(), Value::Null);
+}
+
+#[test]
+fn test_vector_distance_type_mismatch() {
+    // 非向量参数 → TypeMismatch
+    let e = func("cosine_distance", vec![lit_i64(1), lit_i64(2)]);
+    assert!(matches!(eval(&e), Err(EvalError::TypeMismatch { .. })));
+
+    let e = func("l2_distance", vec![lit_text("a"), lit_text("b")]);
+    assert!(matches!(eval(&e), Err(EvalError::TypeMismatch { .. })));
 }

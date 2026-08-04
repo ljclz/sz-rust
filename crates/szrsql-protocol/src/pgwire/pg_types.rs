@@ -79,6 +79,7 @@ pub fn column_type_oid(ct: &ColumnType) -> u32 {
         ColumnType::Enum(_) => oid::TEXT,
         ColumnType::Array(_) => oid::ANY_ARRAY,
         ColumnType::Range(_) => oid::UNKNOWN,
+        ColumnType::Vector(_) => oid::TEXT, // P4-5: 向量类型无原生 PG OID，降级 TEXT
     }
 }
 
@@ -103,7 +104,8 @@ pub fn column_type_size(ct: &ColumnType) -> i16 {
         | ColumnType::Range(_)
         | ColumnType::Json
         | ColumnType::TsVector
-        | ColumnType::TsQuery => -1,
+        | ColumnType::TsQuery
+        | ColumnType::Vector(_) => -1,
     }
 }
 
@@ -152,6 +154,9 @@ pub fn value_to_text(value: &Value) -> Option<String> {
         Value::TsQuery(tq) => Some(tq.to_pg_string()),
 
         Value::Range(r) => Some(format_range(r)),
+
+        // P4-5: 向量以文本格式传输
+        Value::Vector(v) => Some(v.to_string()),
     }
 }
 
@@ -215,7 +220,8 @@ pub fn value_to_binary(value: &Value) -> Option<Vec<u8>> {
         | Value::Array(_)
         | Value::TsVector(_)
         | Value::TsQuery(_)
-        | Value::Range(_) => None,
+        | Value::Range(_)
+        | Value::Vector(_) => None,
     }
 }
 

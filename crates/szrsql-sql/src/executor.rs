@@ -11158,6 +11158,7 @@ fn column_type_to_sql(ty: &szrsql_types::value::ColumnType) -> String {
         ColumnType::Json => "JSON".into(),
         ColumnType::TsVector => "TSVECTOR".into(),
         ColumnType::TsQuery => "TSQUERY".into(),
+        ColumnType::Vector(d) => format!("VECTOR({d})"),
     }
 }
 

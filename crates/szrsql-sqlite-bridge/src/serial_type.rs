@@ -125,7 +125,8 @@ pub fn encode_value(value: &Value) -> (u64, Vec<u8>) {
         | Value::Range(_)
         | Value::Json(_)
         | Value::TsVector(_)
-        | Value::TsQuery(_) => {
+        | Value::TsQuery(_)
+        | Value::Vector(_) => {
             // 使用 Value 的 cast_explicit 转为 Text，再编码
             let text = value_to_text(value);
             let bytes = text.as_bytes();
@@ -227,7 +228,8 @@ fn value_to_json(value: &Value) -> serde_json::Value {
         | Value::Range(_)
         | Value::Json(_)
         | Value::TsVector(_)
-        | Value::TsQuery(_) => {
+        | Value::TsQuery(_)
+        | Value::Vector(_) => {
             serde_json::json!(value_to_text(value))
         }
     }

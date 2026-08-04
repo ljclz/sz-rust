@@ -85,6 +85,12 @@ fn hash_value<H: Hasher>(value: &SzValue, hasher: &mut H) {
                 hash_value(b, hasher);
             }
         }
+        SzValue::Vector(v) => {
+            // 向量按分量序列化哈希
+            for f in &v.data {
+                f.to_bits().hash(hasher);
+            }
+        }
         SzValue::Json(v) => {
             // JSON 值按规范化字符串哈希
             if let Ok(s) = serde_json::to_string(v) {

@@ -394,6 +394,7 @@ fn value_type_name(v: &Value) -> &'static str {
         Value::Json(_) => "Json",
         Value::TsVector(_) => "TsVector",
         Value::TsQuery(_) => "TsQuery",
+        Value::Vector(_) => "Vector",
     }
 }
 

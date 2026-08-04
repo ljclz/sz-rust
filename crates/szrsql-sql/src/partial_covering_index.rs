@@ -102,6 +102,7 @@ fn value_type_discriminant(v: &Value) -> u8 {
         Value::Json(_) => 12,
         Value::TsVector(_) => 13,
         Value::TsQuery(_) => 14,
+        Value::Vector(_) => 15,
     }
 }
 

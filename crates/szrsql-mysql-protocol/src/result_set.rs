@@ -127,6 +127,8 @@ impl ResultSetEncoder {
             Value::Range(_) => b"".to_vec(),
             Value::TsVector(tv) => tv.to_pg_string().into_bytes(),
             Value::TsQuery(_) => b"".to_vec(),
+            // P4-5: 向量以文本格式输出
+            Value::Vector(v) => v.to_string().into_bytes(),
         }
     }
 

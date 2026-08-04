@@ -355,6 +355,7 @@ fn estimate_row_size(row: &DecodedRow) -> u64 {
             SzValue::Range(_) => 32,
             SzValue::TsVector(t) => t.lexemes.len() as u64 * 32,
             SzValue::TsQuery(_) => 32, // 估算
+        SzValue::Vector(v) => v.dims() as u64 * 8,
         })
         .sum()
 }
@@ -384,6 +385,7 @@ fn format_value_for_log(value: &SzValue) -> String {
         SzValue::Range(_) => "[range]".to_string(),
         SzValue::TsVector(_) => "[tsvector]".to_string(),
         SzValue::TsQuery(_) => "[tsquery]".to_string(),
+        SzValue::Vector(v) => format!("[vector({})]", v.dims()),
     }
 }
 

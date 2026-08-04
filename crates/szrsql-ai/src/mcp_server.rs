@@ -2425,6 +2425,7 @@ fn column_type_to_string(ct: &szrsql_types::value::ColumnType) -> String {
         ColumnType::Json => "JSON".to_string(),
         ColumnType::TsVector => "TSVECTOR".to_string(),
         ColumnType::TsQuery => "TSQUERY".to_string(),
+        ColumnType::Vector(d) => format!("VECTOR({d})").to_string(),
     }
 }
 
