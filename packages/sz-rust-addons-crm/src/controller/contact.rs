@@ -24,7 +24,11 @@ impl ContactController {
             if kw.is_empty() {
                 Vec::new()
             } else {
-                vec![WhereCondition::new("name", WhereOp::Like, OrmValue::String(kw.to_string()))]
+                vec![WhereCondition::new(
+                    "name",
+                    WhereOp::Like,
+                    OrmValue::String(kw.to_string()),
+                )]
             }
         } else {
             Vec::new()
@@ -65,7 +69,11 @@ impl ContactController {
     }
 
     /// 更新联系人（部分更新）
-    pub async fn update<R: Repository<Contact, Key = OrmValue>>(repo: &R, id: i64, body: Value) -> Value {
+    pub async fn update<R: Repository<Contact, Key = OrmValue>>(
+        repo: &R,
+        id: i64,
+        body: Value,
+    ) -> Value {
         let key = OrmValue::I64(id);
         let mut contact = match repo.find_by_id(&key) {
             Ok(Some(c)) => c,
@@ -76,12 +84,16 @@ impl ContactController {
             macro_rules! patch {
                 ($field:ident, str) => {
                     if let Some(v) = obj.get(stringify!($field)) {
-                        if let Some(s) = v.as_str() { contact.$field = s.to_string(); }
+                        if let Some(s) = v.as_str() {
+                            contact.$field = s.to_string();
+                        }
                     }
                 };
                 ($field:ident, i64) => {
                     if let Some(v) = obj.get(stringify!($field)) {
-                        if let Some(n) = v.as_i64() { contact.$field = n; }
+                        if let Some(n) = v.as_i64() {
+                            contact.$field = n;
+                        }
                     }
                 };
             }

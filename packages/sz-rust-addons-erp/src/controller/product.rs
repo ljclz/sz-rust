@@ -10,14 +10,28 @@ pub struct ProductController;
 
 impl ProductController {
     pub async fn list<R: Repository<Product, Key = OrmValue>>(
-        repo: &R, page: u64, page_size: u64, category: Option<String>,
+        repo: &R,
+        page: u64,
+        page_size: u64,
+        category: Option<String>,
     ) -> Value {
         let conditions: Vec<WhereCondition> = if let Some(c) = category.as_deref() {
-            if c.is_empty() { Vec::new() }
-            else { vec![WhereCondition::new("category", WhereOp::Eq, OrmValue::String(c.to_string()))] }
-        } else { Vec::new() };
+            if c.is_empty() {
+                Vec::new()
+            } else {
+                vec![WhereCondition::new(
+                    "category",
+                    WhereOp::Eq,
+                    OrmValue::String(c.to_string()),
+                )]
+            }
+        } else {
+            Vec::new()
+        };
         match repo.paginate_by(&conditions, page, page_size) {
-            Ok(pr) => json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}}),
+            Ok(pr) => {
+                json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}})
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }
@@ -45,7 +59,11 @@ impl ProductController {
         }
     }
 
-    pub async fn update<R: Repository<Product, Key = OrmValue>>(repo: &R, id: i64, body: Value) -> Value {
+    pub async fn update<R: Repository<Product, Key = OrmValue>>(
+        repo: &R,
+        id: i64,
+        body: Value,
+    ) -> Value {
         let key = OrmValue::I64(id);
         let mut product = match repo.find_by_id(&key) {
             Ok(Some(d)) => d,
@@ -54,13 +72,36 @@ impl ProductController {
         };
         if let Some(obj) = body.as_object() {
             macro_rules! patch {
-                ($field:ident, str) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(s) = v.as_str() { product.$field = s.to_string(); } } };
-                ($field:ident, f64) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(n) = v.as_f64() { product.$field = n; } } };
-                ($field:ident, i64) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(n) = v.as_i64() { product.$field = n; } } };
+                ($field:ident, str) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(s) = v.as_str() {
+                            product.$field = s.to_string();
+                        }
+                    }
+                };
+                ($field:ident, f64) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(n) = v.as_f64() {
+                            product.$field = n;
+                        }
+                    }
+                };
+                ($field:ident, i64) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(n) = v.as_i64() {
+                            product.$field = n;
+                        }
+                    }
+                };
             }
-            patch!(name, str); patch!(sku, str); patch!(price, f64);
-            patch!(stock, i64); patch!(supplier_id, i64); patch!(category, str);
-            patch!(status, str); patch!(remark, str);
+            patch!(name, str);
+            patch!(sku, str);
+            patch!(price, f64);
+            patch!(stock, i64);
+            patch!(supplier_id, i64);
+            patch!(category, str);
+            patch!(status, str);
+            patch!(remark, str);
         }
         match repo.save(product) {
             Ok(saved) => json!({"code": 0, "msg": "updated", "data": saved}),

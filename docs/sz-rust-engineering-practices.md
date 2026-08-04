@@ -1,10 +1,10 @@
 # SZ-Rust 工程化实践规范
 
-> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，10 workspace 包，4206 测试）
-> **项目版本**：v0.2.0
+> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，14+ workspace 包，3352 测试）
+> **项目版本**：v0.3.0
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
-> **文档版本**：v1.1（2026-07-26）
+> **文档版本**：v1.2（2026-08-02）
 
 ---
 
@@ -487,6 +487,10 @@ flowchart LR
 | W-3 | 路径遍历 | 文件下载接口未校验路径 | 门禁 9 路径遍历扫描 + canonicalize |
 | W-4 | 路由安全 | 路由参数无类型校验 | 五维审查（安全性）+ 参数校验中间件 |
 | W-5 | 认证绕过 | JWT 比较未用常量时间 | 五维审查（安全性）+ subtle::ConstantTimeEq |
+| W-6 | thread_local 跨 await 失效 | 多租户场景下 await 后 thread_local 可能切换线程 | ADR-013 记录限制 + 调用方重新验证 TenantContext |
+| W-7 | unsafe_code 策略变更 | forbid → deny + 模块级 allow 打开安全缺口 | ADR-016 + 所有 unsafe 块必须有 // SAFETY: 注释 + clippy 强制 |
+| W-8 | 探索性实现逃逸 | 热加载等探索性功能未经生产验证即合入 main | ADR-016 标记"探索性" + 禁用生产卸载路径 |
+| W-9 | Feature 重依赖编译膨胀 | graphql/grpc 引入 tonic/prost 等重依赖 | Feature 隔离（默认不启用）+ p2-addons 组合开关 |
 
 ---
 
@@ -501,9 +505,46 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-07-26
+> **最后更新**: 2026-08-03
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.1
+> **规范版本**: v1.3
+>
+> **v1.3 变更摘要**（2026-08-03，两次更新）：
+> - P2 拆包完成：sz-rust-core 57K LOC → 23.6K LOC（−58.7%），提取 7 个 facade crate 共 42.4K LOC
+> - 新增 7 个 facade crate：sz-rust-{orm,http,cache,state,infra,auth,pay}-facade，通过 `pub use X as <module>` 重导出
+> - 向后兼容：`sz_rust_core::<module>::*` 路径全部保留，内部模块无需改动
+> - 清理死代码：删除 sz-rust-core/src/ 中已提取的 9 个源文件 + 2 个子目录（config/validate/static_files/upload/debug_page/wechat/oauth/gateway/pay）
+> - 统一 infra-facade 依赖路径：`sz-orm-storage` 直接依赖改为通过 `sz-rust-orm-facade` 间接依赖
+> - 新增 facade README：7 个 facade crate 各写 README.md
+> - 新增迁移指南：`docs/facade-migration-guide.md`（下游业务包从 sz-rust-core 迁移到 facade crate 的完整指南）
+> - 新增 ADR-017 更新：记录 7 个 facade 提取详情、剩余模块阻塞原因
+> - 新增开发过程审查报告（`docs/audit/2026-08-03-P2拆包开发过程审查与优化报告.md`）：四评 97.50/100（6.1~6.5 全部完成，18 条铁律全 ✅，审查盲区清零）
+> - sed 副作用专项审计：4 项检查全部通过（crate::残留/路径遍历防护/向后兼容路径/文档注释）
+> - 新增并发边界测试（4 个，state-facade）+ 混沌测试（3 个，cache-facade），共 7 个新测试全部通过
+> - 新增 facade 集成测试 crate（`sz-rust-facade-tests`）：12 个 P9-FACADE 跨 facade 集成测试（cache+state / orm+pay+http / auth+infra / 端到端业务流）
+> - 新增向后兼容路径测试（`sz-rust-core/tests/backward_compat.rs`）：6 个 P9-COMPAT 测试（旧路径转发 + 类型同一性编译期验证）
+> - 修复 url_decode UTF-8 缺陷：`%XX` 逐字节转 char → 字节收集 + `from_utf8_lossy`（对齐 PHP urldecode），新增 2 个回归测试
+> - 覆盖率验证：llvm-cov 实测 7 facade 行覆盖率全部 ≥ 94.8%；CI 新增 coverage job（tarpaulin --fail-under 85）
+> - 编译时间监控：`scripts/check-compile-time.sh` + 基线 `scripts/compile-time-baseline.json`（总 57.38s）+ CI compile-time job
+> - 内存泄漏检测：`examples/rss_stability.rs`（150 周期 30,000 次创建/释放，RSS 增量 0.21 MiB）+ CI miri job
+> - 新增 ADR-018：facade 独立发布策略（0.x 统一版本 / 1.0 后 semver 独立）
+> - P3 剩余模块解耦（ADR-019）：四簇提取 4 个新 facade（orm-ext / router / middleware / mvc，~34.6K LOC），6 个阻塞模块（view/controller/guard/hooks/model/routing）+ middleware 簇 + router/websocket_route/openapi 全部提取；解 container↔request_scope 双向环（ScopeId 迁移至 middleware-facade）；安全关键中间件保留 @REVIEW_REQUIRED；sz-rust-core 57K → ~9.2K LOC（−83.9%）
+> - 测试数量：workspace 全量 4,983 passed，0 failed（--jobs 1 规避 Cargo 并发编译 crate 解析竞争）
+> - workspace 包数量 14 → 26（11 个 facade + 集成测试 crate）
+> - 竞争力深化（4.3 六项全达标）：blog/ecommerce/iot 3 个完整示例；criterion 22 项基准（docs/benchmark-report.md）；错误消息 i18n 本地化（BaseException.message_key + mvc i18n_error）；OpenAPI 从路由配置自动生成（ecommerce /openapi.json 实测）；sz-rust-mcp crate（5 工具 + stdio JSON-RPC）；missing_docs 门禁全绿（-D missing_docs 26 crate 0 错误，修复 4 处 doc 缺陷）
+> - 实测评测报告（`docs/audit/2026-08-03-基于实测的能力评测报告.md`）：全部结论基于命令输出；**实测推翻两处文档结论**——①铁律 2 生产代码裸 unwrap 622 处（core 433，此前"✅"错误）；②fmt 门禁修复前有 275 处 diff（CI 实际红过）；实测证实 unsafe 收敛 3 处 FFI、RSS 3.86 MiB、路由 197ns、4,994 测试 0 失败
+> - CI 门禁：cargo-deny（许可证+安全+来源）+ cargo-udeps（未使用依赖）+ cargo-machete 均已集成
+> - 已知劣势：剩余模块耦合（view/controller/guard/hooks/model/routing 占 ~60%），待 P3 解耦
+>
+> **v1.2 变更摘要**（2026-08-02）：
+> - P2 能力评估完成：多租户 / GraphQL / gRPC / 热加载 / OpenAPI 自动扫描
+> - unsafe_code 策略变更：`#![forbid(unsafe_code)]` → `#![deny(unsafe_code)]` + 模块级 `#![allow(unsafe_code)]`（hot_reload FFI 需要）
+> - 新增 4 条 ADR（ADR-013~016），ADR 总数 12 → 16，密度 0.429 → 0.571
+> - 新增 P2 教训防御追溯项（W-6~W-9）：thread_local 跨 await 失效 / unsafe_code 策略变更 / 探索性实现逃逸 / Feature 重依赖
+> - 新增五维审查报告归档机制（`docs/audit/YYYY-MM-DD-<scope>五维审查报告.md`）
+> - 修复 log.rs 并行测试竞态（`id1.counter() + 1` → 单调递增断言）
+> - 测试数量：默认构建 3308 passed，p2-addons 构建 3352 passed（+35 新测试）
+> - workspace 包数量 10 → 14+（新增 sz-orm-graphql、sz-orm-grpc 路径依赖）
 >
 > **v1.1 变更摘要**（2026-07-26）：
 > - workspace 包数量 8 → 10（新增 sz-rust-tracing、sz-rust-observability）

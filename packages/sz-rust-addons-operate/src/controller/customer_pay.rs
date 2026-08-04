@@ -733,7 +733,7 @@ mod tests {
     struct TestSettledService;
 
     #[async_trait::async_trait]
-impl SettledService for TestSettledService {
+    impl SettledService for TestSettledService {
         async fn create_order(&self, data: &Value) -> Result<Value, String> {
             let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
             Ok(json!({
@@ -940,7 +940,7 @@ impl SettledService for TestSettledService {
 
     // -------------------- SettledService trait 测试 --------------------
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_settled_service_create_order_returns_order_detail() {
         let svc = TestSettledService;
         let result = svc.create_order(&json!({"order_id": 42})).await.unwrap();
@@ -948,22 +948,25 @@ impl SettledService for TestSettledService {
         assert_eq!(result["pay_res"]["msg"], "success");
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_settled_service_pay_buy_returns_order_detail() {
         let svc = TestSettledService;
-        let result = svc.pay_buy(&json!({"order_id": 10}), &json!({})).await.unwrap();
+        let result = svc
+            .pay_buy(&json!({"order_id": 10}), &json!({}))
+            .await
+            .unwrap();
         assert_eq!(result["order_id"], 10);
         assert_eq!(result["pay_res"]["msg"], "pay_buy_success");
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_settled_service_epay_check_ccb_returns_y() {
         let svc = TestSettledService;
         let result = svc.epay_check(&json!({"bank_name": "ccb"})).await.unwrap();
         assert_eq!(result["respObj"]["RESULT"], "Y");
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_settled_service_refund_success() {
         let svc = TestSettledService;
         let result = svc.refund(&json!({"order_id": 1}), &json!({})).await;
@@ -1048,7 +1051,7 @@ impl SettledService for TestSettledService {
     struct FailingSettledService;
 
     #[async_trait::async_trait]
-impl SettledService for FailingSettledService {
+    impl SettledService for FailingSettledService {
         async fn create_order(&self, _data: &Value) -> Result<Value, String> {
             Err("模拟下单失败：银行 API 不可用".to_string())
         }
@@ -1075,7 +1078,7 @@ impl SettledService for FailingSettledService {
     }
 
     #[async_trait::async_trait]
-impl SettledService for SelectiveFailingSettledService {
+    impl SettledService for SelectiveFailingSettledService {
         async fn create_order(&self, data: &Value) -> Result<Value, String> {
             if self.fail_create_order {
                 return Err("create_order 失败".to_string());
@@ -1396,7 +1399,7 @@ impl SettledService for SelectiveFailingSettledService {
         // T-2: 当 svc.create_order 返回空字符串错误时，应使用默认消息"支付订单创建失败"
         struct EmptyErrorService;
         #[async_trait::async_trait]
-impl SettledService for EmptyErrorService {
+        impl SettledService for EmptyErrorService {
             async fn create_order(&self, _data: &Value) -> Result<Value, String> {
                 Err(String::new())
             }
@@ -1429,7 +1432,7 @@ impl SettledService for EmptyErrorService {
         // T-2: 当 svc.refund 返回空字符串错误时，应使用默认消息"退款失败"
         struct EmptyErrorRefundService;
         #[async_trait::async_trait]
-impl SettledService for EmptyErrorRefundService {
+        impl SettledService for EmptyErrorRefundService {
             async fn create_order(&self, data: &Value) -> Result<Value, String> {
                 let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
                 Ok(json!({"order_id": order_id, "pay_res": {"msg": "success"}}))

@@ -198,9 +198,7 @@ fn bench_json_serialization(c: &mut Criterion) {
 fn bench_middleware_chain(c: &mut Criterion) {
     let mut group = c.benchmark_group("middleware_chain");
 
-    group.bench_function("default_chain", |b| {
-        b.iter(|| MiddlewareChain::default_chain())
-    });
+    group.bench_function("default_chain", |b| b.iter(MiddlewareChain::default_chain));
 
     group.bench_function("push_5", |b| {
         b.iter(|| {
@@ -275,6 +273,42 @@ fn bench_di_container(c: &mut Criterion) {
     group.finish();
 }
 
+// ============================================================================
+// 基准测试组 7：framework vs 原生（axum 风格静态路由对照，4.3 竞争力对比）
+// ============================================================================
+
+/// 原生风格：手写静态路由匹配（近似 axum matchit 的开销下限）
+fn bench_vs_native(c: &mut Criterion) {
+    let mut group = c.benchmark_group("framework_vs_native");
+
+    group.bench_function("native_match_static", |b| {
+        b.iter(|| {
+            let uri = "/oapc/customer/index";
+            let parts: Vec<&str> = uri.trim_start_matches('/').split('/').collect();
+            let _ = (parts.first(), parts.get(1), parts.get(2));
+        })
+    });
+
+    group.bench_function("parse_path_static_framework", |b| {
+        b.iter(|| parse_path("/oapc/customer/index"))
+    });
+
+    group.bench_function("native_match_with_query", |b| {
+        b.iter(|| {
+            let uri = "/oapc/customer/getListById?id=1&page=2";
+            let path = uri.split('?').next().unwrap_or(uri);
+            let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+            let _ = (parts.first(), parts.get(1), parts.get(2));
+        })
+    });
+
+    group.bench_function("parse_path_long_framework", |b| {
+        b.iter(|| parse_path("/oapc/customer/getListById?id=1&page=2"))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_path,
@@ -283,5 +317,6 @@ criterion_group!(
     bench_json_serialization,
     bench_middleware_chain,
     bench_di_container,
+    bench_vs_native,
 );
 criterion_main!(benches);

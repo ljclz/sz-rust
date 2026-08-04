@@ -127,7 +127,6 @@ pub trait FuiouService: Send + Sync {
     /// }
     /// ```
     async fn edit_bill(&self, resp_obj: &Value) -> Result<bool, String>;
-
 }
 
 /// Mock 富友支付服务 — 用于单元测试
@@ -451,7 +450,8 @@ mod tests {
                 "bank_type": "WECHAT",
                 "customer_name": "测试商户",
                 "order_no": "ORDER_001"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["result_code"], "000000");
         assert_eq!(result["respObj"]["result_msg"], "成功");
@@ -469,7 +469,8 @@ mod tests {
                 "trade_no": "TEST_FUIOU_002",
                 "bank_type": "WECHAT",
                 "type": "check"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["result_code"], "000000");
         assert_eq!(result["respObj"]["trans_stat"], "SUCCESS");
@@ -485,7 +486,8 @@ mod tests {
                 "total_amt": "15000",
                 "refund_amt": "15000",
                 "order_type": "WECHAT"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["result_code"], "000000");
     }
@@ -493,7 +495,10 @@ mod tests {
     #[tokio::test]
     async fn test_mock_fuiou_add_bill_returns_true() {
         let svc = MockFuiouService;
-        let result = svc.add_bill(&json!({"ORDERID": "TEST_FUIOU_001"})).await.unwrap();
+        let result = svc
+            .add_bill(&json!({"ORDERID": "TEST_FUIOU_001"}))
+            .await
+            .unwrap();
         assert!(result);
     }
 
@@ -501,7 +506,8 @@ mod tests {
     async fn test_mock_fuiou_edit_bill_returns_true() {
         let svc = MockFuiouService;
         let result = svc
-            .edit_bill(&json!({"mchnt_order_no": "TEST_FUIOU_001"})).await
+            .edit_bill(&json!({"mchnt_order_no": "TEST_FUIOU_001"}))
+            .await
             .unwrap();
         assert!(result);
     }
@@ -514,7 +520,7 @@ mod tests {
     pub struct FailingFuiouService;
 
     #[async_trait::async_trait]
-impl FuiouService for FailingFuiouService {
+    impl FuiouService for FailingFuiouService {
         async fn fuiou_pay(&self, _order: &Value) -> Result<Value, String> {
             Err("FUIOU 支付失败：银行 API 超时".to_string())
         }
@@ -536,7 +542,7 @@ impl FuiouService for FailingFuiouService {
     pub struct RejectedFuiouService;
 
     #[async_trait::async_trait]
-impl FuiouService for RejectedFuiouService {
+    impl FuiouService for RejectedFuiouService {
         async fn fuiou_pay(&self, _order: &Value) -> Result<Value, String> {
             Ok(serde_json::json!({
                 "msg": "支付失败",
@@ -615,7 +621,10 @@ impl FuiouService for RejectedFuiouService {
     async fn test_rejected_fuiou_pay_returns_error_result_code() {
         // T-1: RejectedFuiouService.fuiou_pay 返回 result_code=999999（业务拒绝）
         let svc = RejectedFuiouService;
-        let result = svc.fuiou_pay(&json!({"trade_no": "REJECT_001"})).await.unwrap();
+        let result = svc
+            .fuiou_pay(&json!({"trade_no": "REJECT_001"}))
+            .await
+            .unwrap();
         assert_eq!(result["respObj"]["result_code"], "999999");
         assert_eq!(result["respObj"]["trans_stat"], "FAIL");
     }
@@ -625,7 +634,8 @@ impl FuiouService for RejectedFuiouService {
         // T-1: RejectedFuiouService.reject 返回 result_code=999999（业务拒绝）
         let svc = RejectedFuiouService;
         let result = svc
-            .reject(&json!({"mchnt_order_no": "REJECT_001"})).await
+            .reject(&json!({"mchnt_order_no": "REJECT_001"}))
+            .await
             .unwrap();
         assert_eq!(result["result_code"], "999999");
         assert!(result["result_msg"].as_str().unwrap().contains("退款失败"));

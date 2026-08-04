@@ -17,6 +17,57 @@ SZ-Rust 基于 axum 0.8，axum 的中间件体系基于 `tower::Layer` + `tower:
 3. **横切关注点分离**：日志/CORS/追踪/限流/鉴权各有不同的关注点，需要清晰的执行顺序
 4. **Handler=Middleware 统一**：对齐 Salvo 设计，允许 Handler 直接作为 Middleware 使用
 
+## 决策替代方案
+
+在确定 Tower Service + 洋葱模型前，曾考虑以下替代方案：
+
+### 方案 A：自定义 Middleware trait（类似 Salvo）
+
+```rust
+pub trait Middleware {
+    fn handle(&self, req: Request, next: Next) -> BoxFuture<Response>;
+}
+```
+
+**拒绝原因**：
+- 与 axum 的 `tower::Layer` 体系不兼容，需要额外适配层
+- 无法利用 Tower 生态（timeout、retry、load-shed 等中间件）
+- 重复造轮子，维护成本高
+
+### 方案 B：纯函数式中间件（类似 Actix-web）
+
+```rust
+pub fn auth_middleware(req: ServiceRequest, srv: &mut Svc) -> Ready<Result<ServiceResponse, Error>> {
+    // 函数式处理
+}
+```
+
+**拒绝原因**：
+- 无法持有状态（如限流计数器、JWT 黑名单缓存）
+- 中间件组合困难，无法声明式配置
+- 与 PHP 中间件数组顺序语义差异大
+
+### 方案 C：宏生成中间件链（编译期展开）
+
+```rust
+middleware_chain! {
+    Trace → Cors → Log → RateLimit → Auth
+}
+```
+
+**拒绝原因**：
+- 运行时无法动态添加/移除中间件（插件系统需要）
+- 宏复杂度高于收益，调试困难
+- PHP 端中间件数组是运行时配置，宏方案无法对齐
+
+### 最终选择：Tower Service + 洋葱模型
+
+综合以上分析，选择 Tower Service 方案：
+- 与 axum 原生兼容，零适配开销
+- 支持状态持有（`Layer` 可捕获环境变量）
+- 洋葱模型语义清晰，执行顺序可控
+- PHP 中间件数组可直接映射为 `ServiceBuilder::layer()` 链
+
 ## 决策
 
 采用 **Tower Service + 洋葱模型**，定义 5 个内置中间件，执行顺序固定：
@@ -75,6 +126,49 @@ Trace → Cors → Log → RateLimit → Auth → [Guard] → Handler
 
 这避免了 PHP 端"中间件和控制器是不同类型"的割裂感。
 
+## 决策替代方案
+
+### 方案 A：自定义 Middleware trait（拒绝）
+
+```rust
+// 定义 sz-rust 专属的 Middleware trait
+pub trait Middleware {
+    fn handle(&self, req: Request, next: Next) -> Future<Output = Response>;
+}
+```
+
+**拒绝原因**：
+- 无法利用 axum 0.8 的 `tower::Layer` 生态（如 `tower-http` 的 CORS、追踪、限流中间件）
+- 需要自己实现中间件链的执行顺序和错误传播
+- 与 axum 的路由系统集成困难（axum 的路由器只接受 `tower::Layer`）
+
+### 方案 B：纯函数式中间件（拒绝）
+
+```rust
+// 中间件就是 `fn(Request) -> Future<Response>`
+type Middleware = fn(Request) -> Pin<Box<dyn Future<Output = Response>>>;
+```
+
+**拒绝原因**：
+- 无法携带状态（如限流器的计数器、CORS 的配置）
+- 无法实现中间件的组合（如 `auth.and_then(log)`）
+- 函数指针无法实现 `Clone`，难以在路由树中共享
+
+### 方案 C：宏生成中间件链（拒绝）
+
+```rust
+// 通过宏自动生成中间件链
+#[middleware(trace, cors, log, ratelimit, auth)]
+async fn handler(...) -> Response { ... }
+```
+
+**拒绝原因**：
+- 中间件顺序被硬编码在宏中，难以动态调整
+- 宏展开后的代码难以调试（中间件执行顺序不直观）
+- 无法在运行时根据配置启用/禁用某个中间件
+
+**最终选择**：Tower Service + 洋葱模型。利用 `tower::Layer` 的标准接口，中间件顺序通过 `ServiceBuilder` 控制，与 axum 0.8 完全兼容。
+
 ## 后果
 
 ### 正面后果
@@ -111,3 +205,5 @@ Trace → Cors → Log → RateLimit → Auth → [Guard] → Handler
    - 反转 Bug → 检查 `MiddlewareChain::service_builder_order()` 的反转逻辑
    - 缺失 Bug → 检查 `MiddlewareBuilder` 的 5 个 `Option<Config>` 是否为 `None`
    - 兼容 Bug → 检查 `tower_compat::TowerCompat` 的类型约束是否满足
+   - **中间件 panic** → 中间件 `call` 中 panic 会穿透 Tower 层，检查是否用 `catch_unwind` 或 `HandleErrorLayer` 包装
+   - **状态跨层丢失** → 中间件通过 `request.extensions_mut()` 注入状态（如 `AuthenticatedUser`），后续中间件/Handler 用 `request.extensions()` 读取；若类型不匹配或注入顺序错误会读取失败

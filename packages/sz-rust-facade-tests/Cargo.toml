@@ -1,0 +1,36 @@
+[package]
+name = "sz-rust-facade-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "跨 Facade 集成测试 — 验证 7 个 facade crate 之间的协作（P9-FACADE 系列）"
+publish = false
+
+[dependencies]
+# P9-FACADE：7 个 facade 全量依赖，测试跨 crate 协作
+sz-rust-cache-facade = { workspace = true }
+sz-rust-state-facade = { workspace = true }
+sz-rust-infra-facade = { workspace = true }
+sz-rust-auth-facade = { workspace = true }
+sz-rust-pay-facade = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+# P3 四簇 facade
+sz-rust-orm-ext-facade = { workspace = true }
+sz-rust-router-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
+sz-rust-mvc-facade = { workspace = true }
+# core（验证 P3 提取后向后兼容 re-export 路径）
+sz-rust-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }
+
+[lib]
+name = "sz_rust_facade_tests"
+path = "src/lib.rs"

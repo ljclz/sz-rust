@@ -231,7 +231,10 @@ impl HttpSettledService {
         };
         let client = HttpBankClient::new(config);
         let body = body.clone();
-        client.post_json("", &body).await.map(|_| ())
+        client
+            .post_json("", &body)
+            .await
+            .map(|_| ())
             .map_err(|e| format!("企微通知发送失败: {}", e))
     }
 }
@@ -328,7 +331,7 @@ mod tests {
     pub struct MockSettledService;
 
     #[async_trait::async_trait]
-impl SettledService for MockSettledService {
+    impl SettledService for MockSettledService {
         async fn create_order(&self, data: &Value) -> Result<Value, String> {
             let order_id = data.get("order_id").and_then(|v| v.as_i64()).unwrap_or(1);
             Ok(json!({
@@ -365,14 +368,20 @@ impl SettledService for MockSettledService {
     #[tokio::test]
     async fn test_mock_settled_service_pay_buy() {
         let svc = MockSettledService;
-        let result = svc.pay_buy(&json!({"order_id": 10}), &json!({})).await.unwrap();
+        let result = svc
+            .pay_buy(&json!({"order_id": 10}), &json!({}))
+            .await
+            .unwrap();
         assert_eq!(result["order_id"], 10);
     }
 
     #[tokio::test]
     async fn test_mock_settled_service_epay_check() {
         let svc = MockSettledService;
-        let result = svc.epay_check(&json!({"order_no": "TEST001"})).await.unwrap();
+        let result = svc
+            .epay_check(&json!({"order_no": "TEST001"}))
+            .await
+            .unwrap();
         assert_eq!(result["msg"], "查询成功");
         assert_eq!(result["respObj"]["RESULT"], "Y");
     }
@@ -455,7 +464,10 @@ impl SettledService for MockSettledService {
     async fn test_http_settled_epay_check_returns_resp_obj_with_result_y() {
         // T-1: HttpSettledService.epay_check 应返回包含 RESULT=Y 的 respObj
         let svc = HttpSettledService::from_env();
-        let result = svc.epay_check(&json!({"order_no": "ORD001"})).await.unwrap();
+        let result = svc
+            .epay_check(&json!({"order_no": "ORD001"}))
+            .await
+            .unwrap();
         assert_eq!(result["respObj"]["RESULT"], "Y");
         assert_eq!(result["respObj"]["ORDERID"], "ORD001");
     }

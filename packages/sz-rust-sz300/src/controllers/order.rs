@@ -82,7 +82,20 @@ impl OrderController {
             Ok(data) => {
                 let order_id = match data.get("order_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 order_id 参数", json!({}), 0),
+                    // C5：错误消息本地化（message_key + i18n 翻译，替代硬编码中文）
+                    _ => {
+                        let i18n = crate::i18n_error::order_error_i18n();
+                        let err = sz_rust_http_facade::BaseException::new(
+                            sz_rust_http_facade::ErrorCode::ValidateFailed,
+                            "invalid order_id",
+                        )
+                        .with_message_key("errors.order_id_invalid");
+                        return ctrl.render_error(
+                            sz_rust_mvc_facade::i18n_error::localize_exception(&err, &i18n, None),
+                            json!({}),
+                            0,
+                        );
+                    }
                 };
 
                 info!("查询订单详情: order_id={}", order_id);

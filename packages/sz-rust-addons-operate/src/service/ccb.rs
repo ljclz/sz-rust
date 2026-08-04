@@ -13,7 +13,7 @@
 //!
 //! PHP 依赖 `app\common\service\ccb\ccbPay` SDK 执行 HTTP 请求。
 //! Rust 端通过 [`HttpCcbService`] 使用 reqwest + MD5 签名调用建行 API endpoint。
-//! 同时提供 [`MockCcbService`] 用于单元测试（仅编译进 test 构建）。
+//! 同时提供 `MockCcbService`（#[cfg(test)]，仅测试构建）用于单元测试（仅编译进 test 构建）。
 //!
 //! ## PHP 源码依据
 //!
@@ -318,7 +318,8 @@ mod tests {
                 "auth_code": "123456789012345678",
                 "pay_price": 100.50,
                 "order_no": "ORDER_001"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["RESULT"], "Y");
         assert_eq!(result["respObj"]["TRACEID"], "MOCK_TRACE_TEST_CCB_001");
@@ -332,7 +333,8 @@ mod tests {
                 "trade_no": "TEST_CCB_002",
                 "qry_time": 1,
                 "type": "check"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["RESULT"], "Y");
     }
@@ -346,7 +348,8 @@ mod tests {
                 "refundAmt": 50.0,
                 "payRecordNo": "TEST_CCB_001",
                 "requestSn": "20260722000001"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["return_CODE"], "000000");
     }
@@ -359,7 +362,8 @@ mod tests {
                 "ORDERID": "TEST_CCB_001",
                 "TRACEID": "MOCK_TRACE_001",
                 "AMOUNT": 100.50
-            })).await
+            }))
+            .await
             .unwrap();
         assert!(result);
     }
@@ -375,7 +379,7 @@ mod tests {
     pub struct FailingCcbService;
 
     #[async_trait::async_trait]
-impl CcbService for FailingCcbService {
+    impl CcbService for FailingCcbService {
         async fn ccb_pay(&self, _order: &Value) -> Result<Value, String> {
             Err("CCB 支付失败：银行 API 超时".to_string())
         }
@@ -394,7 +398,7 @@ impl CcbService for FailingCcbService {
     pub struct RejectedCcbService;
 
     #[async_trait::async_trait]
-impl CcbService for RejectedCcbService {
+    impl CcbService for RejectedCcbService {
         async fn ccb_pay(&self, order: &Value) -> Result<Value, String> {
             let trade_no = order
                 .get("trade_no")
@@ -464,7 +468,10 @@ impl CcbService for RejectedCcbService {
     async fn test_rejected_ccb_pay_returns_result_n() {
         // T-1: RejectedCcbService.ccb_pay 返回 RESULT=N（业务拒绝，非系统错误）
         let svc = RejectedCcbService;
-        let result = svc.ccb_pay(&json!({"trade_no": "REJECT_001"})).await.unwrap();
+        let result = svc
+            .ccb_pay(&json!({"trade_no": "REJECT_001"}))
+            .await
+            .unwrap();
         assert_eq!(result["respObj"]["RESULT"], "N", "业务拒绝时 RESULT 应为 N");
         assert_eq!(result["respObj"]["ERRMSG"], "余额不足");
     }

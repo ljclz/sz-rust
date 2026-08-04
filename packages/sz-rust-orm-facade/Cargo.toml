@@ -1,0 +1,42 @@
+[package]
+name = "sz-rust-orm-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "ORM facade for sz-rust framework — re-exports sz-orm-* family under a unified namespace"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["orm", "database", "thinkphp"]
+categories = ["database"]
+
+[dependencies]
+# sz-orm family (all path + version dual-specified)
+sz-orm-core = { workspace = true }
+sz-orm-auth = { workspace = true }
+sz-orm-mqtt = { workspace = true }
+sz-orm-scheduler = { workspace = true }
+sz-orm-logger = { workspace = true }
+sz-orm-queue = { workspace = true }
+sz-orm-websocket = { workspace = true, features = ["server"] }
+sz-orm-storage = { workspace = true }
+sz-orm-limit = { workspace = true }
+sz-orm-tracing = { workspace = true }
+sz-orm-macros = { workspace = true }
+sz-orm-sql-validator = { workspace = true }
+sz-orm-query-builder = { workspace = true }
+sz-orm-graphql = { workspace = true, optional = true }
+sz-orm-grpc = { workspace = true, optional = true }
+
+[features]
+default = []
+# GraphQL 集成（可选）
+graphql = ["dep:sz-orm-graphql"]
+# gRPC 支持（可选）
+grpc = ["dep:sz-orm-grpc"]
+# 全量 P2 功能
+p2-addons = ["graphql", "grpc"]
+
+[lints]
+workspace = true

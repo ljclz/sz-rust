@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 联系人
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct Contact {
     /// 主键
     pub id: i64,
@@ -41,22 +41,6 @@ impl Contact {
     /// 创建空联系人
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-impl Default for Contact {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            name: String::new(),
-            phone: String::new(),
-            email: String::new(),
-            customer_id: 0,
-            position: String::new(),
-            remark: String::new(),
-            created_at: 0,
-            updated_at: 0,
-        }
     }
 }
 

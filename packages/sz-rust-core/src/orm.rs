@@ -45,8 +45,8 @@ pub use sz_orm_core::{
 /// 而非直接依赖 `sz_orm_core::repository`，以保持 facade 收口。
 pub mod repository {
     pub use sz_orm_core::repository::{
-        EntityAttributes, EntityKey, GenericKeyRepository, InMemoryRepository, PageResult,
-        Repository, RepositoryError, WhereCondition, WhereOp,
+        BatchUpdateResult, EntityAttributes, EntityKey, GenericKeyRepository, InMemoryRepository,
+        PageResult, Repository, RepositoryError, RepositoryResult, WhereCondition, WhereOp,
     };
 }
 
@@ -212,3 +212,15 @@ pub use sz_orm_sql_validator::{
     SqlComplexityScore, SqlStatementType, SqlToken, SqlValidationError,
     ValidationResult, WhitelistValidator, ComplexityLevel,
 };
+
+// ============================================================================
+// P2: sz-orm-graphql — GraphQL 集成（可选 feature: graphql）
+// ============================================================================
+#[cfg(feature = "graphql")]
+pub mod graphql;
+
+// ============================================================================
+// P2: sz-orm-grpc — gRPC 支持（可选 feature: grpc）
+// ============================================================================
+#[cfg(feature = "grpc")]
+pub mod grpc;

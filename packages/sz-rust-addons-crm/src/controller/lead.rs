@@ -12,14 +12,28 @@ pub struct LeadController;
 
 impl LeadController {
     pub async fn list<R: Repository<Lead, Key = OrmValue>>(
-        repo: &R, page: u64, page_size: u64, status: Option<String>,
+        repo: &R,
+        page: u64,
+        page_size: u64,
+        status: Option<String>,
     ) -> Value {
         let conditions: Vec<WhereCondition> = if let Some(s) = status.as_deref() {
-            if s.is_empty() { Vec::new() }
-            else { vec![WhereCondition::new("status", WhereOp::Eq, OrmValue::String(s.to_string()))] }
-        } else { Vec::new() };
+            if s.is_empty() {
+                Vec::new()
+            } else {
+                vec![WhereCondition::new(
+                    "status",
+                    WhereOp::Eq,
+                    OrmValue::String(s.to_string()),
+                )]
+            }
+        } else {
+            Vec::new()
+        };
         match repo.paginate_by(&conditions, page, page_size) {
-            Ok(pr) => json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}}),
+            Ok(pr) => {
+                json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}})
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }
@@ -47,7 +61,11 @@ impl LeadController {
         }
     }
 
-    pub async fn update<R: Repository<Lead, Key = OrmValue>>(repo: &R, id: i64, body: Value) -> Value {
+    pub async fn update<R: Repository<Lead, Key = OrmValue>>(
+        repo: &R,
+        id: i64,
+        body: Value,
+    ) -> Value {
         let key = OrmValue::I64(id);
         let mut lead = match repo.find_by_id(&key) {
             Ok(Some(c)) => c,
@@ -58,17 +76,23 @@ impl LeadController {
             macro_rules! patch {
                 ($field:ident, str) => {
                     if let Some(v) = obj.get(stringify!($field)) {
-                        if let Some(s) = v.as_str() { lead.$field = s.to_string(); }
+                        if let Some(s) = v.as_str() {
+                            lead.$field = s.to_string();
+                        }
                     }
                 };
                 ($field:ident, f64) => {
                     if let Some(v) = obj.get(stringify!($field)) {
-                        if let Some(n) = v.as_f64() { lead.$field = n; }
+                        if let Some(n) = v.as_f64() {
+                            lead.$field = n;
+                        }
                     }
                 };
                 ($field:ident, i64) => {
                     if let Some(v) = obj.get(stringify!($field)) {
-                        if let Some(n) = v.as_i64() { lead.$field = n; }
+                        if let Some(n) = v.as_i64() {
+                            lead.$field = n;
+                        }
                     }
                 };
             }

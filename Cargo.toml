@@ -2,6 +2,19 @@
 resolver = "2"
 members = [
     "packages/sz-rust-core",
+    "packages/sz-rust-http-facade",
+    "packages/sz-rust-cache-facade",
+    "packages/sz-rust-state-facade",
+    "packages/sz-rust-infra-facade",
+    "packages/sz-rust-auth-facade",
+    "packages/sz-rust-pay-facade",
+    "packages/sz-rust-orm-facade",
+    "packages/sz-rust-orm-ext-facade",
+    "packages/sz-rust-router-facade",
+    "packages/sz-rust-middleware-facade",
+    "packages/sz-rust-mvc-facade",
+    "packages/sz-rust-mcp",
+    "packages/sz-rust-facade-tests",
     "packages/sz-rust-macros",
     "packages/sz-rust-examples",
     "packages/sz-rust-addons-loader",
@@ -133,9 +146,23 @@ sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.2.2" }
 sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator", version = "1.2.2" }
 sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx", version = "1.2.2" }
 sz-orm-query-builder = { path = "../sz-orm/packages/sz-orm-query-builder", version = "1.2.2" }
+sz-orm-graphql = { path = "../sz-orm/packages/sz-orm-graphql", version = "1.2.2" }
+sz-orm-grpc = { path = "../sz-orm/packages/sz-orm-grpc", version = "1.2.2" }
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "0.3.0", path = "packages/sz-rust-core" }
+sz-rust-orm-facade = { version = "0.3.0", path = "packages/sz-rust-orm-facade" }
+sz-rust-http-facade = { version = "0.3.0", path = "packages/sz-rust-http-facade" }
+sz-rust-cache-facade = { version = "0.3.0", path = "packages/sz-rust-cache-facade" }
+sz-rust-state-facade = { version = "0.3.0", path = "packages/sz-rust-state-facade" }
+sz-rust-infra-facade = { version = "0.3.0", path = "packages/sz-rust-infra-facade" }
+sz-rust-auth-facade = { version = "0.3.0", path = "packages/sz-rust-auth-facade" }
+sz-rust-pay-facade = { version = "0.3.0", path = "packages/sz-rust-pay-facade" }
+sz-rust-orm-ext-facade = { version = "0.3.0", path = "packages/sz-rust-orm-ext-facade" }
+sz-rust-router-facade = { version = "0.3.0", path = "packages/sz-rust-router-facade" }
+sz-rust-middleware-facade = { version = "0.3.0", path = "packages/sz-rust-middleware-facade" }
+sz-rust-mvc-facade = { version = "0.3.0", path = "packages/sz-rust-mvc-facade" }
+sz-rust-mcp = { version = "0.3.0", path = "packages/sz-rust-mcp" }
 sz-rust-macros = { version = "0.3.0", path = "packages/sz-rust-macros" }
 sz-rust-addons-loader = { version = "0.3.0", path = "packages/sz-rust-addons-loader" }
 sz-rust-pdf = { version = "0.3.0", path = "packages/sz-rust-pdf" }

@@ -87,12 +87,12 @@ pub enum TlsError {
 ///
 /// - `cert_path`：PEM 格式证书文件路径
 /// - `key_path`：PEM 格式私钥文件路径（支持 PKCS8 / PKCS1 / Sec1）
-pub fn load_tls_config(
+pub async fn load_tls_config(
     cert_path: impl AsRef<Path>,
     key_path: impl AsRef<Path>,
 ) -> Result<ServerConfig, TlsError> {
-    let certs = load_certs(cert_path)?;
-    let key = load_private_key(key_path)?;
+    let certs = load_certs(cert_path).await?;
+    let key = load_private_key(key_path).await?;
 
     let mut config = ServerConfig::builder()
         .with_no_client_auth()
@@ -104,9 +104,11 @@ pub fn load_tls_config(
 }
 
 /// 从 PEM 文件加载证书链
-fn load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'static>>, TlsError> {
-    let file = std::fs::File::open(path).map_err(TlsError::ReadCertFile)?;
-    let mut reader = BufReader::new(file);
+async fn load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'static>>, TlsError> {
+    let cert_data = tokio::fs::read(path.as_ref())
+        .await
+        .map_err(TlsError::ReadCertFile)?;
+    let mut reader = BufReader::new(&cert_data[..]);
     let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
         .collect::<Result<Vec<_>, _>>()
         .map_err(TlsError::ParseCert)?;
@@ -120,9 +122,11 @@ fn load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'static>>, Tl
 }
 
 /// 从 PEM 文件加载私钥（支持 PKCS8 / PKCS1 / Sec1）
-fn load_private_key(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'static>, TlsError> {
-    let file = std::fs::File::open(path).map_err(TlsError::ReadKeyFile)?;
-    let mut reader = BufReader::new(file);
+async fn load_private_key(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'static>, TlsError> {
+    let key_data = tokio::fs::read(path.as_ref())
+        .await
+        .map_err(TlsError::ReadKeyFile)?;
+    let mut reader = BufReader::new(&key_data[..]);
     let mut keys = Vec::new();
     for item in rustls_pemfile::read_all(&mut reader) {
         match item.map_err(TlsError::ParseKey)? {
@@ -274,7 +278,7 @@ pub async fn serve_h2(
     key_path: impl AsRef<Path>,
 ) -> Result<(), TlsError> {
     let listener = TcpListener::bind(addr).await.map_err(TlsError::Bind)?;
-    let config = load_tls_config(cert_path, key_path)?;
+    let config = load_tls_config(cert_path, key_path).await?;
     serve_h2_with_listener(router, listener, config).await
 }
 
@@ -288,7 +292,7 @@ pub async fn serve_h2_with_graceful_shutdown(
     key_path: impl AsRef<Path>,
 ) -> Result<(), TlsError> {
     let listener = TcpListener::bind(addr).await.map_err(TlsError::Bind)?;
-    let config = load_tls_config(cert_path, key_path)?;
+    let config = load_tls_config(cert_path, key_path).await?;
     let tls_listener = TlsListener::from_config(listener, config);
     axum::serve(tls_listener, router.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -368,13 +372,13 @@ mod tests {
     // load_tls_config
     // ====================================================================
 
-    #[test]
-    fn test_load_tls_config_valid_pem() {
+    #[tokio::test]
+    async fn test_load_tls_config_valid_pem() {
         let (cert, key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("valid_cert.pem", &cert);
         let key_path = write_temp_pem("valid_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path);
+        let config = load_tls_config(&cert_path, &key_path).await;
         assert!(
             config.is_ok(),
             "failed to load TLS config: {:?}",
@@ -387,49 +391,49 @@ mod tests {
         assert!(config.alpn_protocols.contains(&b"http/1.1".to_vec()));
     }
 
-    #[test]
-    fn test_load_tls_config_missing_cert_file() {
-        let result = load_tls_config("nonexistent_cert.pem", "nonexistent_key.pem");
+    #[tokio::test]
+    async fn test_load_tls_config_missing_cert_file() {
+        let result = load_tls_config("nonexistent_cert.pem", "nonexistent_key.pem").await;
         assert!(matches!(result, Err(TlsError::ReadCertFile(_))));
     }
 
-    #[test]
-    fn test_load_tls_config_missing_key_file() {
+    #[tokio::test]
+    async fn test_load_tls_config_missing_key_file() {
         let (cert, _key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("valid_cert_for_missing_key.pem", &cert);
 
-        let result = load_tls_config(&cert_path, "nonexistent_key.pem");
+        let result = load_tls_config(&cert_path, "nonexistent_key.pem").await;
         assert!(matches!(result, Err(TlsError::ReadKeyFile(_))));
     }
 
-    #[test]
-    fn test_load_tls_config_invalid_pem_content() {
+    #[tokio::test]
+    async fn test_load_tls_config_invalid_pem_content() {
         let cert_path = write_temp_pem("invalid_cert.pem", b"not a valid PEM");
         let key_path = write_temp_pem("invalid_key.pem", b"not a valid PEM");
 
-        let result = load_tls_config(&cert_path, &key_path);
+        let result = load_tls_config(&cert_path, &key_path).await;
         // PEM 解析失败 → ParseCert（certs() 返回空）或 ParseKey
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_load_tls_config_empty_pem_files() {
+    #[tokio::test]
+    async fn test_load_tls_config_empty_pem_files() {
         let cert_path = write_temp_pem("empty_cert.pem", b"");
         let key_path = write_temp_pem("empty_key.pem", b"");
 
         // 空文件 → load_certs 返回 ParseCert 错误（no certificate found）
-        let result = load_tls_config(&cert_path, &key_path);
+        let result = load_tls_config(&cert_path, &key_path).await;
         assert!(matches!(result, Err(TlsError::ParseCert(_))));
     }
 
-    #[test]
-    fn test_load_tls_config_key_without_cert() {
+    #[tokio::test]
+    async fn test_load_tls_config_key_without_cert() {
         // 只有私钥没有证书 → ParseCert
         let (_cert, key) = generate_self_signed_cert();
         let key_path = write_temp_pem("only_key.pem", &key);
         let empty_cert_path = write_temp_pem("empty_for_key_only.pem", b"");
 
-        let result = load_tls_config(&empty_cert_path, &key_path);
+        let result = load_tls_config(&empty_cert_path, &key_path).await;
         assert!(matches!(result, Err(TlsError::ParseCert(_))));
     }
 
@@ -437,13 +441,13 @@ mod tests {
     // tls_acceptor + TlsListener 构造
     // ====================================================================
 
-    #[test]
-    fn test_tls_acceptor_constructible() {
+    #[tokio::test]
+    async fn test_tls_acceptor_constructible() {
         let (cert, key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("acceptor_cert.pem", &cert);
         let key_path = write_temp_pem("acceptor_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path).unwrap();
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let _acceptor = tls_acceptor(config);
     }
 
@@ -453,7 +457,7 @@ mod tests {
         let cert_path = write_temp_pem("listener_cert.pem", &cert);
         let key_path = write_temp_pem("listener_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path).unwrap();
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (tcp, _addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
             .unwrap();
@@ -462,13 +466,13 @@ mod tests {
         assert!(tls_listener.local_addr().is_ok());
     }
 
-    #[test]
-    fn test_tls_listener_new() {
+    #[tokio::test]
+    async fn test_tls_listener_new() {
         let (cert, key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("new_cert.pem", &cert);
         let key_path = write_temp_pem("new_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path).unwrap();
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let _arc: Arc<ServerConfig> = Arc::new(config);
     }
 
@@ -487,7 +491,7 @@ mod tests {
         let (cert, key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("serve_cert.pem", &cert);
         let key_path = write_temp_pem("serve_key.pem", &key);
-        let config = load_tls_config(&cert_path, &key_path).unwrap();
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (listener, addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
             .unwrap();
@@ -546,7 +550,7 @@ mod tests {
         let (cert, key) = generate_self_signed_cert();
         let cert_path = write_temp_pem("handshake_cert.pem", &cert);
         let key_path = write_temp_pem("handshake_key.pem", &key);
-        let config = load_tls_config(&cert_path, &key_path).unwrap();
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (listener, addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
             .unwrap();
@@ -588,7 +592,7 @@ mod tests {
         let key_path = write_temp_pem("full_key.pem", &key);
 
         // 3. 构造服务器 config
-        let server_config = load_tls_config(&cert_path, &key_path).unwrap();
+        let server_config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (listener, addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
             .unwrap();

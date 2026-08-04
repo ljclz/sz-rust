@@ -80,8 +80,7 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
     .map_err(|_| {
         tracing::error!("认证查询超时（>5s）");
         "服务暂时不可用".to_string()
-    })?
-    .map_err(|e| e)?;
+    })??;
 
     let row = rows.first().ok_or_else(|| "用户名或密码错误".to_string())?;
 

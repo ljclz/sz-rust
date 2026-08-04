@@ -10,19 +10,36 @@ pub struct PurchaseOrderController;
 
 impl PurchaseOrderController {
     pub async fn list<R: Repository<PurchaseOrder, Key = OrmValue>>(
-        repo: &R, page: u64, page_size: u64, status: Option<String>,
+        repo: &R,
+        page: u64,
+        page_size: u64,
+        status: Option<String>,
     ) -> Value {
         let conditions: Vec<WhereCondition> = if let Some(s) = status.as_deref() {
-            if s.is_empty() { Vec::new() }
-            else { vec![WhereCondition::new("status", WhereOp::Eq, OrmValue::String(s.to_string()))] }
-        } else { Vec::new() };
+            if s.is_empty() {
+                Vec::new()
+            } else {
+                vec![WhereCondition::new(
+                    "status",
+                    WhereOp::Eq,
+                    OrmValue::String(s.to_string()),
+                )]
+            }
+        } else {
+            Vec::new()
+        };
         match repo.paginate_by(&conditions, page, page_size) {
-            Ok(pr) => json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}}),
+            Ok(pr) => {
+                json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}})
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }
 
-    pub async fn create<R: Repository<PurchaseOrder, Key = OrmValue>>(repo: &R, body: Value) -> Value {
+    pub async fn create<R: Repository<PurchaseOrder, Key = OrmValue>>(
+        repo: &R,
+        body: Value,
+    ) -> Value {
         let mut order: PurchaseOrder = match serde_json::from_value(body) {
             Ok(d) => d,
             Err(e) => return json!({"code": 400, "msg": e.to_string(), "data": null}),
@@ -45,7 +62,11 @@ impl PurchaseOrderController {
         }
     }
 
-    pub async fn update<R: Repository<PurchaseOrder, Key = OrmValue>>(repo: &R, id: i64, body: Value) -> Value {
+    pub async fn update<R: Repository<PurchaseOrder, Key = OrmValue>>(
+        repo: &R,
+        id: i64,
+        body: Value,
+    ) -> Value {
         let key = OrmValue::I64(id);
         let mut order = match repo.find_by_id(&key) {
             Ok(Some(d)) => d,
@@ -54,13 +75,36 @@ impl PurchaseOrderController {
         };
         if let Some(obj) = body.as_object() {
             macro_rules! patch {
-                ($field:ident, str) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(s) = v.as_str() { order.$field = s.to_string(); } } };
-                ($field:ident, f64) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(n) = v.as_f64() { order.$field = n; } } };
-                ($field:ident, i64) => { if let Some(v) = obj.get(stringify!($field)) { if let Some(n) = v.as_i64() { order.$field = n; } } };
+                ($field:ident, str) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(s) = v.as_str() {
+                            order.$field = s.to_string();
+                        }
+                    }
+                };
+                ($field:ident, f64) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(n) = v.as_f64() {
+                            order.$field = n;
+                        }
+                    }
+                };
+                ($field:ident, i64) => {
+                    if let Some(v) = obj.get(stringify!($field)) {
+                        if let Some(n) = v.as_i64() {
+                            order.$field = n;
+                        }
+                    }
+                };
             }
-            patch!(supplier_id, i64); patch!(product_id, i64);
-            patch!(quantity, i64); patch!(unit_price, f64); patch!(total_amount, f64);
-            patch!(status, str); patch!(order_date, i64); patch!(remark, str);
+            patch!(supplier_id, i64);
+            patch!(product_id, i64);
+            patch!(quantity, i64);
+            patch!(unit_price, f64);
+            patch!(total_amount, f64);
+            patch!(status, str);
+            patch!(order_date, i64);
+            patch!(remark, str);
         }
         match repo.save(order) {
             Ok(saved) => json!({"code": 0, "msg": "updated", "data": saved}),

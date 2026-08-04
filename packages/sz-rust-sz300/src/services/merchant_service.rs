@@ -83,7 +83,6 @@ impl MerchantService {
             tracing::error!("商户列表查询超时（>5s）");
             "服务暂时不可用".to_string()
         })?
-        .map_err(|e| e)
     }
 
     /// 根据 merchant_id 查询单个商户

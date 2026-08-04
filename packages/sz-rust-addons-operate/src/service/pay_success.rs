@@ -181,7 +181,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_pay_success_returns_true() {
         let svc = MockPaySuccessService;
         let result = svc
@@ -192,11 +192,12 @@ mod tests {
                     "transaction_id": "TRACE_001"
                 }),
             )
-            .await.unwrap();
+            .await
+            .unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_pay_success_with_icbc_source() {
         let svc = MockPaySuccessService;
         let result = svc
@@ -207,11 +208,12 @@ mod tests {
                     "transaction_id": "ICBC_001"
                 }),
             )
-            .await.unwrap();
+            .await
+            .unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_pay_success_with_fuiou_source() {
         let svc = MockPaySuccessService;
         let result = svc
@@ -222,11 +224,12 @@ mod tests {
                     "epay_id": "FUIOU_001"
                 }),
             )
-            .await.unwrap();
+            .await
+            .unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_pay_success_with_empty_data() {
         let svc = MockPaySuccessService;
         let result = svc.on_pay_success("ORDER_004", &json!({})).await.unwrap();
@@ -241,7 +244,7 @@ mod tests {
     pub struct FailingPaySuccessService;
 
     #[async_trait::async_trait]
-impl PaySuccessService for FailingPaySuccessService {
+    impl PaySuccessService for FailingPaySuccessService {
         async fn on_pay_success(&self, _order_no: &str, _data: &Value) -> Result<bool, String> {
             Err("支付成功处理失败：订单状态更新异常".to_string())
         }
@@ -251,17 +254,19 @@ impl PaySuccessService for FailingPaySuccessService {
     pub struct OrderNotFoundPaySuccessService;
 
     #[async_trait::async_trait]
-impl PaySuccessService for OrderNotFoundPaySuccessService {
+    impl PaySuccessService for OrderNotFoundPaySuccessService {
         async fn on_pay_success(&self, _order_no: &str, _data: &Value) -> Result<bool, String> {
             Ok(false) // 对齐 PHP `$this->model` 为空时返回 false
         }
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_failing_pay_success_returns_error() {
         // T-1: FailingPaySuccessService.on_pay_success 应返回 Err
         let svc = FailingPaySuccessService;
-        let result = svc.on_pay_success("ORDER_001", &json!({"pay_source": "ccb"})).await;
+        let result = svc
+            .on_pay_success("ORDER_001", &json!({"pay_source": "ccb"}))
+            .await;
         assert!(result.is_err());
         assert!(
             result.unwrap_err().contains("支付成功处理失败"),
@@ -269,7 +274,7 @@ impl PaySuccessService for OrderNotFoundPaySuccessService {
         );
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_order_not_found_pay_success_returns_false() {
         // T-1: OrderNotFoundPaySuccessService.on_pay_success 应返回 Ok(false)
         // 对齐 PHP `if (!$this->model) return false;` 语义
@@ -281,7 +286,7 @@ impl PaySuccessService for OrderNotFoundPaySuccessService {
         assert!(!result, "订单不存在时应返回 Ok(false)");
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_http_pay_success_returns_true_when_no_webhook() {
         // T-1: HttpPaySuccessService.on_pay_success 无 webhook 配置时应返回 Ok(true)
         // 注意：测试环境中 QYWX_WEBHOOK_URL 未设置
@@ -291,7 +296,8 @@ impl PaySuccessService for OrderNotFoundPaySuccessService {
                 "ORDER_001",
                 &json!({"pay_source": "ccb", "transaction_id": "TRACE_001"}),
             )
-            .await.unwrap();
+            .await
+            .unwrap();
         assert!(result, "无 webhook 配置时应返回 Ok(true)");
     }
 }

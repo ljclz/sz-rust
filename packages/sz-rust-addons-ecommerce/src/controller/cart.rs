@@ -9,12 +9,16 @@ use crate::model::cart::CartItem;
 pub struct CartController;
 
 impl CartController {
-    pub async fn list<R: Repository<CartItem, Key = OrmValue>>(
-        repo: &R, user_id: i64,
-    ) -> Value {
-        let conditions = vec![WhereCondition::new("user_id", WhereOp::Eq, OrmValue::I64(user_id))];
+    pub async fn list<R: Repository<CartItem, Key = OrmValue>>(repo: &R, user_id: i64) -> Value {
+        let conditions = vec![WhereCondition::new(
+            "user_id",
+            WhereOp::Eq,
+            OrmValue::I64(user_id),
+        )];
         match repo.paginate_by(&conditions, 1, 1000) {
-            Ok(pr) => json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total_count": pr.total}}),
+            Ok(pr) => {
+                json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total_count": pr.total}})
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }
@@ -35,7 +39,9 @@ impl CartController {
     }
 
     pub async fn update_qty<R: Repository<CartItem, Key = OrmValue>>(
-        repo: &R, id: i64, quantity: i64,
+        repo: &R,
+        id: i64,
+        quantity: i64,
     ) -> Value {
         let key = OrmValue::I64(id);
         let mut item = match repo.find_by_id(&key) {
@@ -59,7 +65,11 @@ impl CartController {
     }
 
     pub async fn clear<R: Repository<CartItem, Key = OrmValue>>(repo: &R, user_id: i64) -> Value {
-        let conditions = vec![WhereCondition::new("user_id", WhereOp::Eq, OrmValue::I64(user_id))];
+        let conditions = vec![WhereCondition::new(
+            "user_id",
+            WhereOp::Eq,
+            OrmValue::I64(user_id),
+        )];
         match repo.delete_by(&conditions) {
             Ok(n) => json!({"code": 0, "msg": "cleared", "data": {"rows": n}}),
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),

@@ -12,6 +12,11 @@ description = "SZ-Rust sz300 业务应用 — 设备/商户/商品/订单管理�
 # 保留的直接依赖：
 #   - sz-orm-sqlx：SQLx 后端实现（sz-rust-core 不提供）
 sz-rust-core.workspace = true
+# C4 验证：业务包 facade 直连（类型与 core re-export 同一，可逐步替换 sz_rust_core:: 引用）
+sz-rust-mvc-facade.workspace = true
+sz-rust-middleware-facade.workspace = true
+sz-rust-http-facade.workspace = true
+sz-rust-state-facade.workspace = true
 sz-rust-observability.workspace = true
 sz-orm-sqlx.workspace = true
 # 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。

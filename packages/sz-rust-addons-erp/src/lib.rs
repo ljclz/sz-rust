@@ -15,7 +15,7 @@
 //! register_routes(builder, erp_state);
 //! ```
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 pub mod controller;
 pub mod model;
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use axum::extract::{Json, Path, Query};
 use serde::Deserialize;
 use serde_json::Value;
-use sz_rust_core::orm::repository::{InMemoryRepository, Repository};
+use sz_rust_core::orm::repository::InMemoryRepository;
 use sz_rust_core::router::RouterBuilder;
 
 use crate::model::product::Product;
@@ -73,204 +73,166 @@ where
     let base = "/api/erp";
 
     // 商品
-    let builder = builder.get(
-        &format!("{}/products", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::product::ProductController::list(
-                        &*s.products, q.page.unwrap_or(1), q.page_size.unwrap_or(20),
-                        q.category.clone(),
-                    )
-                    .await,
+    let builder = builder.get(&format!("{}/products", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::product::ProductController::list(
+                    &*s.products,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.category.clone(),
                 )
-            }
-        },
-    );
-    let builder = builder.post(
-        &format!("{}/products", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(controller::product::ProductController::create(&*s.products, body.0).await)
-            }
-        },
-    );
-    let builder = builder.get(
-        &format!("{}/products/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::product::ProductController::get(&*s.products, path.id).await)
-            }
-        },
-    );
-    let builder = builder.put(
-        &format!("{}/products/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(
-                    controller::product::ProductController::update(&*s.products, path.id, body.0)
-                        .await,
-                )
-            }
-        },
-    );
-    let builder = builder.delete(
-        &format!("{}/products/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::product::ProductController::delete(&*s.products, path.id).await)
-            }
-        },
-    );
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/products", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(controller::product::ProductController::create(&*s.products, body.0).await)
+        }
+    });
+    let builder = builder.get(&format!("{}/products/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::product::ProductController::get(&*s.products, path.id).await)
+        }
+    });
+    let builder = builder.put(&format!("{}/products/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(
+                controller::product::ProductController::update(&*s.products, path.id, body.0).await,
+            )
+        }
+    });
+    let builder = builder.delete(&format!("{}/products/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::product::ProductController::delete(&*s.products, path.id).await)
+        }
+    });
 
     // 供应商
-    let builder = builder.get(
-        &format!("{}/suppliers", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::supplier::SupplierController::list(
-                        &*s.suppliers, q.page.unwrap_or(1), q.page_size.unwrap_or(20),
-                        q.keyword.clone(),
-                    )
+    let builder = builder.get(&format!("{}/suppliers", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::supplier::SupplierController::list(
+                    &*s.suppliers,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.keyword.clone(),
+                )
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/suppliers", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(controller::supplier::SupplierController::create(&*s.suppliers, body.0).await)
+        }
+    });
+    let builder = builder.get(&format!("{}/suppliers/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::supplier::SupplierController::get(&*s.suppliers, path.id).await)
+        }
+    });
+    let builder = builder.put(&format!("{}/suppliers/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(
+                controller::supplier::SupplierController::update(&*s.suppliers, path.id, body.0)
                     .await,
-                )
-            }
-        },
-    );
-    let builder = builder.post(
-        &format!("{}/suppliers", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(controller::supplier::SupplierController::create(&*s.suppliers, body.0).await)
-            }
-        },
-    );
-    let builder = builder.get(
-        &format!("{}/suppliers/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::supplier::SupplierController::get(&*s.suppliers, path.id).await)
-            }
-        },
-    );
-    let builder = builder.put(
-        &format!("{}/suppliers/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(
-                    controller::supplier::SupplierController::update(&*s.suppliers, path.id, body.0)
-                        .await,
-                )
-            }
-        },
-    );
-    let builder = builder.delete(
-        &format!("{}/suppliers/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::supplier::SupplierController::delete(&*s.suppliers, path.id).await)
-            }
-        },
-    );
+            )
+        }
+    });
+    let builder = builder.delete(&format!("{}/suppliers/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::supplier::SupplierController::delete(&*s.suppliers, path.id).await)
+        }
+    });
 
     // 采购单
-    let builder = builder.get(
-        &format!("{}/purchase_orders", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::list(
-                        &*s.purchase_orders, q.page.unwrap_or(1), q.page_size.unwrap_or(20),
-                        q.status.clone(),
-                    )
-                    .await,
+    let builder = builder.get(&format!("{}/purchase_orders", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::list(
+                    &*s.purchase_orders,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.status.clone(),
                 )
-            }
-        },
-    );
-    let builder = builder.post(
-        &format!("{}/purchase_orders", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::create(
-                        &*s.purchase_orders, body.0,
-                    )
-                    .await,
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/purchase_orders", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::create(
+                    &*s.purchase_orders,
+                    body.0,
                 )
-            }
-        },
-    );
-    let builder = builder.get(
-        &format!("{}/purchase_orders/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::get(
-                        &*s.purchase_orders, path.id,
-                    )
-                    .await,
+                .await,
+            )
+        }
+    });
+    let builder = builder.get(&format!("{}/purchase_orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::get(
+                    &*s.purchase_orders,
+                    path.id,
                 )
-            }
-        },
-    );
-    let builder = builder.put(
-        &format!("{}/purchase_orders/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::update(
-                        &*s.purchase_orders, path.id, body.0,
-                    )
-                    .await,
+                .await,
+            )
+        }
+    });
+    let builder = builder.put(&format!("{}/purchase_orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::update(
+                    &*s.purchase_orders,
+                    path.id,
+                    body.0,
                 )
-            }
-        },
-    );
-    let builder = builder.delete(
-        &format!("{}/purchase_orders/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::delete(
-                        &*s.purchase_orders, path.id,
-                    )
-                    .await,
+                .await,
+            )
+        }
+    });
+    let builder = builder.delete(&format!("{}/purchase_orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::delete(
+                    &*s.purchase_orders,
+                    path.id,
                 )
-            }
-        },
-    );
-    let builder = builder.post(
-        &format!("{}/purchase_orders/:id/approve", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(
-                    controller::purchase_order::PurchaseOrderController::approve(
-                        &*s.purchase_orders, path.id,
-                    )
-                    .await,
-       
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/purchase_orders/:id/approve", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(
+                controller::purchase_order::PurchaseOrderController::approve(
+                    &*s.purchase_orders,
+                    path.id,
                 )
-            }
-        },
-    );
+                .await,
+            )
+        }
+    });
 
     builder
 }

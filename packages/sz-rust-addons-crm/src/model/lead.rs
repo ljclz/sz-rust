@@ -40,17 +40,26 @@ pub struct Lead {
 }
 
 impl Lead {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 impl Default for Lead {
     fn default() -> Self {
         Self {
-            id: 0, name: String::new(), source: String::new(),
-            status: "prospect".to_string(), phone: String::new(),
-            email: String::new(), company: String::new(),
-            estimated_amount: 0.0, owner_id: 0, remark: String::new(),
-            created_at: 0, updated_at: 0,
+            id: 0,
+            name: String::new(),
+            source: String::new(),
+            status: "prospect".to_string(),
+            phone: String::new(),
+            email: String::new(),
+            company: String::new(),
+            estimated_amount: 0.0,
+            owner_id: 0,
+            remark: String::new(),
+            created_at: 0,
+            updated_at: 0,
         }
     }
 }

@@ -37,16 +37,25 @@ pub struct Deal {
 }
 
 impl Deal {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 impl Default for Deal {
     fn default() -> Self {
         Self {
-            id: 0, name: String::new(), stage: "prospect".to_string(),
-            amount: 0.0, contact_id: 0, lead_id: 0, owner_id: 0,
-            remark: String::new(), probability: 0,
-            created_at: 0, updated_at: 0,
+            id: 0,
+            name: String::new(),
+            stage: "prospect".to_string(),
+            amount: 0.0,
+            contact_id: 0,
+            lead_id: 0,
+            owner_id: 0,
+            remark: String::new(),
+            probability: 0,
+            created_at: 0,
+            updated_at: 0,
         }
     }
 }

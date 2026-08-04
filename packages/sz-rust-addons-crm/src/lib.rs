@@ -24,7 +24,7 @@
 //! - `crm_leads`
 //! - `crm_deals`
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 pub mod controller;
 pub mod model;
@@ -35,7 +35,7 @@ use std::sync::Arc;
 use axum::extract::{Json, Path, Query};
 use serde::Deserialize;
 use serde_json::Value;
-use sz_rust_core::orm::repository::{InMemoryRepository, Repository};
+use sz_rust_core::orm::repository::InMemoryRepository;
 use sz_rust_core::router::RouterBuilder;
 
 use crate::model::contact::Contact;
@@ -97,204 +97,150 @@ where
     let base = "/api/crm";
 
     // 联系人
-    let builder = builder.get(
-        &format!("{}/contacts", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::contact::ContactController::list(
-                        &*s.contacts,
-                        q.page.unwrap_or(1),
-                        q.page_size.unwrap_or(20),
-                        q.keyword.clone(),
-                    )
-                    .await,
+    let builder = builder.get(&format!("{}/contacts", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::contact::ContactController::list(
+                    &*s.contacts,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.keyword.clone(),
                 )
-            }
-        },
-    );
+                .await,
+            )
+        }
+    });
 
-    let builder = builder.post(
-        &format!("{}/contacts", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(controller::contact::ContactController::create(&*s.contacts, body.0).await)
-            }
-        },
-    );
+    let builder = builder.post(&format!("{}/contacts", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(controller::contact::ContactController::create(&*s.contacts, body.0).await)
+        }
+    });
 
-    let builder = builder.get(
-        &format!("{}/contacts/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::contact::ContactController::get(&*s.contacts, path.id).await)
-            }
-        },
-    );
+    let builder = builder.get(&format!("{}/contacts/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::contact::ContactController::get(&*s.contacts, path.id).await)
+        }
+    });
 
-    let builder = builder.put(
-        &format!("{}/contacts/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(
-                    controller::contact::ContactController::update(&*s.contacts, path.id, body.0)
-                        .await,
-                )
-            }
-        },
-    );
+    let builder = builder.put(&format!("{}/contacts/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(
+                controller::contact::ContactController::update(&*s.contacts, path.id, body.0).await,
+            )
+        }
+    });
 
-    let builder = builder.delete(
-        &format!("{}/contacts/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::contact::ContactController::delete(&*s.contacts, path.id).await)
-            }
-        },
-    );
+    let builder = builder.delete(&format!("{}/contacts/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::contact::ContactController::delete(&*s.contacts, path.id).await)
+        }
+    });
 
     // 线索
-    let builder = builder.get(
-        &format!("{}/leads", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::lead::LeadController::list(
-                        &*s.leads,
-                        q.page.unwrap_or(1),
-                        q.page_size.unwrap_or(20),
-                        q.keyword.clone(),
-                    )
-                    .await,
+    let builder = builder.get(&format!("{}/leads", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::lead::LeadController::list(
+                    &*s.leads,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.keyword.clone(),
                 )
-            }
-        },
-    );
+                .await,
+            )
+        }
+    });
 
-    let builder = builder.post(
-        &format!("{}/leads", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(controller::lead::LeadController::create(&*s.leads, body.0).await)
-            }
-        },
-    );
+    let builder = builder.post(&format!("{}/leads", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(controller::lead::LeadController::create(&*s.leads, body.0).await)
+        }
+    });
 
-    let builder = builder.get(
-        &format!("{}/leads/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::lead::LeadController::get(&*s.leads, path.id).await)
-            }
-        },
-    );
+    let builder = builder.get(&format!("{}/leads/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::lead::LeadController::get(&*s.leads, path.id).await)
+        }
+    });
 
-    let builder = builder.put(
-        &format!("{}/leads/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(controller::lead::LeadController::update(&*s.leads, path.id, body.0).await)
-            }
-        },
-    );
+    let builder = builder.put(&format!("{}/leads/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(controller::lead::LeadController::update(&*s.leads, path.id, body.0).await)
+        }
+    });
 
-    let builder = builder.delete(
-        &format!("{}/leads/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::lead::LeadController::delete(&*s.leads, path.id).await)
-            }
-        },
-    );
+    let builder = builder.delete(&format!("{}/leads/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::lead::LeadController::delete(&*s.leads, path.id).await)
+        }
+    });
 
-    let builder = builder.post(
-        &format!("{}/leads/:id/convert", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::lead::LeadController::convert(&*s.leads, path.id).await)
-            }
-        },
-    );
+    let builder = builder.post(&format!("{}/leads/:id/convert", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::lead::LeadController::convert(&*s.leads, path.id).await)
+        }
+    });
 
     // 商机
-    let builder = builder.get(
-        &format!("{}/deals", base),
-        {
-            let s = state.clone();
-            move |q: Query<ListQuery>| async move {
-                Json(
-                    controller::deal::DealController::list(
-                        &*s.deals,
-                        q.page.unwrap_or(1),
-                        q.page_size.unwrap_or(20),
-                        q.stage.clone(),
-                    )
-                    .await,
+    let builder = builder.get(&format!("{}/deals", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::deal::DealController::list(
+                    &*s.deals,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.stage.clone(),
                 )
-            }
-        },
-    );
+                .await,
+            )
+        }
+    });
 
-    let builder = builder.post(
-        &format!("{}/deals", base),
-        {
-            let s = state.clone();
-            move |body: Json<Value>| async move {
-                Json(controller::deal::DealController::create(&*s.deals, body.0).await)
-            }
-        },
-    );
+    let builder = builder.post(&format!("{}/deals", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
+            Json(controller::deal::DealController::create(&*s.deals, body.0).await)
+        }
+    });
 
-    let builder = builder.get(
-        &format!("{}/deals/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::deal::DealController::get(&*s.deals, path.id).await)
-            }
-        },
-    );
+    let builder = builder.get(&format!("{}/deals/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::deal::DealController::get(&*s.deals, path.id).await)
+        }
+    });
 
-    let builder = builder.put(
-        &format!("{}/deals/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>, body: Json<Value>| async move {
-                Json(controller::deal::DealController::update(&*s.deals, path.id, body.0).await)
-            }
-        },
-    );
+    let builder = builder.put(&format!("{}/deals/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
+            Json(controller::deal::DealController::update(&*s.deals, path.id, body.0).await)
+        }
+    });
 
-    let builder = builder.delete(
-        &format!("{}/deals/:id", base),
-        {
-            let s = state.clone();
-            move |path: Path<IdPath>| async move {
-                Json(controller::deal::DealController::delete(&*s.deals, path.id).await)
-            }
-        },
-    );
+    let builder = builder.delete(&format!("{}/deals/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::deal::DealController::delete(&*s.deals, path.id).await)
+        }
+    });
 
-    let builder = builder.get(
-        &format!("{}/deals/pipeline", base),
-        {
-            let s = state.clone();
-            move || async move {
-                Json(controller::deal::DealController::pipeline(&*s.deals).await)
-            }
-        },
-    );
+    let builder = builder.get(&format!("{}/deals/pipeline", base), {
+        let s = state.clone();
+        move || async move { Json(controller::deal::DealController::pipeline(&*s.deals).await) }
+    });
 
     builder
 }

@@ -6,9 +6,9 @@ use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
-use sz_rust_core::controller::SzController;
 use sz_rust_core::middleware::csrf::{generate_token, CSRF_COOKIE_NAME};
 use sz_rust_core::request::fetch_post_data;
+use sz_rust_mvc_facade::controller::SzController; // C4: facade 直连迁移
 
 struct AuthController;
 impl SzController for AuthController {}

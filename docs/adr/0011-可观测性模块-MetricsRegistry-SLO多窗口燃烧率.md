@@ -187,3 +187,5 @@ otlp = ["dep:opentelemetry"] # OTLP gRPC 导出（可选，对接 OTel Collector
    - 标签基数爆炸 Bug → 检查标签值是否包含高基数变量（user_id / request_id）
    - OTLP 导出失败 Bug → 检查 `otlp` feature 是否启用，OTLP exporter 初始化是否成功
    - SLO 窗口计算错误 Bug → 检查滑动窗口的边界条件，特别是窗口切换时的计数器重置逻辑
+   - **测试污染全局指标** → `MetricsRegistry` 通过 `OnceLock` 提供全局实例，测试间未重置会导致指标累加；使用 `MetricsRegistry::reset_for_test()` 或在每个测试中创建独立实例
+   - **标签基数爆炸** → 标签值包含 `user_id` / `request_id` 等高基数变量时，Prometheus 内存占用线性增长；检查 `metrics.record` 的 `labels` 是否包含动态字符串

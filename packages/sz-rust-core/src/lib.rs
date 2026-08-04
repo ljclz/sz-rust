@@ -53,7 +53,7 @@
 //! | `wechat` | `overtrue/wechat` / `EasyWeChat` 微信 SDK（公众号/小程序/开放平台/企业微信） | ✅ |
 //! | `gateway` | `GatewayWorker\Gateway` WebSocket 客户端管理（Gateway API 抽象 + GatewayTransport trait + MemoryGatewayTransport） | ✅ |
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 // v0.2.0：启用 missing_docs 警告，要求所有公开项必须有文档注释
 #![warn(missing_docs)]
 // 文档构建时将 missing_docs 作为错误（CI 中 RUSTDOCFLAGS="-D warnings" 会强制）
@@ -61,52 +61,92 @@
 
 pub mod addons;
 pub mod api_version;
-pub mod cache;
 pub mod cache_warmer;
-pub mod config;
 pub mod container;
-pub mod controller;
-pub mod cookie;
-pub mod debug_page;
-pub mod env;
-pub mod error;
 pub mod error_handler;
-pub mod event;
-pub mod gateway;
-pub mod guard;
 pub mod h2;
 pub mod health;
-pub mod hooks;
-pub mod i18n;
-pub mod log;
 pub mod macros;
-pub mod mail;
-pub mod middleware;
 pub mod migration_history;
-pub mod model;
 pub mod multi_app;
-pub mod notify;
-pub mod oauth;
-pub mod openapi;
-pub mod orm;
-pub mod pay;
+pub mod multi_tenant;
+
+// P3 拆包：MVC 层 facade（view/controller/guard 控制器与视图抽象），
+// 向下游保留 `sz_rust_core::{controller,guard,view}` 路径。
+pub use sz_rust_mvc_facade::{controller, guard, view};
+
+// P3 拆包：中间件层 facade（auth/sanctum/jwt_blacklist 等 14 个中间件 + log 门面），
+// 向下游保留 `sz_rust_core::middleware::*` 与 `sz_rust_core::log::*` 路径。
+pub use sz_rust_middleware_facade as middleware;
+pub use sz_rust_middleware_facade::log;
+
+// P3 拆包：ORM 扩展层 facade（model/hooks/relation 框架层抽象），
+// 基于 sz-rust-orm-facade 构建，向下游保留 `sz_rust_core::{model,hooks,relation}` 路径。
+pub use sz_rust_orm_ext_facade::{hooks, model, relation};
+
+// P2 拆包：ORM facade 作为独立 crate，通过 `sz_rust_core::orm::*` 访问
+// 下游业务包应通过此 facade 统一访问 sz-orm-* 全家桶，而非直接依赖各子包。
+pub use sz_rust_orm_facade as orm;
+
+// P2 拆包：HTTP facade 作为独立 crate，通过 `sz_rust_core::http::*` 访问
+// 包含 response、error、request 三大基础模块，下游可直接依赖以减少编译耦合。
+pub use sz_rust_http_facade as http;
+
+// P2 拆包：Cache facade 作为独立 crate，通过 `sz_rust_core::cache::*` 访问
+// 包含 CacheDriver trait + Memory/Redis/Memcached/MultiLevel 驱动，下游可直接依赖。
+pub use sz_rust_cache_facade as cache;
+
+// P2 拆包：State facade 作为独立 crate，通过 `sz_rust_core::state::*` 访问
+// 包含 session/cookie/env/event/i18n/mail/notify 七大应用状态模块，下游可直接依赖。
+pub use sz_rust_state_facade as state;
+
+// P2 拆包：Infra facade 作为独立 crate，通过 `sz_rust_core::infra::*` 访问
+// 包含 config/validate/static_files/upload/debug_page 五大基础设施模块，下游可直接依赖。
+pub use sz_rust_infra_facade as infra;
+
+// P2 拆包：Auth facade 作为独立 crate，通过 `sz_rust_core::auth::*` 访问
+// 包含 wechat/oauth/gateway 三大认证与网关模块，下游可直接依赖。
+pub use sz_rust_auth_facade as auth;
+
+// 向后兼容：保留 crate::session / crate::cookie / crate::env / crate::event /
+// crate::i18n / crate::mail / crate::notify 路径，内部模块和集成测试无需改动。
+pub use state::{cookie, env, event, i18n, mail, notify, session};
+
+// 向后兼容：保留 crate::config / crate::validate / crate::static_files /
+// crate::upload / crate::debug_page 路径。
+pub use infra::{config, debug_page, static_files, upload, validate};
+
+// 向后兼容：保留 crate::wechat / crate::oauth / crate::gateway 路径。
+pub use auth::{gateway, oauth, wechat};
+
+// 向后兼容：保留 crate::response / crate::error / crate::request 路径
+// 内部模块仍可通过 crate::response::ApiResponse 等方式访问，无需改动。
+pub use http::{error, request, response};
+
+// P2 拆包：Pay facade 作为独立 crate，通过 `sz_rust_core::pay::*` 访问
+// 包含 PayProvider trait + MemoryPayProvider + PayOrder/RefundOrder Builder，下游可直接依赖。
+pub use sz_rust_pay_facade::pay;
+
 pub mod qr_code;
-pub mod relation;
-pub mod request;
-pub mod response;
-pub mod router;
-pub mod routing;
 pub mod runtime;
 pub mod schema_cache;
 pub mod seed;
 pub mod server;
-pub mod session;
-pub mod static_files;
-pub mod upload;
-pub mod validate;
-pub mod view;
-pub mod websocket_route;
-pub mod wechat;
+
+// P3 拆包：路由层 facade（router/routing/websocket_route/openapi 三层路由机制），
+// 向下游保留 `sz_rust_core::{router,routing,websocket_route,openapi}` 路径。
+pub use sz_rust_router_facade::{openapi, router, routing, websocket_route};
+
+// P2: GraphQL / gRPC facade（可选 feature）
+#[cfg(feature = "graphql")]
+pub use orm::graphql;
+
+#[cfg(feature = "grpc")]
+pub use orm::grpc;
+
+// P2: Addon 热加载（可选 feature: hot-reload）
+#[cfg(feature = "hot-reload")]
+pub use runtime::hot_reload;
 
 // ============================================================================
 // 过程宏重导出

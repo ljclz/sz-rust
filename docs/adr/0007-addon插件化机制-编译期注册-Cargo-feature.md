@@ -21,6 +21,62 @@ PHP 项目使用 addon 机制：
 
 sz-rust 需要决定如何实现 addon 插件化机制，在 Rust 的编译期模型下保持灵活性。
 
+## 决策替代方案
+
+在确定编译期注册 + Cargo feature 模式前，曾考虑以下替代方案：
+
+### 方案 A：运行时动态加载（libloading）
+
+```rust
+// 运行时加载 .so/.dll
+let lib = Library::new("/path/to/addon.so")?;
+let init = lib.get::<fn() -> AddonInitResult>(b"addon_init\0")?;
+init();
+```
+
+**拒绝原因**（详见 ADR-016）：
+- **ABI 兼容性**：插件必须与主程序使用完全相同的 Rust 版本和依赖版本，否则 `AddonInitResult` 内存布局不一致会导致 UB
+- **生命周期管理**：axum Router 持有插件路由的引用，插件卸载后路由成为悬垂指针
+- **安全审计困难**：`unsafe` FFI 调用难以静态分析，插件 panic 可能穿透 FFI 边界
+- **版本对齐成本**：每次主程序升级，所有插件需重新编译
+
+> **注**：ADR-016 探索了运行时动态加载方案，但标记为"探索性实现"，不建议生产环境使用。
+
+### 方案 B：HTTP 子进程（Sidecar 模式）
+
+```rust
+// 插件作为独立 HTTP 服务运行
+// 主程序通过反向代理转发 /addons/<plugin>/ → plugin:8080
+```
+
+**拒绝原因**：
+- 运维复杂度高（每个插件需要独立进程管理）
+- 插件间通信需要额外的服务发现机制
+- 无法共享 DI 容器、缓存、数据库连接池
+- PHP 端 addon 是进程内插件，Sidecar 模式语义差异大
+
+### 方案 C：WASM 插件（Wasmtime）
+
+```rust
+// 插件编译为 WASM 模块
+let module = Module::from_file(engine, "addon.wasm")?;
+let instance = Instance::new(&module, &imports)?;
+```
+
+**拒绝原因**：
+- WASM 生态在 Rust 服务端场景尚不成熟
+- 插件无法直接使用 Rust 标准库（需要 WASI）
+- 性能开销（WASM 沙箱化、内存拷贝）
+- 开发体验差（插件需要单独编译为 WASM）
+
+### 最终选择：编译期注册 + Cargo feature
+
+综合以上分析，选择编译期注册方案：
+- **类型安全**：插件与主程序共享类型系统，编译期检查
+- **零运行时开销**：插件代码直接编译进二进制，无动态加载开销
+- **Feature 隔离**：通过 Cargo feature 控制插件编译，不启用则零依赖
+- **DI 容器共享**：插件可直接使用主程序的 Service/Repository
+
 ## 决策
 
 采用 **编译期注册 + Cargo feature** 模式，放弃运行时动态加载：
@@ -123,3 +179,5 @@ operate = ["dep:sz-rust-addons-operate"]
    - 功能不可用 Bug → 检查 `Cargo.toml` 的 `features` 是否包含该插件
    - 依赖缺失 Bug → 检查插件的 `Cargo.toml` 是否声明了所有依赖
    - 编译错误 Bug → 检查插件是否只依赖 `sz-rust-core`，避免循环依赖
+   - **Feature 组合冲突** → 同时启用多个插件时，若两个插件依赖同一 crate 的不同版本，Cargo 解析失败；检查 `cargo tree -d` 排查重复依赖
+   - **插件初始化顺序** → `sz-rust-addons-loader` 按 Cargo feature 字母序初始化插件，若插件 B 依赖插件 A 的运行时状态，需确保 A 在 B 之前初始化（可通过 `addons_init_order` 配置调整）

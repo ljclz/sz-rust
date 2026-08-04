@@ -24,6 +24,61 @@ PHP szoa RBAC 模型：
 
 sz-rust 需要决定如何统一鉴权机制，同时保持与 PHP 端的兼容性。
 
+## 决策替代方案
+
+在确定 JWT + Middleware + Guard 三层分离模型前，曾考虑以下替代方案：
+
+### 方案 A：仅使用 Middleware（类似 Actix-web guard）
+
+```rust
+// 所有鉴权逻辑在中间件中
+pub fn auth_middleware() -> impl Middleware {
+    |req, next| async {
+        let token = req.headers().get("Authorization");
+        // 验证 JWT、检查 RBAC...
+    }
+}
+```
+
+**拒绝原因**：
+- 鉴权逻辑与中间件耦合，无法按路由粒度控制
+- 无法支持 `#[authorize]` 属性宏声明式鉴权
+- PHP 端 `is_super=1` 绕过逻辑难以在中间件中优雅表达
+
+### 方案 B：仅使用 Guard trait（类似 Spring Security）
+
+```rust
+#[derive(Authorize)]
+#[guard(MyAuthGuard)]
+struct UserController;
+```
+
+**拒绝原因**：
+- Guard 仅能控制"是否允许访问"，无法处理"如何提取用户身份"
+- JWT 解析、黑名单检查等前置逻辑无处安放
+- 无法支持多鉴权方式并存（JWT + Basic Auth + Cache Token）
+
+### 方案 C：统一使用 Session（类似 PHP 默认）
+
+```rust
+// 基于 Cookie Session
+let user = session.get("user_id");
+```
+
+**拒绝原因**：
+- 无法支持无状态 API 场景（微服务间调用）
+- Session 存储在 Redis，单点故障风险
+- PHP 端 szoa/szweb 已使用 JWT，Session 方案无法兼容
+
+### 最终选择：JWT + Middleware + Guard 三层分离
+
+综合以上分析，选择三层分离方案：
+- **Middleware 层**：JWT 解析、黑名单检查、用户身份提取（前置处理）
+- **Guard 层**：RBAC 权限检查、`is_super=1` 绕过逻辑（细粒度控制）
+- **属性宏层**：`#[authorize]` 声明式标注，编译期绑定 Guard
+
+三层职责清晰，可独立替换（如将 JWT 替换为 OAuth2）。
+
 ## 决策
 
 采用 **JWT + Middleware + Guard 三层分离** 模型：
@@ -134,3 +189,5 @@ Auth 中间件负责 JWT 校验并注入 `AuthenticatedUser`，Guard 基于 `Aut
    - 权限校验失效 Bug → 检查 `PermissionGuard` 的权限字符串是否匹配，`is_super` 是否被错误设置为 `true`
    - Guard 未执行 Bug → 检查 `guard_middleware` 是否通过 `from_fn_with_state` 正确注册
    - 用户信息丢失 Bug → 检查 Auth Middleware 是否正确注入 `AuthenticatedUser` 到 `request.extensions_mut()`
+   - **JWT 密钥配置错误** → `JWT_SECRET` 环境变量未设置或过短（建议 ≥ 32 字节），导致 token 签发/验证使用默认密钥，生产环境所有 token 可被伪造
+   - **Token 过期未刷新** → JWT 过期时间（`exp` claim）到期后客户端未刷新，返回 `401 NotLogin`；检查 `Authorization: Bearer <token>` 的 `exp` 字段

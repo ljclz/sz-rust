@@ -85,7 +85,8 @@ async fn test_start_consumer_graceful_shutdown_integration() {
 #[tokio::test]
 async fn test_send_ota_command_builds_message() {
     // send_ota_command 仅构建 MqttMessage 并返回 Ok，不实际发送
-    let result = mqtt_service::send_ota_command("SN001", "http://ota.example.com/firmware.bin", "2.0").await;
+    let result =
+        mqtt_service::send_ota_command("SN001", "http://ota.example.com/firmware.bin", "2.0").await;
     assert!(result.is_ok(), "send_ota_command 应成功构建消息");
 }
 

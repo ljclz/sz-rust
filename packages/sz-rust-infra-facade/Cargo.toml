@@ -1,0 +1,50 @@
+[package]
+name = "sz-rust-infra-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Infrastructure facade for sz-rust framework — config, validate, static files, upload, debug page"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["config", "validate", "upload", "static", "thinkphp"]
+categories = ["web-programming"]
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+md-5 = { workspace = true }
+once_cell = { workspace = true }
+hex = { workspace = true }
+infer = { workspace = true }
+mime_guess = { workspace = true }
+serde_yml = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+tokio-util = { workspace = true, features = ["io"] }
+tracing = { workspace = true }
+tower-http = { workspace = true, features = ["fs"] }
+# upload module deps
+ab_glyph = { workspace = true }
+async-trait = { workspace = true }
+image = { workspace = true }
+imageproc = { workspace = true }
+rand = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

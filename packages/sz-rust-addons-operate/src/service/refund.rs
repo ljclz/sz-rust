@@ -279,26 +279,27 @@ mod tests {
             .execute(&json!({
                 "order_id": 1,
                 "opt_uid": 100
-            })).await
+            }))
+            .await
             .unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_refund_cash_returns_true() {
         let svc = MockRefundService;
         let result = svc.refund(1, 100.50).await.unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_refund_epay_returns_true() {
         let svc = MockRefundService;
         let result = svc.reject(1, 200.00).await.unwrap();
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_mock_refund_with_zero_amount() {
         let svc = MockRefundService;
         let result = svc.refund(1, 0.0).await.unwrap();
@@ -312,7 +313,7 @@ mod tests {
     // 审计报告 T-1 指出：Mock 测试永远返回 Ok(true)，无法检测任何生产代码 bug。
     // 此处通过 HttpRefundService（无 webhook 配置）测试真实业务校验逻辑的失败路径。
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_http_refund_execute_returns_false_when_order_id_missing() {
         // T-1: HttpRefundService.execute 当 order_id 不存在时应返回 Ok(false)
         // 对齐 PHP `if (!$this->model) return false;`
@@ -328,19 +329,22 @@ mod tests {
         let svc = HttpRefundService::from_env();
         // pay_status=10（未支付）
         let result = svc
-            .execute(&json!({"order_id": 1, "pay_status": 10, "pay_price": 100.0})).await
+            .execute(&json!({"order_id": 1, "pay_status": 10, "pay_price": 100.0}))
+            .await
             .unwrap();
         assert!(!result, "pay_status=10 时 execute 应返回 Ok(false)");
 
         // pay_status=30（已退款）
         let result = svc
-            .execute(&json!({"order_id": 1, "pay_status": 30, "pay_price": 100.0})).await
+            .execute(&json!({"order_id": 1, "pay_status": 30, "pay_price": 100.0}))
+            .await
             .unwrap();
         assert!(!result, "pay_status=30 时 execute 应返回 Ok(false)");
 
         // pay_status=0（默认值）
         let result = svc
-            .execute(&json!({"order_id": 1, "pay_price": 100.0})).await
+            .execute(&json!({"order_id": 1, "pay_price": 100.0}))
+            .await
             .unwrap();
         assert!(!result, "pay_status 缺失时 execute 应返回 Ok(false)");
     }
@@ -351,7 +355,8 @@ mod tests {
         // 注意：测试环境中 QYWX_WEBHOOK_URL 未设置，webhook 通知被跳过
         let svc = HttpRefundService::from_env();
         let result = svc
-            .execute(&json!({"order_id": 1, "pay_status": 20, "pay_price": 100.0})).await
+            .execute(&json!({"order_id": 1, "pay_status": 20, "pay_price": 100.0}))
+            .await
             .unwrap();
         assert!(
             result,
@@ -359,7 +364,7 @@ mod tests {
         );
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_http_refund_refund_returns_true_when_no_webhook() {
         // T-1: HttpRefundService.refund 无 webhook 配置时应返回 Ok(true)
         let svc = HttpRefundService::from_env();
@@ -367,7 +372,7 @@ mod tests {
         assert!(result);
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_http_refund_reject_returns_true_when_no_webhook() {
         // T-1: HttpRefundService.reject 无 webhook 配置时应返回 Ok(true)
         let svc = HttpRefundService::from_env();
@@ -383,7 +388,7 @@ mod tests {
     pub struct FailingRefundService;
 
     #[async_trait::async_trait]
-impl RefundService for FailingRefundService {
+    impl RefundService for FailingRefundService {
         async fn execute(&self, _param: &Value) -> Result<bool, String> {
             Err("退款执行失败：订单查询异常".to_string())
         }
@@ -399,7 +404,7 @@ impl RefundService for FailingRefundService {
     pub struct BusinessFailingRefundService;
 
     #[async_trait::async_trait]
-impl RefundService for BusinessFailingRefundService {
+    impl RefundService for BusinessFailingRefundService {
         async fn execute(&self, _param: &Value) -> Result<bool, String> {
             Ok(false) // 模拟 PHP `if (pay_status != 20) return false;`
         }
@@ -411,7 +416,7 @@ impl RefundService for BusinessFailingRefundService {
         }
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_failing_refund_execute_returns_error() {
         let svc = FailingRefundService;
         let result = svc.execute(&json!({"order_id": 1})).await;
@@ -422,7 +427,7 @@ impl RefundService for BusinessFailingRefundService {
         );
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_failing_refund_refund_returns_error() {
         let svc = FailingRefundService;
         let result = svc.refund(1, 100.0).await;
@@ -430,7 +435,7 @@ impl RefundService for BusinessFailingRefundService {
         assert!(result.unwrap_err().contains("现金退款失败"));
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_failing_refund_reject_returns_error() {
         let svc = FailingRefundService;
         let result = svc.reject(1, 100.0).await;
@@ -438,7 +443,7 @@ impl RefundService for BusinessFailingRefundService {
         assert!(result.unwrap_err().contains("电子退款失败"));
     }
 
-#[tokio::test]
+    #[tokio::test]
     async fn test_business_failing_refund_execute_returns_false() {
         // T-1: 业务校验失败时 execute 应返回 Ok(false)，而非 Err
         // 对齐 PHP `return false;` 语义（业务失败，非系统错误）

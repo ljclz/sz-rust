@@ -14,7 +14,7 @@
 //!
 //! ## 整合说明
 //!
-//! 本模块使用 [`sz_orm_core::migration::FileMigrationResolver`] 解析迁移目录，
+//! 本模块使用 `sz_orm_core::migration::FileMigrationResolver`（sz-orm-core，经 sz-rust-orm-facade 透传） 解析迁移目录，
 //! 对齐 sz-orm 的迁移文件命名约定（`<version>_<name>_up.sql` / `<version>_<name>_down.sql`）。
 //!
 //! ### 离线模式（默认）

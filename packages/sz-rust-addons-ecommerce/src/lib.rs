@@ -15,7 +15,7 @@
 //! register_routes(builder, ec_state);
 //! ```
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 pub mod controller;
 pub mod model;
@@ -26,7 +26,7 @@ use std::sync::Arc;
 use axum::extract::{Json, Path, Query};
 use serde::Deserialize;
 use serde_json::Value;
-use sz_rust_core::orm::repository::{InMemoryRepository, Repository};
+use sz_rust_core::orm::repository::InMemoryRepository;
 use sz_rust_core::router::RouterBuilder;
 
 use crate::model::cart::CartItem;
@@ -58,7 +58,9 @@ struct ListQuery {
 }
 
 #[derive(Deserialize)]
-struct IdPath { id: i64 }
+struct IdPath {
+    id: i64,
+}
 
 /// 注册电商所有路由。
 pub fn register_routes<S>(builder: RouterBuilder<S>, state: EcommerceState) -> RouterBuilder<S>
@@ -68,96 +70,114 @@ where
     let base = "/api/ecommerce";
 
     // 订单
-    let builder = builder.get(
-        &format!("{}/orders", base),
-        { let s = state.clone(); move |q: Query<ListQuery>| async move {
-            Json(controller::order::OrderController::list(&*s.orders, q.page.unwrap_or(1), q.page_size.unwrap_or(20), q.status.clone()).await)
-        }},
-    );
-    let builder = builder.post(
-        &format!("{}/orders", base),
-        { let s = state.clone(); move |body: Json<Value>| async move {
+    let builder = builder.get(&format!("{}/orders", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::order::OrderController::list(
+                    &*s.orders,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.status.clone(),
+                )
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/orders", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
             Json(controller::order::OrderController::create(&*s.orders, body.0).await)
-        }},
-    );
-    let builder = builder.get(
-        &format!("{}/orders/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
+        }
+    });
+    let builder = builder.get(&format!("{}/orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::get(&*s.orders, path.id).await)
-        }},
-    );
-    let builder = builder.put(
-        &format!("{}/orders/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>, body: Json<Value>| async move {
+        }
+    });
+    let builder = builder.put(&format!("{}/orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(controller::order::OrderController::update(&*s.orders, path.id, body.0).await)
-        }},
-    );
-    let builder = builder.delete(
-        &format!("{}/orders/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
+        }
+    });
+    let builder = builder.delete(&format!("{}/orders/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::delete(&*s.orders, path.id).await)
-        }},
-    );
-    let builder = builder.post(
-        &format!("{}/orders/:id/cancel", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
+        }
+    });
+    let builder = builder.post(&format!("{}/orders/:id/cancel", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::cancel(&*s.orders, path.id).await)
-        }},
-    );
+        }
+    });
 
     // 订单项
-    let builder = builder.get(
-        &format!("{}/order_items", base),
-        { let s = state.clone(); move |q: Query<ListQuery>| async move {
-            Json(controller::order_item::OrderItemController::list(&*s.order_items, q.page.unwrap_or(1), q.page_size.unwrap_or(20), q.order_id).await)
-        }},
-    );
-    let builder = builder.post(
-        &format!("{}/order_items", base),
-        { let s = state.clone(); move |body: Json<Value>| async move {
+    let builder = builder.get(&format!("{}/order_items", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
+            Json(
+                controller::order_item::OrderItemController::list(
+                    &*s.order_items,
+                    q.page.unwrap_or(1),
+                    q.page_size.unwrap_or(20),
+                    q.order_id,
+                )
+                .await,
+            )
+        }
+    });
+    let builder = builder.post(&format!("{}/order_items", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
             Json(controller::order_item::OrderItemController::create(&*s.order_items, body.0).await)
-        }},
-    );
-    let builder = builder.delete(
-        &format!("{}/order_items/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
-            Json(controller::order_item::OrderItemController::delete(&*s.order_items, path.id).await)
-        }},
-    );
+        }
+    });
+    let builder = builder.delete(&format!("{}/order_items/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(
+                controller::order_item::OrderItemController::delete(&*s.order_items, path.id).await,
+            )
+        }
+    });
 
     // 购物车
-    let builder = builder.get(
-        &format!("{}/cart", base),
-        { let s = state.clone(); move |q: Query<ListQuery>| async move {
+    let builder = builder.get(&format!("{}/cart", base), {
+        let s = state.clone();
+        move |q: Query<ListQuery>| async move {
             let uid = q.user_id.unwrap_or(0);
             Json(controller::cart::CartController::list(&*s.carts, uid).await)
-        }},
-    );
-    let builder = builder.post(
-        &format!("{}/cart", base),
-        { let s = state.clone(); move |body: Json<Value>| async move {
+        }
+    });
+    let builder = builder.post(&format!("{}/cart", base), {
+        let s = state.clone();
+        move |body: Json<Value>| async move {
             Json(controller::cart::CartController::add(&*s.carts, body.0).await)
-        }},
-    );
-    let builder = builder.put(
-        &format!("{}/cart/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>, body: Json<Value>| async move {
+        }
+    });
+    let builder = builder.put(&format!("{}/cart/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>, body: Json<Value>| async move {
             let qty: i64 = body.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
             Json(controller::cart::CartController::update_qty(&*s.carts, path.id, qty).await)
-        }},
-    );
-    let builder = builder.delete(
-        &format!("{}/cart/:id", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
+        }
+    });
+    let builder = builder.delete(&format!("{}/cart/:id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
             Json(controller::cart::CartController::delete(&*s.carts, path.id).await)
-        }},
-    );
-    let builder = builder.delete(
-        &format!("{}/cart/clear/:user_id", base),
-        { let s = state.clone(); move |path: Path<IdPath>| async move {
+        }
+    });
+    let builder = builder.delete(&format!("{}/cart/clear/:user_id", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
             Json(controller::cart::CartController::clear(&*s.carts, path.id).await)
-        }},
-    );
+        }
+    });
 
     builder
 }

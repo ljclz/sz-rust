@@ -2,14 +2,14 @@
 
 > **项目**：SZ-Rust（鲜视达 Rust Web 框架）
 > **维护规则**：每完成一项重大架构决策必须新增 ADR，并更新本索引
-> **文档版本**：v1.0（2026-07-22）
+> **文档版本**：v1.1（2026-08-02）
 
 ---
 
 ## 1. ADR 目录
 
-> 当前 ADR 数量：**12**（P0×4 + P1×6 + P2×2，覆盖 12 项关键架构决策）
-> ADR 密度：12 / 28 模块 = **0.429**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
+> 当前 ADR 数量：**16**（P0×4 + P1×6 + P2×6，覆盖 16 项关键架构决策）
+> ADR 密度：16 / 28 模块 = **0.571**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
 
 | 编号 | 标题 | 状态 | 日期 | 决策者 | 文件 |
 |------|------|------|------|--------|------|
@@ -25,6 +25,10 @@
 | ADR-010 | 配置加载方式（serde + YAML + 环境变量覆盖 + 默认值） | 已接受 | 2026-07-22 | SZ-Rust Team | [0010-配置加载方式-serde-YAML-环境变量覆盖.md](0010-配置加载方式-serde-YAML-环境变量覆盖.md) |
 | ADR-011 | 可观测性模块（MetricsRegistry + SLO 多窗口燃烧率） | 已接受 | 2026-07-22 | SZ-Rust Team | [0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md](0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) |
 | ADR-012 | 分布式追踪（W3C TraceContext + OTLP exporter） | 已接受 | 2026-07-22 | SZ-Rust Team | [0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md](0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) |
+| ADR-013 | 多租户支持（thread_local TenantContext + TenantRepository 装饰器） | 已接受 | 2026-08-02 | SZ-Rust Team | [0013-multi-tenant-thread-local-repository-decorator.md](0013-multi-tenant-thread-local-repository-decorator.md) |
+| ADR-014 | GraphQL 集成（sz-orm-graphql facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0014-graphql-integration-facade.md](0014-graphql-integration-facade.md) |
+| ADR-015 | gRPC 支持（sz-orm-grpc facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0015-grpc-support-facade.md](0015-grpc-support-facade.md) |
+| ADR-016 | Addon 热加载探索（libloading 运行时动态加载 + unsafe_code 策略变更） | 已接受 | 2026-08-02 | SZ-Rust Team | [0016-addon-hot-reload-libloading-unsafe.md](0016-addon-hot-reload-libloading-unsafe.md) |
 
 **状态说明**：
 - `提议`（Proposed）：已提交但尚未评审
@@ -185,13 +189,13 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，底层依赖 axum（Tow
 
 ## 5. ADR 完成状态
 
-所有已识别的 ADR 均已完成编写（12/12）：
+所有已识别 ADR 均已完成编写（16/16）：
 
 | 优先级 | 编号 | 标题 | 状态 | 完成日期 |
 |--------|------|------|------|---------|
 | P0 | ADR-001 | 三层路由机制（属性宏 / 配置式 / 约定式） | ✅ 已接受 | 2026-07-22 |
 | P0 | ADR-002 | 中间件模型（Tower Service + 洋葱模型） | ✅ 已接受 | 2026-07-22 |
-| P0 | ADR-003 | 控制器抽象（trait + 默认方法 + 组合） | ✅ 已接受 | 2026-07-22 |
+| P0 | ADR-003 | 控制器抽象（SzController trait + 默认方法 + 组合） | ✅ 已接受 | 2026-07-22 |
 | P0 | ADR-004 | Model 钩子实现（re-export sz-orm-core + 16 事件） | ✅ 已接受 | 2026-07-22 |
 | P1 | ADR-005 | 事务管理策略（委托 sz-orm-core） | ✅ 已接受 | 2026-07-22 |
 | P1 | ADR-006 | 认证授权机制（JWT + Middleware + Guard） | ✅ 已接受 | 2026-07-22 |
@@ -201,6 +205,13 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，底层依赖 axum（Tow
 | P2 | ADR-010 | 配置加载方式（serde + YAML + 环境变量覆盖） | ✅ 已接受 | 2026-07-22 |
 | P1 | ADR-011 | 可观测性模块（MetricsRegistry + SLO 多窗口燃烧率） | ✅ 已接受 | 2026-07-22 |
 | P1 | ADR-012 | 分布式追踪（W3C TraceContext + OTLP exporter） | ✅ 已接受 | 2026-07-22 |
+| P2 | ADR-013 | 多租户支持（thread_local TenantContext + TenantRepository 装饰器） | ✅ 已接受 | 2026-08-02 |
+| P2 | ADR-014 | GraphQL 集成（sz-orm-graphql facade 透传） | ✅ 已接受 | 2026-08-02 |
+| P2 | ADR-015 | gRPC 支持（sz-orm-grpc facade 透传） | ✅ 已接受 | 2026-08-02 |
+| P2 | ADR-016 | Addon 热加载探索（libloading 运行时动态加载 + unsafe_code 策略变更） | ✅ 已接受 | 2026-08-02 |
+| P2 | ADR-017 | sz-rust-core 拆包策略（Facade 渐进提取，7 个 facade） | ✅ 已接受 | 2026-08-03 |
+| P2 | ADR-018 | Facade Crate 独立发布策略（0.x 统一版本 / 1.0 后 semver 独立） | ✅ 已接受 | 2026-08-03 |
+| P3 | ADR-019 | P3 剩余模块解耦（四簇提取：orm-ext / router / middleware / mvc） | ✅ 已接受 | 2026-08-03 |
 
 ---
 

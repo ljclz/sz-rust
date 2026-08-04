@@ -10,13 +10,24 @@ pub struct OrderItemController;
 
 impl OrderItemController {
     pub async fn list<R: Repository<OrderItem, Key = OrmValue>>(
-        repo: &R, page: u64, page_size: u64, order_id: Option<i64>,
+        repo: &R,
+        page: u64,
+        page_size: u64,
+        order_id: Option<i64>,
     ) -> Value {
         let conditions: Vec<WhereCondition> = if let Some(oid) = order_id {
-            vec![WhereCondition::new("order_id", WhereOp::Eq, OrmValue::I64(oid))]
-        } else { Vec::new() };
+            vec![WhereCondition::new(
+                "order_id",
+                WhereOp::Eq,
+                OrmValue::I64(oid),
+            )]
+        } else {
+            Vec::new()
+        };
         match repo.paginate_by(&conditions, page, page_size) {
-            Ok(pr) => json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}}),
+            Ok(pr) => {
+                json!({"code": 0, "msg": "ok", "data": {"list": pr.items, "total": pr.total, "page": pr.page, "page_size": pr.page_size}})
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }

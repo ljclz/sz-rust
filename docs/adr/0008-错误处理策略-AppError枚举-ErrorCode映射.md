@@ -104,6 +104,45 @@ impl ErrorCode {
 
 这与 RESTful 最佳实践不一致，但对齐 PHP 行为。
 
+## 决策替代方案
+
+### 方案 A：直接使用 `anyhow::Error`（拒绝）
+
+```rust
+// 使用 anyhow 处理所有错误
+fn do_something() -> anyhow::Result<()> { ... }
+```
+
+**拒绝原因**：
+- `anyhow::Error` 是黑盒错误，无法提取错误码（`code` / `msg` / `data`）
+- 无法对齐 PHP 的 `BaseException` 结构（`code` + `msg` + `data` 三字段）
+- 无法实现 `IntoResponse` 自动转换为 `{code, msg, data}` JSON 响应
+- 生产 Bug 定位时无法通过错误码分类统计
+
+### 方案 B：每个业务模块定义自己的错误枚举（拒绝）
+
+每个业务模块（user / order / product）定义独立的错误枚举。
+
+**拒绝原因**：
+- 错误码分散在多个枚举中，无法统一管理
+- 不同模块可能对同一错误使用不同的 HTTP 状态码
+- 无法实现统一的 `error_handler` 中间件（需要处理所有错误类型）
+- PHP 端的 `BaseException` 是统一的，Rust 端也应保持统一
+
+### 方案 C：仅使用 HTTP 状态码（RESTful 风格）（拒绝）
+
+```rust
+// 完全 RESTful：成功=200，业务失败=400/422，未登录=401，无权限=403
+// 不返回业务错误码（code 字段）
+```
+
+**拒绝原因**：
+- PHP 端的业务错误返回 HTTP 200 + `{code: 0, msg: "error"}`，完全 RESTful 会破坏 PHP 客户端兼容
+- 前端代码依赖 `code` 字段判断业务成功/失败，而非 HTTP 状态码
+- 迁移期间 PHP 和 Rust 并存，错误处理风格必须一致
+
+**最终选择**：`AppError` 枚举 + `ErrorCode` 映射 + `BaseException` 对齐。统一错误类型，PHP 错误码与 Rust 扩展错误码共存，通过 `error_handler` 中间件统一转换为 JSON 响应。
+
 ## 后果
 
 ### 正面后果
@@ -141,3 +180,5 @@ impl ErrorCode {
    - 错误码不匹配 Bug → 检查 `ErrorCode` 枚举的 `#[repr(i32)]` 值
    - HTTP 状态码 Bug → 检查 `ErrorCode::http_status()` 的映射
    - 错误吞没 Bug → 检查业务代码是否用 `?` 传播错误，还是用 `unwrap()`/`expect()` 直接 panic
+   - **未知错误码静默降级** → `ErrorCode::from(999)` 返回 `Failed`（code=0），真实错误码被掩盖；检查 `From<i32> for ErrorCode` 的 fallback 逻辑
+   - **`data` 字段类型不匹配** → `BaseException::data` 为 `Value`，若业务代码传入非 JSON 可序列化类型，`IntoResponse` 转换时 panic

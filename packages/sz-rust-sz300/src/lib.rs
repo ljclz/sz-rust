@@ -24,6 +24,7 @@ pub mod config;
 pub mod controllers;
 /// 数据库连接池初始化（MySQL + PostgreSQL）
 pub mod db;
+pub mod i18n_error;
 /// 应用中间件（JWT 认证、日志等）
 pub mod middleware;
 /// 数据模型（对齐 PHP model）

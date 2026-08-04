@@ -350,7 +350,8 @@ mod tests {
                 "auth_code": "123456789012345678",
                 "pay_price": 200.00,
                 "order_no": "ORDER_001"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["return_code"], 0);
         assert_eq!(result["respObj"]["pay_status"], 1);
@@ -365,7 +366,8 @@ mod tests {
                 "trade_no": "TEST_ICBC_002",
                 "epay_id": "MOCK_ICBC_002",
                 "type": "check"
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["respObj"]["pay_status"], 1);
     }
@@ -380,7 +382,8 @@ mod tests {
                 "reject_no": "REJECT_001",
                 "refund_fee": 100.00,
                 "customer_id": 1001
-            })).await
+            }))
+            .await
             .unwrap();
         assert_eq!(result["return_code"], 0);
         assert_eq!(result["status"], 1);
@@ -390,7 +393,8 @@ mod tests {
     async fn test_mock_icbc_add_bill_returns_true() {
         let svc = MockIcbcService;
         let result = svc
-            .add_bill(&json!({"out_trade_no": "TEST_ICBC_001"})).await
+            .add_bill(&json!({"out_trade_no": "TEST_ICBC_001"}))
+            .await
             .unwrap();
         assert!(result);
     }
@@ -403,7 +407,7 @@ mod tests {
     pub struct FailingIcbcService;
 
     #[async_trait::async_trait]
-impl IcbcService for FailingIcbcService {
+    impl IcbcService for FailingIcbcService {
         async fn icbc_pay(&self, _order: &Value) -> Result<Value, String> {
             Err("ICBC 支付失败：银行 API 超时".to_string())
         }
@@ -422,7 +426,7 @@ impl IcbcService for FailingIcbcService {
     pub struct RejectedIcbcService;
 
     #[async_trait::async_trait]
-impl IcbcService for RejectedIcbcService {
+    impl IcbcService for RejectedIcbcService {
         async fn icbc_pay(&self, _order: &Value) -> Result<Value, String> {
             Ok(serde_json::json!({
                 "msg": "支付失败",
@@ -487,7 +491,10 @@ impl IcbcService for RejectedIcbcService {
     async fn test_rejected_icbc_pay_returns_pay_status_0() {
         // T-1: RejectedIcbcService.icbc_pay 返回 pay_status=0（业务拒绝）
         let svc = RejectedIcbcService;
-        let result = svc.icbc_pay(&json!({"trade_no": "REJECT_001"})).await.unwrap();
+        let result = svc
+            .icbc_pay(&json!({"trade_no": "REJECT_001"}))
+            .await
+            .unwrap();
         assert_eq!(
             result["respObj"]["pay_status"], 0,
             "业务拒绝时 pay_status 应为 0"
@@ -499,7 +506,10 @@ impl IcbcService for RejectedIcbcService {
     async fn test_rejected_icbc_reject_returns_error_code() {
         // T-1: RejectedIcbcService.reject 返回 return_code=-1（业务拒绝）
         let svc = RejectedIcbcService;
-        let result = svc.reject(&json!({"trade_no": "REJECT_001"})).await.unwrap();
+        let result = svc
+            .reject(&json!({"trade_no": "REJECT_001"}))
+            .await
+            .unwrap();
         assert_eq!(result["return_code"], -1);
         assert!(result["return_msg"].as_str().unwrap().contains("退款失败"));
     }

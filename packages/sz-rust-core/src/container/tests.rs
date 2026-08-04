@@ -1138,23 +1138,21 @@ fn test_container_circular_indirect_a_b_a() {
     use std::sync::Arc;
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct ServiceA(Arc<ServiceB>);
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct ServiceB(Arc<ServiceA>);
 
     let container = Container::new();
     let c = Arc::new(container);
 
     let c_b = c.clone();
-    c.singleton(move || {
-        ServiceA(c_b.make::<ServiceB>().expect("ServiceB 应能解析"))
-    });
+    c.singleton(move || ServiceA(c_b.make::<ServiceB>().expect("ServiceB 应能解析")));
 
     let c_a = c.clone();
-    c.singleton(move || {
-        ServiceB(c_a.make::<ServiceA>().expect("ServiceA 应能解析"))
-    });
+    c.singleton(move || ServiceB(c_a.make::<ServiceA>().expect("ServiceA 应能解析")));
 
     // 触发解析，应检测到循环依赖
     let _ = c.make::<ServiceA>();
@@ -1169,10 +1167,13 @@ fn test_container_circular_long_chain() {
     use std::sync::Arc;
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct NodeA(Arc<NodeB>);
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct NodeB(Arc<NodeC>);
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct NodeC(Arc<NodeA>);
 
     let container = Container::new();
@@ -1195,13 +1196,17 @@ fn test_container_circular_long_chain() {
 /// 通过 panic 的 expected 前缀验证错误消息格式。
 /// 注：type_name 返回模块全路径，故 expected 使用完整路径。
 #[test]
-#[should_panic(expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX")]
+#[should_panic(
+    expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX"
+)]
 fn test_container_circular_error_message_contains_chain() {
     use std::sync::Arc;
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct NodeX(Arc<NodeY>);
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct NodeY(Arc<NodeX>);
 
     let container = Container::new();
