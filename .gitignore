@@ -34,3 +34,8 @@ coverage/
 mutants.out/
 # 临时测试脚本
 _*.py
+
+# ZCode agent
+.zcode/
+# Coverage raw data
+build_rs_cov.profraw

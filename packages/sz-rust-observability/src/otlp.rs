@@ -49,18 +49,13 @@ use std::time::Duration;
 static INIT: Once = Once::new();
 
 /// OTLP 传输协议
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OtlpProtocol {
     /// gRPC 协议（默认，端口 4317）
+    #[default]
     Grpc,
     /// HTTP/protobuf 协议（端口 4318）
     HttpProtobuf,
-}
-
-impl Default for OtlpProtocol {
-    fn default() -> Self {
-        Self::Grpc
-    }
 }
 
 impl OtlpProtocol {

@@ -199,6 +199,60 @@ jobs:
       - name: Run cargo-machete
         run: cargo machete --workspace
 
+  # 门禁 13：ADR 覆盖率检查（规则 14 支撑）
+  adr-coverage:
+    name: ADR Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 运行 ADR 覆盖率检查脚本
+        run: bash scripts/check-adr-coverage.sh
+
+      - name: 检查 ADR 索引同步
+        run: |
+          echo "检查 ADR 索引是否包含所有 ADR 文件..."
+          adr_files=$(find docs/adr -name "*.md" ! -name "README.md" | wc -l)
+          index_refs=$(grep -c "ADR-" docs/adr/README.md || true)
+          echo "ADR 文件数: $adr_files  索引引用数: $index_refs"
+          if [ "$index_refs" -lt "$adr_files" ]; then
+            echo "::warning::ADR 索引可能未同步，请检查 docs/adr/README.md"
+          fi
+
+      - name: 验证 ADR 必填字段
+        run: |
+          echo "验证每个 ADR 的必填字段..."
+          errors=0
+          for file in docs/adr/ADR-*.md docs/adr/[0-9]*.md; do
+            [ -f "$file" ] || continue
+            for field in "状态" "日期" "相关代码" "背景" "决策" "后果" "注意事项" "Bug 定位提示"; do
+              if ! grep -q "$field" "$file"; then
+                echo "::error file=$file::缺少必填字段: $field"
+                errors=$((errors + 1))
+              fi
+            done
+          done
+          if [ "$errors" -gt 0 ]; then
+            echo "::error::共 $errors 个 ADR 格式问题"
+            exit 1
+          fi
+          echo "所有 ADR 格式验证通过"
+
+      - name: 验证 ADR 代码行号引用
+        run: |
+          echo "检查 ADR 中的代码行号引用是否有效..."
+          for file in docs/adr/ADR-*.md docs/adr/[0-9]*.md; do
+            [ -f "$file" ] || continue
+            code_refs=$(grep "相关代码" "$file" | grep -oE 'packages/[^ `]+' || true)
+            for ref in $code_refs; do
+              filepath=$(echo "$ref" | sed 's/ *([^)]*)//')
+              if [ -n "$filepath" ] && [ ! -f "$filepath" ]; then
+                echo "::warning file=$file::引用文件不存在: $filepath"
+              fi
+            done
+          done
+          echo "代码行号检查完成"
+
   # 门禁 12：DB 集成测试（P1-TEST-02）
   # 启动真实 MySQL 9.6 + PostgreSQL 18，运行 #[ignore] 的 DB 集成测试
   # 覆盖：连接池 / 事务原子性 / SAVEPOINT / SQL 注入防护 / 业务 schema CRUD
@@ -238,3 +292,62 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run DB integration tests (ignored)
         run: cargo test --package sz-rust-sz300 --test db_integration_test -- --ignored --test-threads=1
+
+  # 门禁 14：行覆盖率 ≥ 85%（规则 10）
+  # 使用 cargo-llvm-cov（跨平台：Linux CI + Windows 本地均可运行）
+  # 排除 sz-orm-macros（proc-macro crate，instrument-coverage 下存在重复定义冲突）
+  coverage:
+    name: Coverage (>= 85%)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run coverage with fail-under gate
+        run: cargo llvm-cov --workspace --exclude sz-orm-macros --cobertura --fail-under-lines 85
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: cobertura.xml
+
+  # 门禁 15：编译时间监控（拆包收益量化 + 防回归）
+  # 首次运行（基线不存在）→ 保存基线；之后 → 与基线对比，超阈值仅 warning 不阻塞
+  compile-time:
+    name: Compile Time Monitor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Measure and compare compile time
+        run: bash scripts/check-compile-time.sh --threshold-percent=50 || true
+      - name: Upload timings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/
+
+  # 门禁 16：Miri 内存/UB 检测（规则支撑：内存泄漏盲区）
+  # 对纯逻辑 facade-tests 跑 miri；依赖不兼容时允许失败（continue-on-error）
+  miri:
+    name: Miri (UB + memory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - name: Install Rust toolchain (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Run Miri on facade integration tests
+        run: cargo +nightly miri test -p sz-rust-facade-tests --jobs 1
