@@ -214,10 +214,14 @@ fn parse_sql_inner(sql: &str) -> Result<Vec<Statement>, ParseError> {
     // Navicat 兼容：预处理 SHOW PROCEDURE/FUNCTION STATUS WHERE Db = 'xxx'
     // sqlparser 不支持此 MySQL 方言，归一化为空结果集查询。
     let normalized2 = normalize_show_procedure_function(&normalized);
+    // ODBC/JDBC 兼容：预处理 {fn FUNC(args)} 转义语法
+    // ODBC/JDBC 驱动使用 {fn ...} 包裹标量函数调用以实现跨数据库兼容，
+    // 这里剥离外壳并将 ODBC 特有函数名映射为标准 SQL 函数名。
+    let normalized3 = normalize_odbc_jdbc_escape(&normalized2);
     // SQL:2016 F-9：将 OVERLAPS 时间区间谓词归一化为等价的布尔表达式
     // （sqlparser 0.53 仅将 OVERLAPS 识别为关键字，未作为表达式运算符解析）
-    let normalized3 = normalize_overlaps_predicate(&normalized2);
-    let sql: &str = normalized3.as_ref();
+    let normalized4 = normalize_overlaps_predicate(&normalized3);
+    let sql: &str = normalized4.as_ref();
     // ADV-BUG-001 修复：OR/AND 链深度预检
     // sqlparser-rs 内部用递归下降解析二值表达式，左结合链深度 = 操作数个数
     // 在调用 sqlparser-rs 之前统计 SQL 文本中 OR/AND 关键字出现次数，超限直接拒绝
@@ -749,6 +753,185 @@ fn normalize_show_procedure_function(sql: &str) -> Cow<'_, str> {
         }
     }
     Cow::Owned(result)
+}
+
+// =====================================================================
+// ODBC/JDBC 转义语法归一化
+// =====================================================================
+
+/// ODBC 标量函数名 → SQL 标准函数名映射表（小写）。
+///
+/// 覆盖 ODBC Scalar Function Escape 语法中定义的函数名到 SzRSQL 已支持
+/// 的标准 SQL 函数名的映射。SzRSQL 已原生支持大多数标准函数名（如 ABS、UPPER、
+/// LENGTH、NOW 等），因此对于已支持的函数名只需剥离 `{fn ...}` 外壳即可；
+/// 本表仅处理 ODBC 特有命名与标准命名不一致的情况。
+const ODBC_FN_MAP: &[(&str, &str)] = &[
+    // 字符串函数
+    ("ucase", "UPPER"),
+    ("lcase", "LOWER"),
+    ("ltrim", "LTRIM"),
+    ("rtrim", "RTRIM"),
+    ("insert", "INSERT"),
+    ("locate", "LOCATE"),
+    ("repeat", "REPEAT"),
+    ("replace", "REPLACE"),
+    // 数值函数
+    ("atan2", "ATAN2"),
+    ("mod", "MOD"),
+    ("power", "POWER"),
+    ("truncate", "TRUNCATE"),
+    // 日期/时间函数
+    ("curdate", "CURRENT_DATE"),
+    ("curtime", "CURRENT_TIME"),
+    ("dayname", "DAYNAME"),
+    ("dayofmonth", "DAYOFMONTH"),
+    ("dayofweek", "DAYOFWEEK"),
+    ("dayofyear", "DAYOFYEAR"),
+    ("monthname", "MONTHNAME"),
+    ("quarter", "QUARTER"),
+    ("timestamp", "TIMESTAMP"),
+    ("week", "WEEK"),
+    // 系统函数
+    ("database", "DATABASE"),
+    ("ifnull", "COALESCE"),
+    ("user", "USER"),
+];
+
+/// ODBC/JDBC 转义语法归一化：将 `{fn FUNC(args...)}` 重写为标准 SQL 函数调用。
+///
+/// ## 背景
+/// ODBC 和 JDBC 驱动规范定义了一套转义语法，允许客户端以统一的方式调用
+/// 标量函数，不受底层数据库方言差异的影响。转义语法格式为：
+/// ```text
+/// {fn FUNCTION_NAME(arg1, arg2, ...)}
+/// ```
+/// 例如：`{fn UCASE(name)}`、`{fn CONCAT(first_name, ' ', last_name)}`、
+/// `{fn CURDATE()}`、`{fn IFNULL(col, 'N/A')}`。
+///
+/// ## 归一化策略
+/// 1. 剥离 `{fn ...}` 外壳，保留内部函数调用文本。
+/// 2. 若函数名在 `ODBC_FN_MAP` 中存在映射（ODBC 特有命名），则替换为标准 SQL 函数名。
+/// 3. 若函数名已是标准 SQL 函数名（如 ABS、UPPER、LENGTH、NOW 等），SzRSQL 已
+///    原生支持，直接使用即可。
+///
+/// ## 嵌套支持
+/// 支持嵌套的 `{fn ...}` 表达式，例如：
+/// `{fn CONCAT({fn UCASE(a)}, {fn LCASE(b)})}` → `CONCAT(UPPER(a), LOWER(b))`
+///
+/// ## 字符串字面量保护
+/// 正确处理单引号/双引号字符串字面量中的 `{fn` 文本，避免误匹配。
+fn normalize_odbc_jdbc_escape(sql: &str) -> Cow<'_, str> {
+    // 快速检测：不包含 "{fn" 直接返回借用
+    let lower = sql.to_ascii_lowercase();
+    if !lower.contains("{fn") {
+        return Cow::Borrowed(sql);
+    }
+
+    let bytes = sql.as_bytes();
+    let mut result = String::with_capacity(sql.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        // 跳过字符串字面量（单引号或双引号），保护字面量中的 "{fn" 文本
+        if bytes[i] == b'\'' || bytes[i] == b'"' {
+            let quote = bytes[i];
+            result.push(bytes[i] as char);
+            i += 1;
+            while i < bytes.len() {
+                result.push(bytes[i] as char);
+                if bytes[i] == quote {
+                    if i + 1 < bytes.len() && bytes[i + 1] == quote {
+                        result.push(bytes[i + 1] as char);
+                        i += 2; // 转义引号 '' 或 ""
+                        continue;
+                    }
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // 检测 "{fn" 前缀（大小写不敏感）
+        if bytes[i] == b'{'
+            && i + 3 <= bytes.len()
+            && bytes[i + 1..i + 3].eq_ignore_ascii_case(b"fn")
+            && (i + 3 == bytes.len() || !bytes[i + 3].is_ascii_alphanumeric())
+        {
+            // 寻找匹配的闭合 "}"，跟踪大括号深度并跳过字符串字面量
+            let mut depth = 1;
+            let mut j = i + 3;
+            let mut found = false;
+            while j < bytes.len() {
+                let c = bytes[j];
+                if c == b'\'' || c == b'"' {
+                    // 跳过字符串字面量（含转义引号 '' 或 \"）
+                    let quote = c;
+                    j += 1;
+                    while j < bytes.len() {
+                        if bytes[j] == quote {
+                            if j + 1 < bytes.len() && bytes[j + 1] == quote {
+                                j += 2; // 转义引号
+                            } else {
+                                j += 1;
+                                break;
+                            }
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    continue;
+                }
+                if c == b'{' {
+                    depth += 1;
+                } else if c == b'}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        found = true;
+                        break;
+                    }
+                }
+                j += 1;
+            }
+
+            if found {
+                // 提取 {fn ...} 内部内容（不含 "{fn" 前缀和 "}" 后缀）
+                let inner_start = i + 3; // 跳过 "{fn"
+                let inner_raw = sql.get(inner_start..j).map(str::trim);
+                if let Some(inner_raw) = inner_raw {
+                    // 递归归一化内部（处理嵌套 {fn ...}）
+                    let inner = normalize_odbc_jdbc_escape(inner_raw);
+                    // 提取函数名并做映射替换
+                    let func_name_end = inner.find('(').unwrap_or(inner.len());
+                    let func_name = inner.get(..func_name_end).unwrap_or(&inner).trim();
+                    let args = inner.get(func_name_end..).unwrap_or("");
+
+                    // ODBC 特有函数名 → 标准 SQL 函数名映射
+                    let mapped = ODBC_FN_MAP
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case(func_name))
+                        .map(|(_, v)| *v);
+
+                    let out_name = mapped.unwrap_or(func_name);
+                    result.push_str(out_name);
+                    result.push_str(args);
+                }
+                i = j + 1; // 跳过 "}"
+                continue;
+            }
+            // 未找到匹配的 "}"，原样输出 "{"
+        }
+
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+
+    if result == sql {
+        Cow::Borrowed(sql)
+    } else {
+        Cow::Owned(result)
+    }
 }
 
 /// 将 SQL:2016 F-9 `OVERLAPS` 时间区间谓词归一化为等价的布尔表达式。
@@ -6369,6 +6552,96 @@ mod overlaps_e2e_tests {
     fn test_overlaps_in_where_with_other_conditions() {
         let sql = "SELECT * FROM t WHERE (a, b) OVERLAPS (1, 10) AND c > 5";
         let stmt = parse_one(sql).expect("should parse");
+        let _ = stmt;
+    }
+}
+
+// =====================================================================
+// ODBC/JDBC {fn ...} 转义语法归一化测试
+// =====================================================================
+
+#[cfg(test)]
+mod odbc_escape_tests {
+    use super::normalize_odbc_jdbc_escape;
+
+    #[test]
+    fn test_no_rewrite_when_absent() {
+        let sql = "SELECT ABS(x), UPPER(name) FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert!(matches!(result, std::borrow::Cow::Borrowed(s) if s == sql));
+    }
+
+    #[test]
+    fn test_strip_fn_wrapper_standard_name() {
+        // 标准 SQL 函数名（SzRSQL 已支持）直接剥离外壳
+        let sql = "SELECT {fn ABS(-5)} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT ABS(-5) FROM t");
+    }
+
+    #[test]
+    fn test_ucase_to_upper() {
+        let sql = "SELECT {fn UCASE(name)} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT UPPER(name) FROM t");
+    }
+
+    #[test]
+    fn test_lcase_to_lower() {
+        let sql = "SELECT {fn LCASE(name)} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT LOWER(name) FROM t");
+    }
+
+    #[test]
+    fn test_curdate_to_current_date() {
+        let sql = "SELECT {fn CURDATE()} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT CURRENT_DATE() FROM t");
+    }
+
+    #[test]
+    fn test_ifnull_to_coalesce() {
+        let sql = "SELECT {fn IFNULL(col, 'N/A')} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT COALESCE(col, 'N/A') FROM t");
+    }
+
+    #[test]
+    fn test_multiple_fn_in_one_statement() {
+        let sql = "SELECT {fn UCASE(a)}, {fn LCASE(b)}, {fn ABS(c)} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT UPPER(a), LOWER(b), ABS(c) FROM t");
+    }
+
+    #[test]
+    fn test_nested_fn() {
+        // 嵌套 {fn ...} 表达式
+        let sql = "SELECT {fn CONCAT({fn UCASE(a)}, {fn LCASE(b)})} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT CONCAT(UPPER(a), LOWER(b)) FROM t");
+    }
+
+    #[test]
+    fn test_case_insensitive_fn() {
+        let sql = "SELECT {FN Ucase(name)} FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT UPPER(name) FROM t");
+    }
+
+    #[test]
+    fn test_string_literal_not_matched() {
+        // 字符串字面量中的 {fn ...} 不应被处理
+        let sql = "SELECT '{fn UCASE(x)}' FROM t";
+        let result = normalize_odbc_jdbc_escape(sql);
+        assert_eq!(result.as_ref(), "SELECT '{fn UCASE(x)}' FROM t");
+    }
+
+    #[test]
+    fn test_full_parse_after_rewrite() {
+        use super::parse_one;
+        let sql = "SELECT {fn UCASE(name)}, {fn IFNULL(col, 0)} FROM t WHERE id = {fn ABS(-1)}";
+        let stmt = parse_one(sql).expect("should parse after ODBC escape rewrite");
         let _ = stmt;
     }
 }
