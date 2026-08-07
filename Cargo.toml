@@ -33,7 +33,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -188,25 +188,25 @@ sz-orm-graphql = "2.1.0"
 sz-orm-grpc = "2.1.0"
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "0.6.0", path = "packages/sz-rust-core" }
-sz-rust-orm-facade = { version = "0.6.0", path = "packages/sz-rust-orm-facade" }
-sz-rust-http-facade = { version = "0.6.0", path = "packages/sz-rust-http-facade" }
-sz-rust-cache-facade = { version = "0.6.0", path = "packages/sz-rust-cache-facade" }
-sz-rust-state-facade = { version = "0.6.0", path = "packages/sz-rust-state-facade" }
-sz-rust-infra-facade = { version = "0.6.0", path = "packages/sz-rust-infra-facade" }
-sz-rust-auth-facade = { version = "0.6.0", path = "packages/sz-rust-auth-facade" }
-sz-rust-pay-facade = { version = "0.6.0", path = "packages/sz-rust-pay-facade" }
-sz-rust-orm-ext-facade = { version = "0.6.0", path = "packages/sz-rust-orm-ext-facade" }
-sz-rust-router-facade = { version = "0.6.0", path = "packages/sz-rust-router-facade" }
-sz-rust-middleware-facade = { version = "0.6.0", path = "packages/sz-rust-middleware-facade" }
-sz-rust-mvc-facade = { version = "0.6.0", path = "packages/sz-rust-mvc-facade" }
-sz-rust-mcp = { version = "0.6.0", path = "packages/sz-rust-mcp" }
-sz-rust-macros = { version = "0.6.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-loader = { version = "0.6.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-pdf = { version = "0.6.0", path = "packages/sz-rust-pdf" }
-sz-rust-tracing = { version = "0.6.0", path = "packages/sz-rust-tracing" }
-sz-rust-observability = { version = "0.6.0", path = "packages/sz-rust-observability" }
-sz-rust-cli = { version = "0.6.0", path = "packages/sz-rust-cli" }
+sz-rust-core = { version = "0.6.1", path = "packages/sz-rust-core" }
+sz-rust-orm-facade = { version = "0.6.1", path = "packages/sz-rust-orm-facade" }
+sz-rust-http-facade = { version = "0.6.1", path = "packages/sz-rust-http-facade" }
+sz-rust-cache-facade = { version = "0.6.1", path = "packages/sz-rust-cache-facade" }
+sz-rust-state-facade = { version = "0.6.1", path = "packages/sz-rust-state-facade" }
+sz-rust-infra-facade = { version = "0.6.1", path = "packages/sz-rust-infra-facade" }
+sz-rust-auth-facade = { version = "0.6.1", path = "packages/sz-rust-auth-facade" }
+sz-rust-pay-facade = { version = "0.6.1", path = "packages/sz-rust-pay-facade" }
+sz-rust-orm-ext-facade = { version = "0.6.1", path = "packages/sz-rust-orm-ext-facade" }
+sz-rust-router-facade = { version = "0.6.1", path = "packages/sz-rust-router-facade" }
+sz-rust-middleware-facade = { version = "0.6.1", path = "packages/sz-rust-middleware-facade" }
+sz-rust-mvc-facade = { version = "0.6.1", path = "packages/sz-rust-mvc-facade" }
+sz-rust-mcp = { version = "0.6.1", path = "packages/sz-rust-mcp" }
+sz-rust-macros = { version = "0.6.1", path = "packages/sz-rust-macros" }
+sz-rust-addons-loader = { version = "0.6.1", path = "packages/sz-rust-addons-loader" }
+sz-rust-pdf = { version = "0.6.1", path = "packages/sz-rust-pdf" }
+sz-rust-tracing = { version = "0.6.1", path = "packages/sz-rust-tracing" }
+sz-rust-observability = { version = "0.6.1", path = "packages/sz-rust-observability" }
+sz-rust-cli = { version = "0.6.1", path = "packages/sz-rust-cli" }
 
 # 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }
