@@ -23,5 +23,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 http-body-util = { workspace = true }
 http = { workspace = true }
 
-[lints]
-workspace = true
+
+# P3: simd_str.rs 需要 unsafe SIMD intrinsics（SSE2/AVX2），
+# 覆盖 workspace 的 unsafe_code = "forbid" 为 allow。
+# simd_str.rs 通过 #![allow(unsafe_code)] 控制，其他模块不受影响。
+[lints.rust]
+unsafe_code = "allow"

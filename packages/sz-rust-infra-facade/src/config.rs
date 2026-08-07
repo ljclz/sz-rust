@@ -381,17 +381,17 @@ impl AppConfig {
     /// └── server.yml
     /// ```
     #[tracing::instrument(skip_all)]
-    pub fn load_from_dir(config_dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
+    pub async fn load_from_dir(config_dir: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let dir = config_dir.as_ref();
 
         // 逐个加载 section（文件不存在时用默认值，不报错）
         let mut config = AppConfig {
-            app: load_section(&dir.join("app.yml"), AppSection::default())?,
-            database: load_section(&dir.join("database.yml"), DatabaseSection::default())?,
-            cache: load_section(&dir.join("cache.yml"), CacheSection::default())?,
-            addons: load_section(&dir.join("addons.yml"), AddonsSection::default())?,
-            log: load_section(&dir.join("log.yml"), LogSection::default())?,
-            server: load_section(&dir.join("server.yml"), ServerSection::default())?,
+            app: load_section(&dir.join("app.yml"), AppSection::default()).await?,
+            database: load_section(&dir.join("database.yml"), DatabaseSection::default()).await?,
+            cache: load_section(&dir.join("cache.yml"), CacheSection::default()).await?,
+            addons: load_section(&dir.join("addons.yml"), AddonsSection::default()).await?,
+            log: load_section(&dir.join("log.yml"), LogSection::default()).await?,
+            server: load_section(&dir.join("server.yml"), ServerSection::default()).await?,
         };
 
         // 应用环境变量覆盖
@@ -448,14 +448,19 @@ impl AppConfig {
 }
 
 /// 从 YAML 文件加载单个 section（文件不存在时返回默认值）
-fn load_section<T: DeserializeOwned + Default>(path: &Path, default: T) -> Result<T, ConfigError> {
+async fn load_section<T: DeserializeOwned + Default>(
+    path: &Path,
+    default: T,
+) -> Result<T, ConfigError> {
     if !path.exists() {
         return Ok(default);
     }
-    let content = std::fs::read_to_string(path).map_err(|e| ConfigError::FileRead {
-        path: path.display().to_string(),
-        source: e,
-    })?;
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| ConfigError::FileRead {
+            path: path.display().to_string(),
+            source: e,
+        })?;
     serde_yaml::from_str(&content).map_err(|e| ConfigError::Parse {
         path: path.display().to_string(),
         source: e,
@@ -485,7 +490,7 @@ fn load_section<T: DeserializeOwned + Default>(path: &Path, default: T) -> Resul
 /// use std::sync::Arc;
 /// use parking_lot::RwLock;
 ///
-/// let config = AppConfig::load_from_dir("config/").unwrap();
+/// let config = AppConfig::load_from_dir("config/").await.unwrap();
 /// let shared = Arc::new(RwLock::new(config));
 /// let watcher = ConfigWatcher::new("config/", shared.clone());
 ///
@@ -652,7 +657,7 @@ impl ConfigWatcher {
                     _ = ticker.tick() => {
                         if watcher.has_changes().await {
                             tracing::info!("检测到配置文件变化，正在重新加载...");
-                            match AppConfig::load_from_dir(&config_dir) {
+                            match AppConfig::load_from_dir(&config_dir).await {
                                 Ok(new_config) => {
                                     *shared_config.write() = new_config;
                                     watcher.update_mtimes().await;
@@ -725,8 +730,8 @@ app_map:
     }
 
     /// 测试从目录加载（使用项目实际的 config/ 目录）
-    #[test]
-    fn test_load_from_dir() {
+    #[tokio::test]
+    async fn test_load_from_dir() {
         // config/ 目录位于 workspace 根
         let config_dir = std::env::current_dir().ok().and_then(|d| {
             // 测试运行时 cwd 可能是 packages/sz-rust-core
@@ -746,7 +751,7 @@ app_map:
         });
 
         if let Some(config_dir) = config_dir {
-            let config = AppConfig::load_from_dir(&config_dir).unwrap();
+            let config = AppConfig::load_from_dir(&config_dir).await.unwrap();
             // 验证 app.yml 加载
             assert_eq!(config.app.default_app, "index");
             assert!(config.app.auto_multi_app);
@@ -798,12 +803,12 @@ app_map:
     }
 
     /// 测试文件不存在时使用默认值
-    #[test]
-    fn test_load_missing_file_uses_default() {
+    #[tokio::test]
+    async fn test_load_missing_file_uses_default() {
         let temp_dir = std::env::temp_dir().join("sz_rust_config_test_missing");
         let _ = std::fs::create_dir_all(&temp_dir);
         // 目录存在但无任何 yml 文件
-        let config = AppConfig::load_from_dir(&temp_dir).unwrap();
+        let config = AppConfig::load_from_dir(&temp_dir).await.unwrap();
         assert!(config.app.auto_multi_app);
         assert_eq!(config.database.default, "mysql");
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -1045,7 +1050,7 @@ app_map:
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("app.yml"), "default_app: test\n").unwrap();
 
-        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let config = AppConfig::load_from_dir(&dir).await.unwrap();
         let shared = Arc::new(parking_lot::RwLock::new(config));
         let watcher = ConfigWatcher::new(&dir, shared);
 
@@ -1064,7 +1069,7 @@ app_map:
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("app.yml"), "default_app: before\n").unwrap();
 
-        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let config = AppConfig::load_from_dir(&dir).await.unwrap();
         let shared = Arc::new(parking_lot::RwLock::new(config));
         let watcher = ConfigWatcher::new(&dir, shared);
 
@@ -1090,7 +1095,7 @@ app_map:
         let dir = std::env::temp_dir().join("sz_rust_watcher_test_new");
         let _ = std::fs::create_dir_all(&dir);
 
-        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let config = AppConfig::load_from_dir(&dir).await.unwrap();
         let shared = Arc::new(parking_lot::RwLock::new(config));
         let watcher = ConfigWatcher::new(&dir, shared);
 
@@ -1111,7 +1116,7 @@ app_map:
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("app.yml"), "default_app: before\n").unwrap();
 
-        let config = AppConfig::load_from_dir(&dir).unwrap();
+        let config = AppConfig::load_from_dir(&dir).await.unwrap();
         let shared = Arc::new(parking_lot::RwLock::new(config));
         let watcher = ConfigWatcher::new(&dir, shared.clone()).with_poll_interval(1); // 1 秒轮询
 

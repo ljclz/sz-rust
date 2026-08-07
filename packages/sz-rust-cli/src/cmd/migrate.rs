@@ -436,21 +436,19 @@ async fn fetch_applied_versions(
 }
 
 /// 删除 __migrations 表中的迁移记录
+///
+/// 参数化绑定防 SQL 注入（铁律 §1）：`version` 虽源自迁移文件名而非用户输入，
+/// 仍统一走 `execute_with_params` 参数化路径，杜绝任何拼接风险。
 async fn delete_migration_record(
     conn: &mut Box<dyn Connection>,
     version: &str,
     db_type: DbType,
 ) -> Result<(), CliError> {
-    let sql = match db_type {
-        DbType::PostgreSQL | DbType::Sqlite => {
-            format!("DELETE FROM __migrations WHERE version = '{}'", version)
-        }
-        DbType::MySQL => {
-            format!("DELETE FROM __migrations WHERE version = '{}'", version)
-        }
-        _ => return Ok(()),
-    };
-    conn.execute(&sql)
+    if !matches!(db_type, DbType::PostgreSQL | DbType::Sqlite | DbType::MySQL) {
+        return Ok(());
+    }
+    let params = [sz_rust_core::orm::Value::String(version.to_string())];
+    conn.execute_with_params("DELETE FROM __migrations WHERE version = ?", &params)
         .await
         .map_err(|e| CliError::Migration(format!("Failed to delete migration record: {}", e)))?;
     Ok(())

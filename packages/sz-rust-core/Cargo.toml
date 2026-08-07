@@ -42,7 +42,7 @@ http.workspace = true
 http-body-util.workspace = true
 # HTTP/2 + TLS
 tokio-rustls.workspace = true
-rustls-pemfile.workspace = true
+# P0-2: rustls-pemfile(unmaintained) 迁移至 rustls-pki-types::pem::PemObject（rustls 0.23 内置）
 # 文件上传
 sha1.workspace = true
 sha2.workspace = true
@@ -58,8 +58,7 @@ async-trait.workspace = true
 rand.workspace = true
 # 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
 image = { workspace = true }
-imageproc = { workspace = true }
-ab_glyph = { workspace = true }
+# P0-2: imageproc/ab_glyph 移至 sz-rust-infra-facade（实际使用方），core 不直接使用
 # 二维码生成（对齐 PHP endroid/qr-code）
 qrcode = { workspace = true }
 # Swoole/Worker 适配（tokio 替代）
@@ -103,6 +102,8 @@ sz-orm-graphql = { workspace = true, optional = true }
 sz-orm-grpc = { workspace = true, optional = true }
 # P2: Addon 热加载探索（运行时动态加载 .dylib/.so/.dll）
 libloading = { version = "0.8", optional = true }
+# P3: bumpalo 区域分配器（可选，bumpalo-pool feature）
+bumpalo = { version = "3", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -128,6 +129,14 @@ grpc = ["dep:sz-orm-grpc", "sz-rust-orm-facade/grpc"]
 hot-reload = ["dep:libloading"]
 # P2 全量功能开关（同时启用 graphql + grpc + hot-reload）
 p2-addons = ["graphql", "grpc", "hot-reload"]
+# SIMD JSON 加速（x86_64 平台启用 simd-json）
+simd-json = ["dep:simd-json"]
+# P3: alloc 计数 GlobalAlloc wrapper（仅 test/bench 启用，默认不启用）
+alloc-count = []
+# P3: 内存池（区域分配器，默认不启用）
+mem-pool = []
+# P3: bumpalo 内存池后端（需 mem-pool + bumpalo 依赖）
+bumpalo-pool = ["dep:bumpalo", "mem-pool"]
 
 [lib]
 name = "sz_rust_core"
@@ -145,5 +154,21 @@ path = "tests/fuzz.rs"
 name = "core_bench"
 harness = false
 
+[[bench]]
+name = "p3_bench"
+harness = false
+
+# P3: alloc_counter.rs 需要 unsafe impl GlobalAlloc，
+# 在包级别覆盖 workspace 的 unsafe_code = "forbid" 为 allow，
+# lib.rs 的 #![deny(unsafe_code)] 仍保持 crate 默认 deny，
+# 仅 alloc_counter.rs 通过 #![allow(unsafe_code)] 覆盖。
+[lints.rust]
+unsafe_code = "allow"
+
 [package.metadata.cargo-machete]
 ignored = ["md-5"]
+
+# SIMD JSON 加速（仅 x86_64 平台启用）
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+simd-json = { workspace = true, optional = true }
+

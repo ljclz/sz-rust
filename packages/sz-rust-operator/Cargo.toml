@@ -1,0 +1,34 @@
+[package]
+name = "sz-rust-operator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "K8s Operator for sz-rust — CRD + Controller for automated sz-rust app deployment"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["k8s", "operator", "controller", "sz-rust", "crd"]
+categories = ["web-programming"]
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures = { workspace = true }
+kube = { workspace = true }
+kube-derive = { workspace = true }
+schemars = { workspace = true }
+json-patch = { workspace = true }
+k8s-openapi = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

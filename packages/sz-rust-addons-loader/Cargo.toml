@@ -19,6 +19,14 @@ thiserror.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
 tracing.workspace = true
+# 热重载（optional，仅 hot-reload feature 启用时）
+notify = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["macros", "rt-multi-thread", "signal"] }
+
+[features]
+default = []
+# 热重载（M2 方案：进程重启 + 状态迁移，避免 dlopen unsafe）
+hot-reload = ["dep:notify", "dep:tokio"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -61,39 +61,42 @@ pub use error::CliError;
 /// - `Ok(0)`：成功
 /// - `Ok(code)`：命令指定的退出码
 /// - `Err(_)`：内部错误
-pub fn run<I, S>(args: I) -> Result<i32, CliError>
+pub async fn run<I, S>(args: I) -> Result<i32, CliError>
 where
     I: IntoIterator<Item = S>,
     S: Into<std::ffi::OsString> + Clone,
 {
     use clap::Parser;
     let cli = Cli::parse_from(args);
-    cli.execute()
+    cli.execute().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_run_no_args_returns_ok() {
+    #[tokio::test]
+    async fn test_run_no_args_returns_ok() {
         // 仅程序名、无子命令：command=None，execute 返回 Ok(0)
-        let result = run(vec!["sz-rust"]);
+        let result = run(vec!["sz-rust"]).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }
 
-    #[test]
-    fn test_run_cache_clear_command() {
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_run_cache_clear_command() {
         // 通过 run() 分发执行 cache:clear 命令。
         // cache:clear 读写进程级工作目录下的 runtime/cache，
         // 必须持有全局互斥锁并隔离到临时目录，避免与 make/optimize
         // 模块的 set_current_dir 测试并行竞态。
+        // clippy::await_holding_lock: 本测试运行在 current_thread runtime，
+        // std::sync::MutexGuard 跨 await 不会跨线程，安全。
         let _lock = crate::cmd::test_support::acquire_global_lock();
         let temp = tempfile::tempdir().expect("tempdir failed");
         let original = std::env::current_dir().expect("current_dir failed");
         std::env::set_current_dir(temp.path()).expect("set_current_dir failed");
-        let result = run(vec!["sz-rust", "cache:clear"]);
+        let result = run(vec!["sz-rust", "cache:clear"]).await;
         let restore = std::env::set_current_dir(&original);
         assert!(restore.is_ok(), "恢复工作目录失败");
         assert!(result.is_ok());

@@ -188,7 +188,7 @@ impl Cli {
     /// - `Ok(0)`：成功
     /// - `Ok(code)`：命令指定的退出码（非 0 表示部分失败）
     /// - `Err(_)`：内部错误
-    pub fn execute(&self) -> Result<i32, CliError> {
+    pub async fn execute(&self) -> Result<i32, CliError> {
         match &self.command {
             None => {
                 // 无子命令，打印帮助
@@ -229,10 +229,16 @@ impl Cli {
             Some(Command::Scheduler { scheduler_command }) => {
                 cmd::scheduler::execute(scheduler_command).map(|_| 0)
             }
-            Some(Command::OptimizeRoute) => cmd::optimize::execute_optimize_route().map(|_| 0),
-            Some(Command::OptimizeConfig) => cmd::optimize::execute_optimize_config().map(|_| 0),
-            Some(Command::OptimizeSchema) => cmd::optimize::execute_optimize_schema().map(|_| 0),
-            Some(Command::RouteClear) => cmd::optimize::execute_route_clear().map(|_| 0),
+            Some(Command::OptimizeRoute) => {
+                cmd::optimize::execute_optimize_route().await.map(|_| 0)
+            }
+            Some(Command::OptimizeConfig) => {
+                cmd::optimize::execute_optimize_config().await.map(|_| 0)
+            }
+            Some(Command::OptimizeSchema) => {
+                cmd::optimize::execute_optimize_schema().await.map(|_| 0)
+            }
+            Some(Command::RouteClear) => cmd::optimize::execute_route_clear().await.map(|_| 0),
         }
     }
 }
@@ -395,10 +401,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_execute_no_command_returns_ok() {
+    #[tokio::test]
+    async fn test_execute_no_command_returns_ok() {
         let cli = Cli { command: None };
-        let result = cli.execute();
+        let result = cli.execute().await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }

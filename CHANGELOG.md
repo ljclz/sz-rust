@@ -5,6 +5,79 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] - 2026-08-05
+
+### 修复
+- **§5.3 SQL 注入根治**：
+  - `cli/src/cmd/migrate.rs:444` — `delete_migration_record` 从 `format!` 拼接改为 `execute_with_params` 参数化绑定
+  - `orm-ext-facade/src/hooks.rs:777` — `soft_delete_update_sql` / `soft_delete_restore_sql` 加 `debug_assert!(is_valid_identifier(...))` 校验
+- **§5.2 路由纳秒级优化**：
+  - `router-facade/src/router.rs:35` — `APP_MAP` 从 `LazyLock<HashSet>` 改为 `const APP_LIST: &[&str]` 线性查找
+  - `router-facade/src/router.rs:130` — `parse_path` 从 `Vec::collect` 改为迭代器直接消费
+  - 新增 3 个性能测试（release-only，p99 < 300/500/800ns）
+- **clippy 修复**：`middleware-facade/src/rate_limit.rs:501` — `or_insert_with(Vec::new)` → `or_default()`
+
+### 变更
+- **§5.1 addons 文档更新**：crm/erp/ecommerce 三包 lib.rs doc-comment 从"0 测试脚手架"改为"已填实（v0.3.2）：N 测试"
+- **§5.7 评估报告重写**：综合评分 55→78，7 维度评分更新，12 处过时表述修正
+- `Cargo.toml` workspace version 0.3.1 → 0.3.2
+
+### 已知问题
+- **crates.io 0.3.2 发布阻塞**：sz-orm-* 包在 crates.io 上版本不一致（core 1.5.0 / auth 1.2.2 / graphql 1.2.1），需上游统一发布 1.5.0 后方可发布
+
+## [0.6.0] - 2026-08-07
+
+### P3 性能优化（6 大方向）
+
+#### 新增
+- **方向 3：SIMD 字符串加速** — `router-facade/src/simd_str.rs`
+  - SSE2 并行 ASCII 检测 + 字节操作（`capitalize_first_simd`）
+  - SSE2 memchr 风格分隔符查找（`find_separator_simd`），一次扫描 16 字节
+  - x86_64 运行时检测 + 非 x86_64 标量回退，18 个单元测试
+- **方向 4：内存池** — `sz-rust-core/src/mem_pool.rs`
+  - `MemPool` trait + `StackPool<const CAP: usize>`（区域分配器，零堆分配）
+  - `BumpaloPool` 实现（`bumpalo-pool` feature gate），13 个单元测试
+  - `AllocCounter` GlobalAlloc wrapper（`alloc-count` feature gate），4 个单元测试
+- **方向 2：连接池 L3 调优** — `orm-facade/src/{pool_warmer,query_cache,pool_scaler}.rs`
+  - `PoolWarmer`：并发连接预热，支持超时和降级，7 个单元测试
+  - `QueryCache`：L2 查询缓存（TTL + jitter + LRU 淘汰 + invalidate pattern），10 个单元测试
+  - `PoolScaler`：动态扩容/缩容（基于 timeout_rate / idle_rate），10 个单元测试
+- **方向 5：零拷贝优化**
+  - `routing.rs` 新增 `HandlerRefRef<'a>` 借用版本（零堆分配），13 个单元测试
+  - `response.rs` 新增 `to_json_bytes() -> bytes::Bytes`（避免 String UTF-8 验证开销），4 个单元测试
+- **方向 6：异步优化** — `sz-rust-core/src/runtime.rs`
+  - `SzRuntime` 新增 `blocking_threads` 字段 + `with_blocking_threads()` 链式配置
+  - 3 种预设：`for_io_intensive()` / `for_cpu_intensive()` / `for_balanced()`
+  - 11 个单元测试
+- **P3 bench 框架** — `sz-rust-core/benches/p3_bench.rs`
+  - 5 类 benchmark（22 个）：端到端 p99 / SIMD 字符串 / alloc 计数 / 拷贝计数 / 异步调度
+- **P3 soak 测试** — `sz-rust-core/tests/soak_p3.rs`
+  - 3 个 soak 测试：优化点全覆盖 / SIMD 稳定性 / 异步调度稳定性
+- **spawn_blocking 审计脚本** — `scripts/audit_blocking.sh`
+  - 静态扫描 async fn 内阻塞调用，审计报告 `docs/audit/blocking_audit_20260807.md`
+- **火焰图脚本** — `scripts/flamegraph.sh`
+
+#### 变更
+- **方向 1：热路径内联优化**
+  - `router.rs`：`parse_path` / `split_first_segment` / `is_app_in_map` / `capitalize_first` / `ParsedPath::new` 添加 `#[inline]`
+  - `chain.rs`：`has_duplicates` 添加 `#[inline]`
+  - `container/mod.rs`：`make` / `make_or_panic` / `make_with_scope` 添加 `#[inline]`
+  - `simd_str.rs`：`capitalize_first_simd` / `find_separator_simd` / `is_ascii_simd` 添加 `#[inline]`
+- `router.rs`：`parse_path` 使用 SIMD 分隔符查找替代 `split` 迭代器
+- `router-facade/Cargo.toml`：移除 `[lints] workspace = true`，添加 `[lints.rust] unsafe_code = "allow"`
+- `sz-rust-core/Cargo.toml`：添加 `alloc-count` / `mem-pool` / `bumpalo-pool` feature、`p3_bench` bench target
+- `sz-rust-orm-facade/Cargo.toml`：添加 `async-trait` / `tokio` / `parking_lot` / `rand` / `thiserror` 依赖
+- `sz-rust-http-facade/Cargo.toml`：添加 `bytes` 依赖
+- workspace 版本 0.5.0 → 0.6.0
+
+#### 验证
+- workspace 全量测试：5174 passed, 0 failed
+- sz-pay 兼容性：cargo check + 全量测试通过
+- sz-orm 上游：无变更（git status 空）
+- clippy：无新警告（3 个预存警告）
+- fmt：`cargo fmt --all -- --check` 通过
+- bench：22 个 benchmark 全部编译通过，`capitalize_first` ~38ns
+
 ## [Unreleased]
 
 ### 新增

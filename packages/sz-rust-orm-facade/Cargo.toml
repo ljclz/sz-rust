@@ -29,6 +29,13 @@ sz-orm-query-builder = { workspace = true }
 sz-orm-graphql = { workspace = true, optional = true }
 sz-orm-grpc = { workspace = true, optional = true }
 
+# P3: 连接池 L3 调优
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+thiserror = { workspace = true }
+
 [features]
 default = []
 # GraphQL 集成（可选）

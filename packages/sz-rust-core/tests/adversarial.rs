@@ -366,8 +366,8 @@ fn adversarial_dml_memory_mailer() {
 // ============================================================================
 
 /// B1a: env.rs 解析 — 100KB 单行（无等号 → Parse 错误）
-#[test]
-fn adversarial_huge_single_line_no_eq() {
+#[tokio::test]
+async fn adversarial_huge_single_line_no_eq() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_b1a");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -377,7 +377,7 @@ fn adversarial_huge_single_line_no_eq() {
     std::fs::write(&env_file, &huge_line).unwrap();
 
     let env = Env::new();
-    let result = env.load_from_file(&env_file);
+    let result = env.load_from_file(&env_file).await;
     // 不含 '=' → 预期 Parse 错误
     assert!(result.is_err(), "100KB 无等号行应返回 Parse 错误");
     match result {
@@ -391,8 +391,8 @@ fn adversarial_huge_single_line_no_eq() {
 }
 
 /// B1a2: env.rs 解析 — 100KB 单行键值对
-#[test]
-fn adversarial_huge_single_line_kv() {
+#[tokio::test]
+async fn adversarial_huge_single_line_kv() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_b1a2");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -403,7 +403,7 @@ fn adversarial_huge_single_line_kv() {
     std::fs::write(&env_file, &content).unwrap();
 
     let env = Env::new();
-    env.load_from_file(&env_file).unwrap();
+    env.load_from_file(&env_file).await.unwrap();
 
     let val = env.get("K").unwrap();
     assert_eq!(val.len(), 100 * 1024 - 4);
@@ -413,8 +413,8 @@ fn adversarial_huge_single_line_kv() {
 }
 
 /// B1b: env.rs 解析 — 10MB 总内容（5 万行有效键值对）
-#[test]
-fn adversarial_huge_total_ini() {
+#[tokio::test]
+async fn adversarial_huge_total_ini() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_b1b");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -434,7 +434,7 @@ fn adversarial_huge_total_ini() {
     std::fs::write(&env_file, &content).unwrap();
 
     let env = Env::new();
-    env.load_from_file(&env_file).unwrap();
+    env.load_from_file(&env_file).await.unwrap();
 
     // 验证首尾和中间采样
     assert_eq!(env.get("KEY_0"), Some("V".repeat(140)));
@@ -451,8 +451,8 @@ fn adversarial_huge_total_ini() {
 }
 
 /// B1c: env.rs 解析 — 嵌套 100 层 section
-#[test]
-fn adversarial_deeply_nested_sections() {
+#[tokio::test]
+async fn adversarial_deeply_nested_sections() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_b1c");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -467,7 +467,7 @@ fn adversarial_deeply_nested_sections() {
     std::fs::write(&env_file, &content).unwrap();
 
     let env = Env::new();
-    env.load_from_file(&env_file).unwrap();
+    env.load_from_file(&env_file).await.unwrap();
 
     // 验证每层 section 都正确解析
     for i in 0..100 {
@@ -781,8 +781,8 @@ fn adversarial_concurrent_memory_mailer() {
 // ============================================================================
 
 /// D1a: env.rs 解析 — null 字节 embedded（键和值中）
-#[test]
-fn adversarial_encoding_env_null_byte() {
+#[tokio::test]
+async fn adversarial_encoding_env_null_byte() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_d1a");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -792,7 +792,7 @@ fn adversarial_encoding_env_null_byte() {
     std::fs::write(&env_file, content).unwrap();
 
     let env = Env::new();
-    let result = env.load_from_file(&env_file);
+    let result = env.load_from_file(&env_file).await;
 
     // 由于 Rust 字符串支持 null 字节，解析应成功
     assert!(result.is_ok(), "含 null 字节的键应能解析成功");
@@ -814,7 +814,7 @@ fn adversarial_encoding_env_null_byte() {
     std::fs::write(&env_file2, content2).unwrap();
 
     let env2 = Env::new();
-    env2.load_from_file(&env_file2).unwrap();
+    env2.load_from_file(&env_file2).await.unwrap();
     let val2 = env2.get("NORMAL_KEY").unwrap();
     // null 字节应在值中保留
     assert!(val2.contains('\0'), "null 字节应在值中保留");
@@ -824,8 +824,8 @@ fn adversarial_encoding_env_null_byte() {
 }
 
 /// D1b: env.rs 解析 — 无限递归 key（100KB 超长键名）
-#[test]
-fn adversarial_encoding_env_recursive_key() {
+#[tokio::test]
+async fn adversarial_encoding_env_recursive_key() {
     let env = Env::new();
 
     // 100KB 超长键名
@@ -852,7 +852,7 @@ fn adversarial_encoding_env_recursive_key() {
     std::fs::write(&env_file, &content).unwrap();
 
     let env2 = Env::new();
-    env2.load_from_file(&env_file).unwrap();
+    env2.load_from_file(&env_file).await.unwrap();
     let full_key = format!("section.{}", long_section_key);
     let val2 = env2.get(&full_key);
     assert!(val2.is_some(), "section 内超长键名应能存储");
@@ -862,8 +862,8 @@ fn adversarial_encoding_env_recursive_key() {
 }
 
 /// D1c: env.rs 解析 — BOM 头
-#[test]
-fn adversarial_encoding_env_bom() {
+#[tokio::test]
+async fn adversarial_encoding_env_bom() {
     let temp_dir = std::env::temp_dir().join("sz_rust_adv_d1c");
     let _ = std::fs::create_dir_all(&temp_dir);
     let env_file = temp_dir.join(".env");
@@ -874,7 +874,7 @@ fn adversarial_encoding_env_bom() {
     std::fs::write(&env_file, &content).unwrap();
 
     let env = Env::new();
-    let result = env.load_from_file(&env_file);
+    let result = env.load_from_file(&env_file).await;
 
     // BOM 开头的行：trim 不会移除 \u{FEFF}（它不是空白字符）
     // 第一行变为 "\u{FEFF}APP_KEY = value_with_bom"

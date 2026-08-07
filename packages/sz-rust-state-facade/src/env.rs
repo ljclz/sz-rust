@@ -47,10 +47,10 @@
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::fs;
 
 // ============================================================================
 // 错误类型
@@ -142,12 +142,14 @@ impl Env {
     ///
     /// - [`EnvError::FileRead`][]: 文件读取失败
     /// - [`EnvError::Parse`][]: 文件解析失败（格式错误）
-    pub fn load_from_file(&self, path: impl AsRef<Path>) -> Result<(), EnvError> {
+    pub async fn load_from_file(&self, path: impl AsRef<Path>) -> Result<(), EnvError> {
         let path_ref = path.as_ref();
-        let content = fs::read_to_string(path_ref).map_err(|e| EnvError::FileRead {
-            path: path_ref.display().to_string(),
-            source: e,
-        })?;
+        let content = fs::read_to_string(path_ref)
+            .await
+            .map_err(|e| EnvError::FileRead {
+                path: path_ref.display().to_string(),
+                source: e,
+            })?;
 
         self.parse_ini_content(&content, &path_ref.display().to_string())
     }
@@ -497,8 +499,8 @@ APP_DEBUG = value2
     }
 
     /// 测试从真实文件加载
-    #[test]
-    fn test_load_from_file() {
+    #[tokio::test]
+    async fn test_load_from_file() {
         // 创建临时 .env 文件
         let temp_dir = std::env::temp_dir().join("sz_rust_env_test");
         let _ = std::fs::create_dir_all(&temp_dir);
@@ -512,7 +514,7 @@ APP_DEBUG = value2
         drop(file);
 
         let env = Env::new();
-        env.load_from_file(&env_file).unwrap();
+        env.load_from_file(&env_file).await.unwrap();
 
         assert_eq!(env.get("TEST_KEY"), Some("test_value".to_string()));
         assert_eq!(env.get("section.inner"), Some("inner_value".to_string()));
@@ -521,10 +523,10 @@ APP_DEBUG = value2
     }
 
     /// 测试文件不存在时返回错误
-    #[test]
-    fn test_load_nonexistent_file_errors() {
+    #[tokio::test]
+    async fn test_load_nonexistent_file_errors() {
         let env = Env::new();
-        let result = env.load_from_file("/nonexistent/path/.env");
+        let result = env.load_from_file("/nonexistent/path/.env").await;
         assert!(result.is_err());
         match result {
             Err(EnvError::FileRead { .. }) => {}

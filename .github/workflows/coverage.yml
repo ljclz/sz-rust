@@ -39,9 +39,9 @@ jobs:
         run: cargo install cargo-tarpaulin --locked
 
       # 仅对 sz-rust-core 运行覆盖率统计
-      # P1-CICD-01：--fail-under 70 强制覆盖率阈值，低于 70% 时 CI 失败
+      # P1-CICD-01：--fail-under 85 强制覆盖率阈值，与 ci.yml 门禁 14 一致（铁律 10），低于 85% 时 CI 失败
       - name: Run coverage
-        run: cargo tarpaulin -p sz-rust-core --lib --out Xml --output-dir coverage/ --fail-under 70 -- --test-threads=1
+        run: cargo tarpaulin -p sz-rust-core --lib --out Xml --output-dir coverage/ --fail-under 85 -- --test-threads=1
 
       # 仅在配置了 CODECOV_TOKEN 时上传到 Codecov
       # P1-CICD-01：fail_ci_if_error: true — 上传失败时阻断 CI

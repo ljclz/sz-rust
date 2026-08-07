@@ -68,7 +68,7 @@ const RUNTIME_DIR: &str = "runtime";
 /// 2. 序列化为美化格式 JSON
 /// 3. 写入缓存文件（自动创建父目录）
 /// 4. 输出统计信息（路由数量、文件路径）
-pub fn execute_optimize_route() -> Result<(), CliError> {
+pub async fn execute_optimize_route() -> Result<(), CliError> {
     let routes = route::collect_routes();
     let route_count = routes.len();
 
@@ -90,7 +90,7 @@ pub fn execute_optimize_route() -> Result<(), CliError> {
         .map_err(|e| CliError::Generic(format!("路由缓存序列化失败: {}", e)))?;
 
     let cache_path = get_route_cache_path();
-    write_cache_file(&cache_path, &content)?;
+    write_cache_file(&cache_path, &content).await?;
 
     println!(
         "Route cache generated: {} route(s) → {}",
@@ -113,7 +113,7 @@ pub fn execute_optimize_route() -> Result<(), CliError> {
 /// 4. 序列化为美化格式 JSON
 /// 5. 写入缓存文件
 /// 6. 输出统计信息（配置项数量、文件路径）
-pub fn execute_optimize_config() -> Result<(), CliError> {
+pub async fn execute_optimize_config() -> Result<(), CliError> {
     let config_dir = Path::new(CONFIG_DIR);
 
     if !config_dir.exists() {
@@ -126,9 +126,8 @@ pub fn execute_optimize_config() -> Result<(), CliError> {
     let mut merged = serde_json::Map::new();
     let mut file_count = 0usize;
 
-    let entries = std::fs::read_dir(config_dir)?;
-    for entry in entries {
-        let entry = entry?;
+    let mut entries = tokio::fs::read_dir(config_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
 
         // 仅处理文件（跳过子目录）
@@ -149,7 +148,7 @@ pub fn execute_optimize_config() -> Result<(), CliError> {
             .unwrap_or("unknown")
             .to_string();
 
-        let content = std::fs::read_to_string(&path)?;
+        let content = tokio::fs::read_to_string(&path).await?;
         let config_value = parse_config_file(&content, ext)?;
         merged.insert(stem, config_value);
         file_count += 1;
@@ -159,7 +158,7 @@ pub fn execute_optimize_config() -> Result<(), CliError> {
         .map_err(|e| CliError::Generic(format!("配置缓存序列化失败: {}", e)))?;
 
     let cache_path = get_config_cache_path();
-    write_cache_file(&cache_path, &content)?;
+    write_cache_file(&cache_path, &content).await?;
 
     println!(
         "Config cache generated: {} file(s) → {}",
@@ -173,7 +172,7 @@ pub fn execute_optimize_config() -> Result<(), CliError> {
 ///
 /// 删除路由缓存文件 `runtime/cache/route_cache.json`。
 /// 若文件不存在，输出提示但不报错。
-pub fn execute_route_clear() -> Result<(), CliError> {
+pub async fn execute_route_clear() -> Result<(), CliError> {
     let cache_path = get_route_cache_path();
 
     if !cache_path.exists() {
@@ -182,7 +181,7 @@ pub fn execute_route_clear() -> Result<(), CliError> {
         return Ok(());
     }
 
-    std::fs::remove_file(&cache_path)?;
+    tokio::fs::remove_file(&cache_path).await?;
     println!("Route cache cleared: {}", cache_path.display());
     Ok(())
 }
@@ -208,8 +207,8 @@ pub fn execute_route_clear() -> Result<(), CliError> {
 /// Rust 无法运行时反射获取所有 `Model` 实现类型，因此本命令生成的是 schema
 /// 缓存索引占位文件（`tables` 为空数组），具体字段元数据由运行时
 /// `SchemaCache::remember_schema()` 在首次访问表时回源加载并填充。
-pub fn execute_optimize_schema() -> Result<(), CliError> {
-    let (default_connection, connections) = read_database_connections()?;
+pub async fn execute_optimize_schema() -> Result<(), CliError> {
+    let (default_connection, connections) = read_database_connections().await?;
     let connection_count = connections.len();
     let generated_at = chrono::Utc::now().to_rfc3339();
 
@@ -225,12 +224,12 @@ pub fn execute_optimize_schema() -> Result<(), CliError> {
         .map_err(|e| CliError::Generic(format!("schema 缓存序列化失败: {}", e)))?;
 
     let cache_path = get_schema_cache_path();
-    write_cache_file(&cache_path, &content)?;
+    write_cache_file(&cache_path, &content).await?;
 
     // 生成 PHP 兼容索引文件（对齐 PHP schema 缓存文件格式）
     let php_content = build_php_schema_index(&generated_at, &connections);
     let php_path = get_schema_cache_php_path();
-    write_cache_file(&php_path, &php_content)?;
+    write_cache_file(&php_path, &php_content).await?;
 
     println!(
         "Schema cache generated: {} connection(s) → {}",
@@ -270,7 +269,7 @@ pub fn get_schema_cache_php_path() -> PathBuf {
 /// 返回 `(默认连接名, 连接信息列表)`。
 ///
 /// 若配置文件不存在，返回空列表（生成空 schema 缓存索引，不报错）。
-fn read_database_connections() -> Result<(String, Vec<serde_json::Value>), CliError> {
+async fn read_database_connections() -> Result<(String, Vec<serde_json::Value>), CliError> {
     let path = Path::new(CONFIG_DIR).join(DATABASE_CONFIG_FILE);
 
     if !path.exists() {
@@ -278,7 +277,7 @@ fn read_database_connections() -> Result<(String, Vec<serde_json::Value>), CliEr
         return Ok((String::new(), Vec::new()));
     }
 
-    let content = std::fs::read_to_string(&path)?;
+    let content = tokio::fs::read_to_string(&path).await?;
     let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .map_err(|e| CliError::Generic(format!("数据库配置解析失败: {}", e)))?;
     let json = serde_json::to_value(yaml)
@@ -356,11 +355,11 @@ fn build_php_schema_index(generated_at: &str, connections: &[serde_json::Value])
 }
 
 /// 写入缓存文件（自动创建父目录）
-fn write_cache_file(path: &Path, content: &str) -> Result<(), CliError> {
+async fn write_cache_file(path: &Path, content: &str) -> Result<(), CliError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
-    std::fs::write(path, content)?;
+    tokio::fs::write(path, content).await?;
     Ok(())
 }
 
@@ -406,12 +405,14 @@ mod tests {
         assert!(path.ends_with("runtime/cache/config_cache.json"));
     }
 
-    #[test]
-    fn test_write_cache_file_creates_parent_dirs() {
+    #[tokio::test]
+    async fn test_write_cache_file_creates_parent_dirs() {
         let temp = tempfile::tempdir().unwrap();
         let nested = temp.path().join("nested").join("deep").join("cache.json");
 
-        write_cache_file(&nested, r#"{"key":"value"}"#).unwrap();
+        write_cache_file(&nested, r#"{"key":"value"}"#)
+            .await
+            .unwrap();
 
         assert!(nested.exists());
         let content = std::fs::read_to_string(&nested).unwrap();
@@ -468,12 +469,12 @@ mod tests {
         assert!(matches!(result, Err(CliError::Generic(_))));
     }
 
-    #[test]
-    fn test_execute_optimize_route_creates_cache_file() {
+    #[tokio::test]
+    async fn test_execute_optimize_route_creates_cache_file() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
-        execute_optimize_route().unwrap();
+        execute_optimize_route().await.unwrap();
 
         let cache_path = get_route_cache_path();
         assert!(cache_path.exists());
@@ -484,42 +485,42 @@ mod tests {
         assert!(!json.as_array().unwrap().is_empty());
     }
 
-    #[test]
-    fn test_execute_route_clear_removes_cache_file() {
+    #[tokio::test]
+    async fn test_execute_route_clear_removes_cache_file() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
         // 先生成缓存
-        execute_optimize_route().unwrap();
+        execute_optimize_route().await.unwrap();
         assert!(get_route_cache_path().exists());
 
         // 清除缓存
-        execute_route_clear().unwrap();
+        execute_route_clear().await.unwrap();
         assert!(!get_route_cache_path().exists());
     }
 
-    #[test]
-    fn test_execute_route_clear_nonexistent_cache() {
+    #[tokio::test]
+    async fn test_execute_route_clear_nonexistent_cache() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
         // 缓存不存在时应返回 Ok
-        let result = execute_route_clear();
+        let result = execute_route_clear().await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_optimize_config_no_config_dir() {
+    #[tokio::test]
+    async fn test_execute_optimize_config_no_config_dir() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
         // config/ 目录不存在时应返回错误
-        let result = execute_optimize_config();
+        let result = execute_optimize_config().await;
         assert!(matches!(result, Err(CliError::Generic(_))));
     }
 
-    #[test]
-    fn test_execute_optimize_config_with_json_files() {
+    #[tokio::test]
+    async fn test_execute_optimize_config_with_json_files() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
@@ -537,7 +538,7 @@ mod tests {
         )
         .unwrap();
 
-        execute_optimize_config().unwrap();
+        execute_optimize_config().await.unwrap();
 
         let cache_path = get_config_cache_path();
         assert!(cache_path.exists());
@@ -550,8 +551,8 @@ mod tests {
         assert_eq!(json["database"]["port"], 5432);
     }
 
-    #[test]
-    fn test_execute_optimize_config_with_yaml_files() {
+    #[tokio::test]
+    async fn test_execute_optimize_config_with_yaml_files() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
@@ -559,7 +560,7 @@ mod tests {
         std::fs::create_dir_all(&config_dir).unwrap();
         std::fs::write(config_dir.join("cache.yaml"), "driver: redis\nttl: 3600\n").unwrap();
 
-        execute_optimize_config().unwrap();
+        execute_optimize_config().await.unwrap();
 
         let cache_path = get_config_cache_path();
         assert!(cache_path.exists());
@@ -584,13 +585,13 @@ mod tests {
         assert!(path.ends_with("runtime/schema_cache.php"));
     }
 
-    #[test]
-    fn test_execute_optimize_schema_no_config() {
+    #[tokio::test]
+    async fn test_execute_optimize_schema_no_config() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
         // 无 config/database.yml 时也应成功生成空 schema 缓存索引
-        execute_optimize_schema().unwrap();
+        execute_optimize_schema().await.unwrap();
 
         let cache_path = get_schema_cache_path();
         assert!(cache_path.exists());
@@ -615,8 +616,8 @@ mod tests {
         assert!(php_content.contains("'tables' => []"));
     }
 
-    #[test]
-    fn test_optimize_schema_generates_valid_json() {
+    #[tokio::test]
+    async fn test_optimize_schema_generates_valid_json() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
@@ -638,7 +639,7 @@ mod tests {
         )
         .unwrap();
 
-        execute_optimize_schema().unwrap();
+        execute_optimize_schema().await.unwrap();
 
         let cache_path = get_schema_cache_path();
         assert!(cache_path.exists());
@@ -670,19 +671,19 @@ mod tests {
         assert!(php_content.contains("'database' => 'shop'"));
     }
 
-    #[test]
-    fn test_read_database_connections_missing_file() {
+    #[tokio::test]
+    async fn test_read_database_connections_missing_file() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
         // 配置文件不存在时返回空列表
-        let (default, conns) = read_database_connections().unwrap();
+        let (default, conns) = read_database_connections().await.unwrap();
         assert_eq!(default, "");
         assert!(conns.is_empty());
     }
 
-    #[test]
-    fn test_read_database_connections_invalid_yaml() {
+    #[tokio::test]
+    async fn test_read_database_connections_invalid_yaml() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
@@ -690,7 +691,7 @@ mod tests {
         std::fs::create_dir_all(&config_dir).unwrap();
         std::fs::write(config_dir.join("database.yml"), ":\n : bad").unwrap();
 
-        let result = read_database_connections();
+        let result = read_database_connections().await;
         assert!(matches!(result, Err(CliError::Generic(_))));
     }
 
@@ -717,8 +718,8 @@ mod tests {
         assert!(content.contains("'prefix' => 'sz_food_'"));
     }
 
-    #[test]
-    fn test_execute_optimize_config_skips_unsupported_files() {
+    #[tokio::test]
+    async fn test_execute_optimize_config_skips_unsupported_files() {
         let temp = tempfile::tempdir().unwrap();
         let _guard = CwdGuard::switch(temp.path()).unwrap();
 
@@ -728,7 +729,7 @@ mod tests {
         // .txt 文件应被跳过
         std::fs::write(config_dir.join("readme.txt"), "not a config").unwrap();
 
-        execute_optimize_config().unwrap();
+        execute_optimize_config().await.unwrap();
 
         let cache_path = get_config_cache_path();
         let content = std::fs::read_to_string(&cache_path).unwrap();

@@ -46,7 +46,7 @@
 //!
 //! let mut loader = HotAddonLoader::new();
 //! // 扫描目录并加载所有 .so/.dylib/.dll
-//! let results = loader.scan("/opt/sz300/addons").unwrap();
+//! let results = loader.scan("/opt/sz300/addons").await.unwrap();
 //! for (name, result) in results {
 //!     println!("{}: {:?}", name, result);
 //! }
@@ -221,12 +221,12 @@ impl HotAddonLoader {
     ///
     /// 返回 `(name, Result<manifest, error>)` 列表。
     /// 单个插件加载失败不影响其他插件。
-    pub fn scan(&mut self) -> Vec<AddonScanResult> {
+    pub async fn scan(&mut self) -> Vec<AddonScanResult> {
         let mut results = Vec::new();
         let dirs = self.scan_dirs.clone();
 
         for dir in dirs {
-            match self.scan_dir(&dir) {
+            match self.scan_dir(&dir).await {
                 Ok(entries) => results.extend(entries),
                 Err(e) => results.push((
                     dir.to_string_lossy().to_string(),
@@ -239,14 +239,16 @@ impl HotAddonLoader {
     }
 
     /// 扫描单个目录
-    fn scan_dir(&mut self, dir: &Path) -> Result<Vec<AddonScanResult>, HotReloadError> {
+    async fn scan_dir(&mut self, dir: &Path) -> Result<Vec<AddonScanResult>, HotReloadError> {
         let mut results = Vec::new();
 
-        let entries = std::fs::read_dir(dir).map_err(|e| {
+        let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| {
             HotReloadError::ScanFailed(format!("无法读取目录 {}: {}", dir.display(), e))
         })?;
 
-        for entry in entries.flatten() {
+        while let Some(entry) = entries.next_entry().await.map_err(|e| {
+            HotReloadError::ScanFailed(format!("读取目录条目失败 {}: {}", dir.display(), e))
+        })? {
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -487,28 +489,28 @@ mod tests {
         assert!(json.contains("libcrm.so"));
     }
 
-    #[test]
-    fn test_scan_empty_dir_returns_empty() {
+    #[tokio::test]
+    async fn test_scan_empty_dir_returns_empty() {
         // 创建临时空目录
         let tmp = tempfile::tempdir().unwrap();
         let mut loader = HotAddonLoader::new();
         loader.add_scan_dir(tmp.path());
-        let results = loader.scan();
+        let results = loader.scan().await;
         // 空目录 → 无结果（不是错误）
         assert!(results.is_empty());
     }
 
-    #[test]
-    fn test_scan_nonexistent_dir_returns_error() {
+    #[tokio::test]
+    async fn test_scan_nonexistent_dir_returns_error() {
         let mut loader = HotAddonLoader::new();
         loader.add_scan_dir("/this/path/does/not/exist/xyz123");
-        let results = loader.scan();
+        let results = loader.scan().await;
         assert_eq!(results.len(), 1);
         assert!(results[0].1.is_err());
     }
 
-    #[test]
-    fn test_scan_dir_with_non_lib_files_ignored() {
+    #[tokio::test]
+    async fn test_scan_dir_with_non_lib_files_ignored() {
         let tmp = tempfile::tempdir().unwrap();
         // 写入非库文件
         std::fs::write(tmp.path().join("readme.txt"), "hello").unwrap();
@@ -516,7 +518,7 @@ mod tests {
 
         let mut loader = HotAddonLoader::new();
         loader.add_scan_dir(tmp.path());
-        let results = loader.scan();
+        let results = loader.scan().await;
         // 非库文件应被忽略 → 无结果
         assert!(results.is_empty());
     }

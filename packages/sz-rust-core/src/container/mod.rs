@@ -356,6 +356,7 @@ impl Container {
     ///
     /// 理论上不会 panic（工厂返回的 `Box<dyn Any>` 内部类型由编译时泛型保证）。
     /// 若发生 panic 说明内部状态被破坏（bindings 与 instances 不一致）。
+    #[inline]
     pub fn make<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         self.make_with_scope::<T>(0)
     }
@@ -784,6 +785,7 @@ impl Container {
     /// # Panics
     ///
     /// 当服务未注册时 panic。
+    #[inline]
     pub fn make_or_panic<T: Send + Sync + 'static>(&self) -> Arc<T> {
         match self.make::<T>() {
             Some(instance) => instance,
@@ -857,7 +859,7 @@ impl App {
     /// use sz_rust_core::container::App;
     /// use sz_rust_core::config::AppConfig;
     ///
-    /// let config = AppConfig::load_from_dir("config").unwrap();
+    /// let config = AppConfig::load_from_dir("config").await.unwrap();
     /// let app = App::init(config);
     /// ```
     pub fn init(config: AppConfig) -> &'static App {
@@ -991,6 +993,7 @@ impl App {
     /// 管理的请求中（即 `current_scope_id()` 返回 `Some`），则自动路由到
     /// `make_with_scope`，使 Scoped 绑定在请求内缓存、请求结束清理。
     /// 请求外调用则退化为无作用域的 `make`（向后兼容）。
+    #[inline]
     pub fn make<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         if let Some(scope_id) = crate::middleware::request_scope::current_scope_id() {
             self.container.make_with_scope::<T>(scope_id)
@@ -1002,6 +1005,7 @@ impl App {
     /// 解析服务实例（带作用域 ID）
     ///
     /// 对齐 PHP `app()->make('key')` + 请求作用域支持。
+    #[inline]
     pub fn make_with_scope<T: Send + Sync + 'static>(&self, scope_id: ScopeId) -> Option<Arc<T>> {
         self.container.make_with_scope::<T>(scope_id)
     }

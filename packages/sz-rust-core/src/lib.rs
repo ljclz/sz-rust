@@ -66,10 +66,19 @@ pub mod container;
 pub mod error_handler;
 pub mod h2;
 pub mod health;
+pub mod json;
 pub mod macros;
 pub mod migration_history;
 pub mod multi_app;
 pub mod multi_tenant;
+
+// P3: alloc 计数 GlobalAlloc wrapper（仅 alloc-count feature 启用时编译）
+#[cfg(feature = "alloc-count")]
+pub mod alloc_counter;
+
+// P3: 内存池（区域分配器，仅 mem-pool feature 启用时编译）
+#[cfg(feature = "mem-pool")]
+pub mod mem_pool;
 
 // P3 拆包：MVC 层 facade（view/controller/guard 控制器与视图抽象），
 // 向下游保留 `sz_rust_core::{controller,guard,view}` 路径。

@@ -173,16 +173,18 @@ impl MailAttachment {
     /// # 返回
     ///
     /// 成功返回 [`MailAttachment`]，失败返回 [`MailError::AttachmentRead`]。
-    pub fn from_file(
+    pub async fn from_file(
         path: impl AsRef<std::path::Path>,
         filename: Option<&str>,
         mime_type: impl Into<String>,
     ) -> Result<Self, MailError> {
         let path_ref = path.as_ref();
-        let content = std::fs::read(path_ref).map_err(|e| MailError::AttachmentRead {
-            path: path_ref.display().to_string(),
-            source: e,
-        })?;
+        let content = tokio::fs::read(path_ref)
+            .await
+            .map_err(|e| MailError::AttachmentRead {
+                path: path_ref.display().to_string(),
+                source: e,
+            })?;
 
         let filename = match filename {
             Some(name) => name.to_string(),
@@ -612,14 +614,16 @@ mod tests {
     }
 
     /// 测试 MailAttachment 从文件创建
-    #[test]
-    fn test_attachment_from_file() {
+    #[tokio::test]
+    async fn test_attachment_from_file() {
         let temp_dir = std::env::temp_dir().join("sz_rust_mail_test");
         let _ = std::fs::create_dir_all(&temp_dir);
         let file_path = temp_dir.join("test.txt");
         std::fs::write(&file_path, b"hello attachment").unwrap();
 
-        let attachment = MailAttachment::from_file(&file_path, None, "text/plain").unwrap();
+        let attachment = MailAttachment::from_file(&file_path, None, "text/plain")
+            .await
+            .unwrap();
         assert_eq!(attachment.filename, "test.txt");
         assert_eq!(attachment.content, b"hello attachment");
         assert_eq!(attachment.mime_type, "text/plain");
@@ -628,9 +632,9 @@ mod tests {
     }
 
     /// 测试 MailAttachment 从不存在文件创建返回错误
-    #[test]
-    fn test_attachment_from_nonexistent_file_errors() {
-        let result = MailAttachment::from_file("/nonexistent/file.txt", None, "text/plain");
+    #[tokio::test]
+    async fn test_attachment_from_nonexistent_file_errors() {
+        let result = MailAttachment::from_file("/nonexistent/file.txt", None, "text/plain").await;
         assert!(result.is_err());
         match result {
             Err(MailError::AttachmentRead { .. }) => {}

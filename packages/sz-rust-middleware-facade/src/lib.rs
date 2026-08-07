@@ -26,6 +26,7 @@ pub type ScopeId = u64;
 pub mod auth;
 pub mod builder;
 pub mod chain;
+pub mod circuit_breaker;
 pub mod cors;
 pub mod csrf;
 pub mod handler_as_middleware;

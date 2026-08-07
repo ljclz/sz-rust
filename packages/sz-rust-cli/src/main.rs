@@ -12,9 +12,10 @@
 
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
+#[tokio::main]
+async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
-    match sz_rust_cli::run(args) {
+    match sz_rust_cli::run(args).await {
         Ok(code) => ExitCode::from(code as u8),
         Err(e) => {
             eprintln!("Error: {}", e);

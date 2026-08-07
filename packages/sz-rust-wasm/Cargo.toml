@@ -1,0 +1,33 @@
+[package]
+name = "sz-rust-wasm"
+version = "0.6.0"
+edition = "2021"
+rust-version = "1.81"
+authors = ["SZ-Rust Team"]
+license = "MIT"
+description = "WASM edge computing for sz-rust — compile to WASM for edge deployment"
+repository = "https://github.com/ljclz/sz-rust"
+homepage = "https://github.com/ljclz/sz-rust"
+keywords = ["wasm", "edge", "serverless", "sz-rust", "webassembly"]
+categories = ["wasm", "web-programming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3.77"
+web-sys = { version = "0.3", features = ["Request", "Response", "Headers", "Window", "RequestInit", "RequestMode", "ResponseInit"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# 声明独立 workspace（不继承父 workspace，避免 WASM 依赖冲突）
+[workspace]

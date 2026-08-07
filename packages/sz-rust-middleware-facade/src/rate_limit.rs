@@ -88,7 +88,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use sz_rust_orm_facade::RateLimiter;
+use sz_rust_orm_facade::{RateLimitError, RateLimitResult, RateLimiter};
 
 use crate::auth::AuthenticatedUser;
 
@@ -381,6 +381,146 @@ pub fn token_bucket_config(capacity: u64, refill_per_second: f64) -> RateLimitCo
     RateLimitConfig::new(limiter)
 }
 
+// ============================================================================
+// P1-5: 本仓独立限流器实现（非 re-export sz-orm-limit）
+// ============================================================================
+
+/// 本仓独立令牌桶限流器
+///
+/// 算法：容量固定，按时间差补充令牌（refill_per_second * elapsed_secs），
+/// 请求消耗 1 令牌。使用 `parking_lot::Mutex` 保护内部状态。
+/// `max_keys` 防止 OOM DoS（默认 10,000）。
+pub struct TokenBucket {
+    capacity: u64,
+    refill_per_second: f64,
+    max_keys: usize,
+    entries: parking_lot::Mutex<std::collections::HashMap<String, TokenBucketEntry>>,
+}
+
+#[derive(Clone)]
+struct TokenBucketEntry {
+    tokens: f64,
+    last_refill: std::time::Instant,
+}
+
+impl TokenBucket {
+    /// 创建令牌桶（capacity > 0, refill_per_second > 0）
+    pub fn new(capacity: u64, refill_per_second: f64) -> Self {
+        assert!(capacity > 0, "capacity must be > 0");
+        assert!(refill_per_second > 0.0, "refill_per_second must be > 0.0");
+        Self {
+            capacity,
+            refill_per_second,
+            max_keys: 10_000,
+            entries: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// 设置最大 key 数量（OOM 防护）
+    pub fn with_max_keys(mut self, max_keys: usize) -> Self {
+        self.max_keys = max_keys;
+        self
+    }
+}
+
+impl RateLimiter for TokenBucket {
+    fn acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
+        let mut entries = self.entries.lock();
+        if entries.len() >= self.max_keys && !entries.contains_key(key) {
+            return Err(RateLimitError::Internal("max keys exceeded".to_string()));
+        }
+        let now = std::time::Instant::now();
+        let entry = entries.entry(key.to_string()).or_insert(TokenBucketEntry {
+            tokens: self.capacity as f64,
+            last_refill: now,
+        });
+        let elapsed = now.duration_since(entry.last_refill).as_secs_f64();
+        entry.tokens = (entry.tokens + elapsed * self.refill_per_second).min(self.capacity as f64);
+        entry.last_refill = now;
+        if entry.tokens >= 1.0 {
+            entry.tokens -= 1.0;
+            let remaining = entry.tokens as u64;
+            let reset_at = now.elapsed().as_millis() as i64;
+            Ok(RateLimitResult::allowed(remaining, reset_at))
+        } else {
+            let reset_at = now.elapsed().as_millis() as i64;
+            Ok(RateLimitResult::rejected(0, reset_at))
+        }
+    }
+
+    fn try_acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
+        self.acquire(key)
+    }
+
+    fn reset(&self, key: &str) -> Result<(), RateLimitError> {
+        self.entries.lock().remove(key);
+        Ok(())
+    }
+}
+
+/// 本仓独立滑动窗口限流器
+///
+/// 算法：保留窗口内所有请求时间戳，清理过期时间戳后检查数量。
+/// 使用 `parking_lot::Mutex` 保护内部状态。
+/// `max_keys` 防止 OOM DoS（默认 10,000）。
+pub struct SlidingWindow {
+    max_requests: u64,
+    window_size: Duration,
+    max_keys: usize,
+    entries: parking_lot::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+}
+
+impl SlidingWindow {
+    /// 创建滑动窗口（max_requests > 0, window_size > 0）
+    pub fn new(max_requests: u64, window_size: Duration) -> Self {
+        assert!(max_requests > 0, "max_requests must be > 0");
+        assert!(window_size > Duration::ZERO, "window_size must be > 0");
+        Self {
+            max_requests,
+            window_size,
+            max_keys: 10_000,
+            entries: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// 设置最大 key 数量（OOM 防护）
+    pub fn with_max_keys(mut self, max_keys: usize) -> Self {
+        self.max_keys = max_keys;
+        self
+    }
+}
+
+impl RateLimiter for SlidingWindow {
+    fn acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
+        let mut entries = self.entries.lock();
+        if entries.len() >= self.max_keys && !entries.contains_key(key) {
+            return Err(RateLimitError::Internal("max keys exceeded".to_string()));
+        }
+        let now = std::time::Instant::now();
+        let window_start = now - self.window_size;
+        let timestamps = entries.entry(key.to_string()).or_default();
+        timestamps.retain(|&t| t > window_start);
+        if timestamps.len() < self.max_requests as usize {
+            timestamps.push(now);
+            let remaining = self.max_requests.saturating_sub(timestamps.len() as u64);
+            let reset_at = now.elapsed().as_millis() as i64;
+            Ok(RateLimitResult::allowed(remaining, reset_at))
+        } else {
+            let reset_at = now.elapsed().as_millis() as i64;
+            Ok(RateLimitResult::rejected(0, reset_at))
+        }
+    }
+
+    fn try_acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
+        self.acquire(key)
+    }
+
+    fn reset(&self, key: &str) -> Result<(), RateLimitError> {
+        self.entries.lock().remove(key);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +528,121 @@ mod tests {
     use axum::Router;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    // ====================================================================
+    // P1-5: 本仓独立限流器测试（TokenBucket + SlidingWindow）
+    // ====================================================================
+
+    #[test]
+    fn test_token_bucket_basic_allow_then_reject() {
+        let tb = TokenBucket::new(2, 1.0);
+        let r1 = tb.acquire("k1").unwrap();
+        assert!(r1.allowed);
+        let r2 = tb.acquire("k1").unwrap();
+        assert!(r2.allowed);
+        let r3 = tb.acquire("k1").unwrap();
+        assert!(!r3.allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_refill_after_time() {
+        let tb = TokenBucket::new(1, 100.0);
+        let r1 = tb.acquire("k1").unwrap();
+        assert!(r1.allowed);
+        let r2 = tb.acquire("k1").unwrap();
+        assert!(!r2.allowed);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let r3 = tb.acquire("k1").unwrap();
+        assert!(r3.allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_independent_keys() {
+        let tb = TokenBucket::new(1, 1.0);
+        assert!(tb.acquire("k1").unwrap().allowed);
+        assert!(tb.acquire("k2").unwrap().allowed);
+        assert!(!tb.acquire("k1").unwrap().allowed);
+        assert!(!tb.acquire("k2").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_reset() {
+        let tb = TokenBucket::new(1, 1.0);
+        assert!(tb.acquire("k1").unwrap().allowed);
+        assert!(!tb.acquire("k1").unwrap().allowed);
+        tb.reset("k1").unwrap();
+        assert!(tb.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_max_keys_oom_protection() {
+        let tb = TokenBucket::new(1, 1.0).with_max_keys(2);
+        assert!(tb.acquire("k1").unwrap().allowed);
+        assert!(tb.acquire("k2").unwrap().allowed);
+        assert!(tb.acquire("k3").is_err());
+    }
+
+    #[test]
+    fn test_sliding_window_basic_allow_then_reject() {
+        let sw = SlidingWindow::new(2, Duration::from_secs(60));
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(!sw.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_sliding_window_window_expiry() {
+        let sw = SlidingWindow::new(1, Duration::from_millis(50));
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(!sw.acquire("k1").unwrap().allowed);
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(sw.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_sliding_window_independent_keys() {
+        let sw = SlidingWindow::new(1, Duration::from_secs(60));
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(sw.acquire("k2").unwrap().allowed);
+        assert!(!sw.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_sliding_window_reset() {
+        let sw = SlidingWindow::new(1, Duration::from_secs(60));
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(!sw.acquire("k1").unwrap().allowed);
+        sw.reset("k1").unwrap();
+        assert!(sw.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_sliding_window_max_keys_oom_protection() {
+        let sw = SlidingWindow::new(1, Duration::from_secs(60)).with_max_keys(2);
+        assert!(sw.acquire("k1").unwrap().allowed);
+        assert!(sw.acquire("k2").unwrap().allowed);
+        assert!(sw.acquire("k3").is_err());
+    }
+
+    #[test]
+    fn test_token_bucket_concurrent_100_requests() {
+        let tb = std::sync::Arc::new(TokenBucket::new(100, 1000.0));
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let tb_clone = std::sync::Arc::clone(&tb);
+            handles.push(std::thread::spawn(move || {
+                let mut allowed = 0;
+                for _ in 0..10 {
+                    if tb_clone.acquire("k1").unwrap().allowed {
+                        allowed += 1;
+                    }
+                }
+                allowed
+            }));
+        }
+        let total: u32 = handles.into_iter().map(|h| h.join().unwrap()).sum();
+        assert_eq!(total, 100);
+    }
 
     // ====================================================================
     // 辅助函数

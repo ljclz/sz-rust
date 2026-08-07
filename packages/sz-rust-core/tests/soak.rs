@@ -47,6 +47,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sz_rust_core::cache::{Cache, MemoryCacheDriver};
+use sz_rust_core::container::Container;
 use sz_rust_core::response::ApiResponse;
 use sz_rust_core::router::parse_path;
 use sz_rust_core::routing::HandlerRef;
@@ -111,6 +113,18 @@ async fn soak_web_framework_steady_state() {
                 "Animal@feed",
             ];
 
+            // 覆盖路径 4：中间件链（worker 启动时构建一次）
+            let chain = sz_rust_core::middleware::chain::MiddlewareChain::default_chain();
+
+            // 覆盖路径 5：DI 容器（worker 启动时构建一次）
+            let container = Container::new();
+            container.singleton(|| 42i32);
+
+            // 覆盖路径 6：缓存读写（worker 启动时构建一次）
+            let cache = Arc::new(Cache::new());
+            cache.register_default(MemoryCacheDriver::new());
+            let cache_key = format!("soak_worker_{}", worker_id);
+
             let mut iteration: usize = 0;
             while !stop_clone.load(Ordering::Relaxed) {
                 let t0 = Instant::now();
@@ -146,7 +160,17 @@ async fn soak_web_framework_steady_state() {
                 );
                 let _json = resp.to_json_string();
 
-                // 4. 记录延迟和计数
+                // 4. 中间件链重复检测
+                let _has_dup = chain.has_duplicates();
+
+                // 5. DI 容器依赖解析
+                let _val = container.make::<i32>();
+
+                // 6. 缓存读写
+                let _ = cache.set(&cache_key, iteration, None);
+                let _: Option<usize> = cache.get(&cache_key).unwrap_or(None);
+
+                // 记录延迟和计数
                 let elapsed_us = t0.elapsed().as_micros() as u64;
                 record_latency(&latency_clone, elapsed_us);
                 ops_clone.fetch_add(1, Ordering::Relaxed);
@@ -255,6 +279,13 @@ async fn soak_smoke_10s() {
             ];
             let handlers = ["Customer@index", "Login@index", "User@list"];
 
+            // 覆盖路径 4-6：中间件链 + DI 容器 + 缓存
+            let chain = sz_rust_core::middleware::chain::MiddlewareChain::default_chain();
+            let container = Container::new();
+            container.singleton(|| 42i32);
+            let cache = Arc::new(Cache::new());
+            cache.register_default(MemoryCacheDriver::new());
+
             let mut iteration: usize = 0;
             while !stop_c.load(Ordering::Relaxed) {
                 let t0 = Instant::now();
@@ -274,6 +305,13 @@ async fn soak_smoke_10s() {
                         "ok",
                     );
                     let _json = resp.to_json_string();
+
+                    // 覆盖路径 4-6
+                    let _has_dup = chain.has_duplicates();
+                    let _val = container.make::<i32>();
+                    let _ = cache.set("soak_smoke", iteration, None);
+                    let _: Option<usize> = cache.get("soak_smoke").unwrap_or(None);
+
                     record_latency(&lat_c, t0.elapsed().as_micros() as u64);
                     ops_c.fetch_add(1, Ordering::Relaxed);
                 } else {

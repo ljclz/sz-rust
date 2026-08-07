@@ -50,11 +50,45 @@ jobs:
         continue-on-error: true
         id: audit
 
+      # P0-2 unmaintained 真实编译检查
+      # paste / rustls-pemfile 已消除；ttf-parser 经 ab_glyph→owned_ttf_parser 引入（无替代品，已在 deny.toml 记录）
+      # rkyv 为幻影依赖（cargo tree -i rkyv = nothing to print）
+      - name: Verify unmaintained dependencies (real = 0)
+        run: |
+          set -uo pipefail
+          echo "=== cargo tree -i paste (should be empty) ==="
+          PASTE_OUT=$(cargo tree -i paste 2>&1 || true)
+          echo "$PASTE_OUT"
+          if echo "$PASTE_OUT" | grep -q "package id"; then
+            echo "::error::paste is still in the dependency tree"
+            exit 1
+          fi
+          echo "✅ paste eliminated"
+
+          echo "=== cargo tree -i rustls-pemfile (should be empty in default features) ==="
+          PEM_OUT=$(cargo tree -i rustls-pemfile 2>&1 || true)
+          echo "$PEM_OUT"
+          if echo "$PEM_OUT" | grep -q "package id"; then
+            echo "::warning::rustls-pemfile still present (may come from sz-orm-mqtt under --all-features; acceptable)"
+          else
+            echo "✅ rustls-pemfile eliminated (default features)"
+          fi
+
+          echo "=== cargo tree -i rkyv (should be empty / phantom) ==="
+          RKYV_OUT=$(cargo tree -i rkyv 2>&1 || true)
+          echo "$RKYV_OUT"
+          if echo "$RKYV_OUT" | grep -q "package id"; then
+            echo "::warning::rkyv present in tree (should be phantom)"
+          else
+            echo "✅ rkyv confirmed as phantom dependency"
+          fi
+
       - name: Audit summary
         if: always()
         run: |
           echo "## 🔒 Security Audit Summary" >> $GITHUB_STEP_SUMMARY
           echo "- **cargo-audit**: ${{ steps.audit.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **unmaintained check**: paste/rustls-pemfile/rkyv verified" >> $GITHUB_STEP_SUMMARY
 
   geiger:
     name: Unsafe Code Check (cargo-geiger)

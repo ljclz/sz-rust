@@ -1,4 +1,4 @@
-//! HTTP/2 + TLS 支持 — 基于 `tokio-rustls` + `rustls-pemfile`
+//! HTTP/2 + TLS 支持 — 基于 `tokio-rustls` + `rustls-pki-types` PEM 解析
 //!
 //! 对齐 PHP `think-swoole` 启用 SSL 后的行为，提供 HTTP/2 over TLS 启动器。
 //!
@@ -30,14 +30,13 @@
 //! # }
 //! ```
 
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 
 use axum::serve::Listener;
 use axum::Router;
 use tokio::net::TcpListener;
-use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tokio_rustls::rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
@@ -108,10 +107,9 @@ async fn load_certs(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'static
     let cert_data = tokio::fs::read(path.as_ref())
         .await
         .map_err(TlsError::ReadCertFile)?;
-    let mut reader = BufReader::new(&cert_data[..]);
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&cert_data)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(TlsError::ParseCert)?;
+        .map_err(|e| TlsError::ParseCert(std::io::Error::other(e)))?;
     if certs.is_empty() {
         return Err(TlsError::ParseCert(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -126,16 +124,9 @@ async fn load_private_key(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'stati
     let key_data = tokio::fs::read(path.as_ref())
         .await
         .map_err(TlsError::ReadKeyFile)?;
-    let mut reader = BufReader::new(&key_data[..]);
-    let mut keys = Vec::new();
-    for item in rustls_pemfile::read_all(&mut reader) {
-        match item.map_err(TlsError::ParseKey)? {
-            rustls_pemfile::Item::Pkcs8Key(k) => keys.push(PrivateKeyDer::Pkcs8(k)),
-            rustls_pemfile::Item::Pkcs1Key(k) => keys.push(PrivateKeyDer::Pkcs1(k)),
-            rustls_pemfile::Item::Sec1Key(k) => keys.push(PrivateKeyDer::Sec1(k)),
-            _ => {}
-        }
-    }
+    let keys: Vec<PrivateKeyDer<'static>> = PrivateKeyDer::pem_slice_iter(&key_data)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| TlsError::ParseKey(std::io::Error::other(e)))?;
     keys.into_iter().next().ok_or(TlsError::NoPrivateKey)
 }
 
@@ -605,7 +596,7 @@ mod tests {
 
         // 5. 构造客户端 config，使用自签名证书（添加到 root store）
         let mut root_store = RootCertStore::empty();
-        let cert_der = rustls_pemfile::certs(&mut BufReader::new(cert.as_slice()))
+        let cert_der = CertificateDer::pem_slice_iter(&cert[..])
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         for c in cert_der {
