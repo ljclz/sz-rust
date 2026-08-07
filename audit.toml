@@ -21,6 +21,8 @@ ignore = [
     "RUSTSEC-2025-0134",
     # ttf-parser unmaintained（ab_glyph 传递依赖，仅字体解析）
     "RUSTSEC-2026-0192",
+    # rkyv unmaintained（Cargo.lock 残留，cargo tree -i rkyv = nothing to print）
+    "RUSTSEC-2026-0235",
 ]
 
 # 信息性公告（不阻断，仅警告）

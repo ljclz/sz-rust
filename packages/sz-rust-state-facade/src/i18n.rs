@@ -41,10 +41,10 @@
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::fs;
 
 // ============================================================================
 // 错误类型
@@ -296,12 +296,18 @@ impl I18n {
     /// ```php
     /// Lang::load('lang/en-us.json', 'en-us');
     /// ```
-    pub fn load_from_file(&self, path: impl AsRef<Path>, lang: &str) -> Result<(), I18nError> {
+    pub async fn load_from_file(
+        &self,
+        path: impl AsRef<Path>,
+        lang: &str,
+    ) -> Result<(), I18nError> {
         let path_ref = path.as_ref();
-        let content = fs::read_to_string(path_ref).map_err(|e| I18nError::FileRead {
-            path: path_ref.display().to_string(),
-            source: e,
-        })?;
+        let content = fs::read_to_string(path_ref)
+            .await
+            .map_err(|e| I18nError::FileRead {
+                path: path_ref.display().to_string(),
+                source: e,
+            })?;
 
         self.load_from_json_str(&content, lang, &path_ref.display().to_string())
     }
@@ -610,8 +616,8 @@ mod tests {
     }
 
     /// 测试从 JSON 文件加载
-    #[test]
-    fn test_load_from_file() {
+    #[tokio::test]
+    async fn test_load_from_file() {
         let temp_dir = std::env::temp_dir().join("sz_rust_i18n_test");
         let _ = std::fs::create_dir_all(&temp_dir);
         let lang_file = temp_dir.join("en-us.json");
@@ -621,7 +627,7 @@ mod tests {
         drop(file);
 
         let i18n = I18n::new();
-        i18n.load_from_file(&lang_file, "en-us").unwrap();
+        i18n.load_from_file(&lang_file, "en-us").await.unwrap();
 
         assert_eq!(
             i18n.get_simple("hello", Some("en-us")),
@@ -636,10 +642,12 @@ mod tests {
     }
 
     /// 测试文件不存在时返回错误
-    #[test]
-    fn test_load_nonexistent_file_errors() {
+    #[tokio::test]
+    async fn test_load_nonexistent_file_errors() {
         let i18n = I18n::new();
-        let result = i18n.load_from_file("/nonexistent/path/lang.json", "en-us");
+        let result = i18n
+            .load_from_file("/nonexistent/path/lang.json", "en-us")
+            .await;
         assert!(result.is_err());
         match result {
             Err(I18nError::FileRead { .. }) => {}

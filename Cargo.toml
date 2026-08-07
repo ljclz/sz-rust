@@ -28,10 +28,12 @@ members = [
     "packages/sz-rust-tracing",
     "packages/sz-rust-observability",
     "packages/sz-rust-sz300",
+    "packages/sz-rust-operator",
+
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -62,14 +64,40 @@ axum = { version = "0.8", features = ["macros", "multipart", "ws", "http2"] }
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.7", features = ["cors", "trace", "compression-gzip", "timeout", "fs"] }
 hyper = "1"
+hyper-util = { version = "0.1", features = ["tokio"] }
 http = "1"
 http-body-util = "0.1"
+
 
 # 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9.34"
 toml = "0.8"
+# SIMD JSON 加速（仅 x86_64，cfg 条件依赖）
+simd-json = "0.13"
+# OpenAPI 文档生成
+utoipa = "5"
+utoipa-swagger-ui = "8"
+# gRPC 支持
+tonic = "0.12"
+prost = "0.13"
+# GraphQL 支持（async-graphql 7.x + axum 集成）
+async-graphql = "7"
+async-graphql-axum = "7"
+# K8s Operator 支持（kube + schemars for CRD）
+kube = { version = "0.95", features = ["runtime", "derive", "client"] }
+kube-derive = "0.95"
+schemars = "0.8"
+# K8s API 类型（kube 依赖）
+k8s-openapi = { version = "0.23", features = ["latest"] }
+# JSON Schema 生成（kube CRD 需要）
+json-patch = "3"
+# WASM 边缘计算支持
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.2"
+js-sys = "0.2"
+web-sys = { version = "0.3", features = ["Request", "Response", "Headers", "Window", "Fetch", "RequestInit", "RequestMode"] }
 
 # 日志与追踪
 tracing = "0.1"
@@ -85,6 +113,9 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 bytes = "1"
 indexmap = { version = "2", features = ["serde"] }
+# 文件监听（热重载）
+notify = "6"
+
 
 # HTTP 客户端
 reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"] }
@@ -105,9 +136,14 @@ tempfile = "3"
 # 随机数（对齐 PHP rand(0, 9999)）
 rand = "0.8"
 
+# Redis 客户端（对齐 PHP think-orm/think-cache Redis 驱动）
+redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"] }
+
 # 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
-image = "0.25"
-imageproc = "0.25"
+# P0-2: 禁用 exr feature 消除 paste(unmaintained) 传递依赖链 image→exr→pulp→paste
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp", "rayon"] }
+# P0-2: imageproc 0.25→0.27，default-features=false 避免强制 image/default（含 exr→paste）
+imageproc = { version = "0.27", default-features = false, features = ["text", "rayon"] }
 ab_glyph = "0.2"
 
 # 二维码生成（对齐 PHP endroid/qr-code）
@@ -116,7 +152,8 @@ qrcode = "0.14"
 # Excel/PDF 处理（对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
 rust_xlsxwriter = "0.79"
 calamine = { version = "0.36", features = ["dates"] }
-lopdf = "0.42"
+# P0-2: lopdf 0.42→0.44 消除 ttf-parser(unmaintained) 传递依赖
+lopdf = "0.44"
 
 # 加密
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
@@ -131,45 +168,45 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，path + version 双重指定：本地开发用 path，crates.io 发布用 version）
-sz-orm-core = { path = "../sz-orm/packages/sz-orm-core", version = "1.2.2" }
-sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth", version = "1.2.2" }
-sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage", version = "1.2.2" }
-sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue", version = "1.2.2" }
-sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt", version = "1.2.2" }
-sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket", version = "1.2.2" }
-sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler", version = "1.2.2" }
-sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing", version = "1.2.2" }
-sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger", version = "1.2.2" }
-sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit", version = "1.2.2" }
-sz-orm-config = { path = "../sz-orm/packages/sz-orm-config", version = "1.2.2" }
-sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros", version = "1.2.2" }
-sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator", version = "1.2.2" }
-sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx", version = "1.2.2" }
-sz-orm-query-builder = { path = "../sz-orm/packages/sz-orm-query-builder", version = "1.2.2" }
-sz-orm-graphql = { path = "../sz-orm/packages/sz-orm-graphql", version = "1.2.2" }
-sz-orm-grpc = { path = "../sz-orm/packages/sz-orm-grpc", version = "1.2.2" }
+# 内部依赖（SZ-ORM 全家桶，从 crates.io 2.1.0 拉取，避免本地工作区未提交修改影响构建）
+sz-orm-core = "2.1.0"
+sz-orm-auth = "2.1.0"
+sz-orm-storage = "2.1.0"
+sz-orm-queue = "2.1.0"
+sz-orm-mqtt = "2.1.0"
+sz-orm-websocket = "2.1.0"
+sz-orm-scheduler = "2.1.0"
+sz-orm-tracing = "2.1.0"
+sz-orm-logger = "2.1.0"
+sz-orm-limit = "2.1.0"
+sz-orm-config = "2.1.0"
+sz-orm-macros = "2.1.0"
+sz-orm-sql-validator = "2.1.0"
+sz-orm-sqlx = "2.1.0"
+sz-orm-query-builder = "2.1.0"
+sz-orm-graphql = "2.1.0"
+sz-orm-grpc = "2.1.0"
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "0.3.0", path = "packages/sz-rust-core" }
-sz-rust-orm-facade = { version = "0.3.0", path = "packages/sz-rust-orm-facade" }
-sz-rust-http-facade = { version = "0.3.0", path = "packages/sz-rust-http-facade" }
-sz-rust-cache-facade = { version = "0.3.0", path = "packages/sz-rust-cache-facade" }
-sz-rust-state-facade = { version = "0.3.0", path = "packages/sz-rust-state-facade" }
-sz-rust-infra-facade = { version = "0.3.0", path = "packages/sz-rust-infra-facade" }
-sz-rust-auth-facade = { version = "0.3.0", path = "packages/sz-rust-auth-facade" }
-sz-rust-pay-facade = { version = "0.3.0", path = "packages/sz-rust-pay-facade" }
-sz-rust-orm-ext-facade = { version = "0.3.0", path = "packages/sz-rust-orm-ext-facade" }
-sz-rust-router-facade = { version = "0.3.0", path = "packages/sz-rust-router-facade" }
-sz-rust-middleware-facade = { version = "0.3.0", path = "packages/sz-rust-middleware-facade" }
-sz-rust-mvc-facade = { version = "0.3.0", path = "packages/sz-rust-mvc-facade" }
-sz-rust-mcp = { version = "0.3.0", path = "packages/sz-rust-mcp" }
-sz-rust-macros = { version = "0.3.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-loader = { version = "0.3.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-pdf = { version = "0.3.0", path = "packages/sz-rust-pdf" }
-sz-rust-tracing = { version = "0.3.0", path = "packages/sz-rust-tracing" }
-sz-rust-observability = { version = "0.3.0", path = "packages/sz-rust-observability" }
-sz-rust-cli = { version = "0.3.0", path = "packages/sz-rust-cli" }
+sz-rust-core = { version = "0.6.0", path = "packages/sz-rust-core" }
+sz-rust-orm-facade = { version = "0.6.0", path = "packages/sz-rust-orm-facade" }
+sz-rust-http-facade = { version = "0.6.0", path = "packages/sz-rust-http-facade" }
+sz-rust-cache-facade = { version = "0.6.0", path = "packages/sz-rust-cache-facade" }
+sz-rust-state-facade = { version = "0.6.0", path = "packages/sz-rust-state-facade" }
+sz-rust-infra-facade = { version = "0.6.0", path = "packages/sz-rust-infra-facade" }
+sz-rust-auth-facade = { version = "0.6.0", path = "packages/sz-rust-auth-facade" }
+sz-rust-pay-facade = { version = "0.6.0", path = "packages/sz-rust-pay-facade" }
+sz-rust-orm-ext-facade = { version = "0.6.0", path = "packages/sz-rust-orm-ext-facade" }
+sz-rust-router-facade = { version = "0.6.0", path = "packages/sz-rust-router-facade" }
+sz-rust-middleware-facade = { version = "0.6.0", path = "packages/sz-rust-middleware-facade" }
+sz-rust-mvc-facade = { version = "0.6.0", path = "packages/sz-rust-mvc-facade" }
+sz-rust-mcp = { version = "0.6.0", path = "packages/sz-rust-mcp" }
+sz-rust-macros = { version = "0.6.0", path = "packages/sz-rust-macros" }
+sz-rust-addons-loader = { version = "0.6.0", path = "packages/sz-rust-addons-loader" }
+sz-rust-pdf = { version = "0.6.0", path = "packages/sz-rust-pdf" }
+sz-rust-tracing = { version = "0.6.0", path = "packages/sz-rust-tracing" }
+sz-rust-observability = { version = "0.6.0", path = "packages/sz-rust-observability" }
+sz-rust-cli = { version = "0.6.0", path = "packages/sz-rust-cli" }
 
 # 命令行 + 调度器
 clap = { version = "4.5", features = ["derive"] }
@@ -179,6 +216,8 @@ clap = { version = "4.5", features = ["derive"] }
 [profile.dev]
 opt-level = 0
 debug = true
+# 启用算术溢出检查（开发期也需 fail-fast，与 release 一致，铁律 1）
+overflow-checks = true
 
 [profile.release]
 opt-level = 3

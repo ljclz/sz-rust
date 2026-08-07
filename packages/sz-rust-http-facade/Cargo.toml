@@ -19,6 +19,34 @@ thiserror = { workspace = true }
 http-body-util = { workspace = true }
 tracing = { workspace = true }
 regex = { workspace = true }
+# P3: 零拷贝字节容器
+bytes = { workspace = true }
+# TLS（HTTP/2 + HTTPS）
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+tower = { workspace = true }
+# OpenAPI 文档生成
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true, optional = true }
+# gRPC 支持
+tonic = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
+# GraphQL 支持（async-graphql + async-graphql-axum）
+async-graphql = { workspace = true, optional = true }
+async-graphql-axum = { workspace = true, optional = true }
+
+[features]
+default = []
+# Swagger UI 集成
+swagger-ui = ["dep:utoipa-swagger-ui"]
+# gRPC 支持
+grpc = ["dep:tonic", "dep:prost"]
+# GraphQL 支持（async-graphql 引擎 + axum 集成）
+graphql = ["dep:async-graphql", "dep:async-graphql-axum"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

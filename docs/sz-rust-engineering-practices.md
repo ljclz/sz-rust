@@ -1,10 +1,10 @@
 # SZ-Rust 工程化实践规范
 
-> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，26 workspace 包，4,994 测试）
-> **项目版本**：v0.3.0
+> **目标项目**：SZ-Rust（鲜视达 Rust Web 框架，对标 ThinkPHP 8，26 workspace 包，2,633+ 测试）
+> **项目版本**：v0.3.1
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
-> **文档版本**：v1.4（2026-08-04）
+> **文档版本**：v1.5（2026-08-05）
 
 ---
 
@@ -505,9 +505,20 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-08-04
+> **最后更新**: 2026-08-05
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.4
+> **规范版本**: v1.5
+>
+> **v1.5 变更摘要**（2026-08-05）：
+> - 修复 4 项铁律违规（铁律 1/10/7/4），综合五维审查 92.2/100 通过
+> - 铁律 1：`Cargo.toml:182` `[profile.dev]` 添加 `overflow-checks = true`
+> - 铁律 10：`.github/workflows/coverage.yml:44` 阈值 70→85，与 ci.yml 一致
+> - 铁律 7：`notify.rs:771` TencentSmsConfig 改为 `#[derive(Clone)]` + 手动 `impl Debug` 脱敏（secret_id/secret_key/sms_sdk_app_id → `***REDACTED***`），新增 2 个脱敏测试
+> - 铁律 4：7 个文件的 `std::fs` → `tokio::fs` 异步化（static_files/mail/i18n/env/config/hot_reload/optimize），CLI 全链路 async 改造（main→run→execute→console→optimize），新增 ADR-020
+> - 验证：`cargo fmt --check` ✅ | `cargo clippy --all-targets -D warnings` ✅ | `cargo test -p sz-rust-state-facade` 222 passed ✅ | `cargo test -p sz-rust-infra-facade` 670 passed ✅
+> - 范围外发现项（铁律 18 记录）：view/layout.rs:85,170、view/inheritance.rs:153、view.rs:647、upload/storage.rs:312,337,648,649 仍有 `std::fs`，留待后续迭代
+> - 环境限制：Windows rustc `STATUS_STACK_BUFFER_OVERRUN` 阻止 cli/core 本地测试，clippy `--all-targets` 已验证编译正确性，Linux CI 可运行全量测试
+> - 五维审查报告：`docs/audit/2026-08-05-iron-violations-fix-five-dimensional-review.md`
 >
 > **v1.4 变更摘要**（2026-08-04）：
 > - CI coverage job 切换为 cargo-llvm-cov（--exclude sz-orm-macros --cobertura --fail-under-lines 85），解决 Windows 本机无法运行 tarpaulin 的问题；实测 workspace 总体覆盖率 89.2%

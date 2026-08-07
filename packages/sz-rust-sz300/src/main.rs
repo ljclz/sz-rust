@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 尝试加载框架统一 AppConfig（YAML 配置文件，可选）
     // 对齐 sz-rust-core 的 AppConfig::load_from_dir()，实现框架级配置统一
-    match sz_rust_core::config::AppConfig::load_from_dir("config") {
+    match sz_rust_core::config::AppConfig::load_from_dir("config").await {
         Ok(framework_config) => {
             tracing::info!("框架统一 AppConfig 加载成功（config/ 目录）");
             // 框架配置可用于后续框架级功能（缓存、插件、日志等）
@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         use sz_rust_core::runtime::hot_reload::HotAddonLoader;
         let mut loader = HotAddonLoader::new();
         loader.add_scan_dir("addons");
-        let results = loader.scan();
+        let results = loader.scan().await;
         let loaded: Vec<_> = results
             .iter()
             .filter_map(

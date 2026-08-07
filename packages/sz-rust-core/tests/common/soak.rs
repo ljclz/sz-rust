@@ -516,6 +516,33 @@ pub fn record_latency(window: &Arc<std::sync::Mutex<VecDeque<u64>>>, latency_us:
     w.push_back(latency_us);
 }
 
+/// 解析时长字符串为 Duration
+fn parse_duration_str(s: &str) -> Option<Duration> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (num_str, unit) = if let Some(rest) = s.strip_suffix('s') {
+        (rest, "s")
+    } else if let Some(rest) = s.strip_suffix('m') {
+        (rest, "m")
+    } else if let Some(rest) = s.strip_suffix('h') {
+        (rest, "h")
+    } else {
+        let rest = s.strip_suffix('d')?;
+        (rest, "d")
+    };
+    let num: u64 = num_str.parse().ok()?;
+    let secs = match unit {
+        "s" => num,
+        "m" => num.saturating_mul(60),
+        "h" => num.saturating_mul(3600),
+        "d" => num.saturating_mul(86400),
+        _ => return None,
+    };
+    Some(Duration::from_secs(secs))
+}
+
 /// 从环境变量或命令行参数解析 Soak 时长
 ///
 /// # 用法
@@ -553,26 +580,21 @@ pub fn parse_duration_from_args() -> Duration {
             return parse_duration_str(rest).unwrap_or(Duration::from_secs(60));
         }
     }
-    // 默认 60 秒（CI 快速验证；6h 任务用 SOAK_DURATION=6h）
     Duration::from_secs(60)
 }
 
-/// 解析时长字符串（如 "60s" / "5m" / "2h" / "1d"）
-fn parse_duration_str(s: &str) -> Option<Duration> {
-    let s = s.trim().to_lowercase();
-    if let Ok(secs) = s.parse::<u64>() {
-        return Some(Duration::from_secs(secs));
-    }
-    let (num_str, unit) = s.split_at(s.len() - 1);
-    let num: u64 = num_str.parse().ok()?;
-    let secs = match unit {
-        "s" => num,
-        "m" => num.saturating_mul(60),
-        "h" => num.saturating_mul(3600),
-        "d" => num.saturating_mul(86400),
-        _ => return None,
-    };
-    Some(Duration::from_secs(secs))
+/// Soak 覆盖矩阵：6 路径 × 采样点覆盖表
+///
+/// 返回 6 个覆盖路径的名称列表，供 soak 测试输出和文档引用。
+pub fn soak_coverage_matrix() -> [&'static str; 6] {
+    [
+        "route_parse",    // parse_path 路由解析
+        "handler_ref",    // HandlerRef::parse
+        "json_serialize", // ApiResponse::to_json_string
+        "middleware",     // MiddlewareChain::has_duplicates
+        "di_container",   // Container::singleton + make
+        "cache_rw",       // Cache::set + get
+    ]
 }
 
 #[cfg(test)]

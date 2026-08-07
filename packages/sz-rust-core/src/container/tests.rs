@@ -145,8 +145,8 @@ fn test_db_connection_names() {
 ///
 /// 直接验证 `AppConfig::load_from_dir()` 能加载 5 个连接配置，
 /// 不通过 `App::init()`（避免 OnceLock 全局状态污染）。
-#[test]
-fn test_load_5_db_connections() {
+#[tokio::test]
+async fn test_load_5_db_connections() {
     // 查找 config 目录（从当前目录向上 5 级查找）
     let config_dir = std::env::current_dir().ok().and_then(|d| {
         let mut current = d.clone();
@@ -169,7 +169,7 @@ fn test_load_5_db_connections() {
         return;
     };
 
-    let config = AppConfig::load_from_dir(&config_dir).unwrap();
+    let config = AppConfig::load_from_dir(&config_dir).await.unwrap();
 
     // 验证 5 个数据库连接配置
     let names: Vec<&str> = config

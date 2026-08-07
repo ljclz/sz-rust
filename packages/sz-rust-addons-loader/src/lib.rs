@@ -56,6 +56,8 @@
 
 pub mod autoload;
 pub mod error;
+#[cfg(feature = "hot-reload")]
+pub mod hot_reload;
 pub mod loader;
 pub mod manifest;
 pub mod registry;

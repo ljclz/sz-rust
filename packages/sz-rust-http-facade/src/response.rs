@@ -117,6 +117,19 @@ impl ApiResponse {
     pub fn to_json_string(&self) -> String {
         self.to_value().to_string()
     }
+
+    /// 序列化为 `bytes::Bytes`（零拷贝引用计数字节容器）
+    ///
+    /// P3 优化：替代 `to_json_string` 的 String 分配，
+    /// 使用 `serde_json::to_vec` 序列化到 `Vec<u8>` 后转为 `Bytes`，
+    /// 避免 String 的 UTF-8 验证开销，支持零拷贝传递。
+    ///
+    /// 输出与 `to_json_string` 逐字节一致。
+    pub fn to_json_bytes(&self) -> bytes::Bytes {
+        let vec = serde_json::to_vec(&self.to_value())
+            .expect("ApiResponse::to_json_bytes: serde_json::to_vec infallible for Value");
+        bytes::Bytes::from(vec)
+    }
 }
 
 impl Serialize for ApiResponse {
@@ -681,6 +694,39 @@ mod tests {
         let json_str = resp.to_json_string();
         let expected = r#"{"code":1,"msg":"ok","data":{"id":1,"name":"alice"}}"#;
         assert_eq!(json_str, expected);
+    }
+
+    #[test]
+    fn test_api_response_to_json_bytes() {
+        let resp = ApiResponse::new(1, "ok", serde_json::json!({}));
+        let json_bytes = resp.to_json_bytes();
+        let expected = r#"{"code":1,"msg":"ok","data":{}}"#;
+        assert_eq!(json_bytes.as_ref(), expected.as_bytes());
+    }
+
+    #[test]
+    fn test_api_response_to_json_bytes_with_data() {
+        let resp = ApiResponse::success(serde_json::json!({"id": 1, "name": "alice"}), "ok");
+        let json_bytes = resp.to_json_bytes();
+        let expected = r#"{"code":1,"msg":"ok","data":{"id":1,"name":"alice"}}"#;
+        assert_eq!(json_bytes.as_ref(), expected.as_bytes());
+    }
+
+    #[test]
+    fn test_api_response_to_json_bytes_matches_string() {
+        // to_json_bytes 输出与 to_json_string 逐字节一致
+        let resp = ApiResponse::new(-1, "未登录", serde_json::json!({"token": null}));
+        let json_str = resp.to_json_string();
+        let json_bytes = resp.to_json_bytes();
+        assert_eq!(json_bytes.as_ref(), json_str.as_bytes());
+    }
+
+    #[test]
+    fn test_api_response_to_json_bytes_empty() {
+        let resp = ApiResponse::success_empty();
+        let json_bytes = resp.to_json_bytes();
+        let expected = r#"{"code":1,"msg":"","data":{}}"#;
+        assert_eq!(json_bytes.as_ref(), expected.as_bytes());
     }
 
     #[test]

@@ -13,4 +13,5 @@
 pub mod openapi;
 pub mod router;
 pub mod routing;
+pub mod simd_str;
 pub mod websocket_route;

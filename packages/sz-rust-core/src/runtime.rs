@@ -92,6 +92,8 @@ pub struct SzRuntime {
     runtime: tokio::runtime::Runtime,
     /// worker 线程数（对齐 swoole `worker_num`）
     worker_threads: usize,
+    /// blocking 线程数（对齐 tokio `max_blocking_threads`）
+    blocking_threads: usize,
     /// 关闭令牌：所有后台任务通过 `shutdown_token()` 获取子 token 监听关闭
     shutdown_token: CancellationToken,
 }
@@ -107,8 +109,10 @@ impl SzRuntime {
     /// - `worker_threads = 0` 会被强制为 1
     pub fn with_worker_threads(worker_threads: usize) -> Self {
         let n = worker_threads.max(1);
+        let blocking = 512;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(n)
+            .max_blocking_threads(blocking)
             .enable_all()
             .thread_name("sz-rust-worker")
             .build()
@@ -116,13 +120,79 @@ impl SzRuntime {
         Self {
             runtime,
             worker_threads: n,
+            blocking_threads: blocking,
             shutdown_token: CancellationToken::new(),
         }
+    }
+
+    /// 自定义 blocking 线程数（链式调用）
+    ///
+    /// - `blocking_threads = 0` 会被强制为 1
+    pub fn with_blocking_threads(mut self, blocking_threads: usize) -> Self {
+        let b = blocking_threads.max(1);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(self.worker_threads)
+            .max_blocking_threads(b)
+            .enable_all()
+            .thread_name("sz-rust-worker")
+            .build()
+            .expect("Failed to create tokio runtime");
+        self.runtime = runtime;
+        self.blocking_threads = b;
+        self
+    }
+
+    /// IO 密集型预设（worker = num_cpus × 2, blocking = 1024）
+    pub fn for_io_intensive() -> Self {
+        let worker = (num_cpus::get() * 2).max(1);
+        let blocking = 1024;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker)
+            .max_blocking_threads(blocking)
+            .enable_all()
+            .thread_name("sz-rust-io")
+            .build()
+            .expect("Failed to create tokio runtime");
+        Self {
+            runtime,
+            worker_threads: worker,
+            blocking_threads: blocking,
+            shutdown_token: CancellationToken::new(),
+        }
+    }
+
+    /// CPU 密集型预设（worker = num_cpus / 2, blocking = 256）
+    pub fn for_cpu_intensive() -> Self {
+        let worker = (num_cpus::get() / 2).max(1);
+        let blocking = 256;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker)
+            .max_blocking_threads(blocking)
+            .enable_all()
+            .thread_name("sz-rust-cpu")
+            .build()
+            .expect("Failed to create tokio runtime");
+        Self {
+            runtime,
+            worker_threads: worker,
+            blocking_threads: blocking,
+            shutdown_token: CancellationToken::new(),
+        }
+    }
+
+    /// 均衡预设（worker = num_cpus, blocking = 512，默认）
+    pub fn for_balanced() -> Self {
+        Self::with_worker_threads(num_cpus::get())
     }
 
     /// 获取 worker 线程数
     pub fn worker_threads(&self) -> usize {
         self.worker_threads
+    }
+
+    /// 获取 blocking 线程数
+    pub fn blocking_threads(&self) -> usize {
+        self.blocking_threads
     }
 
     /// 获取关闭令牌的克隆
@@ -272,5 +342,86 @@ mod tests {
         let h2 = rt2.spawn(async { 2 });
         assert_eq!(rt1.block_on(h1).unwrap(), 1);
         assert_eq!(rt2.block_on(h2).unwrap(), 2);
+    }
+
+    // ===== P3 6.1: blocking_threads 与预设配置测试 =====
+
+    #[test]
+    fn test_default_blocking_threads_is_512() {
+        let rt = SzRuntime::new();
+        assert_eq!(rt.blocking_threads(), 512);
+    }
+
+    #[test]
+    fn test_with_blocking_threads_custom() {
+        let rt = SzRuntime::with_worker_threads(2).with_blocking_threads(256);
+        assert_eq!(rt.worker_threads(), 2);
+        assert_eq!(rt.blocking_threads(), 256);
+    }
+
+    #[test]
+    fn test_with_blocking_threads_zero_falls_back_to_one() {
+        let rt = SzRuntime::with_worker_threads(1).with_blocking_threads(0);
+        assert_eq!(rt.blocking_threads(), 1);
+    }
+
+    #[test]
+    fn test_for_io_intensive_worker_doubled() {
+        let rt = SzRuntime::for_io_intensive();
+        assert_eq!(rt.worker_threads(), (num_cpus::get() * 2).max(1));
+        assert_eq!(rt.blocking_threads(), 1024);
+    }
+
+    #[test]
+    fn test_for_cpu_intensive_worker_halved() {
+        let rt = SzRuntime::for_cpu_intensive();
+        assert_eq!(rt.worker_threads(), (num_cpus::get() / 2).max(1));
+        assert_eq!(rt.blocking_threads(), 256);
+    }
+
+    #[test]
+    fn test_for_balanced_equals_default() {
+        let rt = SzRuntime::for_balanced();
+        assert_eq!(rt.worker_threads(), num_cpus::get());
+        assert_eq!(rt.blocking_threads(), 512);
+    }
+
+    #[test]
+    fn test_io_intensive_spawn_works() {
+        let rt = SzRuntime::for_io_intensive();
+        let handle = rt.spawn(async { 42 });
+        assert_eq!(rt.block_on(handle).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_cpu_intensive_spawn_works() {
+        let rt = SzRuntime::for_cpu_intensive();
+        let handle = rt.spawn(async { 42 });
+        assert_eq!(rt.block_on(handle).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_balanced_spawn_works() {
+        let rt = SzRuntime::for_balanced();
+        let handle = rt.spawn(async { 42 });
+        assert_eq!(rt.block_on(handle).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_with_blocking_threads_chain_spawn_works() {
+        let rt = SzRuntime::with_worker_threads(2).with_blocking_threads(128);
+        let handle = rt.spawn(async { 42 });
+        assert_eq!(rt.block_on(handle).unwrap(), 42);
+        assert_eq!(rt.blocking_threads(), 128);
+    }
+
+    #[test]
+    fn test_presets_have_distinct_blocking_threads() {
+        let io_rt = SzRuntime::for_io_intensive();
+        let cpu_rt = SzRuntime::for_cpu_intensive();
+        let balanced_rt = SzRuntime::for_balanced();
+
+        assert_ne!(io_rt.blocking_threads(), cpu_rt.blocking_threads());
+        assert_ne!(balanced_rt.blocking_threads(), cpu_rt.blocking_threads());
     }
 }

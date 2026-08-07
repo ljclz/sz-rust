@@ -17,11 +17,16 @@
 //! ```
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use std::borrow::Cow;
+use std::time::Duration;
 use sz_rust_core::container::Container;
 use sz_rust_core::middleware::chain::MiddlewareChain;
 use sz_rust_core::middleware::order::MiddlewareKind;
-use sz_rust_core::router::parse_path;
+use sz_rust_core::router::{capitalize_first, parse_path};
 use sz_rust_core::routing::{HandlerRef, HttpMethod, RouteConfig, RouteRule};
+use sz_rust_middleware_facade::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
+use sz_rust_middleware_facade::rate_limit::{SlidingWindow, TokenBucket};
+use sz_rust_orm_facade::RateLimiter;
 
 // ============================================================================
 // 基准测试组 1：route_matching — 路由匹配
@@ -192,6 +197,110 @@ fn bench_json_serialization(c: &mut Criterion) {
 }
 
 // ============================================================================
+// 基准测试组 3b：capitalize_first — 首字母大写零分配路径（v0.3.3 新增）
+// ============================================================================
+
+fn bench_capitalize_first(c: &mut Criterion) {
+    let mut group = c.benchmark_group("capitalize_first");
+
+    group.bench_function("capitalize_first_already_upper", |b| {
+        b.iter(|| {
+            let _ = criterion::black_box(capitalize_first(criterion::black_box("Customer")));
+        })
+    });
+
+    group.bench_function("capitalize_first_needs_upper", |b| {
+        b.iter(|| {
+            let _ = criterion::black_box(capitalize_first(criterion::black_box("customer")));
+        })
+    });
+
+    group.bench_function("capitalize_first_needs_upper_24_bytes", |b| {
+        let input = "aaaaaaaaaaaaaaaaaaaaaaaa";
+        b.iter(|| {
+            let _ = criterion::black_box(capitalize_first(criterion::black_box(input)));
+        })
+    });
+
+    group.bench_function("capitalize_first_needs_upper_25_bytes", |b| {
+        let input = "aaaaaaaaaaaaaaaaaaaaaaaaa";
+        b.iter(|| {
+            let _ = criterion::black_box(capitalize_first(criterion::black_box(input)));
+        })
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试组 3c：json_dto — DTO zero-copy 反序列化（v0.3.3 新增）
+// ============================================================================
+
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct MediumResponse<'a> {
+    code: i64,
+    #[serde(borrow)]
+    msg: Cow<'a, str>,
+    #[serde(borrow)]
+    data: MediumData<'a>,
+}
+
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct MediumData<'a> {
+    #[serde(borrow)]
+    list: Vec<MediumItem<'a>>,
+    total: i64,
+    page: i64,
+    page_size: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct MediumItem<'a> {
+    id: i64,
+    #[serde(borrow)]
+    name: Cow<'a, str>,
+    price: i64,
+    stock: i64,
+    #[serde(borrow)]
+    description: Cow<'a, str>,
+}
+
+fn bench_json_dto(c: &mut Criterion) {
+    let mut group = c.benchmark_group("json_dto");
+
+    let medium: serde_json::Value = serde_json::json!({
+        "code": 1,
+        "msg": "success",
+        "data": {
+            "list": (0..50).map(|i| {
+                serde_json::json!({
+                    "id": i,
+                    "name": format!("item_{i}"),
+                    "price": i * 100,
+                    "stock": i * 10,
+                    "description": format!("Description for item {i}")
+                })
+            }).collect::<Vec<_>>(),
+            "total": 50,
+            "page": 1,
+            "page_size": 50
+        }
+    });
+    let json_str = serde_json::to_string(&medium).unwrap();
+
+    group.bench_function("deserialize_medium_dto", |b| {
+        b.iter(|| {
+            let _: MediumResponse = serde_json::from_str(criterion::black_box(&json_str)).unwrap();
+        })
+    });
+
+    group.finish();
+}
+
+// ============================================================================
 // 基准测试组 4：middleware_chain — 中间件链构建与操作
 // ============================================================================
 
@@ -309,14 +418,71 @@ fn bench_vs_native(c: &mut Criterion) {
     group.finish();
 }
 
+// ============================================================================
+// 基准测试组 8：rate_limiting — 限流判定（P1-5 新增）
+// ============================================================================
+
+fn bench_rate_limiting(c: &mut Criterion) {
+    let mut group = c.benchmark_group("rate_limiting");
+
+    let token_bucket = TokenBucket::new(1000, 100.0);
+    group.bench_function("token_bucket_acquire", |b| {
+        b.iter(|| {
+            let _ = token_bucket.acquire("bench_key");
+        })
+    });
+
+    let sliding_window = SlidingWindow::new(1000, Duration::from_secs(60));
+    group.bench_function("sliding_window_acquire", |b| {
+        b.iter(|| {
+            let _ = sliding_window.acquire("bench_key");
+        })
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试组 9：circuit_breaker — 熔断判定（P1-5 新增）
+// ============================================================================
+
+fn bench_circuit_breaker(c: &mut Criterion) {
+    let mut group = c.benchmark_group("circuit_breaker");
+
+    let cb = CircuitBreaker::new(CircuitBreakerConfig {
+        error_threshold: 0.5,
+        cooldown: Duration::from_secs(30),
+        probe_requests: 3,
+        stat_window: Duration::from_secs(60),
+    });
+
+    group.bench_function("state_query_closed", |b| {
+        b.iter(|| {
+            let _ = cb.can_request();
+        })
+    });
+
+    group.bench_function("record_success", |b| {
+        b.iter(|| {
+            cb.record_success();
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_path,
     bench_handler_ref_parse,
     bench_route_config,
     bench_json_serialization,
+    bench_capitalize_first,
+    bench_json_dto,
     bench_middleware_chain,
     bench_di_container,
     bench_vs_native,
+    bench_rate_limiting,
+    bench_circuit_breaker,
 );
 criterion_main!(benches);

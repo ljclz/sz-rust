@@ -768,7 +768,12 @@ impl SmsNotifier for MemorySmsNotifier {
 /// 腾讯云短信配置 — 对齐 `tencentcloud/tencentcloud-sdk-php` SmsClient
 ///
 /// 对齐 PHP SDK `TencentCloud\Sms\V20210111\Models\SendSmsRequest` 的配置项。
-#[derive(Debug, Clone)]
+///
+/// # 安全
+///
+/// `secret_id` / `secret_key` 为敏感字段，Debug 输出已脱敏为 `"***REDACTED***"`，
+/// 防止日志泄露密钥（铁律 7）。字段值仍可通过 `config.secret_id` 正常访问。
+#[derive(Clone)]
 pub struct TencentSmsConfig {
     /// SecretId（必填）
     pub secret_id: String,
@@ -782,6 +787,20 @@ pub struct TencentSmsConfig {
     pub region: String,
     /// API 端点（默认 `sms.tencentcloudapi.com`）
     pub endpoint: String,
+}
+
+impl std::fmt::Debug for TencentSmsConfig {
+    /// 自定义 Debug：`secret_id` / `secret_key` 脱敏为 `"***REDACTED***"`（铁律 7）
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TencentSmsConfig")
+            .field("secret_id", &"***REDACTED***")
+            .field("secret_key", &"***REDACTED***")
+            .field("app_id", &self.app_id)
+            .field("default_sign_name", &self.default_sign_name)
+            .field("region", &self.region)
+            .field("endpoint", &self.endpoint)
+            .finish()
+    }
 }
 
 impl TencentSmsConfig {
@@ -973,6 +992,57 @@ impl SmsNotifier for TencentSmsNotifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ------------------------------------------------------------------------
+    // TencentSmsConfig Debug 脱敏测试（铁律 7）
+    // ------------------------------------------------------------------------
+
+    /// 测试 TencentSmsConfig 的 Debug 输出不含真实密钥（脱敏）
+    #[test]
+    fn test_tencent_sms_config_debug_redacted() {
+        let config = TencentSmsConfig {
+            secret_id: "AKIDxxx-test-secret-id".to_string(),
+            secret_key: "SKxxx-test-secret-key".to_string(),
+            app_id: "1400000000".to_string(),
+            default_sign_name: Some("鲜视达科技".to_string()),
+            region: "ap-guangzhou".to_string(),
+            endpoint: "sms.tencentcloudapi.com".to_string(),
+        };
+        let debug_output = format!("{:?}", config);
+        assert!(
+            debug_output.contains("***REDACTED***"),
+            "Debug 输出应含脱敏占位符"
+        );
+        assert!(
+            !debug_output.contains("AKIDxxx-test-secret-id"),
+            "Debug 输出不应含真实 secret_id"
+        );
+        assert!(
+            !debug_output.contains("SKxxx-test-secret-key"),
+            "Debug 输出不应含真实 secret_key"
+        );
+    }
+
+    /// 测试脱敏不影响字段访问与 Clone 行为（铁律 7 不破坏功能）
+    #[test]
+    fn test_tencent_sms_config_field_access_and_clone() {
+        let config = TencentSmsConfig {
+            secret_id: "AKIDxxx".to_string(),
+            secret_key: "SKxxx".to_string(),
+            app_id: "1400000000".to_string(),
+            default_sign_name: None,
+            region: "ap-guangzhou".to_string(),
+            endpoint: "sms.tencentcloudapi.com".to_string(),
+        };
+        // 字段值仍为真实密钥，可正常用于 API 调用
+        assert_eq!(config.secret_id, "AKIDxxx");
+        assert_eq!(config.secret_key, "SKxxx");
+        assert!(!config.secret_id.is_empty());
+        // Clone 行为不变
+        let cloned = config.clone();
+        assert_eq!(cloned.secret_id, "AKIDxxx");
+        assert_eq!(cloned.secret_key, "SKxxx");
+    }
 
     // ------------------------------------------------------------------------
     // NotifyLevel 测试

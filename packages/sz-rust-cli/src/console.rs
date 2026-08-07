@@ -35,7 +35,7 @@
 //!
 //! let mut console = Console::new();
 //! console.register(Box::new(HelloCommand));
-//! console.run(std::env::args().collect());
+//! console.run(std::env::args().collect()).await;
 //! ```
 //!
 //! ## 设计说明
@@ -106,7 +106,7 @@ pub trait Command: Send + Sync {
 ///
 /// let mut console = Console::new();
 /// console.register(Box::new(MyCommand));
-/// console.run(vec!["sz-rust".to_string(), "my:command".to_string()]);
+/// console.run(vec!["sz-rust".to_string(), "my:command".to_string()]).await;
 /// ```
 pub struct Console {
     /// 已注册的自定义命令映射（命令名 → 命令实现）
@@ -161,14 +161,14 @@ impl Console {
     /// - `Ok(0)`：成功
     /// - `Ok(code)`：命令指定的退出码
     /// - `Err(_)`：内部错误
-    pub fn run(&self, args: Vec<String>) -> Result<i32, CliError> {
+    pub async fn run(&self, args: Vec<String>) -> Result<i32, CliError> {
         if args.len() >= 2 {
             if let Some(command) = self.commands.get(&args[1]) {
                 let cmd_args: &[String] = &args[2..];
                 return command.execute(cmd_args);
             }
         }
-        crate::run(args)
+        crate::run(args).await
     }
 
     /// 列出所有已注册的自定义命令签名
@@ -262,42 +262,48 @@ mod tests {
         assert_eq!(commands.len(), 2);
     }
 
-    #[test]
-    fn test_run_custom_command() {
+    #[tokio::test]
+    async fn test_run_custom_command() {
         let mut console = Console::new();
         console.register(Box::new(HelloCommand));
-        let result = console.run(vec!["sz-rust".to_string(), "hello".to_string()]);
+        let result = console
+            .run(vec!["sz-rust".to_string(), "hello".to_string()])
+            .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }
 
-    #[test]
-    fn test_run_custom_command_with_args() {
+    #[tokio::test]
+    async fn test_run_custom_command_with_args() {
         let mut console = Console::new();
         console.register(Box::new(EchoCommand));
-        let result = console.run(vec![
-            "sz-rust".to_string(),
-            "echo".to_string(),
-            "foo".to_string(),
-            "bar".to_string(),
-        ]);
+        let result = console
+            .run(vec![
+                "sz-rust".to_string(),
+                "echo".to_string(),
+                "foo".to_string(),
+                "bar".to_string(),
+            ])
+            .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }
 
-    #[test]
-    fn test_run_unknown_command_falls_through() {
+    #[tokio::test]
+    async fn test_run_unknown_command_falls_through() {
         let console = Console::new();
         // "cache:clear" 是内置 clap 命令，未注册为自定义命令，应回退到 crate::run
-        let result = console.run(vec!["sz-rust".to_string(), "cache:clear".to_string()]);
+        let result = console
+            .run(vec!["sz-rust".to_string(), "cache:clear".to_string()])
+            .await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_run_no_args_falls_through() {
+    #[tokio::test]
+    async fn test_run_no_args_falls_through() {
         let console = Console::new();
         // 无参数时应回退到 crate::run
-        let result = console.run(vec!["sz-rust".to_string()]);
+        let result = console.run(vec!["sz-rust".to_string()]).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }

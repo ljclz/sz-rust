@@ -28,8 +28,18 @@
 #![warn(missing_docs)]
 
 pub mod error;
+/// GraphQL 支持（需启用 `graphql` feature）
+///
+/// 提供 [`graphql_router_dynamic`] / [`graphql::graphql_router`] 构建 GraphQL axum 路由，
+/// 以及 [`graphql::graphiql_route`] 提供 GraphiQL IDE。
+#[cfg(feature = "graphql")]
+pub mod graphql;
+#[cfg(feature = "grpc")]
+pub mod grpc;
+pub mod openapi;
 pub mod request;
 pub mod response;
+pub mod tls;
 
 // ============================================================================
 // 便捷重导出 — 顶层直接访问常用项

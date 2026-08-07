@@ -2,7 +2,9 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v0.3.0**（2026-08-02）— addons 生态（CRM/ERP/电商模板）+ RouterBuilder 泛型状态 + 10 个新 Skills + sz-orm 1.2.2
+**当前版本：v0.3.1**（2026-08-05）— 生产就绪修复：依赖治理（paste/rustls-pemfile 消除）+ 限流熔断落地 + 性能基线 9 类基准 + 失实声称撤回
+
+> **v0.3.0 → v0.3.1 变更摘要**：见 [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 
@@ -14,6 +16,8 @@
 - **控制器层**：`SzController` → `BaseController` → `AddonsBaseController` 三层 trait 继承链，对齐 PHP `app\SzController` / `app\BaseController` / `addons\BaseController`。提供 `renderJson` / `renderSuccess` / `renderError` / `postData` / `getData` 等方法。
 - **模型层**：`BaseModel` trait 组合 SZ-ORM 的 `Model` + `ModelExt` + `RelationLoader`，对齐 `think\Model`。支持 `$append` 虚拟字段、访问器（`Accessor`）、修改器（`Mutator`）、动态 Append（`Appendable`）。
 - **中间件**：内置 CORS / Auth(JWT) / Log / RateLimit / Trace 五个中间件，外加链构建器（`MiddlewareChain`）、Handler=Middleware 双向转换器、tower-http 兼容层。
+- **限流器（v0.3.1 已落地）**：`sz-rust-middleware-facade::rate_limit` 提供令牌桶（`TokenBucket`）+ 滑动窗口（`SlidingWindow`）两种算法，实现 `sz_rust_orm_facade::RateLimiter` trait，含 OOM 防护与 100 并发无误差测试。
+- **熔断器（v0.3.1 已落地）**：`sz-rust-middleware-facade::circuit_breaker` 提供 Closed/Open/HalfOpen 三态状态机 + `circuit_breaker_middleware`（Open 返回 503），parking_lot::Mutex 保护并发安全。
 - **验证器**：对齐 `think\Validate`，内置 30+ 规则（require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith 等），支持批量验证、场景、自定义消息。
 - **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。
 - **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。
@@ -134,6 +138,9 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-cli/              # CLI 命令行工具（make/migrate/route/cache/scheduler）
     ├── sz-rust-addons-loader/    # 插件加载器
     ├── sz-rust-addons-operate/   # 插件操作库
+    ├── sz-rust-addons-crm/       # CRM 插件（脚手架标注，非生产就绪）
+    ├── sz-rust-addons-erp/       # ERP 插件（脚手架标注，非生产就绪）
+    ├── sz-rust-addons-ecommerce/ # 电商插件（脚手架标注，非生产就绪）
     ├── sz-rust-pdf/              # PDF/Excel 导入导出
     ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率，v0.2.0）
     ├── sz-rust-tracing/          # 分布式追踪模块（W3C TraceContext + OTLP，v0.2.0）
@@ -160,16 +167,17 @@ sz-rust/                          # workspace 根目录
 
 ---
 
-## CI 门禁与质量保障（v0.2.0 增强）
+## CI 门禁与质量保障（v0.3.1 增强）
 
-项目通过 GitHub Actions 实施 10+ 道门禁，所有门禁严格生效（无 `continue-on-error`）：
+项目通过 GitHub Actions 实施 17 道门禁，所有门禁严格生效（无 `continue-on-error`）：
 
 | Workflow | 触发条件 | 职责 |
 |----------|---------|------|
-| `ci.yml` | push/PR | fmt / check / clippy / test / doc(missing_docs) / audit / feature-matrix / unused-deps / **deny(cargo-deny)** |
+| `ci.yml` | push/PR | fmt / check / clippy / test / doc(missing_docs) / audit / feature-matrix / unused-deps / **deny(cargo-deny)** / **Windows 兼容（CARGO_INCREMENTAL=0）** |
 | `soak.yml` | 每周日 00:00 UTC + workflow_dispatch | 6 小时 soak test，60 秒指标采样，420 分钟超时 |
 | `coverage.yml` | push/PR | cargo-tarpaulin 覆盖率统计 + Codecov 上传 |
-| `benchmark.yml` | push main / PR | criterion 性能基准测试 + gh-pages-bench 分支保存 |
+| `benchmark.yml` | push main / PR | criterion 性能基准测试 + **9 类基准覆盖门禁** + gh-pages-bench 分支保存 |
+| `security.yml` | push/PR + 每周日 00:00 UTC | cargo-audit + **unmaintained 真实编译检查（paste/rustls-pemfile/rkyv）** + cargo-geiger |
 | `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 10 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
 
 **cargo-deny 审计维度**（`deny.toml`）：

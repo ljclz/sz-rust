@@ -47,3 +47,12 @@ path = "src/bin/ecommerce_demo.rs"
 [[bin]]
 name = "iot_demo"
 path = "src/bin/iot_demo.rs"
+
+# P2-6 横向对比 benchmark
+[[bin]]
+name = "bench_sz_rust"
+path = "src/bin/bench_sz_rust.rs"
+
+[[bin]]
+name = "bench_axum_native"
+path = "src/bin/bench_axum_native.rs"

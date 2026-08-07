@@ -30,10 +30,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_dir = std::env::var("SZ_RUST_CONFIG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("config"));
-    let config = AppConfig::load_from_dir(&config_dir).unwrap_or_else(|e| {
-        tracing::warn!("加载配置失败（使用默认配置）: {}", e);
-        AppConfig::default()
-    });
+    let config = AppConfig::load_from_dir(&config_dir)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("加载配置失败（使用默认配置）: {}", e);
+            AppConfig::default()
+        });
 
     // 初始化 App 容器
     let app = App::init(config);

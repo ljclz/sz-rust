@@ -226,6 +226,100 @@ impl std::fmt::Display for HandlerRef {
 }
 
 // ============================================================================
+// HandlerRefRef — 零拷贝借用版本（P3 优化）
+// ============================================================================
+
+/// Handler 引用（零拷贝借用版本）
+///
+/// 与 [`HandlerRef`] 语义完全一致，但使用 `&'a str` 切片而非 `String`，
+/// 解析时零堆分配。适用于热路径（路由匹配）中临时解析 handler 字符串。
+///
+/// ## 用法
+///
+/// ```rust,ignore
+/// use sz_rust_router_facade::routing::HandlerRefRef;
+///
+/// let h = HandlerRefRef::parse("User@list").unwrap();
+/// assert_eq!(h.controller, "User");
+/// assert_eq!(h.action, "list");
+///
+/// // 转为 owned 版本（1 次分配）
+/// let owned: HandlerRef = h.to_owned();
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HandlerRefRef<'a> {
+    /// 控制器名（首字母大写，如 `User`）
+    pub controller: &'a str,
+    /// 操作名（小驼峰，如 `list` / `index`）
+    pub action: &'a str,
+}
+
+impl<'a> HandlerRefRef<'a> {
+    /// 从 `"Controller@action"` 或 `"Controller/action"` 字符串解析（零分配）
+    ///
+    /// 使用 `split_once` 返回 `&str` 切片，不调用 `to_string()`。
+    /// 校验规则与 [`HandlerRef::parse`] 完全一致。
+    pub fn parse(s: &'a str) -> Result<Self, RouteConfigError> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err(RouteConfigError::EmptyHandler);
+        }
+
+        // 优先按 '@' 分隔，其次按 '/' 分隔
+        let (controller, action) = if let Some((c, a)) = s.split_once('@') {
+            (c, a)
+        } else if let Some((c, a)) = s.split_once('/') {
+            (c, a)
+        } else {
+            (s, crate::router::DEFAULT_ACTION)
+        };
+
+        let controller = controller.trim();
+        let action = action.trim();
+
+        if controller.is_empty() {
+            return Err(RouteConfigError::EmptyController);
+        }
+        if action.is_empty() {
+            return Err(RouteConfigError::EmptyAction);
+        }
+        if !is_valid_identifier(controller) {
+            return Err(RouteConfigError::InvalidController(controller.to_string()));
+        }
+        if !is_valid_identifier(action) {
+            return Err(RouteConfigError::InvalidAction(action.to_string()));
+        }
+
+        Ok(Self { controller, action })
+    }
+
+    /// 转为 owned 版本（1 次分配）
+    pub fn to_owned(&self) -> HandlerRef {
+        HandlerRef {
+            controller: self.controller.to_string(),
+            action: self.action.to_string(),
+        }
+    }
+
+    /// 转换为 `"Controller@action"` 字符串
+    pub fn to_handler_string(&self) -> String {
+        format!("{}@{}", self.controller, self.action)
+    }
+}
+
+impl<'a> From<HandlerRefRef<'a>> for HandlerRef {
+    fn from(h: HandlerRefRef<'a>) -> Self {
+        h.to_owned()
+    }
+}
+
+impl<'a> std::fmt::Display for HandlerRefRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.controller, self.action)
+    }
+}
+
+// ============================================================================
 // Layer 2 - 配置式路由
 // ============================================================================
 
@@ -600,16 +694,16 @@ impl ConventionRoute {
             parsed.action
         );
         Some(Self {
-            app: parsed.app,
-            controller: parsed.controller,
-            action: parsed.action,
+            app: parsed.app.into_owned(),
+            controller: parsed.controller.into_owned(),
+            action: parsed.action.into_owned(),
             method: HttpMethod::GET,
             path,
         })
     }
 
     /// 从 ParsedPath 构造
-    pub fn from_parsed(parsed: ParsedPath) -> Option<Self> {
+    pub fn from_parsed<'a>(parsed: ParsedPath<'a>) -> Option<Self> {
         let uri = format!(
             "/{}/{}/{}",
             parsed.app,
@@ -882,6 +976,94 @@ mod tests {
             action: "list".to_string(),
         };
         assert_eq!(h.to_string(), "User@list");
+    }
+
+    // ====================================================================
+    // HandlerRefRef — 零拷贝借用版本（P3）
+    // ====================================================================
+
+    #[test]
+    fn test_handler_ref_ref_parse_at_separator() {
+        let h = HandlerRefRef::parse("User@list").unwrap();
+        assert_eq!(h.controller, "User");
+        assert_eq!(h.action, "list");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_slash_separator() {
+        let h = HandlerRefRef::parse("User/list").unwrap();
+        assert_eq!(h.controller, "User");
+        assert_eq!(h.action, "list");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_only_controller() {
+        let h = HandlerRefRef::parse("User").unwrap();
+        assert_eq!(h.controller, "User");
+        assert_eq!(h.action, "index");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_with_whitespace() {
+        let h = HandlerRefRef::parse("  User  @  list  ").unwrap();
+        assert_eq!(h.controller, "User");
+        assert_eq!(h.action, "list");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_empty() {
+        assert!(HandlerRefRef::parse("").is_err());
+        assert!(HandlerRefRef::parse("   ").is_err());
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_empty_controller() {
+        assert!(HandlerRefRef::parse("@list").is_err());
+        assert!(HandlerRefRef::parse("/list").is_err());
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_empty_action() {
+        assert!(HandlerRefRef::parse("User@").is_err());
+        assert!(HandlerRefRef::parse("User/").is_err());
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_rejects_path_traversal() {
+        assert!(HandlerRefRef::parse("../Secret@admin").is_err());
+    }
+
+    #[test]
+    fn test_handler_ref_ref_parse_rejects_special_chars() {
+        assert!(HandlerRefRef::parse("User$@list").is_err());
+    }
+
+    #[test]
+    fn test_handler_ref_ref_to_owned_consistency() {
+        let ref_ref = HandlerRefRef::parse("User@list").unwrap();
+        let owned = ref_ref.to_owned();
+        assert_eq!(owned.controller, "User");
+        assert_eq!(owned.action, "list");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_from_into_handler_ref() {
+        let ref_ref = HandlerRefRef::parse("Admin@dashboard").unwrap();
+        let owned: HandlerRef = ref_ref.into();
+        assert_eq!(owned.controller, "Admin");
+        assert_eq!(owned.action, "dashboard");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_display() {
+        let h = HandlerRefRef::parse("User@list").unwrap();
+        assert_eq!(h.to_string(), "User@list");
+    }
+
+    #[test]
+    fn test_handler_ref_ref_to_handler_string() {
+        let h = HandlerRefRef::parse("User@list").unwrap();
+        assert_eq!(h.to_handler_string(), "User@list");
     }
 
     // ====================================================================

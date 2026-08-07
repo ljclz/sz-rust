@@ -351,3 +351,25 @@ jobs:
           components: miri
       - name: Run Miri on facade integration tests
         run: cargo +nightly miri test -p sz-rust-facade-tests --jobs 1
+
+  # 门禁 17：Windows 兼容性验证
+  # 规避 rustc STATUS_STACK_BUFFER_OVERRUN bug：强制 CARGO_INCREMENTAL=0
+  # 见 .trae/rules/project_rules.md 铁律 2（异步运行时）
+  windows:
+    name: Windows Compatibility
+    runs-on: windows-latest
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        shell: bash
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace compiles (CARGO_INCREMENTAL=0)
+        run: cargo check --workspace --all-targets
+      - name: Run lib tests (no integration)
+        run: cargo test --workspace --lib --jobs 1

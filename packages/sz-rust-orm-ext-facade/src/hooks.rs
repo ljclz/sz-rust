@@ -759,12 +759,39 @@ pub fn is_soft_deleted(field_value: Option<&str>) -> bool {
     }
 }
 
+/// 标识符合法性 debug 校验（仅 debug 构建生效）
+///
+/// 与 `sz_orm_core::sql_safety::validate_identifier` 同语义：
+/// ASCII 字母数字 + 下划线，不以数字开头，长度 1-63。
+/// 此处内联以避免在 facade 层引入对 sz-orm-core 的直接依赖。
+const fn is_valid_identifier(name: &str) -> bool {
+    if name.is_empty() || name.len() > 63 {
+        return false;
+    }
+    let bytes = name.as_bytes();
+    if !bytes[0].is_ascii_alphabetic() && bytes[0] != b'_' {
+        return false;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_alphanumeric() && bytes[i] != b'_' {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// 构造软删除 UPDATE SQL（`UPDATE {table} SET {field} = NOW() WHERE {pk} = ?`）
 ///
 /// 对齐 PHP `delete()` 的软删除行为：UPDATE SET delete_time = NOW() WHERE pk = ?
 ///
 /// 注：sz-orm-core 的 Repository 实际执行软删除，此函数仅提供 SQL 片段用于
 /// 测试和文档参考，不应直接用于业务代码。
+///
+/// **安全约束**：`table` / `field` / `pk` 必须为编译期确定的模型定义字段名，
+/// 禁止传入用户输入。debug 构建下会通过 `debug_assert!` 校验标识符合法性，
+/// release 构建跳过校验以零成本运行。
 ///
 /// # 示例
 ///
@@ -775,12 +802,31 @@ pub fn is_soft_deleted(field_value: Option<&str>) -> bool {
 /// assert_eq!(sql, "UPDATE users SET delete_time = NOW() WHERE id = ?");
 /// ```
 pub fn soft_delete_update_sql(table: &str, field: &str, pk: &str) -> String {
+    debug_assert!(
+        is_valid_identifier(table),
+        "table must be a valid SQL identifier, got {:?}",
+        table
+    );
+    debug_assert!(
+        is_valid_identifier(field),
+        "field must be a valid SQL identifier, got {:?}",
+        field
+    );
+    debug_assert!(
+        is_valid_identifier(pk),
+        "pk must be a valid SQL identifier, got {:?}",
+        pk
+    );
     format!("UPDATE {} SET {} = NOW() WHERE {} = ?", table, field, pk)
 }
 
 /// 构造恢复软删除 UPDATE SQL（`UPDATE {table} SET {field} = NULL WHERE {pk} = ?`）
 ///
 /// 对齐 PHP `restore()` 的恢复行为：UPDATE SET delete_time = NULL WHERE pk = ?
+///
+/// **安全约束**：`table` / `field` / `pk` 必须为编译期确定的模型定义字段名，
+/// 禁止传入用户输入。debug 构建下会通过 `debug_assert!` 校验标识符合法性，
+/// release 构建跳过校验以零成本运行。
 ///
 /// # 示例
 ///
@@ -791,6 +837,21 @@ pub fn soft_delete_update_sql(table: &str, field: &str, pk: &str) -> String {
 /// assert_eq!(sql, "UPDATE users SET delete_time = NULL WHERE id = ?");
 /// ```
 pub fn soft_delete_restore_sql(table: &str, field: &str, pk: &str) -> String {
+    debug_assert!(
+        is_valid_identifier(table),
+        "table must be a valid SQL identifier, got {:?}",
+        table
+    );
+    debug_assert!(
+        is_valid_identifier(field),
+        "field must be a valid SQL identifier, got {:?}",
+        field
+    );
+    debug_assert!(
+        is_valid_identifier(pk),
+        "pk must be a valid SQL identifier, got {:?}",
+        pk
+    );
     format!("UPDATE {} SET {} = NULL WHERE {} = ?", table, field, pk)
 }
 

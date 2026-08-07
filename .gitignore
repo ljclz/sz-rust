@@ -11,6 +11,8 @@
 *.pfx
 secrets.json
 credentials.json
+deploy_key
+deploy_key.pub
 
 # IDE
 .idea/
@@ -39,3 +41,9 @@ _*.py
 .zcode/
 # Coverage raw data
 build_rs_cov.profraw
+
+# WASM build artifacts
+packages/sz-rust-wasm/target/
+
+# Artifacts
+artifacts/

@@ -238,3 +238,20 @@ pub mod graphql;
 // ============================================================================
 #[cfg(feature = "grpc")]
 pub mod grpc;
+
+// ============================================================================
+// 连接池配置调优（L2 方案：sqlx 配置调优，不修改 sz-orm 上游）
+// ============================================================================
+pub mod pool_config;
+pub use pool_config::SqlxPoolConfig;
+
+// ============================================================================
+// P3 L3 连接池调优（PoolWarmer + QueryCache + PoolScaler）
+// ============================================================================
+pub mod pool_scaler;
+pub mod pool_warmer;
+pub mod query_cache;
+
+pub use pool_scaler::{PoolMetrics, PoolScaler, PoolScalerConfig};
+pub use pool_warmer::{PoolWarmer, WarmupError as PoolWarmupError};
+pub use query_cache::{QueryCache, QueryCacheConfig, QueryCacheError};

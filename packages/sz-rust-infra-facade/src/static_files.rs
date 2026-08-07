@@ -767,8 +767,8 @@ pub fn compute_etag(metadata: &std::fs::Metadata) -> Option<String> {
 /// # 返回
 /// - `Ok(String)` — 32 位十六进制 MD5 hash
 /// - `Err(_)` — 文件读取失败
-pub fn fingerprint_file(path: &Path) -> std::io::Result<String> {
-    let content = std::fs::read(path)?;
+pub async fn fingerprint_file(path: &Path) -> std::io::Result<String> {
+    let content = tokio::fs::read(path).await?;
     Ok(fingerprint_bytes(&content))
 }
 
@@ -2332,23 +2332,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_fingerprint_file_reads_content() {
+    #[tokio::test]
+    async fn test_fingerprint_file_reads_content() {
         let dir = create_test_dir();
         let file_path = dir.path().join("content.txt");
         fs::write(&file_path, b"hello").unwrap();
 
-        let file_hash = fingerprint_file(&file_path).unwrap();
+        let file_hash = fingerprint_file(&file_path).await.unwrap();
         let bytes_hash = fingerprint_bytes(b"hello");
         assert_eq!(file_hash, bytes_hash);
         assert_eq!(file_hash, "5d41402abc4b2a76b9719d911017c592");
     }
 
-    #[test]
-    fn test_fingerprint_file_missing_returns_err() {
+    #[tokio::test]
+    async fn test_fingerprint_file_missing_returns_err() {
         let dir = create_test_dir();
         let missing = dir.path().join("nonexistent.txt");
-        let result = fingerprint_file(&missing);
+        let result = fingerprint_file(&missing).await;
         assert!(result.is_err(), "Missing file should return Err");
     }
 

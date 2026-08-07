@@ -30,3 +30,9 @@
 pub mod gateway;
 pub mod oauth;
 pub mod wechat;
+
+/// Redis Gateway 集群广播（需启用 `redis-gateway` feature）
+///
+/// 提供 [`RedisGatewayTransport`]，基于 Redis pub/sub 实现跨节点 WebSocket 消息广播。
+#[cfg(feature = "redis-gateway")]
+pub mod redis_gateway;

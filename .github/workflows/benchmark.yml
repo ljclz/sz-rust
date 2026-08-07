@@ -22,11 +22,48 @@ jobs:
       - name: Checkout sz-orm dependency
         run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
 
+      # P1-6 基准覆盖门禁：校验 11 类基准存在（v0.3.3 扩展，超出 7 类最低要求）
+      # 基准类别：route_matching / handler_ref_parse / route_config / json_serialization
+      #           capitalize_first / json_dto / middleware_chain / di_container
+      #           framework_vs_native / rate_limiting / circuit_breaker
+      - name: Verify benchmark coverage (>= 11 categories)
+        run: |
+          set -euo pipefail
+          LISTING=$(cargo bench --package sz-rust-core --bench core_bench -- --list 2>&1)
+          echo "$LISTING"
+          REQUIRED=(
+            "bench_route_matching"
+            "bench_handler_ref_parse"
+            "bench_route_config"
+            "bench_json_serialization"
+            "bench_capitalize_first"
+            "bench_json_dto"
+            "bench_middleware_chain"
+            "bench_di_container"
+            "bench_framework_vs_native"
+            "bench_rate_limiting"
+            "bench_circuit_breaker"
+          )
+          MISSING=0
+          for NAME in "${REQUIRED[@]}"; do
+            if echo "$LISTING" | grep -q "$NAME"; then
+              echo "✅ $NAME present"
+            else
+              echo "❌ $NAME MISSING"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::Missing $MISSING benchmark groups (required >= 11 categories)"
+            exit 1
+          fi
+          echo "✅ All 11 benchmark groups present (exceeds 7-category minimum)"
+
       - name: Run benchmarks
         run: |
           cargo bench --package sz-rust-core --bench core_bench -- \
             --warm-up-time 1 --measurement-time 3 --sample-size 30 \
-            ${{ github.event_name == 'pull_request' && '--baseline v0.1.0' || '--save-baseline v0.1.0' }}
+            ${{ github.event_name == 'pull_request' && '--baseline v0.3.3' || '--save-baseline v0.3.3' }}
 
       - name: Upload criterion results
         if: always()

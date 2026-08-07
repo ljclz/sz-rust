@@ -18,9 +18,16 @@ serde_json = { workspace = true }
 hex = { workspace = true }
 sha1 = { workspace = true }
 thiserror = { workspace = true }
+# Redis pub/sub 集群广播（可选，通过 redis-gateway feature 启用）
+redis = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+# Redis Gateway 集群广播支持（Redis pub/sub 跨节点广播 WebSocket 消息）
+redis-gateway = ["redis", "futures"]
 
 [lints]
 workspace = true
