@@ -47,3 +47,4 @@ packages/sz-rust-wasm/target/
 
 # Artifacts
 artifacts/
+*.tar.gz

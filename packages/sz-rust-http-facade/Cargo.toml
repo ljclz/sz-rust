@@ -21,6 +21,8 @@ tracing = { workspace = true }
 regex = { workspace = true }
 # P3: 零拷贝字节容器
 bytes = { workspace = true }
+# SSE (Server-Sent Events) 支持
+futures = { workspace = true }
 # TLS（HTTP/2 + HTTPS）
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }

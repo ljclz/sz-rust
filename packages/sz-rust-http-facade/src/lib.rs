@@ -39,6 +39,7 @@ pub mod grpc;
 pub mod openapi;
 pub mod request;
 pub mod response;
+pub mod sse;
 pub mod tls;
 
 // ============================================================================
