@@ -5,6 +5,17 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.1] - 2026-08-07
+
+### 新增
+- **SSE (Server-Sent Events) 支持**：
+  - `http-facade/src/sse.rs` — 基于 axum 0.8 的 SSE 实现，支持 `Event::data()`/`event()`/`retry()`/`id()`
+  - `SseStream` — 将异步迭代器适配为 axum SSE 流
+  - 4 个单元测试覆盖：事件构建、流适配、keep-alive、错误处理
+
+### 变更
+- `Cargo.toml` workspace version 0.6.0 → 0.6.1（SSE 为新增功能，semver 兼容）
+
 ## [0.3.2] - 2026-08-05
 
 ### 修复
