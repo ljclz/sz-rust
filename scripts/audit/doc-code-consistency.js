@@ -6,11 +6,10 @@
  *
  * 扫描交付声称类文档（README / CHANGELOG / docs 根目录 / docs/audit 根目录），
  * 提取所有 `sz-rust-*` crate 名，与 `packages/` 目录 + Cargo.toml workspace members 交叉验证：
- *   - ERROR：文档声称的 crate 不存在于 packages/，且该文档未标注企业版交付、
- *             且不在 KNOWN_EXTERNAL_CRATES 已知企业版清单内 → 幻影交付，构建失败
+ *   - ERROR：文档声称的 crate 不存在于 packages/，且非「已定性虚构+标注回退」引用
+ *             → 幻影交付，构建失败（含 KNOWN_FICTIONAL_CRATES 清单内未标注回退的声称）
  *   - WARN ：crate 存在但非 workspace member（如 sz-rust-wasm）
- *             或属于已知企业版交付清单（需人工核验企业版仓库）
- *             或文档整体标注了企业版/enterprise 交付
+ *             或已定性虚构 crate 的审计回退标注引用（行内含 未完成/虚构/不存在）
  *
  * 排除规则：
  *   - 扫描范围仅限交付声称文档（docs/cases 愿景、docs/spec 规划、archive 历史文档不扫描）
@@ -41,9 +40,10 @@ const SCAN_FILES = [
     ...lsFile(path.join(ROOT, '.github', 'workflows'), '.yaml'),
 ];
 
-// 已知企业版交付声明（2026-08-13 审计报告核验：声称在 sz-rust-enterprise 仓库，本仓库无源码）。
-// 属"跨仓库错位"而非纯虚构，报 WARN 需人工核验；清单外的不存在 crate 一律 ERROR。
-const KNOWN_EXTERNAL_CRATES = new Set([
+// 已定性虚构的 crate（2026-08-14 核验：开源版与企业版仓库 git 历史中均从未存在，
+// 见 docs/audit/2026-08-13-文档已实现但生产零调用审计报告.md + doc-debt DB-2026-08-13-01）。
+// 清单内 crate 的"声称"视为虚构（ERROR）；但行内已标注「未完成/虚构/不存在」的引用豁免（WARN）。
+const KNOWN_FICTIONAL_CRATES = new Set([
     'sz-rust-marketplace',
     'sz-rust-visual',
     'sz-rust-sdd-agent',
@@ -176,10 +176,14 @@ function main() {
 
             const firstRef = refs[0];
             if (!exists) {
-                if (KNOWN_EXTERNAL_CRATES.has(name) || docExternal) {
-                    warnings.push(`${rel}:${firstRef.line} 声称 ${name}（未在本仓库找到；${
-                        KNOWN_EXTERNAL_CRATES.has(name) ? '已知企业版交付声明，需核验企业版仓库' : '文档标注企业版/enterprise 交付'
-                    }）`);
+                // 已定性虚构 crate：文档内标注「已定性虚构/纯虚构/未完成」= 审计回退后的文档，WARN 豁免；
+                // 未标注 = 仍将其作为有效声称 → ERROR（防虚构交付再犯）
+                const docFictional = /已定性虚构|纯虚构|虚构交付|未完成|fictional/.test(content);
+                const fictionalAnnotated = docFictional || refs.some((r) => /未完成|虚构|不存在|从未存在|fictional/.test(r.text));
+                if (KNOWN_FICTIONAL_CRATES.has(name) && fictionalAnnotated) {
+                    warnings.push(`${rel}:${firstRef.line} 引用 ${name}（已定性虚构，当前为审计回退标注引用）`);
+                } else if (KNOWN_FICTIONAL_CRATES.has(name) || docExternal) {
+                    errors.push(`${rel}:${firstRef.line} 声称 ${name}（已定性虚构交付：crate 在开源/企业版仓库均不存在，禁止作为有效声称）`);
                 } else {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（幻影交付：packages/${name} 不存在且未标注所属仓库）`);
                 }

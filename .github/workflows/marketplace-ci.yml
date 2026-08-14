@@ -1,3 +1,5 @@
+# 已定性虚构（2026-08-14）：sz-rust-marketplace 在开源/企业版仓库 git 历史中均不存在，
+# 本 workflow 永不触发，保留仅作审计记录。
 name: Marketplace CI
 
 on:

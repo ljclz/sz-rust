@@ -202,7 +202,7 @@ sz-rust/                          # workspace 根目录
 | `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 10 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
 | `mcdc.yml` / `mutants.yml` | push/PR | 分支覆盖率门禁 / 变异测试 |
 | `publish-oss.yml` / `release.yml` | 发布流程 | crates.io 发布 / release 构建 |
-| `marketplace-ci.yml` | 插件市场路径变更 | ⚠️ 引用 `sz-rust-marketplace`（企业版交付，本仓库无源码，workflow 永不触发，见 2026-08-13 审计报告） |
+| `marketplace-ci.yml` | 插件市场路径变更 | ⚠️ 引用 `sz-rust-marketplace`（已定性虚构交付，见 2026-08-13 审计报告，workflow 永不触发） |
 
 > 注：`soak.yml` / `soak-nightly.yml` 已停用（重命名为 `.disabled`，2026-08-13 前），6h soak 由本地自托管工具 `scripts/soak-self-hosted/` 承担（见 `docs/soak-toolkit-guide.md`）。
 
