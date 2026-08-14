@@ -234,6 +234,28 @@ impl OrderController {
                     order_no, order.merchant_id
                 );
 
+                // 安全修复（黑帽审计 A16）：业务逻辑校验
+                // 1. 金额/重量/数量必须非负（防负数订单记账污染）
+                // 2. 明细非空时，主单金额必须等于订单项金额合计（防客户端虚报金额）
+                if order.total_fen < 0 || order.total_weight_g < 0 || order.item_count < 0 {
+                    return ctrl.render_error("订单金额/重量/数量不能为负", json!({}), 0);
+                }
+                for item in &items {
+                    if item.price_fen < 0 || item.weight_g < 0 || item.quantity < 0 {
+                        return ctrl.render_error("订单明细金额/重量/数量不能为负", json!({}), 0);
+                    }
+                }
+                if !items.is_empty() {
+                    let items_total: i64 = items.iter().map(|i| i.total_fen.max(0)).sum();
+                    if items_total != order.total_fen {
+                        return ctrl.render_error(
+                            "订单总金额与明细不一致（服务端校验失败）",
+                            json!({}),
+                            0,
+                        );
+                    }
+                }
+
                 // 触发 before_insert 钩子（对齐 PHP think-orm Model 钩子）
                 let hook_ctx = HookContext::new();
                 state

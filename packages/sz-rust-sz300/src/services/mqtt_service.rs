@@ -87,6 +87,23 @@ impl MqttMessageHandler {
             .unwrap_or(0);
         let items = payload.get("items").and_then(|v| v.as_array());
 
+        // 安全修复（黑帽审计 A16）：设备上报金额必须非负（防伪造负金额记账污染）
+        if total_fen < 0 {
+            tracing::warn!(device_sn, total_fen, "MQTT: 订单金额为负，拒绝写入");
+            return Err("订单金额不能为负".to_string());
+        }
+        // 明细金额非负校验（若携带 items）
+        if let Some(arr) = items {
+            for item in arr {
+                let total = item.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0);
+                let price = item.get("price_fen").and_then(|v| v.as_i64()).unwrap_or(0);
+                if total < 0 || price < 0 {
+                    tracing::warn!(device_sn, "MQTT: 订单明细金额为负，拒绝写入");
+                    return Err("订单明细金额不能为负".to_string());
+                }
+            }
+        }
+
         let mut conn = state.db_pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
