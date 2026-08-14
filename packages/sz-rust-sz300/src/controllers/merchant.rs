@@ -226,12 +226,28 @@ impl MerchantController {
     /// 删除商户（软删除）
     async fn delete(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        // 安全修复（黑帽复核 A6）：仅允许删除自己商户
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
-                    Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
-                };
+                // 请求体 merchant_id 必须与身份一致（防越权删除）
+                if let Some(requested) = data.get("merchant_id").and_then(|v| v.as_i64()) {
+                    if requested != owned_merchant_id {
+                        tracing::warn!(
+                            requested = requested,
+                            owned = owned_merchant_id,
+                            "越权尝试：删除商户与身份不符"
+                        );
+                        return ctrl.render_error("无权访问该商户数据", json!({}), 0);
+                    }
+                }
+                let merchant_id = owned_merchant_id;
 
                 info!("删除商户: merchant_id={}", merchant_id);
 

@@ -28,6 +28,20 @@ use tracing::{info, warn};
 struct DeviceController;
 impl SzController for DeviceController {}
 
+/// 校验设备是否归属指定商户（黑帽复核 A6 修复辅助）
+///
+/// 查询设备 merchant_id 并与身份值比对；设备不存在或归属不符均返回 false。
+async fn device_belongs_to(state: &AppState, device_id: i64, merchant_id: i64) -> bool {
+    match crate::services::device_service::DeviceService::get(&state.db_pool, device_id).await {
+        Ok(Some(row)) => row
+            .get("merchant_id")
+            .and_then(|v| v.as_i64())
+            .map(|m| m == merchant_id)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 impl DeviceController {
     /// 分页查询设备列表，支持按 merchant_id 筛选
     async fn list(state: &AppState, req: Request<Body>) -> Response {
@@ -140,16 +154,21 @@ impl DeviceController {
     /// 绑定设备到商户
     async fn bind(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        // 安全修复（黑帽复核 A6）：merchant_id 以服务端身份为准，禁止绑定到其他商户
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_sn = match data.get("device_sn").and_then(|v| v.as_str()) {
                     Some(sn) if !sn.trim().is_empty() => sn.trim().to_string(),
                     _ => return ctrl.render_error("缺少有效的 device_sn 参数", json!({}), 0),
                 };
-                let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
-                    Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
-                };
+                let merchant_id = owned_merchant_id; // 服务端权威值，忽略请求体
 
                 info!(
                     "设备绑定请求: device_sn={}, merchant_id={}",
@@ -183,6 +202,14 @@ impl DeviceController {
     /// 解绑设备（将 merchant_id 置为 0，状态置为离线）
     async fn unbind(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        // 安全修复（黑帽复核 A6）：仅允许解绑本商户设备
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
@@ -191,6 +218,11 @@ impl DeviceController {
                 };
 
                 info!("设备解绑请求: device_id={}", device_id);
+
+                // 归属校验：设备必须属于当前商户
+                if !device_belongs_to(state, device_id, owned_merchant_id).await {
+                    return ctrl.render_error("设备不存在", json!({}), 0);
+                }
 
                 match DeviceService::unbind(&state.db_pool, device_id).await {
                     Ok(()) => {
@@ -215,6 +247,14 @@ impl DeviceController {
     /// 触发 OTA 升级
     async fn trigger_ota(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        // 安全修复（黑帽复核 A6）：仅允许对本商户设备触发 OTA
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
@@ -231,11 +271,14 @@ impl DeviceController {
                     device_id, ota_version
                 );
 
-                // 验证设备存在
+                // 验证设备存在且归属当前商户（防跨商户 OTA）
                 match DeviceService::exists(&state.db_pool, device_id).await {
                     Ok(true) => {}
                     Ok(false) => return ctrl.render_error("设备不存在", json!({}), 0),
                     Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+                }
+                if !device_belongs_to(state, device_id, owned_merchant_id).await {
+                    return ctrl.render_error("设备不存在", json!({}), 0);
                 }
 
                 // 查询 OTA 版本信息

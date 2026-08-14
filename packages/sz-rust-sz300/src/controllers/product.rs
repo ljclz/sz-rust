@@ -28,6 +28,20 @@ use tracing::{info, warn};
 struct ProductController;
 impl SzController for ProductController {}
 
+/// 校验商品是否归属指定商户（黑帽复核 A6 修复辅助）
+///
+/// 查询商品 merchant_id 并与身份值比对；商品不存在或归属不符均返回 false。
+async fn product_belongs_to(state: &AppState, good_id: i64, merchant_id: i64) -> bool {
+    match crate::services::product_service::ProductService::get(&state.db_pool, good_id).await {
+        Ok(Some(row)) => row
+            .get("merchant_id")
+            .and_then(|v| v.as_i64())
+            .map(|m| m == merchant_id)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
 impl ProductController {
     /// 分页查询商品列表，支持按 merchant_id/cat_id/keyword 筛选
     async fn list(state: &AppState, req: Request<Body>) -> Response {
@@ -204,6 +218,14 @@ impl ProductController {
     /// 更新商品信息 — 动态字段更新
     async fn update(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        // 安全修复（黑帽复核 A6）：仅允许更新本商户商品
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let good_id = match data.get("good_id").and_then(|v| v.as_i64()) {
@@ -213,9 +235,13 @@ impl ProductController {
 
                 info!("更新商品: good_id={}", good_id);
 
-                // 从 data 提取可更新字段（仅白名单列）
+                // 归属校验：商品必须属于当前商户
+                if !product_belongs_to(state, good_id, owned_merchant_id).await {
+                    return ctrl.render_error("商品不存在", json!({}), 0);
+                }
+
+                // 从 data 提取可更新字段（仅白名单列；merchant_id 禁止更新防越权转移）
                 let allowed_keys: &[&str] = &[
-                    "merchant_id",
                     "cat_id",
                     "name",
                     "barcode",
@@ -245,6 +271,14 @@ impl ProductController {
     /// 删除商品（软删除）
     async fn delete(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        // 安全修复（黑帽复核 A6）：仅允许删除本商户商品
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let good_id = match data.get("good_id").and_then(|v| v.as_i64()) {
@@ -253,6 +287,11 @@ impl ProductController {
                 };
 
                 info!("删除商品: good_id={}", good_id);
+
+                // 归属校验：商品必须属于当前商户
+                if !product_belongs_to(state, good_id, owned_merchant_id).await {
+                    return ctrl.render_error("商品不存在", json!({}), 0);
+                }
 
                 match ProductService::delete(&state.db_pool, good_id).await {
                     Ok(()) => {
