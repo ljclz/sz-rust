@@ -138,6 +138,12 @@ pub struct RateLimitConfig {
     pub exclude_paths: Vec<String>,
     /// Key 前缀（用于区分不同限流场景，如 `"login"` / `"api"` / `"sms"`）
     pub key_prefix: String,
+    /// 是否信任代理头（`X-Forwarded-For` / `X-Real-IP`）。
+    ///
+    /// 安全修复 M-2（2026-08-14）：默认 `false` —— 仅使用 socket 对端地址，
+    /// 防止客户端伪造 `X-Forwarded-For` 绕过 IP 限流。
+    /// 仅在服务部署于可信反向代理之后（代理会覆盖这些头）时设为 `true`。
+    pub trust_proxy_headers: bool,
 }
 
 impl std::fmt::Debug for RateLimitConfig {
@@ -146,6 +152,7 @@ impl std::fmt::Debug for RateLimitConfig {
             .field("key_extractor", &self.key_extractor)
             .field("exclude_paths", &self.exclude_paths)
             .field("key_prefix", &self.key_prefix)
+            .field("trust_proxy_headers", &self.trust_proxy_headers)
             .finish_non_exhaustive()
     }
 }
@@ -158,6 +165,7 @@ impl RateLimitConfig {
             key_extractor: KeyExtractor::default(),
             exclude_paths: Vec::new(),
             key_prefix: String::new(),
+            trust_proxy_headers: false,
         }
     }
 
@@ -179,6 +187,14 @@ impl RateLimitConfig {
         self
     }
 
+    /// 设置是否信任代理头（安全修复 M-2）
+    ///
+    /// 默认 `false`（不信任 `X-Forwarded-For`）；仅在可信反向代理之后部署时设为 `true`。
+    pub fn with_trust_proxy_headers(mut self, trust: bool) -> Self {
+        self.trust_proxy_headers = trust;
+        self
+    }
+
     /// 判断路径是否被排除
     pub fn is_excluded(&self, path: &str) -> bool {
         crate::auth::is_route_allowed(path, &self.exclude_paths)
@@ -187,27 +203,28 @@ impl RateLimitConfig {
 
 /// 从请求 headers 提取客户端 IP
 ///
-/// 优先级：`X-Forwarded-For`（取第一个，对齐 PHP `request()->ip()` 的代理透传行为）
-/// > `X-Real-IP` > `"unknown"`
-///
-/// **注意**：`X-Forwarded-For` 可被客户端伪造，生产环境应通过可信代理覆盖该 header。
-pub fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded) = headers.get("x-forwarded-for") {
-        if let Ok(value) = forwarded.to_str() {
-            // X-Forwarded-For: client, proxy1, proxy2
-            if let Some(first) = value.split(',').next() {
-                let trimmed = first.trim();
-                if !trimmed.is_empty() {
-                    return trimmed.to_string();
+/// 安全修复 M-2（2026-08-14）：`trust_proxy` 为 `false`（默认）时**不信任**
+/// `X-Forwarded-For` / `X-Real-IP`，返回 `"unknown"`（限流按 unknown 统一计数，
+/// 避免客户端伪造代理头绕过限流）；仅在可信反向代理之后部署时置 `true`。
+pub fn extract_client_ip(headers: &HeaderMap, trust_proxy: bool) -> String {
+    if trust_proxy {
+        if let Some(forwarded) = headers.get("x-forwarded-for") {
+            if let Ok(value) = forwarded.to_str() {
+                // X-Forwarded-For: client, proxy1, proxy2
+                if let Some(first) = value.split(',').next() {
+                    let trimmed = first.trim();
+                    if !trimmed.is_empty() {
+                        return trimmed.to_string();
+                    }
                 }
             }
         }
-    }
-    if let Some(real_ip) = headers.get("x-real-ip") {
-        if let Ok(value) = real_ip.to_str() {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
+        if let Some(real_ip) = headers.get("x-real-ip") {
+            if let Ok(value) = real_ip.to_str() {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
             }
         }
     }
@@ -218,15 +235,16 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 ///
 /// 根据 [`RateLimitConfig::key_extractor`] 策略提取 Key，并拼接 `key_prefix`（如果非空）。
 pub fn extract_rate_limit_key(req: &Request, config: &RateLimitConfig) -> String {
+    let trust_proxy = config.trust_proxy_headers;
     let inner_key = match config.key_extractor {
-        KeyExtractor::Ip => extract_client_ip(req.headers()),
+        KeyExtractor::Ip => extract_client_ip(req.headers(), trust_proxy),
         KeyExtractor::UserId => req
             .extensions()
             .get::<AuthenticatedUser>()
             .map(|u| u.user_id.to_string())
-            .unwrap_or_else(|| extract_client_ip(req.headers())),
+            .unwrap_or_else(|| extract_client_ip(req.headers(), trust_proxy)),
         KeyExtractor::IpPlusRoute => {
-            let ip = extract_client_ip(req.headers());
+            let ip = extract_client_ip(req.headers(), trust_proxy);
             let path = req.uri().path();
             format!("{}:{}", ip, path)
         }
@@ -672,7 +690,9 @@ mod tests {
 
     /// 构建测试用 Router（使用滑动窗口：2 次/60 秒）
     fn build_app_sliding_window() -> Router {
-        let config = sliding_window_config(2, Duration::from_secs(60));
+        // trust_proxy=true：测试用 X-Forwarded-For 模拟不同客户端 IP
+        let config =
+            sliding_window_config(2, Duration::from_secs(60)).with_trust_proxy_headers(true);
         Router::new()
             .route(
                 "/api",
@@ -743,7 +763,7 @@ mod tests {
     fn test_extract_client_ip_from_x_forwarded_for() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "1.2.3.4".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
     }
 
     #[test]
@@ -754,14 +774,14 @@ mod tests {
             "x-forwarded-for",
             "1.2.3.4, 5.6.7.8, 9.10.11.12".parse().unwrap(),
         );
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
     }
 
     #[test]
     fn test_extract_client_ip_from_x_real_ip() {
         let mut headers = HeaderMap::new();
         headers.insert("x-real-ip", "1.2.3.4".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
     }
 
     #[test]
@@ -769,13 +789,13 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "1.1.1.1".parse().unwrap());
         headers.insert("x-real-ip", "2.2.2.2".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "1.1.1.1");
+        assert_eq!(extract_client_ip(&headers, true), "1.1.1.1");
     }
 
     #[test]
     fn test_extract_client_ip_no_headers() {
         let headers = HeaderMap::new();
-        assert_eq!(extract_client_ip(&headers), "unknown");
+        assert_eq!(extract_client_ip(&headers, true), "unknown");
     }
 
     #[test]
@@ -783,7 +803,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "".parse().unwrap());
         // 空 X-Forwarded-For 应回退到 X-Real-IP 或 unknown
-        assert_eq!(extract_client_ip(&headers), "unknown");
+        assert_eq!(extract_client_ip(&headers, true), "unknown");
     }
 
     #[test]
@@ -791,14 +811,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "".parse().unwrap());
         headers.insert("x-real-ip", "3.3.3.3".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "3.3.3.3");
+        assert_eq!(extract_client_ip(&headers, true), "3.3.3.3");
     }
 
     #[test]
     fn test_extract_client_ip_trims_whitespace() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "  1.2.3.4  ".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
     }
 
     // ====================================================================
@@ -807,7 +827,9 @@ mod tests {
 
     #[test]
     fn test_extract_rate_limit_key_ip_strategy() {
-        let config = sliding_window_config(10, Duration::from_secs(60));
+        // trust_proxy=true：信任 X-Forwarded-For（模拟可信代理场景）
+        let config =
+            sliding_window_config(10, Duration::from_secs(60)).with_trust_proxy_headers(true);
         let req = make_request_with_ip("GET", "/api", "1.2.3.4");
         assert_eq!(extract_rate_limit_key(&req, &config), "1.2.3.4");
     }
@@ -831,9 +853,10 @@ mod tests {
 
     #[test]
     fn test_extract_rate_limit_key_user_id_strategy_fallback_to_ip() {
-        // 无 AuthenticatedUser 时回退到 IP
+        // 无 AuthenticatedUser 时回退到 IP（trust_proxy=true 场景）
         let config = sliding_window_config(10, Duration::from_secs(60))
-            .with_key_extractor(KeyExtractor::UserId);
+            .with_key_extractor(KeyExtractor::UserId)
+            .with_trust_proxy_headers(true);
         let req = make_request_with_ip("GET", "/api", "1.2.3.4");
         assert_eq!(extract_rate_limit_key(&req, &config), "1.2.3.4");
     }
@@ -841,14 +864,17 @@ mod tests {
     #[test]
     fn test_extract_rate_limit_key_ip_plus_route_strategy() {
         let config = sliding_window_config(10, Duration::from_secs(60))
-            .with_key_extractor(KeyExtractor::IpPlusRoute);
+            .with_key_extractor(KeyExtractor::IpPlusRoute)
+            .with_trust_proxy_headers(true);
         let req = make_request_with_ip("GET", "/api/users", "1.2.3.4");
         assert_eq!(extract_rate_limit_key(&req, &config), "1.2.3.4:/api/users");
     }
 
     #[test]
     fn test_extract_rate_limit_key_with_prefix() {
-        let config = sliding_window_config(10, Duration::from_secs(60)).with_key_prefix("login");
+        let config = sliding_window_config(10, Duration::from_secs(60))
+            .with_key_prefix("login")
+            .with_trust_proxy_headers(true);
         let req = make_request_with_ip("GET", "/api", "1.2.3.4");
         assert_eq!(extract_rate_limit_key(&req, &config), "login:1.2.3.4");
     }

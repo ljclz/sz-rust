@@ -12,6 +12,15 @@ use serde_json::json;
 use sz_rust_ai_facade::llm::provider::{ChatMessage, ChatRequest, Role};
 use sz_rust_core::controller::SzController;
 
+/// 默认模型（与 ai-facade 默认配置对齐）
+const DEFAULT_MODEL: &str = "gpt-4o-mini";
+
+/// 允许客户端指定的模型白名单（安全修复 M-1：成本控制 + 防任意模型调用）
+const ALLOWED_MODELS: &[&str] = &["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"];
+
+/// prompt 最大字符数（安全修复 M-1：阻断 LLM 成本耗尽 DoS，约 4K tokens）
+const MAX_PROMPT_CHARS: usize = 16_000;
+
 struct AiController;
 impl SzController for AiController {}
 
@@ -33,12 +42,28 @@ impl AiController {
                     Some(p) if !p.is_empty() => p.to_string(),
                     _ => return ctrl.render_error("prompt 不能为空", json!({}), 0),
                 };
+                // 安全修复 M-1（2026-08-14）：prompt 长度上限，阻断 LLM 成本耗尽 DoS
+                if prompt.chars().count() > MAX_PROMPT_CHARS {
+                    return ctrl.render_error(
+                        format!("prompt 过长（上限 {} 字符）", MAX_PROMPT_CHARS),
+                        json!({}),
+                        0,
+                    );
+                }
 
+                // 安全修复 M-1：model 白名单，禁止客户端指定任意模型（成本控制 + 防提示注入面扩大）
                 let model = data
                     .get("model")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("gpt-4o-mini")
+                    .unwrap_or(DEFAULT_MODEL)
                     .to_string();
+                if !ALLOWED_MODELS.contains(&model.as_str()) {
+                    return ctrl.render_error(
+                        format!("不支持的模型: {}（允许: {:?}）", model, ALLOWED_MODELS),
+                        json!({}),
+                        0,
+                    );
+                }
 
                 let chat_req = ChatRequest::new(
                     model,

@@ -213,6 +213,11 @@ pub struct RateLimitProductionConfig {
     pub exclude_paths: Vec<String>,
     /// key 前缀
     pub key_prefix: String,
+    /// 是否信任代理头（安全修复 M-2，默认 false）
+    ///
+    /// `true`：信任 `X-Forwarded-For`（仅限可信反向代理之后部署）；
+    /// `false`（默认）：不信任代理头，防客户端伪造绕过限流。
+    pub trust_proxy_headers: bool,
 }
 
 impl Default for RateLimitProductionConfig {
@@ -227,6 +232,7 @@ impl Default for RateLimitProductionConfig {
                 "/metrics".into(),
             ],
             key_prefix: "sz300:rl".into(),
+            trust_proxy_headers: false,
         }
     }
 }
@@ -236,6 +242,7 @@ impl RateLimitProductionConfig {
     ///
     /// - `SZ300_RATE_LIMIT_CAPACITY`：令牌桶容量（默认 2000）
     /// - `SZ300_RATE_LIMIT_REFILL`：每秒补充速率（默认 1000）
+    /// - `SZ300_RATE_LIMIT_TRUST_PROXY`：是否信任代理头（默认 false，安全修复 M-2）
     pub fn from_env() -> Self {
         let capacity = std::env::var("SZ300_RATE_LIMIT_CAPACITY")
             .ok()
@@ -247,6 +254,17 @@ impl RateLimitProductionConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1000.0);
 
+        let trust_proxy_headers = std::env::var("SZ300_RATE_LIMIT_TRUST_PROXY")
+            .ok()
+            .map(|s| s.eq_ignore_ascii_case("true") || s == "1")
+            .unwrap_or(false);
+
+        if trust_proxy_headers {
+            tracing::warn!(
+                "RATE_LIMIT_TRUST_PROXY=true：信任 X-Forwarded-For（请确认部署在可信反向代理之后，否则限流可被伪造头绕过）"
+            );
+        }
+
         if std::env::var("SZ300_RATE_LIMIT_CAPACITY").is_err() {
             tracing::warn!("RATE_LIMIT_DEFAULT_CONFIG: 使用默认 capacity=2000");
         }
@@ -254,6 +272,7 @@ impl RateLimitProductionConfig {
         Self {
             capacity,
             refill_per_second,
+            trust_proxy_headers,
             ..Default::default()
         }
     }

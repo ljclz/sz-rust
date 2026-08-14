@@ -52,7 +52,7 @@ fn minimal_router() -> Router {
 fn chaos_extract_ip_empty_x_forwarded_for() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", HeaderValue::from_static(""));
-    assert_eq!(extract_client_ip(&headers), "unknown");
+    assert_eq!(extract_client_ip(&headers, true), "unknown");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn chaos_extract_ip_only_commas_x_forwarded_for() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", HeaderValue::from_static(" , , , "));
     // 全是逗号和空格，trim 后为空 → 回退到 unknown
-    assert_eq!(extract_client_ip(&headers), "unknown");
+    assert_eq!(extract_client_ip(&headers, true), "unknown");
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn chaos_extract_ip_multiple_x_forwarded_for() {
         HeaderValue::from_static("1.1.1.1, 2.2.2.2, 3.3.3.3"),
     );
     // 取第一个非空段
-    assert_eq!(extract_client_ip(&headers), "1.1.1.1");
+    assert_eq!(extract_client_ip(&headers, true), "1.1.1.1");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn chaos_extract_ip_invalid_header_value() {
     // 包含非 ASCII 字节，to_str() 会失败
     let invalid = HeaderValue::from_bytes(b"\xff\xfe").expect("invalid bytes");
     headers.insert("x-forwarded-for", invalid);
-    assert_eq!(extract_client_ip(&headers), "unknown");
+    assert_eq!(extract_client_ip(&headers, true), "unknown");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn chaos_extract_ip_x_real_ip_takes_after_x_forwarded_for() {
     headers.insert("x-forwarded-for", HeaderValue::from_static(""));
     headers.insert("x-real-ip", HeaderValue::from_static("9.9.9.9"));
     // X-Forwarded-For 为空 → 回退到 X-Real-IP
-    assert_eq!(extract_client_ip(&headers), "9.9.9.9");
+    assert_eq!(extract_client_ip(&headers, true), "9.9.9.9");
 }
 
 // ============================================================================
@@ -100,13 +100,15 @@ fn chaos_extract_ip_x_real_ip_takes_after_x_forwarded_for() {
 fn chaos_rate_limit_key_with_empty_prefix() {
     let limiter = Arc::new(SlidingWindowRateLimiter::new(100, Duration::from_secs(60)))
         as Arc<dyn RateLimiter + Send + Sync>;
-    let config = RateLimitConfig::new(limiter).with_key_prefix("");
+    let config = RateLimitConfig::new(limiter)
+        .with_key_prefix("")
+        .with_trust_proxy_headers(true);
     let req = Request::builder()
         .header("x-forwarded-for", "1.2.3.4")
         .body(Body::empty())
         .expect("request build");
     let key = extract_rate_limit_key(&req, &config);
-    // 空前缀 → key 直接是 IP
+    // 空前缀 → key 直接是 IP（trust_proxy=true 时读取 X-Forwarded-For）
     assert_eq!(key, "1.2.3.4");
 }
 
@@ -116,14 +118,30 @@ fn chaos_rate_limit_key_user_id_without_auth_falls_back_to_ip() {
         as Arc<dyn RateLimiter + Send + Sync>;
     let config = RateLimitConfig::new(limiter)
         .with_key_extractor(KeyExtractor::UserId)
-        .with_key_prefix("login");
+        .with_key_prefix("login")
+        .with_trust_proxy_headers(true);
     let req = Request::builder()
         .header("x-forwarded-for", "1.2.3.4")
         .body(Body::empty())
         .expect("request build");
-    // extensions 中无 AuthenticatedUser → 回退到 IP
+    // extensions 中无 AuthenticatedUser → 回退到 IP（trust_proxy=true 时读取 X-Forwarded-For）
     let key = extract_rate_limit_key(&req, &config);
     assert_eq!(key, "login:1.2.3.4");
+}
+
+// 安全修复 M-2：默认不信任代理头 → 伪造 X-Forwarded-For 无法绕过限流
+#[test]
+fn chaos_rate_limit_key_default_ignores_forged_proxy_header() {
+    let limiter = Arc::new(SlidingWindowRateLimiter::new(100, Duration::from_secs(60)))
+        as Arc<dyn RateLimiter + Send + Sync>;
+    let config = RateLimitConfig::new(limiter); // 默认 trust_proxy_headers=false
+    let req = Request::builder()
+        .header("x-forwarded-for", "1.2.3.4")
+        .body(Body::empty())
+        .expect("request build");
+    // 伪造的 X-Forwarded-For 不应被采信 → key 为 unknown（限流按 unknown 统一计数）
+    let key = extract_rate_limit_key(&req, &config);
+    assert_eq!(key, "unknown");
 }
 
 #[test]
@@ -328,7 +346,7 @@ fn chaos_duplicate_headers_does_not_panic() {
     let mut headers = HeaderMap::new();
     headers.append("x-forwarded-for", HeaderValue::from_static("1.1.1.1"));
     headers.append("x-forwarded-for", HeaderValue::from_static("2.2.2.2"));
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, true);
     // 取第一个
     assert_eq!(ip, "1.1.1.1");
 }
@@ -345,7 +363,7 @@ async fn chaos_huge_x_forwarded_for_truncated_safely() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", value);
     // 不应 panic，应取第一个 IP
-    let ip = extract_client_ip(&headers);
+    let ip = extract_client_ip(&headers, true);
     assert_eq!(ip, "1.1.1.1");
 }
 
@@ -388,7 +406,7 @@ async fn chaos_middleware_chain_panic_propagation() {
             }),
         )
         .layer(from_fn_with_state(
-            sliding_window_config(100, Duration::from_secs(60)),
+            sliding_window_config(100, Duration::from_secs(60)).with_trust_proxy_headers(true),
             sz_rust_core::middleware::rate_limit::rate_limit_middleware,
         ));
 
@@ -434,7 +452,7 @@ async fn chaos_middleware_chain_slow_handler_with_rate_limit() {
             }),
         )
         .layer(from_fn_with_state(
-            sliding_window_config(1, Duration::from_secs(60)),
+            sliding_window_config(1, Duration::from_secs(60)).with_trust_proxy_headers(true),
             sz_rust_core::middleware::rate_limit::rate_limit_middleware,
         ));
 
@@ -559,9 +577,12 @@ async fn chaos_token_bucket_zero_capacity_rejected() {
 #[tokio::test]
 async fn chaos_no_state_pollution_between_requests() {
     // 两个不同 IP 的请求不应共享限流状态
+    // 注：trust_proxy_headers=true 模拟可信代理场景（X-Forwarded-For 由代理写入）
     let limiter = Arc::new(SlidingWindowRateLimiter::new(1, Duration::from_secs(60)))
         as Arc<dyn RateLimiter + Send + Sync>;
-    let config = RateLimitConfig::new(limiter).with_key_prefix("chaos_pollution");
+    let config = RateLimitConfig::new(limiter)
+        .with_key_prefix("chaos_pollution")
+        .with_trust_proxy_headers(true);
 
     let app = minimal_router().layer(from_fn_with_state(
         config,

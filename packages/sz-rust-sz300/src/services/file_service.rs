@@ -46,6 +46,15 @@ impl FileService {
             return Err(format!("不支持的文件格式: .{}", ext));
         }
 
+        // 安全修复 M-4（2026-08-14）：magic bytes 内容校验
+        // 防止攻击者上传伪装成图片扩展名的恶意内容（HTML/JS 等）
+        if !magic_bytes_match(&ext.to_lowercase(), data) {
+            return Err(format!(
+                "文件内容与扩展名 .{} 不匹配（内容嗅探校验失败）",
+                ext
+            ));
+        }
+
         // 生成唯一文件名
         let new_filename = format!(
             "{}_{}.{}",
@@ -103,5 +112,57 @@ impl FileService {
             })?;
         }
         Ok(())
+    }
+}
+
+/// 校验文件内容（magic bytes）与声明的扩展名一致（安全修复 M-4）
+///
+/// 支持的格式与文件头：
+/// - jpg/jpeg：`FF D8 FF`
+/// - png：`89 50 4E 47 0D 0A 1A 0A`
+/// - gif：`47 49 46 38`（GIF8）
+/// - bmp：`42 4D`（BM）
+fn magic_bytes_match(ext: &str, data: &[u8]) -> bool {
+    match ext {
+        "jpg" | "jpeg" => data.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "png" => data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+        "gif" => data.starts_with(b"GIF8"),
+        "bmp" => data.starts_with(b"BM"),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_magic_bytes_jpeg() {
+        assert!(magic_bytes_match("jpg", &[0xFF, 0xD8, 0xFF, 0xE0, 0x00]));
+        assert!(magic_bytes_match("jpeg", &[0xFF, 0xD8, 0xFF, 0xE1]));
+        assert!(!magic_bytes_match("jpg", b"<html>"));
+        assert!(!magic_bytes_match("jpg", &[]));
+    }
+
+    #[test]
+    fn test_magic_bytes_png() {
+        assert!(magic_bytes_match(
+            "png",
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00]
+        ));
+        assert!(!magic_bytes_match("png", b"GIF89a"));
+    }
+
+    #[test]
+    fn test_magic_bytes_gif_bmp() {
+        assert!(magic_bytes_match("gif", b"GIF89a"));
+        assert!(magic_bytes_match("gif", b"GIF87a"));
+        assert!(magic_bytes_match("bmp", b"BM\x00\x00"));
+        assert!(!magic_bytes_match("gif", b"<html>"));
+    }
+
+    #[test]
+    fn test_magic_bytes_unknown_ext() {
+        assert!(!magic_bytes_match("txt", b"hello"));
     }
 }

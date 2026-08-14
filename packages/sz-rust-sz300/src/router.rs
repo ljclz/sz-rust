@@ -129,7 +129,8 @@ pub fn create_router(state: AppState) -> Router {
     let rl_config = crate::config::RateLimitProductionConfig::from_env();
     let rate_limit_layer = token_bucket_config(rl_config.capacity, rl_config.refill_per_second)
         .with_exclude_paths(rl_config.exclude_paths)
-        .with_key_prefix(rl_config.key_prefix);
+        .with_key_prefix(rl_config.key_prefix)
+        .with_trust_proxy_headers(rl_config.trust_proxy_headers);
 
     // 熔断器配置（从环境变量读取阈值）
     let cb_config = crate::config::CircuitBreakerProductionConfig::from_env();
