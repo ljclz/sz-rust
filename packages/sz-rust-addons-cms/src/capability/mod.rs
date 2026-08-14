@@ -322,6 +322,135 @@ impl Capability for ManageCategoryCapability {
 }
 
 // ============================================================================
+// CmsPlugin — CapabilityHook 实现
+// ============================================================================
+
+use std::sync::Arc;
+use sz_rust_addons_loader::CapabilityHook;
+use sz_rust_capability::CapabilityRegistry;
+
+/// CMS 插件 CapabilityHook 实现。
+///
+/// 持有 `CmsState`，在激活时将 5 个能力注册到全局 `CapabilityRegistry`。
+pub struct CmsPlugin {
+    state: CmsState,
+}
+
+impl CmsPlugin {
+    pub fn new(state: CmsState) -> Self {
+        Self { state }
+    }
+}
+
+/// CMS 插件的 5 个能力名称常量。
+pub const CMS_CAPABILITY_NAMES: [&str; 5] = [
+    "cms.search_article",
+    "cms.create_article",
+    "cms.publish_article",
+    "cms.manage_category",
+    "cms.manage_tag",
+];
+
+impl CapabilityHook for CmsPlugin {
+    fn register_capabilities(&self, registry: &CapabilityRegistry) -> CapResult<Vec<String>> {
+        let caps: Vec<Arc<dyn Capability>> = vec![
+            Arc::new(SearchArticleCapability::new(self.state.clone())),
+            Arc::new(CreateArticleCapability::new(self.state.clone())),
+            Arc::new(PublishArticleCapability::new(self.state.clone())),
+            Arc::new(ManageCategoryCapability::new(self.state.clone())),
+            Arc::new(ManageTagCapability::new(self.state.clone())),
+        ];
+        let mut names = Vec::with_capacity(caps.len());
+        for cap in caps {
+            let name = cap.name().to_string();
+            registry.register(cap);
+            names.push(name);
+        }
+        Ok(names)
+    }
+
+    fn capability_names(&self) -> Vec<String> {
+        CMS_CAPABILITY_NAMES.iter().map(|s| s.to_string()).collect()
+    }
+}
+
+// ============================================================================
+// 5. ManageTagCapability — cms.manage_tag
+// ============================================================================
+
+/// 标签管理能力。支持 action 分发：list/create/delete。
+pub struct ManageTagCapability {
+    state: CmsState,
+}
+
+impl ManageTagCapability {
+    pub fn new(state: CmsState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Capability for ManageTagCapability {
+    fn name(&self) -> &'static str {
+        "cms.manage_tag"
+    }
+
+    fn description(&self) -> &'static str {
+        "标签管理，支持 list/create/delete 操作"
+    }
+
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": { "type": "string", "enum": ["list", "create", "delete"], "description": "操作类型" },
+                "id": { "type": "integer", "description": "标签 ID（delete 必填）" },
+                "name": { "type": "string", "description": "标签名称（create 必填）" }
+            },
+            "required": ["action"]
+        })
+    }
+
+    fn tags(&self) -> &[&'static str] {
+        &["cms", "tag", "manage", "write"]
+    }
+
+    fn source(&self) -> CapabilitySource {
+        CapabilitySource::Plugin
+    }
+
+    async fn call(&self, args: Value) -> CapResult<Value> {
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CapError::ValidationError("action is required".to_string()))?;
+        let result = match action {
+            "list" => TagController::list(&*self.state.tags).await,
+            "create" => {
+                let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                if name.is_empty() {
+                    return Err(CapError::ValidationError("name is required".to_string()));
+                }
+                let body = json!({ "id": 0, "name": name });
+                TagController::create(&*self.state.tags, body).await
+            }
+            "delete" => {
+                let id = args.get("id").and_then(|v| v.as_i64()).ok_or_else(|| {
+                    CapError::ValidationError("id is required for delete".to_string())
+                })?;
+                TagController::delete(&*self.state.tags, id).await
+            }
+            other => {
+                return Err(CapError::ValidationError(format!(
+                    "unsupported action: {other}"
+                )));
+            }
+        };
+        controller_result_to_cap_result(result)
+    }
+}
+
+// ============================================================================
 // 测试模块
 // ============================================================================
 
@@ -330,7 +459,7 @@ mod tests {
     use super::*;
     use crate::model::article::Article;
     use sz_rust_capability::CapabilityRegistry;
-    use sz_rust_core::orm::repository::{InMemoryRepository, Repository};
+    use sz_rust_core::orm::repository::Repository;
 
     fn test_state() -> CmsState {
         CmsState::default()
@@ -475,134 +604,5 @@ mod tests {
         for name in &names {
             assert!(name.starts_with("cms."), "能力名 {name} 不以 cms. 开头");
         }
-    }
-}
-
-// ============================================================================
-// CmsPlugin — CapabilityHook 实现
-// ============================================================================
-
-use std::sync::Arc;
-use sz_rust_addons_loader::CapabilityHook;
-use sz_rust_capability::CapabilityRegistry;
-
-/// CMS 插件 CapabilityHook 实现。
-///
-/// 持有 `CmsState`，在激活时将 5 个能力注册到全局 `CapabilityRegistry`。
-pub struct CmsPlugin {
-    state: CmsState,
-}
-
-impl CmsPlugin {
-    pub fn new(state: CmsState) -> Self {
-        Self { state }
-    }
-}
-
-/// CMS 插件的 5 个能力名称常量。
-pub const CMS_CAPABILITY_NAMES: [&str; 5] = [
-    "cms.search_article",
-    "cms.create_article",
-    "cms.publish_article",
-    "cms.manage_category",
-    "cms.manage_tag",
-];
-
-impl CapabilityHook for CmsPlugin {
-    fn register_capabilities(&self, registry: &CapabilityRegistry) -> CapResult<Vec<String>> {
-        let caps: Vec<Arc<dyn Capability>> = vec![
-            Arc::new(SearchArticleCapability::new(self.state.clone())),
-            Arc::new(CreateArticleCapability::new(self.state.clone())),
-            Arc::new(PublishArticleCapability::new(self.state.clone())),
-            Arc::new(ManageCategoryCapability::new(self.state.clone())),
-            Arc::new(ManageTagCapability::new(self.state.clone())),
-        ];
-        let mut names = Vec::with_capacity(caps.len());
-        for cap in caps {
-            let name = cap.name().to_string();
-            registry.register(cap);
-            names.push(name);
-        }
-        Ok(names)
-    }
-
-    fn capability_names(&self) -> Vec<String> {
-        CMS_CAPABILITY_NAMES.iter().map(|s| s.to_string()).collect()
-    }
-}
-
-// ============================================================================
-// 5. ManageTagCapability — cms.manage_tag
-// ============================================================================
-
-/// 标签管理能力。支持 action 分发：list/create/delete。
-pub struct ManageTagCapability {
-    state: CmsState,
-}
-
-impl ManageTagCapability {
-    pub fn new(state: CmsState) -> Self {
-        Self { state }
-    }
-}
-
-#[async_trait]
-impl Capability for ManageTagCapability {
-    fn name(&self) -> &'static str {
-        "cms.manage_tag"
-    }
-
-    fn description(&self) -> &'static str {
-        "标签管理，支持 list/create/delete 操作"
-    }
-
-    fn schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "action": { "type": "string", "enum": ["list", "create", "delete"], "description": "操作类型" },
-                "id": { "type": "integer", "description": "标签 ID（delete 必填）" },
-                "name": { "type": "string", "description": "标签名称（create 必填）" }
-            },
-            "required": ["action"]
-        })
-    }
-
-    fn tags(&self) -> &[&'static str] {
-        &["cms", "tag", "manage", "write"]
-    }
-
-    fn source(&self) -> CapabilitySource {
-        CapabilitySource::Plugin
-    }
-
-    async fn call(&self, args: Value) -> CapResult<Value> {
-        let action = args
-            .get("action")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CapError::ValidationError("action is required".to_string()))?;
-        let result = match action {
-            "list" => TagController::list(&*self.state.tags).await,
-            "create" => {
-                let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if name.is_empty() {
-                    return Err(CapError::ValidationError("name is required".to_string()));
-                }
-                let body = json!({ "id": 0, "name": name });
-                TagController::create(&*self.state.tags, body).await
-            }
-            "delete" => {
-                let id = args.get("id").and_then(|v| v.as_i64()).ok_or_else(|| {
-                    CapError::ValidationError("id is required for delete".to_string())
-                })?;
-                TagController::delete(&*self.state.tags, id).await
-            }
-            other => {
-                return Err(CapError::ValidationError(format!(
-                    "unsupported action: {other}"
-                )));
-            }
-        };
-        controller_result_to_cap_result(result)
     }
 }

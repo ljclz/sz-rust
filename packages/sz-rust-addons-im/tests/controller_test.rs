@@ -1,6 +1,6 @@
 mod common;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use sz_rust_addons_im::controller::conversation::ConversationController;
 use sz_rust_addons_im::controller::message::MessageController;
 use sz_rust_addons_im::controller::user_status::UserStatusController;

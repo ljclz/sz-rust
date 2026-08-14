@@ -38,6 +38,7 @@ pub struct InstanceManager {
     history_recorder: Arc<HistoryRecorder>,
     audit: Arc<AuditLogger>,
     event_bus: Arc<dyn WorkflowEventBus>,
+    #[allow(dead_code)] // 保留：实例历史脱敏预留
     sensitive_registry: Arc<SensitiveFieldRegistry>,
 }
 
@@ -51,6 +52,7 @@ impl InstanceManager {
         history_recorder: Arc<HistoryRecorder>,
         audit: Arc<AuditLogger>,
         event_bus: Arc<dyn WorkflowEventBus>,
+        #[allow(dead_code)] // 保留：实例历史脱敏预留
         sensitive_registry: Arc<SensitiveFieldRegistry>,
     ) -> Self {
         Self {

@@ -326,7 +326,7 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                     "columns 不能为空（禁止 SELECT *）".into(),
                 ));
             }
-            let mut q = sz_rust_orm_facade::Query::select()
+            let mut q = sz_rust_orm_facade::SelectQuery::new()
                 .columns(&columns)
                 .from(table);
             // where_eq: {"id": 1, "status": "active"}

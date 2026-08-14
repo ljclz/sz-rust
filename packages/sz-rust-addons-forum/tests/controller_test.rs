@@ -1,6 +1,6 @@
 mod common;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use sz_rust_addons_forum::controller::board::BoardController;
 use sz_rust_addons_forum::controller::reply::ReplyController;
 use sz_rust_addons_forum::controller::topic::TopicController;

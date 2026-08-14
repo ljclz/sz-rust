@@ -124,6 +124,7 @@ async fn it_agent_multi_round_tool_trace() {
     assert_eq!(result.trace.terminated_by, TerminateReason::Natural);
     assert_eq!(result.trace.steps.len(), 2);
     for step in &result.trace.steps {
-        assert!(step.duration_ms > 0 || step.duration_ms == 0);
+        // duration_ms 为无符号类型（u64），恒 >= 0；此断言验证字段可访问（编译期）
+        let _ = step.duration_ms;
     }
 }

@@ -252,7 +252,7 @@ async fn tag_crud_full_cycle() {
     .unwrap();
     let listed = TagController::list(&*repo).await;
     assert_eq!(listed["code"], 0);
-    assert!(listed["data"].as_array().unwrap().len() >= 1);
+    assert!(!listed["data"].as_array().unwrap().is_empty());
     let deleted = TagController::delete(&*repo, 5).await;
     assert_eq!(deleted["code"], 0);
 }

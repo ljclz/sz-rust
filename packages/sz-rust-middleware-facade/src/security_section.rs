@@ -16,7 +16,7 @@ use crate::ip_access_control::IpAccessControlConfig;
 use crate::security_headers::SecurityHeadersConfig;
 
 /// Security 配置段（聚合 4 个安全中间件配置）
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SecuritySection {
     /// 安全响应头配置
     #[serde(default)]
@@ -30,17 +30,6 @@ pub struct SecuritySection {
     /// 请求体大小限制配置
     #[serde(default)]
     pub body_size: BodySizeLimitConfig,
-}
-
-impl Default for SecuritySection {
-    fn default() -> Self {
-        Self {
-            headers: SecurityHeadersConfig::default(),
-            ip_access: IpAccessControlConfig::default(),
-            audit: AuditLogConfig::default(),
-            body_size: BodySizeLimitConfig::default(),
-        }
-    }
 }
 
 impl SecuritySection {

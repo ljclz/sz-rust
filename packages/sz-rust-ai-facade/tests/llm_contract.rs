@@ -247,7 +247,7 @@ async fn contract_chat_with_temperature() {
     let mut req = make_request();
     req.temperature = Some(0.7);
     let result = provider.chat_completion(req).await.unwrap();
-    assert!(result.choices.len() > 0);
+    assert!(!result.choices.is_empty());
 }
 
 #[tokio::test]

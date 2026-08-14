@@ -11,30 +11,49 @@ use serde::{Deserialize, Serialize};
 /// `password_hash` 为敏感字段，序列化时跳过（铁律 7）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SysUser {
+    /// 主键
     pub id: i64,
+    /// 租户 ID（多租户隔离）
     pub tenant_id: i64,
+    /// 登录用户名
     pub username: String,
+    /// 显示名称
     pub display_name: String,
+    /// 密码哈希（敏感字段，序列化跳过）
     #[serde(skip_serializing)]
     pub password_hash: String,
+    /// 邮箱（可选）
     pub email: Option<String>,
+    /// 手机号（可选）
     pub phone: Option<String>,
+    /// 账号状态（active/disabled）
     pub status: String,
+    /// 插件扩展字段（JSON）
     pub extra: serde_json::Value,
+    /// 创建时间
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 更新时间
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// 系统权限（共享 Schema）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SysPermission {
+    /// 主键
     pub id: i64,
+    /// 租户 ID（多租户隔离）
     pub tenant_id: i64,
+    /// 权限名称
     pub name: String,
+    /// 权限描述
     pub description: String,
+    /// 资源标识（如 order）
     pub resource: String,
+    /// 操作（create/read/update/delete）
     pub action: String,
+    /// 数据权限条件（JSON，可选）
     pub conditions: Option<serde_json::Value>,
+    /// 创建时间
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -44,32 +63,46 @@ pub struct SysPermission {
 /// `delivered`/`delivered_at`/`retry_count` 跟踪投递状态。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SysEvent {
+    /// 主键
     pub id: i64,
+    /// 租户 ID（多租户隔离）
     pub tenant_id: i64,
+    /// 事件类型（如 order.created）
     pub event_type: String,
+    /// 来源插件名
     pub source_plugin: String,
+    /// 事件负载（JSON）
     pub payload: serde_json::Value,
+    /// 是否已投递
     pub delivered: bool,
+    /// 投递时间（可选）
     pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 重试次数
     pub retry_count: i32,
+    /// 最大重试次数
     pub max_retries: i32,
+    /// 创建时间
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 更新时间
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl SysUser {
+    /// 返回系统用户表名
     pub fn table_name() -> &'static str {
         "sys_users"
     }
 }
 
 impl SysPermission {
+    /// 返回系统权限表名
     pub fn table_name() -> &'static str {
         "sys_permissions"
     }
 }
 
 impl SysEvent {
+    /// 返回系统事件表名
     pub fn table_name() -> &'static str {
         "sys_events"
     }

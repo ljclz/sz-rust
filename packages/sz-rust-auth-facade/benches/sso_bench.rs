@@ -286,7 +286,7 @@ fn bench_csrf_token_generate(c: &mut Criterion) {
             let mut bytes = [0u8; 32];
             rand::rngs::OsRng.fill_bytes(&mut bytes);
             use base64::Engine;
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
         });
     });
 }
@@ -305,7 +305,8 @@ fn bench_concurrent_verify(c: &mut Criterion) {
         store.clone(),
         config.clone(),
     );
-    let verifier = RefreshTokenVerifier::new(codec, blacklist, store, config.issuer);
+    // verifier 构造验证（benchmark 主体仅测并发 spawn，不消费 verifier）
+    let _verifier = RefreshTokenVerifier::new(codec, blacklist, store, config.issuer);
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let token = rt.block_on(async { issuer.issue(1, "bench_user").await.unwrap().access_token });

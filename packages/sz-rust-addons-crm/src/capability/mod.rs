@@ -430,7 +430,7 @@ mod tests {
     use crate::model::contact::Contact;
     use crate::model::deal::Deal;
     use crate::model::lead::Lead;
-    use sz_rust_core::orm::repository::{InMemoryRepository, Repository};
+    use sz_rust_core::orm::repository::Repository;
 
     fn test_state() -> CrmState {
         CrmState::default()

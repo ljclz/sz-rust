@@ -90,7 +90,6 @@ mod tests {
     use crate::config::RagConfig;
     use crate::metrics::RagMetrics;
     use crate::rule::FileRuleStore;
-    use crate::search::RagSearchRequest;
     use crate::template::FileTemplateStore;
     use crate::term::FileTermStore;
     use sz_rust_ai_facade::common::AiError;

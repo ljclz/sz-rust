@@ -100,11 +100,10 @@ fn eval_expr(expr: &str, ctx: &serde_json::Value) -> WorkflowResult<serde_json::
         return Ok(serde_json::Value::Bool(as_bool(&left)? && as_bool(&right)?));
     }
     if expr.starts_with("not ") || expr.starts_with("not(") {
-        let inner = if expr.starts_with("not ") {
-            &expr[4..]
-        } else {
-            &expr[3..expr.len() - 1]
-        };
+        let inner = expr
+            .strip_prefix("not ")
+            .or_else(|| expr.strip_prefix("not(").map(|s| &s[..s.len() - 1]))
+            .unwrap_or(expr);
         let val = eval_expr(inner, ctx)?;
         return Ok(serde_json::Value::Bool(!as_bool(&val)?));
     }
@@ -167,8 +166,8 @@ fn eval_value(expr: &str, ctx: &serde_json::Value) -> WorkflowResult<serde_json:
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null));
     }
-    if expr.starts_with("$.") {
-        return lookup_path(&expr[2..], ctx);
+    if let Some(path) = expr.strip_prefix("$.") {
+        return lookup_path(path, ctx);
     }
     Err(WorkflowError::with_field(
         WorkflowErrorCode::GuardEvalFailed,

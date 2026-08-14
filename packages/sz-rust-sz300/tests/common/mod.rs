@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static ENV_LOCK: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
-    static LOCK_DEPTH: Cell<i32> = Cell::new(0);
+    static LOCK_DEPTH: Cell<i32> = const { Cell::new(0) };
 }
 
 fn acquire_lock() {
@@ -47,6 +47,7 @@ impl EnvGuard {
         }
     }
 
+    #[allow(dead_code)] // 测试公共模块 API，供未来用例使用
     pub fn set_many(pairs: &[(&str, &str)]) -> Self {
         acquire_lock();
         let names: Vec<String> = pairs.iter().map(|(k, _)| k.to_string()).collect();

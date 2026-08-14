@@ -22,37 +22,27 @@ pub enum CandidateStrategy {
 }
 
 /// 审批策略类型，对齐 spec 6.3.2。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalStrategyType {
     /// 会签：所有候选人均同意才完成
+    #[default]
     AndSign,
     /// 或签：任一候选人同意即完成
     OrSign,
 }
 
-impl Default for ApprovalStrategyType {
-    fn default() -> Self {
-        Self::AndSign
-    }
-}
-
 /// 容错策略，对齐 spec 5.4.1。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FaultStrategy {
     /// 失败终止实例
+    #[default]
     Fail,
     /// 跳过节点继续
     Skip,
     /// 重试（指数退避）
     Retry,
-}
-
-impl Default for FaultStrategy {
-    fn default() -> Self {
-        Self::Fail
-    }
 }
 
 /// 状态机迁移定义，对齐 spec 6.2.4-6.2.5。

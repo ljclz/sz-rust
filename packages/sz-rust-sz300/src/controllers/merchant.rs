@@ -107,7 +107,7 @@ impl MerchantController {
                     .rule("name|商户名称", "require")
                     .rule("contact_phone|联系电话", "require|regex:^1[3-9]\\d{9}$");
                 if let Err(e) = validator.check(&data) {
-                    return ctrl.render_error(&format!("参数验证失败: {}", e), json!({}), 0);
+                    return ctrl.render_error(format!("参数验证失败: {}", e), json!({}), 0);
                 }
 
                 let name = data

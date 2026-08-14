@@ -15,7 +15,7 @@ use sz_rust_auth_facade::wechat::{
 use sz_rust_cache_facade::{Cache, MemoryCacheDriver};
 use sz_rust_http_facade::{ApiResponse, BaseException};
 use sz_rust_orm_facade::jwt::{JwtClaims, JwtEncoder};
-use sz_rust_orm_facade::{DbType, Query};
+use sz_rust_orm_facade::{DbType, SelectQuery};
 use sz_rust_pay_facade::{MemoryPayProvider, PayOrder, PayProvider};
 use sz_rust_state_facade::event::{ClosureListener, EventDispatcher};
 use sz_rust_state_facade::session::{MemorySessionStore, Session};
@@ -95,7 +95,7 @@ fn end_to_end_payment_flow() {
     );
 
     // ── 7. orm-facade：对账查询（参数化绑定） ──
-    let built = Query::select()
+    let built = SelectQuery::new()
         .columns(&["id", "out_trade_no", "total_amount"])
         .from("orders")
         .where_eq("out_trade_no", "E2E202608030001".into())

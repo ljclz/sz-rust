@@ -57,6 +57,8 @@ pub fn is_public_path(path: &str) -> bool {
 /// 因此此处注册顺序为 auth_middleware 在前（内层），csrf_middleware 在后（外层），
 /// cors_layer 最后注册（最外层）。
 pub fn create_router(state: AppState) -> Router {
+    // mut 仅在 admin feature（router.nest）下需要
+    #[cfg_attr(not(feature = "admin"), allow(unused_mut))]
     let mut router = Router::new()
         // API 文档（Swagger UI / Redoc / OpenAPI JSON）
         .route("/api-docs", get(openapi::swagger_ui))

@@ -4,6 +4,7 @@ use sz_rust_addons_forum::model::reply::Reply;
 use sz_rust_addons_forum::model::topic::Topic;
 use sz_rust_core::orm::repository::InMemoryRepository;
 
+#[allow(dead_code)] // 测试公共模块 API，供未来用例使用
 pub fn forum_state() -> sz_rust_addons_forum::ForumState {
     sz_rust_addons_forum::ForumState::default()
 }

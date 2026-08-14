@@ -211,7 +211,7 @@ impl OrderController {
                 );
 
                 // 触发 before_insert 钩子（对齐 PHP think-orm Model 钩子）
-                let mut hook_ctx = HookContext::new();
+                let hook_ctx = HookContext::new();
                 state
                     .hook_registry
                     .dispatch(HookEvent::BeforeInsert, &hook_ctx)

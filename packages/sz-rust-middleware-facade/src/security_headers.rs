@@ -17,20 +17,15 @@ use serde::Deserialize;
 use std::fmt;
 
 /// X-Frame-Options 取值（spec §6.1 第 1 条）
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 pub enum FrameOptions {
     /// `DENY` — 禁止任何 frame 嵌入
+    #[default]
     Deny,
     /// `SAMEORIGIN` — 仅同源可嵌入
     SameOrigin,
     /// `ALLOW-FROM <uri>` — 指定来源可嵌入
     AllowFrom(String),
-}
-
-impl Default for FrameOptions {
-    fn default() -> Self {
-        Self::Deny
-    }
 }
 
 impl fmt::Display for FrameOptions {
@@ -76,9 +71,10 @@ impl Default for HstsConfig {
 }
 
 /// Referrer-Policy 取值（spec §6.1 第 5 条）
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 pub enum ReferrerPolicy {
     /// `no-referrer`
+    #[default]
     NoReferrer,
     /// `no-referrer-when-downgrade`
     NoReferrerWhenDowngrade,
@@ -94,12 +90,6 @@ pub enum ReferrerPolicy {
     StrictOriginWhenCrossOrigin,
     /// `unsafe-url`
     UnsafeUrl,
-}
-
-impl Default for ReferrerPolicy {
-    fn default() -> Self {
-        Self::NoReferrer
-    }
 }
 
 impl fmt::Display for ReferrerPolicy {
@@ -179,7 +169,7 @@ pub fn generate_csp_nonce() -> Result<String, SecurityHeadersError> {
     let mut bytes = [0u8; 16];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     use base64::Engine;
-    let nonce = base64::engine::general_purpose::STANDARD_NO_PAD.encode(&bytes);
+    let nonce = base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes);
     Ok(nonce)
 }
 
@@ -399,8 +389,10 @@ mod tests {
 
     #[test]
     fn test_inject_csp_with_nonce() {
-        let mut config = SecurityHeadersConfig::default();
-        config.csp = Some("default-src 'self'; script-src 'self' 'nonce-{nonce}'".to_string());
+        let config = SecurityHeadersConfig {
+            csp: Some("default-src 'self'; script-src 'self' 'nonce-{nonce}'".to_string()),
+            ..SecurityHeadersConfig::default()
+        };
         let mut response = Response::new(axum::body::Body::empty());
         inject_security_headers(&mut response, &config, false).unwrap();
 
@@ -412,8 +404,10 @@ mod tests {
 
     #[test]
     fn test_inject_csp_without_nonce() {
-        let mut config = SecurityHeadersConfig::default();
-        config.csp = Some("default-src 'self'".to_string());
+        let config = SecurityHeadersConfig {
+            csp: Some("default-src 'self'".to_string()),
+            ..SecurityHeadersConfig::default()
+        };
         let mut response = Response::new(axum::body::Body::empty());
         inject_security_headers(&mut response, &config, false).unwrap();
 
@@ -423,8 +417,10 @@ mod tests {
 
     #[test]
     fn test_inject_permissions_policy() {
-        let mut config = SecurityHeadersConfig::default();
-        config.permissions_policy = Some("geolocation=(), camera=()".to_string());
+        let config = SecurityHeadersConfig {
+            permissions_policy: Some("geolocation=(), camera=()".to_string()),
+            ..SecurityHeadersConfig::default()
+        };
         let mut response = Response::new(axum::body::Body::empty());
         inject_security_headers(&mut response, &config, false).unwrap();
 
@@ -467,8 +463,10 @@ mod tests {
         use axum::routing::get;
         use tower::ServiceExt;
 
-        let mut config = SecurityHeadersConfig::default();
-        config.enabled = false;
+        let config = SecurityHeadersConfig {
+            enabled: false,
+            ..SecurityHeadersConfig::default()
+        };
 
         let app = axum::Router::new()
             .route("/", get(|| async { "ok" }))

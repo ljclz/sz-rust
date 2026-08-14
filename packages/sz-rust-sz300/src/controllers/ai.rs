@@ -70,7 +70,7 @@ impl AiController {
                             }),
                         )
                     }
-                    Err(e) => ctrl.render_error(&format!("AI 调用失败: {}", e), json!({}), 0),
+                    Err(e) => ctrl.render_error(format!("AI 调用失败: {}", e), json!({}), 0),
                 }
             }
             Err(e) => ctrl.render_error(&e, json!({}), 0),

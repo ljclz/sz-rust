@@ -98,7 +98,6 @@ impl DesignerApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definition::NoopPluginChecker;
     use crate::repository::InMemoryDefinitionRepository;
 
     const VALID_YAML: &str = r#"

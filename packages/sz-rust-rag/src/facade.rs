@@ -117,6 +117,7 @@ mod tests {
         EmbeddingProvider, EmbeddingRequest, EmbeddingResult, SimilarityMetric, VectorHit,
     };
 
+    #[allow(dead_code)] // 测试 stub，供单测引用
     struct StubEmbedding;
     #[async_trait::async_trait]
     impl EmbeddingProvider for StubEmbedding {
@@ -139,6 +140,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)] // 测试 stub，供单测引用
     struct StubVectorStore;
     #[async_trait::async_trait]
     impl VectorStore for StubVectorStore {
