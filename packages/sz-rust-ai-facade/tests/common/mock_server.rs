@@ -4,7 +4,6 @@
 //! 所有 HTTP 指向 127.0.0.1 随机端口，禁止真实网络（spec 5.1.1.7）。
 
 use std::collections::VecDeque;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

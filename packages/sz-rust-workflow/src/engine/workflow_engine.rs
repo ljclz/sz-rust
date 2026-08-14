@@ -22,6 +22,7 @@ pub struct WorkflowEngine {
     state_machine: Arc<StateMachineEngine>,
     approval_flow: Arc<ApprovalFlowEngine>,
     task_manager: Arc<TaskManager>,
+    #[allow(dead_code)] // 构造时移交给 instance_manager，字段仅持有引用
     history_recorder: Arc<HistoryRecorder>,
 }
 

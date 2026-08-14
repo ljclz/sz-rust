@@ -1144,8 +1144,11 @@ mod tests {
     #[tokio::test]
     async fn test_make_validate_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
-        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        // 锁仅保护目录切换（set_current_dir），await 前释放避免跨 await 持锁
+        let _guard = {
+            let _lock = super::super::test_support::acquire_global_lock();
+            CwdGuard::switch(temp_dir.path()).unwrap()
+        };
 
         // 通过顶层 execute 入口调用 make validate（验证命令分发正常）
         let cmd = MakeCommand::Validate {

@@ -317,15 +317,12 @@ mod tests {
             token_clone.cancel();
         });
 
-        let mut cancelled = false;
-        tokio::select! {
-            _ = token.cancelled() => {
-                cancelled = true;
-            }
+        let cancelled = tokio::select! {
+            _ = token.cancelled() => true,
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 panic!("token cancellation should win");
             }
-        }
+        };
         assert!(cancelled, "token 取消应使 cancelled() 分支获胜");
     }
 

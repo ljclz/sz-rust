@@ -188,7 +188,7 @@ pub fn validate_json_schema(schema: &serde_json::Value, args: &serde_json::Value
             if let Some(field_name) = field.as_str() {
                 if !args
                     .as_object()
-                    .map_or(false, |obj| obj.contains_key(field_name))
+                    .is_some_and(|obj| obj.contains_key(field_name))
                 {
                     return Err(CapError::ValidationError(format!(
                         "缺少必填字段: {field_name}"

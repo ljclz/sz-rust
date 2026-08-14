@@ -146,7 +146,7 @@ mod tests {
             .expect("write failed");
         assert!(file.exists());
 
-        let failures = CargoChecker::rollback(&[file.clone()]).await;
+        let failures = CargoChecker::rollback(std::slice::from_ref(&file)).await;
         assert!(failures.is_empty());
         assert!(!file.exists());
     }

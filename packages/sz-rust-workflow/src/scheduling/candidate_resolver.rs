@@ -53,7 +53,7 @@ impl CandidateResolver for DefaultCandidateResolver {
             CandidateStrategy::Dynamic { expr } => {
                 let val = self.guard_evaluator.evaluate(expr, context).await?;
                 if let serde_json::Value::Array(arr) =
-                    serde_json::to_value(&val).unwrap_or(serde_json::Value::Null)
+                    serde_json::to_value(val).unwrap_or(serde_json::Value::Null)
                 {
                     arr.into_iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))

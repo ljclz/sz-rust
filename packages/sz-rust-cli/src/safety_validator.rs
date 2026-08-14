@@ -9,18 +9,26 @@
 
 use std::collections::HashMap;
 
+/// 铁律违规项
 #[derive(Debug, Clone)]
 pub struct Violation {
+    /// 违反的铁律编号（如 "铁律3"）
     pub rule: String,
+    /// 违规文件路径
     pub file: String,
+    /// 违规行号（1-based）
     pub line: usize,
+    /// 违规描述
     pub message: String,
+    /// 修复建议
     pub suggestion: String,
 }
 
+/// 生成代码安全校验器（铁律子集检查）
 pub struct SafetyValidator;
 
 impl SafetyValidator {
+    /// 批量校验文件列表（.rs 走铁律 2/3/4，.sql 走铁律 8）
     pub fn validate_files(files: &[(String, String)]) -> Vec<Violation> {
         let mut violations = Vec::new();
         for (path, content) in files {
@@ -90,6 +98,7 @@ impl SafetyValidator {
         violations
     }
 
+    /// 生成格式化检查报告
     pub fn format_report(violations: &[Violation]) -> String {
         if violations.is_empty() {
             return "安全检查通过：0 个违规项".to_string();

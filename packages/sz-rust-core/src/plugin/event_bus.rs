@@ -18,10 +18,15 @@ pub type SubscriptionId = u64;
 /// 插件事件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginEvent {
+    /// 事件 ID（发布后分配）
     pub id: EventId,
+    /// 租户 ID（多租户隔离）
     pub tenant_id: i64,
+    /// 事件类型（如 order.created）
     pub event_type: String,
+    /// 来源插件名
     pub source_plugin: String,
+    /// 事件负载（JSON）
     pub payload: serde_json::Value,
 }
 
@@ -64,17 +69,26 @@ pub trait EventBus: Send + Sync + 'static {
     async fn replay_pending(&self) -> Result<usize, String>;
 }
 
+/// 事件总线中的订阅表条目：订阅 ID + 处理器
+pub type SubscriptionEntry = (SubscriptionId, Arc<dyn EventHandler>);
+
+/// 事件总线中的订阅表：event_type → 订阅条目列表
+pub type SubscriptionMap = std::collections::HashMap<String, Vec<SubscriptionEntry>>;
+
 /// 内存事件总线实现（用于测试和轻量场景）。
 pub struct InMemoryEventBus {
+    /// 已发布事件记录（按序追加）
     events: parking_lot::RwLock<Vec<PluginEvent>>,
+    /// 下一个事件 ID 计数器
     next_id: parking_lot::Mutex<EventId>,
-    subscribers: parking_lot::RwLock<
-        std::collections::HashMap<String, Vec<(SubscriptionId, Arc<dyn EventHandler>)>>,
-    >,
+    /// 订阅表：event_type → [(sub_id, handler)]
+    subscribers: parking_lot::RwLock<SubscriptionMap>,
+    /// 下一个订阅 ID 计数器
     next_sub_id: parking_lot::Mutex<SubscriptionId>,
 }
 
 impl InMemoryEventBus {
+    /// 创建空的内存事件总线
     pub fn new() -> Self {
         Self {
             events: parking_lot::RwLock::new(Vec::new()),

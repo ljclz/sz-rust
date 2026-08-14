@@ -171,8 +171,10 @@ mod tests {
 
     #[test]
     fn test_is_excluded() {
-        let mut cfg = BodySizeLimitConfig::default();
-        cfg.exclude_paths = vec!["/health".to_string()];
+        let cfg = BodySizeLimitConfig {
+            exclude_paths: vec!["/health".to_string()],
+            ..BodySizeLimitConfig::default()
+        };
         assert!(cfg.is_excluded("/health"));
         assert!(!cfg.is_excluded("/api/data"));
     }

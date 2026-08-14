@@ -186,7 +186,7 @@ async fn agent_trace_records_steps() {
     opts.allow_tools = vec!["echo".into()];
     opts.max_steps = Some(5);
     let result = agent.run(task, opts).await.unwrap();
-    assert!(result.trace.steps.len() >= 1);
+    assert!(!result.trace.steps.is_empty());
     for step in &result.trace.steps {
         assert!(step.tool_call.is_some());
         assert!(step.tool_result.is_some());

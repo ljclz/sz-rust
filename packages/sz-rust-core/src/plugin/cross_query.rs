@@ -8,10 +8,16 @@ use serde_json::Value;
 /// 跨插件查询错误。
 #[derive(Debug, thiserror::Error)]
 pub enum CrossQueryError {
+    /// 权限不足：目标租户与当前租户不一致
     #[error("权限不足：租户 {tenant_id} 无权查询")]
-    PermissionDenied { tenant_id: i64 },
+    PermissionDenied {
+        /// 当前（无权查询的）租户 ID
+        tenant_id: i64,
+    },
+    /// 能力未找到（CapabilityRegistry 无此能力）
     #[error("能力未找到: {0}")]
     NotFound(String),
+    /// 能力调用失败
     #[error("查询失败: {0}")]
     QueryFailed(String),
 }
@@ -21,6 +27,7 @@ pub enum CrossQueryError {
 /// 通过 `CapabilityRegistry::call_with_tenant` 调用其他插件能力，
 /// 自动注入 `tenant_id` 实现租户隔离。
 pub struct CrossQuery {
+    /// 当前租户 ID（所有查询强制注入）
     tenant_id: i64,
 }
 

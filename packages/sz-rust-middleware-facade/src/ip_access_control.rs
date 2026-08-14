@@ -13,18 +13,13 @@ use axum::middleware::Next;
 use axum::response::Response;
 
 /// IP 访问控制模式（spec §6.2 第 1 条）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 pub enum IpAccessMode {
     /// 白名单模式：仅允许 `ip_list` 中的 IP
+    #[default]
     Whitelist,
     /// 黑名单模式：拒绝 `ip_list` 中的 IP
     Blacklist,
-}
-
-impl Default for IpAccessMode {
-    fn default() -> Self {
-        Self::Whitelist
-    }
 }
 
 impl fmt::Display for IpAccessMode {

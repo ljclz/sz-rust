@@ -174,8 +174,8 @@ impl PluginNodeExecutor {
             let mut result = serde_json::Map::new();
             for (k, v) in map {
                 if let Some(s) = v.as_str() {
-                    if s.starts_with("$.") {
-                        if let Some(val) = lookup(context, &s[2..]) {
+                    if let Some(path) = s.strip_prefix("$.") {
+                        if let Some(val) = lookup(context, path) {
                             result.insert(k.clone(), val.clone());
                             continue;
                         }

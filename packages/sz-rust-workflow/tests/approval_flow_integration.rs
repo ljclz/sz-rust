@@ -1,6 +1,4 @@
-use sz_rust_workflow::{
-    DefinitionFormat, TaskAction, WorkflowConfig, WorkflowDeps, WorkflowEngine,
-};
+use sz_rust_workflow::{DefinitionFormat, WorkflowConfig, WorkflowDeps, WorkflowEngine};
 
 const APPROVAL_YAML: &str = r#"
 flow_key: approval_test

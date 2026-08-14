@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_is_tty_returns_bool() {
         let result = InteractivePrompt::is_tty();
-        assert!(result == true || result == false);
+        assert!(result || !result); // 布尔恒真：验证 is_tty 返回 bool 而非 panic
     }
 
     #[test]

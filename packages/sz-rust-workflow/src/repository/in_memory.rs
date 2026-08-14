@@ -297,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn definition_repo_set_active() {
         let repo = InMemoryDefinitionRepository::default();
-        let mut def1 = FlowDefinition {
+        let def1 = FlowDefinition {
             flow_key: "test".into(),
             version: semver::Version::new(1, 0, 0),
             name: "v1".into(),

@@ -4,10 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value;
 use sz_rust_capability::{CapResult, Capability, CapabilitySource};
-use sz_rust_workflow::{
-    DefinitionFormat, FaultStrategy, NodeConfig, NodeType, WorkflowConfig, WorkflowDeps,
-    WorkflowEngine,
-};
+use sz_rust_workflow::{DefinitionFormat, WorkflowConfig, WorkflowDeps, WorkflowEngine};
 
 struct DoubleCap;
 #[async_trait]
@@ -35,7 +32,7 @@ impl Capability for DoubleCap {
 
 #[tokio::test]
 async fn plugin_node_capability_call() {
-    let mut deps = WorkflowDeps::default_for_test();
+    let deps = WorkflowDeps::default_for_test();
     deps.capability_registry.register(Arc::new(DoubleCap));
     let engine = WorkflowEngine::new(WorkflowConfig::default(), deps);
 

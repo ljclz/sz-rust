@@ -8,14 +8,14 @@ use serde_json::json;
 
 use sz_rust_http_facade::request::{parse_query, url_decode};
 use sz_rust_http_facade::{ApiResponse, BaseException};
-use sz_rust_orm_facade::{sql_string, DbType, Query, Value};
+use sz_rust_orm_facade::{sql_string, DbType, SelectQuery, Value};
 use sz_rust_pay_facade::{MemoryPayProvider, PayConfig, PayOrder, PayPlatform, PayProvider};
 
 /// 完整链路：参数化查询订单 → 支付 → API 响应
 #[test]
 fn query_pay_respond_chain() {
     // 1. orm-facade：参数化构建订单查询（WHERE 全部走绑定参数，防注入）
-    let built = Query::select()
+    let built = SelectQuery::new()
         .column("id")
         .column("out_trade_no")
         .column("total_amount")
@@ -75,7 +75,7 @@ fn sql_macro_and_parameterized_binding() {
     assert!(sql.contains("users"));
 
     // 显式列投影（规则：禁止 SELECT *）
-    let projected = Query::select()
+    let projected = SelectQuery::new()
         .columns(&["id", "name", "email"])
         .from("users")
         .where_eq("status", "active".into())

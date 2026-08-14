@@ -11,20 +11,15 @@ use axum::middleware::Next;
 use axum::response::Response;
 
 /// 审计日志输出目标（spec §6.3 第 7 条）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 pub enum AuditOutputTarget {
     /// 输出到 tracing 管道（复用 sz-rust-tracing）
+    #[default]
     Tracing,
     /// 输出到独立文件
     File,
     /// 输出到 stdout
     Stdout,
-}
-
-impl Default for AuditOutputTarget {
-    fn default() -> Self {
-        Self::Tracing
-    }
 }
 
 impl fmt::Display for AuditOutputTarget {
