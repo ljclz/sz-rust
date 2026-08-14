@@ -196,7 +196,7 @@ Project implements 23 gates via GitHub Actions, all strictly enforced (no `conti
 | `fuzz.yml` | push/PR + Every Saturday 00:00 UTC + workflow_dispatch | 10 cases × 1000 iterations fuzzing, supports `FUZZ_ITERATIONS` |
 | `mcdc.yml` / `mutants.yml` | push/PR | Branch coverage gate / mutation testing |
 | `publish-oss.yml` / `release.yml` | Release flow | crates.io publishing / release build |
-| `marketplace-ci.yml` | Marketplace path changes | ⚠️ references `sz-rust-marketplace` (enterprise delivery, no source in this repo, workflow never triggers — see 2026-08-13 audit report) |
+| `marketplace-ci.yml` | Marketplace path changes | ⚠️ references `sz-rust-marketplace` (verified fictional delivery on 2026-08-14, see audit report; workflow never triggers) |
 
 > Note: `soak.yml` / `soak-nightly.yml` are disabled (renamed to `.disabled`), 6h soak is handled by the self-hosted toolkit `scripts/soak-self-hosted/` (see `docs/soak-toolkit-guide.md`).
 

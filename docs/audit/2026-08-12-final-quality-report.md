@@ -36,6 +36,8 @@
 | sz-rust-migration | 153 | 40 | 4,993 |
 | sz-rust-cli | 140 | 22 | 7,263 |
 | sz-rust-workflow | 131 | 47 | 6,247 |
+> ⚠️ **2026-08-14 审计修正**：下表含 4 个虚构 crate（sz-rust-sdd-agent / sz-rust-migration / sz-rust-visual / sz-rust-marketplace），在开源/企业版仓库 git 历史中均不存在，其测试数与行数为虚构声称。
+
 | sz-rust-frontend-codegen | 71 | 24 | 2,457 |
 | sz-rust-tracing | 58 | 1 | 764 |
 | sz-rust-sdd-agent | 58 | 35 | 4,282 |
