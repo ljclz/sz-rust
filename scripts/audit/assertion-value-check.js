@@ -73,12 +73,36 @@ function stripNoise(code) {
         .replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-// 找到第 i 个字符开始的匹配括号块（支持嵌套）
+// 找到第 i 个字符开始的匹配括号块（支持嵌套；跳过字符串字面量与注释内的 {}）
 function findBlockEnd(text, start) {
     let depth = 0;
+    let inStr = false;
+    let rawStr = false;
     for (let i = start; i < text.length; i++) {
-        if (text[i] === '{') depth++;
-        else if (text[i] === '}') {
+        const ch = text[i];
+        // 行注释：跳过到行尾（注释内的 {} 不计数）
+        if (ch === '/' && text[i + 1] === '/') {
+            while (i < text.length && text[i] !== '\n') i++;
+            continue;
+        }
+        // raw string r#"..."# 优先处理（可能跨行、含任意字符）
+        if (rawStr) {
+            if (ch === '#' && text[i - 1] === '"') rawStr = false;
+            continue;
+        }
+        if (inStr) {
+            if (ch === '\\') { i++; continue; }
+            if (ch === '"') inStr = false;
+            continue;
+        }
+        if (ch === 'r' && text[i + 1] === '#' && text[i + 2] === '"') {
+            rawStr = true;
+            i += 2;
+            continue;
+        }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === '{') depth++;
+        else if (ch === '}') {
             depth--;
             if (depth === 0) return i + 1;
         }

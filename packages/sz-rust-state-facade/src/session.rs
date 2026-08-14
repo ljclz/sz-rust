@@ -577,9 +577,14 @@ mod tests {
 
     #[test]
     fn test_session_clear_flash_when_no_data() {
-        // 无数据时调用 clear_flash 不应 panic
+        // 无数据时调用 clear_flash 不应 panic，且 flash 保持为空
         let session = make_session();
         session.clear_flash();
+        assert_eq!(
+            session.get_flash("any"),
+            None,
+            "clear_flash 后 flash 数据应为空"
+        );
     }
 
     #[test]

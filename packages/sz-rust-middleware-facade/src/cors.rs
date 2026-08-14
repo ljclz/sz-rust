@@ -539,42 +539,131 @@ mod tests {
     // 辅助函数测试
     // ====================================================================
 
-    #[test]
-    fn test_parse_methods_default() {
-        let methods = parse_methods(DEFAULT_ALLOW_METHODS);
-        // AllowMethods::list 不直接暴露内部，但通过 CorsLayer 应用到响应来验证
-        // 这里仅验证不 panic
-        let _ = methods;
+    #[tokio::test]
+    async fn test_parse_methods_default() {
+        // 默认配置的 allow-methods 应包含全部默认方法
+        let layer = CorsLayer::new().allow_methods(parse_methods(DEFAULT_ALLOW_METHODS));
+        let router = make_router(layer);
+        let resp = send_preflight(router, "/api", "https://example.com", "GET", "").await;
+        let methods = resp
+            .headers()
+            .get("access-control-allow-methods")
+            .expect("missing Access-Control-Allow-Methods")
+            .to_str()
+            .unwrap();
+        assert!(methods.contains("GET"));
+        assert!(methods.contains("POST"));
+        assert!(methods.contains("PATCH"));
+        assert!(methods.contains("DELETE"));
     }
 
-    #[test]
-    fn test_parse_methods_empty() {
-        let methods = parse_methods("");
-        let _ = methods;
+    #[tokio::test]
+    async fn test_parse_methods_empty() {
+        // 空字符串解析为空列表：预检请求的请求方法不应被允许
+        let layer = CorsLayer::new().allow_methods(parse_methods(""));
+        let router = make_router(layer);
+        let resp = send_preflight(router, "/api", "https://example.com", "GET", "").await;
+        let allow = resp
+            .headers()
+            .get("access-control-allow-methods")
+            .map(|v| v.to_str().unwrap().to_string());
+        // 空 allow 列表时头可能缺失或为空；缺失 = 未允许任何方法，符合预期
+        if let Some(v) = allow {
+            assert!(!v.contains("GET"), "空方法列表不应允许 GET，实际: {v}");
+        }
     }
 
-    #[test]
-    fn test_parse_methods_with_whitespace() {
-        let methods = parse_methods("GET,  POST  , PATCH");
-        let _ = methods;
+    #[tokio::test]
+    async fn test_parse_methods_with_whitespace() {
+        // 带空白分隔的方法应被 trim 后正常解析
+        let layer = CorsLayer::new().allow_methods(parse_methods("GET,  POST  , PATCH"));
+        let router = make_router(layer);
+        let resp = send_preflight(router, "/api", "https://example.com", "POST", "").await;
+        let methods = resp
+            .headers()
+            .get("access-control-allow-methods")
+            .expect("missing Access-Control-Allow-Methods")
+            .to_str()
+            .unwrap();
+        assert!(methods.contains("GET"), "实际: {methods}");
+        assert!(methods.contains("POST"), "实际: {methods}");
+        assert!(methods.contains("PATCH"), "实际: {methods}");
     }
 
-    #[test]
-    fn test_parse_headers_default() {
-        let headers = parse_headers(DEFAULT_ALLOW_HEADERS);
-        let _ = headers;
+    #[tokio::test]
+    async fn test_parse_headers_default() {
+        let layer = CorsLayer::new().allow_headers(parse_headers(DEFAULT_ALLOW_HEADERS));
+        let router = make_router(layer);
+        let resp = send_preflight(
+            router,
+            "/api",
+            "https://example.com",
+            "POST",
+            DEFAULT_ALLOW_HEADERS,
+        )
+        .await;
+        let headers = resp
+            .headers()
+            .get("access-control-allow-headers")
+            .expect("missing Access-Control-Allow-Headers")
+            .to_str()
+            .unwrap()
+            .to_lowercase();
+        assert!(headers.contains("authorization"));
+        assert!(headers.contains("content-type"));
+        assert!(headers.contains("x-requested-with"));
+        assert!(headers.contains("x-csrf-token"));
     }
 
-    #[test]
-    fn test_parse_headers_empty() {
-        let headers = parse_headers("");
-        let _ = headers;
+    #[tokio::test]
+    async fn test_parse_headers_empty() {
+        let layer = CorsLayer::new().allow_headers(parse_headers(""));
+        let router = make_router(layer);
+        let resp = send_preflight(
+            router,
+            "/api",
+            "https://example.com",
+            "POST",
+            "Content-Type",
+        )
+        .await;
+        let allow = resp
+            .headers()
+            .get("access-control-allow-headers")
+            .map(|v| v.to_str().unwrap().to_string());
+        // 头缺失 = 未允许任何头，符合预期
+        if let Some(v) = allow {
+            assert!(
+                !v.contains("content-type"),
+                "空头列表不应允许 content-type，实际: {v}"
+            );
+        }
     }
 
-    #[test]
-    fn test_parse_headers_with_whitespace() {
-        let headers = parse_headers("Authorization,  Content-Type  , X-Requested-With");
-        let _ = headers;
+    #[tokio::test]
+    async fn test_parse_headers_with_whitespace() {
+        let layer = CorsLayer::new().allow_headers(parse_headers(
+            "Authorization,  Content-Type  , X-Requested-With",
+        ));
+        let router = make_router(layer);
+        let resp = send_preflight(
+            router,
+            "/api",
+            "https://example.com",
+            "POST",
+            "Authorization, Content-Type, X-Requested-With",
+        )
+        .await;
+        let headers = resp
+            .headers()
+            .get("access-control-allow-headers")
+            .expect("missing Access-Control-Allow-Headers")
+            .to_str()
+            .unwrap()
+            .to_lowercase();
+        assert!(headers.contains("authorization"), "实际: {headers}");
+        assert!(headers.contains("content-type"), "实际: {headers}");
+        assert!(headers.contains("x-requested-with"), "实际: {headers}");
     }
 
     #[test]

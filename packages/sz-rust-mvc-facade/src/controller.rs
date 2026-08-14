@@ -1481,7 +1481,12 @@ mod tests {
     #[test]
     fn test_base_controller_override_initialize() {
         let ctrl = CustomController;
-        ctrl.initialize(); // 不应 panic
+        ctrl.initialize(); // 子类覆盖的 initialize 不应 panic
+                           // 覆盖的 initialize 保持子类行为：batch_validate 仍为 true
+        assert!(
+            ctrl.batch_validate(),
+            "覆盖 initialize 后默认校验开关应保持"
+        );
     }
 
     /// 模拟 PHP 业务控制器：带状态的 initialize 钩子

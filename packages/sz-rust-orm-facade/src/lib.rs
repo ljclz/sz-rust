@@ -133,7 +133,10 @@ pub mod logger {
 
 // ============================================================================
 // sz-orm-query-builder：链式 SQL 构造器（sea-query 风格，独立于 Model）
+// Query 已废弃（sz-orm 3.5.0），保留 re-export 维持向下兼容；
+// 迁移待办：标准 CRUD 迁至 sz_orm_core::QueryBuilder<M>（见 CHANGELOG 0.6.9）
 // ============================================================================
+#[allow(deprecated)]
 pub use sz_orm_query_builder::{
     BuiltQuery, DeleteQuery, InsertQuery, Query, SelectQuery, UpdateQuery,
 };

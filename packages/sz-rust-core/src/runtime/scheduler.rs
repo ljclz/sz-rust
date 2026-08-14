@@ -377,7 +377,10 @@ mod tests {
     #[test]
     fn test_scheduler_accessor() {
         let runtime = SchedulerRuntime::new(SchedulerRuntimeConfig::default());
-        let _scheduler = runtime.scheduler();
-        // 验证可以获取内部引用
+        let scheduler = runtime.scheduler();
+        // 验证可以获取内部引用且状态可查询（初始无任务、可触发零个到期任务）
+        assert!(scheduler.list_tasks().is_empty(), "初始任务列表应为空");
+        let fired = scheduler.try_fire_due(chrono::Utc::now());
+        assert_eq!(fired, 0, "无任务时不应触发任何项");
     }
 }

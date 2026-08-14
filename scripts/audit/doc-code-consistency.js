@@ -68,7 +68,7 @@ const IGNORE_END = '<!-- doc-code-consistency: ignore-end -->';
 // 「已完成 / 已实现 / 全部完成 / 已落地 / 测试通过」+ crate 名 = 完成声称，
 // 行内必须附证据标记：来源 / cargo test / commit / 路径 :行号 / 测试数。
 const COMPLETION_CLAIM_RE = /(?:已完成|全部完成|已实现|已落地|已交付|测试通过|tests? passed|全部通过)/;
-const EVIDENCE_RE = /(?:来源|source|cargo (?:test|check|clippy)|\d+\s*[+]?\s*(?:个)?(?:测试|tests?|passed)|\d+\s*(?:个)?测试|:\d+|commit|SHA|PR\s*#|企业版|enterprise|✅|测试数)/;
+const EVIDENCE_RE = /(?:来源|source|cargo (?:test|check|clippy)|\d+\s*[+]?\s*(?:个)?(?:测试|tests?|passed)|\d+\s*(?:个)?测试|:\d+|commit|SHA|PR\s*#|企业版|enterprise|✅|测试数|生产接入状态|未挂载|未接入|已实现但)/;
 
 function lsDir(dir) {
     if (!fs.existsSync(dir)) return [];

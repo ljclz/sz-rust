@@ -232,10 +232,12 @@ mod tests {
     #[tokio::test]
     async fn test_websocket_broadcast_no_connections() {
         let runtime = WebSocketRuntime::new(WebSocketRuntimeConfig::new("127.0.0.1:0"));
-        // 没有连接时广播应返回 0
+        // 没有连接时广播应返回 Ok(0)
         let result = runtime.broadcast_to_all(b"hello".to_vec()).await;
-        // 可能返回 Ok(0) 或 Err，取决于 WsServer 实现
-        let _ = result;
+        match result {
+            Ok(n) => assert_eq!(n, 0, "无连接时广播应送达 0 个接收者"),
+            Err(e) => panic!("无连接广播不应失败，实际: {:?}", e),
+        }
     }
 
     #[tokio::test]
@@ -247,10 +249,16 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         // 手动停止
-        let _ = runtime.stop().await;
+        let stop_result = runtime.stop().await;
+        assert!(
+            stop_result.is_ok(),
+            "stop() 应成功，实际: {:?}",
+            stop_result
+        );
 
         // 等待任务退出
-        let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        let exit = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        assert!(exit.is_ok(), "stop 后 websocket 任务应在 2s 内退出");
     }
 
     #[test]
