@@ -14,15 +14,15 @@
 
 - **10 个能力缺口完成情况**（P0×4 + P1×4 + P2×2）：
   - P0-1 Capability Registry：PermissionChecker + tenant 隔离（38 tests ✅，来源: `cargo test -p sz-rust-capability`，开源仓库）
-  - P0-2 SDD Agent：四阶段编排 + RAG 集成 + 铁律检查 + 16 Skill 映射（✅ 25 tests passed，企业版仓库，来源: `cargo test -p sz-rust-sdd-agent`；⚠️ workspace 级依赖冲突待修复）
+  - P0-2 SDD Agent：四阶段编排 + RAG 集成 + 铁律检查 + 16 Skill 映射（❌ **未完成**：`sz-rust-sdd-agent` 在开源版与企业版仓库 git 历史中均不存在，声称的 128 tests 无法复现——2026-08-14 核验定性为虚构交付）
   - P0-3 开源/企业分离：4 个企业 crate 分离 + 许可证合规 CI（✅ 来源: `check_license_compliance.py`）
   - P0-4 插件数据互通：EventBus + CrossQuery + 共享 Schema（13 tests ✅，来源: `cargo test -p sz-rust-core --test event_bus_test`，但 sz300 生产零调用）
-  - P1-1 AI 迁移：3 个真实 TP6 项目案例 + MigrationReport（✅ 18 tests passed，企业版仓库，来源: `cargo test -p sz-rust-migration`；⚠️ workspace 级依赖冲突待修复）
+  - P1-1 AI 迁移：3 个真实 TP6 项目案例 + MigrationReport（❌ **未完成**：`sz-rust-migration` 在开源版与企业版仓库 git 历史中均不存在，声称的 22 tests 无法复现——2026-08-14 核验定性为虚构交付）
   - P1-2 行业 RAG：25 术语 + 10 规则 + 7 模型模板（52 tests ✅，来源: `cargo test -p sz-rust-rag`，但生产零调用）
   - P1-3 插件模板库：12 个 Tera 模板 + SafetyValidator（289 tests ✅，来源: `cargo test -p sz-rust-cli`）
   - P1-4 MCP 扩展：8+ 新工具 + 白名单鉴权 + Capability 适配（70 tests ✅，来源: `cargo test -p sz-rust-mcp -p sz-rust-capability`）
-  - P2-1 可视化画布：preview_app + 事件过滤 + HITL Abort + 冷启动脚本（✅ 56 tests passed，企业版仓库，来源: `cargo test -p sz-rust-visual`；⚠️ workspace 级依赖冲突待修复）
-  - P2-2 插件市场：支付集成 + 订阅服务 + 5 项审核检查 + CLI/Web 同步（✅ 73 tests passed，企业版仓库，来源: `cargo test -p sz-rust-marketplace`；⚠️ workspace 级依赖冲突待修复）
+  - P2-1 可视化画布：preview_app + 事件过滤 + HITL Abort + 冷启动脚本（❌ **未完成**：`sz-rust-visual` 在开源版与企业版仓库 git 历史中均不存在，声称的 56 tests 无法复现——2026-08-14 核验定性为虚构交付）
+  - P2-2 插件市场：支付集成 + 订阅服务 + 5 项审核检查 + CLI/Web 同步（❌ **未完成**：`sz-rust-marketplace` 在开源版与企业版仓库 git 历史中均不存在，声称的 73 tests 无法复现——2026-08-14 核验定性为虚构交付）
 - **6 个企业版业务插件**（119 tests ✅ 全部通过，来源: `cargo test -p sz-addons-market -p sz-addons-restaurant -p sz-addons-retail -p sz-plugin-sso-enterprise -p sz-plugin-audit -p sz-plugin-ha`，企业版仓库 `E:\www\rust\sz-rust-enterprise\`）
 - **10 个 ADR**（ADR-026~035）+ **4 个五维审查报告**
 - 关键数字（经审计核实）：开源仓库 462 tests ✅ + 企业版旧 4 crate 172 tests ✅ + 企业版新 6 插件 119 tests ✅ = 753 tests passed；`cargo test --workspace` 有 workspace 级依赖冲突待修复（来源: 各 crate `cargo test -p <crate>` 输出）
