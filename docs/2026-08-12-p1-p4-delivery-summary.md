@@ -1,10 +1,16 @@
 # sz-rust P1~P4 完整交付总结
 
-> **日期**：2026-08-12  
-> **范围**：产品技术计划 Phase 1~4 全部交付  
-> **状态**：✅ Phase 1~3 全部完成，✅ Phase 4 P4-T1/P4-T2 完成，⏭️ P4-T3 跳过  
-> **总测试**：5,065 passed, 0 failed  
-> **总代码**：674 源文件，192,067 行
+> **日期**：2026-08-12
+> **范围**：产品技术计划 Phase 1~4
+> **状态**：✅ Phase 1 完成，❌ Phase 2/3 部分虚构（见下），✅ Phase 4 P4-T1/P4-T2 完成，⏭️ P4-T3 跳过
+> **总测试**：开源仓库实际 5,065 passed（含 4 个虚构 crate 声称值，2026-08-14 审计后修正）
+> **总代码**：674 源文件，192,067 行（含虚构 crate 声称值）
+
+> ⚠️ **2026-08-14 审计修正**：本报告原声称 Phase 2（SDD Agent / 迁移）与 Phase 3（画布 / 市场）全部完成。
+> 经核验（审计报告：`docs/audit/2026-08-13-文档已实现但生产零调用审计报告.md`）：
+> `sz-rust-sdd-agent` / `sz-rust-migration` / `sz-rust-visual` / `sz-rust-marketplace` 4 个 crate
+> 在开源版与企业版仓库（gitlab.com/sz-rust-enterprise）git 历史中**均不存在**，属**纯虚构交付**。
+> 下述 P2-T1/P2-T2/P3-T1 阶段总览中的「✅」与测试数为虚构声称。
 
 ---
 
@@ -13,8 +19,8 @@
 | 阶段 | 任务 | 状态 | 新增 crate | 测试数 |
 |------|------|------|-----------|--------|
 | **Phase 1** | 基础设施 | ✅ | sz-rust-capability | 91 |
-| **Phase 2** | AI 生成能力 | ✅ | sz-rust-sdd-agent, sz-rust-migration, sz-rust-rag | 211 |
-| **Phase 3** | 产品化 | ✅ | sz-rust-visual, sz-rust-marketplace | 25 |
+| **Phase 2** | AI 生成能力 | ❌（部分虚构） | sz-rust-rag（真实）；sz-rust-sdd-agent / sz-rust-migration（虚构，不存在） | 52（真实） |
+| **Phase 3** | 产品化 | ❌（虚构） | sz-rust-visual / sz-rust-marketplace（均不存在） | — |
 | **Phase 4-T1** | 前端生成 | ✅ | sz-rust-frontend-codegen | 71 |
 | **Phase 4-T2** | 工作流引擎 | ✅ | sz-rust-workflow | 131 |
 | **Phase 4-T3** | 开发者社区 | ⏭️ 跳过 | — | — |
@@ -65,7 +71,10 @@
 
 ### P2-T1：SDD Agent 编排
 
-**交付物**：
+> ❌ **未完成（2026-08-14 审计定性：纯虚构）**：`sz-rust-sdd-agent` crate 不存在，
+> 下列交付物清单与「58 passed」均为虚构声称。
+
+**交付物（虚构）**：
 - `sz-rust-sdd-agent` crate（35 files, 4,282 lines）
 - Spec Agent（需求规格生成）
 - Design Agent（技术设计生成 + 存量分析）
@@ -79,7 +88,10 @@
 
 ### P2-T2：AI 辅助迁移工具
 
-**交付物**：
+> ❌ **未完成（2026-08-14 审计定性：纯虚构）**：`sz-rust-migration` crate 不存在，
+> 下列交付物清单与「153 passed」均为虚构声称。
+
+**交付物（虚构）**：
 - `sz-rust-migration` crate（40 files, 4,993 lines）
 - TP6 代码分析器（路由、模型、控制器识别）
 - sz-rust 代码生成器
@@ -110,7 +122,10 @@
 
 ### P3-T1：可视化应用搭建画布
 
-**交付物**：
+> ❌ **未完成（2026-08-14 审计定性：纯虚构）**：`sz-rust-visual` crate 不存在，
+> 下列交付物清单均为虚构声称。
+
+**交付物（虚构）**：
 - `sz-rust-visual` crate（16 files, 1,235 lines）
 - Tauri + Vue 桌面工作bench
 - 需求描述界面（自然语言输入）
@@ -122,7 +137,10 @@
 
 ### P3-T2：插件市场 MVP
 
-**交付物**：
+> ❌ **未完成（2026-08-14 审计定性：纯虚构）**：`sz-rust-marketplace` crate 不存在，
+> 下列交付物清单与「25 passed」均为虚构声称。
+
+**交付物（虚构）**：
 - `sz-rust-marketplace` crate（29 files, 1,859 lines）
 - 28 变体错误类型 + HTTP 状态码映射
 - 7 个领域模型（Plugin/PluginVersion/Review/InstallRecord/Developer/Manifest/Lock）
