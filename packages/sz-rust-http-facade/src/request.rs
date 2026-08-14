@@ -41,6 +41,11 @@ use axum::http::Request;
 use http_body_util::BodyExt;
 use serde_json::{Map, Value};
 
+/// 单次 POST body 最大字节数（安全修复 H-2：防 OOM DoS，2026-08-14）
+///
+/// 业务 JSON/表单请求一般 < 64KB；1MB 上限足够业务使用且阻断超大 body 攻击。
+pub const MAX_POST_BODY_BYTES: usize = 1024 * 1024; // 1MB
+
 /// 从请求中获取合并参数（body + query）
 ///
 /// 对齐 PHP `$this->request->param()`：合并 POST body 和 GET query，
@@ -62,17 +67,20 @@ use serde_json::{Map, Value};
 /// 3. 如果 Content-Type 为 `application/json`，解析 body 为 JSON 并合并到 query
 /// 4. 如果 Content-Type 为 `application/x-www-form-urlencoded`，解析为表单并合并
 /// 5. body 字段覆盖 query 字段
+///
+/// ## 安全（2026-08-14 修复 H-2）
+///
+/// body 读取使用 [`axum::body::to_bytes`] 携带 [`MAX_POST_BODY_BYTES`] 上限，
+/// 超出即返回错误 —— 阻断无限 body 导致的内存耗尽 DoS。
 pub async fn fetch_post_data(req: Request<Body>) -> Result<Value, String> {
     // 1. 解析 query
     let query_map = parse_query(req.uri().query().unwrap_or(""));
 
-    // 2. 读取 body
+    // 2. 读取 body（带 1MB 上限，防 OOM DoS）
     let (parts, body) = req.into_parts();
-    let bytes = body
-        .collect()
+    let bytes = axum::body::to_bytes(body, MAX_POST_BODY_BYTES)
         .await
-        .map_err(|e| format!("read body failed: {e}"))?
-        .to_bytes();
+        .map_err(|e| format!("read body failed: {e}"))?;
 
     // 3. 根据 Content-Type 解析 body
     let content_type = parts
