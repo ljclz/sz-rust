@@ -5,6 +5,8 @@ pub mod admin;
 pub mod ai;
 /// 认证相关控制器（对齐 PHP AuthController）
 pub mod auth;
+/// Capability 控制器（能力注册表查询接口）
+pub mod capabilities;
 /// 控制器公共辅助函数（分页解析等）
 pub mod common;
 /// 设备相关控制器（对齐 PHP DeviceController）

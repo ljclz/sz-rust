@@ -1,5 +1,5 @@
 use crate::controllers::{
-    ai, auth, device, file, file_serve, health, merchant, order, product, view,
+    ai, auth, capabilities, device, file, file_serve, health, merchant, order, product, view,
 };
 use crate::middleware::auth_middleware;
 use crate::openapi;
@@ -105,6 +105,8 @@ pub fn create_router(state: AppState) -> Router {
         )
         // AI 聊天接口
         .route("/api/v1/ai/chat", post(ai::chat))
+        // Capability 注册表查询（AI Agent 能力发现）
+        .route("/api/v1/capabilities/list", post(capabilities::list))
         // 视图模板渲染
         .route("/page/{template}", get(view::render_page))
         // 静态文件服务
