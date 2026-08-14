@@ -8,8 +8,23 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+/// 从 Authorization header 提取 Bearer token（安全修复 L-3：大小写不敏感）
+///
+/// 对齐核心库 `strip_bearer_prefix` 语义：`Bearer`/`bearer`/`BEARER` 均识别，
+/// 无前缀时保持原样（由 verify_token 校验失败兜底）。
+pub(crate) fn extract_bearer_token(auth_header: &str) -> &str {
+    let trimmed = auth_header.trim();
+    if trimmed.len() >= 6 {
+        let prefix = &trimmed[..6];
+        if prefix.eq_ignore_ascii_case("bearer") {
+            return trimmed[6..].trim_start();
+        }
+    }
+    trimmed
+}
+
 /// JWT 鉴权中间件：校验 Authorization 头中的 Bearer 令牌，
-/// 公开路径（白名单精确匹配）自动跳过鉴权
+/// 公开路径（白名单精确匹配）自动跳过鉴权。
 ///
 /// 安全说明（2026-07-26 P1 修复）：
 /// - 旧版使用 `path.starts_with("/api/v1/auth/")` 前缀匹配，会绕过 `/api/v1/auth/me`、
@@ -23,6 +38,9 @@ use axum::{
 /// （需 `State<AuthConfig>` + `from_fn_with_state`，本仓使用 `from_fn` + 全局 `auth_service`）。
 /// 保留自研版以维持 JWT 验证逻辑（`auth_service::verify_token`）与错误响应格式不变。
 /// 迁移至 middleware-facade 版需同步改造 `auth_service` 初始化流程。
+///
+/// 安全修复 H-1（2026-08-14）：验证通过后将用户身份注入 `Request.extensions()`
+/// （`Arc<User>`），业务层通过 `auth_service::current_user` 获取，禁止信任请求体身份字段。
 #[deprecated(
     since = "1.2.0",
     note = "请使用 sz_rust_middleware_facade::auth::auth_middleware（需同步迁移 AuthConfig 初始化）"
@@ -34,7 +52,7 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Response {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
+    let token = extract_bearer_token(auth_header);
 
     // 公开路径白名单（精确匹配，避免前缀绕过）
     let path = req.uri().path();

@@ -52,7 +52,7 @@ async fn role_guard(req: Request<Body>, next: Next, required_role: &str) -> Resp
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
+    let token = crate::middleware::auth_middleware::extract_bearer_token(auth_header);
 
     if token.is_empty() {
         return (StatusCode::UNAUTHORIZED, "未提供认证令牌").into_response();

@@ -5,6 +5,21 @@ use tracing;
 use crate::services::mqtt_service::MqttMessageHandler;
 use crate::state::AppState;
 
+/// MQTT 单条消息 payload 上限（安全缓解 L-1：防内存 DoS，256KB）
+const MAX_MQTT_PAYLOAD_BYTES: usize = 256 * 1024;
+
+/// 校验 MQTT topic 中的 device_sn 格式（安全缓解 L-1）
+///
+/// 仅允许字母/数字/连字符，长度 1-64。拒绝包含 `/`、空白、控制字符或
+/// 日志注入序列（`\n` 等）的异常标识。
+fn is_valid_device_sn(sn: &str) -> bool {
+    !sn.is_empty()
+        && sn.len() <= 64
+        && sn
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// MQTT 消息分发器
 pub struct MqttDispatcher;
 
@@ -12,6 +27,12 @@ impl MqttDispatcher {
     /// 分发 MQTT 消息到对应的处理器
     #[tracing::instrument(skip(state, payload), fields(topic))]
     pub async fn dispatch(state: &AppState, topic: &str, payload: &[u8]) {
+        // 安全缓解 L-1（2026-08-14）：payload 大小上限，防 MQTT 内存 DoS
+        if payload.len() > MAX_MQTT_PAYLOAD_BYTES {
+            tracing::warn!(topic, len = payload.len(), "MQTT: payload 超限丢弃");
+            return;
+        }
+
         let payload_value: Value = match serde_json::from_slice(payload) {
             Ok(v) => v,
             Err(_) => {
@@ -31,6 +52,12 @@ impl MqttDispatcher {
 
         let device_sn = parts[3];
         let action = parts[4];
+
+        // 安全缓解 L-1：device_sn 格式校验（字母数字连字符，防日志注入与异常标识）
+        if !is_valid_device_sn(device_sn) {
+            tracing::warn!(device_sn, "MQTT: 非法 device_sn 丢弃");
+            return;
+        }
 
         match action {
             "status" => {

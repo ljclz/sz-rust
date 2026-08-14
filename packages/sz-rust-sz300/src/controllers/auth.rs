@@ -41,6 +41,17 @@ fn clear_csrf_cookie(response: &mut Response) {
     }
 }
 
+/// Refresh Token Cookie 名称（安全修复 L-2：HttpOnly 存储）
+const REFRESH_COOKIE_NAME: &str = "sz300_refresh_token";
+
+/// 当前 Unix 时间戳（秒）
+fn now_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 impl AuthController {
     /// 用户登录 — 仅负责解析请求、调用 service、格式化响应
     ///
@@ -194,15 +205,29 @@ pub async fn refresh(State(_state): State<AppState>, req: Request<Body>) -> Resp
 
     let issuer = crate::services::auth_service::get_refresh_issuer();
     match issuer.rotate(refresh_token).await {
-        Ok(pair) => ctrl.render_success(
-            "刷新成功",
-            json!({
-                "access_token": pair.access_token,
-                "refresh_token": pair.refresh_token,
-                "access_expires_at": pair.access_expires_at,
-                "refresh_expires_at": pair.refresh_expires_at,
-            }),
-        ),
+        Ok(pair) => {
+            let mut resp = ctrl.render_success(
+                "刷新成功",
+                json!({
+                    "access_token": pair.access_token,
+                    "refresh_token": pair.refresh_token,
+                    "access_expires_at": pair.access_expires_at,
+                    "refresh_expires_at": pair.refresh_expires_at,
+                }),
+            );
+            // 安全修复 L-2（2026-08-14）：同时通过 HttpOnly Cookie 下发 refresh_token，
+            // 降低 XSS 窃取风险（JS 无法读取 HttpOnly cookie；body 字段保留向后兼容）。
+            let cookie_value = format!(
+                "{}={}; Path=/api/v1/auth/refresh; Max-Age={}; SameSite=Strict; Secure; HttpOnly=true",
+                REFRESH_COOKIE_NAME,
+                pair.refresh_token,
+                pair.refresh_expires_at.saturating_sub(now_timestamp()),
+            );
+            if let Ok(value) = cookie_value.parse() {
+                resp.headers_mut().append("set-cookie", value);
+            }
+            resp
+        }
         Err(e) => {
             let msg = match e {
                 RefreshTokenError::Expired => "refresh_token 已过期".to_string(),
@@ -223,13 +248,21 @@ pub async fn refresh(State(_state): State<AppState>, req: Request<Body>) -> Resp
 
 /// 退出登录（对齐 PHP AuthController::logout）
 ///
-/// 清除客户端 CSRF Cookie，防止退出后 Cookie 残留。
+/// 清除客户端 CSRF Cookie 与 Refresh Token Cookie，防止退出后残留。
 #[tracing::instrument(skip(_state, req))]
 pub async fn logout(State(_state): State<AppState>, req: Request<Body>) -> Response {
     let _data = req;
     let ctrl = AuthController;
     let mut resp = ctrl.render_success("已退出登录", json!({}));
     clear_csrf_cookie(&mut resp);
+    // 安全修复 L-2：清除 HttpOnly refresh token cookie
+    let cookie_value = format!(
+        "{}={}; Path=/api/v1/auth/refresh; Max-Age=0; SameSite=Strict; Secure; HttpOnly=true",
+        REFRESH_COOKIE_NAME, ""
+    );
+    if let Ok(value) = cookie_value.parse() {
+        resp.headers_mut().append("set-cookie", value);
+    }
     resp
 }
 
