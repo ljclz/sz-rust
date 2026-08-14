@@ -73,5 +73,35 @@ async fn plugin_node_timeout_config() {
         ..WorkflowConfig::default()
     };
     let engine = WorkflowEngine::new(config, WorkflowDeps::default_for_test());
-    let _ = &engine;
+
+    // 验证带自定义超时配置的引擎可正常导入并启动流程（超时配置不破坏构造/执行链路）
+    let yaml = r#"
+flow_key: timeout_test
+version: "1.0.0"
+name: 超时配置测试
+nodes:
+  - node_id: start
+    node_type: start
+    kind: start
+    next: end
+  - node_id: end
+    node_type: end
+    kind: end
+start_node: start
+active: true
+"#;
+    let imported = engine.import_definition(yaml, DefinitionFormat::Yaml).await;
+    assert!(
+        imported.is_ok(),
+        "自定义超时配置下应能导入流程定义，实际: {:?}",
+        imported
+    );
+    let summary = engine
+        .start_instance("timeout_test", serde_json::json!({}), "user1")
+        .await;
+    assert!(
+        summary.is_ok(),
+        "自定义超时配置下应能启动实例，实际: {:?}",
+        summary
+    );
 }

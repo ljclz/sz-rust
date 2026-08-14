@@ -448,29 +448,51 @@ mod tests {
     // 组 2：便捷构造函数
     // ====================================================================
 
-    #[test]
-    fn test_compression_layer_default() {
-        let _layer = compression_layer();
-        // CompressionLayer::new() 返回默认配置（gzip）
-        // 验证不 panic 即可
+    #[tokio::test]
+    async fn test_compression_layer_default() {
+        // gzip 压缩 layer：大响应应带 content-encoding: gzip
+        let router = make_router().layer(compression_layer());
+        let req = make_request_with_header("GET", "/large", "accept-encoding", "gzip");
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let encoding = resp
+            .headers()
+            .get("content-encoding")
+            .map(|v| v.to_str().unwrap().to_string());
+        assert_eq!(
+            encoding.as_deref(),
+            Some("gzip"),
+            "大响应经 compression_layer 应返回 gzip 压缩"
+        );
     }
 
-    #[test]
-    fn test_timeout_layer_with_duration() {
-        let _layer = timeout_layer(Duration::from_secs(30));
-        // TimeoutLayer::new(duration) 创建超时 Layer
+    #[tokio::test]
+    async fn test_timeout_layer_with_duration() {
+        // 30s 超时：正常请求应在超时前完成（返回 200）
+        let router = make_router().layer(timeout_layer(Duration::from_secs(30)));
+        let resp = router.oneshot(make_request("GET", "/")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(read_body(resp).await, "hello world");
     }
 
-    #[test]
-    fn test_timeout_layer_zero_duration() {
-        // 边界测试：0 秒超时（立即超时）
-        let _layer = timeout_layer(Duration::from_secs(0));
+    #[tokio::test]
+    async fn test_timeout_layer_zero_duration() {
+        // 边界测试：0 秒超时 layer。实测 tower-http 对立即完成的请求不触发超时，
+        // 因此请求仍正常完成（200）；本测试验证 0 超时配置不破坏请求处理链路。
+        let router = make_router().layer(timeout_layer(Duration::from_secs(0)));
+        let resp = router.oneshot(make_request("GET", "/")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(read_body(resp).await, "hello world");
     }
 
-    #[test]
-    fn test_tower_trace_layer_for_http() {
-        let _layer = tower_trace_layer();
-        // TraceLayer::new_for_http() 创建 HTTP 请求追踪 Layer
+    #[tokio::test]
+    async fn test_tower_trace_layer_for_http() {
+        // TraceLayer 应用于 router 后请求应正常处理
+        let apply = tower_trace_layer();
+        let router = apply(make_router());
+        let resp = router.oneshot(make_request("GET", "/")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(read_body(resp).await, "hello world");
     }
 
     // ====================================================================

@@ -794,9 +794,10 @@ mod tests {
             child_pk: "id".to_string(),
         });
         // 调用方应先检查 is_one_to_one，false 时不调用 php_with_join_sql
-        if is_one_to_one(&has_many_rel) {
-            panic!("HasMany should not be OneToOne");
-        }
+        assert!(
+            !is_one_to_one(&has_many_rel),
+            "HasMany 不应被判定为 OneToOne"
+        );
         // 不调用 php_with_join_sql，对齐 PHP unset($with[$key]) 行为
     }
 

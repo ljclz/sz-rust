@@ -1,7 +1,7 @@
 # 插件市场设计方案
 
 > **目标**：建立 sz-rust 插件生态，允许开发者发布和分享插件  
-> **核心组件**：`sz-rust-addons-loader`（已实现）+ Plugin trait（待实现）  
+> **核心组件**：`sz-rust-addons-loader`（已实现：独立库，未接入生产默认链路，见 2026-08-13 审计报告）+ Plugin trait（待实现）  
 > **分发方式**：crates.io + Git 仓库 + 本地目录
 
 ---

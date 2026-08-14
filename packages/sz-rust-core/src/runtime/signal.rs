@@ -188,23 +188,37 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_signal_does_not_block_indefinitely_in_select() {
         // 验证 shutdown_signal 可以在 select! 中与其他 future 组合
-        // 这里用 timeout 来验证它不会立即返回（除非有信号）
+        // 用 sleep 分支获胜来验证 shutdown_signal 不会立即返回（除非有信号）
+        let mut timed_out = false;
         tokio::select! {
             _ = shutdown_signal() => {
                 // 收到信号（测试环境通常不会收到）
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                // 超时，验证 shutdown_signal 不会立即返回
+                timed_out = true;
             }
         }
+        assert!(timed_out, "shutdown_signal 不应在无信号时立即返回");
     }
 
     #[tokio::test]
     async fn test_shutdown_with_token_cancels_token() {
-        // 验证 shutdown_with_token 的类型签名正确
+        // 验证 shutdown_with_token 可组合进 select!，且无信号时不会提前 cancel token
         let token = CancellationToken::new();
-        let _fut = shutdown_with_token(token.clone());
-        // 不实际 await（会阻塞等待信号），仅验证类型
+        let mut timed_out = false;
+        tokio::select! {
+            _ = shutdown_with_token(token.clone()) => {
+                // 收到信号（测试环境通常不会收到）
+            }
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                timed_out = true;
+            }
+        }
+        assert!(timed_out, "shutdown_with_token 不应在无信号时提前返回");
+        assert!(
+            !token.is_cancelled(),
+            "无信号时 shutdown_with_token 不应取消 token"
+        );
     }
 
     #[tokio::test]
@@ -229,8 +243,12 @@ mod tests {
             token_clone.cancel();
         });
 
-        // cancelled() 在 cancel 后立即完成
-        token.cancelled().await;
+        // cancelled() 在 cancel 后立即完成（不应挂起）
+        let result = tokio::time::timeout(Duration::from_secs(1), token.cancelled()).await;
+        assert!(
+            result.is_ok(),
+            "token.cancelled() 在 cancel 后应在 1s 内完成"
+        );
     }
 
     #[tokio::test]
@@ -299,14 +317,16 @@ mod tests {
             token_clone.cancel();
         });
 
+        let mut cancelled = false;
         tokio::select! {
             _ = token.cancelled() => {
-                // 预期路径
+                cancelled = true;
             }
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 panic!("token cancellation should win");
             }
         }
+        assert!(cancelled, "token 取消应使 cancelled() 分支获胜");
     }
 
     #[tokio::test]

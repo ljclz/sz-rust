@@ -107,6 +107,8 @@ pub enum SamplingConfig {
     TraceIdRatioBased(f64),
 }
 
+// 显式 impl 而非 derive：明确默认值为 AlwaysOn（可读性优先，clippy 建议可忽略）
+#[allow(clippy::derivable_impls)]
 impl Default for SamplingConfig {
     fn default() -> Self {
         Self::AlwaysOn

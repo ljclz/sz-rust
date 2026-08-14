@@ -175,7 +175,29 @@ mod tests {
         let config = WorkflowConfig::default();
         let deps = WorkflowDeps::default_for_test();
         let engine = WorkflowEngine::new(config, deps);
-        let _ = &engine;
+
+        // 验证引擎可导入并校验一个合法流程定义（构造后基础能力可用）
+        let yaml = r#"
+flow_key: init_test
+version: "1.0.0"
+name: 初始化测试
+nodes:
+  - node_id: start
+    node_type: start
+    kind: start
+    next: end
+  - node_id: end
+    node_type: end
+    kind: end
+start_node: start
+active: true
+"#;
+        let result = engine.import_definition(yaml, DefinitionFormat::Yaml).await;
+        assert!(
+            result.is_ok(),
+            "engine_init 后应能导入合法流程定义，实际: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
