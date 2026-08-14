@@ -47,7 +47,7 @@ impl Default for Deal {
         Self {
             id: 0,
             name: String::new(),
-            stage: "prospect".to_string(),
+            stage: "initial".to_string(),
             amount: 0.0,
             contact_id: 0,
             lead_id: 0,

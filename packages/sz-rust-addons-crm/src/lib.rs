@@ -28,6 +28,7 @@
 
 #![allow(missing_docs)]
 
+pub mod capability;
 pub mod controller;
 pub mod model;
 pub mod service;
@@ -70,6 +71,7 @@ struct ListQuery {
     page_size: Option<u64>,
     keyword: Option<String>,
     stage: Option<String>,
+    status: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -154,6 +156,7 @@ where
                     q.page.unwrap_or(1),
                     q.page_size.unwrap_or(20),
                     q.keyword.clone(),
+                    q.status.clone(),
                 )
                 .await,
             )
@@ -191,7 +194,15 @@ where
     let builder = builder.post(&format!("{}/leads/:id/convert", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
-            Json(controller::lead::LeadController::convert(&*s.leads, path.id).await)
+            Json(
+                controller::lead::LeadController::convert(
+                    &*s.leads,
+                    &*s.contacts,
+                    &*s.deals,
+                    path.id,
+                )
+                .await,
+            )
         }
     });
 
@@ -204,6 +215,7 @@ where
                     &*s.deals,
                     q.page.unwrap_or(1),
                     q.page_size.unwrap_or(20),
+                    q.keyword.clone(),
                     q.stage.clone(),
                 )
                 .await,

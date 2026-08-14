@@ -59,19 +59,23 @@
 use axum::Router;
 use tower_http::cors::CorsLayer;
 
+use super::audit_log::{audit_log_middleware, AuditLogConfig};
 use super::auth::{auth_middleware, AuthConfig};
+use super::body_size_limit::{body_size_limit_middleware, BodySizeLimitConfig};
 use super::chain::MiddlewareChain;
 use super::cors;
+use super::ip_access_control::{ip_access_control_middleware, IpAccessControlConfig};
 use super::log::{log_middleware_with_config, LogConfig};
 use super::order::MiddlewareKind;
 #[cfg(test)]
 use super::order::{DEFAULT_ORDER, PHP_GLOBAL_ORDER};
 use super::rate_limit::{rate_limit_middleware, RateLimitConfig};
+use super::security_headers::{security_headers_middleware, SecurityHeadersConfig};
 use super::trace::{trace_middleware, TraceConfig};
 
 /// 中间件链构建器
 ///
-/// 持有 `MiddlewareChain`（顺序定义）+ 5 个 `Option<Config>`（各中间件配置），
+/// 持有 `MiddlewareChain`（顺序定义）+ 9 个 `Option<Config>`（各中间件配置），
 /// 通过 `apply()` 方法一次性应用到 `axum::Router`。
 ///
 /// ## 字段说明
@@ -84,6 +88,10 @@ use super::trace::{trace_middleware, TraceConfig};
 /// | `auth` | `Option<AuthConfig>` | Auth 中间件配置 |
 /// | `rate_limit` | `Option<RateLimitConfig>` | RateLimit 中间件配置 |
 /// | `trace` | `Option<TraceConfig>` | Trace 中间件配置 |
+/// | `security_headers` | `Option<SecurityHeadersConfig>` | 安全响应头中间件配置 |
+/// | `ip_access_control` | `Option<IpAccessControlConfig>` | IP 访问控制中间件配置 |
+/// | `audit_log` | `Option<AuditLogConfig>` | 安全审计日志中间件配置 |
+/// | `body_size_limit` | `Option<BodySizeLimitConfig>` | 请求体大小限制中间件配置 |
 #[derive(Debug, Clone)]
 pub struct MiddlewareBuilder {
     chain: MiddlewareChain,
@@ -92,6 +100,10 @@ pub struct MiddlewareBuilder {
     auth: Option<AuthConfig>,
     rate_limit: Option<RateLimitConfig>,
     trace: Option<TraceConfig>,
+    security_headers: Option<SecurityHeadersConfig>,
+    ip_access_control: Option<IpAccessControlConfig>,
+    audit_log: Option<AuditLogConfig>,
+    body_size_limit: Option<BodySizeLimitConfig>,
 }
 
 impl MiddlewareBuilder {
@@ -104,6 +116,10 @@ impl MiddlewareBuilder {
             auth: None,
             rate_limit: None,
             trace: None,
+            security_headers: None,
+            ip_access_control: None,
+            audit_log: None,
+            body_size_limit: None,
         }
     }
 
@@ -118,6 +134,10 @@ impl MiddlewareBuilder {
             auth: None,
             rate_limit: None,
             trace: None,
+            security_headers: None,
+            ip_access_control: None,
+            audit_log: None,
+            body_size_limit: None,
         }
     }
 
@@ -133,6 +153,10 @@ impl MiddlewareBuilder {
             auth: None,
             rate_limit: None,
             trace: None,
+            security_headers: None,
+            ip_access_control: None,
+            audit_log: None,
+            body_size_limit: None,
         }
     }
 
@@ -172,6 +196,30 @@ impl MiddlewareBuilder {
         self
     }
 
+    /// 设置安全响应头配置
+    pub fn with_security_headers(mut self, config: SecurityHeadersConfig) -> Self {
+        self.security_headers = Some(config);
+        self
+    }
+
+    /// 设置 IP 访问控制配置
+    pub fn with_ip_access_control(mut self, config: IpAccessControlConfig) -> Self {
+        self.ip_access_control = Some(config);
+        self
+    }
+
+    /// 设置安全审计日志配置
+    pub fn with_audit_log(mut self, config: AuditLogConfig) -> Self {
+        self.audit_log = Some(config);
+        self
+    }
+
+    /// 设置请求体大小限制配置
+    pub fn with_body_size_limit(mut self, config: BodySizeLimitConfig) -> Self {
+        self.body_size_limit = Some(config);
+        self
+    }
+
     /// 从链中移除所有指定类型的中间件（同时清除对应 Config）
     ///
     /// 返回被移除的中间件数量（仅链中数量，不包括 Config）。
@@ -184,6 +232,10 @@ impl MiddlewareBuilder {
                 MiddlewareKind::Log => self.log = None,
                 MiddlewareKind::RateLimit => self.rate_limit = None,
                 MiddlewareKind::Auth => self.auth = None,
+                MiddlewareKind::SecurityHeaders => self.security_headers = None,
+                MiddlewareKind::IpAccessControl => self.ip_access_control = None,
+                MiddlewareKind::AuditLog => self.audit_log = None,
+                MiddlewareKind::BodySizeLimit => self.body_size_limit = None,
             }
         }
         removed
@@ -208,6 +260,10 @@ impl MiddlewareBuilder {
                 MiddlewareKind::Log => self.log = None,
                 MiddlewareKind::RateLimit => self.rate_limit = None,
                 MiddlewareKind::Auth => self.auth = None,
+                MiddlewareKind::SecurityHeaders => self.security_headers = None,
+                MiddlewareKind::IpAccessControl => self.ip_access_control = None,
+                MiddlewareKind::AuditLog => self.audit_log = None,
+                MiddlewareKind::BodySizeLimit => self.body_size_limit = None,
             }
         }
         removed
@@ -243,6 +299,26 @@ impl MiddlewareBuilder {
         self.trace.as_ref()
     }
 
+    /// 返回安全响应头配置引用
+    pub fn security_headers(&self) -> Option<&SecurityHeadersConfig> {
+        self.security_headers.as_ref()
+    }
+
+    /// 返回 IP 访问控制配置引用
+    pub fn ip_access_control(&self) -> Option<&IpAccessControlConfig> {
+        self.ip_access_control.as_ref()
+    }
+
+    /// 返回安全审计日志配置引用
+    pub fn audit_log(&self) -> Option<&AuditLogConfig> {
+        self.audit_log.as_ref()
+    }
+
+    /// 返回请求体大小限制配置引用
+    pub fn body_size_limit(&self) -> Option<&BodySizeLimitConfig> {
+        self.body_size_limit.as_ref()
+    }
+
     /// 判断指定中间件是否已启用（链中包含且 Config 已设置）
     ///
     /// 注意：`Cors` 的 Config 是 `CorsLayer`（必为 `Some` 才视为已启用）。
@@ -256,6 +332,10 @@ impl MiddlewareBuilder {
             MiddlewareKind::Log => self.log.is_some(),
             MiddlewareKind::RateLimit => self.rate_limit.is_some(),
             MiddlewareKind::Auth => self.auth.is_some(),
+            MiddlewareKind::SecurityHeaders => self.security_headers.is_some(),
+            MiddlewareKind::IpAccessControl => self.ip_access_control.is_some(),
+            MiddlewareKind::AuditLog => self.audit_log.is_some(),
+            MiddlewareKind::BodySizeLimit => self.body_size_limit.is_some(),
         }
     }
 
@@ -275,6 +355,10 @@ impl MiddlewareBuilder {
         let mut auth = self.auth;
         let mut rate_limit = self.rate_limit;
         let mut trace = self.trace;
+        let mut security_headers = self.security_headers;
+        let mut ip_access_control = self.ip_access_control;
+        let mut audit_log = self.audit_log;
+        let mut body_size_limit = self.body_size_limit;
         for kind in self.chain.service_builder_order() {
             router = match kind {
                 MiddlewareKind::Trace => {
@@ -318,6 +402,46 @@ impl MiddlewareBuilder {
                         router
                     }
                 }
+                MiddlewareKind::SecurityHeaders => {
+                    if let Some(cfg) = security_headers.take() {
+                        router.layer(axum::middleware::from_fn_with_state(
+                            cfg,
+                            security_headers_middleware,
+                        ))
+                    } else {
+                        router
+                    }
+                }
+                MiddlewareKind::IpAccessControl => {
+                    if let Some(cfg) = ip_access_control.take() {
+                        router.layer(axum::middleware::from_fn_with_state(
+                            cfg,
+                            ip_access_control_middleware,
+                        ))
+                    } else {
+                        router
+                    }
+                }
+                MiddlewareKind::AuditLog => {
+                    if let Some(cfg) = audit_log.take() {
+                        router.layer(axum::middleware::from_fn_with_state(
+                            cfg,
+                            audit_log_middleware,
+                        ))
+                    } else {
+                        router
+                    }
+                }
+                MiddlewareKind::BodySizeLimit => {
+                    if let Some(cfg) = body_size_limit.take() {
+                        router.layer(axum::middleware::from_fn_with_state(
+                            cfg,
+                            body_size_limit_middleware,
+                        ))
+                    } else {
+                        router
+                    }
+                }
             };
         }
         router
@@ -335,12 +459,16 @@ impl std::fmt::Display for MiddlewareBuilder {
         write!(f, "MiddlewareBuilder(chain={}, ", self.chain)?;
         write!(
             f,
-            "cors={}, log={}, auth={}, rate_limit={}, trace={})",
+            "cors={}, log={}, auth={}, rate_limit={}, trace={}, security_headers={}, ip_access={}, audit={}, body_size={}",
             self.cors.is_some(),
             self.log.is_some(),
             self.auth.is_some(),
             self.rate_limit.is_some(),
-            self.trace.is_some()
+            self.trace.is_some(),
+            self.security_headers.is_some(),
+            self.ip_access_control.is_some(),
+            self.audit_log.is_some(),
+            self.body_size_limit.is_some(),
         )
     }
 }
@@ -429,7 +557,7 @@ mod tests {
     fn test_default_builder_uses_default_order() {
         let builder = MiddlewareBuilder::default_builder();
         assert_eq!(builder.chain().order(), DEFAULT_ORDER);
-        assert_eq!(builder.chain().len(), 5);
+        assert_eq!(builder.chain().len(), 9);
         // 默认所有 Config 为 None
         assert!(builder.cors().is_none());
         assert!(builder.log().is_none());
@@ -560,7 +688,7 @@ mod tests {
             .with_rate_limit(make_rate_limit_config())
             .with_auth(AuthConfig::default());
         let removed = builder.remove_from(MiddlewareKind::RateLimit);
-        assert_eq!(removed, 2);
+        assert_eq!(removed, 3);
         assert!(builder.rate_limit().is_none());
         assert!(builder.auth().is_none());
         assert!(!builder.chain().contains(MiddlewareKind::RateLimit));
@@ -790,19 +918,31 @@ mod tests {
     fn r5_4_default_order_aligns_with_php_extension() {
         // PHP 全局 + 业务中间件顺序：
         //   SessionInit(Trace) → AllowCrossDomain(Cors) → [Log/RateLimit/Auth 业务追加]
+        // v2 新增安全中间件：BodySizeLimit/IpAccessControl/SecurityHeaders 插入在 Trace 之后、Cors 之前；
+        // AuditLog 追加在 Auth 之后（最后执行，可关联 user_id）
         let builder = default_builder();
         assert_eq!(
             builder.chain().order(),
             [
                 MiddlewareKind::Trace,
+                MiddlewareKind::BodySizeLimit,
+                MiddlewareKind::IpAccessControl,
+                MiddlewareKind::SecurityHeaders,
                 MiddlewareKind::Cors,
                 MiddlewareKind::Log,
                 MiddlewareKind::RateLimit,
-                MiddlewareKind::Auth
+                MiddlewareKind::Auth,
+                MiddlewareKind::AuditLog,
             ]
         );
-        // PHP 全局顺序必须是默认顺序的前缀
-        assert!(builder.chain().order().starts_with(PHP_GLOBAL_ORDER));
+        // PHP 全局中间件必须包含在默认顺序中
+        // （安全中间件插入在全局中间件之间，不再保证前缀关系）
+        for kind in PHP_GLOBAL_ORDER {
+            assert!(
+                builder.chain().order().contains(kind),
+                "default order missing PHP global middleware {kind}"
+            );
+        }
     }
 
     #[test]
@@ -810,7 +950,7 @@ mod tests {
         // 公开 API 跳过 RateLimit + Auth（对齐 PHP 公开路由不挂 Auth middleware）
         let mut builder = default_builder().with_auth(AuthConfig::default());
         let removed = builder.remove_from(MiddlewareKind::RateLimit);
-        assert_eq!(removed, 2);
+        assert_eq!(removed, 3);
         assert!(!builder.is_enabled(MiddlewareKind::Auth));
         assert!(!builder.is_enabled(MiddlewareKind::RateLimit));
         // Trace/Cors/Log 仍保留
@@ -824,15 +964,19 @@ mod tests {
         // 验证 apply 按 service_builder_order()（逆序）应用
         let builder = default_builder();
         let sb_order = builder.chain().service_builder_order();
-        // 业务期望：Trace, Cors, Log, RateLimit, Auth
-        // ServiceBuilder 注册顺序（逆序）：Auth, RateLimit, Log, Cors, Trace
+        // 业务期望：Trace, BodySizeLimit, IpAccessControl, SecurityHeaders, Cors, Log, RateLimit, Auth, AuditLog
+        // ServiceBuilder 注册顺序（逆序）：AuditLog, Auth, RateLimit, Log, Cors, SecurityHeaders, IpAccessControl, BodySizeLimit, Trace
         assert_eq!(
             sb_order,
             [
+                MiddlewareKind::AuditLog,
                 MiddlewareKind::Auth,
                 MiddlewareKind::RateLimit,
                 MiddlewareKind::Log,
                 MiddlewareKind::Cors,
+                MiddlewareKind::SecurityHeaders,
+                MiddlewareKind::IpAccessControl,
+                MiddlewareKind::BodySizeLimit,
                 MiddlewareKind::Trace,
             ]
         );

@@ -255,3 +255,8 @@ pub mod query_cache;
 pub use pool_scaler::{PoolMetrics, PoolScaler, PoolScalerConfig};
 pub use pool_warmer::{PoolWarmer, WarmupError as PoolWarmupError};
 pub use query_cache::{QueryCache, QueryCacheConfig, QueryCacheError};
+
+// ============================================================================
+// 数据范围控制 Data Scope — 应用层行级数据过滤
+// ============================================================================
+pub mod data_scope;

@@ -21,6 +21,12 @@ impl FileService {
     }
 
     /// 保存上传文件
+    ///
+    /// # Deprecated
+    ///
+    /// 建议迁移至 `sz_rust_core::upload` 上传引擎（支持云存储驱动）。
+    /// 当前实现保留以兼容现有调用方。
+    #[deprecated(since = "1.2.0", note = "请使用 sz_rust_core::upload 上传引擎")]
     pub async fn save(filename: &str, data: &[u8]) -> Result<String, String> {
         // 检查文件大小
         if data.len() as u64 > MAX_FILE_SIZE {

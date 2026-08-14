@@ -136,10 +136,93 @@ pub enum MakeCommand {
         /// 资源名称（如 `User`）
         name: String,
     },
+
+    /// 生成插件骨架（P1-T3 插件模板库）
+    ///
+    /// 基于 Tera 模板引擎生成完整插件结构，含 Model、Controller、Service、
+    /// Repository、Migration、Routes、Manifest、Tests。
+    /// 生成后自动执行 `cargo check` 验证，失败时回滚已写入文件。
+    #[command(name = "plugin")]
+    Plugin {
+        /// 模板类型（如 `crud` 或 `master-slave`）
+        #[arg(long)]
+        template: String,
+        /// 插件名称（如 `user-management`）
+        #[arg(long)]
+        name: String,
+        /// 表名（可选，默认取插件名 snake_case）
+        #[arg(long)]
+        table: Option<String>,
+        /// 字段定义（如 `id:i32:pk,name:String,age:i32`）
+        #[arg(long)]
+        fields: Option<String>,
+        /// 强制覆盖已存在目录
+        #[arg(long)]
+        force: bool,
+        /// 输出目录（可选，默认 `plugins/<name>/`）
+        #[arg(long)]
+        output: Option<String>,
+        /// 主表名（主从模板专用）
+        #[arg(long)]
+        master: Option<String>,
+        /// 从表名（主从模板专用）
+        #[arg(long)]
+        slave: Option<String>,
+        /// 主表字段定义（主从模板专用）
+        #[arg(long)]
+        master_fields: Option<String>,
+        /// 从表字段定义（主从模板专用）
+        #[arg(long)]
+        slave_fields: Option<String>,
+        /// 外键字段名（主从模板专用）
+        #[arg(long)]
+        foreign_key: Option<String>,
+    },
+
+    /// 生成前端代码（P4-T1 前端代码生成）
+    ///
+    /// 根据 ORM 模型自动生成 Vue/React 组件、路由、权限、API 客户端。
+    /// 对齐 Laravel Artisan `make:frontend` 风格。
+    #[command(name = "frontend")]
+    Frontend {
+        /// 要生成的模型名（可多次指定）
+        #[arg(long = "model")]
+        models: Vec<String>,
+        /// 模型目录（默认 `src/model/`）
+        #[arg(long = "model-dir", default_value = "src/model/")]
+        model_dir: String,
+        /// 前端框架（vue / react）
+        #[arg(long, default_value = "vue")]
+        framework: String,
+        /// UI 组件库（element_plus / ant_design_vue）
+        #[arg(long = "ui", default_value = "element_plus")]
+        ui: String,
+        /// 输出目录（默认 `./frontend/`）
+        #[arg(long, default_value = "./frontend/")]
+        output: String,
+        /// 自定义模板目录
+        #[arg(long = "template-dir")]
+        template_dir: Option<String>,
+        /// 覆盖策略（skip / overwrite / merge）
+        #[arg(long = "override", default_value = "skip")]
+        override_strategy: String,
+        /// 生成测试骨架
+        #[arg(long = "with-tests")]
+        with_tests: bool,
+        /// 生成请求拦截器
+        #[arg(long = "with-interceptors")]
+        with_interceptors: bool,
+        /// 懒加载路由（默认 true）
+        #[arg(long = "lazy-load", default_value_t = true)]
+        lazy_load: bool,
+        /// 强制覆盖非空输出目录
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// 执行 make 子命令
-pub fn execute(cmd: &MakeCommand) -> Result<(), CliError> {
+pub async fn execute(cmd: &MakeCommand) -> Result<(), CliError> {
     match cmd {
         MakeCommand::Model { name } => execute_make_model(name),
         MakeCommand::Controller { name, api, plain } => execute_make_controller(name, *api, *plain),
@@ -153,6 +236,62 @@ pub fn execute(cmd: &MakeCommand) -> Result<(), CliError> {
         MakeCommand::Service { name } => execute_make_service(name),
         MakeCommand::Middleware { name } => execute_make_middleware(name),
         MakeCommand::Scaffold { name } => execute_make_scaffold(name),
+        MakeCommand::Plugin {
+            template,
+            name,
+            table,
+            fields,
+            force,
+            output,
+            master,
+            slave,
+            master_fields,
+            slave_fields,
+            foreign_key,
+        } => {
+            execute_make_plugin(crate::context_builder::PluginCommandArgs {
+                template: template.clone(),
+                name: name.clone(),
+                table: table.clone(),
+                fields: fields.clone(),
+                force: *force,
+                output: output.clone(),
+                master: master.clone(),
+                slave: slave.clone(),
+                master_fields: master_fields.clone(),
+                slave_fields: slave_fields.clone(),
+                foreign_key: foreign_key.clone(),
+            })
+            .await
+        }
+        MakeCommand::Frontend {
+            models,
+            model_dir,
+            framework,
+            ui,
+            output,
+            template_dir,
+            override_strategy,
+            with_tests,
+            with_interceptors,
+            lazy_load,
+            force,
+        } => {
+            execute_make_frontend(
+                models,
+                model_dir,
+                framework,
+                ui,
+                output,
+                template_dir.as_deref(),
+                override_strategy,
+                *with_tests,
+                *with_interceptors,
+                *lazy_load,
+                *force,
+            )
+            .await
+        }
     }
 }
 
@@ -552,6 +691,274 @@ fn name_to_table(name: &str) -> String {
     name.to_string()
 }
 
+/// `make:plugin` 命令主流程（P1-T3）
+///
+/// 状态机：Validate → LoadTemplates → BuildContext → Render → WriteFiles
+/// 后续 Batch D 将追加 CargoCheck → Rollback 分支。
+pub async fn execute_make_plugin(
+    args: crate::context_builder::PluginCommandArgs,
+) -> Result<(), CliError> {
+    use crate::context_builder::TemplateContextBuilder;
+    use crate::template_engine::TemplateEngine;
+    use crate::validator::InputValidator;
+
+    InputValidator::validate_plugin_name(&args.name)?;
+
+    if let Some(ref table) = args.table {
+        InputValidator::validate_table_name(table)?;
+    }
+    if let Some(ref fields) = args.fields {
+        InputValidator::validate_fields(fields)?;
+    }
+    if let Some(ref master) = args.master {
+        InputValidator::validate_table_name(master)?;
+    }
+    if let Some(ref slave) = args.slave {
+        InputValidator::validate_table_name(slave)?;
+    }
+
+    let template_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
+    let engine = TemplateEngine::init(&template_dir).await?;
+
+    engine.validate_template_type(&args.template)?;
+
+    let is_master_slave = args.template == "master-slave";
+
+    let ctx = if is_master_slave {
+        TemplateContextBuilder::new(args.clone()).build_master_slave()?
+    } else {
+        TemplateContextBuilder::new(args.clone()).build()?
+    };
+
+    let output_dir = args
+        .output
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("plugins").join(&args.name));
+
+    if output_dir.exists() && !args.force {
+        return Err(CliError::DirExists(output_dir));
+    }
+
+    let template_files: &[(&str, &str)] = match args.template.as_str() {
+        "master-slave" => &[
+            (
+                "plugin-master-slave/master_model.rs.tera",
+                "src/master_model.rs",
+            ),
+            (
+                "plugin-master-slave/slave_model.rs.tera",
+                "src/slave_model.rs",
+            ),
+            (
+                "plugin-master-slave/master_controller.rs.tera",
+                "src/master_controller.rs",
+            ),
+            (
+                "plugin-master-slave/slave_controller.rs.tera",
+                "src/slave_controller.rs",
+            ),
+            (
+                "plugin-master-slave/cascade_service.rs.tera",
+                "src/cascade_service.rs",
+            ),
+            (
+                "plugin-master-slave/datasource_config.rs.tera",
+                "src/datasource_config.rs",
+            ),
+            (
+                "plugin-master-slave/migration.sql.tera",
+                "migrations/master_slave.sql",
+            ),
+            ("plugin-master-slave/manifest.json.tera", "manifest.json"),
+        ],
+        "workflow" => &[
+            ("plugin-workflow/model.rs.tera", "src/model.rs"),
+            ("plugin-workflow/controller.rs.tera", "src/controller.rs"),
+            ("plugin-workflow/routes.rs.tera", "src/routes.rs"),
+            ("plugin-workflow/migration.sql.tera", "migrations/table.sql"),
+            ("plugin-workflow/manifest.json.tera", "manifest.json"),
+            ("plugin-workflow/tests.rs.tera", "tests/workflow_test.rs"),
+        ],
+        "report" => &[
+            ("plugin-report/model.rs.tera", "src/model.rs"),
+            ("plugin-report/controller.rs.tera", "src/controller.rs"),
+            ("plugin-report/routes.rs.tera", "src/routes.rs"),
+            ("plugin-report/migration.sql.tera", "migrations/table.sql"),
+            ("plugin-report/manifest.json.tera", "manifest.json"),
+            ("plugin-report/tests.rs.tera", "tests/report_test.rs"),
+        ],
+        _ => &[
+            ("plugin-crud/model.rs.tera", "src/model.rs"),
+            ("plugin-crud/controller.rs.tera", "src/controller.rs"),
+            ("plugin-crud/service.rs.tera", "src/service.rs"),
+            ("plugin-crud/repository.rs.tera", "src/repository.rs"),
+            ("plugin-crud/migration.sql.tera", "migrations/table.sql"),
+            ("plugin-crud/routes.rs.tera", "src/routes.rs"),
+            ("plugin-crud/manifest.json.tera", "manifest.json"),
+            ("plugin-crud/tests.rs.tera", "tests/crud_test.rs"),
+        ],
+    };
+
+    let mut rendered_files: Vec<(PathBuf, String)> = Vec::new();
+    for (template_name, output_path) in template_files {
+        let content = engine.render(template_name, &ctx)?;
+        rendered_files.push((output_dir.join(output_path), content));
+    }
+
+    let safety_files: Vec<(String, String)> = rendered_files
+        .iter()
+        .map(|(p, c)| (p.display().to_string(), c.clone()))
+        .collect();
+    let violations = crate::safety_validator::SafetyValidator::validate_files(&safety_files);
+    if !violations.is_empty() {
+        let report = crate::safety_validator::SafetyValidator::format_report(&violations);
+        eprintln!("{report}");
+        return Err(CliError::Generic(format!(
+            "安全检查失败：{} 个违规项，已阻止生成",
+            violations.len()
+        )));
+    }
+
+    if output_dir.exists() && args.force {
+        tokio::fs::remove_dir_all(&output_dir).await?;
+    }
+
+    for (file_path, content) in &rendered_files {
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(file_path, content).await?;
+    }
+
+    let written_paths: Vec<std::path::PathBuf> =
+        rendered_files.iter().map(|(p, _)| p.clone()).collect();
+
+    let check_result = crate::cargo_checker::CargoChecker::check(&output_dir).await;
+    match check_result {
+        Ok(result) if result.success => {
+            println!(
+                "Plugin '{}' created successfully at: {}",
+                args.name,
+                output_dir.display()
+            );
+            println!("Files generated:");
+            for (file_path, _) in &rendered_files {
+                println!("  - {}", file_path.display());
+            }
+            println!("cargo check: PASSED");
+            Ok(())
+        }
+        Ok(result) => {
+            eprintln!("cargo check: FAILED");
+            eprintln!("Compilation errors:");
+            for err in &result.errors {
+                eprintln!("  {err}");
+            }
+
+            let failures = crate::cargo_checker::CargoChecker::rollback(&written_paths).await;
+            if !failures.is_empty() {
+                eprintln!(
+                    "Warning: {} files could not be removed during rollback",
+                    failures.len()
+                );
+            }
+
+            Err(CliError::CompileFailed(result.errors))
+        }
+        Err(e) => {
+            eprintln!("cargo check could not be executed: {e}");
+            eprintln!("Rolling back generated files...");
+
+            let failures = crate::cargo_checker::CargoChecker::rollback(&written_paths).await;
+            if !failures.is_empty() {
+                eprintln!(
+                    "Warning: {} files could not be removed during rollback",
+                    failures.len()
+                );
+            }
+
+            Err(e)
+        }
+    }
+}
+
+/// 执行前端代码生成（P4-T1）
+///
+/// 将 CLI 参数转换为 `GenerationConfig`，调用 `CodegenService::generate`，
+/// 输出结构化报告到 stdout。
+#[allow(clippy::too_many_arguments)]
+async fn execute_make_frontend(
+    models: &[String],
+    model_dir: &str,
+    framework: &str,
+    ui: &str,
+    output: &str,
+    template_dir: Option<&str>,
+    override_strategy: &str,
+    with_tests: bool,
+    with_interceptors: bool,
+    lazy_load: bool,
+    force: bool,
+) -> Result<(), CliError> {
+    use sz_rust_frontend_codegen::{
+        CodegenService, Framework, GenerationConfig, OverrideStrategy, UiLibrary,
+    };
+
+    let fw = match framework.to_lowercase().as_str() {
+        "vue" => Framework::Vue,
+        "react" => Framework::React,
+        other => {
+            return Err(CliError::Generic(format!(
+                "不支持的前端框架: {other}（可选: vue, react）"
+            )));
+        }
+    };
+
+    let ui_lib = match ui.to_lowercase().as_str() {
+        "element_plus" | "element-plus" => UiLibrary::ElementPlus,
+        "ant_design_vue" | "ant-design-vue" => UiLibrary::AntDesignVue,
+        other => {
+            return Err(CliError::Generic(format!(
+                "不支持的 UI 库: {other}（可选: element_plus, ant_design_vue）"
+            )));
+        }
+    };
+
+    let strategy = match override_strategy.to_lowercase().as_str() {
+        "skip" => OverrideStrategy::Skip,
+        "overwrite" => OverrideStrategy::Overwrite,
+        "merge" => OverrideStrategy::Merge,
+        other => {
+            return Err(CliError::Generic(format!(
+                "不支持的覆盖策略: {other}（可选: skip, overwrite, merge）"
+            )));
+        }
+    };
+
+    let config = GenerationConfig {
+        models: models.to_vec(),
+        model_dir: PathBuf::from(model_dir),
+        framework: fw,
+        ui_library: ui_lib,
+        output_dir: PathBuf::from(output),
+        template_dir: template_dir.map(PathBuf::from),
+        override_strategy: strategy,
+        with_tests,
+        with_interceptors,
+        lazy_load,
+        force,
+    };
+
+    let service = CodegenService::new();
+    let report = service
+        .generate(config)
+        .await
+        .map_err(|e| CliError::Generic(e.to_string()))?;
+    println!("{}", report.format_cli());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,8 +1141,8 @@ mod tests {
         assert!(nested.exists());
     }
 
-    #[test]
-    fn test_make_validate_creates_file() {
+    #[tokio::test]
+    async fn test_make_validate_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
         let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
@@ -744,7 +1151,7 @@ mod tests {
         let cmd = MakeCommand::Validate {
             name: "Order".to_string(),
         };
-        execute(&cmd).unwrap();
+        execute(&cmd).await.unwrap();
 
         let validate_path = temp_dir.path().join("app/validate/Order.rs");
         assert!(validate_path.exists());

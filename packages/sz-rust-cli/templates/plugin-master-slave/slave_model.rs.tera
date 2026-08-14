@@ -1,0 +1,17 @@
+{% extends "plugin-crud/model.rs.tera" %}
+
+{% block table_name %}{{ slave_table }}{% endblock %}
+
+{% block table_name_doc %}{{ slave_table }}{% endblock %}
+
+{% block struct_name %}{{ slave_class_name }}{% endblock %}
+
+{% block fields %}
+{%- for field in slave_fields %}
+    pub {{ field.name }}: {{ field.rust_type }},
+{%- endfor %}
+{% endblock %}
+
+{% block struct_name_impl %}{{ slave_class_name }}{% endblock %}
+
+{% block table_name_method %}{{ slave_table }}{% endblock %}

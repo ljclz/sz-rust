@@ -236,7 +236,7 @@ mod tests {
     fn test_default_chain_uses_default_order() {
         let chain = MiddlewareChain::default_chain();
         assert_eq!(chain.order(), DEFAULT_ORDER);
-        assert_eq!(chain.len(), 5);
+        assert_eq!(chain.len(), 9);
     }
 
     #[test]
@@ -355,15 +355,19 @@ mod tests {
     #[test]
     fn test_remove_by_index() {
         let mut chain = MiddlewareChain::default_chain();
-        let removed = chain.remove(2); // 移除 Log
-        assert_eq!(removed, Some(MiddlewareKind::Log));
+        let removed = chain.remove(2); // 移除 IpAccessControl
+        assert_eq!(removed, Some(MiddlewareKind::IpAccessControl));
         assert_eq!(
             chain.order(),
             [
                 MiddlewareKind::Trace,
+                MiddlewareKind::BodySizeLimit,
+                MiddlewareKind::SecurityHeaders,
                 MiddlewareKind::Cors,
+                MiddlewareKind::Log,
                 MiddlewareKind::RateLimit,
                 MiddlewareKind::Auth,
+                MiddlewareKind::AuditLog,
             ]
         );
     }
@@ -372,7 +376,7 @@ mod tests {
     fn test_remove_out_of_bounds_returns_none() {
         let mut chain = MiddlewareChain::default_chain();
         assert_eq!(chain.remove(99), None);
-        assert_eq!(chain.len(), 5); // 未变化
+        assert_eq!(chain.len(), 9); // 未变化
     }
 
     #[test]
@@ -395,14 +399,17 @@ mod tests {
 
     #[test]
     fn test_remove_from_removes_kind_and_after() {
-        // 公开 API 跳过 RateLimit 和 Auth
+        // 公开 API 跳过 RateLimit、Auth 和 AuditLog
         let mut chain = MiddlewareChain::default_chain();
         let removed = chain.remove_from(MiddlewareKind::RateLimit);
-        assert_eq!(removed, 2);
+        assert_eq!(removed, 3);
         assert_eq!(
             chain.order(),
             [
                 MiddlewareKind::Trace,
+                MiddlewareKind::BodySizeLimit,
+                MiddlewareKind::IpAccessControl,
+                MiddlewareKind::SecurityHeaders,
                 MiddlewareKind::Cors,
                 MiddlewareKind::Log
             ]
@@ -413,7 +420,7 @@ mod tests {
     fn test_remove_from_first_element_clears_all() {
         let mut chain = MiddlewareChain::default_chain();
         let removed = chain.remove_from(MiddlewareKind::Trace);
-        assert_eq!(removed, 5);
+        assert_eq!(removed, 9);
         assert!(chain.is_empty());
     }
 
@@ -437,10 +444,14 @@ mod tests {
         assert_eq!(
             sb_order,
             [
+                MiddlewareKind::AuditLog,
                 MiddlewareKind::Auth,
                 MiddlewareKind::RateLimit,
                 MiddlewareKind::Log,
                 MiddlewareKind::Cors,
+                MiddlewareKind::SecurityHeaders,
+                MiddlewareKind::IpAccessControl,
+                MiddlewareKind::BodySizeLimit,
                 MiddlewareKind::Trace,
             ]
         );
@@ -479,7 +490,7 @@ mod tests {
     fn test_position_returns_index() {
         let chain = MiddlewareChain::default_chain();
         assert_eq!(chain.position(MiddlewareKind::Trace), Some(0));
-        assert_eq!(chain.position(MiddlewareKind::Auth), Some(4));
+        assert_eq!(chain.position(MiddlewareKind::Auth), Some(7));
     }
 
     #[test]
@@ -530,7 +541,7 @@ mod tests {
         let chain = MiddlewareChain::default_chain();
         assert_eq!(
             chain.to_string(),
-            "MiddlewareChain[trace -> cors -> log -> rate_limit -> auth]"
+            "MiddlewareChain[trace -> body_size_limit -> ip_access_control -> security_headers -> cors -> log -> rate_limit -> auth -> audit_log]"
         );
     }
 
@@ -565,13 +576,16 @@ mod tests {
 
     #[test]
     fn test_php_alignment_default_chain_includes_global() {
-        // DEFAULT_ORDER 必须包含 PHP 全局中间件（Trace + Cors）作为前缀
+        // DEFAULT_ORDER 必须包含 PHP 全局中间件（Trace + Cors）
+        // （安全中间件插入在全局中间件之间，不再保证前缀关系）
         let chain = MiddlewareChain::default_chain();
         let php_global = MiddlewareChain::php_global();
-        assert!(
-            chain.order().starts_with(php_global.order()),
-            "DEFAULT_ORDER must start with PHP global order"
-        );
+        for kind in php_global.order() {
+            assert!(
+                chain.order().contains(kind),
+                "DEFAULT_ORDER must contain PHP global middleware {kind}"
+            );
+        }
     }
 
     #[test]
@@ -584,8 +598,15 @@ mod tests {
     #[test]
     fn test_php_alignment_cors_second() {
         // 对齐 PHP `app/middleware.php` 第二个中间件 `AllowCrossDomain`
+        // v2 安全中间件插入在 Trace 与 Cors 之间，Cors 不再位于 index 1，
+        // 但 Cors 仍必须在 Trace 之后、Log 之前
         let chain = MiddlewareChain::default_chain();
-        assert_eq!(chain.order().get(1), Some(&MiddlewareKind::Cors));
+        let trace_pos = chain.position(MiddlewareKind::Trace);
+        let cors_pos = chain.position(MiddlewareKind::Cors);
+        let log_pos = chain.position(MiddlewareKind::Log);
+        assert!(cors_pos.is_some(), "Cors must be present");
+        assert!(trace_pos < cors_pos, "Cors must come after Trace");
+        assert!(cors_pos < log_pos, "Cors must come before Log");
     }
 
     #[test]

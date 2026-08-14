@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-orm-facade
 
 SZ-Rust ORM 全家桶统一入口。下游业务包通过此 crate 访问所有 `sz-orm-*` 子包，而非直接依赖各子包。

@@ -32,6 +32,13 @@ pub async fn check(State(_state): State<AppState>) -> Json<Value> {
 pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
     let db_ok = health_service::ping_db(&state.db_pool).await;
 
+    // SLO 指标记录：DB 探活结果计入燃烧率监控
+    if db_ok {
+        state.slo_monitor.record_success();
+    } else {
+        state.slo_monitor.record_failure();
+    }
+
     if db_ok {
         (
             StatusCode::OK,

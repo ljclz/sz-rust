@@ -22,6 +22,8 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
+use sz_rust_core::hooks::{HookContext, HookEvent};
+use sz_rust_core::plugin::event_bus::EventBus;
 use tracing::{info, warn};
 
 struct OrderController;
@@ -208,12 +210,42 @@ impl OrderController {
                     order_no, order.merchant_id
                 );
 
+                // 触发 before_insert 钩子（对齐 PHP think-orm Model 钩子）
+                let mut hook_ctx = HookContext::new();
+                state
+                    .hook_registry
+                    .dispatch(HookEvent::BeforeInsert, &hook_ctx)
+                    .ok();
+
                 match OrderService::create(&state.db_pool, &order, &items).await {
                     Ok(new_order_id) => {
                         info!(
                             "订单创建成功: order_id={}, order_no={}",
                             new_order_id, order_no
                         );
+                        // 触发 after_insert 钩子
+                        state
+                            .hook_registry
+                            .dispatch(HookEvent::AfterInsert, &hook_ctx)
+                            .ok();
+                        // 触发 order.created 事件（异步 fire-and-forget，错误不影响主流程）
+                        let event = sz_rust_core::plugin::event_bus::PluginEvent {
+                            id: 0,
+                            tenant_id: order.merchant_id,
+                            event_type: "order.created".to_string(),
+                            source_plugin: "sz300".to_string(),
+                            payload: json!({
+                                "order_id": new_order_id,
+                                "order_no": order_no,
+                                "merchant_id": order.merchant_id,
+                            }),
+                        };
+                        let bus = state.event_bus.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = bus.publish(&event).await {
+                                tracing::warn!("order.created 事件发布失败: {}", e);
+                            }
+                        });
                         ctrl.render_success(
                             "下单成功",
                             json!({

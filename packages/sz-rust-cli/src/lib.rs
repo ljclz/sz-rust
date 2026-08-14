@@ -38,11 +38,19 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod cargo_checker;
 pub mod cli;
 pub mod cmd;
 pub mod console;
+pub mod context_builder;
 pub mod error;
+pub mod field_parser;
+pub mod interactive;
+pub mod safety_validator;
+pub mod skeleton;
 pub mod stubs;
+pub mod template_engine;
+pub mod validator;
 
 pub use cli::{Cli, Command as CliCommand};
 pub use console::{Command, CommandSignature, Console};

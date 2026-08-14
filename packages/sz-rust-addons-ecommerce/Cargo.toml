@@ -19,6 +19,8 @@ chrono.workspace = true
 tracing.workspace = true
 axum.workspace = true
 sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 

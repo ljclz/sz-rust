@@ -207,6 +207,8 @@ impl std::error::Error for GuardError {}
 pub struct UserContext {
     /// 用户 ID（对齐 `AuthenticatedUser::user_id`）
     pub user_id: i64,
+    /// 部门 ID（对齐 PHP `dept_id`，用于数据范围控制 DataScope）
+    pub dept_id: i64,
     /// 是否超级管理员（对齐 PHP `is_super=1`，绕过所有 RBAC）
     pub is_super: bool,
     /// 角色列表（对齐 PHP `role` 表）
@@ -220,10 +222,17 @@ impl UserContext {
     pub fn new(user_id: i64) -> Self {
         Self {
             user_id,
+            dept_id: 0,
             is_super: false,
             roles: Vec::new(),
             permissions: Vec::new(),
         }
+    }
+
+    /// 设置部门 ID（用于数据范围控制 DataScope）
+    pub fn with_dept(mut self, dept_id: i64) -> Self {
+        self.dept_id = dept_id;
+        self
     }
 
     /// 设置是否超级管理员
@@ -280,6 +289,7 @@ impl std::fmt::Debug for UserContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UserContext")
             .field("user_id", &self.user_id)
+            .field("dept_id", &self.dept_id)
             .field("is_super", &self.is_super)
             .field("roles", &self.roles)
             .field("permissions", &self.permissions)
@@ -291,6 +301,7 @@ impl Clone for UserContext {
     fn clone(&self) -> Self {
         Self {
             user_id: self.user_id,
+            dept_id: self.dept_id,
             is_super: self.is_super,
             roles: self.roles.clone(),
             permissions: self.permissions.clone(),

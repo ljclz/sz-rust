@@ -168,11 +168,57 @@ pub async fn me(State(state): State<AppState>, req: Request<Body>) -> Response {
 }
 
 /// 刷新登录令牌（对齐 PHP AuthController::refresh）
+///
+/// 使用 RefreshTokenIssuer::rotate 轮换 Token：
+/// 旧 refreshToken → 新 accessToken + 新 refreshToken，旧 refreshToken 立即失效。
 #[tracing::instrument(skip(_state, req))]
 pub async fn refresh(State(_state): State<AppState>, req: Request<Body>) -> Response {
-    let _data = req;
+    use sz_rust_core::auth::refresh::RefreshTokenError;
+
     let ctrl = AuthController;
-    ctrl.render_success("ok", json!({}))
+
+    let body_bytes = match axum::body::to_bytes(req.into_body(), 65536).await {
+        Ok(b) => b,
+        Err(_) => return ctrl.render_error("请求体读取失败", json!({}), 0),
+    };
+
+    let body_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(_) => return ctrl.render_error("无效的 JSON 请求体", json!({}), 0),
+    };
+
+    let refresh_token = match body_json.get("refresh_token").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return ctrl.render_error("缺少 refresh_token 字段", json!({}), 0),
+    };
+
+    let issuer = crate::services::auth_service::get_refresh_issuer();
+    match issuer.rotate(refresh_token).await {
+        Ok(pair) => ctrl.render_success(
+            "刷新成功",
+            json!({
+                "access_token": pair.access_token,
+                "refresh_token": pair.refresh_token,
+                "access_expires_at": pair.access_expires_at,
+                "refresh_expires_at": pair.refresh_expires_at,
+            }),
+        ),
+        Err(e) => {
+            let msg = match e {
+                RefreshTokenError::Expired => "refresh_token 已过期".to_string(),
+                RefreshTokenError::Revoked => "refresh_token 已被撤销".to_string(),
+                RefreshTokenError::WrongTokenType { .. } => "错误的 Token 类型".to_string(),
+                RefreshTokenError::InvalidSignature => "无效的 Token 签名".to_string(),
+                RefreshTokenError::IssuerMismatch { .. } => "Token 签发人不匹配".to_string(),
+                RefreshTokenError::VersionMismatch { .. } => "Token 已失效，请重新登录".to_string(),
+                RefreshTokenError::ReuseDetected => {
+                    "检测到 Token 复用攻击，所有 Token 已撤销".to_string()
+                }
+                _ => "Token 刷新失败".to_string(),
+            };
+            ctrl.render_error(&msg, json!({}), 0)
+        }
+    }
 }
 
 /// 退出登录（对齐 PHP AuthController::logout）

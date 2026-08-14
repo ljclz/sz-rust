@@ -1,0 +1,27 @@
+[package]
+name = "sz-rust-addons-im"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust IM 模板插件 — 会话/消息/用户状态管理骨架，可作即时通讯项目起点"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["im", "chat", "sz-rust", "addons", "template"]
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+[lib]
+name = "sz_rust_addons_im"
+path = "src/lib.rs"

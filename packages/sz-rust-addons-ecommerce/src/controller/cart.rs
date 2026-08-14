@@ -24,16 +24,42 @@ impl CartController {
     }
 
     pub async fn add<R: Repository<CartItem, Key = OrmValue>>(repo: &R, body: Value) -> Value {
-        let mut item: CartItem = match serde_json::from_value(body) {
+        let new_item: CartItem = match serde_json::from_value(body) {
             Ok(d) => d,
             Err(e) => return json!({"code": 400, "msg": e.to_string(), "data": null}),
         };
-        if item.user_id == 0 || item.product_id == 0 {
+        if new_item.user_id == 0 || new_item.product_id == 0 {
             return json!({"code": 400, "msg": "user_id 和 product_id 必填", "data": null});
         }
-        item.id = 0;
-        match repo.save(item) {
-            Ok(saved) => json!({"code": 0, "msg": "added", "data": saved}),
+        if new_item.quantity <= 0 {
+            return json!({"code": 400, "msg": "商品数量必须大于 0", "data": null});
+        }
+        let conditions = vec![
+            WhereCondition::new("user_id", WhereOp::Eq, OrmValue::I64(new_item.user_id)),
+            WhereCondition::new(
+                "product_id",
+                WhereOp::Eq,
+                OrmValue::I64(new_item.product_id),
+            ),
+        ];
+        match repo.paginate_by(&conditions, 1, 1) {
+            Ok(pr) => {
+                if let Some(mut existing) = pr.items.into_iter().next() {
+                    existing.quantity += new_item.quantity;
+                    existing.updated_at = new_item.updated_at;
+                    match repo.save(existing) {
+                        Ok(saved) => json!({"code": 0, "msg": "merged", "data": saved}),
+                        Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
+                    }
+                } else {
+                    let mut item = new_item;
+                    item.id = 0;
+                    match repo.save(item) {
+                        Ok(saved) => json!({"code": 0, "msg": "added", "data": saved}),
+                        Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
+                    }
+                }
+            }
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }

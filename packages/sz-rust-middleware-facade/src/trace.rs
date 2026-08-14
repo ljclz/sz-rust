@@ -57,8 +57,21 @@ use axum::middleware::Next;
 use axum::response::Response;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use sz_rust_orm_facade::{Span, Tracer};
+
+/// Span 桥接 trait — 将 SzTracer Span 桥接到外部 tracer（如 OTel SDK）
+///
+/// 当 `TraceConfig` 配置了 `span_bridge` 时，`trace_middleware` 在 `end_span`
+/// 之后调用 `bridge(&span)`，将 Span 数据提交到外部 tracer。
+///
+/// `OtlpSpanBridge`（定义在 `sz-rust-observability`）实现此 trait，
+/// 将 SzTracer Span 桥接到 OpenTelemetry SDK tracer，通过 OTLP 导出到 Collector。
+pub trait SpanBridge: Send + Sync {
+    /// 桥接 Span 到外部 tracer
+    fn bridge(&self, span: &Span);
+}
 
 /// Trace 中间件配置
 #[derive(Clone)]
@@ -69,6 +82,8 @@ pub struct TraceConfig {
     pub service_name: String,
     /// 排除路径（不创建 Span，复用 [`crate::auth::is_route_allowed`] 匹配）
     pub exclude_paths: Vec<String>,
+    /// Span 桥接（可选，配置后 trace_middleware 将 Span 提交到外部 tracer）
+    pub span_bridge: Option<Arc<dyn SpanBridge + Send + Sync>>,
 }
 
 impl std::fmt::Debug for TraceConfig {
@@ -76,6 +91,7 @@ impl std::fmt::Debug for TraceConfig {
         f.debug_struct("TraceConfig")
             .field("service_name", &self.service_name)
             .field("exclude_paths", &self.exclude_paths)
+            .field("span_bridge", &self.span_bridge.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -88,6 +104,7 @@ impl TraceConfig {
             tracer,
             service_name,
             exclude_paths: Vec::new(),
+            span_bridge: None,
         }
     }
 
@@ -100,6 +117,12 @@ impl TraceConfig {
     /// 设置排除路径
     pub fn with_exclude_paths(mut self, paths: Vec<String>) -> Self {
         self.exclude_paths = paths;
+        self
+    }
+
+    /// 设置 Span 桥接（配置后 trace_middleware 将 Span 提交到外部 tracer）
+    pub fn with_span_bridge(mut self, bridge: Arc<dyn SpanBridge + Send + Sync>) -> Self {
+        self.span_bridge = Some(bridge);
         self
     }
 
@@ -194,12 +217,15 @@ pub async fn trace_middleware(
     }
 
     // 2. 提取/创建 Span + 记录请求信息到 span tags（链式 builder）
+    let start = Instant::now();
     let method = req.method().clone();
     let uri = req.uri().path().to_string();
+    let url = req.uri().to_string();
     let mut span = extract_or_create_span(req.headers(), &config)
         .with_tag("http.method", method.as_str())
         .with_tag("http.uri", &uri)
-        .with_tag("http.path", &path);
+        .with_tag("http.path", &path)
+        .with_tag("http.url", &url);
 
     // 3. 注入 Span 到 request extensions（下游 handler 可通过 extensions 获取）
     let mut req = req;
@@ -208,11 +234,19 @@ pub async fn trace_middleware(
     // 4. 调用 next
     let mut response = next.run(req).await;
 
-    // 5. 记录响应状态码到 span tags + end_span（finish + 存入 tracer 内部 buffer）
+    // 5. 记录响应状态码 + 响应耗时到 span tags + end_span（finish + 存入 tracer 内部 buffer）
     let status = response.status().as_u16();
-    span = span.with_tag("http.status_code", status.to_string());
+    let elapsed_ms = start.elapsed().as_millis();
+    span = span
+        .with_tag("http.status_code", status.to_string())
+        .with_tag("http.response_time", elapsed_ms.to_string());
     // end_span 接收 owned Span，clone 一份用于后续 inject；end_span 内部会 finish
     config.tracer.end_span(span.clone());
+
+    // 5.5 Span 桥接：配置了 bridge 时将 Span 提交到外部 tracer（如 OTel SDK）
+    if let Some(bridge) = &config.span_bridge {
+        bridge.bridge(&span);
+    }
 
     // 6. 注入 traceparent 到响应 headers（使用 clone 的 span，已 finish 但 traceparent 不变）
     inject_traceparent_to_response(&mut response, &span, &config);
@@ -742,5 +776,193 @@ mod tests {
         // Trace 必须最先执行，确保所有后续中间件都能通过 extensions 获取 Span
         use crate::order::{MiddlewareKind, DEFAULT_ORDER};
         assert_eq!(DEFAULT_ORDER.first(), Some(&MiddlewareKind::Trace));
+    }
+
+    // ====================================================================
+    // T10: http.url + http.response_time 注入测试
+    // ====================================================================
+
+    /// 测试 Span tags 含 http.url（完整 URL）
+    #[tokio::test]
+    async fn test_trace_middleware_injects_http_url() {
+        let tracer = Arc::new(sz_orm_tracing::SzTracer::new("test-service"));
+        let config = TraceConfig::new(tracer.clone());
+        let app = Router::new()
+            .route(
+                "/api/test",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                trace_middleware,
+            ));
+
+        let resp = app.oneshot(make_request("GET", "/api/test")).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let spans = tracer.get_spans();
+        assert!(!spans.is_empty());
+        let tags = spans[0].tags();
+        assert!(tags.contains_key("http.url"));
+        assert_eq!(tags.get("http.url").unwrap(), "/api/test");
+    }
+
+    /// 测试 Span tags 含 http.response_time（毫秒）
+    #[tokio::test]
+    async fn test_trace_middleware_injects_response_time() {
+        let tracer = Arc::new(sz_orm_tracing::SzTracer::new("test-service"));
+        let config = TraceConfig::new(tracer.clone());
+        let app = Router::new()
+            .route(
+                "/api",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                trace_middleware,
+            ));
+
+        let resp = app.oneshot(make_request("GET", "/api")).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let spans = tracer.get_spans();
+        assert!(!spans.is_empty());
+        let tags = spans[0].tags();
+        assert!(tags.contains_key("http.response_time"));
+        let response_time_str = tags.get("http.response_time").unwrap();
+        let response_time: u64 = response_time_str.parse().unwrap();
+        // 响应时间 >= 0（内存 handler 极快，可能为 0ms）
+        let _ = response_time;
+    }
+
+    /// 测试 Span 含 5 个 HTTP 属性：method/url/path/status_code/response_time
+    #[tokio::test]
+    async fn test_trace_middleware_span_has_five_http_attributes() {
+        let tracer = Arc::new(sz_orm_tracing::SzTracer::new("test-service"));
+        let config = TraceConfig::new(tracer.clone());
+        let app = Router::new()
+            .route(
+                "/api/data",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                trace_middleware,
+            ));
+
+        let resp = app.oneshot(make_request("GET", "/api/data")).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let spans = tracer.get_spans();
+        assert!(!spans.is_empty());
+        let tags = spans[0].tags();
+        assert_eq!(tags.get("http.method").unwrap(), "GET");
+        assert_eq!(tags.get("http.uri").unwrap(), "/api/data");
+        assert_eq!(tags.get("http.path").unwrap(), "/api/data");
+        assert_eq!(tags.get("http.url").unwrap(), "/api/data");
+        assert_eq!(tags.get("http.status_code").unwrap(), "200");
+        assert!(tags.contains_key("http.response_time"));
+    }
+
+    // ====================================================================
+    // T11: SpanBridge 桥接测试
+    // ====================================================================
+
+    /// Mock SpanBridge — 记录桥接的 Span 数据
+    struct MockSpanBridge {
+        bridged_names: parking_lot::Mutex<Vec<String>>,
+        bridged_tags: parking_lot::Mutex<Vec<HashMap<String, String>>>,
+    }
+
+    impl MockSpanBridge {
+        fn new() -> Self {
+            Self {
+                bridged_names: parking_lot::Mutex::new(Vec::new()),
+                bridged_tags: parking_lot::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn bridged_count(&self) -> usize {
+            self.bridged_names.lock().len()
+        }
+
+        fn first_name(&self) -> String {
+            self.bridged_names.lock()[0].clone()
+        }
+
+        fn first_tags(&self) -> HashMap<String, String> {
+            self.bridged_tags.lock()[0].clone()
+        }
+    }
+
+    impl SpanBridge for MockSpanBridge {
+        fn bridge(&self, span: &Span) {
+            self.bridged_names
+                .lock()
+                .push(span.operation_name().to_string());
+            self.bridged_tags.lock().push(span.tags().clone());
+        }
+    }
+
+    /// 测试配置了 span_bridge 时 Span 被桥接
+    #[tokio::test]
+    async fn test_trace_middleware_with_otlp_bridge() {
+        let tracer = Arc::new(sz_orm_tracing::SzTracer::new("test-service"));
+        let bridge = Arc::new(MockSpanBridge::new());
+        let config = TraceConfig::new(tracer.clone()).with_span_bridge(bridge.clone());
+        let app = Router::new()
+            .route(
+                "/api",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                trace_middleware,
+            ));
+
+        let resp = app.oneshot(make_request("GET", "/api")).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        assert_eq!(bridge.bridged_count(), 1);
+        assert!(bridge.first_name().contains("request"));
+
+        let tags = bridge.first_tags();
+        assert_eq!(tags.get("http.method").unwrap(), "GET");
+        assert_eq!(tags.get("http.url").unwrap(), "/api");
+        assert_eq!(tags.get("http.status_code").unwrap(), "200");
+        assert!(tags.contains_key("http.response_time"));
+    }
+
+    /// 测试未配置 span_bridge 时不桥接（正常工作）
+    #[tokio::test]
+    async fn test_trace_middleware_without_span_bridge() {
+        let tracer = Arc::new(sz_orm_tracing::SzTracer::new("test-service"));
+        let config = TraceConfig::new(tracer.clone());
+        assert!(config.span_bridge.is_none());
+
+        let app = Router::new()
+            .route(
+                "/api",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                trace_middleware,
+            ));
+
+        let resp = app.oneshot(make_request("GET", "/api")).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert!(resp.headers().contains_key("traceparent"));
+    }
+
+    /// 测试 SpanBridge trait 对象可正确 Clone（TraceConfig Clone）
+    #[test]
+    fn test_trace_config_with_span_bridge_clone() {
+        let tracer: Arc<dyn Tracer + Send + Sync> = Arc::new(sz_orm_tracing::SzTracer::new("test"));
+        let bridge: Arc<dyn SpanBridge + Send + Sync> = Arc::new(MockSpanBridge::new());
+        let config = TraceConfig::new(tracer).with_span_bridge(bridge);
+        let cloned = config.clone();
+        assert!(config.span_bridge.is_some());
+        assert!(cloned.span_bridge.is_some());
     }
 }

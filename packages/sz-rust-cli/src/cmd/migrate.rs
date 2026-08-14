@@ -117,7 +117,7 @@ fn execute_migrate_offline(args: &MigrateArgs, migrations: &[Migration]) -> Resu
         if let Some(last) = migrations.last() {
             println!("  Would rollback: {} ({})", last.version, last.name);
             if args.show_sql {
-                print_sql_block("SQL DOWN", &last.sql_down);
+                println!("{}", print_sql_block("SQL DOWN", &last.sql_down));
             }
         }
         println!("Note: Actual rollback requires database connection (offline mode).");
@@ -126,7 +126,7 @@ fn execute_migrate_offline(args: &MigrateArgs, migrations: &[Migration]) -> Resu
         for m in migrations {
             println!("  Would apply: {} ({})", m.version, m.name);
             if args.show_sql {
-                print_sql_block("SQL UP", &m.sql_up);
+                println!("{}", print_sql_block("SQL UP", &m.sql_up));
             }
         }
         println!(
@@ -160,7 +160,7 @@ fn execute_migrate_online(
                 .ok_or_else(|| CliError::Migration("No migrations to rollback".to_string()))?;
             println!("Rolling back: {} ({})", last.version, last.name);
             if args.show_sql {
-                print_sql_block("SQL DOWN", &last.sql_down);
+                println!("{}", print_sql_block("SQL DOWN", &last.sql_down));
             }
             if !last.sql_down.is_empty() {
                 conn.execute(&last.sql_down)
@@ -299,8 +299,8 @@ pub fn execute_status_full(
         };
         println!("{:<15} {:<30} {:<20}", m.version, m.name, status);
         if show_sql {
-            print_sql_block("SQL UP", &m.sql_up);
-            print_sql_block("SQL DOWN", &m.sql_down);
+            println!("{}", print_sql_block("SQL UP", &m.sql_up));
+            println!("{}", print_sql_block("SQL DOWN", &m.sql_down));
         }
     }
 
@@ -476,15 +476,17 @@ fn resolve_migrations(path: &Path, db_type: DbType) -> Result<Vec<Migration>, Cl
 ///   <sql content>
 ///   ----------------
 /// ```
-fn print_sql_block(title: &str, sql: &str) {
+/// 返回格式化后的 SQL 代码块字符串（空 SQL 返回空串），由调用方输出。
+fn print_sql_block(title: &str, sql: &str) -> String {
     if sql.is_empty() {
-        return;
+        return String::new();
     }
-    println!("  --- {} ---", title);
+    let mut out = format!("  --- {} ---\n", title);
     for line in sql.lines() {
-        println!("  {}", line);
+        out.push_str(&format!("  {}\n", line));
     }
-    println!("  {}", "-".repeat(title.len() + 8));
+    out.push_str(&format!("  {}\n", "-".repeat(title.len() + 8)));
+    out
 }
 
 #[cfg(test)]
@@ -729,12 +731,24 @@ mod tests {
 
     #[test]
     fn test_print_sql_block_empty_sql() {
-        print_sql_block("SQL UP", "");
+        // 空 SQL 不输出任何内容
+        let out = print_sql_block("SQL UP", "");
+        assert!(out.is_empty(), "空 SQL 不应产生输出，实际: {:?}", out);
     }
 
     #[test]
     fn test_print_sql_block_with_content() {
-        print_sql_block("SQL UP", "CREATE TABLE users (id INT);");
+        let out = print_sql_block("SQL UP", "CREATE TABLE users (id INT);");
+        assert!(out.contains("--- SQL UP ---"), "应包含标题, 实际: {out}");
+        assert!(
+            out.contains("CREATE TABLE users (id INT);"),
+            "应包含 SQL 内容, 实际: {out}"
+        );
+        assert!(
+            out.contains(&"-".repeat("SQL UP".len() + 8)),
+            "应以分隔线结尾, 实际: {:?}",
+            out
+        );
     }
 
     #[test]

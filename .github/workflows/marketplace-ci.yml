@@ -1,0 +1,31 @@
+name: Marketplace CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/sz-rust-marketplace/**'
+      - 'packages/sz-rust-cli/src/cmd/plugin.rs'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sz-rust-marketplace/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check
+        run: cargo check -p sz-rust-marketplace
+      - name: Clippy
+        run: cargo clippy -p sz-rust-marketplace -- -D warnings
+      - name: Format
+        run: cargo fmt --check -p sz-rust-marketplace
+      - name: Test
+        run: cargo test -p sz-rust-marketplace
+      - name: CLI Test
+        run: cargo test -p sz-rust-cli

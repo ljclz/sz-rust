@@ -30,6 +30,12 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 sz-orm-sqlx.workspace = true
 # SZ-Rust 核心（调度器封装，含 ORM facade）
 sz-rust-core.workspace = true
+# 模板引擎（P1-T3 插件模板库）
+tera.workspace = true
+# 交互式命令行输入（P1-T3 插件模板库）
+dialoguer.workspace = true
+# 前端代码生成（P4-T1 CLI make:frontend 子命令）
+sz-rust-frontend-codegen = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true

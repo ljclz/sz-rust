@@ -176,6 +176,14 @@ pub enum Command {
     /// 删除 `runtime/cache/route_cache.json` 文件。
     #[command(name = "route:clear")]
     RouteClear,
+
+    /// 插件市场命令组（plugin search/install/publish/uninstall/update/list/login）
+    #[command(name = "plugin")]
+    Plugin {
+        /// plugin 子命令
+        #[command(subcommand)]
+        plugin_command: cmd::plugin::PluginCommand,
+    },
 }
 
 impl Cli {
@@ -195,7 +203,9 @@ impl Cli {
                 println!("SZ-Rust CLI — 使用 --help 查看可用命令");
                 Ok(0)
             }
-            Some(Command::Make { make_command }) => cmd::make::execute(make_command).map(|_| 0),
+            Some(Command::Make { make_command }) => {
+                cmd::make::execute(make_command).await.map(|_| 0)
+            }
             Some(Command::Migrate { args }) => cmd::migrate::execute_migrate(args).map(|_| 0),
             Some(Command::MigrateStatus {
                 path,
@@ -239,6 +249,7 @@ impl Cli {
                 cmd::optimize::execute_optimize_schema().await.map(|_| 0)
             }
             Some(Command::RouteClear) => cmd::optimize::execute_route_clear().await.map(|_| 0),
+            Some(Command::Plugin { plugin_command }) => cmd::plugin::execute(plugin_command).await,
         }
     }
 }

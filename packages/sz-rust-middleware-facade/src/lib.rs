@@ -23,18 +23,28 @@
 /// 请求作用域 ID（原定义于 sz-rust-core::container，P3 迁移至此消除双向环）
 pub type ScopeId = u64;
 
+pub mod audit_log;
 pub mod auth;
+pub mod body_size_limit;
 pub mod builder;
 pub mod chain;
 pub mod circuit_breaker;
 pub mod cors;
 pub mod csrf;
 pub mod handler_as_middleware;
+pub mod ip_access_control;
 pub mod jwt_blacklist;
 pub mod log;
 pub mod order;
 pub mod rate_limit;
 pub mod request_scope;
 pub mod sanctum;
+pub mod security_headers;
+pub mod security_metrics;
+pub mod security_section;
+pub mod sso_middleware;
 pub mod tower_compat;
 pub mod trace;
+
+/// Security 配置段 re-export（应用层直接 `use sz_rust_middleware_facade::SecuritySection`）
+pub use security_section::{SecurityConfigError, SecuritySection};

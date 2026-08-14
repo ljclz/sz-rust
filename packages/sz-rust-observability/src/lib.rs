@@ -72,6 +72,12 @@ pub mod otlp;
 /// 直接导出器（Jaeger / Zipkin），默认启用，不依赖 OpenTelemetry SDK
 pub mod exporters;
 
+/// 管理监控数据采集（Admin Monitor API）
+///
+/// 由 `admin` feature 门控，提供系统信息、DB 连接池、Redis 状态采集。
+#[cfg(feature = "admin")]
+pub mod admin;
+
 pub use exporters::{
     JaegerExporter, MemoryTraceHttpTransport, TraceExportError, TraceHttpTransport, TraceLog,
     TraceSpan, ZipkinExporter,

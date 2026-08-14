@@ -101,6 +101,15 @@ impl MerchantController {
         let ctrl = MerchantController;
         match ctrl.post_data(req).await {
             Ok(data) => {
+                // 数据验证（对齐 PHP think\Validate）
+                // 规则：name 必填，contact_phone 手机号格式（11 位数字）
+                let mut validator = sz_rust_core::validate::Validate::new()
+                    .rule("name|商户名称", "require")
+                    .rule("contact_phone|联系电话", "require|regex:^1[3-9]\\d{9}$");
+                if let Err(e) = validator.check(&data) {
+                    return ctrl.render_error(&format!("参数验证失败: {}", e), json!({}), 0);
+                }
+
                 let name = data
                     .get("name")
                     .and_then(|v| v.as_str())

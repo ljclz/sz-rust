@@ -45,20 +45,40 @@ impl ProductController {
 
                 info!("查询商品列表: page={}, page_size={}", page, page_size);
 
+                // 缓存读取：尝试从缓存获取商品列表（key 含 page/page_size）
+                let cache_key = format!("product:list:{}:{}", page, page_size);
+                if let Some(cache) = &state.cache {
+                    if let Ok(Some(cached)) = cache.get::<String>(&cache_key) {
+                        if let Ok(cached_json) = serde_json::from_str::<serde_json::Value>(&cached)
+                        {
+                            tracing::debug!("商品列表缓存命中: {}", cache_key);
+                            return ctrl.render_success("success", cached_json);
+                        }
+                    }
+                }
+
                 match ProductService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
                         info!("商品列表查询成功: total={}", page_data.total);
-                        ctrl.render_success(
-                            "success",
-                            json!({
-                                "list": list,
-                                "total": page_data.total,
-                                "page": page,
-                                "page_size": page_size
-                            }),
-                        )
+                        let resp_data = json!({
+                            "list": list,
+                            "total": page_data.total,
+                            "page": page,
+                            "page_size": page_size
+                        });
+                        // 缓存写入：TTL 300 秒
+                        if let Some(cache) = &state.cache {
+                            if let Ok(s) = serde_json::to_string(&resp_data) {
+                                let _ = cache.set(
+                                    &cache_key,
+                                    s,
+                                    Some(std::time::Duration::from_secs(300)),
+                                );
+                            }
+                        }
+                        ctrl.render_success("success", resp_data)
                     }
                     Err(msg) => ctrl.render_error(&msg, json!({}), 0),
                 }

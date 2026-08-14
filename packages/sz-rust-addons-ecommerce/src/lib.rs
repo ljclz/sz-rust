@@ -19,6 +19,7 @@
 
 #![allow(missing_docs)]
 
+pub mod capability;
 pub mod controller;
 pub mod model;
 pub mod service;
@@ -114,6 +115,24 @@ where
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::cancel(&*s.orders, path.id).await)
+        }
+    });
+    let builder = builder.post(&format!("{}/orders/:id/pay", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::order::OrderController::pay(&*s.orders, path.id).await)
+        }
+    });
+    let builder = builder.post(&format!("{}/orders/:id/ship", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::order::OrderController::ship(&*s.orders, path.id).await)
+        }
+    });
+    let builder = builder.post(&format!("{}/orders/:id/complete", base), {
+        let s = state.clone();
+        move |path: Path<IdPath>| async move {
+            Json(controller::order::OrderController::complete(&*s.orders, path.id).await)
         }
     });
 

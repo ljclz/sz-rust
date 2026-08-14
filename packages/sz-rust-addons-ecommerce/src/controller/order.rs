@@ -8,6 +8,12 @@ use crate::model::order::Order;
 
 pub struct OrderController;
 
+pub const ORDER_STATUS_PENDING: &str = "pending";
+pub const ORDER_STATUS_PAID: &str = "paid";
+pub const ORDER_STATUS_SHIPPED: &str = "shipped";
+pub const ORDER_STATUS_COMPLETED: &str = "completed";
+pub const ORDER_STATUS_CANCELLED: &str = "cancelled";
+
 impl OrderController {
     pub async fn list<R: Repository<Order, Key = OrmValue>>(
         repo: &R,
@@ -123,12 +129,66 @@ impl OrderController {
             Ok(None) => return json!({"code": 404, "msg": "not found", "data": null}),
             Err(e) => return json!({"code": 500, "msg": e.to_string(), "data": null}),
         };
-        if order.status != "pending" && order.status != "paid" {
+        if order.status != ORDER_STATUS_PENDING && order.status != ORDER_STATUS_PAID {
             return json!({"code": 400, "msg": "仅 pending/paid 状态可取消", "data": null});
         }
-        order.status = "cancelled".to_string();
+        order.status = ORDER_STATUS_CANCELLED.to_string();
         match repo.save(order) {
             Ok(saved) => json!({"code": 0, "msg": "cancelled", "data": saved}),
+            Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
+        }
+    }
+
+    pub async fn pay<R: Repository<Order, Key = OrmValue>>(repo: &R, id: i64) -> Value {
+        let key = OrmValue::I64(id);
+        let mut order = match repo.find_by_id(&key) {
+            Ok(Some(d)) => d,
+            Ok(None) => return json!({"code": 404, "msg": "not found", "data": null}),
+            Err(e) => return json!({"code": 500, "msg": e.to_string(), "data": null}),
+        };
+        if order.status != ORDER_STATUS_PENDING {
+            return json!({"code": 422, "msg": format!("订单状态为 {}，不可执行此操作", order.status), "data": null});
+        }
+        order.status = ORDER_STATUS_PAID.to_string();
+        order.updated_at = chrono::Utc::now().timestamp();
+        match repo.save(order) {
+            Ok(saved) => json!({"code": 0, "msg": "paid", "data": saved}),
+            Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
+        }
+    }
+
+    pub async fn ship<R: Repository<Order, Key = OrmValue>>(repo: &R, id: i64) -> Value {
+        let key = OrmValue::I64(id);
+        let mut order = match repo.find_by_id(&key) {
+            Ok(Some(d)) => d,
+            Ok(None) => return json!({"code": 404, "msg": "not found", "data": null}),
+            Err(e) => return json!({"code": 500, "msg": e.to_string(), "data": null}),
+        };
+        if order.status != ORDER_STATUS_PAID {
+            return json!({"code": 422, "msg": format!("订单状态为 {}，不可执行此操作", order.status), "data": null});
+        }
+        order.status = ORDER_STATUS_SHIPPED.to_string();
+        order.updated_at = chrono::Utc::now().timestamp();
+        match repo.save(order) {
+            Ok(saved) => json!({"code": 0, "msg": "shipped", "data": saved}),
+            Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
+        }
+    }
+
+    pub async fn complete<R: Repository<Order, Key = OrmValue>>(repo: &R, id: i64) -> Value {
+        let key = OrmValue::I64(id);
+        let mut order = match repo.find_by_id(&key) {
+            Ok(Some(d)) => d,
+            Ok(None) => return json!({"code": 404, "msg": "not found", "data": null}),
+            Err(e) => return json!({"code": 500, "msg": e.to_string(), "data": null}),
+        };
+        if order.status != ORDER_STATUS_SHIPPED {
+            return json!({"code": 422, "msg": format!("订单状态为 {}，不可执行此操作", order.status), "data": null});
+        }
+        order.status = ORDER_STATUS_COMPLETED.to_string();
+        order.updated_at = chrono::Utc::now().timestamp();
+        match repo.save(order) {
+            Ok(saved) => json!({"code": 0, "msg": "completed", "data": saved}),
             Err(e) => json!({"code": 500, "msg": e.to_string(), "data": null}),
         }
     }

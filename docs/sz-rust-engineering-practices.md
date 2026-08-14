@@ -4,7 +4,7 @@
 > **项目版本**：v0.3.1
 > **文档用途**：锁定已有工程质量，防止后续修改引入退化
 > **维护规则**：任何修改 CI/CD 或新增门禁的 PR 必须同步更新本文档
-> **文档版本**：v1.5（2026-08-05）
+> **文档版本**：v1.6（2026-08-13）
 
 ---
 
@@ -505,9 +505,19 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-08-05
+> **最后更新**: 2026-08-13
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.5
+> **规范版本**: v1.6
+>
+> **v1.6 变更摘要**（2026-08-13，防幻影交付三件套 + 四项新门禁）：
+> - 铁律 23 新增（`.trae/rules/project_rules.md`）：完成声称证据链强制（交付物路径 + 验证命令真实输出 + 变更标识），CI 门禁 19 自动检查
+> - 新门禁 19 `doc-code-consistency.js`：文档声称的 `sz-rust-*` crate 必须存在于 workspace，防幻影交付（含声称分级制：完成声称须附证据）
+> - 新门禁 20 `adr-code-consistency.js`：ADR「相关代码」引用的 packages/ 路径必须存在，防 ADR 漂移
+> - 新门禁 21 `assertion-value-check.js`：拒绝无断言且无 unwrap/expect 的空洞测试（覆盖率空洞），当前识别 26 处存量待修复
+> - 新门禁 22 `feature-consistency.js`：源码 `#[cfg(feature)]` 引用必须已在 Cargo.toml 声明（防死代码），死 feature 提示清理
+> - 审计报告：`docs/audit/2026-08-13-文档已实现但生产零调用审计报告.md`（4 个幻影 crate + 10 个零调用 crate + 20+ 零调用模块）
+> - 验证：4 个审计脚本本地实测通过（doc-code-consistency 0 ERROR / adr-code 0 ERROR / assertion-value 26 存量 ERROR / feature-consistency 0 ERROR 0 WARN）
+> - 文档欠债：DB-2026-08-13-01/02 登记 `docs/audit/doc-debt.md`（企业版 4 crate 核验 + README 生产接入状态，限期 2026-08-18）
 >
 > **v1.5 变更摘要**（2026-08-05）：
 > - 修复 4 项铁律违规（铁律 1/10/7/4），综合五维审查 92.2/100 通过
@@ -548,7 +558,7 @@ flowchart LR
 > - P3 剩余模块解耦（ADR-019）：四簇提取 4 个新 facade（orm-ext / router / middleware / mvc，~34.6K LOC），6 个阻塞模块（view/controller/guard/hooks/model/routing）+ middleware 簇 + router/websocket_route/openapi 全部提取；解 container↔request_scope 双向环（ScopeId 迁移至 middleware-facade）；安全关键中间件保留 @REVIEW_REQUIRED；sz-rust-core 57K → ~9.2K LOC（−83.9%）
 > - 测试数量：workspace 全量 4,983 passed，0 failed（--jobs 1 规避 Cargo 并发编译 crate 解析竞争）
 > - workspace 包数量 14 → 26（11 个 facade + 集成测试 crate）
-> - 竞争力深化（4.3 六项全达标）：blog/ecommerce/iot 3 个完整示例；criterion 22 项基准（docs/benchmark-report.md）；错误消息 i18n 本地化（BaseException.message_key + mvc i18n_error）；OpenAPI 从路由配置自动生成（ecommerce /openapi.json 实测）；sz-rust-mcp crate（5 工具 + stdio JSON-RPC）；missing_docs 门禁全绿（-D missing_docs 26 crate 0 错误，修复 4 处 doc 缺陷）
+> - 竞争力深化（4.3 六项全达标）：blog/ecommerce/iot 3 个完整示例；criterion 22 项基准（docs/benchmarks/benchmark-report.md）；错误消息 i18n 本地化（BaseException.message_key + mvc i18n_error）；OpenAPI 从路由配置自动生成（ecommerce /openapi.json 实测）；sz-rust-mcp crate（5 工具 + stdio JSON-RPC）；missing_docs 门禁全绿（-D missing_docs 26 crate 0 错误，修复 4 处 doc 缺陷）
 > - 实测评测报告（`docs/audit/2026-08-03-基于实测的能力评测报告.md`）：全部结论基于命令输出；**实测推翻两处文档结论**——①铁律 2 生产代码裸 unwrap 622 处（core 433，此前"✅"错误）；②fmt 门禁修复前有 275 处 diff（CI 实际红过）；实测证实 unsafe 收敛 3 处 FFI、RSS 3.86 MiB、路由 197ns、4,994 测试 0 失败
 > - CI 门禁：cargo-deny（许可证+安全+来源）+ cargo-udeps（未使用依赖）+ cargo-machete 均已集成
 > - 已知劣势：无重大架构缺陷；剩余工作为业务测试补齐（sz300 部分 service 层覆盖率 0%）和 DB 集成测试 CI 验证

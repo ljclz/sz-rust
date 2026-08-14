@@ -1,0 +1,29 @@
+[package]
+name = "sz-rust-addons-cms"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust CMS 模板插件 — 文章/分类/标签管理骨架，可作 CMS 项目起点"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["cms", "sz-rust", "addons", "template"]
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+[lib]
+name = "sz_rust_addons_cms"
+path = "src/lib.rs"

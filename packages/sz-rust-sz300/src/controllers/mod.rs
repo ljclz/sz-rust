@@ -1,3 +1,8 @@
+/// 管理监控控制器（admin feature 门控）
+#[cfg(feature = "admin")]
+pub mod admin;
+/// AI 控制器（LLM 聊天接口）
+pub mod ai;
 /// 认证相关控制器（对齐 PHP AuthController）
 pub mod auth;
 /// 控制器公共辅助函数（分页解析等）
@@ -16,3 +21,5 @@ pub mod merchant;
 pub mod order;
 /// 商品管理控制器（对齐 PHP ProductController）
 pub mod product;
+/// 视图模板控制器（对接 sz-rust-core::view）
+pub mod view;

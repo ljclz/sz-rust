@@ -16,6 +16,7 @@ pub mod cache;
 pub mod make;
 pub mod migrate;
 pub mod optimize;
+pub mod plugin;
 pub mod route;
 pub mod scheduler;
 pub mod seed;

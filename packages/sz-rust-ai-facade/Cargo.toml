@@ -1,0 +1,68 @@
+[package]
+name = "sz-rust-ai-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AI facade for sz-rust — LLM/Embedding/RAG/Agent unified abstraction"
+repository.workspace = true
+homepage.workspace = true
+autobenches = false
+keywords = ["ai", "llm", "rag", "agent", "thinkphp"]
+categories = ["science::artificial-intelligence"]
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+validator = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+arc-swap = "1"
+
+# sz-rust 内部 facade 依赖
+sz-rust-orm-facade = { workspace = true }
+sz-rust-cache-facade = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+sz-rust-mcp = { workspace = true }
+sz-rust-observability = { workspace = true }
+sz-rust-capability = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+proptest = { workspace = true }
+criterion = { workspace = true }
+sysinfo = { workspace = true }
+
+[[bench]]
+name = "ai_facade_bench"
+harness = false
+
+[[bin]]
+name = "generate_baseline_report"
+path = "benches/generate_baseline_report.rs"
+
+[features]
+default = []
+# OpenAI Provider
+openai = []
+# Claude Provider
+claude = []
+# Gemini Provider
+gemini = []
+# 全部 Provider
+all-providers = ["openai", "claude", "gemini"]
+
+[lints]
+workspace = true

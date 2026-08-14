@@ -72,6 +72,64 @@ async fn cart_add_success() {
 }
 
 #[tokio::test]
+async fn cart_add_rejects_non_positive_quantity() {
+    let repo: CartRepo = Arc::new(InMemoryRepository::new());
+    let r = CartController::add(&*repo, json!({"id": 0, "user_id": 1, "product_id": 10, "quantity": 0, "selected": false, "created_at": 0, "updated_at": 0})).await;
+    assert_eq!(r["code"], 400);
+    assert!(r["msg"].as_str().unwrap().contains("商品数量必须大于 0"));
+    let r = CartController::add(&*repo, json!({"id": 0, "user_id": 1, "product_id": 10, "quantity": -1, "selected": false, "created_at": 0, "updated_at": 0})).await;
+    assert_eq!(r["code"], 400);
+}
+
+#[tokio::test]
+async fn cart_add_merges_same_user_same_product() {
+    let repo: CartRepo = Arc::new(InMemoryRepository::new());
+    let body1 = json!({"id": 0, "user_id": 1, "product_id": 10, "quantity": 2, "selected": true, "created_at": 0, "updated_at": 100});
+    let r1 = CartController::add(&*repo, body1).await;
+    assert_eq!(r1["code"], 0);
+    assert_eq!(r1["msg"], "added");
+    assert_eq!(r1["data"]["quantity"], 2);
+
+    let body2 = json!({"id": 0, "user_id": 1, "product_id": 10, "quantity": 3, "selected": false, "created_at": 0, "updated_at": 200});
+    let r2 = CartController::add(&*repo, body2).await;
+    assert_eq!(r2["code"], 0);
+    assert_eq!(r2["msg"], "merged");
+    assert_eq!(r2["data"]["quantity"], 5);
+
+    let list = CartController::list(&*repo, 1).await;
+    assert_eq!(list["data"]["total_count"], 1);
+}
+
+#[tokio::test]
+async fn cart_add_different_user_or_product_does_not_merge() {
+    let repo: CartRepo = Arc::new(InMemoryRepository::new());
+    repo.save(CartItem {
+        id: 100,
+        user_id: 1,
+        product_id: 10,
+        quantity: 5,
+        selected: false,
+        created_at: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+
+    let r = CartController::add(&*repo, json!({"id": 0, "user_id": 2, "product_id": 10, "quantity": 3, "selected": false, "created_at": 0, "updated_at": 0})).await;
+    assert_eq!(r["code"], 0);
+    assert_eq!(r["msg"], "added");
+
+    let existing = repo.find_by_id(&OrmValue::I64(100)).unwrap().unwrap();
+    assert_eq!(existing.quantity, 5);
+
+    let r = CartController::add(&*repo, json!({"id": 0, "user_id": 1, "product_id": 20, "quantity": 2, "selected": false, "created_at": 0, "updated_at": 0})).await;
+    assert_eq!(r["code"], 0);
+    assert_eq!(r["msg"], "added");
+
+    let existing = repo.find_by_id(&OrmValue::I64(100)).unwrap().unwrap();
+    assert_eq!(existing.quantity, 5);
+}
+
+#[tokio::test]
 async fn cart_list_by_user_id() {
     let repo: CartRepo = Arc::new(InMemoryRepository::new());
     repo.save(CartItem {
@@ -364,8 +422,112 @@ async fn order_cancel_state_machine() {
 }
 
 #[tokio::test]
+async fn order_pay_ship_complete_forward_flow() {
+    let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+    repo.save(Order {
+        id: 1,
+        user_id: 1,
+        order_no: "ORD001".into(),
+        total_amount: 100.0,
+        paid_amount: 0.0,
+        status: "pending".into(),
+        shipping_address: "".into(),
+        remark: "".into(),
+        created_at: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+
+    let r = OrderController::pay(&*repo, 1).await;
+    assert_eq!(r["code"], 0);
+    assert_eq!(r["data"]["status"], "paid");
+
+    let r = OrderController::ship(&*repo, 1).await;
+    assert_eq!(r["code"], 0);
+    assert_eq!(r["data"]["status"], "shipped");
+
+    let r = OrderController::complete(&*repo, 1).await;
+    assert_eq!(r["code"], 0);
+    assert_eq!(r["data"]["status"], "completed");
+}
+
+#[tokio::test]
+async fn order_pay_rejects_non_pending() {
+    let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+    repo.save(Order {
+        id: 1,
+        user_id: 1,
+        order_no: "ORD001".into(),
+        total_amount: 100.0,
+        paid_amount: 100.0,
+        status: "paid".into(),
+        shipping_address: "".into(),
+        remark: "".into(),
+        created_at: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+
+    let r = OrderController::pay(&*repo, 1).await;
+    assert_eq!(r["code"], 422);
+    assert!(r["msg"].as_str().unwrap().contains("订单状态为 paid"));
+}
+
+#[tokio::test]
+async fn order_ship_rejects_non_paid() {
+    let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+    repo.save(Order {
+        id: 1,
+        user_id: 1,
+        order_no: "ORD001".into(),
+        total_amount: 100.0,
+        paid_amount: 0.0,
+        status: "pending".into(),
+        shipping_address: "".into(),
+        remark: "".into(),
+        created_at: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+
+    let r = OrderController::ship(&*repo, 1).await;
+    assert_eq!(r["code"], 422);
+    assert!(r["msg"].as_str().unwrap().contains("订单状态为 pending"));
+}
+
+#[tokio::test]
+async fn order_complete_rejects_non_shipped() {
+    let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+    repo.save(Order {
+        id: 1,
+        user_id: 1,
+        order_no: "ORD001".into(),
+        total_amount: 100.0,
+        paid_amount: 100.0,
+        status: "paid".into(),
+        shipping_address: "".into(),
+        remark: "".into(),
+        created_at: 0,
+        updated_at: 0,
+    })
+    .unwrap();
+
+    let r = OrderController::complete(&*repo, 1).await;
+    assert_eq!(r["code"], 422);
+    assert!(r["msg"].as_str().unwrap().contains("订单状态为 paid"));
+}
+
+#[tokio::test]
+async fn order_pay_not_found() {
+    let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+    let r = OrderController::pay(&*repo, 999).await;
+    assert_eq!(r["code"], 404);
+}
+
+#[tokio::test]
 async fn order_list_filter_by_status() {
     let repo: OrderRepo = Arc::new(InMemoryRepository::new());
+
     repo.save(Order {
         id: 1,
         user_id: 1,

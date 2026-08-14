@@ -216,19 +216,21 @@ async fn lead_create_rejects_empty_name() {
 #[tokio::test]
 async fn lead_create_and_convert() {
     let repo: LeadRepo = Arc::new(InMemoryRepository::new());
+    let contact_repo: ContactRepo = Arc::new(InMemoryRepository::new());
+    let deal_repo: DealRepo = Arc::new(InMemoryRepository::new());
     // id 和 name 是必填字段；控制器将 id 重置为 0
     let body = json!({"id": 0, "name": "HotLead", "status": "qualified"});
     let r = LeadController::create(&*repo, body).await;
     assert_eq!(r["code"], 0);
 
     // 控制器将 id 重置为 0，convert 使用 id=0
-    let r = LeadController::convert(&*repo, 0).await;
+    let r = LeadController::convert(&*repo, &*contact_repo, &*deal_repo, 0).await;
     assert_eq!(r["code"], 0);
     assert_eq!(r["msg"], "converted");
     assert_eq!(r["data"]["lead"]["status"], "converted");
 
     // Status filter in list
-    let r = LeadController::list(&*repo, 1, 10, Some("converted".to_string())).await;
+    let r = LeadController::list(&*repo, 1, 10, None, Some("converted".to_string())).await;
     assert_eq!(r["data"]["total"], 1);
 }
 
@@ -262,7 +264,7 @@ fn deal_default_values() {
     let d = Deal::default();
     assert_eq!(d.id, 0);
     assert!(d.name.is_empty());
-    assert_eq!(d.stage, "prospect");
+    assert_eq!(d.stage, "initial");
 }
 
 #[test]
@@ -271,7 +273,7 @@ fn deal_get_attribute_all_fields() {
     let d = Deal {
         id: 8,
         name: "BigDeal".to_string(),
-        stage: "negotiation".to_string(),
+        stage: "negotiating".to_string(),
         amount: 100000.0,
         probability: 80,
         contact_id: 3,
@@ -303,7 +305,7 @@ async fn deal_pipeline_aggregation() {
     repo.save(Deal {
         id: 1,
         name: "D1".to_string(),
-        stage: "prospect".to_string(),
+        stage: "initial".to_string(),
         amount: 1000.0,
         ..Default::default()
     })
@@ -311,7 +313,7 @@ async fn deal_pipeline_aggregation() {
     repo.save(Deal {
         id: 2,
         name: "D2".to_string(),
-        stage: "prospect".to_string(),
+        stage: "initial".to_string(),
         amount: 2000.0,
         ..Default::default()
     })
@@ -319,7 +321,7 @@ async fn deal_pipeline_aggregation() {
     repo.save(Deal {
         id: 3,
         name: "D3".to_string(),
-        stage: "negotiation".to_string(),
+        stage: "negotiating".to_string(),
         amount: 5000.0,
         ..Default::default()
     })
@@ -328,23 +330,20 @@ async fn deal_pipeline_aggregation() {
     let r = DealController::pipeline(&*repo).await;
     assert_eq!(r["code"], 0);
     let pipeline = r["data"]["pipeline"].as_array().unwrap();
-    // prospect stage
-    let prospect = pipeline.iter().find(|p| p["stage"] == "prospect").unwrap();
-    assert_eq!(prospect["count"], 2);
-    assert_eq!(prospect["total_amount"], 3000.0);
-    // negotiation stage
+    // initial stage
+    let initial = pipeline.iter().find(|p| p["stage"] == "initial").unwrap();
+    assert_eq!(initial["count"], 2);
+    assert_eq!(initial["total_amount"], 3000.0);
+    // negotiating stage
     let neg = pipeline
         .iter()
-        .find(|p| p["stage"] == "negotiation")
+        .find(|p| p["stage"] == "negotiating")
         .unwrap();
     assert_eq!(neg["count"], 1);
     assert_eq!(neg["total_amount"], 5000.0);
-    // closed_won should have 0
-    let cw = pipeline
-        .iter()
-        .find(|p| p["stage"] == "closed_won")
-        .unwrap();
-    assert_eq!(cw["count"], 0);
+    // won should have 0
+    let won = pipeline.iter().find(|p| p["stage"] == "won").unwrap();
+    assert_eq!(won["count"], 0);
 }
 
 #[tokio::test]
@@ -354,7 +353,7 @@ async fn deal_create_update_delete_lifecycle() {
     // Create — id 和 name 是必填字段；控制器将 id 重置为 0
     let r = DealController::create(
         &*repo,
-        json!({"id": 0, "name": "NewDeal", "stage": "proposal", "amount": 50000.0}),
+        json!({"id": 0, "name": "NewDeal", "stage": "quoted", "amount": 50000.0}),
     )
     .await;
     assert_eq!(r["code"], 0);
@@ -378,7 +377,7 @@ async fn deal_create_update_delete_lifecycle() {
 #[tokio::test]
 async fn deal_list_filter_by_stage() {
     let repo: DealRepo = Arc::new(InMemoryRepository::new());
-    for (i, stage) in ["prospect", "proposal", "closed_won"].iter().enumerate() {
+    for (i, stage) in ["initial", "quoted", "won"].iter().enumerate() {
         repo.save(Deal {
             id: (i + 1) as i64,
             name: format!("D{}", i),
@@ -387,7 +386,7 @@ async fn deal_list_filter_by_stage() {
         })
         .unwrap();
     }
-    let r = DealController::list(&*repo, 1, 10, Some("proposal".to_string())).await;
+    let r = DealController::list(&*repo, 1, 10, None, Some("quoted".to_string())).await;
     assert_eq!(r["data"]["total"], 1);
     assert_eq!(r["data"]["list"][0]["name"], "D1");
 }

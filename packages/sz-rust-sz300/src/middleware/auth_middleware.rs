@@ -16,6 +16,17 @@ use axum::{
 ///   `/api/v1/auth/logout` 等需要鉴权的接口
 /// - 新版调用 `crate::router::is_public_path`（精确匹配）共用同一份白名单，
 ///   避免白名单散落多处导致策略不一致
+///
+/// # Deprecated 说明
+///
+/// `sz_rust_middleware_facade::auth::auth_middleware` 签名不兼容
+/// （需 `State<AuthConfig>` + `from_fn_with_state`，本仓使用 `from_fn` + 全局 `auth_service`）。
+/// 保留自研版以维持 JWT 验证逻辑（`auth_service::verify_token`）与错误响应格式不变。
+/// 迁移至 middleware-facade 版需同步改造 `auth_service` 初始化流程。
+#[deprecated(
+    since = "1.2.0",
+    note = "请使用 sz_rust_middleware_facade::auth::auth_middleware（需同步迁移 AuthConfig 初始化）"
+)]
 pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let auth_header = req
         .headers()

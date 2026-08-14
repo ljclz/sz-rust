@@ -13,7 +13,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 async fn main() -> anyhow::Result<()> {
     // 初始化日志 — EnvFilter + JSON 格式（生产环境友好）
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,sz_rust_sz300=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("warn,sz_rust_sz300=info"));
     fmt().with_env_filter(filter).json().init();
 
     tracing::info!("鲜视达 SZ-300 后端服务启动");
@@ -27,6 +27,15 @@ async fn main() -> anyhow::Result<()> {
 
     // 加载配置（从环境变量读取，密钥不硬编码）
     let config = config::load_config()?;
+
+    // 加载优雅关闭配置
+    let shutdown_config = config::ShutdownConfig::from_env();
+    tracing::info!(
+        "优雅关闭配置: shutdown_timeout={:?}, mqtt_timeout={:?}, force_abort={}",
+        shutdown_config.shutdown_timeout,
+        shutdown_config.mqtt_timeout(),
+        shutdown_config.force_abort_on_timeout
+    );
 
     // 尝试加载框架统一 AppConfig（YAML 配置文件，可选）
     // 对齐 sz-rust-core 的 AppConfig::load_from_dir()，实现框架级配置统一
@@ -123,8 +132,50 @@ async fn main() -> anyhow::Result<()> {
     );
     tracing::info!("可观测性模块初始化完成（Prometheus /metrics 端点已启用）");
 
+    // 初始化 Capability Registry（能力注册表，用于 AI/MCP 能力发现与调用）
+    let capability_registry = Arc::new(sz_rust_capability::CapabilityRegistry::new());
+    tracing::info!("Capability Registry 初始化完成");
+
+    // 初始化 AI facade（可选，从环境变量读取 API Key）
+    // 若 SZ300_AI_API_KEY 未设置，AI 功能降级（/api/v1/ai/chat 返回 503）
+    let ai = match std::env::var("SZ300_AI_API_KEY") {
+        Ok(_api_key) => {
+            tracing::info!("AI facade 初始化跳过（需配置 Provider，当前仅标记为可用）");
+            None
+        }
+        Err(_) => {
+            tracing::info!(
+                "AI facade 未配置（SZ300_AI_API_KEY 未设置，/api/v1/ai/chat 将返回降级响应）"
+            );
+            None
+        }
+    };
+
+    // 初始化事件总线（用于业务事件发布/订阅，如 order.created）
+    let event_bus = Arc::new(sz_rust_core::plugin::event_bus::InMemoryEventBus::new());
+    tracing::info!("事件总线初始化完成（InMemoryEventBus）");
+
+    // 初始化缓存 facade（可选，默认使用内存驱动）
+    // 若需 Redis 驱动，设置 SZ300_REDIS_URL 环境变量
+    let cache = {
+        let cache = sz_rust_cache_facade::Cache::new();
+        cache.register_default(sz_rust_cache_facade::MemoryCacheDriver::new());
+        Some(Arc::new(cache))
+    };
+    tracing::info!("缓存 facade 初始化完成（MemoryCacheDriver）");
+
+    // 初始化 SLO 监控器（Google SRE 推荐：1h/5m Page + 6h/30m Ticket 双窗口）
+    let slo_monitor = Arc::new(sz_rust_observability::slo::SloMonitor::new(
+        sz_rust_observability::slo::SloConfig::default(),
+    ));
+    tracing::info!("SLO 监控器初始化完成（target=99.9%, Page=1h/5m, Ticket=6h/30m）");
+
+    // 初始化 ORM 钩子注册表（16 事件生命周期钩子，对齐 PHP think-orm Model 钩子）
+    let hook_registry = Arc::new(sz_rust_core::hooks::HookRegistry::new());
+    tracing::info!("ORM 钩子注册表初始化完成（16 事件）");
+
     // 初始化数据库连接池
-    let pool = db::init_pool(&config).await?;
+    let pool = Arc::new(db::init_pool(&config).await?);
     let pg_pool = match config::pg_config() {
         Ok(pg_cfg) => match db::init_pg_pool(&pg_cfg).await {
             Ok(p) => {
@@ -142,9 +193,31 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let app_state = AppState {
-        db_pool: Arc::new(pool),
+        db_pool: pool.clone(),
         pg_pool,
         metrics_registry: metrics_registry.clone(),
+        capability_registry: capability_registry.clone(),
+        ai,
+        event_bus,
+        cache,
+        slo_monitor,
+        hook_registry,
+        #[cfg(feature = "admin")]
+        db_pool_stats: Arc::new(
+            sz_rust_sz300::state::DbPoolStatsAdapter::new(pool.clone())
+        ) as Arc<dyn sz_rust_observability::admin::DbPoolStats>,
+        #[cfg(feature = "admin")]
+        redis_stats: std::env::var("ADMIN_REDIS_URL")
+            .ok()
+            .and_then(|url| match sz_rust_sz300::state::RedisStatsAdapter::from_url(&url) {
+                Ok(adapter) => {
+                    Some(Arc::new(adapter) as Arc<dyn sz_rust_observability::admin::RedisStats>)
+                }
+                Err(e) => {
+                    tracing::warn!("Admin Redis 适配器初始化失败（非致命，/api/admin/redis/info 将返回降级响应）: {}", e);
+                    None
+                }
+            }),
     };
 
     // 初始化 JWT 认证（传入数据库连接池用于密码验证）
@@ -156,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
     // 初始化 MQTT 消费者 — 带优雅退出信号
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let app_state_clone = app_state.clone();
-    let mqtt_handle = tokio::spawn(async move {
+    let mut mqtt_handle = tokio::spawn(async move {
         services::mqtt_listener::MqttDispatcher::start_consumer(app_state_clone, shutdown_rx).await;
     });
 
@@ -196,9 +269,30 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!("收到关闭信号，正在优雅关闭...");
             // 通知 MQTT 消费者退出
             let _ = shutdown_tx.send(true);
-            // 等待 MQTT 任务完成（最多 5 秒）
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
-            tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
+            // 等待 MQTT 任务完成（可配置超时）
+            let mqtt_timeout = shutdown_config.mqtt_timeout();
+            match tokio::time::timeout(mqtt_timeout, &mut mqtt_handle).await {
+                Ok(Ok(())) => {
+                    tracing::info!("MQTT 消费者已正常退出，HTTP 服务器关闭中...");
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("MQTT 消费者退出异常: {e:?}，HTTP 服务器关闭中...");
+                }
+                Err(_) => {
+                    if shutdown_config.force_abort_on_timeout {
+                        tracing::warn!(
+                            "MQTT_CONSUMER_FORCE_QUIT: MQTT 消费者在 {:?} 内未退出，强制中止",
+                            mqtt_timeout
+                        );
+                        mqtt_handle.abort();
+                    } else {
+                        tracing::warn!(
+                            "MQTT 消费者在 {:?} 内未退出，继续关闭 HTTP 服务器",
+                            mqtt_timeout
+                        );
+                    }
+                }
+            }
         })
         .await?;
 

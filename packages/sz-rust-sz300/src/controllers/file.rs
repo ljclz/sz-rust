@@ -33,6 +33,8 @@ impl FileController {
                     Err(e) => return ctrl.render_error(&e, json!({}), 0),
                 };
 
+                // 保存文件（使用 sz_rust_core::upload 引擎时通过 StorageConfig 配置驱动）
+                #[allow(deprecated)]
                 match file_service::FileService::save(filename, &bytes).await {
                     Ok(url) => ctrl.render_success("上传成功", json!({"url": url})),
                     Err(e) => ctrl.render_error(&e, json!({}), 0),
@@ -53,6 +55,7 @@ impl FileController {
                 Err(e) => return ctrl.render_error(format!("读取文件失败: {}", e), json!({}), 0),
             };
 
+            #[allow(deprecated)]
             match file_service::FileService::save(&filename, &data).await {
                 Ok(url) => uploaded.push(json!({"filename": filename, "url": url})),
                 Err(e) => return ctrl.render_error(&e, json!({}), 0),

@@ -116,6 +116,7 @@ impl LogFacade {
     pub fn log(&self, level: LogLevel, msg: &str) {
         self.logger.log(level, msg);
         match level {
+            LogLevel::Trace => tracing::trace!("{}", msg),
             LogLevel::Debug => tracing::debug!("{}", msg),
             LogLevel::Info => tracing::info!("{}", msg),
             LogLevel::Warn => tracing::warn!("{}", msg),
@@ -174,6 +175,7 @@ impl<'a> ChannelRef<'a> {
             logger.log(level, msg);
         }
         match level {
+            LogLevel::Trace => tracing::trace!("[{}] {}", self.name, msg),
             LogLevel::Debug => tracing::debug!("[{}] {}", self.name, msg),
             LogLevel::Info => tracing::info!("[{}] {}", self.name, msg),
             LogLevel::Warn => tracing::warn!("[{}] {}", self.name, msg),
@@ -208,6 +210,7 @@ impl<'a> ChannelRef<'a> {
 /// 未知字符串默认为 `LogLevel::Info`。
 pub fn parse_level(s: &str) -> LogLevel {
     match s.to_lowercase().as_str() {
+        "trace" => LogLevel::Trace,
         "debug" => LogLevel::Debug,
         "info" => LogLevel::Info,
         "warn" | "warning" => LogLevel::Warn,
@@ -695,6 +698,14 @@ async fn log_middleware_inner(req: Request, next: Next, config: &LogConfig) -> R
         let request_id_hex = request_id.to_hex();
 
         match level {
+            LogLevel::Trace => tracing::trace!(
+                request_id = %request_id_hex,
+                method = %method,
+                uri = %uri,
+                status = status,
+                duration_ms = duration_ms,
+                "request completed"
+            ),
             LogLevel::Debug => tracing::debug!(
                 request_id = %request_id_hex,
                 method = %method,

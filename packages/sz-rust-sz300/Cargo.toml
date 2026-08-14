@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust sz300 业务应用 — 设备/商户/商品/订单管理示例"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 # sz-orm 穿透依赖已迁移至 sz-rust-core::orm facade（v0.2.0+）
@@ -18,6 +22,9 @@ sz-rust-middleware-facade.workspace = true
 sz-rust-http-facade.workspace = true
 sz-rust-state-facade.workspace = true
 sz-rust-observability.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-ai-facade.workspace = true
+sz-rust-cache-facade.workspace = true
 sz-orm-sqlx.workspace = true
 # 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。
 # features 取 sz-orm-sqlx 的子集，Cargo 按并集解析，与 sz-orm-sqlx 共享同一编译产物，不增加主包体积。
@@ -34,6 +41,8 @@ tracing-subscriber.workspace = true
 base64.workspace = true
 bcrypt = "0.16"
 once_cell.workspace = true
+# Admin Monitor API 依赖（可选，启用 admin feature）
+redis = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -45,6 +54,8 @@ real-broker = ["sz-rust-core/real-broker"]
 otlp = ["sz-rust-observability/otlp"]
 # 启用 OTLP HTTP/protobuf 分布式追踪导出（端口 4318）
 otlp-http = ["sz-rust-observability/otlp-http"]
+# 启用 Admin Monitor API（/api/admin/* 端点：服务器信息 / DB 连接池 / Redis 状态）
+admin = ["sz-rust-observability/admin", "dep:redis"]
 
 [[bin]]
 name = "sz300-server"
@@ -57,3 +68,5 @@ harness = false
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 futures.workspace = true
+tower.workspace = true
+http-body-util.workspace = true

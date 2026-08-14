@@ -42,9 +42,21 @@ pub enum ConfigError {
         #[source]
         source: serde_yaml::Error,
     },
+    /// 生产环境禁止使用 debug/trace 日志级别
+    #[error("生产环境禁止使用 {level} 日志级别 — 请使用 warn 或更高级别")]
+    LogLevelForbiddenInProduction {
+        /// 当前日志级别
+        level: String,
+    },
+    /// AI 配置校验失败
+    #[error("AI 配置校验失败: {0}")]
+    AiConfigInvalid(String),
+    /// Data Scope 配置校验失败
+    #[error("Data Scope 配置校验失败: {0}")]
+    DataScopeConfigInvalid(String),
 }
 
-/// 顶层应用配置（含 6 个 section）
+/// 顶层应用配置（含 6 个 section + AI section）
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     /// 应用配置段
@@ -65,6 +77,12 @@ pub struct AppConfig {
     /// 服务器配置段（HTTP 监听地址与端口）
     #[serde(default)]
     pub server: ServerSection,
+    /// AI 配置段（可选，不配置时 AI 功能不可用）
+    #[serde(default)]
+    pub ai: Option<AiSection>,
+    /// Data Scope 配置段（可选，不配置时数据范围控制不可用）
+    #[serde(default)]
+    pub data_scope: DataScopeSection,
 }
 
 /// 应用配置段 — 对齐 PHP `config/app.php`
@@ -360,7 +378,67 @@ fn default_log_file() -> String {
 }
 
 fn default_log_level() -> String {
-    "info".to_string()
+    "warn".to_string()
+}
+
+// ============================================================================
+// LogConfig — 生产环境日志级别配置与校验
+// ============================================================================
+
+/// 日志配置（生产环境加固）
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    /// 日志级别（默认 `warn,sz_rust_sz300=info`）
+    pub level: String,
+    /// 生产环境最低允许级别（固定 `warn`）
+    pub production_min_level: String,
+    /// 日志排除路径（不记录访问日志的端点）
+    pub exclude_paths: Vec<String>,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            level: "warn,sz_rust_sz300=info".to_string(),
+            production_min_level: "warn".to_string(),
+            exclude_paths: vec![
+                "/health".into(),
+                "/health/ready".into(),
+                "/health/startup".into(),
+                "/metrics".into(),
+            ],
+        }
+    }
+}
+
+impl LogConfig {
+    /// 从环境变量读取日志配置
+    ///
+    /// - `RUST_LOG`：日志级别（未设置时使用默认 `warn,sz_rust_sz300=info`）
+    pub fn from_env() -> Self {
+        let level =
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,sz_rust_sz300=info".to_string());
+        Self {
+            level,
+            ..Default::default()
+        }
+    }
+
+    /// 校验生产环境日志级别
+    ///
+    /// `env=production` 且 level 含 `debug`/`trace` → 返回错误
+    pub fn validate_production(&self, env: &str) -> Result<(), ConfigError> {
+        if env != "production" {
+            return Ok(());
+        }
+        let level_lower = self.level.to_lowercase();
+        if level_lower.contains("debug") || level_lower.contains("trace") {
+            return Err(ConfigError::LogLevelForbiddenInProduction {
+                level: self.level.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -392,6 +470,9 @@ impl AppConfig {
             addons: load_section(&dir.join("addons.yml"), AddonsSection::default()).await?,
             log: load_section(&dir.join("log.yml"), LogSection::default()).await?,
             server: load_section(&dir.join("server.yml"), ServerSection::default()).await?,
+            ai: load_optional_section(&dir.join("ai.yml")).await?,
+            data_scope: load_section(&dir.join("data_scope.yml"), DataScopeSection::default())
+                .await?,
         };
 
         // 应用环境变量覆盖
@@ -465,6 +546,25 @@ async fn load_section<T: DeserializeOwned + Default>(
         path: path.display().to_string(),
         source: e,
     })
+}
+
+/// 加载可选配置段 — 文件不存在时返回 None，存在时解析为 Some(T)
+async fn load_optional_section<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, ConfigError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| ConfigError::FileRead {
+            path: path.display().to_string(),
+            source: e,
+        })?;
+    serde_yaml::from_str(&content)
+        .map(Some)
+        .map_err(|e| ConfigError::Parse {
+            path: path.display().to_string(),
+            source: e,
+        })
 }
 
 // ============================================================================
@@ -675,6 +775,284 @@ impl ConfigWatcher {
         });
 
         ConfigWatcherHandle { cancel }
+    }
+}
+
+// ============================================================================
+// AI 配置段
+// ============================================================================
+
+/// AI 配置段 — Provider 凭证 / 模型路由 / 限流 / 故障切换 / Agent / Embedding / 向量存储
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiSection {
+    /// AI Provider 列表（openai/claude/gemini 等）
+    #[serde(default)]
+    pub providers: Vec<AiProviderConfig>,
+    /// 模型路由表 — model name → provider name
+    #[serde(default)]
+    pub routing: AiRoutingTable,
+    /// 限流配置
+    #[serde(default)]
+    pub rate_limit: AiRateLimitConfig,
+    /// 默认模型名
+    #[serde(default = "default_ai_default_model")]
+    pub default_model: String,
+    /// 故障切换配置
+    #[serde(default)]
+    pub failover: AiFailoverConfig,
+    /// Agent 配置
+    #[serde(default)]
+    pub agent: AiAgentConfig,
+    /// Embedding 配置
+    #[serde(default)]
+    pub embedding: AiEmbeddingConfig,
+    /// 向量存储配置
+    #[serde(default)]
+    pub vector: AiVectorConfig,
+}
+
+fn default_ai_default_model() -> String {
+    "gpt-4o".to_string()
+}
+
+impl Default for AiSection {
+    fn default() -> Self {
+        Self {
+            providers: Vec::new(),
+            routing: AiRoutingTable::default(),
+            rate_limit: AiRateLimitConfig::default(),
+            default_model: default_ai_default_model(),
+            failover: AiFailoverConfig::default(),
+            agent: AiAgentConfig::default(),
+            embedding: AiEmbeddingConfig::default(),
+            vector: AiVectorConfig::default(),
+        }
+    }
+}
+
+impl AiSection {
+    /// 从环境变量加载 AI 配置
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let mut section = Self::default();
+        if let Ok(model) = std::env::var("SZ_AI_DEFAULT_MODEL") {
+            if !model.is_empty() {
+                section.default_model = model;
+            }
+        }
+        if let Ok(rps) = std::env::var("SZ_AI_RATE_LIMIT_RPS") {
+            if let Ok(rps) = rps.parse::<u32>() {
+                section.rate_limit.rps = rps;
+            }
+        }
+        if let Ok(burst) = std::env::var("SZ_AI_RATE_LIMIT_BURST") {
+            if let Ok(burst) = burst.parse::<u32>() {
+                section.rate_limit.burst = burst;
+            }
+        }
+        Ok(section)
+    }
+
+    /// 校验 AI 配置合法性
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.rate_limit.rps == 0 {
+            return Err(ConfigError::AiConfigInvalid(
+                "rate_limit.rps must be > 0".to_string(),
+            ));
+        }
+        if !self.providers.is_empty() && self.routing.routes.is_empty() {
+            return Err(ConfigError::AiConfigInvalid(
+                "providers configured but routing table is empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// 单个 AI Provider 配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiProviderConfig {
+    /// Provider 名称（openai/claude/gemini）
+    pub name: String,
+    /// API 密钥
+    #[serde(default)]
+    pub api_key: String,
+    /// API 基础 URL
+    #[serde(default)]
+    pub base_url: String,
+    /// 支持的模型列表
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+/// 模型路由表 — model name → provider name
+#[derive(Debug, Clone, serde::Serialize, Deserialize, Default)]
+pub struct AiRoutingTable {
+    /// 路由映射 — model name → provider name
+    #[serde(default)]
+    pub routes: HashMap<String, String>,
+}
+
+/// AI 限流配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiRateLimitConfig {
+    /// 每秒请求数
+    #[serde(default = "default_ai_rps")]
+    pub rps: u32,
+    /// 突发容量
+    #[serde(default = "default_ai_burst")]
+    pub burst: u32,
+}
+
+fn default_ai_rps() -> u32 {
+    10
+}
+
+fn default_ai_burst() -> u32 {
+    20
+}
+
+impl Default for AiRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            rps: default_ai_rps(),
+            burst: default_ai_burst(),
+        }
+    }
+}
+
+/// AI 故障切换配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiFailoverConfig {
+    /// 连续失败阈值（达到后切换至备用 Provider）
+    #[serde(default = "default_ai_failover_threshold")]
+    pub threshold: u32,
+    /// 冷却时间（毫秒）
+    #[serde(default = "default_ai_failover_cooldown")]
+    pub cooldown_ms: u64,
+}
+
+fn default_ai_failover_threshold() -> u32 {
+    3
+}
+
+fn default_ai_failover_cooldown() -> u64 {
+    30_000
+}
+
+impl Default for AiFailoverConfig {
+    fn default() -> Self {
+        Self {
+            threshold: default_ai_failover_threshold(),
+            cooldown_ms: default_ai_failover_cooldown(),
+        }
+    }
+}
+
+/// AI Agent 配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiAgentConfig {
+    /// 默认最大步数
+    #[serde(default = "default_ai_agent_max_steps")]
+    pub default_max_steps: u32,
+    /// 工具调用超时（毫秒）
+    #[serde(default = "default_ai_agent_tool_timeout")]
+    pub tool_timeout_ms: u64,
+    /// 空闲超时（毫秒）
+    #[serde(default = "default_ai_agent_idle_timeout")]
+    pub idle_timeout_ms: u64,
+}
+
+fn default_ai_agent_max_steps() -> u32 {
+    25
+}
+
+fn default_ai_agent_tool_timeout() -> u64 {
+    30_000
+}
+
+fn default_ai_agent_idle_timeout() -> u64 {
+    30_000
+}
+
+impl Default for AiAgentConfig {
+    fn default() -> Self {
+        Self {
+            default_max_steps: default_ai_agent_max_steps(),
+            tool_timeout_ms: default_ai_agent_tool_timeout(),
+            idle_timeout_ms: default_ai_agent_idle_timeout(),
+        }
+    }
+}
+
+/// AI Embedding 配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiEmbeddingConfig {
+    /// 默认 Embedding 模型
+    #[serde(default = "default_ai_embed_model")]
+    pub default_model: String,
+    /// 批量大小
+    #[serde(default = "default_ai_embed_batch")]
+    pub batch_size: u32,
+    /// 缓存 TTL（秒）
+    #[serde(default = "default_ai_embed_cache_ttl")]
+    pub cache_ttl_secs: u64,
+}
+
+fn default_ai_embed_model() -> String {
+    "text-embedding-3-small".to_string()
+}
+
+fn default_ai_embed_batch() -> u32 {
+    64
+}
+
+fn default_ai_embed_cache_ttl() -> u64 {
+    86_400
+}
+
+impl Default for AiEmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            default_model: default_ai_embed_model(),
+            batch_size: default_ai_embed_batch(),
+            cache_ttl_secs: default_ai_embed_cache_ttl(),
+        }
+    }
+}
+
+/// AI 向量存储配置
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct AiVectorConfig {
+    /// 向量存储后端（orm/qdrant/milvus）
+    #[serde(default = "default_ai_vector_backend")]
+    pub backend: String,
+    /// 默认相似度度量（cosine/dot/l2）
+    #[serde(default = "default_ai_vector_metric")]
+    pub default_metric: String,
+    /// 向量维度
+    #[serde(default = "default_ai_vector_dimensions")]
+    pub dimensions: usize,
+}
+
+fn default_ai_vector_backend() -> String {
+    "orm".to_string()
+}
+
+fn default_ai_vector_metric() -> String {
+    "cosine".to_string()
+}
+
+fn default_ai_vector_dimensions() -> usize {
+    1536
+}
+
+impl Default for AiVectorConfig {
+    fn default() -> Self {
+        Self {
+            backend: default_ai_vector_backend(),
+            default_metric: default_ai_vector_metric(),
+            dimensions: default_ai_vector_dimensions(),
+        }
     }
 }
 
@@ -1140,5 +1518,133 @@ app_map:
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// ============================================================================
+// Data Scope 配置段
+// ============================================================================
+
+/// Data Scope 规则配置（YAML 映射）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DataScopeRuleConfig {
+    /// 数据范围模式（all / dept / dept_and_sub / self / custom）
+    pub mode: String,
+    /// 部门字段名（DEPT / DEPT_AND_SUB 模式必填）
+    #[serde(default)]
+    pub dept_field: Option<String>,
+    /// 创建者字段名（SELF 模式必填）
+    #[serde(default)]
+    pub creator_field: Option<String>,
+    /// 自定义生成器名称（CUSTOM 模式必填）
+    #[serde(default)]
+    pub custom_generator: Option<String>,
+    /// 目标表名
+    pub target_table: String,
+    /// 优先级
+    #[serde(default)]
+    pub priority: u32,
+}
+
+/// Data Scope 配置段
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DataScopeSection {
+    /// 规则列表
+    #[serde(default)]
+    pub rules: Vec<DataScopeRuleConfig>,
+    /// 部门树缓存 TTL（秒）
+    #[serde(default = "default_dept_tree_ttl")]
+    pub dept_tree_ttl_secs: u64,
+    /// 是否启用
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+fn default_dept_tree_ttl() -> u64 {
+    300
+}
+
+impl Default for DataScopeSection {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            dept_tree_ttl_secs: 300,
+            enabled: false,
+        }
+    }
+}
+
+impl DataScopeSection {
+    /// 校验配置并转换为 DataScopeRule 列表
+    pub fn validate(
+        &self,
+    ) -> Result<Vec<sz_rust_orm_facade::data_scope::DataScopeRule>, ConfigError> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
+
+        let mut rules = Vec::new();
+        for config in &self.rules {
+            let mode = match config.mode.as_str() {
+                "all" => sz_rust_orm_facade::data_scope::DataScopeMode::All,
+                "dept" => sz_rust_orm_facade::data_scope::DataScopeMode::Dept,
+                "dept_and_sub" => sz_rust_orm_facade::data_scope::DataScopeMode::DeptAndSub,
+                "self" => sz_rust_orm_facade::data_scope::DataScopeMode::Self_,
+                "custom" => sz_rust_orm_facade::data_scope::DataScopeMode::Custom,
+                other => {
+                    return Err(ConfigError::DataScopeConfigInvalid(format!(
+                        "unknown mode '{}' for table '{}'",
+                        other, config.target_table
+                    )))
+                }
+            };
+
+            let mut rule =
+                sz_rust_orm_facade::data_scope::DataScopeRule::new(&config.target_table, mode)
+                    .with_priority(config.priority);
+
+            if let Some(ref field) = config.dept_field {
+                rule = rule.with_dept_field(field);
+            }
+            if let Some(ref field) = config.creator_field {
+                rule = rule.with_creator_field(field);
+            }
+            if let Some(ref name) = config.custom_generator {
+                rule = rule.with_custom_generator(name);
+            }
+
+            match rule.mode {
+                sz_rust_orm_facade::data_scope::DataScopeMode::Dept
+                | sz_rust_orm_facade::data_scope::DataScopeMode::DeptAndSub => {
+                    if rule.dept_field.is_none() {
+                        return Err(ConfigError::DataScopeConfigInvalid(format!(
+                            "mode '{}' requires dept_field for table '{}'",
+                            config.mode, config.target_table
+                        )));
+                    }
+                }
+                sz_rust_orm_facade::data_scope::DataScopeMode::Self_ => {
+                    if rule.creator_field.is_none() {
+                        return Err(ConfigError::DataScopeConfigInvalid(format!(
+                            "mode 'self' requires creator_field for table '{}'",
+                            config.target_table
+                        )));
+                    }
+                }
+                sz_rust_orm_facade::data_scope::DataScopeMode::Custom => {
+                    if rule.custom_generator.is_none() {
+                        return Err(ConfigError::DataScopeConfigInvalid(format!(
+                            "mode 'custom' requires custom_generator for table '{}'",
+                            config.target_table
+                        )));
+                    }
+                }
+                sz_rust_orm_facade::data_scope::DataScopeMode::All => {}
+            }
+
+            rules.push(rule);
+        }
+
+        Ok(rules)
     }
 }

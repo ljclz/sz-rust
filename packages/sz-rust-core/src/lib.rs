@@ -71,6 +71,7 @@ pub mod macros;
 pub mod migration_history;
 pub mod multi_app;
 pub mod multi_tenant;
+pub mod plugin;
 
 // P3: alloc 计数 GlobalAlloc wrapper（仅 alloc-count feature 启用时编译）
 #[cfg(feature = "alloc-count")]

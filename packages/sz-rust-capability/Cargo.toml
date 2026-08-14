@@ -1,0 +1,42 @@
+[package]
+name = "sz-rust-capability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust Capability Registry — 统一能力注册表，将 Skills 与 Plugins 抽象为统一的 Capability 接口"
+repository.workspace = true
+homepage.workspace = true
+autobenches = false
+keywords = ["capability", "registry", "ai", "plugin", "skill"]
+categories = ["development-tools"]
+
+[dependencies]
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+once_cell = { workspace = true }
+sz-rust-mcp = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "capability_bench"
+harness = false
+
+[[bench]]
+name = "cap_bench"
+harness = false

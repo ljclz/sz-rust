@@ -6,6 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SZ-Rust 框架示例代码 — 快速入门与 CRUD 演示"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 sz-rust-core = { workspace = true }
@@ -23,6 +27,11 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["util"] }
 http-body-util = { workspace = true }
 http = { workspace = true }
+sz-rust-capability = { workspace = true }
+sz-rust-addons-loader = { workspace = true }
+sz-rust-addons-cms = { workspace = true }
+sz-rust-addons-crm = { workspace = true }
+sz-rust-addons-ecommerce = { workspace = true }
 
 [lib]
 name = "sz_rust_examples"

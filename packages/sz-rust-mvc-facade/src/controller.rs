@@ -653,6 +653,223 @@ pub trait AddonsBaseController: BaseController {
     }
 }
 
+// ============================================================================
+// KeyRotation — JWT 签名密钥轮换机制
+// ============================================================================
+
+use parking_lot::RwLock;
+use sha2::{Digest, Sha256};
+use std::time::Duration;
+
+/// JWT 密钥轮换管理器
+///
+/// 支持多密钥并存验证：当前密钥签发/验证，旧密钥在 grace period 内仍可验证。
+/// 轮换任务定期生成新密钥，旧密钥移入 previous 列表，超期后删除。
+pub struct KeyRotation {
+    /// 当前签名密钥
+    current: RwLock<String>,
+    /// 旧密钥列表（key, expires_at）
+    previous: RwLock<Vec<(String, std::time::Instant)>>,
+    /// 轮换间隔（默认 24h）
+    rotation_interval: Duration,
+    /// 旧密钥宽限期（默认 1h）
+    grace_period: Duration,
+    /// 最大保留旧密钥数（默认 3）
+    max_previous: usize,
+}
+
+impl std::fmt::Debug for KeyRotation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyRotation")
+            .field("current", &"[REDACTED]")
+            .field("previous", &"[REDACTED]")
+            .field("rotation_interval", &self.rotation_interval)
+            .field("grace_period", &self.grace_period)
+            .field("max_previous", &self.max_previous)
+            .finish()
+    }
+}
+
+/// 密钥轮换错误
+#[derive(Debug, thiserror::Error)]
+pub enum KeyRotationError {
+    /// 环境变量未设置
+    #[error("SZ300_JWT_SECRET 环境变量未设置")]
+    SecretMissing,
+    /// token 验证失败
+    #[error("Token 验证失败：所有密钥均无法解码")]
+    InvalidToken,
+    /// token 签发失败
+    #[error("Token 签发失败：{0}")]
+    SignError(String),
+}
+
+impl KeyRotation {
+    /// 从环境变量创建密钥轮换管理器
+    ///
+    /// - `SZ300_JWT_SECRET`（必填）：当前密钥
+    /// - `SZ300_JWT_ROTATION_INTERVAL`：轮换间隔秒数（默认 86400 = 24h）
+    /// - `SZ300_JWT_GRACE_PERIOD`：宽限期秒数（默认 3600 = 1h）
+    pub fn from_env() -> Result<Self, KeyRotationError> {
+        let current =
+            std::env::var("SZ300_JWT_SECRET").map_err(|_| KeyRotationError::SecretMissing)?;
+        if current.is_empty() {
+            return Err(KeyRotationError::SecretMissing);
+        }
+
+        let rotation_interval = std::env::var("SZ300_JWT_ROTATION_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(86400));
+
+        let grace_period = std::env::var("SZ300_JWT_GRACE_PERIOD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Duration::from_secs(3600));
+
+        Ok(Self {
+            current: RwLock::new(current),
+            previous: RwLock::new(Vec::new()),
+            rotation_interval,
+            grace_period,
+            max_previous: 3,
+        })
+    }
+
+    /// 直接构造（用于测试或显式配置）
+    pub fn new(
+        current: String,
+        rotation_interval: Duration,
+        grace_period: Duration,
+        max_previous: usize,
+    ) -> Self {
+        Self {
+            current: RwLock::new(current),
+            previous: RwLock::new(Vec::new()),
+            rotation_interval,
+            grace_period,
+            max_previous,
+        }
+    }
+
+    /// 用当前密钥签发 token
+    pub fn sign_token(
+        &self,
+        claims: &sz_rust_orm_facade::jwt::JwtClaims,
+    ) -> Result<String, KeyRotationError> {
+        let secret = self.current.read().clone();
+        let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&secret);
+        encoder
+            .encode(claims)
+            .map_err(|e| KeyRotationError::SignError(e.to_string()))
+    }
+
+    /// 验证 token：先尝试当前密钥，失败则遍历旧密钥（grace period 内）
+    pub fn verify_token(
+        &self,
+        token: &str,
+    ) -> Result<sz_rust_orm_facade::jwt::JwtClaims, KeyRotationError> {
+        // 先用当前密钥验证
+        let current_secret = self.current.read().clone();
+        let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&current_secret);
+        if let Ok(claims) = encoder.decode(token) {
+            return Ok(claims);
+        }
+
+        // 遍历旧密钥（grace period 内）
+        let now = std::time::Instant::now();
+        let previous = self.previous.read();
+        for (key, expires_at) in previous.iter() {
+            if now < *expires_at {
+                let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(key);
+                if let Ok(claims) = encoder.decode(token) {
+                    return Ok(claims);
+                }
+            }
+        }
+
+        Err(KeyRotationError::InvalidToken)
+    }
+
+    /// 启动密钥轮换定时任务
+    pub fn spawn_rotation_task(self: std::sync::Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let interval = self.rotation_interval;
+        let grace_period = self.grace_period;
+        let max_previous = self.max_previous;
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.tick().await; // 跳过首次立即触发
+
+            loop {
+                ticker.tick().await;
+                if let Err(e) = Self::do_rotation(&self, grace_period, max_previous).await {
+                    tracing::error!("JWT_KEY_ROTATION_FAILED: {e}");
+                }
+            }
+        })
+    }
+
+    /// 执行一次密钥轮换
+    pub async fn do_rotation(
+        &self,
+        grace_period: Duration,
+        max_previous: usize,
+    ) -> Result<(), String> {
+        // 生成新密钥（随机 32 字节 hex）
+        let new_key = {
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let bytes: [u8; 32] = rng.gen();
+            hex::encode(bytes)
+        };
+
+        let now = std::time::Instant::now();
+        let expires_at = now + grace_period;
+
+        // 旧 current 移入 previous，新密钥成为 current
+        let old_current = {
+            let mut current = self.current.write();
+            let old = current.clone();
+            *current = new_key.clone();
+            old
+        };
+
+        {
+            let mut previous = self.previous.write();
+            previous.push((old_current.clone(), expires_at));
+            // 超出 max_previous 的旧密钥删除
+            while previous.len() > max_previous {
+                previous.remove(0);
+            }
+            // 删除已过期的旧密钥
+            previous.retain(|(_, exp)| now < *exp);
+        }
+
+        let old_fp = Self::fingerprint(&old_current);
+        let new_fp = Self::fingerprint(&new_key);
+        tracing::info!("JWT_KEY_ROTATED: old_fingerprint={old_fp}, new_fingerprint={new_fp}");
+
+        Ok(())
+    }
+
+    /// 计算密钥指纹（SHA256 前 8 位十六进制）
+    pub fn fingerprint(key: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(key.as_bytes());
+        let result = hasher.finalize();
+        hex::encode(&result[..4])
+    }
+
+    /// 获取当前密钥指纹（用于审计日志）
+    pub fn current_fingerprint(&self) -> String {
+        let current = self.current.read();
+        Self::fingerprint(&current)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

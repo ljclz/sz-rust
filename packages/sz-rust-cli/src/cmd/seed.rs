@@ -108,7 +108,7 @@ fn execute_seed_offline(args: &SeedArgs, seed_files: &[SeedFile]) -> Result<(), 
     for sf in seed_files {
         println!("  Would execute: {}", sf.name);
         if args.show_sql {
-            print_sql_block("SQL", &sf.content);
+            println!("{}", print_sql_block("SQL", &sf.content));
         }
     }
     println!(
@@ -137,7 +137,7 @@ fn execute_seed_online(
         for sf in seed_files {
             println!("  Seeding: {}", sf.name);
             if args.show_sql {
-                print_sql_block("SQL", &sf.content);
+                println!("{}", print_sql_block("SQL", &sf.content));
             }
             conn.execute(&sf.content)
                 .await
@@ -264,16 +264,18 @@ async fn create_connection(url: &str, db_type: DbType) -> Result<Box<dyn Connect
     }
 }
 
-/// 打印 SQL 代码块（带标题分隔符）
-fn print_sql_block(title: &str, sql: &str) {
+/// 构建 SQL 代码块字符串（带标题分隔符）；空 SQL 返回空串
+/// 返回 String 便于测试断言，调用方负责输出（print!）
+fn print_sql_block(title: &str, sql: &str) -> String {
     if sql.is_empty() {
-        return;
+        return String::new();
     }
-    println!("  --- {} ---", title);
+    let mut out = format!("  --- {} ---\n", title);
     for line in sql.lines() {
-        println!("  {}", line);
+        out.push_str(&format!("  {}\n", line));
     }
-    println!("  {}", "-".repeat(title.len() + 8));
+    out.push_str(&format!("  {}\n", "-".repeat(title.len() + 8)));
+    out
 }
 
 #[cfg(test)]
@@ -461,11 +463,20 @@ mod tests {
     #[test]
     fn test_print_sql_block_empty() {
         // 空内容不应输出任何东西
-        print_sql_block("TITLE", "");
+        let out = print_sql_block("TITLE", "");
+        assert!(out.is_empty(), "空内容不应产生输出，实际: {:?}", out);
     }
 
     #[test]
     fn test_print_sql_block_non_empty() {
-        print_sql_block("TITLE", "SELECT 1;\nSELECT 2;");
+        let out = print_sql_block("TITLE", "SELECT 1;\nSELECT 2;");
+        assert!(out.contains("--- TITLE ---"), "应包含标题, 实际: {out}");
+        assert!(out.contains("SELECT 1;"), "应包含第一行 SQL, 实际: {out}");
+        assert!(out.contains("SELECT 2;"), "应包含第二行 SQL, 实际: {out}");
+        assert!(
+            out.contains(&"-".repeat("TITLE".len() + 8)),
+            "应以分隔线结尾, 实际: {:?}",
+            out
+        );
     }
 }

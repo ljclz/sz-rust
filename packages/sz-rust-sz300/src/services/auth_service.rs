@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+use sz_rust_core::auth::refresh::{
+    MemoryRefreshTokenStore, MemoryTokenBlacklist, RefreshTokenConfig, RefreshTokenIssuer,
+    RefreshTokenStore, SsoJwtCodec, TokenBlacklist,
+};
 use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
@@ -8,6 +12,7 @@ use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
 static DB_POOL: OnceLock<Arc<Pool>> = OnceLock::new();
+static REFRESH_ISSUER: OnceLock<RefreshTokenIssuer> = OnceLock::new();
 
 /// 初始化认证模块 — 配置 JWT 密钥、签发者、过期时间与数据库连接池
 ///
@@ -19,6 +24,23 @@ pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
     let _ = AUTH.set(auth);
     let _ = RBAC.set(RbacAuthorizer::new());
     let _ = DB_POOL.set(pool);
+
+    let codec = SsoJwtCodec::new(secret);
+    let blacklist: Arc<dyn TokenBlacklist> = Arc::new(MemoryTokenBlacklist::new());
+    let store: Arc<dyn RefreshTokenStore> = Arc::new(MemoryRefreshTokenStore::new());
+    let config = RefreshTokenConfig {
+        issuer: issuer.to_string(),
+        ..Default::default()
+    };
+    let issuer_impl = RefreshTokenIssuer::new(codec, blacklist, store, config);
+    let _ = REFRESH_ISSUER.set(issuer_impl);
+}
+
+/// 获取已初始化的 Refresh Token 签发器（调用前必须先调用 [`init_auth`]）
+pub fn get_refresh_issuer() -> &'static RefreshTokenIssuer {
+    REFRESH_ISSUER
+        .get()
+        .expect("refresh issuer not initialized")
 }
 
 /// 获取已初始化的 JWT 认证器（调用前必须先调用 [`init_auth`]）
@@ -250,6 +272,18 @@ pub fn verify_token(token: &str) -> Result<User, String> {
 #[tracing::instrument(skip(user))]
 pub fn check_permission(user: &User, permission: &str, resource: &str) -> bool {
     get_rbac().can(user, permission, resource).unwrap_or(false)
+}
+
+/// 测试专用：以给定密钥初始化 JWT 认证器（不接 DB）
+///
+/// 仅用于 middleware 层单元测试，避免依赖真实数据库连接池。
+/// `verify_token` 仅使用 encoder 解码，不依赖 DB，因此此初始化足够。
+#[cfg(test)]
+pub fn init_auth_test_only(secret: &str) {
+    use sz_rust_core::orm::JwtAuthenticator;
+    let auth = JwtAuthenticator::new(secret, "sz300-test", 86400);
+    let _ = AUTH.set(auth);
+    let _ = RBAC.set(RbacAuthorizer::new());
 }
 
 #[cfg(test)]

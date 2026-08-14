@@ -1,10 +1,23 @@
-use crate::controllers::{auth, device, file, file_serve, health, merchant, order, product};
+use crate::controllers::{
+    ai, auth, device, file, file_serve, health, merchant, order, product, view,
+};
 use crate::middleware::auth_middleware;
 use crate::openapi;
 use crate::state::AppState;
 use axum::{middleware, routing::get, routing::post, Router};
+use std::sync::Arc;
 use sz_rust_core::middleware::cors::cors_layer;
 use sz_rust_core::middleware::csrf::csrf_middleware;
+use sz_rust_core::multi_app::MultiAppDispatcher;
+use sz_rust_middleware_facade::circuit_breaker::{
+    circuit_breaker_middleware, CircuitBreaker, CircuitBreakerConfig,
+};
+use sz_rust_middleware_facade::rate_limit::{rate_limit_middleware, token_bucket_config};
+
+#[cfg(feature = "admin")]
+use crate::controllers::admin;
+#[cfg(feature = "admin")]
+use crate::middleware::role_guard::admin_role_guard;
 
 /// 公开路径白名单 — 跳过 JWT 鉴权的路径（精确匹配，避免前缀绕过）
 ///
@@ -35,14 +48,16 @@ pub fn is_public_path(path: &str) -> bool {
 ///
 /// 1. `cors_layer`：CORS 跨域处理（最外层，确保预检请求直接返回）
 /// 2. `csrf_middleware`：CSRF 双提交 Cookie 校验（公开路径自动放行）
-/// 3. `auth_middleware`：JWT 校验（公开路径自动放行）
-/// 4. 业务 handler
+/// 3. `rate_limit_middleware`：限流（令牌桶，健康检查/metrics 排除）
+/// 4. `circuit_breaker_middleware`：熔断器（Open 态返回 503）
+/// 5. `auth_middleware`：JWT 校验（公开路径自动放行）
+/// 6. 业务 handler
 ///
 /// 在 axum/tower 中，`.layer(A).layer(B)` 的执行顺序为 B → A → handler。
 /// 因此此处注册顺序为 auth_middleware 在前（内层），csrf_middleware 在后（外层），
 /// cors_layer 最后注册（最外层）。
 pub fn create_router(state: AppState) -> Router {
-    Router::new()
+    let mut router = Router::new()
         // API 文档（Swagger UI / Redoc / OpenAPI JSON）
         .route("/api-docs", get(openapi::swagger_ui))
         .route("/api-docs/redoc", get(openapi::redoc))
@@ -86,10 +101,61 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/file/upload_multipart",
             post(file::upload_multipart),
         )
+        // AI 聊天接口
+        .route("/api/v1/ai/chat", post(ai::chat))
+        // 视图模板渲染
+        .route("/page/{template}", get(view::render_page))
         // 静态文件服务
-        .route("/uploads/{*path}", get(file_serve::serve_file))
+        .route("/uploads/{*path}", get(file_serve::serve_file));
+
+    // Admin Monitor API（admin feature 门控）
+    // 需要 admin 角色才能访问（role_guard 在 auth_middleware 之上叠加角色检查）
+    #[cfg(feature = "admin")]
+    {
+        router = router.nest(
+            "/api/admin",
+            Router::new()
+                .route("/server/info", get(admin::server_info))
+                .route("/db/pool", get(admin::db_pool))
+                .route("/redis/info", get(admin::redis_info))
+                .layer(middleware::from_fn(admin_role_guard))
+                .with_state(state.clone()),
+        );
+    }
+
+    // 限流配置（令牌桶，从环境变量读取阈值，健康检查/metrics 排除）
+    let rl_config = crate::config::RateLimitProductionConfig::from_env();
+    let rate_limit_layer = token_bucket_config(rl_config.capacity, rl_config.refill_per_second)
+        .with_exclude_paths(rl_config.exclude_paths)
+        .with_key_prefix(rl_config.key_prefix);
+
+    // 熔断器配置（从环境变量读取阈值）
+    let cb_config = crate::config::CircuitBreakerProductionConfig::from_env();
+    cb_config.validate().expect("熔断配置非法");
+    let circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
+        error_threshold: cb_config.error_threshold,
+        cooldown: cb_config.cooldown,
+        probe_requests: cb_config.probe_requests,
+        stat_window: cb_config.stat_window,
+    }));
+
+    router
         // JWT 鉴权中间件（公开路径自动跳过）— 内层
-        .layer(middleware::from_fn(auth_middleware::auth_middleware))
+        // 保留自研版：middleware-facade auth 签名不兼容（from_fn vs from_fn_with_state）
+        .layer(middleware::from_fn(
+            #[allow(deprecated)]
+            auth_middleware::auth_middleware,
+        ))
+        // 熔断器中间件（位于限流之后、auth 之前，Open 态返回 503）
+        .layer(middleware::from_fn_with_state(
+            circuit_breaker,
+            circuit_breaker_middleware,
+        ))
+        // 限流中间件（令牌桶，auth 之前限流避免无效请求消耗鉴权开销）
+        .layer(middleware::from_fn_with_state(
+            rate_limit_layer,
+            rate_limit_middleware,
+        ))
         // CSRF 防护中间件（双提交 Cookie 模式）
         // 公开路径（/health、/metrics、/api/v1/auth/login、/api/v1/auth/refresh）自动放行
         .layer(middleware::from_fn(csrf_middleware))
@@ -98,4 +164,16 @@ pub fn create_router(state: AppState) -> Router {
         .layer(cors_layer())
         // 注入共享状态
         .with_state(state)
+}
+
+/// 创建多应用分发器（对齐 PHP auto_multi_app + app_map）
+///
+/// 注册多个应用 Router，按路径前缀或域名分发。
+/// 当前 sz300 为单应用部署，MultiAppDispatcher 仅用于演示多应用分发能力。
+/// 如需多应用部署，在 main.rs 中调用此函数并合并到主 Router。
+#[allow(dead_code)]
+pub fn create_multi_app_dispatcher(main_router: Router) -> MultiAppDispatcher {
+    let mut dispatcher = MultiAppDispatcher::new();
+    dispatcher.register("sz300", main_router);
+    dispatcher
 }

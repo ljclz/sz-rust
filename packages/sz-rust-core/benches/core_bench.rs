@@ -22,11 +22,35 @@ use std::time::Duration;
 use sz_rust_core::container::Container;
 use sz_rust_core::middleware::chain::MiddlewareChain;
 use sz_rust_core::middleware::order::MiddlewareKind;
+use sz_rust_core::orm::repository::{
+    EntityAttributes, InMemoryRepository, Repository, WhereCondition, WhereOp,
+};
+use sz_rust_core::orm::{Cache as InnerCache, MemoryCache, Value};
 use sz_rust_core::router::{capitalize_first, parse_path};
 use sz_rust_core::routing::{HandlerRef, HttpMethod, RouteConfig, RouteRule};
 use sz_rust_middleware_facade::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
 use sz_rust_middleware_facade::rate_limit::{SlidingWindow, TokenBucket};
 use sz_rust_orm_facade::RateLimiter;
+
+#[derive(Clone, Debug, PartialEq, Default)]
+struct BenchEntity {
+    id: i64,
+    name: String,
+    score: i64,
+    active: bool,
+}
+
+impl EntityAttributes for BenchEntity {
+    fn get_attribute(&self, field: &str) -> Option<Value> {
+        match field {
+            "id" => Some(Value::I64(self.id)),
+            "name" => Some(Value::String(self.name.clone())),
+            "score" => Some(Value::I64(self.score)),
+            "active" => Some(Value::Bool(self.active)),
+            _ => None,
+        }
+    }
+}
 
 // ============================================================================
 // 基准测试组 1：route_matching — 路由匹配
@@ -471,6 +495,124 @@ fn bench_circuit_breaker(c: &mut Criterion) {
     group.finish();
 }
 
+// ============================================================================
+// 基准测试组 10：orm_query_build — ORM 查询构建（W5/W6 PB-1 新增）
+// ============================================================================
+
+fn bench_orm_query_build(c: &mut Criterion) {
+    let mut group = c.benchmark_group("orm_query_build");
+
+    group.bench_function("orm_where_condition_build_1", |b| {
+        b.iter(|| {
+            let _ = WhereCondition::new("id", WhereOp::Eq, Value::I64(1));
+        })
+    });
+
+    group.bench_function("orm_where_condition_build_5", |b| {
+        b.iter(|| {
+            let conds: Vec<WhereCondition> = (1..=5)
+                .map(|i| WhereCondition::new("score", WhereOp::Ge, Value::I64(i * 10)))
+                .collect();
+            conds
+        })
+    });
+
+    group.bench_function("orm_where_condition_build_20", |b| {
+        b.iter(|| {
+            let conds: Vec<WhereCondition> = (1..=20)
+                .map(|i| WhereCondition::new("score", WhereOp::Ge, Value::I64(i * 10)))
+                .collect();
+            conds
+        })
+    });
+
+    let repo = InMemoryRepository::<BenchEntity>::new();
+    for i in 1..=100 {
+        let entity = BenchEntity {
+            id: i,
+            name: format!("item_{i}"),
+            score: i * 10,
+            active: i % 2 == 0,
+        };
+        let _ = repo.save(entity);
+    }
+
+    group.bench_function("orm_paginate_by_page1_size20", |b| {
+        b.iter(|| repo.paginate_by(&[], 1, 20))
+    });
+
+    group.bench_function("orm_paginate_by_page10_size100", |b| {
+        b.iter(|| repo.paginate_by(&[], 10, 100))
+    });
+
+    let entity = BenchEntity {
+        id: 1,
+        name: "test".to_string(),
+        score: 100,
+        active: true,
+    };
+
+    group.bench_function("orm_entity_get_attribute_all_fields", |b| {
+        b.iter(|| {
+            let _ = entity.get_attribute("id");
+            let _ = entity.get_attribute("name");
+            let _ = entity.get_attribute("score");
+            let _ = entity.get_attribute("active");
+            let _ = entity.get_attribute("nonexistent");
+        })
+    });
+
+    group.finish();
+}
+
+// ============================================================================
+// 基准测试组 11：cache_read_write — 缓存读写（W5/W6 PB-2 新增）
+// ============================================================================
+
+fn bench_cache_read_write(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cache_read_write");
+
+    group.bench_function("cache_set_new_key", |b| {
+        let cache = MemoryCache::new();
+        let mut idx = 0u64;
+        b.iter(|| {
+            idx += 1;
+            let key = format!("bench_key_{idx}");
+            InnerCache::set(&cache, &key, b"value".to_vec(), None).expect("cache set");
+        })
+    });
+
+    group.bench_function("cache_get_hit", |b| {
+        let cache = MemoryCache::new();
+        InnerCache::set(&cache, "hit_key", b"hit_value".to_vec(), None).expect("cache set");
+        b.iter(|| {
+            let _ = InnerCache::get(&cache, "hit_key").expect("cache get");
+        })
+    });
+
+    group.bench_function("cache_get_miss", |b| {
+        let cache = MemoryCache::new();
+        b.iter(|| {
+            let _ = InnerCache::get(&cache, "nonexistent_key").expect("cache get");
+        })
+    });
+
+    group.bench_function("cache_remove_existing", |b| {
+        b.iter_with_setup(
+            || {
+                let cache = MemoryCache::new();
+                InnerCache::set(&cache, "remove_key", b"val".to_vec(), None).expect("cache set");
+                cache
+            },
+            |cache| {
+                InnerCache::delete(&cache, "remove_key").expect("cache delete");
+            },
+        )
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parse_path,
@@ -484,5 +626,7 @@ criterion_group!(
     bench_vs_native,
     bench_rate_limiting,
     bench_circuit_breaker,
+    bench_orm_query_build,
+    bench_cache_read_write,
 );
 criterion_main!(benches);
