@@ -31,8 +31,33 @@ pub mod gateway;
 pub mod oauth;
 pub mod wechat;
 
+/// Refresh Token 双 Token 机制（SsoJwtCodec + Issuer + Verifier + Revoker + Store）
+pub mod refresh;
+
+/// SSO 认证中心（SsoService + axum 路由，需启用 `axum` feature）
+pub mod sso;
+
 /// Redis Gateway 集群广播（需启用 `redis-gateway` feature）
 ///
 /// 提供 [`RedisGatewayTransport`]，基于 Redis pub/sub 实现跨节点 WebSocket 消息广播。
 #[cfg(feature = "redis-gateway")]
 pub mod redis_gateway;
+
+/// Redis 存储后端（需启用 `redis-store` feature）
+///
+/// 提供 [`RedisRefreshTokenStore`] / [`RedisTokenBlacklist`] / [`RedisConfig`]，
+/// 替换 Memory 实现，使 SSO 双 Token 机制在生产环境可持久化。
+#[cfg(feature = "redis-store")]
+pub mod redis_store;
+
+/// OAuth2 Token 存储模块（需启用 `redis-store` feature）
+///
+/// 提供 [`OAuth2TokenStore`] trait 和 [`RedisOAuth2TokenStore`] 实现，
+/// 用于持久化 OAuth2 token 响应。
+#[cfg(feature = "redis-store")]
+pub mod oauth_store;
+
+/// OAuth2 回调中间件模块
+///
+/// 提供 [`OAuth2StateStore`] trait 和 axum 回调中间件（需 `axum` feature）。
+pub mod oauth_callback;

@@ -1,0 +1,16 @@
+[package]
+name = "bench-actix"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench-actix"
+path = "src/main.rs"
+
+[dependencies]
+actix-web = "4"
+serde_json = "1"
+redis = { version = "0.27", features = ["tokio-comp"] }
+tokio = { version = "1", features = ["full"] }
+
+[workspace]

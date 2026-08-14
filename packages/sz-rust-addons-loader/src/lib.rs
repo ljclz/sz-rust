@@ -55,6 +55,8 @@
 #![warn(missing_docs)]
 
 pub mod autoload;
+/// 插件能力钩子，集成 Capability Registry。
+pub mod capability_hook;
 pub mod error;
 #[cfg(feature = "hot-reload")]
 pub mod hot_reload;
@@ -66,6 +68,9 @@ pub mod route;
 
 // 重导出核心类型，对齐 PHP `think\addons` 命名空间
 pub use autoload::AddonAutoload;
+pub use capability_hook::{
+    unregister_plugin_capabilities, validate_capability_naming, CapabilityHook,
+};
 pub use error::{AddonLoaderError, AddonLoaderResult};
 pub use loader::AddonLoader;
 pub use manifest::AddonManifest;

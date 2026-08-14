@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-infra-facade
 
 SZ-Rust 基础设施层。包含 config、validate、static_files、upload、debug_page 五大模块。

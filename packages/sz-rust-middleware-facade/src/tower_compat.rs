@@ -496,8 +496,8 @@ mod tests {
     #[test]
     fn test_tower_compat_default_builder() {
         let compat = TowerCompat::default_builder();
-        // 内部 builder 应为 default_builder（chain 长度 5）
-        assert_eq!(compat.builder().chain().len(), 5);
+        // 内部 builder 应为 default_builder（chain 长度 9）
+        assert_eq!(compat.builder().chain().len(), 9);
         assert_eq!(compat.tower_layer_count(), 0);
     }
 

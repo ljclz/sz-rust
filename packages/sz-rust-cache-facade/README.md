@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-cache-facade
 
 SZ-Rust 缓存抽象层。提供统一的 `CacheDriver` trait 和多驱动实现。

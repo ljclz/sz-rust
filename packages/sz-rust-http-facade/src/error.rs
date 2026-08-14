@@ -14,6 +14,7 @@
 //! | `403` | 无权限 |（Rust 扩展） |
 //! | `404` | 资源不存在 |（Rust 扩展） |
 //! | `422` | 验证失败 |（Rust 扩展） |
+//! | `413` | 请求体过大 |（Rust 扩展） |
 //! | `500` | 数据库错误 |（Rust 扩展） |
 //!
 //! ## JSON 响应格式
@@ -45,6 +46,8 @@ pub enum ErrorCode {
     NotFound = 404,
     /// 验证失败（Rust 扩展，HTTP 422）
     ValidateFailed = 422,
+    /// 请求体过大（Rust 扩展，HTTP 413）
+    PayloadTooLarge = 413,
     /// 数据库错误（Rust 扩展，HTTP 500）
     DbError = 500,
 }
@@ -66,6 +69,7 @@ impl ErrorCode {
             ErrorCode::Forbidden => 403,
             ErrorCode::NotFound => 404,
             ErrorCode::ValidateFailed => 422,
+            ErrorCode::PayloadTooLarge => 413,
             ErrorCode::DbError => 500,
         }
     }
@@ -82,6 +86,7 @@ impl From<i32> for ErrorCode {
             403 => ErrorCode::Forbidden,
             404 => ErrorCode::NotFound,
             422 => ErrorCode::ValidateFailed,
+            413 => ErrorCode::PayloadTooLarge,
             500 => ErrorCode::DbError,
             _ => ErrorCode::Failed,
         }
@@ -174,6 +179,11 @@ impl BaseException {
     /// 数据库错误快捷构造
     pub fn db_error(msg: impl Into<String>) -> Self {
         Self::new(ErrorCode::DbError, msg)
+    }
+
+    /// 请求体过大快捷构造（HTTP 413）
+    pub fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::PayloadTooLarge, msg)
     }
 
     /// 转为 JSON 响应（对齐 PHP `renderJson(code, msg, data)`）

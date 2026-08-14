@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn test_grpc_channel_with_metadata() {
-        let channel = GrpcChannel::new("localhost:50051")
-            .with_metadata("authorization", "Bearer token123");
+        let channel =
+            GrpcChannel::new("localhost:50051").with_metadata("authorization", "Bearer token123");
         assert_eq!(
             channel.metadata().get("authorization"),
             Some(&"Bearer token123".to_string())
@@ -199,7 +199,12 @@ mod tests {
             email: "alice@example.com".to_string(),
         });
         assert_eq!(svc.list_users().unwrap().len(), 1);
-        let user = svc.get_user(UserRequest { id: 1, username: String::new() }).unwrap();
+        let user = svc
+            .get_user(UserRequest {
+                id: 1,
+                username: String::new(),
+            })
+            .unwrap();
         assert_eq!(user.username, "alice");
         assert!(svc.remove_user(1).is_some());
         assert_eq!(svc.list_users().unwrap().len(), 0);
@@ -211,14 +216,11 @@ mod tests {
         let port = 52000u16 + (std::process::id() % 1000) as u16;
         let addr = format!("localhost:{}", port);
 
-        let svc = Arc::new(
-            InMemoryUserService::new()
-                .with_user(UserResponse {
-                    id: 42,
-                    username: "bob".to_string(),
-                    email: "bob@example.com".to_string(),
-                })
-        );
+        let svc = Arc::new(InMemoryUserService::new().with_user(UserResponse {
+            id: 42,
+            username: "bob".to_string(),
+            email: "bob@example.com".to_string(),
+        }));
 
         let server = GrpcServer::new("localhost", port)
             .register_service(GrpcServiceDef {

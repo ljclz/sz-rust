@@ -1,5 +1,7 @@
 # SZ-Rust ADR 索引
 
+> **中文** | [English](README.en.md)
+
 > **项目**：SZ-Rust（鲜视达 Rust Web 框架）
 > **维护规则**：每完成一项重大架构决策必须新增 ADR，并更新本索引
 > **文档版本**：v1.2（2026-08-05）
@@ -8,8 +10,8 @@
 
 ## 1. ADR 目录
 
-> 当前 ADR 数量：**16**（P0×4 + P1×6 + P2×6，覆盖 16 项关键架构决策）
-> ADR 密度：16 / 28 模块 = **0.571**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
+> 当前 ADR 数量：**35**（P0×4 + P1×6 + P2×6 + P3×4 + AI×5 + Gaps×10，覆盖 35 项关键架构决策）
+> ADR 密度：35 / 42 模块 = **0.833**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
 
 | 编号 | 标题 | 状态 | 日期 | 决策者 | 文件 |
 |------|------|------|------|--------|------|
@@ -29,6 +31,21 @@
 | ADR-014 | GraphQL 集成（sz-orm-graphql facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0014-graphql-integration-facade.md](0014-graphql-integration-facade.md) |
 | ADR-015 | gRPC 支持（sz-orm-grpc facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0015-grpc-support-facade.md](0015-grpc-support-facade.md) |
 | ADR-016 | Addon 热加载探索（libloading 运行时动态加载 + unsafe_code 策略变更） | 已接受 | 2026-08-02 | SZ-Rust Team | [0016-addon-hot-reload-libloading-unsafe.md](0016-addon-hot-reload-libloading-unsafe.md) |
+| ADR-AI-01 | MCP 工具桥接 — 进程内调用 vs stdio JSON-RPC | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-01-mcp-bridge-in-process.md](ADR-AI-01-mcp-bridge-in-process.md) |
+| ADR-AI-02 | LLM Provider 统一抽象 — 三家标准化 | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-02-llm-provider-unified-abstraction.md](ADR-AI-02-llm-provider-unified-abstraction.md) |
+| ADR-AI-03 | 模型路由 — ArcSwap 无锁热替换 | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-03-model-router-arcswap.md](ADR-AI-03-model-router-arcswap.md) |
+| ADR-AI-04 | RAG 三段式管道 — retrieve → assemble → generate | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-04-rag-three-stage-pipeline.md](ADR-AI-04-rag-three-stage-pipeline.md) |
+| ADR-AI-05 | Facade 静态 API — OnceLock 全局实例对齐 PHP think\facade | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-05-facade-static-api-oncelock.md](ADR-AI-05-facade-static-api-oncelock.md) |
+| ADR-026 | Capability Registry 统一能力抽象 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-026-capability-registry-unified-abstraction.md](ADR-026-capability-registry-unified-abstraction.md) |
+| ADR-027 | SDD Agent 四阶段编排 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-027-sdd-agent-four-phase-orchestration.md](ADR-027-sdd-agent-four-phase-orchestration.md) |
+| ADR-028 | 开源版/企业版双仓库分离 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-028-opensource-enterprise-split.md](ADR-028-opensource-enterprise-split.md) |
+| ADR-029 | 共享 Schema + 插件事件总线 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-029-shared-schema-event-bus.md](ADR-029-shared-schema-event-bus.md) |
+| ADR-030 | AI 辅助迁移工具 TP6→Rust | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-030-ai-migration-tp6-to-rust.md](ADR-030-ai-migration-tp6-to-rust.md) |
+| ADR-031 | 行业 RAG 知识库三段式管道 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-031-industry-rag-knowledge-base.md](ADR-031-industry-rag-knowledge-base.md) |
+| ADR-032 | 插件模板库 Tera 渲染 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-032-plugin-template-tera-rendering.md](ADR-032-plugin-template-tera-rendering.md) |
+| ADR-033 | MCP 工具扩展 7→15+ | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-033-mcp-tools-expansion.md](ADR-033-mcp-tools-expansion.md) |
+| ADR-034 | 可视化画布 Tauri+Vue | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-034-visual-canvas-tauri-vue.md](ADR-034-visual-canvas-tauri-vue.md) |
+| ADR-035 | 插件市场基础设施 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-035-plugin-marketplace-infrastructure.md](ADR-035-plugin-marketplace-infrastructure.md) |
 
 **状态说明**：
 - `提议`（Proposed）：已提交但尚未评审

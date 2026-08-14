@@ -56,6 +56,22 @@ pub enum MiddlewareKind {
     ///
     /// **第五执行**：通过限流后进行鉴权，未登录返回 NotLogin(-1)。
     Auth,
+    /// 安全响应头注入（X-Frame-Options / X-Content-Type-Options / HSTS / CSP / Referrer-Policy / Permissions-Policy）
+    ///
+    /// **响应阶段执行**：在响应构建时注入安全头，不阻塞请求处理。
+    SecurityHeaders,
+    /// IP 访问控制（白/黑名单 + CIDR 网段匹配）
+    ///
+    /// **安全门控阶段**：在鉴权之前拒绝不可信 IP，fail-close/fail-open 可选。
+    IpAccessControl,
+    /// 安全审计日志（结构化 JSON 事件 + 敏感字段脱敏 + 采样率）
+    ///
+    /// **最后执行**：在鉴权之后审计，可关联 user_id。
+    AuditLog,
+    /// 请求体大小限制（全局+分路径上限 + Content-Length 与 Body 双校验）
+    ///
+    /// **早期执行**：在所有业务逻辑之前拒绝超大请求，消耗最少。
+    BodySizeLimit,
 }
 
 impl MiddlewareKind {
@@ -67,6 +83,10 @@ impl MiddlewareKind {
             MiddlewareKind::Log => "log",
             MiddlewareKind::RateLimit => "rate_limit",
             MiddlewareKind::Auth => "auth",
+            MiddlewareKind::SecurityHeaders => "security_headers",
+            MiddlewareKind::IpAccessControl => "ip_access_control",
+            MiddlewareKind::AuditLog => "audit_log",
+            MiddlewareKind::BodySizeLimit => "body_size_limit",
         }
     }
 
@@ -78,6 +98,10 @@ impl MiddlewareKind {
             MiddlewareKind::Log => "(none, sz-rust 自研，对齐 think-logger)",
             MiddlewareKind::RateLimit => "(none, sz-rust 自研)",
             MiddlewareKind::Auth => "app\\<app>\\middleware\\Auth",
+            MiddlewareKind::SecurityHeaders => "(none, sz-rust 自研，对齐 think-security)",
+            MiddlewareKind::IpAccessControl => "(none, sz-rust 自研，对齐 think-security)",
+            MiddlewareKind::AuditLog => "(none, sz-rust 自研，对齐 think-logger)",
+            MiddlewareKind::BodySizeLimit => "(none, sz-rust 自研)",
         }
     }
 }
@@ -93,24 +117,36 @@ impl fmt::Display for MiddlewareKind {
 /// 对齐 PHP `app/middleware.php` 全局中间件 + sz-rust 业务中间件约定：
 ///
 /// 1. `Trace` — 生成 request_id（对齐 PHP `SessionInit` 请求初始化语义）
-/// 2. `Cors` — 跨域预处理（对齐 PHP `AllowCrossDomain`）
-/// 3. `Log` — 请求日志（sz-rust 自研，PHP 端无全局日志中间件）
-/// 4. `RateLimit` — 限流（sz-rust 自研，PHP 端无全局限流中间件）
-/// 5. `Auth` — JWT 鉴权（对齐 PHP `app\<app>\middleware\Auth`）
+/// 2. `BodySizeLimit` — 请求体大小限制（最早拦截超大请求，消耗最少）
+/// 3. `IpAccessControl` — IP 访问控制（安全门控，拒绝不可信 IP）
+/// 4. `SecurityHeaders` — 安全响应头注入（响应阶段注入，不阻塞请求）
+/// 5. `Cors` — 跨域预处理（对齐 PHP `AllowCrossDomain`）
+/// 6. `Log` — 请求日志（sz-rust 自研，PHP 端无全局日志中间件）
+/// 7. `RateLimit` — 限流（sz-rust 自研，PHP 端无全局限流中间件）
+/// 8. `Auth` — JWT 鉴权（对齐 PHP `app\<app>\middleware\Auth`）
+/// 9. `AuditLog` — 安全审计日志（最后执行，可关联 user_id）
 ///
 /// ## 顺序设计理由
 ///
 /// - `Trace` 最先：确保 request_id 在所有后续中间件的日志中可用
-/// - `Cors` 第二：OPTIONS 预检请求直接返回，不消耗后续中间件资源
-/// - `Log` 第三：记录所有请求（包括被限流/鉴权拒绝的），用于审计
-/// - `RateLimit` 第四：在鉴权之前限流，避免无效请求消耗鉴权开销
-/// - `Auth` 第五：通过限流后进行鉴权，未登录返回 NotLogin(-1)
+/// - `BodySizeLimit` 第二：最早拒绝超大请求，消耗最少资源
+/// - `IpAccessControl` 第三：安全门控，在鉴权前拒绝不可信 IP
+/// - `SecurityHeaders` 第四：响应阶段注入安全头，不阻塞请求处理
+/// - `Cors` 第五：OPTIONS 预检请求直接返回，不消耗后续中间件资源
+/// - `Log` 第六：记录所有请求（包括被限流/鉴权拒绝的），用于审计
+/// - `RateLimit` 第七：在鉴权之前限流，避免无效请求消耗鉴权开销
+/// - `Auth` 第八：通过限流后进行鉴权，未登录返回 NotLogin(-1)
+/// - `AuditLog` 第九：最后执行，可关联鉴权后的 user_id
 pub const DEFAULT_ORDER: &[MiddlewareKind] = &[
     MiddlewareKind::Trace,
+    MiddlewareKind::BodySizeLimit,
+    MiddlewareKind::IpAccessControl,
+    MiddlewareKind::SecurityHeaders,
     MiddlewareKind::Cors,
     MiddlewareKind::Log,
     MiddlewareKind::RateLimit,
     MiddlewareKind::Auth,
+    MiddlewareKind::AuditLog,
 ];
 
 /// PHP 全局中间件顺序（对齐 `app/middleware.php`）
@@ -138,6 +174,13 @@ mod tests {
         assert_eq!(MiddlewareKind::Log.as_str(), "log");
         assert_eq!(MiddlewareKind::RateLimit.as_str(), "rate_limit");
         assert_eq!(MiddlewareKind::Auth.as_str(), "auth");
+        assert_eq!(MiddlewareKind::SecurityHeaders.as_str(), "security_headers");
+        assert_eq!(
+            MiddlewareKind::IpAccessControl.as_str(),
+            "ip_access_control"
+        );
+        assert_eq!(MiddlewareKind::AuditLog.as_str(), "audit_log");
+        assert_eq!(MiddlewareKind::BodySizeLimit.as_str(), "body_size_limit");
     }
 
     #[test]
@@ -147,6 +190,16 @@ mod tests {
         assert_eq!(MiddlewareKind::Log.to_string(), "log");
         assert_eq!(MiddlewareKind::RateLimit.to_string(), "rate_limit");
         assert_eq!(MiddlewareKind::Auth.to_string(), "auth");
+        assert_eq!(
+            MiddlewareKind::SecurityHeaders.to_string(),
+            "security_headers"
+        );
+        assert_eq!(
+            MiddlewareKind::IpAccessControl.to_string(),
+            "ip_access_control"
+        );
+        assert_eq!(MiddlewareKind::AuditLog.to_string(), "audit_log");
+        assert_eq!(MiddlewareKind::BodySizeLimit.to_string(), "body_size_limit");
     }
 
     #[test]
@@ -196,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_default_order_length() {
-        assert_eq!(DEFAULT_ORDER.len(), 5);
+        assert_eq!(DEFAULT_ORDER.len(), 9);
     }
 
     #[test]
@@ -206,9 +259,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_order_auth_last() {
-        // Auth 必须最后执行（在限流之后，避免无效请求消耗鉴权）
-        assert_eq!(DEFAULT_ORDER.last(), Some(&MiddlewareKind::Auth));
+    fn test_default_order_audit_log_last() {
+        // AuditLog 必须最后执行（可关联鉴权后的 user_id）
+        assert_eq!(DEFAULT_ORDER.last(), Some(&MiddlewareKind::AuditLog));
     }
 
     #[test]
@@ -263,6 +316,10 @@ mod tests {
             MiddlewareKind::Log,
             MiddlewareKind::RateLimit,
             MiddlewareKind::Auth,
+            MiddlewareKind::SecurityHeaders,
+            MiddlewareKind::IpAccessControl,
+            MiddlewareKind::AuditLog,
+            MiddlewareKind::BodySizeLimit,
         ] {
             assert!(
                 DEFAULT_ORDER.contains(&kind),
@@ -291,9 +348,14 @@ mod tests {
     }
 
     #[test]
-    fn test_php_global_order_is_prefix_of_default() {
-        // PHP 全局中间件顺序必须是 DEFAULT_ORDER 的前缀
-        // （业务中间件 Log/RateLimit/Auth 在全局之后追加）
-        assert!(DEFAULT_ORDER.starts_with(PHP_GLOBAL_ORDER));
+    fn test_php_global_order_is_subset_of_default() {
+        // PHP 全局中间件必须包含在 DEFAULT_ORDER 中
+        // （安全中间件插入在全局中间件之间，不再保证前缀关系）
+        for kind in PHP_GLOBAL_ORDER {
+            assert!(
+                DEFAULT_ORDER.contains(kind),
+                "DEFAULT_ORDER missing PHP global middleware {kind}"
+            );
+        }
     }
 }

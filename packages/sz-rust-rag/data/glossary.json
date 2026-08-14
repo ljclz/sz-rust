@@ -1,0 +1,146 @@
+{
+    "version": "1.0.0",
+    "description": "生鲜零售行业术语表",
+    "categories": {
+        "market": {
+            "name": "菜市场业务",
+            "terms": [
+                {
+                    "name": "摊位",
+                    "definition": "菜市场内商户租用的经营空间，按面积计租",
+                    "code_pattern": "stall|booth|stand"
+                },
+                {
+                    "name": "商户",
+                    "definition": "在菜市场内经营的个体或企业",
+                    "code_pattern": "merchant|vendor|trader"
+                },
+                {
+                    "name": "收银",
+                    "definition": "交易结算过程，含现金/电子支付/赊账",
+                    "code_pattern": "checkout|payment|settle"
+                },
+                {
+                    "name": "进货",
+                    "definition": "商户从供应商采购商品的过程",
+                    "code_pattern": "purchase|procurement|restock"
+                },
+                {
+                    "name": "损耗",
+                    "definition": "商品在存储/运输/销售过程中的重量或质量损失",
+                    "code_pattern": "wastage|shrinkage|loss"
+                },
+                {
+                    "name": "盘点",
+                    "definition": "定期核对实际库存与账面库存的差异",
+                    "code_pattern": "inventory_check|stock_take|audit"
+                },
+                {
+                    "name": "租赁合同",
+                    "definition": "商户与市场管理方签订的摊位租赁协议",
+                    "code_pattern": "lease|rental_contract"
+                },
+                {
+                    "name": "押金",
+                    "definition": "租赁前缴纳的保证金，退租时退还",
+                    "code_pattern": "deposit|security_deposit"
+                },
+                {
+                    "name": "管理费",
+                    "definition": "市场管理方收取的物业管理/卫生/安保费用",
+                    "code_pattern": "management_fee|admin_fee"
+                }
+            ]
+        },
+        "fresh": {
+            "name": "生鲜行业",
+            "terms": [
+                {
+                    "name": "冷链",
+                    "definition": "保持低温的运输和存储链条，确保生鲜品质",
+                    "code_pattern": "cold_chain|refrigerated|frozen"
+                },
+                {
+                    "name": "保质期",
+                    "definition": "商品在规定条件下保持品质的期限",
+                    "code_pattern": "expiry|shelf_life|best_before"
+                },
+                {
+                    "name": "批次",
+                    "definition": "同一生产条件下生产的一组商品",
+                    "code_pattern": "batch|lot|production_batch"
+                },
+                {
+                    "name": "溯源",
+                    "definition": "从零售端追溯到生产端的完整链路",
+                    "code_pattern": "traceability|source_tracking|origin"
+                },
+                {
+                    "name": "温区",
+                    "definition": "冷链中不同温度范围：冷冻(-18°C)/冷藏(0-4°C)/常温",
+                    "code_pattern": "temperature_zone|temp_zone"
+                },
+                {
+                    "name": "鲜度",
+                    "definition": "生鲜商品的新鲜程度指标",
+                    "code_pattern": "freshness|quality_score"
+                },
+                {
+                    "name": "分拣",
+                    "definition": "按大小/品质/成熟度对生鲜进行分级",
+                    "code_pattern": "sorting|grading|classification"
+                },
+                {
+                    "name": "催熟",
+                    "definition": "通过温湿度控制加速水果成熟的过程",
+                    "code_pattern": "ripening|maturation"
+                }
+            ]
+        },
+        "retail": {
+            "name": "零售行业",
+            "terms": [
+                {
+                    "name": "SKU",
+                    "definition": "库存量单位，唯一标识一种商品",
+                    "code_pattern": "sku|product_code|item_code"
+                },
+                {
+                    "name": "POS",
+                    "definition": "销售终端系统，处理交易/支付/小票",
+                    "code_pattern": "pos|point_of_sale|terminal"
+                },
+                {
+                    "name": "会员",
+                    "definition": "注册顾客，享受积分/折扣等权益",
+                    "code_pattern": "member|customer|vip"
+                },
+                {
+                    "name": "促销",
+                    "definition": "限时降价/满减/买赠等营销活动",
+                    "code_pattern": "promotion|discount|campaign|sale"
+                },
+                {
+                    "name": "库存周转",
+                    "definition": "一定时期内库存销售/补充的次数",
+                    "code_pattern": "turnover|inventory_turn"
+                },
+                {
+                    "name": "客单价",
+                    "definition": "平均每笔交易金额",
+                    "code_pattern": "avg_transaction|basket_value|atv"
+                },
+                {
+                    "name": "动销率",
+                    "definition": "有销售的SKU数占总SKU数的比例",
+                    "code_pattern": "active_rate|sell_through_rate"
+                },
+                {
+                    "name": "陈列",
+                    "definition": "商品在货架上的展示方式和位置",
+                    "code_pattern": "display|shelf|placement|planogram"
+                }
+            ]
+        }
+    }
+}

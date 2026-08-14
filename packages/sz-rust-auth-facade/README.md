@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-auth-facade
 
 SZ-Rust 认证与网关层。包含 wechat、oauth、gateway 三大模块。

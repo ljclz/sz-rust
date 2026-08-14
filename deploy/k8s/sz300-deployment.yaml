@@ -85,7 +85,7 @@ spec:
         - name: SZ300_DB_HOST
           value: "mysql-service"
         - name: RUST_LOG
-          value: "info,sz_rust_sz300=debug"
+          value: "warn,sz_rust_sz300=info"
         # 安全上下文：禁止提权 + 只读根文件系统 + drop ALL capabilities
         securityContext:
           allowPrivilegeEscalation: false

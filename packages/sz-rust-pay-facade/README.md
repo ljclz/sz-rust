@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-pay-facade
 
 支付聚合抽象层 Facade，提取自 `sz-rust-core::pay`。

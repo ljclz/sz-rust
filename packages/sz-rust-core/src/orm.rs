@@ -29,10 +29,33 @@
 // sz-orm-core：连接池 + 模型 trait + 值类型 + 仓储层 + 错误类型 + 迁移系统
 // ============================================================================
 pub use sz_orm_core::{
-    value_to_json, BelongsTo, BelongsToMany, Cache, CacheError, Connection, ConnectionFactory,
-    DbError, DbType, HasMany, HasOne, MemoryCache, Model, ModelExt, MorphMany, MorphTo, Pool,
-    PoolConfig, PoolConfigBuilder, PoolError, Relation, RelationAccess, RelationError,
-    RelationLoader, TimestampFields, Value,
+    value_to_json,
+    BelongsTo,
+    BelongsToMany,
+    Cache,
+    CacheError,
+    Connection,
+    ConnectionFactory,
+    DbError,
+    DbType,
+    HasMany,
+    HasOne,
+    MemoryCache,
+    Model,
+    ModelExt,
+    MorphMany,
+    MorphTo,
+    Pool,
+    PoolConfig,
+    PoolConfigBuilder,
+    PoolError,
+    PoolStatus,
+    Relation,
+    RelationAccess,
+    RelationError,
+    RelationLoader,
+    TimestampFields,
+    Value,
     // NOTE: WithRelation intentionally NOT re-exported at facade root — it is
     // exported by both sz_orm_model and sz_orm_query via glob re-exports in
     // sz-orm-core, which is ambiguous under Rust 1.96+'s deny(ambiguous_glob_imports).
@@ -164,7 +187,7 @@ pub mod find_with_related {
 // ============================================================================
 pub use sz_orm_limit::{
     DistributedRateLimiter, FixedWindowRateLimiter, InMemoryBackend, RateLimitError,
-    RateLimitHeaders, RateLimitResult, RateLimitResponseStrategy, SlidingWindowRateLimiter,
+    RateLimitHeaders, RateLimitResponseStrategy, RateLimitResult, SlidingWindowRateLimiter,
     TokenBucketRateLimiter,
 };
 
@@ -191,26 +214,24 @@ pub use sz_orm_queue::{
 // ============================================================================
 // sz-orm-websocket：WebSocket 服务（runtime::websocket 依赖）
 // ============================================================================
-pub use sz_orm_websocket::{
-    DefaultWebSocketHandler, WebSocketHandler, WsError, WsServer,
-};
+pub use sz_orm_websocket::{DefaultWebSocketHandler, WebSocketHandler, WsError, WsServer};
 
 // ============================================================================
 // sz-orm-storage：云存储驱动（upload/storage 依赖）
 // ============================================================================
 pub use sz_orm_storage::{
-    AliyunOssStorage, HuaweiObsStorage, LocalStorage, StorageBuilder, StorageConfig,
-    StorageError, StorageProvider, StorageWrapper,
+    AliyunOssStorage, HuaweiObsStorage, LocalStorage, StorageBuilder, StorageConfig, StorageError,
+    StorageProvider, StorageWrapper,
 };
 
 // ============================================================================
 // sz-orm-sql-validator：SQL 安全校验（SQL 注入防护）
 // ============================================================================
 pub use sz_orm_sql_validator::{
-    detect_statement_type, validate, validate_delete, validate_insert, validate_parameter_count,
-    validate_select, validate_sql, validate_table_name, validate_column_name, validate_update,
-    SqlComplexityScore, SqlStatementType, SqlToken, SqlValidationError,
-    ValidationResult, WhitelistValidator, ComplexityLevel,
+    detect_statement_type, validate, validate_column_name, validate_delete, validate_insert,
+    validate_parameter_count, validate_select, validate_sql, validate_table_name, validate_update,
+    ComplexityLevel, SqlComplexityScore, SqlStatementType, SqlToken, SqlValidationError,
+    ValidationResult, WhitelistValidator,
 };
 
 // ============================================================================

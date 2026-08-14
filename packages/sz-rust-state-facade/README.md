@@ -1,3 +1,5 @@
+> **中文** | [English](README.en.md)
+
 # sz-rust-state-facade
 
 SZ-Rust 应用状态管理。包含 session、cookie、env、event、i18n、mail、notify 七大模块。

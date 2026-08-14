@@ -27,6 +27,7 @@ sz-rust-orm-facade = { workspace = true }
 sz-rust-cache-facade = { workspace = true }
 sz-rust-http-facade = { workspace = true }
 sz-rust-infra-facade = { workspace = true }
+sz-rust-auth-facade = { workspace = true }
 sz-orm-limit = { workspace = true }
 sz-orm-tracing = { workspace = true }
 chrono = { workspace = true }
@@ -34,6 +35,16 @@ rand = { workspace = true }
 base64 = { workspace = true }
 http-body-util = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+ipnet = { workspace = true }
+
+# 远程校验（可选，feature = "remote-validate"）
+reqwest = { workspace = true, optional = true }
+
+[features]
+# 远程 Token 校验
+remote-validate = ["dep:reqwest"]
 
 [lints]
 workspace = true

@@ -382,8 +382,12 @@ mod tests {
 
         // 立即 cancel
         token.cancel();
-        // 等待任务退出（不应 panic）
-        let _ = tokio::time::timeout(Duration::from_millis(500), handle).await;
+        // 等待任务退出（不应 panic，且应在超时前正常结束）
+        let result = tokio::time::timeout(Duration::from_millis(500), handle).await;
+        assert!(
+            result.is_ok(),
+            "cancel 后消费者应退出，但 500ms 超时未返回（阻塞运行时）"
+        );
     }
 
     #[tokio::test]

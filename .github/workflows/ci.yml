@@ -373,3 +373,63 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: Run lib tests (no integration)
         run: cargo test --workspace --lib --jobs 1
+
+  # 门禁 18：AI Facade 专项检查（--features all-providers）
+  ai-facade:
+    name: AI Facade (all-providers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Test with all-providers feature
+        run: cargo test -p sz-rust-ai-facade --features all-providers
+      - name: Clippy with all-providers feature
+        run: cargo clippy -p sz-rust-ai-facade --features all-providers -- -D warnings
+      - name: Doc with all-providers feature
+        run: cargo doc -p sz-rust-ai-facade --features all-providers --no-deps
+
+  # 门禁 19：文档-代码一致性（规则 23 支撑，防幻影交付）
+  # 扫描 README/CHANGELOG/docs 声称的 sz-rust-* crate，必须存在于 workspace
+  # 历史幻影声称（企业版交付）降级 WARN，清单外新增声称 ERROR 构建失败
+  doc-code-consistency:
+    name: Doc-Code Consistency (no phantom delivery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check claimed crates exist in workspace
+        run: node scripts/audit/doc-code-consistency.js
+
+  # 门禁 20：ADR-代码对账（规则 14 支撑，ADR 引用代码必须存在）
+  # 替换原 adr-coverage job 内嵌的"代码行号引用检查"步骤，独立为脚本
+  adr-code:
+    name: ADR Code Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ADR code references exist
+        run: node scripts/audit/adr-code-consistency.js
+
+  # 门禁 21：测试断言价值（规则 10/23 支撑，拒绝无断言的行覆盖）
+  # 无断言且无 unwrap/expect 的测试 = 覆盖率空洞，无论实现多正确都会"通过"
+  assertion-value:
+    name: Assertion Value (no empty tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tests have assertions
+        run: node scripts/audit/assertion-value-check.js
+
+  # 门禁 22：配置-代码一致性（feature 声明 vs 源码引用）
+  # 源码引用的 feature 未声明 = 永远不可启用（死代码）；声明的死 feature 提示清理
+  feature-consistency:
+    name: Feature Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check feature declarations match source
+        run: node scripts/audit/feature-consistency.js

@@ -30,6 +30,10 @@ sz-rust-orm-facade = { workspace = true }
 sz-rust-state-facade = { workspace = true }
 http-body-util = { workspace = true }
 tower = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

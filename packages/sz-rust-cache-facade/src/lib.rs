@@ -1778,7 +1778,7 @@ use std::collections::HashSet;
 ///     'serialize'  => [],
 /// ];
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RedisConfig {
     /// Redis 主机地址（对齐 PHP `host`）
     pub host: String,
@@ -1798,6 +1798,28 @@ pub struct RedisConfig {
     pub prefix: String,
     /// tag 前缀（对齐 PHP `tag_prefix`）
     pub tag_prefix: String,
+    /// 是否启用 TLS（默认 false）
+    pub enable_tls: bool,
+    /// TLS CA 证书路径（enable_tls=true 时使用）
+    pub tls_ca_cert_path: Option<String>,
+}
+
+impl std::fmt::Debug for RedisConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("password", &"[REDACTED]")
+            .field("select", &self.select)
+            .field("timeout", &self.timeout)
+            .field("expire", &self.expire)
+            .field("persistent", &self.persistent)
+            .field("prefix", &self.prefix)
+            .field("tag_prefix", &self.tag_prefix)
+            .field("enable_tls", &self.enable_tls)
+            .field("tls_ca_cert_path", &self.tls_ca_cert_path)
+            .finish()
+    }
 }
 
 impl Default for RedisConfig {
@@ -1812,6 +1834,8 @@ impl Default for RedisConfig {
             persistent: false,
             prefix: String::new(),
             tag_prefix: "tag:".to_string(),
+            enable_tls: false,
+            tls_ca_cert_path: None,
         }
     }
 }
@@ -1831,6 +1855,24 @@ impl RedisConfig {
             expire: Some(expire),
             ..Default::default()
         }
+    }
+
+    /// 判断是否启用 TLS
+    pub fn is_tls_enabled(&self) -> bool {
+        self.enable_tls
+    }
+
+    /// 校验生产环境 TLS 配置
+    ///
+    /// `env=production` 且未启用 TLS → 返回错误消息
+    pub fn validate_production_tls(&self, env: &str) -> Result<(), String> {
+        if env != "production" {
+            return Ok(());
+        }
+        if !self.is_tls_enabled() {
+            return Err("生产环境要求 Redis TLS 连接".to_string());
+        }
+        Ok(())
     }
 }
 

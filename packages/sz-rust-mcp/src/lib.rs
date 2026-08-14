@@ -31,6 +31,26 @@
 
 use serde_json::{json, Value};
 
+pub mod tool;
+pub mod tools;
+pub mod whitelist;
+
+/// 返回所有扩展 MCP 工具（基于 McpTool trait 的新工具）。
+pub fn extended_tools() -> Vec<Box<dyn tool::McpTool>> {
+    vec![
+        Box::new(tools::crud::McpCreate),
+        Box::new(tools::crud::McpRead),
+        Box::new(tools::crud::McpUpdate),
+        Box::new(tools::crud::McpDelete),
+        Box::new(tools::migrate::McpMigrateCreate),
+        Box::new(tools::migrate::McpMigrateRun),
+        Box::new(tools::test_tool::McpTestRun),
+        Box::new(tools::deploy::McpDeployRun),
+        Box::new(tools::plugin_tool::McpPluginInstall),
+        Box::new(tools::plugin_tool::McpPluginUninstall),
+    ]
+}
+
 /// 工具调用错误
 #[derive(Debug, thiserror::Error)]
 pub enum McpError {
@@ -159,6 +179,106 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": {"type": "object", "properties": {
                 "routes": {"type": "array", "items": {"type": "object"}}
             }, "required": ["routes"]}
+        }),
+        json!({
+            "name": "build_insert_query",
+            "description": "构建参数化 INSERT 查询（防 SQL 注入）",
+            "inputSchema": {"type": "object", "properties": {
+                "table": {"type": "string"}, "data": {"type": "object"}
+            }, "required": ["table", "data"]}
+        }),
+        json!({
+            "name": "build_update_query",
+            "description": "构建参数化 UPDATE 查询（WHERE 绑定，防 SQL 注入）",
+            "inputSchema": {"type": "object", "properties": {
+                "table": {"type": "string"}, "set": {"type": "object"}, "where_eq": {"type": "object"}
+            }, "required": ["table", "set"]}
+        }),
+        json!({
+            "name": "build_delete_query",
+            "description": "构建参数化 DELETE 查询（WHERE 绑定，防 SQL 注入）",
+            "inputSchema": {"type": "object", "properties": {
+                "table": {"type": "string"}, "where_eq": {"type": "object"}
+            }, "required": ["table", "where_eq"]}
+        }),
+        json!({
+            "name": "crud_read",
+            "description": "CRUD 读操作：构建参数化 SELECT 并返回 SQL + 参数数",
+            "inputSchema": {"type": "object", "properties": {
+                "table": {"type": "string"}, "columns": {"type": "array", "items": {"type": "string"}},
+                "where_eq": {"type": "object"}, "limit": {"type": "integer"}
+            }, "required": ["table", "columns"]}
+        }),
+        json!({
+            "name": "migrate_create",
+            "description": "生成迁移脚本模板（UP/DOWN SQL）",
+            "inputSchema": {"type": "object", "properties": {
+                "name": {"type": "string"}, "description": {"type": "string"}
+            }, "required": ["name"]}
+        }),
+        json!({
+            "name": "migrate_status",
+            "description": "检查迁移状态：返回已执行/待执行迁移列表",
+            "inputSchema": {"type": "object", "properties": {
+                "migrations_dir": {"type": "string"}
+            }}
+        }),
+        json!({
+            "name": "migrate_run",
+            "description": "生成执行迁移的命令（cargo run -p sz-rust-migration）",
+            "inputSchema": {"type": "object", "properties": {
+                "direction": {"type": "string", "enum": ["up", "down"]}, "steps": {"type": "integer"}
+            }}
+        }),
+        json!({
+            "name": "test_run",
+            "description": "生成测试运行命令（cargo test）",
+            "inputSchema": {"type": "object", "properties": {
+                "package": {"type": "string"}, "test_name": {"type": "string"}, "flags": {"type": "string"}
+            }}
+        }),
+        json!({
+            "name": "test_coverage",
+            "description": "生成覆盖率分析命令（cargo tarpaulin / cargo llvm-cov）",
+            "inputSchema": {"type": "object", "properties": {
+                "package": {"type": "string"}, "output_format": {"type": "string"}
+            }}
+        }),
+        json!({
+            "name": "deploy_check",
+            "description": "检查部署配置完整性（Docker/K8s 配置校验）",
+            "inputSchema": {"type": "object", "properties": {
+                "config_path": {"type": "string"}, "target": {"type": "string", "enum": ["docker", "k8s"]}
+            }, "required": ["config_path"]}
+        }),
+        json!({
+            "name": "deploy_status",
+            "description": "生成部署状态查询命令",
+            "inputSchema": {"type": "object", "properties": {
+                "target": {"type": "string", "enum": ["docker", "k8s", "bare_metal"]}
+            }}
+        }),
+        json!({
+            "name": "plugin_list",
+            "description": "列出已注册的 Capability（按 source/tags 过滤）",
+            "inputSchema": {"type": "object", "properties": {
+                "source": {"type": "string", "enum": ["skill", "plugin", "service"]},
+                "tags": {"type": "array", "items": {"type": "string"}}
+            }}
+        }),
+        json!({
+            "name": "plugin_install",
+            "description": "生成插件安装命令（cargo add + 配置注册）",
+            "inputSchema": {"type": "object", "properties": {
+                "plugin_name": {"type": "string"}, "version": {"type": "string"}
+            }, "required": ["plugin_name"]}
+        }),
+        json!({
+            "name": "plugin_uninstall",
+            "description": "生成插件卸载命令（cargo remove + 清理配置）",
+            "inputSchema": {"type": "object", "properties": {
+                "plugin_name": {"type": "string"}
+            }, "required": ["plugin_name"]}
         }),
     ]
 }
@@ -336,6 +456,245 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
             })
             .to_string())
         }
+        "build_insert_query" => {
+            let table = args
+                .get("table")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("table 必填".into()))?;
+            let data = args
+                .get("data")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| McpError::InvalidArguments("data 必填".into()))?;
+            if data.is_empty() {
+                return Err(McpError::InvalidArguments("data 不能为空".into()));
+            }
+            let columns: Vec<&str> = data.keys().map(|k| k.as_str()).collect();
+            let placeholders: Vec<&str> = columns.iter().map(|_| "?").collect();
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                table,
+                columns.join(", "),
+                placeholders.join(", ")
+            );
+            Ok(json!({"sql": sql, "params": data.len()}).to_string())
+        }
+        "build_update_query" => {
+            let table = args
+                .get("table")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("table 必填".into()))?;
+            let set_map = args
+                .get("set")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| McpError::InvalidArguments("set 必填".into()))?;
+            if set_map.is_empty() {
+                return Err(McpError::InvalidArguments("set 不能为空".into()));
+            }
+            let set_clause: Vec<String> = set_map.keys().map(|k| format!("{} = ?", k)).collect();
+            let mut sql = format!("UPDATE {} SET {}", table, set_clause.join(", "));
+            let mut param_count = set_map.len();
+            if let Some(where_map) = args.get("where_eq").and_then(|v| v.as_object()) {
+                if !where_map.is_empty() {
+                    let where_clause: Vec<String> =
+                        where_map.keys().map(|k| format!("{} = ?", k)).collect();
+                    sql.push_str(&format!(" WHERE {}", where_clause.join(" AND ")));
+                    param_count += where_map.len();
+                }
+            }
+            Ok(json!({"sql": sql, "params": param_count}).to_string())
+        }
+        "build_delete_query" => {
+            let table = args
+                .get("table")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("table 必填".into()))?;
+            let where_map = args
+                .get("where_eq")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| McpError::InvalidArguments("where_eq 必填".into()))?;
+            if where_map.is_empty() {
+                return Err(McpError::InvalidArguments(
+                    "where_eq 不能为空（禁止无条件删除）".into(),
+                ));
+            }
+            let where_clause: Vec<String> =
+                where_map.keys().map(|k| format!("{} = ?", k)).collect();
+            let sql = format!("DELETE FROM {} WHERE {}", table, where_clause.join(" AND "));
+            Ok(json!({"sql": sql, "params": where_map.len()}).to_string())
+        }
+        "crud_read" => {
+            let table = args
+                .get("table")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("table 必填".into()))?;
+            let columns: Vec<&str> = args
+                .get("columns")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| McpError::InvalidArguments("columns 必填".into()))?
+                .iter()
+                .filter_map(|c| c.as_str())
+                .collect();
+            if columns.is_empty() {
+                return Err(McpError::InvalidArguments(
+                    "columns 不能为空（禁止 SELECT *）".into(),
+                ));
+            }
+            let mut sql = format!("SELECT {} FROM {}", columns.join(", "), table);
+            let mut param_count = 0;
+            if let Some(where_map) = args.get("where_eq").and_then(|v| v.as_object()) {
+                if !where_map.is_empty() {
+                    let where_clause: Vec<String> =
+                        where_map.keys().map(|k| format!("{} = ?", k)).collect();
+                    sql.push_str(&format!(" WHERE {}", where_clause.join(" AND ")));
+                    param_count = where_map.len();
+                }
+            }
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+                sql.push_str(&format!(" LIMIT {}", limit));
+            }
+            Ok(json!({"sql": sql, "params": param_count}).to_string())
+        }
+        "migrate_create" => {
+            let name = args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("name 必填".into()))?;
+            let description = args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let template = format!(
+                "-- Migration: {}\n-- Description: {}\n\n-- UP\n\n\n-- DOWN\n\n",
+                name, description
+            );
+            Ok(json!({"template": template, "filename": format!("{}.sql", name)}).to_string())
+        }
+        "migrate_status" => {
+            let migrations_dir = args
+                .get("migrations_dir")
+                .and_then(|v| v.as_str())
+                .unwrap_or("migrations");
+            Ok(json!({
+                "migrations_dir": migrations_dir,
+                "status": "placeholder — 实际使用时连接 sz-rust-migration crate 查询",
+                "applied": [],
+                "pending": []
+            })
+            .to_string())
+        }
+        "migrate_run" => {
+            let direction = args
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("up");
+            let steps = args.get("steps").and_then(|v| v.as_u64()).unwrap_or(0);
+            let mut cmd = "cargo run -p sz-rust-migration --".to_string();
+            if direction == "down" {
+                cmd.push_str(" --down");
+            }
+            if steps > 0 {
+                cmd.push_str(&format!(" --steps {}", steps));
+            }
+            Ok(json!({"command": cmd, "direction": direction, "steps": steps}).to_string())
+        }
+        "test_run" => {
+            let package = args.get("package").and_then(|v| v.as_str());
+            let test_name = args.get("test_name").and_then(|v| v.as_str());
+            let flags = args.get("flags").and_then(|v| v.as_str()).unwrap_or("");
+            let mut cmd = "cargo test".to_string();
+            if let Some(pkg) = package {
+                cmd.push_str(&format!(" -p {}", pkg));
+            }
+            if let Some(tn) = test_name {
+                cmd.push_str(&format!(" -- {}", tn));
+            }
+            if !flags.is_empty() {
+                cmd.push_str(&format!(" {}", flags));
+            }
+            Ok(json!({"command": cmd}).to_string())
+        }
+        "test_coverage" => {
+            let package = args.get("package").and_then(|v| v.as_str());
+            let output_format = args
+                .get("output_format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("html");
+            let mut cmd = "cargo llvm-cov".to_string();
+            if let Some(pkg) = package {
+                cmd.push_str(&format!(" -p {}", pkg));
+            }
+            cmd.push_str(&format!(" --{}", output_format));
+            Ok(json!({"command": cmd, "note": "需安装 cargo-llvm-cov: cargo install cargo-llvm-cov"}).to_string())
+        }
+        "deploy_check" => {
+            let config_path = args
+                .get("config_path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("config_path 必填".into()))?;
+            let target = args
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("docker");
+            Ok(json!({
+                "config_path": config_path,
+                "target": target,
+                "checks": ["配置文件存在性", "端口冲突检测", "环境变量完整性", "依赖服务可达性"],
+                "status": "placeholder — 实际使用时读取配置文件并校验"
+            })
+            .to_string())
+        }
+        "deploy_status" => {
+            let target = args
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("docker");
+            let cmd = match target {
+                "k8s" => "kubectl get pods -o wide",
+                "bare_metal" => "systemctl status sz-rust",
+                _ => "docker ps --filter name=sz-rust",
+            };
+            Ok(json!({"command": cmd, "target": target}).to_string())
+        }
+        "plugin_list" => {
+            let source = args.get("source").and_then(|v| v.as_str());
+            let tags: Vec<&str> = args
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|t| t.as_str()).collect())
+                .unwrap_or_default();
+            Ok(json!({
+                "source": source,
+                "tags": tags,
+                "note": "实际使用时查询 CapabilityRegistry::list_all() / find_by_tags()",
+                "plugins": []
+            })
+            .to_string())
+        }
+        "plugin_install" => {
+            let plugin_name = args
+                .get("plugin_name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("plugin_name 必填".into()))?;
+            let version = args.get("version").and_then(|v| v.as_str());
+            let mut cmd = format!("cargo add {}", plugin_name);
+            if let Some(v) = version {
+                cmd.push_str(&format!(" --version {}", v));
+            }
+            Ok(json!({
+                "command": cmd,
+                "post_install": format!("在 Cargo.toml [dependencies] 追加 {} 并调用 CapabilityRegistry::register", plugin_name)
+            }).to_string())
+        }
+        "plugin_uninstall" => {
+            let plugin_name = args
+                .get("plugin_name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpError::InvalidArguments("plugin_name 必填".into()))?;
+            Ok(json!({
+                "command": format!("cargo remove {}", plugin_name),
+                "post_uninstall": format!("调用 CapabilityRegistry::unregister(\"{}\") 清理注册", plugin_name)
+            }).to_string())
+        }
         _ => Err(McpError::ToolNotFound(name.to_string())),
     }
 }
@@ -355,12 +714,17 @@ mod tests {
     fn tools_list_returns_seven_tools() {
         let resp = handle_request(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 21);
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"parse_path"));
         assert!(names.contains(&"openapi_spec"));
         assert!(names.contains(&"sql_validate"));
         assert!(names.contains(&"route_conflicts"));
+        assert!(names.contains(&"build_insert_query"));
+        assert!(names.contains(&"migrate_create"));
+        assert!(names.contains(&"test_run"));
+        assert!(names.contains(&"deploy_check"));
+        assert!(names.contains(&"plugin_list"));
     }
 
     #[test]

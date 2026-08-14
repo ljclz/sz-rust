@@ -1,0 +1,39 @@
+{# React 编辑表单模板 #}
+import React, { useEffect } from 'react'
+import { Form, Input, Button, Space } from 'antd'
+import { useParams, useNavigate } from 'react-router-dom'
+import { {{ module_name }}Show, {{ module_name }}Update } from '@/api/{{ module_name }}'
+
+export default function {{ module_name | snake_to_pascal }}Edit() {
+  const { id } = useParams()
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    {{ module_name }}Show(id!).then(res => form.setFieldsValue(res.data))
+  }, [id])
+
+  const handleSubmit = async () => {
+    const values = await form.validateFields()
+    await {{ module_name }}Update(id!, values)
+  }
+
+  return (
+    <Form form={form} labelCol={{ "{{ span: 6 }}" }} wrapperCol={{ "{{ span: 18 }}" }}>
+      {% for field in writable_fields %}
+      <Form.Item label="{{ field.name }}" name="{{ field.name }}">
+        {% if field.is_sensitive %}
+        <Input.Password />
+        {% else %}
+        <Input />
+        {% endif %}
+      </Form.Item>
+      {% endfor %}
+      <Form.Item wrapperCol={{ "{{ offset: 6, span: 18 }}" }}>
+        <Space>
+          <Button type="primary" onClick={handleSubmit}>更新</Button>
+          <Button onClick={() => form.resetFields()}>重置</Button>
+        </Space>
+      </Form.Item>
+    </Form>
+  )
+}

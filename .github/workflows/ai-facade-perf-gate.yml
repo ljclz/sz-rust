@@ -1,0 +1,84 @@
+name: AI Facade Performance Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sz-rust-ai-facade/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/sz-rust-ai-facade/**'
+  workflow_dispatch:
+
+jobs:
+  perf-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+
+      - name: Verify 8 benchmark groups exist
+        run: |
+          set -euo pipefail
+          LISTING=$(cargo bench --package sz-rust-ai-facade --bench ai_facade_bench -- --list 2>&1)
+          echo "$LISTING"
+          REQUIRED=(
+            "chat_latency"
+            "stream_throughput"
+            "embedding_batch"
+            "rag_three_stage"
+            "agent_multi_round"
+            "concurrent_qps_p99"
+            "context_truncation"
+            "memory_rss"
+          )
+          MISSING=0
+          for NAME in "${REQUIRED[@]}"; do
+            if echo "$LISTING" | grep -q "$NAME"; then
+              echo "✅ $NAME present"
+            else
+              echo "❌ $NAME MISSING"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::Missing $MISSING benchmark groups (required 8)"
+            exit 1
+          fi
+          echo "✅ All 8 benchmark groups present"
+
+      - name: Run benchmarks with baseline
+        run: |
+          cargo bench --package sz-rust-ai-facade --bench ai_facade_bench -- \
+            --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+            ${{ github.event_name == 'pull_request' && '--baseline previous' || '--save-baseline current' }}
+
+      - name: Generate baseline report
+        run: |
+          cargo run --package sz-rust-ai-facade --bin generate_baseline_report
+
+      - name: Upload criterion results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-facade-criterion-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Upload baseline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-facade-perf-report-${{ github.sha }}
+          path: docs/audit/ai-facade-performance-baseline.md
+          retention-days: 90

@@ -15,6 +15,9 @@ categories = ["development-tools"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
 # facade 直连（下游最佳实践：按需依赖，减少编译耦合）
 sz-rust-router-facade = { workspace = true }
 sz-rust-orm-facade = { workspace = true }
@@ -23,3 +26,6 @@ sz-rust-pay-facade = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

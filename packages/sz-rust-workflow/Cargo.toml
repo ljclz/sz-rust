@@ -1,0 +1,48 @@
+[package]
+name = "sz-rust-workflow"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 工作流引擎 — 状态机/审批流/插件节点编排，含设计器 API 与可观测层"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[lib]
+name = "sz_rust_workflow"
+
+[dependencies]
+# SZ-Rust 内部依赖
+sz-rust-capability = { workspace = true }
+sz-rust-addons-loader = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-auth-facade = { workspace = true }
+sz-rust-router-facade = { workspace = true }
+# 异步运行时
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+# 错误与工具
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+semver = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+# Web 框架（设计器 API）
+axum = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_code = "forbid"

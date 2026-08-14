@@ -4,6 +4,66 @@
 
 ---
 
+## [v1.1.0] — 2026-08-10 — Admin Monitor API
+
+### 概要
+
+实现 `docs/cases/fssadmin-competitive-analysis.md` 中的 Admin Monitor API 需求，提供服务器信息、数据库连接池、Redis 状态三个管理端监控端点，路由级 RoleGuard 鉴权，`admin` feature 默认关闭不影响现有部署。
+
+### 新增
+
+- **`sz-rust-observability::admin` 模块**（`admin` feature）：
+  - `sysinfo_collector`：`collect_server_info()` 基于 `sysinfo` crate 0.32，跨平台（Windows `COMPUTERNAME` / Unix `hostname`），`once_cell` 懒加载 rustc 版本
+  - `db_pool_collector`：`DbPoolStats` trait（trait object 适配，observability crate 不直连 sz-orm-core）
+  - `redis_collector`：`RedisStats` trait + INFO 解析，无连接时降级
+- **`sz-rust-sz300` 集成**：`AppState` 新增 `db_pool_stats` + `redis_stats`；`DbPoolStatsAdapter` / `RedisStatsAdapter` 桥接具体实现
+- **`RoleGuard` 中间件**：路由级角色校验，401（无/无效令牌）/ 403（缺角色）
+- **3 个端点**：`GET /api/admin/server/info`、`GET /api/admin/db/pool`、`GET /api/admin/redis/info`
+
+### 测试
+
+- 20 个单元测试（observability 16 + role_guard 4），全部通过
+- `cargo check -p sz-rust-sz300 --features admin` 与默认配置均编译通过
+
+---
+
+## [v0.6.7+] — 2026-08-09 — P0-P4 + 基础设施优化
+
+### 概要
+
+完成评估报告"七、后续发展方向建议"中 P0-P4 全部 18 项任务，以及基础设施工具链优化（文档同步规则 + Soak 自托管 + 同条件性能对比）。
+
+### 新增
+
+- **P0-1 服务器真实数据全链路验证**：sz-pay + sz-rust-sz300 连接生产 MySQL/PostgreSQL/Redis，E2E 全通过（27 条 file:line 证据）
+- **P0-2 Redis 存储后端压测**：13 轮压测，高并发 QPS=30598~85500，19 条证据
+- **P0-3 渗透测试**：29/29 测试通过，7 场景 × 4-5 用例，20 项防护机制（`packages/sz-rust-auth-facade/tests/security_pentest.rs`）
+- **P1-4 RedisDegradationStore**：SET EX/GET/DEL/SCAN 实现（`packages/sz-rust-auth-facade/src/redis_store.rs`）
+- **P1-5 RedisAuditStore**：ZADD/ZREVRANGE/ZRANGEBYSCORE Sorted Set 实现
+- **P1-6 RedisTicketStore**：SET EX/GETDEL pipeline 原子 take + TTL 实现
+- **P2-9 性能压测**：11 个新增 bench（`packages/sz-rust-auth-facade/benches/sso_bench.rs`）
+- **P3-12 文档国际化**：9 个英文版文件（README.en.md × 8 + ADR 索引）
+- **P3-13 addons 模板**：CMS（文章/分类/标签）+ Forum（板块/帖子/回复）+ IM（会话/消息/用户状态）3 个新包
+- **P3-14 框架对比**：更新至 v0.6.7，新增 Poem 框架对比
+- **P4-15 并发 10K 压测脚本**：`docs/spec/p4-stress-test/p4-15-concurrent-10k.js`
+- **P4-16 100W Token 基准**：350K 签发/s, 435K 校验/s
+- **文档同步强制规则**：project_rules.md 新增规则 19-22（`.trae/rules/project_rules.md:75-103`），AGENTS.md 新增文档同步约束小节（`AGENTS.md:62-70`），文档欠债清单（`docs/audit/doc-debt.md`）
+- **Soak Test 自托管**：GitHub Actions soak.yml/soak-nightly.yml 迁移到服务器 cron 调度（`scripts/soak-self-hosted/`），10s 冒烟验证通过，cron 每周日 00:00 UTC + 每日 18:00 UTC 自动 6h soak
+- **同条件性能对比环境**：5 个框架标准化压测目标（`scripts/perf-compare/benchmarks/`），服务器 Rust 升级到 1.97.1，wrk 4.1.0 + k6 v2.0.0 已安装，部分实测数据已获得（sz-rust 160K req/s, actix 192K req/s）
+
+### 变更
+
+- **P2-11 连接池调优**：PostgreSQL max_connections=10 + acquire_timeout=30s（`packages/sz-rust-sz300/src/db.rs`）
+- **P2-10 SIMD 路由**：已评估，axum 0.8 matchit ~59ns，无需 SIMD 加速
+- **评估报告全面更新**：劣势 3 项已解决，P0-P4 状态全部标记
+
+### 跳过
+
+- **P1-7 OAuth2 完整流程**：当前 generic OAuth2 满足 sz-pay 需求
+- **P1-8 OpenTelemetry 集成**：W3C TraceContext 已满足当前需求
+
+---
+
 ## [v0.3.1] — 2026-08-05 — 生产就绪修复
 
 ### 概要
