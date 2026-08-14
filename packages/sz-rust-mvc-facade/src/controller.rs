@@ -112,9 +112,19 @@ static JWT_CONFIG: Lazy<Option<JwtConfig>> = Lazy::new(|| {
 ///
 /// 若 `SZ_JWT_SECRET` 未设置则 panic，阻止服务启动，防止认证形同虚设。
 /// 测试环境中可跳过此校验（`JWT_CONFIG` 为 `None` 时 `get_token` 返回 `Ok(None)`）。
+///
+/// 安全修复 M-3（2026-08-14）：HS256 对称密钥必须 ≥ 32 字节，
+/// 弱密钥可被离线暴力破解后伪造任意用户 token —— 强度不足直接拒绝启动。
 pub fn validate_jwt_config() {
-    if JWT_CONFIG.is_none() {
+    let Some(config) = JWT_CONFIG.as_ref() else {
         panic!("SZ_JWT_SECRET 环境变量未设置 — 生产环境必须通过环境变量提供 JWT 密钥");
+    };
+    if config.secret.len() < 32 {
+        panic!(
+            "SZ_JWT_SECRET 强度不足：当前 {} 字节，HS256 要求 ≥ 32 字节（256 位）。\
+             请使用 `openssl rand -base64 32` 生成强密钥",
+            config.secret.len()
+        );
     }
 }
 

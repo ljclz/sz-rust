@@ -13,6 +13,7 @@
 //! - 模型层：[`crate::models::device::Device`] 定义实体结构
 
 use crate::controllers::common::parse_pagination;
+use crate::services::auth_service;
 use crate::services::device_service::{DeviceFilters, DeviceService};
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -31,11 +32,19 @@ impl DeviceController {
     /// 分页查询设备列表，支持按 merchant_id 筛选
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        // 安全修复 H-1：merchant_id 以服务端身份为准
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 20);
                 let filters = DeviceFilters {
-                    merchant_id: data.get("merchant_id").and_then(|v| v.as_i64()),
+                    merchant_id: Some(owned_merchant_id), // 服务端权威值，忽略请求体
                 };
 
                 info!(
@@ -74,6 +83,14 @@ impl DeviceController {
     /// 根据 device_id 查询单个设备详情
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        // 安全修复 H-1：先解析服务端身份，设备必须归属当前商户
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
@@ -85,6 +102,18 @@ impl DeviceController {
 
                 match DeviceService::get(&state.db_pool, device_id).await {
                     Ok(Some(row)) => {
+                        // 归属校验：设备必须属于当前商户（防越权）
+                        let row_merchant =
+                            row.get("merchant_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                        if row_merchant != owned_merchant_id {
+                            tracing::warn!(
+                                device_id = device_id,
+                                row_merchant = row_merchant,
+                                owned = owned_merchant_id,
+                                "越权尝试：查询非本商户设备"
+                            );
+                            return ctrl.render_error("设备不存在", json!({}), 0);
+                        }
                         let device = row_to_json(&row);
                         info!("设备查询完成: device_id={}", device_id);
                         ctrl.render_success(

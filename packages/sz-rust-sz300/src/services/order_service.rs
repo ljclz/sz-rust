@@ -160,15 +160,23 @@ impl OrderService {
     /// - `Ok(None)`：订单不存在
     /// - `Err(msg)`：DB 错误（msg 不泄露内部信息）
     #[tracing::instrument(skip(pool))]
-    pub async fn get_with_items(pool: &Pool, order_id: i64) -> Result<Option<OrderDetail>, String> {
+    /// 根据 order_id 查询订单详情（含订单项）
+    ///
+    /// 安全修复 H-1：`merchant_id` 为服务端强制校验的数据边界，
+    /// 订单必须同时匹配 order_id 与 merchant_id 才会返回（防越权）。
+    pub async fn get_with_items(
+        pool: &Pool,
+        order_id: i64,
+        merchant_id: i64,
+    ) -> Result<Option<OrderDetail>, String> {
         let mut conn = pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "订单详情获取 DB 连接失败: order_id={}", order_id);
             "数据库连接失败".to_string()
         })?;
 
-        // 查询订单主表
-        let order_sql = "SELECT * FROM `order` WHERE order_id = ?";
-        let order_params = [Value::I64(order_id)];
+        // 查询订单主表（强制商户边界）
+        let order_sql = "SELECT * FROM `order` WHERE order_id = ? AND merchant_id = ?";
+        let order_params = [Value::I64(order_id), Value::I64(merchant_id)];
         let order_rows = conn
             .query_with_params(order_sql, &order_params)
             .await

@@ -27,7 +27,7 @@ use axum::{
     since = "1.2.0",
     note = "请使用 sz_rust_middleware_facade::auth::auth_middleware（需同步迁移 AuthConfig 初始化）"
 )]
-pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
+pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Response {
     let auth_header = req
         .headers()
         .get("Authorization")
@@ -47,7 +47,12 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     }
 
     match auth_service::verify_token(token) {
-        Ok(_user) => next.run(req).await,
+        Ok(user) => {
+            // 2026-08-14 安全修复 H-1：将 JWT 身份注入请求扩展（Arc 避免 clone 开销），
+            // 业务层通过 extensions 获取当前用户，禁止信任请求体中的 user_id/merchant_id。
+            req.extensions_mut().insert(std::sync::Arc::new(user));
+            next.run(req).await
+        }
         Err(_) => (StatusCode::UNAUTHORIZED, "令牌无效或已过期").into_response(),
     }
 }

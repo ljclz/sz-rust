@@ -13,6 +13,7 @@
 //! - 模型层：[`crate::models::order::Order`] 与 [`crate::models::order_item::OrderItem`] 定义实体结构
 
 use crate::controllers::common::parse_pagination;
+use crate::services::auth_service;
 use crate::services::order_service::{OrderFilters, OrderService};
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -33,11 +34,19 @@ impl OrderController {
     /// 分页查询订单列表，支持按 merchant_id/device_id/status/date_range 筛选
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        // 安全修复 H-1：先解析服务端身份，强制商户数据边界
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 15);
                 let filters = OrderFilters {
-                    merchant_id: data.get("merchant_id").and_then(|v| v.as_i64()),
+                    merchant_id: Some(owned_merchant_id), // 服务端权威值，忽略请求体
                     device_id: data.get("device_id").and_then(|v| v.as_i64()),
                     status: data.get("status").and_then(|v| v.as_i64()),
                     start_date: data
@@ -80,6 +89,14 @@ impl OrderController {
     /// 根据 order_id 查询订单详情（含订单项）
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        // 安全修复 H-1：先解析服务端身份，强制商户数据边界
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let order_id = match data.get("order_id").and_then(|v| v.as_i64()) {
@@ -102,7 +119,9 @@ impl OrderController {
 
                 info!("查询订单详情: order_id={}", order_id);
 
-                match OrderService::get_with_items(&state.db_pool, order_id).await {
+                match OrderService::get_with_items(&state.db_pool, order_id, owned_merchant_id)
+                    .await
+                {
                     Ok(Some(detail)) => {
                         let order = row_to_json(&detail.order);
                         let items: Vec<serde_json::Value> =
@@ -134,6 +153,14 @@ impl OrderController {
     /// 创建订单（含订单项）
     async fn create(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        // 安全修复 H-1：先解析服务端身份；merchant_id 以服务端权威值为准，忽略请求体
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let order_no = data
@@ -148,10 +175,7 @@ impl OrderController {
                 let order = crate::models::order::Order {
                     order_id: None,
                     order_no: order_no.clone(),
-                    merchant_id: data
-                        .get("merchant_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
+                    merchant_id: owned_merchant_id, // 服务端权威值，忽略请求体
                     device_id: data.get("device_id").and_then(|v| v.as_i64()).unwrap_or(0),
                     total_fen: data.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0),
                     total_weight_g: data

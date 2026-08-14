@@ -13,6 +13,7 @@
 //! - 模型层：[`crate::models::merchant::Merchant`] 定义实体结构
 
 use crate::controllers::common::{extract_fields_by_whitelist, parse_pagination};
+use crate::services::auth_service;
 use crate::services::merchant_service::MerchantService;
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -65,34 +66,30 @@ impl MerchantController {
     /// 根据 merchant_id 查询单个商户信息
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
-        match ctrl.post_data(req).await {
-            Ok(data) => {
-                let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
-                    Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
-                };
+        // 安全修复 H-1：merchant_id 以服务端身份为准（用户只能查自己商户）
+        let merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
 
-                info!("查询商户信息: merchant_id={}", merchant_id);
+        info!("查询商户信息: merchant_id={}", merchant_id);
 
-                match MerchantService::get(&state.db_pool, merchant_id).await {
-                    Ok(Some(row)) => {
-                        let merchant = row_to_json(&row);
-                        info!("商户查询完成: merchant_id={}", merchant_id);
-                        ctrl.render_success(
-                            "success",
-                            json!({
-                                "merchant": merchant
-                            }),
-                        )
-                    }
-                    Ok(None) => ctrl.render_error("商户不存在", json!({}), 0),
-                    Err(msg) => ctrl.render_error(&msg, json!({}), 0),
-                }
+        match MerchantService::get(&state.db_pool, merchant_id).await {
+            Ok(Some(row)) => {
+                let merchant = row_to_json(&row);
+                info!("商户查询完成: merchant_id={}", merchant_id);
+                ctrl.render_success(
+                    "success",
+                    json!({
+                        "merchant": merchant
+                    }),
+                )
             }
-            Err(e) => {
-                warn!("商户信息查询参数解析失败: {}", e);
-                ctrl.render_error(&e, json!({}), 0)
-            }
+            Ok(None) => ctrl.render_error("商户不存在", json!({}), 0),
+            Err(msg) => ctrl.render_error(&msg, json!({}), 0),
         }
     }
 
@@ -173,12 +170,28 @@ impl MerchantController {
     /// 更新商户信息 — 动态字段更新
     async fn update(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        // 安全修复 H-1：先解析服务端身份，仅允许更新自己商户
+        let owned_merchant_id = match auth_service::current_user(&req).map(|u| u.id) {
+            Some(uid) => match auth_service::resolve_merchant_id(uid, None).await {
+                Ok(mid) => mid,
+                Err(e) => return ctrl.render_error(&e, json!({}), 0),
+            },
+            None => return ctrl.render_error("未认证请求", json!({}), 0),
+        };
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
-                    Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
-                };
+                // 请求体可携带 merchant_id 但必须与身份一致（防越权）
+                if let Some(requested) = data.get("merchant_id").and_then(|v| v.as_i64()) {
+                    if requested != owned_merchant_id {
+                        tracing::warn!(
+                            requested = requested,
+                            owned = owned_merchant_id,
+                            "越权尝试：更新商户与身份不符"
+                        );
+                        return ctrl.render_error("无权访问该商户数据", json!({}), 0);
+                    }
+                }
+                let merchant_id = owned_merchant_id;
 
                 info!("更新商户: merchant_id={}", merchant_id);
 
