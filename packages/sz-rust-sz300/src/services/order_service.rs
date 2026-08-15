@@ -133,9 +133,9 @@ impl OrderService {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        // 列表查询 — 追加分页参数
+        // 列表查询 — 追加分页参数（显式列投影，铁律：禁 SELECT *）
         let list_sql = format!(
-            "SELECT * FROM `order` {} ORDER BY order_id DESC LIMIT ? OFFSET ?",
+            "SELECT order_id, order_no, merchant_id, device_id, total_fen, total_weight_g, item_count, status, pay_method, pay_at, offline_seq, created_at, updated_at FROM `order` {} ORDER BY order_id DESC LIMIT ? OFFSET ?",
             where_clause
         );
         let mut list_params = params.clone();
@@ -174,8 +174,8 @@ impl OrderService {
             "数据库连接失败".to_string()
         })?;
 
-        // 查询订单主表（强制商户边界）
-        let order_sql = "SELECT * FROM `order` WHERE order_id = ? AND merchant_id = ?";
+        // 查询订单主表（强制商户边界；显式列投影）
+        let order_sql = "SELECT order_id, order_no, merchant_id, device_id, total_fen, total_weight_g, item_count, status, pay_method, pay_at, offline_seq, created_at, updated_at FROM `order` WHERE order_id = ? AND merchant_id = ?";
         let order_params = [Value::I64(order_id), Value::I64(merchant_id)];
         let order_rows = conn
             .query_with_params(order_sql, &order_params)
@@ -190,10 +190,11 @@ impl OrderService {
             None => return Ok(None),
         };
 
-        // 查询订单项
-        let items_sql = "SELECT * FROM order_item WHERE order_id = ?";
+        // 查询订单项（显式列投影；2026-08-14 修复参数数量不匹配：order_item 仅 1 个占位符，不得复用 order_params）
+        let items_sql = "SELECT item_id, order_id, good_id, good_name, price_fen, weight_g, total_fen, quantity FROM order_item WHERE order_id = ?";
+        let items_params = [Value::I64(order_id)];
         let items_rows = conn
-            .query_with_params(items_sql, &order_params)
+            .query_with_params(items_sql, &items_params)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "订单项查询失败: order_id={}", order_id);

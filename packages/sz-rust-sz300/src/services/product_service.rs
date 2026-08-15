@@ -109,9 +109,9 @@ impl ProductService {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        // 列表查询 — 追加分页参数
+        // 列表查询 — 追加分页参数（显式列投影，铁律：禁 SELECT *）
         let list_sql = format!(
-            "SELECT * FROM good {} ORDER BY good_id DESC LIMIT ? OFFSET ?",
+            "SELECT good_id, merchant_id, cat_id, name, barcode, price, unit, ai_class_id, image, status, created_at, updated_at FROM good {} ORDER BY good_id DESC LIMIT ? OFFSET ?",
             where_clause
         );
         let mut list_params = params.clone();
@@ -142,7 +142,7 @@ impl ProductService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM good WHERE good_id = ?";
+        let sql = "SELECT good_id, merchant_id, cat_id, name, barcode, price, unit, ai_class_id, image, status, created_at, updated_at FROM good WHERE good_id = ?";
         let params = [Value::I64(good_id)];
         let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "商品详情查询失败: good_id={}", good_id);

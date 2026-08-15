@@ -65,8 +65,8 @@ impl MerchantService {
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
 
-            // 列表查询 — LIMIT/OFFSET 参数化
-            let list_sql = "SELECT merchant_id, merchant_name, status, created_at FROM merchant ORDER BY merchant_id DESC LIMIT ? OFFSET ?";
+            // 列表查询 — LIMIT/OFFSET 参数化，显式列投影（铁律：禁 SELECT *；2026-08-14 修复 merchant_name 不存在列）
+            let list_sql = "SELECT merchant_id, market_id, name, stall_no, contact_phone, category, status, bank_account, bank_name, created_at, updated_at FROM merchant ORDER BY merchant_id DESC LIMIT ? OFFSET ?";
             let list_params = [Value::I64(page_size), Value::I64(offset)];
             let rows = conn
                 .query_with_params(list_sql, &list_params)
@@ -102,7 +102,7 @@ impl MerchantService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM merchant WHERE merchant_id = ?";
+        let sql = "SELECT merchant_id, market_id, name, stall_no, contact_phone, category, status, bank_account, bank_name, created_at, updated_at FROM merchant WHERE merchant_id = ?";
         let params = [Value::I64(merchant_id)];
         let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "商户详情查询失败: merchant_id={}", merchant_id);

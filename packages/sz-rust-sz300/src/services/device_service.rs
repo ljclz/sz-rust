@@ -92,9 +92,9 @@ impl DeviceService {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        // 列表查询 — 追加分页参数
+        // 列表查询 — 追加分页参数（显式列投影，铁律：禁 SELECT *）
         let list_sql = format!(
-            "SELECT * FROM device {} ORDER BY device_id DESC LIMIT ? OFFSET ?",
+            "SELECT device_id, merchant_id, device_sn, device_model, fw_version, status, signal_strength, bind_at, last_online_at, created_at, updated_at FROM device {} ORDER BY device_id DESC LIMIT ? OFFSET ?",
             where_clause
         );
         let mut list_params = params.clone();
@@ -128,7 +128,7 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM device WHERE device_id = ?";
+        let sql = "SELECT device_id, merchant_id, device_sn, device_model, fw_version, status, signal_strength, bind_at, last_online_at, created_at, updated_at FROM device WHERE device_id = ?";
         let params = [Value::I64(device_id)];
         let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "设备详情查询失败: device_id={}", device_id);
@@ -159,8 +159,8 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
-        // 验证设备 SN 存在
-        let check_sql = "SELECT * FROM device WHERE device_sn = ?";
+        // 验证设备 SN 存在（bind 仅需 device_id/merchant_id 两列，显式投影）
+        let check_sql = "SELECT device_id, merchant_id FROM device WHERE device_sn = ?";
         let check_params = [Value::String(device_sn.to_string())];
         let rows = conn
             .query_with_params(check_sql, &check_params)
@@ -266,7 +266,7 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM ota_version WHERE version = ? AND status = 1";
+        let sql = "SELECT ota_id, version, device_model, url, md5, changelog, size, forced, status, created_at FROM ota_version WHERE version = ? AND status = 1";
         let params = [Value::String(version.to_string())];
         let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "OTA 版本查询失败: version={}", version);
