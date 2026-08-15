@@ -1,5 +1,4 @@
 //! 路由生成器
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 

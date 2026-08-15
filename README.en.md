@@ -17,23 +17,24 @@ All features below are from actual `sz-rust-core` source code. Module structure:
 - **HTTP Server + Routing**: Built on axum 0.8 + tower 0.5 + hyper 1.x, supporting three-layer routing (attribute macro / config-based / convention-based).
 - **Controller Layer**: `SzController` → `BaseController` → `AddonsBaseController` three-layer trait inheritance chain, aligned with PHP `app\SzController` / `app\BaseController` / `addons\BaseController`. Provides `renderJson` / `renderSuccess` / `renderError` / `postData` / `getData` methods.
 - **Model Layer**: `BaseModel` trait composing SZ-ORM's `Model` + `ModelExt` + `RelationLoader`, aligned with `think\Model`. Supports `$append` virtual fields, accessors (`Accessor`), mutators (`Mutator`), dynamic append (`Appendable`).
-- **Middleware**: Built-in CORS / Auth(JWT) / Log / RateLimit / Trace, plus chain builder (`MiddlewareChain`), Handler=Middleware bidirectional converter, tower-http compatibility layer.
-- **Rate Limiter (v0.3.1 landed)**: `sz-rust-middleware-facade::rate_limit` provides Token Bucket (`TokenBucket`) + Sliding Window (`SlidingWindow`) algorithms, implementing `sz_rust_orm_facade::RateLimiter` trait, with OOM protection and 100-concurrent zero-error test.
-- **Circuit Breaker (v0.3.1 landed)**: `sz-rust-middleware-facade::circuit_breaker` provides Closed/Open/HalfOpen three-state state machine + `circuit_breaker_middleware` (Open returns 503), parking_lot::Mutex for concurrency safety.
-- **Validator**: Aligned with `think\Validate`, 30+ built-in rules (require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith, etc.), supporting batch validation, scenarios, custom messages.
-- **Cache System**: Aligned with `think\facade\Cache`, reusing sz-orm-storage drivers.
-- **Event System**: Aligned with `think\Event`, supporting Listener / Subscriber / Observer patterns.
-- **Model Hooks**: `HookDispatcher` with 16 events (PHP native 12 + sz-orm-core extension 4: BeforeSave / AfterSave / BeforeValidate / AfterValidate).
-- **File Upload + Image Processing**: Aligned with `think\File` + `think\file\UploadedFile`, 5 storage engines (Local / Aliyun OSS / Tencent COS / Qiniu Kodo / AWS S3 compatible); image processing aligned with PHP Grafika (resize / crop / watermark / text).
-- **Multi-App Dispatch**: Aligned with ThinkPHP `auto_multi_app`, dispatching to sub-apps by URI prefix.
-- **Guard Authentication & Authorization**: Self-developed Guard pattern (combining NestJS Guard + Spring Security concepts).
-- **View Template**: Aligned with PHP template engine, supporting layout and template rendering.
-- **HTTP/2 + TLS**: Based on rustls + tokio-rustls, aligned with think-swoole SSL.
+- **Middleware**: Built-in CORS / Auth(JWT) / Log / RateLimit / Trace, plus chain builder (`MiddlewareChain`), Handler=Middleware bidirectional converter, tower-http compatibility layer. (✅ Production: sz300 mounts CORS + CSRF + rate-limit + circuit-breaker + custom auth_middleware (router.rs:148-167); facade Auth/Log/Trace not mounted, auth uses custom version due to signature incompatibility)
+- **Rate Limiter (v0.3.1 landed)**: `sz-rust-middleware-facade::rate_limit` provides Token Bucket (`TokenBucket`) + Sliding Window (`SlidingWindow`) algorithms, implementing `sz_rust_orm_facade::RateLimiter` trait, with OOM protection and 100-concurrent zero-error test. (✅ Production mounted: sz300 `router.rs:158-160`, default-enabled, config via `RateLimitProductionConfig::from_env()`)
+- **Circuit Breaker (v0.3.1 landed)**: `sz-rust-middleware-facade::circuit_breaker` provides Closed/Open/HalfOpen three-state state machine + `circuit_breaker_middleware` (Open returns 503), parking_lot::Mutex for concurrency safety. (✅ Production mounted: sz300 `router.rs:153-155`, default-enabled, config via `CircuitBreakerProductionConfig::from_env()`)
+- **Validator**: Aligned with `think\Validate`, 30+ built-in rules (require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith, etc.), supporting batch validation, scenarios, custom messages. (✅ Production: `merchant.rs:103` calls `Validate::new()`)
+- **Cache System**: Aligned with `think\facade\Cache`, reusing sz-orm-storage drivers. (⚠️ Production not mounted: sz300 doesn't call core::cache, only Cargo.toml has cache-facade dep)
+- **Event System**: Aligned with `think\Event`, supporting Listener / Subscriber / Observer patterns. (⚠️ Production not mounted: zero calls in sz300, only CLI stubs template)
+- **Model Hooks**: `HookDispatcher` with 16 events (PHP native 12 + sz-orm-core extension 4: BeforeSave / AfterSave / BeforeValidate / AfterValidate). (✅ Production: `order.rs:26` imports HookContext/HookEvent, `main.rs:174` inits HookRegistry)
+- **File Upload + Image Processing**: Aligned with `think\File` + `think\file\UploadedFile`, 5 storage engines (Local / Aliyun OSS / Tencent COS / Qiniu Kodo / AWS S3 compatible); image processing aligned with PHP Grafika (resize / crop / watermark / text). (⚠️ Production: sz300 uses custom `FileService` (`file_service.rs`, tokio::fs direct write), core 5 storage engines zero production calls)
+- **Multi-App Dispatch**: Aligned with ThinkPHP `auto_multi_app`, dispatching to sub-apps by URI prefix. (⚠️ Production not mounted: sz300 single-app deployment, multi_app zero calls)
+- **Guard Authentication & Authorization**: Self-developed Guard pattern (combining NestJS Guard + Spring Security concepts). (⚠️ Production not mounted: sz300 uses custom `auth_middleware` + `role_guard`, not core::guard)
+- **View Template**: Aligned with PHP template engine, supporting layout and template rendering. (✅ Production: `view.rs:18` calls `View::with_default_engine()`)
+- **HTTP/2 + TLS**: Based on rustls + tokio-rustls, aligned with think-swoole SSL. (⚠️ Production not mounted: sz300 uses bare `axum::serve`, no TLS)
 - **CLI Tool**: `sz-rust-cli` provides make / migrate / route / cache / scheduler commands.
-- **Plugin System**: `sz-rust-addons-loader` implements `addons/` plugin loading and route mounting.
+- **Plugin System**: `sz-rust-addons-loader` implements `addons/` plugin loading and route mounting. (⚠️ Production: core compile-time dep + re-export; runtime gated by hot-reload feature, sz300 default `default = []` off, `main.rs:104-106` logs only)
 - **Based on SZ-ORM**: L4 financial-grade ORM (Data Mapper + Repository pattern), compile-time SQL validation (`sql_string!` / `query!` macros).
-- **Observability (v0.2.0)**: `sz-rust-observability` package provides `MetricsRegistry` + Counter/Gauge/Histogram metric types, SLO multi-window burn-rate alerting (1h/5m + 6h/30m dual-window pairs, aligned with Google SRE Workbook Chapter 5).
-- **Distributed Tracing (v0.2.0)**: `sz-rust-tracing` package implements W3C TraceContext standard (`traceparent: 00-<trace_id>-<span_id>-<flags>`), legacy header compatibility, OTLP exporter placeholder.
+- **Observability (v0.2.0)**: `sz-rust-observability` package provides `MetricsRegistry` + Counter/Gauge/Histogram metric types, SLO multi-window burn-rate alerting (1h/5m + 6h/30m dual-window pairs, aligned with Google SRE Workbook Chapter 5). (✅ Production: `main.rs:125` MetricsRegistry + `main.rs:168` SLO monitor, `health.rs:37/39` records burn rate)
+- **Metrics Endpoint Access Control (T7)**: `MetricsAuthConfig` provides Bearer token + IP allowlist (CIDR, v4/v6) dual mechanisms; the `/metrics` route mounts `metrics_auth_middleware` as an isolated sub-router (`router.rs:54` metrics_router(), no pollution to business APIs), returning 403 when unauthorized; with `SZ300_ENV=production` startup fails unless auth is configured (`main.rs:243`); real client IP injected via `into_make_service_with_connect_info` (`main.rs:262`). (✅ Production: wired)
+- **Distributed Tracing (v0.2.0)**: `sz-rust-tracing` package implements W3C TraceContext standard (`traceparent: 00-<trace_id>-<span_id>-<flags>`), legacy header compatibility, OTLP exporter placeholder. (⚠️ Production not mounted: standalone library, zero workspace calls, sz300 uses native `tracing` + `sz_rust_observability::otlp`)
 
 ---
 
@@ -161,7 +162,7 @@ sz-rust/                          # workspace root
     ├── sz-rust-pdf/              # PDF/Excel import/export
     ├── sz-rust-observability/    # observability (MetricsRegistry + SLO burn rate)
     ├── sz-rust-tracing/          # distributed tracing (W3C TraceContext + OTLP)
-    ├── sz-rust-operator/         # K8s Operator
+
     └── sz-rust-sz300/            # SZ300 business app (end-to-end integration example)
 ```
 

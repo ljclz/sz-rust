@@ -461,16 +461,51 @@ impl MetricsAuthConfig {
             }
         }
 
-        // IP 白名单校验
+        // IP 白名单校验（支持具体 IP 与 CIDR 前缀匹配）
         if !self.allowed_ips.is_empty() {
             if let Some(ip) = client_ip {
-                if self.allowed_ips.iter().any(|allowed| allowed == ip) {
+                if self
+                    .allowed_ips
+                    .iter()
+                    .any(|allowed| ip_matches(ip, allowed))
+                {
                     return true;
                 }
             }
         }
 
         false
+    }
+}
+
+/// IP 匹配：精确相等或 CIDR 前缀匹配（v4 /v6 均支持）
+fn ip_matches(ip: &str, allowed: &str) -> bool {
+    if ip == allowed {
+        return true;
+    }
+    let (cidr, prefix_str) = match allowed.split_once('/') {
+        Some(pair) => pair,
+        None => return false,
+    };
+    let Ok(addr) = ip.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    let Ok(net) = cidr.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    let Ok(bits) = prefix_str.parse::<u32>() else {
+        return false;
+    };
+    match (addr, net, bits) {
+        (std::net::IpAddr::V4(a), std::net::IpAddr::V4(n), b) if b <= 32 => {
+            let mask = if b == 0 { 0 } else { u32::MAX << (32 - b) };
+            (u32::from_be_bytes(a.octets()) & mask) == (u32::from_be_bytes(n.octets()) & mask)
+        }
+        (std::net::IpAddr::V6(a), std::net::IpAddr::V6(n), b) if b <= 128 => {
+            let mask = if b == 0 { 0 } else { u128::MAX << (128 - b) };
+            (u128::from_be_bytes(a.octets()) & mask) == (u128::from_be_bytes(n.octets()) & mask)
+        }
+        _ => false,
     }
 }
 

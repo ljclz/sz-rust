@@ -17,22 +17,23 @@
 - **HTTP 服务器 + 路由**：基于 axum 0.8 + tower 0.5 + hyper 1.x，支持三层路由机制（属性宏 / 配置式 / 约定式）。
 - **控制器层**：`SzController` → `BaseController` → `AddonsBaseController` 三层 trait 继承链，对齐 PHP `app\SzController` / `app\BaseController` / `addons\BaseController`。提供 `renderJson` / `renderSuccess` / `renderError` / `postData` / `getData` 等方法。
 - **模型层**：`BaseModel` trait 组合 SZ-ORM 的 `Model` + `ModelExt` + `RelationLoader`，对齐 `think\Model`。支持 `$append` 虚拟字段、访问器（`Accessor`）、修改器（`Mutator`）、动态 Append（`Appendable`）。
-- **中间件**：内置 CORS / Auth(JWT) / Log / RateLimit / Trace 五个中间件，外加链构建器（`MiddlewareChain`）、Handler=Middleware 双向转换器、tower-http 兼容层。（⚠️ 生产接入状态：sz300 仅挂载 CORS + CSRF + 自研 auth_middleware，Auth/Log/RateLimit/Trace 中间件未挂载到生产链路）
-- **限流器（v0.3.1 已落地）**：`sz-rust-middleware-facade::rate_limit` 提供令牌桶（`TokenBucket`）+ 滑动窗口（`SlidingWindow`）两种算法，实现 `sz_rust_orm_facade::RateLimiter` trait，含 OOM 防护与 100 并发无误差测试。（⚠️ 生产接入状态：已实现但未挂载到 sz300 router，仅 `config.rs` 有配置结构体）
-- **熔断器（v0.3.1 已落地）**：`sz-rust-middleware-facade::circuit_breaker` 提供 Closed/Open/HalfOpen 三态状态机 + `circuit_breaker_middleware`（Open 返回 503），parking_lot::Mutex 保护并发安全。（⚠️ 生产接入状态：已实现但未挂载到 sz300 router，仅 `config.rs` 有配置结构体）
-- **验证器**：对齐 `think\Validate`，内置 30+ 规则（require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith 等），支持批量验证、场景、自定义消息。
-- **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。
-- **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。
-- **模型钩子**：`HookDispatcher` 16 事件（PHP 原生 12 + sz-orm-core 扩展 4：BeforeSave / AfterSave / BeforeValidate / AfterValidate）。
-- **文件上传 + 图像处理**：对齐 `think\File` + `think\file\UploadedFile`，5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3 兼容）；图像处理对齐 PHP Grafika（缩放 / 裁剪 / 水印 / 文字）。
-- **多应用分发**：对齐 ThinkPHP `auto_multi_app`，按 URI 前缀分发到子应用。
-- **Guard 认证授权**：自研 Guard 模式（融合 NestJS Guard + Spring Security 思路）。
-- **视图模板**：对齐 PHP 模板引擎，支持 layout 布局与模板渲染。
-- **HTTP/2 + TLS**：基于 rustls + tokio-rustls，对齐 think-swoole SSL。
+- **中间件**：内置 CORS / Auth(JWT) / Log / RateLimit / Trace 五个中间件，外加链构建器（`MiddlewareChain`）、Handler=Middleware 双向转换器、tower-http 兼容层。（✅ 生产接入状态：sz300 挂载 CORS + CSRF + 限流(令牌桶) + 熔断器 + 自研 auth_middleware（router.rs:148-167）；middleware-facade 的 Auth/Log/Trace 未挂载，auth 用自研版因签名不兼容）
+- **限流器（v0.3.1 已落地）**：`sz-rust-middleware-facade::rate_limit` 提供令牌桶（`TokenBucket`）+ 滑动窗口（`SlidingWindow`）两种算法，实现 `sz_rust_orm_facade::RateLimiter` trait，含 OOM 防护与 100 并发无误差测试。（✅ 生产已接入：sz300 `router.rs:158-160` 挂载令牌桶中间件，默认生效，配置由 `RateLimitProductionConfig::from_env()` 读取）
+- **熔断器（v0.3.1 已落地）**：`sz-rust-middleware-facade::circuit_breaker` 提供 Closed/Open/HalfOpen 三态状态机 + `circuit_breaker_middleware`（Open 返回 503），parking_lot::Mutex 保护并发安全。（✅ 生产已接入：sz300 `router.rs:153-155` 挂载熔断中间件，默认生效，配置由 `CircuitBreakerProductionConfig::from_env()` 读取）
+- **验证器**：对齐 `think\Validate`，内置 30+ 规则（require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith 等），支持批量验证、场景、自定义消息。（✅ 生产已接入：`merchant.rs:103` 调用 `Validate::new()`）
+- **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。（⚠️ 生产未接入：sz300 未调用 core::cache，仅 Cargo.toml 有 cache-facade 依赖声明）
+- **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。（⚠️ 生产未接入：sz300 零调用，仅 CLI stubs 模板引用）
+- **模型钩子**：`HookDispatcher` 16 事件（PHP 原生 12 + sz-orm-core 扩展 4：BeforeSave / AfterSave / BeforeValidate / AfterValidate）。（✅ 生产已接入：`order.rs:26` 引入 HookContext/HookEvent，`main.rs:174` 初始化 HookRegistry）
+- **文件上传 + 图像处理**：对齐 `think\File` + `think\file\UploadedFile`，5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3 兼容）；图像处理对齐 PHP Grafika（缩放 / 裁剪 / 水印 / 文字）。（⚠️ 生产接入状态：sz300 用自研 `FileService`（`file_service.rs`，tokio::fs 直写 + 扩展名白名单），core 5 存储引擎零生产调用）
+- **多应用分发**：对齐 ThinkPHP `auto_multi_app`，按 URI 前缀分发到子应用。（⚠️ 生产未接入：sz300 单应用部署，multi_app 零调用）
+- **Guard 认证授权**：自研 Guard 模式（融合 NestJS Guard + Spring Security 思路）。（⚠️ 生产未接入：sz300 用自研 `auth_middleware` + `role_guard`，未走 core::guard）
+- **视图模板**：对齐 PHP 模板引擎，支持 layout 布局与模板渲染。（✅ 生产已接入：`view.rs:18` 调用 `View::with_default_engine()`）
+- **HTTP/2 + TLS**：基于 rustls + tokio-rustls，对齐 think-swoole SSL。（⚠️ 生产未接入：sz300 用裸 `axum::serve`，无 TLS）
 - **CLI 命令行工具**：`sz-rust-cli` 提供 make / migrate / route / cache / scheduler 等命令。
-- **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。
+- **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。（⚠️ 生产接入状态：core 编译期依赖并 re-export；运行时由 hot-reload feature 门控，sz300 默认 `default = []` 关闭，`main.rs:104-106` 仅打日志）
 - **基于 SZ-ORM**：L4 金融级 ORM（Data Mapper + Repository 模式），编译时 SQL 校验（`sql_string!` / `query!` 宏）。
-- **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。
+- **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。（✅ 生产已接入：`main.rs:125` MetricsRegistry + `main.rs:168` SLO 监控器，`health.rs:37/39` 记录燃烧率）
+- **metrics 端点访问控制（T7）**：`MetricsAuthConfig` 提供 Bearer token + IP 白名单（支持 CIDR，v4/v6）双机制；`/metrics` 路由独立挂载 `metrics_auth_middleware`（`router.rs:54` metrics_router()，独立子路由不污染业务 API），未授权返回 403；`SZ300_ENV=production` 时启动强制校验必须配置鉴权否则拒绝启动（`main.rs:243`），客户端真实 IP 通过 `into_make_service_with_connect_info` 注入（`main.rs:262`）。（✅ 生产已接入）
 - **分布式追踪（v0.2.0 新增）**：`sz-rust-tracing` 包实现 W3C TraceContext 标准（`traceparent: 00-<trace_id>-<span_id>-<flags>`），legacy header 兼容，OTLP exporter 占位。（⚠️ 生产接入状态：独立库，全 workspace 零调用，sz300 用原生 `tracing` + `sz_rust_observability::otlp`）
 - **Admin Monitor API（v1.1.0 新增）**：`admin` feature（默认关闭）提供 3 个管理端点：`GET /api/admin/server/info`（CPU/内存/磁盘/负载/Rust版本/主机名）、`GET /api/admin/db/pool`（连接池 active/idle/max/usage）、`GET /api/admin/redis/info`（Redis 版本/模式/连接数/内存/角色）。路由级 `RoleGuard` 中间件校验 `admin` 角色，无 Redis 连接时自动降级返回 `connected: false`。
 
@@ -163,7 +164,7 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-pdf/              # PDF/Excel 导入导出
     ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率）
     ├── sz-rust-tracing/          # 分布式追踪模块（W3C TraceContext + OTLP）
-    ├── sz-rust-operator/         # K8s Operator
+
     └── sz-rust-sz300/            # SZ300 业务应用（端到端集成示例）
 ```
 

@@ -1,5 +1,4 @@
 //! React 组件生成器
-#![allow(dead_code)]
 
 use crate::config::GenerationConfig;
 use crate::error::FrontendCodegenError;

@@ -236,65 +236,87 @@ async fn main() -> anyhow::Result<()> {
     // 注册路由
     let app = router::create_router(app_state);
 
+    // 校验 metrics 鉴权配置：生产环境（SZ300_ENV=production）必须配置
+    // IP 白名单或 Bearer token，否则启动失败（fail-closed）
+    let metrics_auth_config = config::MetricsAuthConfig::from_env();
+    let env = std::env::var("SZ300_ENV").unwrap_or_else(|_| "development".to_string());
+    metrics_auth_config
+        .validate_production(&env)
+        .map_err(|e| anyhow::anyhow!("metrics 鉴权配置校验失败（env={env}）: {e}"))?;
+    tracing::info!(
+        "metrics 鉴权配置: enabled={}, bearer_token={}, allowed_ips={:?}",
+        metrics_auth_config.enabled,
+        if metrics_auth_config.bearer_token.is_some() {
+            "已配置"
+        } else {
+            "未配置"
+        },
+        metrics_auth_config.allowed_ips,
+    );
+
     // 启动 HTTP 服务器
     let addr = format!("{}:{}", config.server.host, config.server.port);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("监听地址: {}", addr);
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let ctrl_c = async {
-                signal::ctrl_c()
-                    .await
-                    .expect("failed to install Ctrl+C handler");
-            };
+    // into_make_service_with_connect_info：为 metrics IP 白名单提供真实客户端 IP
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let ctrl_c = async {
+            signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+        };
 
-            #[cfg(unix)]
-            let terminate = async {
-                signal::unix::signal(signal::unix::SignalKind::terminate())
-                    .expect("failed to install signal handler")
-                    .recv()
-                    .await;
-            };
+        #[cfg(unix)]
+        let terminate = async {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to install signal handler")
+                .recv()
+                .await;
+        };
 
-            #[cfg(not(unix))]
-            let terminate = std::future::pending::<()>();
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
 
-            tokio::select! {
-                _ = ctrl_c => {},
-                _ = terminate => {},
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
+
+        tracing::info!("收到关闭信号，正在优雅关闭...");
+        // 通知 MQTT 消费者退出
+        let _ = shutdown_tx.send(true);
+        // 等待 MQTT 任务完成（可配置超时）
+        let mqtt_timeout = shutdown_config.mqtt_timeout();
+        match tokio::time::timeout(mqtt_timeout, &mut mqtt_handle).await {
+            Ok(Ok(())) => {
+                tracing::info!("MQTT 消费者已正常退出，HTTP 服务器关闭中...");
             }
-
-            tracing::info!("收到关闭信号，正在优雅关闭...");
-            // 通知 MQTT 消费者退出
-            let _ = shutdown_tx.send(true);
-            // 等待 MQTT 任务完成（可配置超时）
-            let mqtt_timeout = shutdown_config.mqtt_timeout();
-            match tokio::time::timeout(mqtt_timeout, &mut mqtt_handle).await {
-                Ok(Ok(())) => {
-                    tracing::info!("MQTT 消费者已正常退出，HTTP 服务器关闭中...");
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("MQTT 消费者退出异常: {e:?}，HTTP 服务器关闭中...");
-                }
-                Err(_) => {
-                    if shutdown_config.force_abort_on_timeout {
-                        tracing::warn!(
-                            "MQTT_CONSUMER_FORCE_QUIT: MQTT 消费者在 {:?} 内未退出，强制中止",
-                            mqtt_timeout
-                        );
-                        mqtt_handle.abort();
-                    } else {
-                        tracing::warn!(
-                            "MQTT 消费者在 {:?} 内未退出，继续关闭 HTTP 服务器",
-                            mqtt_timeout
-                        );
-                    }
+            Ok(Err(e)) => {
+                tracing::error!("MQTT 消费者退出异常: {e:?}，HTTP 服务器关闭中...");
+            }
+            Err(_) => {
+                if shutdown_config.force_abort_on_timeout {
+                    tracing::warn!(
+                        "MQTT_CONSUMER_FORCE_QUIT: MQTT 消费者在 {:?} 内未退出，强制中止",
+                        mqtt_timeout
+                    );
+                    mqtt_handle.abort();
+                } else {
+                    tracing::warn!(
+                        "MQTT 消费者在 {:?} 内未退出，继续关闭 HTTP 服务器",
+                        mqtt_timeout
+                    );
                 }
             }
-        })
-        .await?;
+        }
+    })
+    .await?;
 
     Ok(())
 }

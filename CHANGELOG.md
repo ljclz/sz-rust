@@ -5,6 +5,23 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-15（sz300 首次真实运行 + metrics 鉴权接线）
+
+### Fixed
+
+- **sz300 首次真实运行冒烟测试修复**（commit `70ea91d`，来源: `cargo test -p sz-rust-sz300` → 134 passed / 0 failed）：
+  - `merchant_service.rs`：商户列表投影引用不存在的 `merchant_name` 列 → 商户列表必崩缺陷，改为真实列并补全显式投影
+  - `order_service.rs`：order_item 查询复用 2 参数数组但 SQL 仅 1 占位符 → order/info 必失败缺陷，改为独立单参数数组
+  - device/merchant/order/product 四个 service 共 10 处 `SELECT *` → 显式列投影（铁律：禁 SELECT *）
+
+### Security
+
+- **/metrics 鉴权接线（T7）**：`MetricsAuthConfig`（此前仅定义未接线）现通过 `metrics_auth_middleware` 挂载到独立 `/metrics` 子路由（`router.rs:54` metrics_router()，route_layer 不污染业务 API）：
+  - Bearer token（`SZ300_METRICS_BEARER_TOKEN`）+ IP 白名单（`SZ300_METRICS_ALLOWED_IPS`，支持 CIDR v4/v6）双机制，未授权返回 403
+  - `SZ300_ENV=production` 启动强制校验：未配置任何鉴权 → 拒绝启动（fail-closed，`main.rs:243`）
+  - 客户端真实 IP 注入：`into_make_service_with_connect_info`（`main.rs:262`）
+  - 新增集成测试 `tests/metrics_auth_router_test.rs`（7 用例）+ CIDR 单测 3 用例（来源: `cargo test -p sz-rust-sz300` 真实输出）
+
 ## [Unreleased] - 2026-08-13（P0/P1/P2 能力完善）
 
 > **文档降级声明**（2026-08-13 审计核实）：以下部分声称经独立验证存在跨仓库混淆或测试编译失败，已标注真实状态。

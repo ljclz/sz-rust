@@ -93,43 +93,43 @@ where
             Json(controller::order::OrderController::create(&*s.orders, body.0).await)
         }
     });
-    let builder = builder.get(&format!("{}/orders/:id", base), {
+    let builder = builder.get(&format!("{}/orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::get(&*s.orders, path.id).await)
         }
     });
-    let builder = builder.put(&format!("{}/orders/:id", base), {
+    let builder = builder.put(&format!("{}/orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(controller::order::OrderController::update(&*s.orders, path.id, body.0).await)
         }
     });
-    let builder = builder.delete(&format!("{}/orders/:id", base), {
+    let builder = builder.delete(&format!("{}/orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::delete(&*s.orders, path.id).await)
         }
     });
-    let builder = builder.post(&format!("{}/orders/:id/cancel", base), {
+    let builder = builder.post(&format!("{}/orders/{{id}}/cancel", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::cancel(&*s.orders, path.id).await)
         }
     });
-    let builder = builder.post(&format!("{}/orders/:id/pay", base), {
+    let builder = builder.post(&format!("{}/orders/{{id}}/pay", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::pay(&*s.orders, path.id).await)
         }
     });
-    let builder = builder.post(&format!("{}/orders/:id/ship", base), {
+    let builder = builder.post(&format!("{}/orders/{{id}}/ship", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::ship(&*s.orders, path.id).await)
         }
     });
-    let builder = builder.post(&format!("{}/orders/:id/complete", base), {
+    let builder = builder.post(&format!("{}/orders/{{id}}/complete", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::order::OrderController::complete(&*s.orders, path.id).await)
@@ -157,7 +157,7 @@ where
             Json(controller::order_item::OrderItemController::create(&*s.order_items, body.0).await)
         }
     });
-    let builder = builder.delete(&format!("{}/order_items/:id", base), {
+    let builder = builder.delete(&format!("{}/order_items/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(
@@ -180,20 +180,20 @@ where
             Json(controller::cart::CartController::add(&*s.carts, body.0).await)
         }
     });
-    let builder = builder.put(&format!("{}/cart/:id", base), {
+    let builder = builder.put(&format!("{}/cart/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             let qty: i64 = body.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
             Json(controller::cart::CartController::update_qty(&*s.carts, path.id, qty).await)
         }
     });
-    let builder = builder.delete(&format!("{}/cart/:id", base), {
+    let builder = builder.delete(&format!("{}/cart/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::cart::CartController::delete(&*s.carts, path.id).await)
         }
     });
-    let builder = builder.delete(&format!("{}/cart/clear/:user_id", base), {
+    let builder = builder.delete(&format!("{}/cart/clear/{{user_id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::cart::CartController::clear(&*s.carts, path.id).await)

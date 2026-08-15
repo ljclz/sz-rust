@@ -1,5 +1,4 @@
 //! API 客户端生成器
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 

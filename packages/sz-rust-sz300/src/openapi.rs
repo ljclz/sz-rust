@@ -73,9 +73,10 @@ fn build_openapi_spec() -> Value {
         })
         .path("/metrics", HttpMethod::Get, |op| {
             op.summary("Prometheus 指标端点")
-                .description("输出 Prometheus 文本格式指标")
+                .description("输出 Prometheus 文本格式指标。访问受 MetricsAuthConfig 控制（T7）：Bearer token 或 IP 白名单（SZ300_METRICS_BEARER_TOKEN / SZ300_METRICS_ALLOWED_IPS，支持 CIDR），未授权返回 403")
                 .tag("健康检查")
-                .response(200, "Prometheus 文本格式", "text/plain");
+                .response(200, "Prometheus 文本格式", "text/plain")
+                .response(403, "未授权（缺少 Bearer token 或不在 IP 白名单）", "text/plain");
         })
         // ===== 认证 =====
         .path("/api/v1/auth/login", HttpMethod::Post, |op| {
@@ -105,6 +106,15 @@ fn build_openapi_spec() -> Value {
                 .description("清除客户端 CSRF Cookie")
                 .tag("认证")
                 .response(200, "已退出登录", "application/json");
+        })
+        // ===== AI 聊天 =====
+        .path("/api/v1/ai/chat", HttpMethod::Post, |op| {
+            op.summary("AI 聊天接口")
+                .description("对接 LLM 返回聊天响应。未配置 SZ300_AI_API_KEY 时返回降级响应（HTTP 200 + code:0，非 503）；prompt 超 16000 字符或 model 不在白名单时同样返回 200 + code:0 业务错误")
+                .tag("AI")
+                .parameter("prompt", "body", "用户提示词（上限 16000 字符）", true, "string")
+                .parameter("model", "body", "模型名（默认 gpt-4o-mini，白名单：gpt-4o-mini/gpt-4o/gpt-4.1-mini）", false, "string")
+                .response(200, "LLM 响应内容（code:1）或降级业务错误（code:0）", "application/json");
         })
         // ===== 商户管理 =====
         .path("/api/v1/merchant/list", HttpMethod::Post, |op| {
@@ -407,7 +417,7 @@ mod tests {
                 }
             }
         }
-        // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 2 = 29
-        assert_eq!(count, 29, "端点总数应为 29，实际: {}", count);
+        // 健康检查 4 + 认证 4 + AI 1 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 2 = 30
+        assert_eq!(count, 30, "端点总数应为 30，实际: {}", count);
     }
 }

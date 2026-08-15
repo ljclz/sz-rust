@@ -82,6 +82,39 @@ fn test_metrics_auth_is_allowed_with_ip_whitelist() {
 }
 
 #[test]
+fn test_metrics_auth_is_allowed_with_cidr_ip_whitelist() {
+    let config = MetricsAuthConfig {
+        allowed_ips: vec!["10.0.0.0/8".to_string(), "192.168.1.0/24".to_string()],
+        ..Default::default()
+    };
+    // CIDR 内放行
+    assert!(config.is_allowed(None, Some("10.1.2.3")));
+    assert!(config.is_allowed(None, Some("192.168.1.99")));
+    // CIDR 外拒绝
+    assert!(!config.is_allowed(None, Some("11.0.0.1")));
+    assert!(!config.is_allowed(None, Some("192.168.2.1")));
+}
+
+#[test]
+fn test_metrics_auth_is_allowed_with_ipv6_cidr_ip_whitelist() {
+    let config = MetricsAuthConfig {
+        allowed_ips: vec!["2001:db8::/32".to_string()],
+        ..Default::default()
+    };
+    assert!(config.is_allowed(None, Some("2001:db8:1::1")));
+    assert!(!config.is_allowed(None, Some("2001:db9::1")));
+}
+
+#[test]
+fn test_metrics_auth_is_allowed_rejects_invalid_cidr() {
+    let config = MetricsAuthConfig {
+        allowed_ips: vec!["10.0.0.0/999".to_string(), "not-an-ip".to_string()],
+        ..Default::default()
+    };
+    assert!(!config.is_allowed(None, Some("10.0.0.1")));
+}
+
+#[test]
 fn test_metrics_auth_is_allowed_disabled() {
     let config = MetricsAuthConfig {
         enabled: false,

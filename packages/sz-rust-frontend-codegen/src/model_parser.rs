@@ -1,5 +1,4 @@
 //! ORM 模型解析器（stub — 任务组 4 实现）
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

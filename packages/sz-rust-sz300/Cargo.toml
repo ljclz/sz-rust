@@ -25,6 +25,8 @@ sz-rust-observability.workspace = true
 sz-rust-capability.workspace = true
 sz-rust-ai-facade.workspace = true
 sz-rust-cache-facade.workspace = true
+sz-rust-addons-ecommerce.workspace = true
+sz-rust-rag.workspace = true
 sz-orm-sqlx.workspace = true
 # 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。
 # features 取 sz-orm-sqlx 的子集，Cargo 按并集解析，与 sz-orm-sqlx 共享同一编译产物，不增加主包体积。

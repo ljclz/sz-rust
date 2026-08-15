@@ -50,6 +50,13 @@ const KNOWN_FICTIONAL_CRATES = new Set([
     'sz-rust-migration',
 ]);
 
+// 已移除的 crate（2026-08-15 移除：非框架核心、零测试、零依赖方）
+// 历史文档/审计报告中的引用降级为 WARN，不阻塞 CI。
+const REMOVED_CRATES = new Set([
+    'sz-rust-operator',
+    'sz-rust-wasm',
+]);
+
 // 非 crate 名：企业版仓库名 + .trae/skills/ 下的 Skill 目录名（文档常引用 Skill 名，非交付声称）
 // + 已核验的部署目录/cron 标记（sz-rust-soak：soak-toolkit 工作目录名，见 scripts/soak-self-hosted/）
 const NON_CRATE_NAMES = new Set([
@@ -180,7 +187,10 @@ function main() {
                 // 未标注 = 仍将其作为有效声称 → ERROR（防虚构交付再犯）
                 const docFictional = /已定性虚构|纯虚构|虚构交付|未完成|fictional/.test(content);
                 const fictionalAnnotated = docFictional || refs.some((r) => /未完成|虚构|不存在|从未存在|fictional/.test(r.text));
-                if (KNOWN_FICTIONAL_CRATES.has(name) && fictionalAnnotated) {
+                // 已移除 crate：历史文档引用降级为 WARN
+                if (REMOVED_CRATES.has(name)) {
+                    warnings.push(`${rel}:${firstRef.line} 引用 ${name}（已移除 crate，历史文档引用）`);
+                } else if (KNOWN_FICTIONAL_CRATES.has(name) && fictionalAnnotated) {
                     warnings.push(`${rel}:${firstRef.line} 引用 ${name}（已定性虚构，当前为审计回退标注引用）`);
                 } else if (KNOWN_FICTIONAL_CRATES.has(name) || docExternal) {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（已定性虚构交付：crate 在开源/企业版仓库均不存在，禁止作为有效声称）`);

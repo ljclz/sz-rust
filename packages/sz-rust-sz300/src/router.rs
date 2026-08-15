@@ -2,8 +2,13 @@ use crate::controllers::{
     ai, auth, capabilities, device, file, file_serve, health, merchant, order, product, view,
 };
 use crate::middleware::auth_middleware;
+use crate::middleware::metrics_auth::{metrics_auth_middleware, ClientIp};
 use crate::openapi;
 use crate::state::AppState;
+use axum::extract::connect_info::ConnectInfo;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::{middleware, routing::get, routing::post, Router};
 use std::sync::Arc;
 use sz_rust_core::middleware::cors::cors_layer;
@@ -42,6 +47,46 @@ pub fn is_public_path(path: &str) -> bool {
     PUBLIC_PATHS.contains(&path)
 }
 
+/// metrics 端点子路由 — 独立访问控制（T7 MetricsAuthConfig 接线）
+///
+/// /metrics 在公开路径白名单中（跳过业务 JWT），因此必须由本层独立鉴权：
+/// - Bearer token（`SZ300_METRICS_BEARER_TOKEN`）
+/// - IP 白名单（`SZ300_METRICS_ALLOWED_IPS`，支持 CIDR）
+/// - `SZ300_METRICS_AUTH_ENABLED=false` 可显式关闭（仅限非生产）
+///
+/// 用独立 Router + route_layer 实现，确保中间件只作用于 /metrics，不污染业务路由。
+/// 额外挂一层 `connect_info_to_client_ip` 桥接中间件：生产环境由
+/// `into_make_service_with_connect_info` 把 `ConnectInfo<SocketAddr>` 写入 extensions，
+/// 本层将其转为 [`ClientIp`]，供 `metrics_auth_middleware` 读取。
+pub fn metrics_router() -> Router<AppState> {
+    let metrics_auth_cfg = crate::config::MetricsAuthConfig::from_env();
+    Router::<AppState>::new()
+        .route("/metrics", get(health::metrics))
+        // 桥接：ConnectInfo<SocketAddr> → ClientIp（避免多 axum 版本 TypeId 不匹配）
+        .layer(middleware::from_fn(connect_info_to_client_ip))
+        .route_layer(middleware::from_fn_with_state(
+            metrics_auth_cfg,
+            metrics_auth_middleware,
+        ))
+}
+
+/// 将 axum 的 `ConnectInfo<SocketAddr>` 转换为 [`ClientIp`] 写入 extensions。
+///
+/// 生产环境 `into_make_service_with_connect_info` 在建立连接时注入 `ConnectInfo`，
+/// 本中间件读取后以自定义 `ClientIp` 类型重新写入，使 `metrics_auth_middleware`
+/// 不直接依赖 `ConnectInfo` 提取器，从而规避依赖图中 axum 0.7/0.8 多版本导致的
+/// `Extensions::get` TypeId 不匹配问题。
+async fn connect_info_to_client_ip(
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    request
+        .extensions_mut()
+        .insert(ClientIp(addr.ip().to_string()));
+    next.run(request).await
+}
+
 /// 创建应用路由表，注册所有业务路由并叠加 CORS + CSRF + JWT 鉴权中间件
 ///
 /// ## 中间件执行顺序（外层→内层）
@@ -64,11 +109,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api-docs", get(openapi::swagger_ui))
         .route("/api-docs/redoc", get(openapi::redoc))
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
-        // 健康检查 + 可观测性
+        // 健康检查 + 可观测性（/metrics 走独立子路由，见 metrics_router()）
         .route("/health", get(health::check))
         .route("/health/ready", get(health::readiness))
         .route("/health/startup", get(health::startup))
-        .route("/metrics", get(health::metrics))
         // 认证（公开接口）
         .route("/api/v1/auth/login", post(auth::login))
         .route("/api/v1/auth/refresh", post(auth::refresh))
@@ -127,6 +171,13 @@ pub fn create_router(state: AppState) -> Router {
         );
     }
 
+    // 接入 ecommerce 插件路由（/api/ecommerce/*）
+    // ecommerce handler 通过闭包捕获 EcommerceState，不依赖 AppState
+    let ec_state = sz_rust_addons_ecommerce::EcommerceState::default();
+    let builder = sz_rust_core::router::RouterBuilder::with_router(router);
+    let builder = sz_rust_addons_ecommerce::register_routes(builder, ec_state);
+    let router = builder.build();
+
     // 限流配置（令牌桶，从环境变量读取阈值，健康检查/metrics 排除）
     let rl_config = crate::config::RateLimitProductionConfig::from_env();
     let rate_limit_layer = token_bucket_config(rl_config.capacity, rl_config.refill_per_second)
@@ -145,6 +196,7 @@ pub fn create_router(state: AppState) -> Router {
     }));
 
     router
+        .merge(metrics_router())
         // JWT 鉴权中间件（公开路径自动跳过）— 内层
         // 保留自研版：middleware-facade auth 签名不兼容（from_fn vs from_fn_with_state）
         .layer(middleware::from_fn(

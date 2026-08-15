@@ -65,11 +65,26 @@ impl AiController {
                     );
                 }
 
+                // RAG 检索增强：尝试行业知识检索，失败则使用原始 prompt（不阻塞正常流程）
+                let enhanced_prompt = match sz_rust_rag::facade::IndustryRag::search(
+                    sz_rust_rag::search::RagSearchRequest::new(&prompt, "sz300"),
+                )
+                .await
+                {
+                    Ok(result) if !result.content.is_empty() => {
+                        format!(
+                            "行业知识上下文：\n{}\n\n用户问题：{}",
+                            result.content, prompt
+                        )
+                    }
+                    _ => prompt,
+                };
+
                 let chat_req = ChatRequest::new(
                     model,
                     vec![ChatMessage {
                         role: Role::User,
-                        content: prompt,
+                        content: enhanced_prompt,
                         tool_call_id: None,
                         tool_calls: None,
                     }],
