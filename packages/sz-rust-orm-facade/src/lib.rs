@@ -260,6 +260,15 @@ pub use pool_warmer::{PoolWarmer, WarmupError as PoolWarmupError};
 pub use query_cache::{QueryCache, QueryCacheConfig, QueryCacheError};
 
 // ============================================================================
+// 可靠任务队列（数据库持久化 Job 表：状态机 / 原子领取 / 退避重试 / 幂等 / 死信）
+// ============================================================================
+pub mod jobs;
+pub use jobs::{
+    Job, JobError, JobErrorKind, JobQueue, JobQueueConfig, JobQueueError, JobStatus, QueueSnapshot,
+    TaskHandler, JOBS_TABLE,
+};
+
+// ============================================================================
 // 数据范围控制 Data Scope — 应用层行级数据过滤
 // ============================================================================
 pub mod data_scope;

@@ -5,6 +5,22 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-15（可靠任务队列：持久化 Job 表 + 状态机 + 退避重试 + 死信）
+
+### Added
+
+- **可靠任务队列 `JobQueue`**（`sz-rust-orm-facade/src/jobs.rs`，ADR-036，来源: `cargo test -p sz-rust-orm-facade --lib jobs::` → 6 passed；`cargo test -p sz-rust-sz300 --test jobs_integration_test -- --ignored` → 5 passed，真实 MySQL 9.6）：
+  - 任务数据化：`sz_jobs` 表（kind/payload/status/attempts/run_after/locked_until/last_error/dedupe_key），时间用 BIGINT 毫秒时间戳（UTC）
+  - 状态机：pending（run_after 表达延迟与退避）/ running（locked_until 租约）/ succeeded / dead（可重放）
+  - 原子领取：单条 `UPDATE ... WHERE id IN (SELECT ... LIMIT n)` 抢占，多实例 worker 安全，不依赖 SKIP LOCKED 方言
+  - 退避重试：指数退避 + 随机抖动，Temporary/Permanent 错误分类，max_attempts 上限进死信
+  - 幂等：`UNIQUE(kind, dedupe_key)`，重复入队返回已有任务 ID
+  - 崩溃自愈：租约超时 running 任务自动回收重跑；死信 `retry_dead()` 人工重放
+  - 观测：`queue_snapshot()`（pending/running/dead/最老 pending 等待秒数）
+  - SQL 全参数化绑定 + 显式列投影（铁律合规）
+- **sz300 接线**（`main.rs`）：JobQueue 初始化 + 幂等建表 + 示例 handler `order.expire_check`（订单超时未支付检查，演示延迟任务）+ worker 启动（复用优雅关闭信号）
+- 文档：ADR-036 + 五维审查报告 `docs/audit/2026-08-15-可靠任务队列五维审查报告.md` + 本 CHANGELOG
+
 ## [Unreleased] - 2026-08-15（连接池调优接线：L2 配置 + 预热 + 动态扩缩容 + 池指标）
 
 ### Added
