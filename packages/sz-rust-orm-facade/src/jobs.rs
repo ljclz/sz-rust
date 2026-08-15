@@ -6,7 +6,8 @@
 //!
 //! - **任务先变成数据**：`sz_jobs` 表（kind/payload/status/attempts/run_after/...）
 //! - **状态机**：pending（含延迟重试）/ running（含租约）/ succeeded / dead（可重放）
-//! - **领取靠数据库裁决**：单条 `UPDATE` 原子抢占，多实例 worker 安全
+//! - **领取靠数据库裁决**：事务内 `SELECT ... FOR UPDATE SKIP LOCKED` + UPDATE
+//!   抢占（MySQL 8.0.1+），多实例 worker 安全，不重复领取
 //! - **退避重试有上限**：指数退避 + 随机抖动，Temporary/Permanent 错误分类
 //! - **幂等**：`dedupe_key` 唯一约束，重复入队返回已有任务，不重复投递
 //! - **崩溃自愈**：`locked_until` 租约超时的 running 任务自动回收重跑
@@ -16,6 +17,15 @@
 //! 时间统一用 BIGINT 毫秒时间戳（UTC），避免 DATETIME 时区歧义。
 //! SQL 全部参数化绑定（`execute_with_params` / `query_with_params`），
 //! 列投影显式声明，无 `SELECT *`。
+//!
+//! # 并发领取的实现取舍（2026-08-15 修正）
+//!
+//! v1 曾用"单条 `UPDATE ... WHERE id IN (SELECT ...)` 抢占"，实测发现并发缺陷：
+//! MySQL 默认 REPEATABLE READ 下，子查询是快照读（返回另一 worker 尚未提交的
+//! pending 行），且 InnoDB 的 UPDATE 锁等待后不重新评估 WHERE（semi-consistent
+//! read 仅 READ COMMITTED 启用），导致两个 worker 重复领取同一任务（集成测试
+//! 实测 calls=2×）。修正为事务内 `SELECT ... FOR UPDATE SKIP LOCKED`——在锁定
+//! 阶段就跳过他人已锁的行，是 MySQL/PostgreSQL 通用的标准做法。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -464,27 +474,53 @@ impl JobQueue {
         Ok(())
     }
 
-    /// 原子领取一批任务（多 worker 安全：单条 UPDATE 抢占，无需 SKIP LOCKED）
+    /// 原子领取一批任务（多 worker 安全：SELECT FOR UPDATE SKIP LOCKED + 事务内 UPDATE）
+    ///
+    /// 为什么不用"单条 UPDATE 抢占"：MySQL 默认 REPEATABLE READ 下 InnoDB 的
+    /// UPDATE 锁等待后不重新评估 WHERE（semi-consistent read 仅 READ COMMITTED
+    /// 启用），并发 worker 会更新到另一 worker 已领取的行（实测重复执行 2x）。
+    /// `FOR UPDATE SKIP LOCKED`（MySQL 8.0.1+）在锁定阶段就跳过他人已锁的行，
+    /// 是官方推荐的多 worker 领取方式（同 PostgreSQL 的 SKIP LOCKED 语义）。
     async fn claim_batch(&self, config: &JobQueueConfig) -> Result<Vec<Job>, JobQueueError> {
         let now = now_ms();
         let locked_until = now + config.lease_seconds as i64 * 1000;
         let mut conn = self.pool.acquire().await?;
-        // 单条 UPDATE 原子抢占：并发 worker 竞争同一行时只有一个 affected
-        conn.execute_with_params(
-            "UPDATE sz_jobs SET status = ?, locked_until = ?, attempts = attempts + 1, updated_at = ? \
-             WHERE id IN (SELECT t.id FROM (SELECT id FROM sz_jobs \
-             WHERE status = ? AND run_after <= ? ORDER BY created_at LIMIT ?) t)",
-            &[
-                Value::String(STATUS_RUNNING.into()),
-                Value::I64(locked_until),
-                Value::I64(now),
-                Value::String(STATUS_PENDING.into()),
-                Value::I64(now),
-                Value::I64(config.batch_size as i64),
-            ],
-        )
-        .await?;
-        // 读回本 worker 领取的任务（按 locked_until 精确过滤，不捞其他 worker 的）
+        conn.begin_transaction().await?;
+        // 1. 锁定候选行：SKIP LOCKED 跳过其他 worker 已锁定的行（不等待）
+        let rows = conn
+            .query_with_params(
+                "SELECT id FROM sz_jobs WHERE status = ? AND run_after <= ? \
+                 ORDER BY created_at LIMIT ? FOR UPDATE SKIP LOCKED",
+                &[
+                    Value::String(STATUS_PENDING.into()),
+                    Value::I64(now),
+                    Value::I64(config.batch_size as i64),
+                ],
+            )
+            .await?;
+        let ids: Vec<Value> = rows
+            .iter()
+            .filter_map(|r| r.get("id").and_then(Value::as_i64).map(Value::I64))
+            .collect();
+        // 2. 事务内抢占（行已被本事务锁定，无竞争）；IN 占位符数量由代码生成，值全参数化
+        if !ids.is_empty() {
+            let placeholders = vec!["?"; ids.len()].join(",");
+            let mut params = Vec::with_capacity(ids.len() + 3);
+            params.push(Value::String(STATUS_RUNNING.into()));
+            params.push(Value::I64(locked_until));
+            params.push(Value::I64(now));
+            params.extend(ids);
+            conn.execute_with_params(
+                &format!(
+                    "UPDATE sz_jobs SET status = ?, locked_until = ?, attempts = attempts + 1, updated_at = ? \
+                     WHERE id IN ({placeholders})"
+                ),
+                &params,
+            )
+            .await?;
+        }
+        conn.commit().await?;
+        // 3. 读回本 worker 领取的任务（按 locked_until 精确过滤，不捞其他 worker 的）
         let rows = conn
             .query_with_params(
                 "SELECT id, kind, payload, status, attempts, run_after, last_error, dedupe_key, created_at \

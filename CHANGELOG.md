@@ -5,6 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-15（任务队列 gauntlet 验证：并发缺陷修复 + 并发/自愈测试）
+
+### Fixed
+
+- **任务队列并发缺陷（old-coder 验证发现）**：多 worker 并发领取时同一任务被执行 2 次（集成测试实测 calls=20≠10）。根因：v1 的"单条 `UPDATE ... WHERE id IN (SELECT ...)` 抢占"在 MySQL 默认 REPEATABLE READ 下，子查询为快照读且 InnoDB UPDATE 锁等待后不重新评估 WHERE（semi-consistent read 仅 READ COMMITTED 启用），乐观锁条件失效。修复：事务内 `SELECT ... FOR UPDATE SKIP LOCKED`（MySQL 8.0.1+，同 PostgreSQL 语义）——锁定阶段即跳过他人已锁行（`jobs.rs:claim_batch`）
+
+### Added
+
+- 集成测试 +2：`test_concurrent_workers_no_duplicate_execution`（双 worker 10 任务恰好执行 10 次）+ `test_stale_lease_reclaimed_and_rerun`（租约过期回收重跑）→ 集成测试共 7 例
+- gauntlet 验证体系：`scripts/audit/jobs-gauntlet.sh`（8 层可复现入口）+ 验证报告 `docs/audit/2026-08-15-任务队列gauntlet验证报告.md`
+- 验证结果（真实输出）：手动变异 4/4 杀死；工具变异 249（139 caught / 96 missed / 14 unviable）；jobs.rs 覆盖 line 75% / branch 80%；集成测试 7/7 ×2 次确定性通过
+
 ## [Unreleased] - 2026-08-15（可靠任务队列：持久化 Job 表 + 状态机 + 退避重试 + 死信）
 
 ### Added

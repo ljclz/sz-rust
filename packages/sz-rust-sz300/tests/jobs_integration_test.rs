@@ -331,3 +331,132 @@ async fn test_job_status_transitions() {
     assert_eq!(job_status(&queue, id).await, JobStatus::Pending);
     cleanup(&queue).await;
 }
+
+/// N1 并发安全：两个 worker 竞争同一批任务，每条只执行一次
+#[tokio::test]
+#[ignore]
+async fn test_concurrent_workers_no_duplicate_execution() {
+    let _guard = TEST_LOCK.lock().await;
+    let queue = match setup_queue().await {
+        Some(q) => q,
+        None => return,
+    };
+    cleanup(&queue).await;
+    // 入队 10 个任务
+    for i in 0..10 {
+        queue
+            .enqueue("test.concurrent", serde_json::json!({"i": i}), None)
+            .await
+            .expect("入队失败");
+    }
+    let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let calls_worker = calls.clone();
+    let handler = Arc::new(ConcurrentHandler {
+        calls: calls_worker,
+    });
+    let handlers: HashMap<String, Arc<dyn TaskHandler>> = HashMap::from([(
+        "test.concurrent".to_string(),
+        handler as Arc<dyn TaskHandler>,
+    )]);
+    // 两个 worker 并发消费
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let w1 = {
+        let q = queue.clone();
+        let h = handlers.clone();
+        let rx = shutdown_rx.clone();
+        tokio::spawn(async move { q.run_worker(h, JobQueueConfig::default(), rx).await })
+    };
+    let w2 = {
+        let q = queue.clone();
+        let h = handlers.clone();
+        let rx = shutdown_rx.clone();
+        tokio::spawn(async move { q.run_worker(h, JobQueueConfig::default(), rx).await })
+    };
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    shutdown_tx.send(true).ok();
+    w1.await.ok();
+    w2.await.ok();
+    let snap = queue.queue_snapshot().await.expect("快照失败");
+    assert_eq!(snap.succeeded, 10, "10 个任务应全部成功");
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        10,
+        "每个任务必须恰好执行一次（原子领取防重复执行）"
+    );
+    cleanup(&queue).await;
+}
+
+/// 计数 handler（记录调用次数，用于并发去重验证）
+struct ConcurrentHandler {
+    calls: Arc<std::sync::atomic::AtomicU32>,
+}
+
+#[async_trait::async_trait]
+impl TaskHandler for ConcurrentHandler {
+    async fn handle(&self, _payload: &serde_json::Value) -> Result<(), JobError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// N2 崩溃自愈：任务被置为 running 且租约过期 → worker 回收重跑 → 成功
+#[tokio::test]
+#[ignore]
+async fn test_stale_lease_reclaimed_and_rerun() {
+    let _guard = TEST_LOCK.lock().await;
+    let queue = match setup_queue().await {
+        Some(q) => q,
+        None => return,
+    };
+    cleanup(&queue).await;
+    let id = queue
+        .enqueue("test.stale", serde_json::json!({}), None)
+        .await
+        .expect("入队失败");
+    // 模拟 worker 崩溃：手动置为 running + 过期租约（61 秒前，超过 lease=60s）
+    let now = now_ms_public();
+    let mut conn = queue.pool().acquire().await.expect("获取连接失败");
+    conn.execute_with_params(
+        &format!("UPDATE {JOBS_TABLE} SET status = 'running', locked_until = ? WHERE id = ?"),
+        &[Value::I64(now - 61_000), Value::I64(id as i64)],
+    )
+    .await
+    .expect("模拟崩溃状态失败");
+
+    let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let calls_worker = calls.clone();
+    let handlers: HashMap<String, Arc<dyn TaskHandler>> = HashMap::from([(
+        "test.stale".to_string(),
+        Arc::new(ConcurrentHandler {
+            calls: calls_worker,
+        }) as Arc<dyn TaskHandler>,
+    )]);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn({
+        let q = queue.clone();
+        async move {
+            q.run_worker(handlers, JobQueueConfig::default(), shutdown_rx)
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    shutdown_tx.send(true).ok();
+    worker.await.ok();
+
+    let snap = queue.queue_snapshot().await.expect("快照失败");
+    assert_eq!(snap.succeeded, 1, "过期租约任务应被回收并成功执行");
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "回收重跑应恰好执行一次"
+    );
+    cleanup(&queue).await;
+}
+
+/// 当前毫秒时间戳（测试辅助，与 jobs 模块 now_ms 同语义）
+fn now_ms_public() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
