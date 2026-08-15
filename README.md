@@ -34,7 +34,7 @@
 - **基于 SZ-ORM**：L4 金融级 ORM（Data Mapper + Repository 模式），编译时 SQL 校验（`sql_string!` / `query!` 宏）。
 - **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。（✅ 生产已接入：`main.rs:125` MetricsRegistry + `main.rs:168` SLO 监控器，`health.rs:37/39` 记录燃烧率）
 - **metrics 端点访问控制（T7）**：`MetricsAuthConfig` 提供 Bearer token + IP 白名单（支持 CIDR，v4/v6）双机制；`/metrics` 路由独立挂载 `metrics_auth_middleware`（`router.rs:54` metrics_router()，独立子路由不污染业务 API），未授权返回 403；`SZ300_ENV=production` 时启动强制校验必须配置鉴权否则拒绝启动（`main.rs:243`），客户端真实 IP 通过 `into_make_service_with_connect_info` 注入（`main.rs:262`）。（✅ 生产已接入）
-- **分布式追踪（v0.2.0 新增）**：`sz-rust-tracing` 包实现 W3C TraceContext 标准（`traceparent: 00-<trace_id>-<span_id>-<flags>`），legacy header 兼容，OTLP exporter 占位。（⚠️ 生产接入状态：独立库，全 workspace 零调用，sz300 用原生 `tracing` + `sz_rust_observability::otlp`）
+- **分布式追踪**：sz300 用原生 `tracing` + `sz_rust_observability::otlp`（OTLP gRPC exporter，`main.rs:169`）。（✅ 生产已接入：`otlp` feature 门控）
 - **Admin Monitor API（v1.1.0 新增）**：`admin` feature（默认关闭）提供 3 个管理端点：`GET /api/admin/server/info`（CPU/内存/磁盘/负载/Rust版本/主机名）、`GET /api/admin/db/pool`（连接池 active/idle/max/usage）、`GET /api/admin/redis/info`（Redis 版本/模式/连接数/内存/角色）。路由级 `RoleGuard` 中间件校验 `admin` 角色，无 Redis 连接时自动降级返回 `connected: false`。
 
 ---
@@ -154,16 +154,10 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-ai-facade/        # AI facade（LLM/Embedding/RAG/Agent/MCP Bridge）
     ├── sz-rust-mcp/              # MCP 协议（stdio JSON-RPC）
     ├── sz-rust-addons-loader/    # 插件加载器
-    ├── sz-rust-addons-operate/   # 插件操作库
-    ├── sz-rust-addons-crm/       # CRM 插件（客户/线索/商机）
-    ├── sz-rust-addons-erp/       # ERP 插件
     ├── sz-rust-addons-ecommerce/ # 电商插件
     ├── sz-rust-addons-cms/       # CMS 插件（文章/分类/标签）
-    ├── sz-rust-addons-forum/     # Forum 插件（板块/帖子/回复）
-    ├── sz-rust-addons-im/        # IM 插件（会话/消息/用户状态）
-    ├── sz-rust-pdf/              # PDF/Excel 导入导出
+    ├── sz-rust-addons-crm/       # CRM 插件（客户/线索/商机）
     ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率）
-    ├── sz-rust-tracing/          # 分布式追踪模块（W3C TraceContext + OTLP）
 
     └── sz-rust-sz300/            # SZ300 业务应用（端到端集成示例）
 ```
@@ -230,7 +224,7 @@ MIT
 
 | 任务域 | 结论 | 关键数字 | 来源 |
 |--------|------|---------|------|
-| TF（测试修复） | ✅ | 171 passed, 0 failed | `cargo test -p sz-rust-sz300/addons-forum/addons-im` |
+| TF（测试修复） | ✅ | 171 passed, 0 failed | `cargo test -p sz-rust-sz300` |
 | PB（性能基准） | ✅ | 45 bench case, RSS 7 MB | `docs/benchmarks/2026-08-12-w5-w6-baseline.md` |
 | SA（安全审计） | ✅ | 22 条铁律全通过 | `docs/audit/2026-08-12-w5-w6-security-audit.md` |
 | E2E（端到端） | ✅ | 8 阶段全执行 | `docs/audit/2026-08-12-w5-w6-e2e-report.md` |

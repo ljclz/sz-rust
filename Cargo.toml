@@ -19,16 +19,10 @@ members = [
     "packages/sz-rust-examples",
     "packages/sz-rust-examples/addon-hot-reload-example",
     "packages/sz-rust-addons-loader",
-    "packages/sz-rust-addons-operate",
     "packages/sz-rust-addons-crm",
-    "packages/sz-rust-addons-erp",
     "packages/sz-rust-addons-ecommerce",
     "packages/sz-rust-addons-cms",
-    "packages/sz-rust-addons-forum",
-    "packages/sz-rust-addons-im",
-    "packages/sz-rust-pdf",
     "packages/sz-rust-cli",
-    "packages/sz-rust-tracing",
     "packages/sz-rust-observability",
     "packages/sz-rust-sz300",
 
@@ -36,7 +30,6 @@ members = [
     "packages/sz-rust-capability",
     "packages/sz-rust-rag",
     "packages/sz-rust-frontend-codegen",
-    "packages/sz-rust-workflow",
 ]
 
 [workspace.package]
@@ -217,8 +210,6 @@ sz-rust-mvc-facade = { version = "1.1.0", path = "packages/sz-rust-mvc-facade" }
 sz-rust-mcp = { version = "1.1.0", path = "packages/sz-rust-mcp" }
 sz-rust-macros = { version = "1.1.0", path = "packages/sz-rust-macros" }
 sz-rust-addons-loader = { version = "1.1.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-pdf = { version = "1.1.0", path = "packages/sz-rust-pdf" }
-sz-rust-tracing = { version = "1.1.0", path = "packages/sz-rust-tracing" }
 sz-rust-observability = { version = "1.1.0", path = "packages/sz-rust-observability" }
 sz-rust-cli = { version = "1.1.0", path = "packages/sz-rust-cli" }
 sz-rust-ai-facade = { version = "1.1.0", path = "packages/sz-rust-ai-facade" }
@@ -228,7 +219,6 @@ sz-rust-addons-crm = { version = "1.1.0", path = "packages/sz-rust-addons-crm" }
 sz-rust-addons-ecommerce = { version = "1.1.0", path = "packages/sz-rust-addons-ecommerce" }
 sz-rust-rag = { version = "1.1.0", path = "packages/sz-rust-rag" }
 sz-rust-frontend-codegen = { version = "1.1.0", path = "packages/sz-rust-frontend-codegen" }
-sz-rust-workflow = { version = "1.1.0", path = "packages/sz-rust-workflow" }
 
 # Ed25519 签名（P3-T2 插件市场）
 ed25519-dalek = "2"

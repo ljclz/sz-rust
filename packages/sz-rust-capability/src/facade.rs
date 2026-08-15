@@ -8,7 +8,7 @@ use crate::registry::CapabilityRegistry;
 use crate::source::CapabilitySource;
 
 struct CapInstance {
-    registry: CapabilityRegistry,
+    registry: Arc<CapabilityRegistry>,
 }
 
 static GLOBAL: OnceLock<CapInstance> = OnceLock::new();
@@ -28,12 +28,20 @@ static GLOBAL: OnceLock<CapInstance> = OnceLock::new();
 pub struct Cap;
 
 impl Cap {
-    pub fn init() -> CapResult<()> {
+    /// 使用外部 registry 初始化全局 facade（与调用方共享同一实例）
+    ///
+    /// 业务应用（如 sz300）持有自己的 `Arc<CapabilityRegistry>` 用于注入
+    /// `AppState` 时，应使用本方法而非 [`Cap::init`]——否则全局 facade 与
+    /// 应用局部 registry 是**两个独立实例**，`Cap::register` 注册的能力
+    /// 无法被业务 handler 访问（2026-08-15 双实例缺陷修复）。
+    pub fn init_with(registry: Arc<CapabilityRegistry>) -> CapResult<()> {
         GLOBAL
-            .set(CapInstance {
-                registry: CapabilityRegistry::new(),
-            })
+            .set(CapInstance { registry })
             .map_err(|_| CapError::NotInitialized)
+    }
+
+    pub fn init() -> CapResult<()> {
+        Self::init_with(Arc::new(CapabilityRegistry::new()))
     }
 
     pub fn is_initialized() -> bool {

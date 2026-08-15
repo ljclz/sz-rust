@@ -34,7 +34,7 @@ All features below are from actual `sz-rust-core` source code. Module structure:
 - **Based on SZ-ORM**: L4 financial-grade ORM (Data Mapper + Repository pattern), compile-time SQL validation (`sql_string!` / `query!` macros).
 - **Observability (v0.2.0)**: `sz-rust-observability` package provides `MetricsRegistry` + Counter/Gauge/Histogram metric types, SLO multi-window burn-rate alerting (1h/5m + 6h/30m dual-window pairs, aligned with Google SRE Workbook Chapter 5). (✅ Production: `main.rs:125` MetricsRegistry + `main.rs:168` SLO monitor, `health.rs:37/39` records burn rate)
 - **Metrics Endpoint Access Control (T7)**: `MetricsAuthConfig` provides Bearer token + IP allowlist (CIDR, v4/v6) dual mechanisms; the `/metrics` route mounts `metrics_auth_middleware` as an isolated sub-router (`router.rs:54` metrics_router(), no pollution to business APIs), returning 403 when unauthorized; with `SZ300_ENV=production` startup fails unless auth is configured (`main.rs:243`); real client IP injected via `into_make_service_with_connect_info` (`main.rs:262`). (✅ Production: wired)
-- **Distributed Tracing (v0.2.0)**: `sz-rust-tracing` package implements W3C TraceContext standard (`traceparent: 00-<trace_id>-<span_id>-<flags>`), legacy header compatibility, OTLP exporter placeholder. (⚠️ Production not mounted: standalone library, zero workspace calls, sz300 uses native `tracing` + `sz_rust_observability::otlp`)
+- **Distributed Tracing**: sz300 uses native `tracing` + `sz_rust_observability::otlp` (OTLP gRPC exporter, `main.rs:169`). (✅ Production: wired, `otlp` feature gated)
 
 ---
 
@@ -152,16 +152,10 @@ sz-rust/                          # workspace root
     ├── sz-rust-mvc-facade/       # MVC facade
     ├── sz-rust-mcp/              # MCP protocol (stdio JSON-RPC)
     ├── sz-rust-addons-loader/    # plugin loader
-    ├── sz-rust-addons-operate/   # plugin operations
-    ├── sz-rust-addons-crm/       # CRM plugin (contacts/leads/deals)
-    ├── sz-rust-addons-erp/       # ERP plugin
     ├── sz-rust-addons-ecommerce/ # e-commerce plugin
     ├── sz-rust-addons-cms/       # CMS plugin (articles/categories/tags)
-    ├── sz-rust-addons-forum/     # Forum plugin (boards/topics/replies)
-    ├── sz-rust-addons-im/        # IM plugin (conversations/messages/user_status)
-    ├── sz-rust-pdf/              # PDF/Excel import/export
+    ├── sz-rust-addons-crm/       # CRM plugin (contacts/leads/deals)
     ├── sz-rust-observability/    # observability (MetricsRegistry + SLO burn rate)
-    ├── sz-rust-tracing/          # distributed tracing (W3C TraceContext + OTLP)
 
     └── sz-rust-sz300/            # SZ300 business app (end-to-end integration example)
 ```
