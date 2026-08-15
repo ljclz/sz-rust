@@ -31,7 +31,7 @@ members = [
     "packages/sz-rust-tracing",
     "packages/sz-rust-observability",
     "packages/sz-rust-sz300",
-    "packages/sz-rust-operator",
+
     "packages/sz-rust-ai-facade",
     "packages/sz-rust-capability",
     "packages/sz-rust-rag",
