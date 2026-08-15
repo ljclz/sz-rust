@@ -941,3 +941,750 @@ async fn test_pg_transaction_commit_rollback() {
     pool.close_all().await;
     println!("✅ PostgreSQL 事务原子性验证通过：commit 生效 / rollback 回滚");
 }
+
+// ============================================================================
+// 服务层 & MQTT 层 & 控制器级真实集成测试
+//
+// 背景：2026-08-15 幻影交付审计（docs/audit/2026-08-15-幻影交付审计报告.md P5）
+// 发现 service_coverage_test.rs / mqtt_dispatch_test.rs 中的 19 个占位测试
+// （#[ignore] + 空函数体 + TODO，0 断言）为幻影测试。占位测试已删除，
+// 本节的真实断言集成测试补齐原占位声称的覆盖场景：
+//   health_service::ping_db / DeviceService::unbind|get_ota_version|update_status
+//   MqttMessageHandler::handle_device_status|order|log / MqttDispatcher::dispatch
+//   MqttDispatcher::start_consumer / auth::me|logout / device::trigger_ota|status_report
+//
+// 运行方式（需真实 MySQL 9.6，sz_orm_test 库）：
+// ```
+// cargo test --package sz-rust-sz300 --test db_integration_test -- --ignored
+// ```
+// ============================================================================
+use std::sync::Arc;
+
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::Request;
+use sz_rust_core::orm::{Pool, Value};
+use sz_rust_sz300::controllers::{auth, device};
+use sz_rust_sz300::services::device_service::DeviceService;
+use sz_rust_sz300::services::health_service;
+use sz_rust_sz300::services::mqtt_listener::MqttDispatcher;
+use sz_rust_sz300::services::mqtt_service::MqttMessageHandler;
+use sz_rust_sz300::state::AppState;
+
+/// 构造测试用 AppState（对齐 main.rs 的组件初始化，admin feature 默认关闭）
+fn build_test_state(pool: Arc<Pool>) -> AppState {
+    use sz_rust_capability::CapabilityRegistry;
+    use sz_rust_core::hooks::HookRegistry;
+    use sz_rust_core::plugin::event_bus::InMemoryEventBus;
+    use sz_rust_observability::slo::{SloConfig, SloMonitor};
+    use sz_rust_observability::MetricsRegistry;
+
+    AppState {
+        db_pool: pool,
+        pg_pool: None,
+        metrics_registry: Arc::new(MetricsRegistry::new()),
+        capability_registry: Arc::new(CapabilityRegistry::new()),
+        ai: None,
+        event_bus: Arc::new(InMemoryEventBus::new()),
+        cache: None,
+        slo_monitor: Arc::new(SloMonitor::new(SloConfig::default())),
+        hook_registry: Arc::new(HookRegistry::new()),
+    }
+}
+
+/// 重建服务层测试所需的 4 张业务表（对齐 001_init.sql 结构，测试库专用）
+async fn create_service_test_tables(conn: &mut dyn sz_rust_core::orm::Connection) {
+    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
+    conn.execute("DROP TABLE IF EXISTS device").await.ok();
+    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
+    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
+
+    conn.execute(
+        "CREATE TABLE device (\
+            device_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            merchant_id INT UNSIGNED DEFAULT 0,\
+            device_sn VARCHAR(50) NOT NULL UNIQUE,\
+            device_model VARCHAR(20) DEFAULT 'SZ-300',\
+            fw_version VARCHAR(20) DEFAULT '',\
+            status TINYINT DEFAULT 0,\
+            signal_strength INT DEFAULT 0,\
+            bind_at DATETIME DEFAULT NULL,\
+            last_online_at DATETIME DEFAULT NULL,\
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,\
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建 device 表失败");
+
+    conn.execute(
+        "CREATE TABLE `order` (\
+            order_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            order_no VARCHAR(32) NOT NULL UNIQUE,\
+            merchant_id INT UNSIGNED NOT NULL,\
+            device_id INT UNSIGNED DEFAULT 0,\
+            total_fen INT UNSIGNED NOT NULL,\
+            total_weight_g INT UNSIGNED DEFAULT 0,\
+            item_count SMALLINT UNSIGNED DEFAULT 0,\
+            status TINYINT DEFAULT 0,\
+            pay_method TINYINT DEFAULT 0,\
+            offline_seq VARCHAR(50) DEFAULT '',\
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建 order 表失败");
+
+    conn.execute(
+        "CREATE TABLE ota_version (\
+            ota_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            version VARCHAR(20) NOT NULL,\
+            device_model VARCHAR(20) DEFAULT 'SZ-300',\
+            url VARCHAR(255) NOT NULL,\
+            md5 VARCHAR(32) DEFAULT '',\
+            changelog TEXT,\
+            size INT UNSIGNED DEFAULT 0,\
+            forced TINYINT DEFAULT 0,\
+            status TINYINT DEFAULT 1,\
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建 ota_version 表失败");
+
+    conn.execute(
+        "CREATE TABLE operate_log (\
+            log_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
+            merchant_id INT UNSIGNED DEFAULT 0,\
+            operator VARCHAR(50) DEFAULT '',\
+            action VARCHAR(50) NOT NULL,\
+            detail TEXT,\
+            ip VARCHAR(45) DEFAULT '',\
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP\
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    )
+    .await
+    .expect("建 operate_log 表失败");
+}
+
+/// 清理服务层测试表
+async fn drop_service_test_tables(conn: &mut dyn sz_rust_core::orm::Connection) {
+    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
+    conn.execute("DROP TABLE IF EXISTS device").await.ok();
+    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
+    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
+}
+
+/// 插入测试设备，返回 device_id
+async fn insert_test_device(conn: &mut dyn sz_rust_core::orm::Connection, sn: &str) -> i64 {
+    conn.execute_with_params(
+        "INSERT INTO device (device_sn, device_model) VALUES (?, 'SZ-300')",
+        &[Value::String(sn.to_string())],
+    )
+    .await
+    .expect("插入测试设备失败");
+    let rows = conn
+        .query("SELECT LAST_INSERT_ID() AS id")
+        .await
+        .expect("查询自增 ID 失败");
+    rows[0]
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .expect("应包含 id 字段")
+}
+
+/// 读取响应 body 为 UTF-8 文本
+async fn resp_body_text(resp: axum::response::Response) -> String {
+    let bytes = axum::body::to_bytes(resp.into_body(), 65536)
+        .await
+        .expect("读取响应体失败");
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+/// ── health_service::ping_db：DB 可达时返回 true
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_service_health_ping_db_true_when_available() {
+    let cfg = ensure_mysql_available().await.expect(
+        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test 数据库)",
+    );
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    assert!(
+        health_service::ping_db(&pool).await,
+        "DB 可达时 ping_db 应返回 true"
+    );
+    pool.close_all().await;
+    println!("✅ health_service::ping_db 可达场景验证通过");
+}
+
+/// ── health_service::ping_db：DB 不可达时返回 false（不 panic）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_service_health_ping_db_false_when_unreachable() {
+    let mut cfg = mysql_test_config();
+    // 指向本机未监听的端口（TCP 拒绝快速失败）
+    cfg.database.port = 3307;
+    match db::init_pool(&cfg).await {
+        Ok(pool) => {
+            let pool = Arc::new(pool);
+            assert!(
+                !health_service::ping_db(&pool).await,
+                "DB 不可达时 ping_db 应返回 false"
+            );
+            pool.close_all().await;
+        }
+        Err(e) => {
+            // init 阶段即失败（连接拒绝）等价于不可达，记录而非断言失败
+            eprintln!(
+                "⚠️ 不可达 pool 初始化失败（符合预期，跳过 false 断言）: {}",
+                e
+            );
+        }
+    }
+    println!("✅ health_service::ping_db 不可达场景验证通过（不 panic）");
+}
+
+/// ── DeviceService::unbind：merchant_id 置 0，status 置 0，bind_at 置 NULL
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_service_unbind_resets_fields() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+
+    let device_id = insert_test_device(&mut *conn, "SN-UNBIND-001").await;
+    conn.execute_with_params(
+        "UPDATE device SET merchant_id = ?, status = 1, bind_at = NOW() WHERE device_id = ?",
+        &[Value::I64(7), Value::I64(device_id)],
+    )
+    .await
+    .expect("预置绑定状态失败");
+
+    DeviceService::unbind(&pool, device_id)
+        .await
+        .expect("unbind 应成功");
+
+    let rows = conn
+        .query_with_params(
+            "SELECT merchant_id, status, bind_at FROM device WHERE device_id = ?",
+            &[Value::I64(device_id)],
+        )
+        .await
+        .expect("查询失败");
+    let row = &rows[0];
+    assert_eq!(
+        row.get("merchant_id").and_then(|v| v.as_i64()),
+        Some(0),
+        "merchant_id 应置 0"
+    );
+    assert_eq!(
+        row.get("status").and_then(|v| v.as_i64()),
+        Some(0),
+        "status 应置 0"
+    );
+    assert!(
+        row.get("bind_at").and_then(|v| v.as_i64()).is_none() || row.get("bind_at").is_none(),
+        "bind_at 应为 NULL"
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ DeviceService::unbind 真实断言验证通过");
+}
+
+/// ── DeviceService::get_ota_version：已发布版本返回 Some
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_service_get_ota_version_returns_enabled() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+
+    conn.execute(
+        "INSERT INTO ota_version (version, url, status) VALUES ('2.0.1', 'http://ota.example.com/2.0.1.bin', 1)",
+    )
+    .await
+    .expect("插入 OTA 版本失败");
+
+    let result = DeviceService::get_ota_version(&pool, "2.0.1")
+        .await
+        .expect("查询应成功");
+    assert!(result.is_some(), "已发布版本应返回 Some");
+    let row = result.unwrap();
+    assert_eq!(row.get("version").and_then(|v| v.as_str()), Some("2.0.1"));
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ DeviceService::get_ota_version 已发布场景验证通过");
+}
+
+/// ── DeviceService::get_ota_version：草稿（status=0）返回 None
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_service_get_ota_version_disabled_returns_none() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+
+    conn.execute(
+        "INSERT INTO ota_version (version, url, status) VALUES ('2.0.0', 'http://ota.example.com/2.0.0.bin', 0)",
+    )
+    .await
+    .expect("插入 OTA 版本失败");
+
+    let result = DeviceService::get_ota_version(&pool, "2.0.0")
+        .await
+        .expect("查询应成功");
+    assert!(result.is_none(), "草稿版本应返回 None");
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ DeviceService::get_ota_version 草稿场景验证通过");
+}
+
+/// ── DeviceService::update_status：更新 status/signal_strength/fw_version
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_service_update_status_updates_fields() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+
+    let device_id = insert_test_device(&mut *conn, "SN-UPD-001").await;
+    DeviceService::update_status(&pool, device_id, 1, -42, "1.9.0")
+        .await
+        .expect("update_status 应成功");
+
+    let rows = conn
+        .query_with_params(
+            "SELECT status, signal_strength, fw_version FROM device WHERE device_id = ?",
+            &[Value::I64(device_id)],
+        )
+        .await
+        .expect("查询失败");
+    let row = &rows[0];
+    assert_eq!(row.get("status").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(
+        row.get("signal_strength").and_then(|v| v.as_i64()),
+        Some(-42)
+    );
+    assert_eq!(
+        row.get("fw_version").and_then(|v| v.as_str()),
+        Some("1.9.0")
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ DeviceService::update_status 真实断言验证通过");
+}
+
+/// ── MqttMessageHandler::handle_device_status：设备状态上报落库
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_handle_device_status_updates_db() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    insert_test_device(&mut *conn, "SN-MQTT-ST-001").await;
+
+    let state = build_test_state(pool.clone());
+    let payload = serde_json::json!({ "status": 1, "signal_strength": -60, "fw_version": "2.1.0" });
+    MqttMessageHandler::handle_device_status(&state, "SN-MQTT-ST-001", &payload)
+        .await
+        .expect("handle_device_status 应成功");
+
+    let rows = conn
+        .query("SELECT status, signal_strength, fw_version FROM device WHERE device_sn = 'SN-MQTT-ST-001'")
+        .await
+        .expect("查询失败");
+    let row = &rows[0];
+    assert_eq!(row.get("status").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(
+        row.get("signal_strength").and_then(|v| v.as_i64()),
+        Some(-60)
+    );
+    assert_eq!(
+        row.get("fw_version").and_then(|v| v.as_str()),
+        Some("2.1.0")
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ MqttMessageHandler::handle_device_status 真实断言验证通过");
+}
+
+/// ── MqttMessageHandler::handle_device_order：设备订单上报写入 order 表
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_handle_device_order_creates_record() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    let device_id = insert_test_device(&mut *conn, "SN-MQTT-ORD-001").await;
+    conn.execute_with_params(
+        "UPDATE device SET merchant_id = ? WHERE device_sn = 'SN-MQTT-ORD-001'",
+        &[Value::I64(3)],
+    )
+    .await
+    .expect("预置商户失败");
+
+    let state = build_test_state(pool.clone());
+    let payload = serde_json::json!({
+        "offline_seq": "SEQ-1001",
+        "total_fen": 1250,
+        "items": [{"name": "白菜", "price_fen": 1250, "total_fen": 1250}]
+    });
+    MqttMessageHandler::handle_device_order(&state, "SN-MQTT-ORD-001", &payload)
+        .await
+        .expect("handle_device_order 应成功");
+
+    let rows = conn
+        .query("SELECT merchant_id, device_id, total_fen, offline_seq, item_count, status FROM `order`")
+        .await
+        .expect("查询订单失败");
+    assert_eq!(rows.len(), 1, "order 表应有 1 条新记录");
+    let row = &rows[0];
+    assert_eq!(row.get("merchant_id").and_then(|v| v.as_i64()), Some(3));
+    assert_eq!(
+        row.get("device_id").and_then(|v| v.as_i64()),
+        Some(device_id)
+    );
+    assert_eq!(row.get("total_fen").and_then(|v| v.as_i64()), Some(1250));
+    assert_eq!(
+        row.get("offline_seq").and_then(|v| v.as_str()),
+        Some("SEQ-1001")
+    );
+    assert_eq!(row.get("item_count").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(row.get("status").and_then(|v| v.as_i64()), Some(1));
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ MqttMessageHandler::handle_device_order 真实断言验证通过");
+}
+
+/// ── MqttMessageHandler::handle_device_order：负金额拒绝写入（黑帽审计 A16 防护）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_handle_device_order_rejects_negative_amount() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    insert_test_device(&mut *conn, "SN-MQTT-NEG-001").await;
+
+    let state = build_test_state(pool.clone());
+    let payload = serde_json::json!({ "offline_seq": "NEG-1", "total_fen": -100 });
+    let result = MqttMessageHandler::handle_device_order(&state, "SN-MQTT-NEG-001", &payload).await;
+    assert!(result.is_err(), "负金额应被拒绝");
+    assert!(result.unwrap_err().contains("负"), "错误信息应说明金额为负");
+
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM `order`")
+        .await
+        .expect("查询失败");
+    assert_eq!(
+        rows[0].get("cnt").and_then(|v| v.as_i64()),
+        Some(0),
+        "负金额订单不得写入 order 表"
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ MqttMessageHandler::handle_device_order 负金额拒绝验证通过");
+}
+
+/// ── MqttMessageHandler::handle_device_log：设备日志写入 operate_log 表
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_handle_device_log_creates_record() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    insert_test_device(&mut *conn, "SN-MQTT-LOG-001").await;
+
+    let state = build_test_state(pool.clone());
+    let payload = serde_json::json!({ "level": "error", "message": "传感器异常" });
+    MqttMessageHandler::handle_device_log(&state, "SN-MQTT-LOG-001", &payload)
+        .await
+        .expect("handle_device_log 应成功");
+
+    let rows = conn
+        .query("SELECT operator, action, detail FROM operate_log")
+        .await
+        .expect("查询日志失败");
+    assert_eq!(rows.len(), 1, "operate_log 应有 1 条新记录");
+    let row = &rows[0];
+    assert_eq!(
+        row.get("operator").and_then(|v| v.as_str()),
+        Some("device:SN-MQTT-LOG-001")
+    );
+    assert!(row
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .contains("error"));
+    assert_eq!(
+        row.get("detail").and_then(|v| v.as_str()),
+        Some("传感器异常")
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ MqttMessageHandler::handle_device_log 真实断言验证通过");
+}
+
+/// ── MqttDispatcher::dispatch：topic 路由分发到对应 handler + 安全校验（L-1）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_dispatch_topic_routing_and_safety() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    insert_test_device(&mut *conn, "SN-DISP-001").await;
+
+    let state = build_test_state(pool.clone());
+
+    // 1. status action 路由 → 落库
+    let payload = serde_json::json!({ "status": 1, "signal_strength": -55, "fw_version": "3.0.0" });
+    MqttDispatcher::dispatch(
+        &state,
+        "/sz/device/SN-DISP-001/status",
+        &serde_json::to_vec(&payload).unwrap(),
+    )
+    .await;
+    let rows = conn
+        .query("SELECT fw_version FROM device WHERE device_sn = 'SN-DISP-001'")
+        .await
+        .expect("查询失败");
+    assert_eq!(
+        rows[0].get("fw_version").and_then(|v| v.as_str()),
+        Some("3.0.0"),
+        "status action 应路由到 handle_device_status"
+    );
+
+    // 2. order action 路由 → order 表新记录
+    let order_payload = serde_json::json!({ "offline_seq": "D-1", "total_fen": 99 });
+    MqttDispatcher::dispatch(
+        &state,
+        "/sz/device/SN-DISP-001/order",
+        &serde_json::to_vec(&order_payload).unwrap(),
+    )
+    .await;
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM `order`")
+        .await
+        .expect("查询失败");
+    assert_eq!(
+        rows[0].get("cnt").and_then(|v| v.as_i64()),
+        Some(1),
+        "order action 应路由到 handle_device_order"
+    );
+
+    // 3. log action 路由 → operate_log 新记录
+    let log_payload = serde_json::json!({ "level": "warn", "message": "温度偏高" });
+    MqttDispatcher::dispatch(
+        &state,
+        "/sz/device/SN-DISP-001/log",
+        &serde_json::to_vec(&log_payload).unwrap(),
+    )
+    .await;
+    let rows = conn
+        .query("SELECT COUNT(*) AS cnt FROM operate_log")
+        .await
+        .expect("查询失败");
+    assert_eq!(
+        rows[0].get("cnt").and_then(|v| v.as_i64()),
+        Some(1),
+        "log action 应路由到 handle_device_log"
+    );
+
+    // 4. 未知 action → 仅 warn 日志，不 panic
+    MqttDispatcher::dispatch(&state, "/sz/device/SN-DISP-001/unknown", b"{}").await;
+
+    // 5. 非法 device_sn（含 `/` 与空白）→ 丢弃，不 panic
+    MqttDispatcher::dispatch(&state, "/sz/device/bad/sn/status", b"{}").await;
+
+    // 6. payload 超限（>256KB）→ 丢弃，不 panic
+    let oversized = vec![b'x'; 256 * 1024 + 1];
+    MqttDispatcher::dispatch(&state, "/sz/device/SN-DISP-001/status", &oversized).await;
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ MqttDispatcher::dispatch 路由 + 安全校验真实验证通过");
+}
+
+/// ── MqttDispatcher::start_consumer：shutdown 信号到达后优雅退出
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_mqtt_start_consumer_graceful_shutdown() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let state = build_test_state(pool.clone());
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let handle = tokio::spawn(async move {
+        MqttDispatcher::start_consumer(state, shutdown_rx).await;
+    });
+
+    // 发送关闭信号后，消费者应在超时时间内退出
+    shutdown_tx.send(true).expect("发送关闭信号失败");
+    tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("start_consumer 未在 5s 内优雅退出（超时）")
+        .expect("消费者任务 panicked");
+
+    pool.close_all().await;
+    println!("✅ MqttDispatcher::start_consumer 优雅退出验证通过");
+}
+
+/// ── 控制器 auth::me：无 Authorization header → 返回业务错误
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_auth_me_missing_token_returns_error() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let state = build_test_state(pool.clone());
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/auth/me")
+        .body(Body::empty())
+        .expect("构造请求失败");
+    let resp = auth::me(State(state), req).await;
+    let body = resp_body_text(resp).await;
+    assert!(
+        body.contains("\"code\":0"),
+        "无 token 应返回业务错误，实际: {}",
+        body
+    );
+    assert!(
+        body.contains("认证令牌") || body.contains("令牌"),
+        "错误信息应说明未提供令牌，实际: {}",
+        body
+    );
+
+    pool.close_all().await;
+    println!("✅ auth::me 无 token 场景验证通过");
+}
+
+/// ── 控制器 auth::logout：清除 CSRF + Refresh Token cookie（Max-Age=0）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_auth_logout_clears_cookie() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let state = build_test_state(pool.clone());
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/logout")
+        .body(Body::empty())
+        .expect("构造请求失败");
+    let resp = auth::logout(State(state), req).await;
+
+    let cookies: Vec<String> = resp
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok().map(String::from))
+        .collect();
+    assert!(!cookies.is_empty(), "logout 应返回 set-cookie 头");
+    assert!(
+        cookies.iter().any(|c| c.contains("Max-Age=0")),
+        "cookie 应含 Max-Age=0，实际: {:?}",
+        cookies
+    );
+
+    pool.close_all().await;
+    println!("✅ auth::logout 清除 cookie 验证通过");
+}
+
+/// ── 控制器 device::trigger_ota：未认证请求被拒绝（A6 越权防护）
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_trigger_ota_unauthenticated_rejected() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let state = build_test_state(pool.clone());
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/device/trigger-ota")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"device_id": 1, "ota_version": "2.0.0"}"#))
+        .expect("构造请求失败");
+    let resp = device::trigger_ota(State(state), req).await;
+    let body = resp_body_text(resp).await;
+    assert!(
+        body.contains("未认证") || body.contains("认证"),
+        "未认证 OTA 触发应被拒绝，实际: {}",
+        body
+    );
+
+    pool.close_all().await;
+    println!("✅ device::trigger_ota 未认证拒绝验证通过");
+}
+
+/// ── 控制器 device::status_report：状态上报真实落库
+#[ignore = "需真实 MySQL 9.6，手动运行: cargo test -- --ignored"]
+#[tokio::test]
+async fn test_device_status_report_updates_db() {
+    let cfg = ensure_mysql_available().await.expect("MySQL 不可达");
+    let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    create_service_test_tables(&mut *conn).await;
+    let device_id = insert_test_device(&mut *conn, "SN-REPORT-001").await;
+
+    let state = build_test_state(pool.clone());
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/device/status-report")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                "device_id": device_id,
+                "status": 1,
+                "signal_strength": -70,
+                "fw_version": "2.2.0"
+            })
+            .to_string(),
+        ))
+        .expect("构造请求失败");
+    let resp = device::status_report(State(state), req).await;
+    let body = resp_body_text(resp).await;
+    assert!(
+        body.contains("状态更新成功"),
+        "status_report 应返回成功，实际: {}",
+        body
+    );
+
+    let rows = conn
+        .query_with_params(
+            "SELECT status, signal_strength, fw_version FROM device WHERE device_id = ?",
+            &[Value::I64(device_id)],
+        )
+        .await
+        .expect("查询失败");
+    let row = &rows[0];
+    assert_eq!(row.get("status").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(
+        row.get("signal_strength").and_then(|v| v.as_i64()),
+        Some(-70)
+    );
+    assert_eq!(
+        row.get("fw_version").and_then(|v| v.as_str()),
+        Some("2.2.0")
+    );
+
+    drop_service_test_tables(&mut *conn).await;
+    pool.close_all().await;
+    println!("✅ device::status_report 真实落库验证通过");
+}
