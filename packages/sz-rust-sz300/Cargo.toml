@@ -23,7 +23,7 @@ sz-rust-http-facade.workspace = true
 sz-rust-state-facade.workspace = true
 sz-rust-observability.workspace = true
 sz-rust-capability.workspace = true
-sz-rust-ai-facade.workspace = true
+sz-rust-ai-facade = { workspace = true, features = ["all-providers"] }
 sz-rust-cache-facade.workspace = true
 sz-rust-addons-ecommerce.workspace = true
 sz-rust-rag.workspace = true
@@ -41,6 +41,7 @@ chrono.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 axum.workspace = true
+reqwest.workspace = true
 tracing-subscriber.workspace = true
 base64.workspace = true
 bcrypt = "0.16"
@@ -74,3 +75,4 @@ criterion = { version = "0.5", features = ["html_reports"] }
 futures.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
+tempfile = { workspace = true }

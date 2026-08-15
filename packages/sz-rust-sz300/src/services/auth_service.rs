@@ -7,7 +7,7 @@ use sz_rust_core::auth::refresh::{
 use sz_rust_core::orm::auth::User;
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
-use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
+use sz_rust_core::orm::{JwtAuthenticator, RbacAuthorizer};
 
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
@@ -52,12 +52,6 @@ pub fn get_refresh_issuer() -> &'static RefreshTokenIssuer {
 #[tracing::instrument(skip_all)]
 pub fn get_auth() -> &'static JwtAuthenticator {
     AUTH.get().expect("auth not initialized")
-}
-
-/// 获取已初始化的 RBAC 授权器（调用前必须先调用 [`init_auth`]）
-#[tracing::instrument(skip_all)]
-pub fn get_rbac() -> &'static RbacAuthorizer {
-    RBAC.get().expect("rbac not initialized")
 }
 
 /// 获取已初始化的数据库连接池（调用前必须先调用 [`init_auth`]）
@@ -287,12 +281,6 @@ pub fn verify_token(token: &str) -> Result<User, String> {
         "token 验证失败".to_string()
     })?;
     Ok(user)
-}
-
-/// 检查用户是否拥有对指定资源的权限
-#[tracing::instrument(skip(user))]
-pub fn check_permission(user: &User, permission: &str, resource: &str) -> bool {
-    get_rbac().can(user, permission, resource).unwrap_or(false)
 }
 
 /// 从请求扩展中获取已认证用户（由 auth_middleware 注入）

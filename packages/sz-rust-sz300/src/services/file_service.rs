@@ -22,11 +22,20 @@ impl FileService {
 
     /// 保存上传文件
     ///
-    /// # Deprecated
+    /// # 设计定位（2026-08-15 论证，替代原"建议迁移"注释）
     ///
-    /// 建议迁移至 `sz_rust_core::upload` 上传引擎（支持云存储驱动）。
-    /// 当前实现保留以兼容现有调用方。
-    #[deprecated(since = "1.2.0", note = "请使用 sz_rust_core::upload 上传引擎")]
+    /// 本服务采用 **bytes 直写模型**（HTTP 上传本质是内存流：JSON base64 /
+    /// Multipart field），与 `sz_rust_core::upload` 引擎的 **文件路径模型**
+    /// （`UploadedFile` 包装磁盘路径 + rename/move）API 形态不兼容。直接迁移
+    /// 需要：bytes → 临时文件往返（性能与失败清理成本）、URL 契约变更
+    /// （`/uploads/YYYY/MM/DD/xxx` → 引擎的 `storage/Ymd/...` 格式）、以及
+    /// M-4 magic bytes 内容校验下沉（upload 引擎 validate 仅有 ext/mime/size 规则）。
+    /// 故保持本实现：sz300 专用上传路径，云存储驱动由 upload 引擎供插件/多租户场景使用。
+    ///
+    /// # 安全
+    ///
+    /// 三重校验：大小上限 5MB → 扩展名白名单 → M-4 magic bytes 内容嗅探
+    /// （2026-08-14 黑帽审计加固，防伪装图片扩展名的恶意内容）。
     pub async fn save(filename: &str, data: &[u8]) -> Result<String, String> {
         // 检查文件大小
         if data.len() as u64 > MAX_FILE_SIZE {
@@ -84,34 +93,6 @@ impl FileService {
 
         // 返回访问路径
         Ok(format!("/uploads/{}/{}", date_dir, new_filename))
-    }
-
-    /// 删除文件 — 含路径遍历防护
-    pub async fn delete(url: &str) -> Result<(), String> {
-        let relative_path = url.strip_prefix("/uploads/").unwrap_or(url);
-
-        // 路径遍历防护：canonicalize 后校验前缀
-        let root = PathBuf::from(UPLOAD_DIR).canonicalize().map_err(|e| {
-            tracing::error!(error = %e, "文件删除：上传目录不存在");
-            "文件删除失败".to_string()
-        })?;
-        let file_path = root.join(relative_path);
-
-        // 校验解析后的路径仍在上传目录内
-        let canonical = file_path
-            .canonicalize()
-            .map_err(|_| "文件不存在".to_string())?;
-        if !canonical.starts_with(&root) {
-            return Err("非法路径: 不允许访问上传目录外的文件".to_string());
-        }
-
-        if canonical.exists() {
-            fs::remove_file(&canonical).await.map_err(|e| {
-                tracing::error!(error = %e, "文件删除：删除文件失败");
-                "文件删除失败".to_string()
-            })?;
-        }
-        Ok(())
     }
 }
 

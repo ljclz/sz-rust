@@ -41,7 +41,11 @@ impl sz_rust_core::orm::jobs::TaskHandler for OrderExpireCheckHandler {
             )
             .await
             .map_err(|e| JobError::Temporary(e.to_string()))?;
-        match rows.first().and_then(|r| r.get("status")).and_then(sz_rust_core::orm::Value::as_i64) {
+        match rows
+            .first()
+            .and_then(|r| r.get("status"))
+            .and_then(sz_rust_core::orm::Value::as_i64)
+        {
             Some(1) => {
                 tracing::warn!(
                     "订单 {} 超时未支付（示例 handler：真实场景应执行关单）",
@@ -184,15 +188,56 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("可观测性模块初始化完成（Prometheus /metrics 端点已启用）");
 
     // 初始化 Capability Registry（能力注册表，用于 AI/MCP 能力发现与调用）
+    // 同时初始化 Cap 全局 facade（OnceLock 单例），使 Cap::register/call/metrics 可用
+    // 注意：必须用 init_with 注入同一实例——若用 Cap::init() 会创建第二个 registry，
+    // Cap::register 注册的能力无法被业务 handler（AppState）访问（双实例缺陷，2026-08-15 修复）
     let capability_registry = Arc::new(sz_rust_capability::CapabilityRegistry::new());
-    tracing::info!("Capability Registry 初始化完成");
+    match sz_rust_capability::Cap::init_with(capability_registry.clone()) {
+        Ok(()) => tracing::info!(
+            "Capability Registry 初始化完成（Cap facade 已接线，与 AppState 共享实例）"
+        ),
+        Err(_) => tracing::warn!("Cap facade 已初始化（跳过重复初始化）"),
+    }
 
     // 初始化 AI facade（可选，从环境变量读取 API Key）
-    // 若 SZ300_AI_API_KEY 未设置，AI 功能降级（/api/v1/ai/chat 返回 503）
+    // 启用 SZ300_AI_API_KEY 后，构建 OpenAI Provider + ModelRouter，调用 Ai::init_default()
+    // 未设置时 AI 功能降级（/api/v1/ai/chat 返回 503）
     let ai = match std::env::var("SZ300_AI_API_KEY") {
-        Ok(_api_key) => {
-            tracing::info!("AI facade 初始化跳过（需配置 Provider，当前仅标记为可用）");
-            None
+        Ok(api_key) => {
+            let base_url = std::env::var("SZ300_AI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .map_err(|e| anyhow::anyhow!("构建 reqwest::Client 失败: {e}"))?;
+            let audit_http = Arc::new(sz_rust_ai_facade::common::AuditHttpClient::new(
+                http_client,
+                sz_rust_ai_facade::common::RateLimitConfig::default(),
+            ));
+
+            let provider =
+                sz_rust_ai_facade::llm::openai::OpenAiProvider::new(api_key, base_url, audit_http);
+            let provider_ref: sz_rust_ai_facade::llm::provider::ProviderRef = Arc::new(provider);
+
+            let mut routes = HashMap::new();
+            routes.insert("gpt-4o-mini".to_string(), provider_ref.clone());
+            routes.insert("gpt-4o".to_string(), provider_ref.clone());
+            routes.insert("gpt-4.1-mini".to_string(), provider_ref.clone());
+
+            let router =
+                sz_rust_ai_facade::llm::ModelRouter::new(routes, "gpt-4o-mini".to_string());
+
+            match sz_rust_ai_facade::Ai::init_default(router, None, None, None, None) {
+                Ok(()) => {
+                    tracing::info!("AI facade 初始化完成（OpenAI Provider，默认模型 gpt-4o-mini）");
+                    Some(Arc::new(sz_rust_ai_facade::Ai))
+                }
+                Err(e) => {
+                    tracing::warn!("AI facade 初始化失败（非致命）: {e}");
+                    None
+                }
+            }
         }
         Err(_) => {
             tracing::info!(
@@ -202,15 +247,77 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 初始化行业 RAG 知识库（可选，需 config/rag.toml + EmbeddingProvider + VectorStore）
+    // 初始化行业 RAG 知识库（可选，需 config/rag.toml）
+    // 使用 LocalEmbedding（伪嵌入）+ FileVectorStore（文件持久化）
     // 未配置时 ai::chat fallback 使用原始 prompt，不阻塞正常流程
     match sz_rust_rag::config::RagConfig::load(std::path::Path::new("config/rag.toml")).await {
         Ok(rag_config) => {
+            let rag_config = Arc::new(rag_config);
             tracing::info!(
-                "RAG 配置加载成功（embedding_model={}, topk={}），但 VectorStore 未实现，RAG 检索降级",
+                "RAG 配置加载成功（embedding_model={}, topk={}, dim={}），开始初始化",
                 rag_config.embedding_model,
-                rag_config.default_topk
+                rag_config.default_topk,
+                rag_config.vector_dimensions
             );
+
+            let embedding = Arc::new(sz_rust_ai_facade::embedding::LocalEmbedding::new_pseudo(
+                rag_config.vector_dimensions,
+            ))
+                as Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider>;
+
+            let vector_store_path = std::path::Path::new("data/rag-vectors.json");
+            let vector_store = match sz_rust_ai_facade::embedding::FileVectorStore::load(
+                vector_store_path,
+            )
+            .await
+            {
+                Ok(vs) => {
+                    tracing::info!(
+                        "RAG VectorStore 从 {} 加载成功",
+                        vector_store_path.display()
+                    );
+                    Arc::new(vs) as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "RAG VectorStore 加载失败（{}），降级为纯内存模式: {}",
+                        vector_store_path.display(),
+                        e
+                    );
+                    Arc::new(sz_rust_ai_facade::embedding::FileVectorStore::new_in_memory())
+                        as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
+                }
+            };
+
+            let knowledge_dir = std::path::Path::new(&rag_config.knowledge_dir);
+            let init_result = (async {
+                let term_store =
+                    sz_rust_rag::term::FileTermStore::new(&knowledge_dir.join("terms.json"))
+                        .await?;
+                let rule_store =
+                    sz_rust_rag::rule::FileRuleStore::new(&knowledge_dir.join("rules.json"))
+                        .await?;
+                let template_store = sz_rust_rag::template::FileTemplateStore::new(
+                    &knowledge_dir.join("templates.json"),
+                )
+                .await?;
+                let metrics = Arc::new(sz_rust_rag::metrics::RagMetrics::register());
+                sz_rust_rag::facade::IndustryRag::init(
+                    embedding,
+                    vector_store,
+                    rag_config.clone(),
+                    Arc::new(term_store),
+                    Arc::new(rule_store),
+                    Arc::new(template_store),
+                    metrics,
+                )
+            })
+            .await;
+
+            match init_result {
+                Ok(()) => tracing::info!("RAG 行业知识库初始化完成"),
+                Err(e) => tracing::warn!("RAG 初始化失败（非致命，ai::chat 将 fallback）: {}", e),
+            }
         }
         Err(e) => {
             tracing::info!(

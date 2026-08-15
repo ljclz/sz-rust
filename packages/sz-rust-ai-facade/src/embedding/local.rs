@@ -23,6 +23,14 @@ impl LocalEmbedding {
         })
     }
 
+    /// 创建伪嵌入提供者（无需模型文件，按字节归一化生成向量）
+    pub fn new_pseudo(dimensions: usize) -> Self {
+        Self {
+            model_path: String::new(),
+            dimensions,
+        }
+    }
+
     pub fn with_dimensions(mut self, dim: usize) -> Self {
         self.dimensions = dim;
         self

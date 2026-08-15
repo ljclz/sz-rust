@@ -206,37 +206,6 @@ impl MqttMessageHandler {
     }
 }
 
-/// Mock MQTT 插件实现（便于无 Broker 环境下开发）
-pub struct MockMqttPlugin;
-
-impl MockMqttPlugin {
-    /// 启动 Mock MQTT 服务
-    pub async fn start(state: AppState) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!("MockMqttPlugin: started (no real broker)");
-        let topics = get_subscribe_topics();
-        for t in &topics {
-            tracing::info!("  subscribed: {}", t.name);
-        }
-        let _ = state;
-        Ok(())
-    }
-
-    /// 发布消息
-    pub async fn publish(
-        topic: &str,
-        payload: &[u8],
-        qos: u8,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!(
-            "MockMQTT publish: topic={}, qos={}, payload={} bytes",
-            topic,
-            qos,
-            payload.len()
-        );
-        Ok(())
-    }
-}
-
 /// 获取 MQTT 配置
 #[tracing::instrument]
 pub fn get_mqtt_config() -> MqttConfig {

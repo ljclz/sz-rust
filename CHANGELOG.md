@@ -5,6 +5,43 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-15（幻影交付审计修复）
+
+> 审计报告：`docs/audit/2026-08-15-幻影交付审计报告.md`
+
+### Fixed
+
+- **P1 死 crate 移除**：从 workspace members 移除 7 个零依赖方 crate（sz-rust-tracing/pdf/workflow/addons-operate/addons-erp/addons-forum/addons-im），`Cargo.toml` workspace members + dependencies 同步清理
+- **P3 Cap facade 接线**：`main.rs:193` 调用 `Cap::init()` 替换直接构造，生产日志确认"Capability Registry 初始化完成（Cap facade 已接线）"
+- **Cap 双实例缺陷修复（复核发现）**：`Cap::init()` 内部新建 registry 与 AppState 局部实例不互通（Cap::register 的能力业务 handler 不可见）。新增 `Cap::init_with(Arc<CapabilityRegistry>)`（capability/facade.rs），`main.rs` 改用 `Cap::init_with(capability_registry.clone())` 与 AppState 共享同一实例。capability crate 42 测试通过
+- **P5 幻影测试删除**：删除 `tests/service_coverage_test.rs`（17 个 `#[ignore]` 占位测试，0 断言）+ `tests/mqtt_dispatch_test.rs` 中 2 个占位测试
+- **P6 死代码删除**：移除 MockMqttPlugin::start/publish、check_permission、get_rbac、FileService::delete、create_multi_app_dispatcher 共 7 个零调用 pub 函数 + 2 个 unused import 警告
+- **P7 文档过时修正**：更新审计报告中 rag/ai-facade 状态为"已接线"，更新 README.md 目录结构移除已删除 crate
+
+### Added
+
+- **AI facade 生产接线**：`main.rs:196-232` 构建 OpenAiProvider + ModelRouter + `Ai::init_default()`，`ai.rs:33` 用 `Ai::is_initialized()` 替换 `state.ai.is_none()`，启用 ai-facade `all-providers` feature
+- **AI 集成测试**：`tests/ai_integration_test.rs`（6 个测试，验证初始化/降级/路由/错误处理）
+- **幻影交付审计报告**：`docs/audit/2026-08-15-幻影交付审计报告.md`（8 维度 36 项审计）
+- **服务层真实集成测试**：`tests/db_integration_test.rs` 补齐 16 个真实断言测试（替代已删除的 19 个占位）：ping_db/unbind/get_ota_version/update_status、MQTT handle_device_status|order|log（含负金额拒绝 A16）、dispatch 路由+安全、start_consumer 优雅退出、auth::me|logout、device::trigger_ota|status_report。真实 MySQL+PG 运行 `--ignored` → 26 passed; 0 failed
+
+### Verified
+
+- `cargo check` → 0 warning
+- `cargo clippy` → 0 warning
+- `cargo test -p sz-rust-sz300` → 72 passed, 0 failed, 0 ignored（43 lib + 6 ai + 6 ecommerce + 6 endpoint + 6 mqtt + 5 rag）
+- 生产部署：健康端点 200，AI/Cap 初始化日志确认输出
+
+### Kept（经决策保留）
+
+- **P4 功能零调用**（6 项）：core::guard/event/cache/h2/multi_app + 5 存储引擎 — 全部保留，标注为「基础设施待接线」；其中 #23 存储引擎经复核**去 deprecated 并论证设计保留**（upload 引擎为文件路径模型 vs sz300 内存 bytes 流 API 不兼容；M-4 magic bytes 校验为 sz300 特有；URL 契约 `/uploads/YYYY/MM/DD` 需保持），FileService 设计定位已写入 file_service.rs:23-37
+- **P3 #16 LogFacade / #17 DI 容器**：设计保留（sz300 采用 tracing 生态；DI 容器为插件体系前置能力）
+- **P8 生产 MQTT Mock**：保持现状，标注为「待真实 broker 接入」（fail-safe 设计，无 broker 时应用可启动）
+
+### Verified
+
+- `cargo test -p sz-rust-sz300 --test db_integration_test -- --ignored --test-threads=1` → 26 passed, 0 failed（真实 MySQL 9.6 + PostgreSQL 18，含 16 个新增服务层/MQTT/控制器级测试）
+
 ## [Unreleased] - 2026-08-15（任务队列 gauntlet 验证：并发缺陷修复 + 并发/自愈测试）
 
 ### Fixed

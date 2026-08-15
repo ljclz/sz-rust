@@ -13,7 +13,7 @@ use axum::{middleware, routing::get, routing::post, Router};
 use std::sync::Arc;
 use sz_rust_core::middleware::cors::cors_layer;
 use sz_rust_core::middleware::csrf::csrf_middleware;
-use sz_rust_core::multi_app::MultiAppDispatcher;
+
 use sz_rust_middleware_facade::circuit_breaker::{
     circuit_breaker_middleware, CircuitBreaker, CircuitBreakerConfig,
 };
@@ -223,14 +223,4 @@ pub fn create_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// 创建多应用分发器（对齐 PHP auto_multi_app + app_map）
-///
-/// 注册多个应用 Router，按路径前缀或域名分发。
-/// 当前 sz300 为单应用部署，MultiAppDispatcher 仅用于演示多应用分发能力。
-/// 如需多应用部署，在 main.rs 中调用此函数并合并到主 Router。
-#[allow(dead_code)]
-pub fn create_multi_app_dispatcher(main_router: Router) -> MultiAppDispatcher {
-    let mut dispatcher = MultiAppDispatcher::new();
-    dispatcher.register("sz300", main_router);
-    dispatcher
-}
+

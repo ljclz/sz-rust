@@ -26,11 +26,11 @@ impl SzController for AiController {}
 
 impl AiController {
     /// AI 聊天接口 — 接收用户 prompt，调用 LLM 返回响应
-    async fn chat(state: &AppState, req: Request<Body>) -> Response {
+    async fn chat(_state: &AppState, req: Request<Body>) -> Response {
         let ctrl = AiController;
         match ctrl.post_data(req).await {
             Ok(data) => {
-                if state.ai.is_none() {
+                if !sz_rust_ai_facade::Ai::is_initialized() {
                     return ctrl.render_error(
                         "AI 服务未配置 — 请设置 SZ300_AI_API_KEY 环境变量",
                         json!({}),
