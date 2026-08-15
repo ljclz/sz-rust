@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
+use std::time::Duration;
 use sz_rust_observability::MetricsRegistry;
 use sz_rust_sz300::{config, db, router, services, state::AppState};
 use tokio::signal;
@@ -122,9 +123,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 初始化可观测性 — Prometheus 指标注册中心
+    // 注：连接池指标（active/idle/waiters/max）由 /metrics handler 实时读取输出，
+    // 不在注册中心预注册 gauge，避免注册后无人更新导致恒 0 误导。
     let metrics_registry = Arc::new(MetricsRegistry::new());
     metrics_registry.register_counter("sz300_requests_total", "Total HTTP requests received");
-    metrics_registry.register_gauge("sz300_active_connections", "Active database connections");
     metrics_registry.register_histogram(
         "sz300_request_duration_seconds",
         "HTTP request duration in seconds",
@@ -151,6 +153,24 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // 初始化行业 RAG 知识库（可选，需 config/rag.toml + EmbeddingProvider + VectorStore）
+    // 未配置时 ai::chat fallback 使用原始 prompt，不阻塞正常流程
+    match sz_rust_rag::config::RagConfig::load(std::path::Path::new("config/rag.toml")).await {
+        Ok(rag_config) => {
+            tracing::info!(
+                "RAG 配置加载成功（embedding_model={}, topk={}），但 VectorStore 未实现，RAG 检索降级",
+                rag_config.embedding_model,
+                rag_config.default_topk
+            );
+        }
+        Err(e) => {
+            tracing::info!(
+                "RAG 未配置（config/rag.toml 加载失败: {}），ai::chat 将使用原始 prompt",
+                e
+            );
+        }
+    }
+
     // 初始化事件总线（用于业务事件发布/订阅，如 order.created）
     let event_bus = Arc::new(sz_rust_core::plugin::event_bus::InMemoryEventBus::new());
     tracing::info!("事件总线初始化完成（InMemoryEventBus）");
@@ -176,10 +196,73 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化数据库连接池
     let pool = Arc::new(db::init_pool(&config).await?);
+    // 连接池预热：启动时建立 min_idle 个连接放入空闲队列，
+    // 消除首次请求冷启动延迟（sz-orm 原生 prewarm，失败自动降级懒加载）
+    pool.prewarm().await;
+    tracing::info!(
+        "MySQL 连接池初始化完成（max_size={}, min_idle={}），预热已执行",
+        pool.max_size(),
+        pool.config().min_idle,
+    );
+
+    // 连接池动态扩缩容（PoolScaler 决策 + sz-orm Pool::resize 执行，L3 调优）
+    // 关键约束：扩容上限对齐 SQLx 池 max_connections（pool.max_size()），
+    // 避免两层池容量失配（历史缺陷：SQLx 默认 10 < sz-orm 20，第 11 个并发 acquire 超时）。
+    // 仅当 scaler 实际做出扩缩容决策时才 resize，避免启动即缩容。
+    {
+        use sz_rust_core::orm::pool_scaler::PoolMetrics as ScalerMetrics;
+        use sz_rust_core::orm::{PoolScaler, PoolScalerConfig};
+        let scaler_config = PoolScalerConfig {
+            // 扩容上限 = SQLx 池容量（DB_POOL_MAX 可调），缩容下限 = min_idle
+            max_connections: pool.max_size() as usize,
+            min_connections: pool.config().min_idle as usize,
+            check_interval: Duration::from_secs(30),
+            ..PoolScalerConfig::default()
+        };
+        let scaler = Arc::new(PoolScaler::new(scaler_config.clone()));
+        let check_interval = scaler_config.check_interval;
+        let pool_clone = pool.clone();
+        let scaler_clone = scaler.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(check_interval);
+            loop {
+                interval.tick().await;
+                let status = pool_clone.status().await;
+                let orm_metrics = pool_clone.pool_metrics();
+                let scaler_metrics = ScalerMetrics {
+                    current_connections: (status.idle + status.active) as usize,
+                    idle_connections: status.idle as usize,
+                    // sz-orm 累计失败含超时/建连失败/池关闭/限流拒绝，作为超时率代理
+                    timeout_count: orm_metrics.acquire_failed_count,
+                    total_acquire: orm_metrics.acquire_count,
+                };
+                let target_before = scaler_clone.target_connections();
+                scaler_clone.adjust(&scaler_metrics);
+                let target = scaler_clone.target_connections();
+                if target != target_before {
+                    pool_clone.resize(target);
+                    tracing::info!(
+                        "连接池动态扩缩容: max_size {} -> {}（acquire_timeout_rate={:.3}, idle_rate={:.3}）",
+                        pool_clone.max_size(),
+                        target,
+                        scaler_metrics.timeout_rate(),
+                        scaler_metrics.idle_rate(),
+                    );
+                }
+            }
+        });
+        tracing::info!(
+            "连接池动态扩缩容已启用: 目标区间 [{}, {}]，检查间隔 {:?}",
+            scaler_config.min_connections,
+            scaler_config.max_connections,
+            scaler_config.check_interval,
+        );
+    }
     let pg_pool = match config::pg_config() {
         Ok(pg_cfg) => match db::init_pg_pool(&pg_cfg).await {
             Ok(p) => {
-                tracing::info!("PostgreSQL 连接池初始化成功");
+                p.prewarm().await;
+                tracing::info!("PostgreSQL 连接池初始化成功（含预热）");
                 Some(Arc::new(p))
             }
             Err(e) => {

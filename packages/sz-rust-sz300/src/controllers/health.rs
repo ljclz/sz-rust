@@ -4,6 +4,8 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use serde_json::{json, Value};
+use std::sync::Arc;
+use sz_rust_core::orm::Pool;
 
 /// 存活检查（liveness probe）
 #[tracing::instrument(skip(_state))]
@@ -110,10 +112,37 @@ pub async fn startup(State(state): State<AppState>) -> impl IntoResponse {
 /// Prometheus 指标端点 — 输出 Prometheus 文本格式指标
 #[tracing::instrument(skip(state))]
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let body = state.metrics_registry.render();
+    // 连接池实时指标：sz-orm Pool::status()/pool_metrics() 仅读取原子计数器
+    //（O(1) 无阻塞），每次 /metrics 请求实时输出，无需后台定期任务
+    let mut body = state.metrics_registry.render();
+    append_pool_metrics(&mut body, "sz300_db_pool", &state.db_pool).await;
+    if let Some(pg_pool) = &state.pg_pool {
+        append_pool_metrics(&mut body, "sz300_pg_pool", pg_pool).await;
+    }
     (
         StatusCode::OK,
         [("content-type", "text/plain; version=0.0.4")],
         body,
     )
+}
+
+/// 追加连接池指标（Prometheus 文本格式）
+///
+/// - `{prefix}_active / _idle / _waiters / _max`：实时快照（gauge）
+/// - `{prefix}_acquire_total / _acquire_failed_total`：池生命周期累计值（counter）
+async fn append_pool_metrics(out: &mut String, prefix: &str, pool: &Arc<Pool>) {
+    let status = pool.status().await;
+    let metrics = pool.pool_metrics();
+    out.push_str(&format!(
+        "# TYPE {prefix}_active gauge\n\
+         {prefix}_active {}\n\
+         {prefix}_idle {}\n\
+         {prefix}_waiters {}\n\
+         {prefix}_max {}\n",
+        status.active, status.idle, status.waiters, status.max,
+    ));
+    out.push_str(&format!(
+        "{prefix}_acquire_total {}\n{prefix}_acquire_failed_total {}\n",
+        metrics.acquire_count, metrics.acquire_failed_count,
+    ));
 }

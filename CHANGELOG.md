@@ -5,6 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-15（连接池调优接线：L2 配置 + 预热 + 动态扩缩容 + 池指标）
+
+### Added
+
+- **连接池 L2/L3 调优接线**（来源: `cargo test -p sz-rust-sz300 -j 2` → lib 43 passed / 0 failed，含新增 4 个 `db::tests`；clippy 零警告）：
+  - `SqlxPoolConfig` 接线：`DB_POOL_MAX / DB_POOL_MIN / DB_POOL_ACQUIRE_TIMEOUT / DB_POOL_IDLE_TIMEOUT / DB_POOL_MAX_LIFETIME` 环境变量调优，未设置保持既有默认（20/10/30s/600s/1800s），非法值回退默认（`db.rs:26-47`）
+  - SQLx 池补齐 `min_connections` / `idle_timeout` / `max_lifetime`，与 sz-orm 层参数同源对齐，两层池参数不再各设各的（`db.rs:56-65`、`db.rs:129-138`）
+  - 连接池预热：sz-orm `prewarm(true)` + 启动时 `pool.prewarm()`，消除首次请求冷启动延迟（`db.rs:74`、`main.rs:200-207`）
+  - PoolScaler 动态扩缩容：30s 周期后台任务，`acquire_failed_count` 作为超时率代理驱动决策，扩容上限对齐 SQLx 池容量（防两层池失配缺陷复发），仅实际调整时 resize（`main.rs:211-254`）
+  - /metrics 实时输出池指标：`sz300_db_pool_active/idle/waiters/max/acquire_total/acquire_failed_total`（PG 池为 `sz300_pg_pool_*`），O(1) 原子读取；移除注册后无人更新的恒 0 gauge `sz300_active_connections`（`controllers/health.rs:112-146`）
+- 五维审查报告：`docs/audit/2026-08-15-连接池调优接线五维审查报告.md`（5 维度无阻断项）
+
 ## [Unreleased] - 2026-08-15（sz300 首次真实运行 + metrics 鉴权接线）
 
 ### Fixed
