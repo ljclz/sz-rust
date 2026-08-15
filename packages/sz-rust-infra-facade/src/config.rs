@@ -869,11 +869,12 @@ impl AiSection {
 }
 
 /// 单个 AI Provider 配置
-#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+#[derive(Clone, serde::Serialize, Deserialize)]
 pub struct AiProviderConfig {
     /// Provider 名称（openai/claude/gemini）
     pub name: String,
-    /// API 密钥
+    /// API 密钥（铁律 7：序列化跳过 + Debug 脱敏，防止日志/响应泄露）
+    #[serde(skip_serializing)]
     #[serde(default)]
     pub api_key: String,
     /// API 基础 URL
@@ -882,6 +883,18 @@ pub struct AiProviderConfig {
     /// 支持的模型列表
     #[serde(default)]
     pub models: Vec<String>,
+}
+
+/// Debug 脱敏：不输出 api_key
+impl std::fmt::Debug for AiProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiProviderConfig")
+            .field("name", &self.name)
+            .field("api_key", &"***")
+            .field("base_url", &self.base_url)
+            .field("models", &self.models)
+            .finish()
+    }
 }
 
 /// 模型路由表 — model name → provider name
@@ -1145,10 +1158,11 @@ app_map:
             assert!(config.database.connections.contains_key("food"));
             assert!(config.database.connections.contains_key("oceanbase"));
 
-            // 验证 mysql 连接（hostname 已改用 localhost，实际地址通过环境变量注入）
+            // 验证 mysql 连接（hostname 已改用 localhost，实际地址通过环境变量注入；
+            // hostport 默认 3306，与 config/database.yml 一致，环境变量 SZ_DB_MYSQL_HOSTPORT 未设置时生效）
             let mysql = config.database.connections.get("mysql").unwrap();
             assert_eq!(mysql.hostname, "localhost");
-            assert_eq!(mysql.hostport, 8802);
+            assert_eq!(mysql.hostport, 3306);
             assert_eq!(mysql.charset, "utf8mb4");
             assert_eq!(mysql.prefix, "sz_");
 
