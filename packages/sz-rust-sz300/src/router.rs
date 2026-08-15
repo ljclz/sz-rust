@@ -222,5 +222,3 @@ pub fn create_router(state: AppState) -> Router {
         // 注入共享状态
         .with_state(state)
 }
-
-
