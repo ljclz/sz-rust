@@ -35,6 +35,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# 实现可靠任务队列 TaskHandler 所需（jobs 模块 trait 用 async_trait 宏）
+async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 anyhow.workspace = true

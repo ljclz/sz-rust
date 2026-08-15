@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use sz_rust_observability::MetricsRegistry;
@@ -9,6 +10,54 @@ use sz_rust_sz300::{config, db, router, services, state::AppState};
 use tokio::signal;
 use tokio::sync::watch;
 use tracing_subscriber::{fmt, EnvFilter};
+
+/// 示例任务：订单支付超时检查（`order.expire_check`）
+///
+/// 演示可靠任务队列的延迟任务用法：入队时指定 delay，到点后由 worker
+/// 持久化领取并执行；进程重启不丢任务、失败自动退避重试。
+/// 真实场景下此处应执行关单动作，示例仅告警。
+struct OrderExpireCheckHandler {
+    db: Arc<sz_rust_core::orm::Pool>,
+}
+
+#[async_trait::async_trait]
+impl sz_rust_core::orm::jobs::TaskHandler for OrderExpireCheckHandler {
+    async fn handle(&self, payload: &serde_json::Value) -> Result<(), sz_rust_core::orm::JobError> {
+        use sz_rust_core::orm::JobError;
+        let order_id = payload["order_id"].as_i64().unwrap_or(0);
+        if order_id <= 0 {
+            return Err(JobError::Permanent("order_id 缺失或非法".to_string()));
+        }
+        // DB 短暂故障属于临时错误，交给队列退避重试
+        let mut conn = self
+            .db
+            .acquire()
+            .await
+            .map_err(|e| JobError::Temporary(e.to_string()))?;
+        let rows = conn
+            .query_with_params(
+                "SELECT order_id, status FROM `order` WHERE order_id = ?",
+                &[sz_rust_core::orm::Value::I64(order_id)],
+            )
+            .await
+            .map_err(|e| JobError::Temporary(e.to_string()))?;
+        match rows.first().and_then(|r| r.get("status")).and_then(sz_rust_core::orm::Value::as_i64) {
+            Some(1) => {
+                tracing::warn!(
+                    "订单 {} 超时未支付（示例 handler：真实场景应执行关单）",
+                    order_id
+                );
+            }
+            Some(_) => {
+                tracing::info!("订单 {} 已支付，跳过超时处理", order_id);
+            }
+            None => {
+                tracing::warn!("订单 {} 不存在，跳过超时处理", order_id);
+            }
+        }
+        Ok(())
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -309,8 +358,33 @@ async fn main() -> anyhow::Result<()> {
         .expect("SZ300_JWT_SECRET 环境变量未设置 — 请在启动前设置 JWT 密钥");
     services::auth_service::init_auth(&jwt_secret, "sz300", 86400, app_state.db_pool.clone());
 
+    // 初始化可靠任务队列（JobQueue）：持久化 Job 表 + worker 消费
+    // 覆盖：任务数据化 / 状态机 / 原子领取 / 退避重试 / 幂等入队 / 死信重放 / 队列健康观测
+    let job_queue = sz_rust_core::orm::JobQueue::new(pool.clone());
+    job_queue.init_schema().await?;
+    tracing::info!("可靠任务队列初始化完成（sz_jobs 表已就绪）");
+
     // 初始化 MQTT 消费者 — 带优雅退出信号
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    // 可靠任务队列 worker：与 MQTT 复用同一优雅关闭信号
+    {
+        use sz_rust_core::orm::{JobQueueConfig, TaskHandler};
+        let handlers: HashMap<String, Arc<dyn TaskHandler>> = HashMap::from([(
+            "order.expire_check".to_string(),
+            Arc::new(OrderExpireCheckHandler { db: pool.clone() }) as Arc<dyn TaskHandler>,
+        )]);
+        let queue_clone = job_queue.clone();
+        let shutdown_rx_clone = shutdown_rx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = queue_clone
+                .run_worker(handlers, JobQueueConfig::default(), shutdown_rx_clone)
+                .await
+            {
+                tracing::error!("可靠任务队列 worker 退出异常: {e}");
+            }
+        });
+        tracing::info!("可靠任务队列 worker 已启动（batch=10, poll=1s, max_attempts=8）");
+    }
     let app_state_clone = app_state.clone();
     let mut mqtt_handle = tokio::spawn(async move {
         services::mqtt_listener::MqttDispatcher::start_consumer(app_state_clone, shutdown_rx).await;
