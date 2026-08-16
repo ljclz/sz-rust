@@ -1,9 +1,22 @@
 # PR 审查执行指南（sz-rust-pr-review）
 
 > **执行入口**：`scripts/audit/pr-review.sh`
-> **Skill 说明**：`.trae/skills/sz-rust-pr-review/SKILL.md`
-> **适用版本**：2026-08-16（含 AI 评审环节，提交 `7c53bc2`）
+> **Skill 说明**：`.trae/skills/sz-rust-pr-review/SKILL.md`（Trae 内）+ `C:\Users\Administrator\.zcode\skills\sz-rust-review\SKILL.md`（**ZCode 内 `/sz-rust-review`，推荐**）
+> **适用版本**：2026-08-16（含 AI 评审 + 多 Provider，提交 `01f5da9`）
 > **项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`
+
+## ZCode Skill 用法（推荐）
+
+在 ZCode 对话中输入：
+
+| 调用 | 行为 |
+|------|------|
+| `/sz-rust-review` | 全量审查（默认最近一次提交） |
+| `/sz-rust-review --ai` | 全量审查 + AI 评审 |
+| `/sz-rust-review fast` | 门禁 1-3（fmt/check/clippy） |
+| `/sz-rust-review --range main...HEAD` | 审查分支相对 main 的全部改动 |
+
+Skill 会按状态机（scanning→static→security→ai→done）执行本指南下述命令，红牌即停输出《阻断报告》，全绿输出《审查报告》。
 
 ---
 
