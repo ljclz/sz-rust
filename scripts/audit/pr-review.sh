@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # PR 审查编排（sz-rust-pr-review Skill 的执行入口）
 #
-# 状态机: scanning → static → security → ai(可选) → done / failed（任一步失败即 FAILED，退出非零）
-# 环节:   git diff 扫描 → fmt+clippy → 门禁脚本 → AI 评审(--ai) → 汇总报告
+# 状态机: scanning → compile → static → security → test → integration(可选跳过) → deep(可选) → ai(可选) → done / failed
+# 环节:   git diff 扫描 → cargo check → fmt+clippy+unwrap → 门禁脚本 → 单元测试 → 真实集成(MySQL) → 变异+覆盖(--deep) → AI 评审(--ai)
 # 严重度: critical / high / medium / low；--severity-threshold 控制阻塞门禁（默认 medium）
 #
 # 用法:
-#   bash scripts/audit/pr-review.sh --range HEAD~1..HEAD [--severity-threshold medium] [--ai] [--report path]
-# 依赖: git / cargo / node（门禁脚本）；--ai 需要 AI_API_KEY（OpenAI 兼容端点，默认 CSDN glm_for_coding，可用 AI_BASE_URL/AI_MODEL 切换 Provider）
+#   bash scripts/audit/pr-review.sh [--range HEAD~1..HEAD] [--severity-threshold medium] [--ai] [--deep] [--skip-integration] [--report path]
+# 依赖: git / cargo / node / python（门禁脚本与 unwrap 检查）；--ai 需要 AI_API_KEY（OpenAI 兼容端点，默认 CSDN glm_for_coding，可用 AI_BASE_URL/AI_MODEL 切换 Provider）
+#       integration 环节需本机 MySQL（127.0.0.1:3306 root/test123 sz_orm_test）；--deep 需 cargo-mutants / cargo-llvm-cov（耗时 10+ 分钟）
 # fail-closed: 任何环节命令失败或输出不可解析 → 该环节失败 → 整体退出非零
 
 set -uo pipefail
@@ -28,12 +29,16 @@ RANGE="HEAD~1..HEAD"
 THRESHOLD="medium"
 REPORT=""
 AI=0
+DEEP=0
+SKIP_INTEGRATION=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --range) RANGE="$2"; shift 2 ;;
     --severity-threshold) THRESHOLD="$2"; shift 2 ;;
     --report) REPORT="$2"; shift 2 ;;
     --ai) AI=1; shift ;;
+    --deep) DEEP=1; shift ;;
+    --skip-integration) SKIP_INTEGRATION=1; shift ;;
     *) echo "未知参数: $1"; exit 2 ;;
   esac
 done
@@ -85,7 +90,20 @@ if ! echo "$DIFF_STAT" | grep -qE "^ [0-9]+ files? changed"; then
 fi
 EXTRA+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
 
-# ---- 环节 2: 静态检查（fmt + clippy） ----
+# ---- 环节 2: 编译检查 ----
+transition "compile" "cargo check --workspace --all-targets"
+CHECK_OUT=$(cargo check --workspace --all-targets -j 2 2>&1)
+if [ $? -ne 0 ]; then
+  # 提取 error 位置行（error[E...] 或 error: 后跟的文件行）
+  while IFS= read -r line; do
+    case "$line" in
+      error\[*) note_issue "critical" "check" "compile-error" "$(echo "$line" | head -c 120)" ;;
+      error:*) note_issue "critical" "check" "compile-error" "$(echo "$line" | head -c 120)" ;;
+    esac
+  done <<< "$CHECK_OUT"
+fi
+
+# ---- 环节 3: 静态检查（fmt + clippy + unwrap） ----
 transition "static" "cargo fmt --all --check"
 if ! cargo fmt --all --check >/tmp/pr-review-fmt.log 2>&1; then
   note_issue "medium" "workspace" "fmt" "格式不合格: $(head -2 /tmp/pr-review-fmt.log | tr '\n' ' ')"
@@ -104,7 +122,18 @@ if [ $CLIPPY_RC -ne 0 ]; then
   done <<< "$CLIPPY_OUT"
 fi
 
-# ---- 环节 3: 安全与一致性门禁 ----
+transition "static" "铁律 2: 生产代码裸 unwrap 检查（check-unwrap.py）"
+if [ -f scripts/check-unwrap.py ]; then
+  UNWRAP_OUT=$(python scripts/check-unwrap.py 2>&1)
+  UNWRAP_COUNT=$(echo "$UNWRAP_OUT" | grep -oE 'AUTHORITATIVE_PROD_UNWRAP: [0-9]+' | awk '{print $2}')
+  if [ -n "$UNWRAP_COUNT" ] && [ "$UNWRAP_COUNT" -gt 0 ]; then
+    note_issue "high" "workspace" "bare-unwrap" "生产代码 ${UNWRAP_COUNT} 处裸 unwrap（铁律 2）"
+  fi
+else
+  note_issue "low" "workspace" "unwrap-check-missing" "scripts/check-unwrap.py 不存在，跳过"
+fi
+
+# ---- 环节 4: 安全与一致性门禁 ----
 transition "security" "门禁脚本（sensitive-field / doc-code / feature / assertion / adr）"
 run_gate() { # run_gate <name> <severity-on-fail> <script...>
   local name="$1" sev="$2"; shift 2
@@ -117,6 +146,57 @@ run_gate "doc-code-consistency" "low" scripts/audit/doc-code-consistency.js
 run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
 run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
+
+# ---- 环节 5: 单元测试 ----
+transition "test" "cargo test（facade lib + sz300）"
+TEST_OUT=$(cargo test -p sz-rust-orm-facade -p sz-rust-sz300 -j 2 2>&1)
+TEST_RC=$?
+if [ $TEST_RC -ne 0 ]; then
+  # 提取失败摘要（test result: FAILED / error）
+  TEST_FAIL=$(echo "$TEST_OUT" | grep -E "test result: FAILED|^error" | head -3 | tr '\n' ' ')
+  note_issue "critical" "test" "test-failure" "$(echo "$TEST_FAIL" | head -c 200)"
+fi
+
+# ---- 环节 6: 真实服务集成（需本机 MySQL，可 --skip-integration） ----
+if [ "$SKIP_INTEGRATION" -eq 1 ]; then
+  echo "⚠️ 跳过集成测试（--skip-integration）"
+else
+  transition "integration" "真实集成测试（jobs_integration，需 MySQL）"
+  INTEG_OUT=$(cargo test -p sz-rust-sz300 --test jobs_integration_test -j 2 -- --ignored 2>&1)
+  INTEG_RC=$?
+  if [ $INTEG_RC -ne 0 ]; then
+    INTEG_FAIL=$(echo "$INTEG_OUT" | grep -E "test result: FAILED|panicked|error\[" | head -3 | tr '\n' ' ')
+    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
+  fi
+fi
+
+# ---- 环节 7（可选）: 深验证（变异 + 覆盖率，--deep，耗时 10+ 分钟） ----
+if [ "$DEEP" -eq 1 ]; then
+  transition "deep" "变异测试（cargo-mutants，facade 全 crate）"
+  MUT_OUT=$(cargo mutants -p sz-rust-orm-facade --timeout 120 -j 2 2>&1)
+  MUT_RC=$?
+  if [ $MUT_RC -ne 0 ]; then
+    MUT_SUM=$(echo "$MUT_OUT" | grep -E "mutants tested|MISSED" | tail -2 | tr '\n' ' ')
+    note_issue "high" "deep" "mutation-killrate" "$(echo "$MUT_SUM" | head -c 200)"
+  fi
+
+  transition "deep" "变更行覆盖率（llvm-cov，jobs.rs ≥75% 行）"
+  COV_OUT=$(cargo llvm-cov -p sz-rust-orm-facade --lib --no-report -j 2 2>&1 && cargo llvm-cov -p sz-rust-sz300 --test jobs_integration_test --no-report -j 2 -- --ignored 2>&1 && cargo llvm-cov report 2>&1)
+  COV_RC=$?
+  if [ $COV_RC -ne 0 ]; then
+    note_issue "high" "deep" "coverage" "覆盖率检查失败（需 cargo-llvm-cov；jobs.rs 阈值 75%）"
+  else
+    JOBS_COV=$(echo "$COV_OUT" | grep "jobs.rs" | awk '{print $4}' | head -1)
+    if [ -n "$JOBS_COV" ]; then
+      COV_VAL=$(echo "$JOBS_COV" | tr -d '%')
+      if [ "$(echo "$COV_VAL < 75" | bc 2>/dev/null)" = "1" ]; then
+        note_issue "high" "deep" "coverage" "jobs.rs 行覆盖 ${JOBS_COV} < 75%"
+      else
+        echo "✅ jobs.rs 行覆盖 ${JOBS_COV}"
+      fi
+    fi
+  fi
+fi
 
 # ---- 环节 4（可选）: AI 评审（OpenAI 兼容端点，默认 CSDN glm_for_coding） ----
 # Provider 配置（环境变量覆盖，默认 CSDN）：

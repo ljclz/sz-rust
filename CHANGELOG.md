@@ -31,6 +31,17 @@
 
 > 教训：批量代码替换必须逐项验证落地（本次静默失败源于 python str.replace 无匹配返回原串且未 assert）
 
+## [Unreleased] - 2026-08-16（pr-review 升级为全量 15 项门禁）
+
+### Added
+
+- **pr-review.sh 全量门禁升级**（补齐此前缺失维度，对标 sz-orm-review 23 关）：
+  - 状态机扩展：scanning → compile → static → security → test → integration → deep(可选) → ai(可选) → done
+  - 新增门禁：编译检查（cargo check，critical）、裸 unwrap 检查（check-unwrap.py，铁律 2，high）、单元测试（cargo test，critical）、真实集成（jobs_integration --ignored 需 MySQL，high，`--skip-integration` 可跳过）、深验证（`--deep`：变异杀率 + jobs.rs ≥75% 行覆盖）
+  - 门禁表 9 → 15 项；SKILL.md（Trae + ZCode /sz-rust-review）与执行指南同步
+- **首次全量运行暴露既有债务**：生产代码 51 处裸 unwrap（铁律 2）——pre-commit 钩子此前仅警告，现以 high 阻塞；已登记 doc-debt（DB-2026-08-16-04，限期 08-19）
+- 验证（真实输出）：全量 15 项门禁 EXIT=1（unwrap 51 处正确阻塞；此前 EXIT=0 为管道干扰误读）；check/clippy/test/integration/AI 各环节通过
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed

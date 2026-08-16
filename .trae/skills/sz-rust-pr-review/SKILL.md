@@ -34,27 +34,34 @@ bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
 - `--range <git-range>`：审查范围（默认 `HEAD~1..HEAD`；PR 场景用 `main...HEAD`）
 - `--severity-threshold <low|medium|high|critical>`：阻塞阈值（默认 medium，≥ 阈值的问题导致审查失败、禁止合入）
 - `--ai`：启用 AI 评审环节（OpenAI 兼容端点。默认 CSDN：`https://ai.csdn.net/api/model/v1` + `model=glm_for_coding` 套餐；可用 `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` 三个环境变量切换任意 OpenAI 兼容 Provider，如快手 `https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`；`CSDN_API_KEY` 为旧变量名兼容）
+- `--deep`：追加深验证（变异测试 + 变更行覆盖率，耗时 10+ 分钟，需 cargo-mutants / cargo-llvm-cov）
+- `--skip-integration`：跳过真实集成测试环节（本机无 MySQL 时使用，如实记录跳过）
 - `--report <path>`：报告输出路径（默认 `docs/audit/<date>-pr-review-<branch>.md`）
 
 ## 状态机
 
 ```
-scanning → static → security → ai(可选) → done / failed
+scanning → compile → static → security → test → integration(可跳过) → deep(可选) → ai(可选) → done / failed
 ```
 
 任一步骤命令失败即 `failed` 并退出非零（fail-closed）；报告记录完整状态流转。
 
-## 环节与严重度映射
+## 环节与严重度映射（全量 15 项门禁）
 
-| 环节 | 检查 | 严重度映射 |
-|------|------|-----------|
-| diff 扫描 | `git diff --check`（空白/冲突标记） | whitespace-error → medium |
-| 静态 | `cargo fmt --all --check` | fmt → medium |
-| 静态 | `cargo clippy --workspace --all-targets -D warnings` | compile-error → critical / lint-warning → medium |
-| 安全 | `sensitive-field-audit.js` | EXPOSED → critical |
-| 一致性 | `doc-code-consistency.js` / `adr-code-consistency.js` / `assertion-value-check.js` | 失败 → low（不阻塞） |
-| 一致性 | `feature-consistency.js` | 失败 → high |
-| AI（`--ai`） | CSDN glm_for_coding 评审 diff + 问题清单 | 无 key / 请求失败 / 解析失败 → medium |
+| # | 环节 | 检查 | 严重度映射 |
+|---|------|------|-----------|
+| 1 | diff 扫描 | `git diff --check`（空白/冲突标记） | whitespace-error → medium |
+| 2 | 编译 | `cargo check --workspace --all-targets` | compile-error → **critical** |
+| 3 | 静态 | `cargo fmt --all --check` | fmt → medium |
+| 4 | 静态 | `cargo clippy --workspace --all-targets -D warnings` | compile-error → critical / lint-warning → medium |
+| 5 | 静态 | `python scripts/check-unwrap.py`（铁律 2 裸 unwrap） | 生产 unwrap → **high** |
+| 6 | 安全 | `sensitive-field-audit.js` | EXPOSED → **critical** |
+| 7 | 一致性 | `feature-consistency.js` | 失败 → high |
+| 8-10 | 一致性 | `doc-code-consistency.js` / `adr-code-consistency.js` / `assertion-value-check.js` | 失败 → low（不阻塞） |
+| 11 | 测试 | `cargo test -p sz-rust-orm-facade -p sz-rust-sz300` | test-failure → **critical** |
+| 12 | 集成 | `cargo test -p sz-rust-sz300 --test jobs_integration_test -- --ignored`（需 MySQL，`--skip-integration` 跳过） | integration-failure → high |
+| 13 | 深验证（`--deep`） | `cargo-mutants`（变异杀率）+ `cargo-llvm-cov`（jobs.rs ≥75% 行覆盖） | mutation-killrate / coverage → high |
+| 14 | AI（`--ai`） | OpenAI 兼容端点评审 diff + 问题清单 | 无 key / 请求失败 / 解析失败 → medium |
 
 ## 通过标准
 
