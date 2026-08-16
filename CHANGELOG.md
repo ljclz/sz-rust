@@ -5,6 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-16（PR 审查编排 Skill：状态机 + 5 环节 + 严重度模型）
+
+### Added
+
+- **sz-rust-pr-review Skill**（`.trae/skills/sz-rust-pr-review/` + `scripts/audit/pr-review.sh`，对齐微信文章《代码审查 Skill 实战》架构模式，复用项目既有检查资产，不引入新依赖）：
+  - 状态机：scanning → static → security → done / failed（任一步失败即 fail-closed，退出非零）
+  - 环节：`git diff` 扫描（--check）→ `cargo fmt` → `clippy --workspace --all-targets -D warnings` → 5 个门禁脚本（sensitive-field / doc-code / feature / assertion / adr）
+  - 严重度模型：critical（clippy 编译错误 / EXPOSED）/ high（feature 门禁）/ medium（fmt / lint / whitespace）/ low（doc/adr/assertion WARN），`--severity-threshold` 控制阻塞阈值
+  - 报告：`docs/audit/<date>-pr-review-<branch>.md`（状态流转 + 问题清单 + 结论）
+  - 验证（真实输出）：当前工作区审查正确识别 3 个问题（fmt medium + clippy critical/lint）→ EXIT=1 阻塞；非法 range → fail-closed
+  - AI 评审环节为后续项（依赖 sz-rust-ai-facade 真实 Provider 实现，当前未接线）
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed
