@@ -15,7 +15,8 @@
   - 严重度模型：critical（clippy 编译错误 / EXPOSED）/ high（feature 门禁）/ medium（fmt / lint / whitespace）/ low（doc/adr/assertion WARN），`--severity-threshold` 控制阻塞阈值
   - 报告：`docs/audit/<date>-pr-review-<branch>.md`（状态流转 + 问题清单 + 结论）
   - 验证（真实输出）：当前工作区审查正确识别 3 个问题（fmt medium + clippy critical/lint）→ EXIT=1 阻塞；非法 range → fail-closed
-  - AI 评审环节为后续项（依赖 sz-rust-ai-facade 真实 Provider 实现，当前未接线）
+  - **AI 评审环节（2026-08-16 接入）**：`--ai` 参数启用，CSDN OpenAI 兼容端点（`https://ai.csdn.net/api/model/v1/chat/completions`，`model=glm_for_coding` 套餐，底层 glm-5.2 上限 200k，`CSDN_API_KEY` 环境变量）；prompt 设计对齐文章 ai_reviewer（diff 截断 8000 字符 + 问题清单 → 3-5 个最重要问题 + 建议 + 评分）；无 key/请求失败/解析失败 → medium 问题如实记录；AI 结论只进报告不影响阻塞判定
+  - 说明：`sz-rust-ai-facade::llm::OpenAiProvider`（llm/openai.rs）为同协议库实现（早已存在，非本次新增），可配置 CSDN base_url/model 供 Rust 应用接线（如 sz300 /api/v1/ai/chat 真实化）
 
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
