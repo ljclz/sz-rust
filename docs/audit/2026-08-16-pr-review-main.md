@@ -12,114 +12,77 @@
 
 ## 变更集
 ```
- .trae/skills/sz-rust-pr-review/SKILL.md            |  10 +-
- CHANGELOG.md                                       |   3 +-
- docs/audit/2026-08-16-pr-review-main.md            | 122 ++++++++++++++++++++-
- ...211\247\350\241\214\346\214\207\345\215\227.md" |  17 ++-
- scripts/audit/pr-review.sh                         |  42 ++++---
- 5 files changed, 164 insertions(+), 30 deletions(-)
+ ...\346\211\247\350\241\214\346\214\207\345\215\227.md" | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
 ```
 
-## AI 评审
+## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## PR 评审报告（sz-rust / scripts/audit/pr-review.sh）
+## PR 审查报告
 
-### 最重要的问题
+### 变更概述
+纯文档更新，新增 ZCode Skill 用法说明，更新版本号。无代码变更。
 
-#### 1. [兼容性] Python `reconfigure` 无版本保护 — **Medium**
+---
 
-`sys.stdout.reconfigure(encoding="utf-8")` 仅在 **Python 3.7+** 可用。若 CI 镜像仍为 Python 3.6（部分企业环境），会直接抛出 `AttributeError` 导致整个 AI 评审流程崩溃，且错误信息不直观。
+### 潜在问题
 
-**建议修改：**
-```bash
-# 方案 A：shell 层统一设置，不依赖 Python 版本
-AI_BODY=$(PYTHONIOENCODING=utf-8 REVIEW_PROMPT="$PROMPT" python -c '...')
+#### 1. 🔴 路径硬编码（可维护性）
+`C:\Users\Administrator\.zcode\skills\sz-rust-review\SKILL.md` 包含具体用户名 `Administrator`，其他开发者环境路径不同会导致文档指引失效。
 
-# 方案 B：Python 内做版本检查
-python -c '
-import sys
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-# ...
-'
+**建议**：使用环境变量或相对路径占位符：
+```markdown
+`%USERPROFILE%\.zcode\skills\sz-rust-review\SKILL.md`（Windows）
+`$HOME/.zcode/skills/sz-rust-review/SKILL.md`（macOS/Linux）
+```
+
+#### 2. 🟡 命令风格不一致（可维护性）
+表格中 `/sz-rust-review fast` 缺少 `--` 前缀，与同表 `--ai`、`--range` 风格不统一。若 `fast` 确为子命令而非 flag，建议补充说明。
+
+**建议**：
+```markdown
+| `/sz-rust-review fast` | 门禁 1-3（fmt/check/clippy），`fast` 为子命令 |
+```
+
+#### 3. 🟡 缺少回退指引（可维护性）
+文档未说明 ZCode Skill 不可用时的回退方案（如仅使用 Trae 方式）。
+
+**建议**：在 ZCode 章节末尾补充：
+```markdown
+> **回退方案**：若 ZCode 不可用，可在 Trae 内使用 `/sz-rust-review` Skill。
+```
+
+#### 4. 🟢 版本号说明不足（可维护性）
+`01f5da9` 仅标注提交哈希，未说明本次版本新增内容（"多 Provider" 具体指什么）。
+
+**建议**：补充简要变更说明：
+```markdown
+> **适用版本**：2026-08-16（含 AI 评审 + 多 Provider 支持，提交 `01f5da9`）
+> **新增**：支持 ZCode `/sz-rust-review` 命令、新增 `--range` 参数
 ```
 
 ---
 
-#### 2. [并发安全] 临时文件路径硬编码，存在竞态条件 — **Medium**
+### 修改建议汇总
 
-`/tmp/pr-review-ai-err.log` 是固定路径。在并发 CI 场景下（多个 branch/PR 同时触发），不同 job 会互相覆盖日志文件，导致错误信息错乱或丢失。
-
-**建议修改：**
-```bash
-# 使用 mktemp 生成唯一临时文件
-AI_ERR_LOG=$(mktemp /tmp/pr-review-ai-err.XXXXXX.log)
-trap "rm -f '$AI_ERR_LOG'" EXIT
-
-# 后续引用 $AI_ERR_LOG 替代硬编码路径
-```
-
----
-
-#### 3. [可观测性] AI API 错误信息未进入报告 — **Medium**
-
-当 AI Provider 返回错误时，错误信息只写入 stderr 并 `exit 1`，但**未被捕获到最终报告中**。审查者只能看到 "AI 评审失败" 而无法得知原因（如本次的 `Account suspended by risk control`），必须手动翻查临时日志文件。
-
-**建议修改：**
-```bash
-if AI_REVIEW=$(printf '%s' "$AI_RESP" | python -c '...' 2>"$AI_ERR_LOG"); then
-  EXTRA+=$'\n## AI 评审\n\n'"$AI_REVIEW"$'\n'
-else
-  AI_ERR=$(cat "$AI_ERR_LOG" 2>/dev/null || echo "未知错误")
-  EXTRA+=$'\n## AI 评审\n\n⚠️ AI 评审失败: '"$AI_ERR"$'\n'
-fi
-```
-
----
-
-#### 4. [健壮性] 变更集检测正则过于宽松 — **Low**
-
-```bash
-if ! echo "$DIFF_STAT" | grep -qE "[0-9]+ files? changed"; then
-```
-
-该正则过于宽松。若某个被修改的文件路径中恰好包含 "1 file changed" 字符串（极端情况），会导致误判。
-
-**建议修改：**
-```bash
-# 匹配 git diff --stat 的标准输出格式（行首开始匹配）
-if ! echo "$DIFF_STAT" | grep -qE "^[[:space:]]*[0-9]+ files? changed"; then
-```
-
----
-
-#### 5. [可维护性] 新旧环境变量优先级未明确 — **Low**
-
-`CSDN_API_KEY`（旧）与 `AI_API_KEY`（新）共存时，如果用户同时设置两者，优先级逻辑不明确，可能导致意外行为。
-
-**建议修改：**
-```bash
-# 新变量优先，旧变量降级兼容
-API_KEY="${AI_API_KEY:-$CSDN_API_KEY}"
-BASE_URL="${AI_BASE_URL:-https://ai.csdn.net/api/model/v1}"
-MODEL="${AI_MODEL:-glm_for_coding}"
-```
+| # | 问题 | 严重度 | 建议 |
+|---|------|--------|------|
+| 1 | 路径硬编码用户名 | 中 | 改用 `%USERPROFILE%` / `$HOME` |
+| 2 | 命令风格不一致 | 低 | 补充 `fast` 说明或统一前缀 |
+| 3 | 缺少回退指引 | 低 | 添加 Trae 回退说明 |
+| 4 | 版本说明不足 | 低 | 补充版本变更摘要 |
 
 ---
 
 ### 整体评分：**7/10**
 
-**优点：**
-- OpenAI 兼容 Provider 通用化设计合理，扩展性好
-- 错误信息增强（输出 Provider 原始 error 详情）提升了可观测性
-- Windows GBK 编码 bug 修复是必要的
-- AI 结论只进报告不影响阻塞判定，fail-closed 策略正确
-
-**待改进：**
-- 临时文件竞态、Python 版本兼容性、错误信息入报告这三项是实际运行中会触发的稳定性问题，建议合入前修复
-- 文档和 CHANGELOG 更新完整，状态机描述清晰
+**评分理由**：
+- ✅ 纯文档变更，无安全/性能风险
+- ✅ 新增内容结构清晰，表格易读
+- ⚠️ 路径硬编码影响跨环境可维护性
+- ⚠️ 细节一致性有待改进
 
 
 ## 结论
