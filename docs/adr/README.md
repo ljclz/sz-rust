@@ -47,6 +47,7 @@
 | ADR-034 | 可视化画布 Tauri+Vue | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-034-visual-canvas-tauri-vue.md](ADR-034-visual-canvas-tauri-vue.md) |
 | ADR-035 | 插件市场基础设施 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-035-plugin-marketplace-infrastructure.md](ADR-035-plugin-marketplace-infrastructure.md) |
 | ADR-036 | 可靠任务队列（数据库持久化 Job 表） | 已接受 | 2026-08-15 | SZ-Rust Team | [ADR-036-reliable-job-queue.md](ADR-036-reliable-job-queue.md) |
+| ADR-037 | MemPool 区域分配器 unsafe fn 收紧 | 已接受 | 2026-08-16 | SZ-Rust Team | [ADR-037-mempool-unsafe-fn.md](ADR-037-mempool-unsafe-fn.md) |
 
 **状态说明**：
 - `提议`（Proposed）：已提交但尚未评审
