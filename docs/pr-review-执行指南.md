@@ -1,7 +1,7 @@
 # PR 审查执行指南（sz-rust-pr-review）
 
 > **执行入口**：`scripts/audit/pr-review.sh`
-> **Skill 说明**：`.trae/skills/sz-rust-pr-review/SKILL.md`（Trae 内）+ `C:\Users\Administrator\.zcode\skills\sz-rust-review\SKILL.md`（**ZCode 内 `/sz-rust-review`，推荐**）
+> **Skill 说明**：`.trae/skills/sz-rust-pr-review/SKILL.md`（Trae 内）+ `%USERPROFILE%\.zcode\skills\sz-rust-review\SKILL.md`（Windows）或 `~/.zcode/skills/sz-rust-review/SKILL.md`（macOS/Linux）（**ZCode 内 `/sz-rust-review`，推荐**）
 > **适用版本**：2026-08-16（含 AI 评审 + 多 Provider，提交 `01f5da9`）
 > **项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`
 
