@@ -1,143 +1,132 @@
 # PR 审查报告（2026-08-16，branch: main，range: HEAD~1..HEAD）
 
-> 审查时点: `HEAD @ fbdeed8`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ bff78e4`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 1 high / 0 medium / 0 low）
+## 问题清单（0 critical / 0 high / 0 medium / 0 low）
 
-- [high] `workspace` **bare-unwrap**: 生产代码 51 处裸 unwrap（铁律 2）
-
+✅ 未发现问题
 
 ## 补充信息
 
 ## 变更集
 ```
- docs/audit/2026-08-16-pr-review-main.md            | 122 +++++++++++++++++----
- ...211\247\350\241\214\346\214\207\345\215\227.md" |   2 +-
- scripts/audit/pr-review.sh                         |   7 +-
- 3 files changed, 106 insertions(+), 25 deletions(-)
+ CHANGELOG.md                                       | 13 +++++
+ docs/audit/doc-debt.md                             |  2 +-
+ packages/sz-rust-capability/src/builtin.rs         |  6 +-
+ packages/sz-rust-capability/src/registry.rs        |  6 +-
+ packages/sz-rust-core/src/api_version.rs           | 67 +++++++++++++++-------
+ packages/sz-rust-core/src/container/tests.rs       |  5 +-
+ packages/sz-rust-core/src/mem_pool.rs              |  6 +-
+ .../sz-rust-examples/src/bin/bench_axum_native.rs  |  8 ++-
+ packages/sz-rust-examples/src/bin/bench_sz_rust.rs |  8 ++-
+ packages/sz-rust-examples/src/bin/blog_demo.rs     | 17 ++++--
+ .../sz-rust-examples/src/bin/ecommerce_demo.rs     | 27 ++++++---
+ packages/sz-rust-examples/src/bin/iot_demo.rs      | 31 ++++++----
+ packages/sz-rust-mcp/src/lib.rs                    | 41 +++++++++----
+ .../src/handler_as_middleware.rs                   | 61 +++++++++++++++-----
+ .../src/ip_access_control.rs                       |  8 ++-
+ .../sz-rust-sz300/src/middleware/role_guard.rs     | 13 +++--
+ scripts/perf-compare/benchmarks/actix/src/main.rs  |  4 +-
+ scripts/perf-compare/benchmarks/axum/src/main.rs   |  8 +--
+ scripts/perf-compare/benchmarks/poem/src/main.rs   |  4 +-
+ .../perf-compare/benchmarks/sz-rust/src/main.rs    |  8 +--
+ 20 files changed, 237 insertions(+), 106 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## PR 审查报告（sz-rust）
+<!DOCTYPE markdown>
+# Code Review: sz-rust unwrap 专项清偿
 
-### 变更概述
+## 1. 总体评价
 
-本次 PR 包含两部分变更：
-1. **文档更新**：精简了 `docs/audit/2026-08-16-pr-review-main.md`
-2. **脚本增强**：在 `pr-review.sh` 中增加 HEAD 提交哈希记录和错误处理
+本次 PR 是一次典型的**技术债务清偿（Tech Debt Paydown）**，目标明确且执行彻底。将 51 处裸 `unwrap()` 替换为语义更明确的 `expect()` 或针对锁中毒的恢复逻辑，显著提升了生产代码的健壮性和可观测性。附带修复的测试断言漂移（8802→3306）也体现了对细节的关注。
 
----
+**评分：8/10**
 
-### 潜在问题
-
-#### 1. 🔴 文档内容大量删除，已知问题被丢弃（可维护性）
-
-原报告明确指出了 4 个问题（路径硬编码、命令风格不一致、缺少回退指引、版本说明不足），新报告几乎全部删除了这些内容。如果这些问题未修复，相当于**丢弃了技术债务追踪**。
-
-**建议**：在文档中保留问题追踪或创建对应 issue：
-
-```markdown
-## 待解决问题（来自前次审查）
-- [ ] 路径硬编码问题（见原报告 #1）
-- [ ] 命令风格统一（见原报告 #2）
-```
+- **加分项**：验证充分（1597 tests passed, 0 clippy warnings），文档债务闭环（DB-2026-08-16-04 RESOLVED），锁中毒处理方案具有高级 Rust 特征。
+- **扣分项**：锁中毒的“静默恢复”策略在所有场景下是否均安全存疑；并发测试的错误定位信息粒度不足；Diff 截断导致无法审查 perf-compare 的具体变更。
 
 ---
 
-#### 2. 🟡 同文件中仍存在硬编码路径（一致性）
+## 2. 关键问题与修改建议
 
-新报告第 6 行仍包含：
+### 🔴 P0: 锁中毒恢复策略的潜在风险 (Safety/Correctness)
+
+**问题描述**：
+PR 将 13 处 `lock().unwrap()` 统一替换为 `unwrap_or_else(|e| e.into_inner())`。
+虽然这避免了 panic，但 `Mutex::into_inner()` 会**忽略中毒状态**直接返回内部数据。如果锁中毒是因为 Panic 发生在“数据更新到一半”的时刻（例如先修改了字段 A，在修改字段 B 时 Panic），此时数据结构处于**不一致（Invariant Broken）**状态。静默读取并继续使用这些脏数据，可能导致后续业务逻辑出现极难排查的 Bug。
+
+**修改建议**：
+建议区分**关键业务状态锁**和**普通缓存/计数器锁**。
+- 对于普通缓存：当前方案可接受。
+- 对于关键状态：建议记录错误日志后，视情况决定是否 Panic 或返回 Error，而不是直接 `into_inner()`。
+
+```rust
+// 建议修改示例：增加日志记录，便于排查中毒原因
+match lock_result {
+    Ok(guard) => guard,
+    Err(poisoned) => {
+        // 记录中毒事件，保留现场信息
+        tracing::error!("Mutex poisoned in {}, recovering lock...", module_path!());
+        poisoned.into_inner()
+    }
+}
 ```
-**项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`
+
+### 🟡 P1: 并发测试错误定位信息不足 (Maintainability)
+
+**问题描述**：
+在 `registry.rs` 的并发测试中，`h.await.unwrap()` 被替换为 `h.await.expect("并发注册任务应成功")`。
+当 50 个并发任务中有 1 个失败（Panic 或 Cancel）时，通用的错误消息无法帮助开发者快速定位是哪一个迭代（Iteration）或哪一个任务上下文出了问题。
+
+**修改建议**：
+在 `expect` 消息中包含任务索引或唯一标识。
+
+```rust
+// 修改前
+for h in handles {
+    h.await.expect("并发注册任务应成功");
+}
+
+// 建议修改后
+for (i, h) in handles.into_iter().enumerate() {
+    h.await.expect(&format!("并发注册任务 #{} 执行失败", i));
+}
 ```
 
-这与本次修复的"路径硬编码"问题自相矛盾。
+### 🟡 P1: HTTP 响应体解析的测试健壮性 (Robustness)
 
-**建议**：一并修复为相对路径或环境变量：
+**问题描述**：
+在 `api_version.rs` 测试中，`response.into_body().collect().await` 的结果被 `expect("响应体读取失败")` 处理。
+虽然这在测试中是合理的（失败即报错），但 `Hyper` 的 `collect()` 错误可能包含连接重置、超时等具体网络原因。如果测试环境不稳定（Flaky Test），直接 Panic 会掩盖网络层的不稳定性。
 
-```markdown
-**项目根目录**：`$PROJECT_ROOT`（或通过 `git rev-parse --show-toplevel` 获取）
-```
+**修改建议**：
+保持现状即可，但在 CI 配置中应确保测试超时时间充足。如果此处经常报错，建议改为断言具体的错误类型，而不是直接 Expect。当前 PR 的改法符合测试惯例，**无需强制修改**，仅作提示。
+
+### 🟢 P2: 文档与代码的一致性 (Process)
+
+**问题描述**：
+`doc-debt.md` 更新及时，但 `CHANGELOG.md` 中提到的 `perf-compare` 基准测试的 11 处修改在提供的 Diff 中不可见（被截断）。
+
+**修改建议**：
+请确认 `perf-compare` 中的修改仅仅是 `unwrap` -> `expect`，没有伴随逻辑变更。基准测试代码通常对 Panic 敏感，确保 `expect` 的消息能准确反映基准测试失败的原因（如 "Redis connection failed" vs "Startup timeout"）。
 
 ---
 
-#### 3. 🟡 脚本分支名替换可能掩盖问题（健壮性）
+## 3. 总结
 
-```bash
-# 当前代码
-BRANCH=$(git branch --show-current | tr '/' '-')
-```
+这是一次高质量的维护性 PR。它展示了团队对代码质量的严格要求（铁律 2）和执行力。
 
-`tr '/' '-'` 会静默替换分支名中的 `/`，这可能导致报告文件名与实际分支名不一致，且开发者无法感知。
-
-**建议**：增加警告输出：
-
-```bash
-RAW_BRANCH=$(git branch --show-current)
-BRANCH=$(echo "$RAW_BRANCH" | tr '/' '-')
-if [ "$RAW_BRANCH" != "$BRANCH" ]; then
-  echo "⚠️ 分支名包含 '/'，已替换为 '-'：$RAW_BRANCH → $BRANCH" >&2
-fi
-```
-
----
-
-#### 4. 🟢 审查报告未提及项目已知的高风险问题（完整性）
-
-已知项目存在 **51 处裸 unwrap**（铁律 2 违规），这是 high 级别问题。但审查报告完全没有提及这一已知风险。作为项目的审查报告，应该至少引用或追踪这一关键问题。
-
-**建议**：在报告中增加已知问题引用：
-
-```markdown
-## 已知高风险问题（来自静态分析）
-- [ ] 生产代码 51 处裸 unwrap（铁律 2），详见 workspace 静态问题清单
-```
-
----
-
-#### 5. 🟢 自我引用循环缺少说明（可维护性）
-
-该 PR 本质上是在**修改审查报告本身**，形成"审查报告审查自己"的自指结构。需要明确审查来源。
-
-**建议**：在文档顶部增加审查来源说明：
-
-```markdown
-> 本报告由自动化流程生成，经人工复核确认。
-> 复核人: ___  复核日期: ___
-```
-
----
-
-### 修改建议汇总
-
-| # | 问题 | 严重度 | 建议 |
-|---|------|--------|------|
-| 1 | 丢弃已知问题 | 中 | 保留问题追踪或创建 issue |
-| 2 | 同文件仍有硬编码路径 | 中 | 一并修复为相对路径 |
-| 3 | 分支名替换静默失败 | 低 | 增加警告输出 |
-| 4 | 未提及 51 处 unwrap | 中 | 增加已知问题引用 |
-| 5 | 自指结构缺少说明 | 低 | 增加审查来源标注 |
-
----
-
-### 整体评分：**6/10**
-
-**评分理由**：
-- ✅ 脚本增加 HEAD 哈希记录和错误处理，提升可追溯性
-- ✅ 修复了部分路径硬编码问题
-- ⚠️ 丢弃了原报告中有价值的问题追踪
-- ⚠️ 同文件中仍存在未修复的硬编码路径，一致性不足
-- ⚠️ 未提及项目已知的 51 处裸 unwrap 高风险问题
-
-**建议**：在合并前补充上述第 1、2、4 项修复，确保不引入回归问题。
+- **通过条件**：确认 `mem_pool` 和 `core` 中的锁中毒恢复逻辑不会掩盖数据竞争或逻辑错误（即确认那些锁保护的数据在 Panic 后仍然是安全的或可丢弃的）。
+- **后续行动**：建议在 Codebase 中建立 `SafeMutex` 或封装通用的锁处理宏，避免未来重复编写 `unwrap_or_else(|e| e.into_inner())` 这种样板代码，同时统一日志记录行为。
 
 
 ## 结论
-❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
+✅ 通过（无 ≥ medium 级别问题）
