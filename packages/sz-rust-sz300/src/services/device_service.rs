@@ -36,6 +36,25 @@ pub struct DevicePage {
 pub struct DeviceService;
 
 impl DeviceService {
+    /// 构建设备列表动态 WHERE 子句 + 参数（纯函数，2026-08-16 抽取自 `list`）
+    ///
+    /// 返回 `(where_clause, params)`：无条件时 where_clause 为空字符串。
+    /// 所有条件参数化绑定，杜绝 SQL 注入。
+    pub fn build_list_where(filters: &DeviceFilters) -> (String, Vec<Value>) {
+        let mut conditions: Vec<&'static str> = Vec::new();
+        let mut params: Vec<Value> = Vec::new();
+        if let Some(mid) = filters.merchant_id {
+            conditions.push("merchant_id = ?");
+            params.push(Value::I64(mid));
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+        (where_clause, params)
+    }
+
     /// 分页查询设备列表
     ///
     /// 构建动态 WHERE 子句 + LIMIT/OFFSET，全部参数化。
@@ -59,18 +78,7 @@ impl DeviceService {
     ) -> Result<DevicePage, String> {
         let offset = (page - 1).max(0) * page_size;
 
-        // 构建 WHERE 条件（参数化，杜绝 SQL 注入）
-        let mut conditions: Vec<&'static str> = Vec::new();
-        let mut params: Vec<Value> = Vec::new();
-        if let Some(mid) = filters.merchant_id {
-            conditions.push("merchant_id = ?");
-            params.push(Value::I64(mid));
-        }
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
+        let (where_clause, params) = Self::build_list_where(&filters);
 
         let mut conn = pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "设备列表获取 DB 连接失败");
@@ -309,3 +317,26 @@ impl DeviceService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_list_where_no_filters_returns_empty_clause() {
+        let (clause, params) =
+            DeviceService::build_list_where(&DeviceFilters { merchant_id: None });
+        assert_eq!(clause, "");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn build_list_where_merchant_id_parameterized() {
+        let (clause, params) = DeviceService::build_list_where(&DeviceFilters {
+            merchant_id: Some(7),
+        });
+        assert_eq!(clause, "WHERE merchant_id = ?");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0], Value::I64(7));
+    }
+}

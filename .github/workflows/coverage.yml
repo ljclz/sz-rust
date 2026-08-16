@@ -62,3 +62,59 @@ jobs:
           path: coverage/
           if-no-files-found: warn
           retention-days: 14
+
+  # sz300 覆盖率：含 DB 集成测试（--ignored）的完整统计
+  # 背景：2026-08-15 实测 lib 视角仅 8.7%（226/2583 行）——controllers/services 的
+  # 覆盖集中在集成测试与 DB 集成测试（db_integration_test 26 个 ignored，需真实 DB）。
+  # 本 job 在 MySQL 9.6 + PostgreSQL 18 服务容器上统计完整覆盖率，作为达标基线。
+  # 阈值说明：暂不强制 --fail-under（当前未达标），随测试补齐后启用（铁律 10 目标 ≥85%）。
+  coverage-sz300:
+    name: Coverage sz300 (incl. DB integration)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9.6
+        env:
+          MYSQL_ROOT_PASSWORD: test123
+          MYSQL_DATABASE: sz_orm_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -ptest123"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test123
+          POSTGRES_DB: sz_orm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Run coverage with DB integration tests
+        run: cargo tarpaulin -p sz-rust-sz300 --ignored --out Xml --output-dir coverage-sz300/ -- --test-threads=1
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sz300-${{ github.sha }}
+          path: coverage-sz300/
+          if-no-files-found: warn
+          retention-days: 14

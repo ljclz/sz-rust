@@ -232,9 +232,15 @@ pub fn get_subscribe_topics() -> Vec<MqttTopic> {
     ]
 }
 
-/// 发送 OTA 指令到设备
-#[tracing::instrument(skip_all)]
-pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> Result<(), String> {
+/// 构建 OTA 指令的 topic 与 payload（纯函数，2026-08-16 抽取自 `send_ota_command`）
+///
+/// topic 格式：`/sz/server/{device_sn}/ota`；payload 含 url/version/timestamp。
+/// 返回 `(topic, payload)`，消息构建失败返回错误（不泄露内部信息）。
+pub fn build_ota_command(
+    device_sn: &str,
+    ota_url: &str,
+    version: &str,
+) -> Result<(String, serde_json::Value), String> {
     let topic = format!("/sz/server/{}/ota", device_sn);
     let payload = serde_json::json!({
         "url": ota_url,
@@ -249,8 +255,43 @@ pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> 
         })?
         .with_qos(QoS::AtLeastOnce);
 
-    tracing::info!("OTA 指令已发送 - SN: {}, 版本: {}", device_sn, version);
-    // NOTE: 通过 MqttPlugin 实际发送消息
+    Ok((topic, payload))
+}
+
+/// 发送 OTA 指令到设备
+#[tracing::instrument(skip_all)]
+pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> Result<(), String> {
+    let (topic, _payload) = build_ota_command(device_sn, ota_url, version)?;
+
+    tracing::info!(
+        "OTA 指令已发送 - SN: {}, 版本: {}, topic: {}",
+        device_sn,
+        version,
+        topic
+    );
+    // NOTE: 实际发送通过 MqttPlugin（InMemory 模拟或 real-broker feature 真实发送）
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_ota_command_constructs_topic_and_payload() {
+        let (topic, payload) = build_ota_command("SN001", "http://ota.example.com/2.0.bin", "2.0")
+            .expect("构建应成功");
+        assert_eq!(topic, "/sz/server/SN001/ota");
+        assert_eq!(payload["url"], "http://ota.example.com/2.0.bin");
+        assert_eq!(payload["version"], "2.0");
+        assert!(payload["timestamp"].as_i64().is_some());
+    }
+
+    #[test]
+    fn build_ota_command_empty_sn_still_constructs() {
+        let (topic, _payload) =
+            build_ota_command("", "http://example.com/f.bin", "1.0").expect("构建应成功");
+        assert_eq!(topic, "/sz/server//ota");
+    }
 }

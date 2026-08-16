@@ -55,30 +55,12 @@ pub struct OrderDetail {
 pub struct OrderService;
 
 impl OrderService {
-    /// 分页查询订单列表
+    /// 构建订单列表动态 WHERE 子句 + 参数（纯函数，2026-08-16 抽取自 `list`）
     ///
-    /// 构建动态 WHERE 子句 + LIMIT/OFFSET，全部参数化。
-    ///
-    /// # 参数
-    ///
-    /// - `pool`：数据库连接池
-    /// - `page`：页码（从 1 开始）
-    /// - `page_size`：每页条数（1..=100）
-    /// - `filters`：筛选条件
-    ///
-    /// # 返回
-    ///
-    /// 成功返回 [`OrderPage`]，失败返回错误描述字符串（不泄露 DB 内部信息）。
-    #[tracing::instrument(skip(pool))]
-    pub async fn list(
-        pool: &Pool,
-        page: i64,
-        page_size: i64,
-        filters: OrderFilters,
-    ) -> Result<OrderPage, String> {
-        let offset = (page - 1).max(0) * page_size;
-
-        // 构建 WHERE 条件（参数化，杜绝 SQL 注入）
+    /// 支持 merchant_id / device_id / status / start_date / end_date 五维筛选，
+    /// 日期字段 trim 后为空视为无此条件。返回 `(where_clause, params)`，
+    /// 无条件时 where_clause 为空字符串。所有条件参数化绑定。
+    pub fn build_list_where(filters: &OrderFilters) -> (String, Vec<Value>) {
         let mut conditions: Vec<&'static str> = Vec::new();
         let mut params: Vec<Value> = Vec::new();
         if let Some(mid) = filters.merchant_id {
@@ -112,6 +94,33 @@ impl OrderService {
         } else {
             format!("WHERE {}", conditions.join(" AND "))
         };
+        (where_clause, params)
+    }
+
+    /// 分页查询订单列表（含筛选）
+    ///
+    /// 构建动态 WHERE 子句 + LIMIT/OFFSET，全部参数化。
+    ///
+    /// # 参数
+    ///
+    /// - `pool`：数据库连接池
+    /// - `page`：页码（从 1 开始）
+    /// - `page_size`：每页条数（1..=100）
+    /// - `filters`：筛选条件
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 [`OrderPage`]，失败返回错误描述字符串（不泄露 DB 内部信息）。
+    #[tracing::instrument(skip(pool))]
+    pub async fn list(
+        pool: &Pool,
+        page: i64,
+        page_size: i64,
+        filters: OrderFilters,
+    ) -> Result<OrderPage, String> {
+        let offset = (page - 1).max(0) * page_size;
+
+        let (where_clause, params) = Self::build_list_where(&filters);
 
         let mut conn = pool.acquire().await.map_err(|e| {
             tracing::error!(error = %e, "订单列表获取 DB 连接失败");
@@ -279,3 +288,51 @@ impl OrderService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_list_where_no_filters_returns_empty_clause() {
+        let (clause, params) = OrderService::build_list_where(&OrderFilters {
+            merchant_id: None,
+            device_id: None,
+            status: None,
+            start_date: None,
+            end_date: None,
+        });
+        assert_eq!(clause, "");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn build_list_where_all_filters_parameterized() {
+        let (clause, params) = OrderService::build_list_where(&OrderFilters {
+            merchant_id: Some(1),
+            device_id: Some(2),
+            status: Some(3),
+            start_date: Some(" 2026-08-01 ".to_string()),
+            end_date: Some("2026-08-15".to_string()),
+        });
+        assert_eq!(
+            clause,
+            "WHERE merchant_id = ? AND device_id = ? AND status = ? AND created_at >= ? AND created_at <= ?"
+        );
+        assert_eq!(params.len(), 5);
+        assert_eq!(params[3], Value::String("2026-08-01".to_string()));
+    }
+
+    #[test]
+    fn build_list_where_blank_date_is_skipped() {
+        let (clause, params) = OrderService::build_list_where(&OrderFilters {
+            merchant_id: Some(9),
+            device_id: None,
+            status: None,
+            start_date: Some("   ".to_string()),
+            end_date: None,
+        });
+        assert_eq!(clause, "WHERE merchant_id = ?");
+        assert_eq!(params.len(), 1);
+    }
+}
