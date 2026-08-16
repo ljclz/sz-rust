@@ -35,7 +35,7 @@
 //! use sz_rust_addons_loader::loader::AddonLoader;
 //!
 //! let loader = AddonLoader::new("/path/to/addons");
-//! let errors = loader.register().unwrap();
+//! let errors = loader.register().await.unwrap();
 //! // errors 包含解析失败的插件错误（不中断整体扫描）
 //!
 //! let route = loader.parse_route("/addons/operate/Order/index").unwrap();
@@ -95,8 +95,8 @@ mod integration_tests {
     /// 4. register() 扫描并注册
     /// 5. parse_route() 解析 URL
     /// 6. 验证路由信息正确
-    #[test]
-    fn test_end_to_end_lifecycle() {
+    #[tokio::test]
+    async fn test_end_to_end_lifecycle() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let addons_path = tmp.path().join("addons");
 
@@ -155,7 +155,7 @@ public $info = [
         assert_eq!(loader.count(), 0);
 
         // 2. 注册所有插件
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
         assert!(errors.is_empty(), "register errors: {:?}", errors);
         assert_eq!(loader.count(), 2);
 
@@ -200,8 +200,8 @@ public $info = [
     }
 
     /// 测试混合启用/禁用插件列表
-    #[test]
-    fn test_mixed_enabled_disabled_addons() {
+    #[tokio::test]
+    async fn test_mixed_enabled_disabled_addons() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
 
@@ -229,7 +229,7 @@ public $info = [
         }
 
         let loader = AddonLoader::new(&addons_path);
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         assert_eq!(loader.count(), 4);
         assert_eq!(loader.enabled_addons().len(), 2);
@@ -241,8 +241,8 @@ public $info = [
     }
 
     /// 测试动态状态切换
-    #[test]
-    fn test_dynamic_status_toggle() {
+    #[tokio::test]
+    async fn test_dynamic_status_toggle() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
         let dir = addons_path.join("operate");
@@ -259,7 +259,7 @@ public $info = [
         .unwrap();
 
         let loader = AddonLoader::new(&addons_path);
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         assert!(loader.is_enabled("operate").unwrap());
 
@@ -273,8 +273,8 @@ public $info = [
     }
 
     /// 测试 autoload 与 registry 协作
-    #[test]
-    fn test_autoload_registry_collaboration() {
+    #[tokio::test]
+    async fn test_autoload_registry_collaboration() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
         let operate_dir = addons_path.join("operate");
@@ -296,7 +296,7 @@ public $info = [
         fs::write(controller_dir.join("Order.php"), "<?php // stub").unwrap();
 
         let loader = AddonLoader::new(&addons_path);
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         // 通过 autoload 解析类路径
         let path = loader
@@ -312,8 +312,8 @@ public $info = [
     }
 
     /// 测试多个插件目录扫描
-    #[test]
-    fn test_multiple_addons_scan() {
+    #[tokio::test]
+    async fn test_multiple_addons_scan() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
 
@@ -336,15 +336,15 @@ public $info = [
         }
 
         let loader = AddonLoader::new(&addons_path);
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
         assert!(errors.is_empty());
         assert_eq!(loader.count(), 4);
         assert_eq!(loader.names(), vec!["cashier", "erp", "food", "operate"]);
     }
 
     /// 测试部分插件损坏时整体扫描不中断
-    #[test]
-    fn test_partial_failure_continues_scan() {
+    #[tokio::test]
+    async fn test_partial_failure_continues_scan() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
 
@@ -368,7 +368,7 @@ public $info = [
         fs::write(bad_dir.join("Plugin.php"), "<?php class Plugin {}").unwrap();
 
         let loader = AddonLoader::new(&addons_path);
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
 
         // bad 插件应记录错误
         assert!(!errors.is_empty());
@@ -379,14 +379,14 @@ public $info = [
     }
 
     /// 测试空插件目录
-    #[test]
-    fn test_empty_addons_directory() {
+    #[tokio::test]
+    async fn test_empty_addons_directory() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
         fs::create_dir_all(&addons_path).unwrap();
 
         let loader = AddonLoader::new(&addons_path);
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
         assert!(errors.is_empty());
         assert_eq!(loader.count(), 0);
     }

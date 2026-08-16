@@ -222,29 +222,30 @@ impl AddonRegistry {
     /// - 单个插件解析失败不会中断整体扫描，但会记录到返回的错误列表
     /// - 目录读取失败返回 `ScanDir` 错误
     #[tracing::instrument(skip(self))]
-    pub fn load_from_directory(
+    pub async fn load_from_directory(
         &self,
         addons_path: &Path,
     ) -> AddonLoaderResult<Vec<AddonLoaderError>> {
         let mut errors = Vec::new();
 
-        let entries = std::fs::read_dir(addons_path).map_err(|e| AddonLoaderError::ScanDir {
-            path: addons_path.display().to_string(),
-            source: e,
-        })?;
+        let entries =
+            tokio::fs::read_dir(addons_path)
+                .await
+                .map_err(|e| AddonLoaderError::ScanDir {
+                    path: addons_path.display().to_string(),
+                    source: e,
+                })?;
 
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    errors.push(AddonLoaderError::ScanDir {
-                        path: addons_path.display().to_string(),
-                        source: e,
-                    });
-                    continue;
-                }
-            };
-
+        let mut entries = entries;
+        while let Some(entry) =
+            entries
+                .next_entry()
+                .await
+                .map_err(|e| AddonLoaderError::ScanDir {
+                    path: addons_path.display().to_string(),
+                    source: e,
+                })?
+        {
             let path = entry.path();
             // 仅处理目录
             if !path.is_dir() {
@@ -262,7 +263,7 @@ impl AddonRegistry {
             }
 
             // 解析插件清单
-            match crate::manifest::parse_manifest(&path) {
+            match crate::manifest::parse_manifest(&path).await {
                 Ok(manifest) => {
                     self.upsert(manifest);
                 }
@@ -531,24 +532,26 @@ mod tests {
         assert_eq!(r1.count(), r2.count());
     }
 
-    #[test]
-    fn test_load_from_directory_empty() {
+    #[tokio::test]
+    async fn test_load_from_directory_empty() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let registry = AddonRegistry::new();
-        let errors = registry.load_from_directory(tmp.path()).unwrap();
+        let errors = registry.load_from_directory(tmp.path()).await.unwrap();
         assert!(errors.is_empty());
         assert_eq!(registry.count(), 0);
     }
 
-    #[test]
-    fn test_load_from_directory_nonexistent() {
+    #[tokio::test]
+    async fn test_load_from_directory_nonexistent() {
         let registry = AddonRegistry::new();
-        let result = registry.load_from_directory(Path::new("/nonexistent/path/12345"));
+        let result = registry
+            .load_from_directory(Path::new("/nonexistent/path/12345"))
+            .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_load_from_directory_with_valid_plugin() {
+    #[tokio::test]
+    async fn test_load_from_directory_with_valid_plugin() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         // 创建 operate 插件目录
         let operate_dir = tmp.path().join("operate");
@@ -582,15 +585,15 @@ public $info = [
         .unwrap();
 
         let registry = AddonRegistry::new();
-        let errors = registry.load_from_directory(tmp.path()).unwrap();
+        let errors = registry.load_from_directory(tmp.path()).await.unwrap();
         assert!(errors.is_empty(), "errors: {:?}", errors);
         assert_eq!(registry.count(), 2);
         assert!(registry.exists("operate"));
         assert!(registry.exists("cashier"));
     }
 
-    #[test]
-    fn test_load_from_directory_skips_files() {
+    #[tokio::test]
+    async fn test_load_from_directory_skips_files() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         // 创建文件（应被跳过）
         std::fs::write(tmp.path().join("BaseController.php"), "<?php // stub").unwrap();
@@ -598,19 +601,21 @@ public $info = [
         std::fs::create_dir(tmp.path().join("empty_dir")).unwrap();
 
         let registry = AddonRegistry::new();
-        let errors = registry.load_from_directory(tmp.path()).unwrap();
+        let errors = registry.load_from_directory(tmp.path()).await.unwrap();
         // empty_dir 无 Plugin.php → 错误
         assert!(!errors.is_empty());
         assert_eq!(registry.count(), 0);
     }
 
-    #[test]
-    fn test_load_from_directory_skips_hidden() {
+    #[tokio::test]
+    async fn test_load_from_directory_skips_hidden() {
         let tmp = tempfile::tempdir().expect("create tempdir");
-        std::fs::create_dir(tmp.path().join(".hidden")).unwrap();
+        tokio::fs::create_dir(tmp.path().join(".hidden"))
+            .await
+            .unwrap();
 
         let registry = AddonRegistry::new();
-        let errors = registry.load_from_directory(tmp.path()).unwrap();
+        let errors = registry.load_from_directory(tmp.path()).await.unwrap();
         // .hidden 目录应被跳过，不产生错误
         assert!(errors.is_empty());
         assert_eq!(registry.count(), 0);

@@ -74,31 +74,34 @@ impl HotReload {
     }
 
     /// Graceful shutdown：将状态序列化到文件
-    pub fn graceful_shutdown(&self) -> Result<(), HotReloadError> {
+    pub async fn graceful_shutdown(&self) -> Result<(), HotReloadError> {
         let state = self.state.read().clone();
         let json = serde_json::to_string_pretty(&state)
             .map_err(|e| HotReloadError::Serialize(e.to_string()))?;
-        std::fs::write(&self.state_path, json)?;
+        tokio::fs::write(&self.state_path, json).await?;
         tracing::info!("Hot reload: state saved to {}", self.state_path.display());
         Ok(())
     }
 
     /// 新进程恢复状态
-    pub fn restore_state(&self) -> Result<serde_json::Value, HotReloadError> {
-        if !self.state_path.exists() {
+    pub async fn restore_state(&self) -> Result<serde_json::Value, HotReloadError> {
+        if tokio::fs::try_exists(&self.state_path)
+            .await
+            .unwrap_or(false)
+        {
+            let json = tokio::fs::read_to_string(&self.state_path).await?;
+            let state: serde_json::Value = serde_json::from_str(&json)
+                .map_err(|e| HotReloadError::Deserialize(e.to_string()))?;
+            *self.state.write() = state.clone();
+            tracing::info!(
+                "Hot reload: state restored from {}",
+                self.state_path.display()
+            );
+            Ok(state)
+        } else {
             tracing::info!("Hot reload: no state file, starting fresh");
-            return Ok(serde_json::Value::Null);
+            Ok(serde_json::Value::Null)
         }
-
-        let json = std::fs::read_to_string(&self.state_path)?;
-        let state: serde_json::Value =
-            serde_json::from_str(&json).map_err(|e| HotReloadError::Deserialize(e.to_string()))?;
-        *self.state.write() = state.clone();
-        tracing::info!(
-            "Hot reload: state restored from {}",
-            self.state_path.display()
-        );
-        Ok(state)
     }
 
     /// 启动文件监听（非阻塞，返回 notify::Watcher）
@@ -140,33 +143,35 @@ mod tests {
         assert_eq!(hr.get_state(), serde_json::json!({"key": "value"}));
     }
 
-    #[test]
-    fn test_hot_reload_graceful_shutdown() {
+    #[tokio::test]
+    async fn test_hot_reload_graceful_shutdown() {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let hr = HotReload::new(temp.path(), "/tmp/watch");
         hr.set_state(serde_json::json!({"counter": 42}));
-        hr.graceful_shutdown().unwrap();
+        hr.graceful_shutdown().await.unwrap();
 
-        let content = std::fs::read_to_string(temp.path()).unwrap();
+        let content = tokio::fs::read_to_string(temp.path()).await.unwrap();
         let state: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(state["counter"], 42);
     }
 
-    #[test]
-    fn test_hot_reload_restore_state() {
+    #[tokio::test]
+    async fn test_hot_reload_restore_state() {
         let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), r#"{"counter": 99}"#).unwrap();
+        tokio::fs::write(temp.path(), r#"{"counter": 99}"#)
+            .await
+            .unwrap();
 
         let hr = HotReload::new(temp.path(), "/tmp/watch");
-        let state = hr.restore_state().unwrap();
+        let state = hr.restore_state().await.unwrap();
         assert_eq!(state["counter"], 99);
         assert_eq!(hr.get_state()["counter"], 99);
     }
 
-    #[test]
-    fn test_hot_reload_restore_state_no_file() {
+    #[tokio::test]
+    async fn test_hot_reload_restore_state_no_file() {
         let hr = HotReload::new("/nonexistent/path/state.json", "/tmp/watch");
-        let state = hr.restore_state().unwrap();
+        let state = hr.restore_state().await.unwrap();
         assert_eq!(state, serde_json::Value::Null);
     }
 

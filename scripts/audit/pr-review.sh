@@ -6,9 +6,11 @@
 # 严重度: critical / high / medium / low；--severity-threshold 控制阻塞门禁（默认 medium）
 #
 # 用法:
-#   bash scripts/audit/pr-review.sh [--range HEAD~1..HEAD] [--severity-threshold medium] [--ai] [--deep] [--skip-integration] [--report path]
+#   bash scripts/audit/pr-review.sh [--range HEAD~1..HEAD] [--severity-threshold medium] [--ai] [--ai-parallel] [--no-ai-cache] [--ai-timeout 120] [--deep] [--skip-integration] [--report path]
 # 依赖: git / cargo / node / python（门禁脚本与 unwrap 检查）；--ai 需要 AI_API_KEY（OpenAI 兼容端点，默认 CSDN glm_for_coding，可用 AI_BASE_URL/AI_MODEL 切换 Provider）
 #       integration 环节需本机 MySQL（127.0.0.1:3306 root/test123 sz_orm_test）；--deep 需 cargo-mutants / cargo-llvm-cov（耗时 10+ 分钟）
+# 性能（第 7 篇方法论）: --ai-parallel 在 diff 扫描后后台启动 AI 评审，与门禁并行；AI 结果按 diff sha256 缓存 ~/.cache/sz-rust-review（--no-ai-cache 关闭）；--ai-timeout 控制单次调用超时（默认 120s）
+# Choreography（第 8 篇方法论）: 审查终态 publish ReviewCompleted/ReviewBlocked/ReviewFailed 事件到 docs/audit/events.jsonl（JSON Lines 追加，供季度审计/发布门禁/指标订阅）
 # fail-closed: 任何环节命令失败或输出不可解析 → 该环节失败 → 整体退出非零
 
 set -uo pipefail
@@ -31,22 +33,40 @@ REPORT=""
 AI=0
 DEEP=0
 SKIP_INTEGRATION=0
+AI_PARALLEL=0
+AI_CACHE=1
+AI_TIMEOUT=120
 while [ $# -gt 0 ]; do
   case "$1" in
     --range) RANGE="$2"; shift 2 ;;
     --severity-threshold) THRESHOLD="$2"; shift 2 ;;
     --report) REPORT="$2"; shift 2 ;;
     --ai) AI=1; shift ;;
+    --ai-parallel) AI=1; AI_PARALLEL=1; shift ;;
+    --no-ai-cache) AI_CACHE=0; shift ;;
+    --ai-timeout) AI_TIMEOUT="$2"; shift 2 ;;
     --deep) DEEP=1; shift ;;
     --skip-integration) SKIP_INTEGRATION=1; shift ;;
     *) echo "未知参数: $1"; exit 2 ;;
   esac
 done
 
+# Provider 配置（环境变量覆盖，默认 CSDN；提前解析供 --ai-parallel 后台预启动使用）
+AI_API_KEY="${AI_API_KEY:-${CSDN_API_KEY:-}}"
+AI_BASE_URL="${AI_BASE_URL:-https://ai.csdn.net/api/model/v1}"
+AI_MODEL="${AI_MODEL:-glm_for_coding}"
+AI_CACHE_DIR="${AI_CACHE_DIR:-$HOME/.cache/sz-rust-review}"
+AI_REVIEW=""
+AI_BG_PID=""      # 后台 AI 评审进程（--ai-parallel）
+AI_BG_RC=""       # 缓存命中等已就绪标记（空=未就绪）
+DIFF_HASH=""      # 当前 diff sha256 前 16 位（缓存 key）
+
 # 临时文件（AI 评审建议：mktemp 防多实例竞态）
 TMPDIR_PREFIX="${TMPDIR:-/tmp}/pr-review"
 AI_ERR_LOG=$(mktemp "${TMPDIR_PREFIX}-ai-err.XXXXXX.log" 2>/dev/null || echo "/tmp/pr-review-ai-err.log")
-trap 'rm -f "$AI_ERR_LOG"' EXIT
+AI_BG_OUT=$(mktemp "${TMPDIR_PREFIX}-ai-bg.XXXXXX.out" 2>/dev/null || echo "/tmp/pr-review-ai-bg.out")
+AI_BG_ERR=$(mktemp "${TMPDIR_PREFIX}-ai-bg.XXXXXX.err" 2>/dev/null || echo "/tmp/pr-review-ai-bg.err")
+trap 'rm -f "$AI_ERR_LOG" "$AI_BG_OUT" "$AI_BG_ERR"' EXIT
 
 SEVERITY_ORDER=(low medium high critical)
 THRESHOLD_IDX=1  # medium 默认
@@ -89,6 +109,71 @@ if ! echo "$DIFF_STAT" | grep -qE "^ [0-9]+ files? changed"; then
   echo "⚠️ 变更集为空（$RANGE），仍执行静态检查"
 fi
 EXTRA+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
+
+# ---- 环节 1.5（可选）: AI 评审核心函数 + 后台预启动（--ai-parallel，第 7 篇并发方法论） ----
+run_ai_review() { # run_ai_review <diff_text> <issues_text> → stdout: review markdown；stderr: 诊断
+  local diff_text="$1" issues_text="$2"
+  local prompt body resp
+  PROMPT="你是一个资深 Rust 工程师。请评审以下 PR 变更（sz-rust 项目）。
+
+要求：
+1. 结合已发现的静态问题清单，列出 3-5 个最重要的潜在问题（性能/安全/可维护性/并发）
+2. 给出具体修改建议（带代码示例）
+3. 整体评分 1-10
+
+已发现的问题清单:
+\`\`\`
+${issues_text}
+\`\`\`
+
+PR diff（截断至 8000 字符）:
+\`\`\`
+${diff_text}
+\`\`\`
+
+只输出 Markdown，不要闲聊。"
+  # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
+  body=$(REVIEW_PROMPT="$PROMPT" AI_MODEL="$AI_MODEL" python -c '
+import json, os, sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+print(json.dumps({
+    "model": os.environ["AI_MODEL"],
+    "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
+    "temperature": 0.2,
+}))
+')
+  resp=$(curl -sS --max-time "$AI_TIMEOUT" \
+    -X POST "${AI_BASE_URL}/chat/completions" \
+    -H "Authorization: Bearer ${AI_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "$body" 2>&1) || { echo "AI 请求失败: $(echo "$resp" | head -c 120)"; return 1; }
+  printf '%s' "$resp" | python -c '
+import json, sys
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
+data = json.load(sys.stdin)
+if "error" in data:
+    print("AI API 错误: " + json.dumps(data["error"], ensure_ascii=False), file=sys.stderr)
+    sys.exit(1)
+print(data["choices"][0]["message"]["content"])
+' 2>&1 || { echo "AI 响应解析失败"; return 1; }
+}
+
+if [ "$AI" -eq 1 ] && [ "$AI_PARALLEL" -eq 1 ] && [ -n "$AI_API_KEY" ]; then
+  transition "ai-bg" "AI 评审后台预启动（--ai-parallel）"
+  DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
+  DIFF_HASH=$(printf '%s' "$DIFF_TEXT" | sha256sum | cut -c1-16)
+  if [ "$AI_CACHE" -eq 1 ] && [ -f "$AI_CACHE_DIR/${DIFF_HASH}.md" ]; then
+    cp "$AI_CACHE_DIR/${DIFF_HASH}.md" "$AI_BG_OUT"
+    AI_BG_RC=0
+    echo "✅ AI 评审缓存命中（${DIFF_HASH}），无需调用 LLM"
+  else
+    ( run_ai_review "$DIFF_TEXT" "" > "$AI_BG_OUT" 2> "$AI_BG_ERR"; echo $? > "${AI_BG_OUT}.rc" ) &
+    AI_BG_PID=$!
+    echo "⏳ AI 评审后台运行中（pid $AI_BG_PID，与门禁并行）"
+  fi
+fi
 
 # ---- 环节 2: 编译检查 ----
 transition "compile" "cargo check --workspace --all-targets"
@@ -142,6 +227,7 @@ run_gate() { # run_gate <name> <severity-on-fail> <script...>
   fi
 }
 run_gate "sensitive-field" "critical" scripts/audit/sensitive-field-audit.js
+run_gate "std-fs" "high" scripts/audit/check-std-fs.py
 run_gate "doc-code-consistency" "low" scripts/audit/doc-code-consistency.js
 run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
@@ -199,73 +285,50 @@ if [ "$DEEP" -eq 1 ]; then
 fi
 
 # ---- 环节 4（可选）: AI 评审（OpenAI 兼容端点，默认 CSDN glm_for_coding） ----
-# Provider 配置（环境变量覆盖，默认 CSDN）：
-#   AI_API_KEY  — 必填（兼容旧变量名 CSDN_API_KEY）
-#   AI_BASE_URL — 默认 https://ai.csdn.net/api/model/v1
-#   AI_MODEL    — 默认 glm_for_coding（CSDN 套餐；快手示例: KAT-Coder-Pro-V2.5）
-AI_API_KEY="${AI_API_KEY:-${CSDN_API_KEY:-}}"
-AI_BASE_URL="${AI_BASE_URL:-https://ai.csdn.net/api/model/v1}"
-AI_MODEL="${AI_MODEL:-glm_for_coding}"
-AI_REVIEW=""
+# 三路径：A 并行后台（--ai-parallel）/ B 缓存命中 / C 串行原逻辑；缓存+超时=第 7 篇方法论
 if [ "$AI" -eq 1 ]; then
   transition "ai" "AI 评审（${AI_MODEL}）"
   if [ -z "$AI_API_KEY" ]; then
     note_issue "medium" "ai" "missing-key" "AI_API_KEY 未设置（或旧变量 CSDN_API_KEY），AI 评审跳过（设置后重跑 --ai）"
   else
-    # prompt 设计（对齐文章 ai_reviewer）：diff + 问题清单 → 3-5 个最重要问题 + 建议 + 评分
     DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
-    ISSUES_TEXT=$(printf '%s' "$ISSUES" | head -c 3000)
-    PROMPT="你是一个资深 Rust 工程师。请评审以下 PR 变更（sz-rust 项目）。
-
-要求：
-1. 结合已发现的静态问题清单，列出 3-5 个最重要的潜在问题（性能/安全/可维护性/并发）
-2. 给出具体修改建议（带代码示例）
-3. 整体评分 1-10
-
-已发现的问题清单:
-\`\`\`
-${ISSUES_TEXT}
-\`\`\`
-
-PR diff（截断至 8000 字符）:
-\`\`\`
-${DIFF_TEXT}
-\`\`\`
-
-只输出 Markdown，不要闲聊。"
-    # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
-    AI_BODY=$(REVIEW_PROMPT="$PROMPT" AI_MODEL="$AI_MODEL" python -c '
-import json, os, sys
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-print(json.dumps({
-    "model": os.environ["AI_MODEL"],
-    "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
-    "temperature": 0.2,
-}))
-')
-    if AI_RESP=$(curl -sS --max-time 120 \
-      -X POST "${AI_BASE_URL}/chat/completions" \
-      -H "Authorization: Bearer ${AI_API_KEY}" \
-      -H "Content-Type: application/json" \
-      -d "$AI_BODY" 2>"$AI_ERR_LOG"); then
-      if AI_REVIEW=$(printf '%s' "$AI_RESP" | python -c '
-import json, sys
-if hasattr(sys.stdin, "reconfigure"):
-    sys.stdin.reconfigure(encoding="utf-8")
-data = json.load(sys.stdin)
-if "error" in data:
-    print("CSDN API 错误: " + json.dumps(data["error"], ensure_ascii=False), file=sys.stderr)
-    sys.exit(1)
-print(data["choices"][0]["message"]["content"])
-' 2>"$AI_ERR_LOG"); then
-        EXTRA+=$'\n## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）\n\n'"$AI_REVIEW"$'\n'
-        echo "✅ AI 评审完成"
+    DIFF_HASH=$(printf '%s' "$DIFF_TEXT" | sha256sum | cut -c1-16)
+    CACHE_TAG=""
+    if [ "$AI_PARALLEL" -eq 1 ] && [ -n "$AI_BG_PID" ]; then
+      # 路径 A：并行后台 — 等后台任务完成（与门禁重叠运行）
+      wait "$AI_BG_PID" 2>/dev/null
+      AI_BG_RC=$?
+      if [ "$AI_BG_RC" -eq 0 ] && [ -s "$AI_BG_OUT" ]; then
+        AI_REVIEW=$(cat "$AI_BG_OUT")
+        echo "✅ AI 评审完成（并行后台）"
+        [ "$AI_CACHE" -eq 1 ] && { mkdir -p "$AI_CACHE_DIR"; cp "$AI_BG_OUT" "$AI_CACHE_DIR/${DIFF_HASH}.md"; }
       else
-        note_issue "medium" "ai" "parse-failed" "AI 响应解析失败: $(head -c 120 "$AI_ERR_LOG")"
+        note_issue "medium" "ai" "ai-failed" "后台 AI 评审失败: $(head -c 120 "$AI_BG_ERR" 2>/dev/null || echo '无输出')"
       fi
+    elif [ "$AI_BG_RC" = "0" ] && [ -s "$AI_BG_OUT" ]; then
+      # 路径 B：缓存命中（预启动阶段已就绪，未调 LLM）
+      AI_REVIEW=$(cat "$AI_BG_OUT")
+      CACHE_TAG="（缓存命中 ${DIFF_HASH}）"
+      echo "✅ AI 评审完成（缓存命中）"
     else
-      note_issue "medium" "ai" "http-failed" "AI 请求失败: $(head -c 120 "$AI_ERR_LOG")"
+      # 路径 C：串行原逻辑 + 缓存检查（diff hash key）
+      if [ "$AI_CACHE" -eq 1 ] && [ -f "$AI_CACHE_DIR/${DIFF_HASH}.md" ]; then
+        AI_REVIEW=$(cat "$AI_CACHE_DIR/${DIFF_HASH}.md")
+        CACHE_TAG="（缓存命中 ${DIFF_HASH}）"
+        echo "✅ AI 评审完成（缓存命中）"
+      else
+        ISSUES_TEXT=$(printf '%s' "$ISSUES" | head -c 3000)
+        if AI_REVIEW=$(run_ai_review "$DIFF_TEXT" "$ISSUES_TEXT" 2>"$AI_ERR_LOG"); then
+          echo "✅ AI 评审完成"
+          [ "$AI_CACHE" -eq 1 ] && { mkdir -p "$AI_CACHE_DIR"; printf '%s' "$AI_REVIEW" > "$AI_CACHE_DIR/${DIFF_HASH}.md"; }
+        else
+          note_issue "medium" "ai" "ai-failed" "$(head -c 120 "$AI_ERR_LOG")"
+          AI_REVIEW=""
+        fi
+      fi
+    fi
+    if [ -n "$AI_REVIEW" ]; then
+      EXTRA+=$'\n## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）'"${CACHE_TAG}"$'\n\n'"$AI_REVIEW"$'\n'
     fi
   fi
 fi
@@ -326,6 +389,34 @@ REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
   fi
 } > "$REPORT"
 echo "📄 报告: $REPORT"
+
+# ---- Choreography 事件落盘（第 8 篇方法论：ReviewCompleted / ReviewBlocked / ReviewFailed） ----
+EVENT_FILE="docs/audit/events.jsonl"
+if [ "$STATE" = "done" ] && [ $BLOCKING -eq 0 ]; then EV="ReviewCompleted"; RESULT="passed"
+elif [ "$STATE" = "done" ]; then EV="ReviewBlocked"; RESULT="blocked"
+else EV="ReviewFailed"; RESULT="failed"
+fi
+{
+  mkdir -p "$(dirname "$EVENT_FILE")"
+  EV="$EV" RESULT="$RESULT" BRANCH="$BRANCH" REVIEW_HEAD="$REVIEW_HEAD" RANGE="$RANGE" STATE="$STATE" \
+  BLOCKING="$BLOCKING" CRIT="${COUNTS[critical]:-0}" HIGH="${COUNTS[high]:-0}" MEDIUM="${COUNTS[medium]:-0}" LOW="${COUNTS[low]:-0}" REPORT="$REPORT" \
+  python -c '
+import json, os
+print(json.dumps({
+    "ts": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+    "event": os.environ["EV"],
+    "result": os.environ["RESULT"],
+    "branch": os.environ["BRANCH"],
+    "commit": os.environ["REVIEW_HEAD"],
+    "range": os.environ["RANGE"],
+    "state": os.environ["STATE"],
+    "blocking": int(os.environ["BLOCKING"]),
+    "issues": {"critical": int(os.environ["CRIT"]), "high": int(os.environ["HIGH"]), "medium": int(os.environ["MEDIUM"]), "low": int(os.environ["LOW"])},
+    "report": os.environ["REPORT"],
+}, ensure_ascii=False))
+' >> "$EVENT_FILE"
+  echo "📡 事件已落盘: $EVENT_FILE"
+}
 
 # ---- 退出码: fail-closed ----
 [ "$STATE" = "done" ] && [ $BLOCKING -eq 0 ] && exit 0

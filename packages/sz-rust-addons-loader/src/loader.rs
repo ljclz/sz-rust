@@ -62,7 +62,7 @@ use crate::registry::AddonRegistry;
 /// use sz_rust_addons_loader::loader::AddonLoader;
 ///
 /// let loader = AddonLoader::new("/path/to/addons");
-/// let errors = loader.register().unwrap();
+/// let errors = loader.register().await.unwrap();
 /// // errors 中包含解析失败的插件错误（不中断整体扫描）
 ///
 /// let route = loader.parse_route("/addons/operate/Order/index").unwrap();
@@ -124,8 +124,8 @@ impl AddonLoader {
     /// - 返回的 `Vec<AddonLoaderError>` 包含所有失败的插件错误
     /// - 目录读取失败返回 `ScanDir` 错误
     #[tracing::instrument(skip(self))]
-    pub fn register(&self) -> AddonLoaderResult<Vec<AddonLoaderError>> {
-        self.registry.load_from_directory(&self.addons_path)
+    pub async fn register(&self) -> AddonLoaderResult<Vec<AddonLoaderError>> {
+        self.registry.load_from_directory(&self.addons_path).await
     }
 
     /// 解析路由（对齐 PHP `Route::execute($addon, $controller, $action)`）
@@ -260,18 +260,18 @@ public $info = [
         assert_eq!(loader.count(), 0);
     }
 
-    #[test]
-    fn test_register_scans_addons() {
+    #[tokio::test]
+    async fn test_register_scans_addons() {
         let (_tmp, loader) = make_test_env();
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
         assert!(errors.is_empty(), "errors: {:?}", errors);
         assert_eq!(loader.count(), 2);
         assert!(loader.exists("operate"));
         assert!(loader.exists("cashier"));
     }
 
-    #[test]
-    fn test_register_returns_errors_for_malformed() {
+    #[tokio::test]
+    async fn test_register_returns_errors_for_malformed() {
         let tmp = tempfile::tempdir().unwrap();
         let addons_path = tmp.path().join("addons");
         let malformed_dir = addons_path.join("malformed");
@@ -280,22 +280,22 @@ public $info = [
         fs::write(malformed_dir.join("Plugin.php"), "<?php class Plugin {}").unwrap();
 
         let loader = AddonLoader::new(&addons_path);
-        let errors = loader.register().unwrap();
+        let errors = loader.register().await.unwrap();
         assert!(!errors.is_empty());
         assert_eq!(loader.count(), 0);
     }
 
-    #[test]
-    fn test_register_nonexistent_path() {
+    #[tokio::test]
+    async fn test_register_nonexistent_path() {
         let loader = AddonLoader::new("/nonexistent/path/12345");
-        let result = loader.register();
+        let result = loader.register().await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_parse_route_valid() {
+    #[tokio::test]
+    async fn test_parse_route_valid() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let route = loader.parse_route("/addons/operate/Order/index").unwrap();
         assert_eq!(route.addon, "operate");
@@ -304,10 +304,10 @@ public $info = [
         assert!(route.controller_file.is_some());
     }
 
-    #[test]
-    fn test_parse_route_dotted_controller() {
+    #[tokio::test]
+    async fn test_parse_route_dotted_controller() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let route = loader
             .parse_route("/addons/operate/admin.Order/index")
@@ -316,10 +316,10 @@ public $info = [
         assert!(route.controller_file.is_some());
     }
 
-    #[test]
-    fn test_parse_route_disabled_addon() {
+    #[tokio::test]
+    async fn test_parse_route_disabled_addon() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let result = loader.parse_route("/addons/cashier/Order/index");
         assert!(result.is_err());
@@ -329,37 +329,37 @@ public $info = [
         }
     }
 
-    #[test]
-    fn test_parse_route_not_found_addon() {
+    #[tokio::test]
+    async fn test_parse_route_not_found_addon() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let result = loader.parse_route("/addons/ghost/Order/index");
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_parse_route_controller_not_found() {
+    #[tokio::test]
+    async fn test_parse_route_controller_not_found() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let result = loader.parse_route("/addons/operate/Ghost/index");
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_names_sorted() {
+    #[tokio::test]
+    async fn test_names_sorted() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let names = loader.names();
         assert_eq!(names, vec!["cashier", "operate"]);
     }
 
-    #[test]
-    fn test_all_addons_sorted() {
+    #[tokio::test]
+    async fn test_all_addons_sorted() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let all = loader.all_addons();
         assert_eq!(all.len(), 2);
@@ -367,122 +367,122 @@ public $info = [
         assert_eq!(all[1].name, "operate");
     }
 
-    #[test]
-    fn test_enabled_addons_filtered() {
+    #[tokio::test]
+    async fn test_enabled_addons_filtered() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let enabled = loader.enabled_addons();
         assert_eq!(enabled.len(), 1);
         assert_eq!(enabled[0].name, "operate");
     }
 
-    #[test]
-    fn test_disabled_addons_filtered() {
+    #[tokio::test]
+    async fn test_disabled_addons_filtered() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let disabled = loader.disabled_addons();
         assert_eq!(disabled.len(), 1);
         assert_eq!(disabled[0].name, "cashier");
     }
 
-    #[test]
-    fn test_exists() {
+    #[tokio::test]
+    async fn test_exists() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         assert!(loader.exists("operate"));
         assert!(loader.exists("cashier"));
         assert!(!loader.exists("ghost"));
     }
 
-    #[test]
-    fn test_is_enabled() {
+    #[tokio::test]
+    async fn test_is_enabled() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         assert!(loader.is_enabled("operate").unwrap());
         assert!(!loader.is_enabled("cashier").unwrap());
         assert!(loader.is_enabled("ghost").is_err());
     }
 
-    #[test]
-    fn test_get_manifest() {
+    #[tokio::test]
+    async fn test_get_manifest() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let manifest = loader.get_manifest("operate").unwrap();
         assert_eq!(manifest.name, "operate");
         assert_eq!(manifest.title, "运营管理");
     }
 
-    #[test]
-    fn test_get_manifest_not_found() {
+    #[tokio::test]
+    async fn test_get_manifest_not_found() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let result = loader.get_manifest("ghost");
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_count() {
+    #[tokio::test]
+    async fn test_count() {
         let (_tmp, loader) = make_test_env();
         assert_eq!(loader.count(), 0);
-        loader.register().unwrap();
+        loader.register().await.unwrap();
         assert_eq!(loader.count(), 2);
     }
 
-    #[test]
-    fn test_resolve_class() {
+    #[tokio::test]
+    async fn test_resolve_class() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let path = loader.resolve_class("addons\\operate\\Plugin").unwrap();
         assert!(path.is_some());
     }
 
-    #[test]
-    fn test_resolve_class_non_addons() {
+    #[tokio::test]
+    async fn test_resolve_class_non_addons() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let path = loader.resolve_class("app\\Home").unwrap();
         assert!(path.is_none());
     }
 
-    #[test]
-    fn test_resolve_controller() {
+    #[tokio::test]
+    async fn test_resolve_controller() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let path = loader.resolve_controller("operate", "Order").unwrap();
         assert!(path.is_some());
     }
 
-    #[test]
-    fn test_resolve_controller_multilevel() {
+    #[tokio::test]
+    async fn test_resolve_controller_multilevel() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let path = loader.resolve_controller("operate", "admin.Order").unwrap();
         assert!(path.is_some());
     }
 
-    #[test]
-    fn test_resolve_plugin() {
+    #[tokio::test]
+    async fn test_resolve_plugin() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let path = loader.resolve_plugin("operate").unwrap();
         assert!(path.is_some());
     }
 
-    #[test]
-    fn test_registry_shared_via_arc() {
+    #[tokio::test]
+    async fn test_registry_shared_via_arc() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         // 通过 registry() 访问的 Arc 应该指向同一份数据
         let registry = loader.registry();
@@ -490,10 +490,10 @@ public $info = [
         assert!(registry.exists("operate"));
     }
 
-    #[test]
-    fn test_autoload_accessor() {
+    #[tokio::test]
+    async fn test_autoload_accessor() {
         let (_tmp, loader) = make_test_env();
-        loader.register().unwrap();
+        loader.register().await.unwrap();
 
         let autoload = loader.autoload();
         assert_eq!(autoload.addons_path(), loader.addons_path());

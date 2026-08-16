@@ -66,6 +66,17 @@
   - P1/P5 不采纳（记录理由）：`into_inner()` 为标准库推荐的锁中毒恢复；mem_pool 分配器无中间状态数据；mem_pool 生产 0 调用 + feature 默认关闭（ADR-037）；examples 为演示代码
 - 验证（真实输出）：check 0 errors；capability/sz300 测试通过；clippy -D warnings 0 警告；unwrap=0；全量审查 EXIT=0
 
+## [Unreleased] - 2026-08-16（铁律 4 门禁 + 生产 std::fs 修复 + 安全审计清单）
+
+### Fixed
+
+- **铁律 4 门禁上线**：新增 `scripts/audit/check-std-fs.py`（复用 check-unwrap 上下文逻辑，排除测试块/目录），接入 pr-review security 环节（high 阻塞）
+- **生产 std::fs 修复**：addons-loader 生产路径完整 async 化——`load_from_directory`/`parse_manifest` → tokio::fs（read_dir/read_to_string），tokio 转主依赖；连锁 async 化测试 30+ 个（registry/loader/route/manifest 的 #[tokio::test]）；addons-loader 231 测试通过
+- **安全审计清单登记**（doc-debt DB-2026-08-16-05/06）：
+  - R001-R007 逐项核实（外部 AI 9/12 真实；R004 已修；其余为论证/保护项）
+  - 剩余 std::fs 30 处：infra-facade upload（同步公共 API，待专项 async 化）、mvc-facade view（同步渲染链）、pdf（第三方库接口要求，建议豁免）、cli（同步工具无 runtime，建议铁律 4 增豁免条款）
+- 验证（真实输出）：addons-loader + 消费者 0 FAILED（231 passed）；workspace check 0 errors；clippy 0 警告；fmt 干净
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed

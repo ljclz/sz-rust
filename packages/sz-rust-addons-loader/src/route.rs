@@ -255,7 +255,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    fn make_test_env() -> (tempfile::TempDir, AddonRegistry, AddonAutoload) {
+    async fn make_test_env() -> (tempfile::TempDir, AddonRegistry, AddonAutoload) {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let addons_path = tmp.path().join("addons");
 
@@ -313,7 +313,7 @@ public $info = [
 
         // 注册插件
         let registry = AddonRegistry::new();
-        let _ = registry.load_from_directory(&addons_path).unwrap();
+        let _ = registry.load_from_directory(&addons_path).await.unwrap();
 
         let autoload = AddonAutoload::new(&addons_path);
 
@@ -464,9 +464,9 @@ public $info = [
         assert_eq!(class, "addons\\operate\\controller\\admin\\sub\\Order");
     }
 
-    #[test]
-    fn test_parse_route_valid() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_valid() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let route = parse_route("/addons/operate/Order/index", &registry, &autoload).unwrap();
         assert_eq!(route.addon, "operate");
@@ -475,9 +475,9 @@ public $info = [
         assert!(route.controller_file.is_some());
     }
 
-    #[test]
-    fn test_parse_route_dotted_controller() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_dotted_controller() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let route = parse_route("/addons/operate/admin.Order/index", &registry, &autoload).unwrap();
         assert_eq!(route.controller, "admin.Order");
@@ -493,9 +493,9 @@ public $info = [
             .contains("admin"));
     }
 
-    #[test]
-    fn test_parse_route_non_addons_url() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_non_addons_url() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let result = parse_route("/api/users", &registry, &autoload);
         assert!(result.is_err());
@@ -505,26 +505,26 @@ public $info = [
         }
     }
 
-    #[test]
-    fn test_parse_route_empty_action() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_empty_action() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let result = parse_route("/addons/operate/Order", &registry, &autoload);
         assert!(result.is_err());
         // action 为空应该触发 RouteParse 错误
     }
 
-    #[test]
-    fn test_parse_route_empty_controller() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_empty_controller() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let result = parse_route("/addons/operate", &registry, &autoload);
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_parse_route_addon_not_found() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_addon_not_found() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let result = parse_route("/addons/ghost/Order/index", &registry, &autoload);
         assert!(result.is_err());
@@ -534,9 +534,9 @@ public $info = [
         }
     }
 
-    #[test]
-    fn test_parse_route_addon_disabled() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_addon_disabled() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let result = parse_route("/addons/disabled/Order/index", &registry, &autoload);
         assert!(result.is_err());
@@ -546,9 +546,9 @@ public $info = [
         }
     }
 
-    #[test]
-    fn test_parse_route_controller_not_found() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_controller_not_found() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         // nonexistent 插件无控制器
         let result = parse_route("/addons/nonexistent/Ghost/index", &registry, &autoload);
@@ -559,9 +559,9 @@ public $info = [
         }
     }
 
-    #[test]
-    fn test_parse_route_controller_file_resolved() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_controller_file_resolved() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let route = parse_route("/addons/operate/Order/index", &registry, &autoload).unwrap();
         let file = route.controller_file.unwrap();
@@ -569,9 +569,9 @@ public $info = [
         assert!(file.to_string_lossy().ends_with("Order.php"));
     }
 
-    #[test]
-    fn test_parse_route_multilevel_controller_file_resolved() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_multilevel_controller_file_resolved() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let route = parse_route("/addons/operate/admin.Order/index", &registry, &autoload).unwrap();
         let file = route.controller_file.unwrap();
@@ -580,9 +580,9 @@ public $info = [
         assert!(file.to_string_lossy().ends_with("Order.php"));
     }
 
-    #[test]
-    fn test_parse_route_no_leading_slash() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_parse_route_no_leading_slash() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         let route = parse_route("addons/operate/Order/index", &registry, &autoload).unwrap();
         assert_eq!(route.addon, "operate");
@@ -606,9 +606,9 @@ public $info = [
     }
 
     // 直接测试 AddonManifest 的 status 字段对路由的影响
-    #[test]
-    fn test_route_status_check_reflects_manifest() {
-        let (_tmp, registry, autoload) = make_test_env();
+    #[tokio::test]
+    async fn test_route_status_check_reflects_manifest() {
+        let (_tmp, registry, autoload) = make_test_env().await;
 
         // operate 启用
         assert!(registry.is_enabled("operate").unwrap());
