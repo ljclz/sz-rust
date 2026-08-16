@@ -55,6 +55,17 @@
 - **附带修复**：core container 测试预存漂移（hostport 断言 8802→3306，与 config/database.yml 一致）
 - 验证（真实输出）：AUTHORITATIVE_PROD_UNWRAP=0；cargo check 0 errors；受影响 crate 测试 1597 passed / 0 failed；clippy --workspace --all-targets -D warnings 0 警告；fmt 干净
 
+## [Unreleased] - 2026-08-16（AI 评审意见 P2-P4 采纳：可观测性改进）
+
+### Changed
+
+- `/sz-rust-review --ai`（bff78e4 审查）AI 意见处理：
+  - P2 采纳：builtin.rs 冗余 `assert!(is_ok())` + expect 双检查 → 单 expect
+  - P3 采纳：bind/serve expect → `unwrap_or_else(panic! 带地址与底层 IO 错误)`（10 处，排查可区分端口占用/权限/地址格式）
+  - P4 采纳：registry 并发 JoinHandle → `unwrap_or_else(panic! 带 JoinError)`（保留子任务 panic 信息）
+  - P1/P5 不采纳（记录理由）：`into_inner()` 为标准库推荐的锁中毒恢复；mem_pool 分配器无中间状态数据；mem_pool 生产 0 调用 + feature 默认关闭（ADR-037）；examples 为演示代码
+- 验证（真实输出）：check 0 errors；capability/sz300 测试通过；clippy -D warnings 0 警告；unwrap=0；全量审查 EXIT=0
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed

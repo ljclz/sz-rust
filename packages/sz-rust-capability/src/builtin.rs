@@ -403,8 +403,7 @@ mod tests {
         let registry = CapabilityRegistry::new();
         let skills = vec![Arc::new(DummySkill) as Arc<dyn Capability>];
         let result = register_builtin_skills(&registry, skills);
-        assert!(result.is_ok());
-        let names = result.expect("register_builtin_skills 应成功（前一行已断言 is_ok）");
+        let names = result.expect("register_builtin_skills 应成功");
         assert_eq!(names, vec!["dummy_skill"]);
         assert_eq!(registry.list_by_source(CapabilitySource::Skill).len(), 1);
     }

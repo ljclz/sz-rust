@@ -254,7 +254,9 @@ async fn main() {
     let addr = "127.0.0.1:8081";
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .expect("绑定监听地址失败");
+        .unwrap_or_else(|e| panic!("绑定监听地址失败: {addr}: {e}"));
     tracing::info!("博客示例运行于 http://{addr} （/post/list /post/create /post/stats）");
-    axum::serve(listener, app).await.expect("HTTP 服务启动失败");
+    axum::serve(listener, app)
+        .await
+        .unwrap_or_else(|e| panic!("HTTP 服务启动失败: {e}"));
 }

@@ -78,9 +78,9 @@ async fn main() {
     let router = build_router();
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .expect("绑定监听地址失败");
+        .unwrap_or_else(|e| panic!("绑定监听地址失败: {addr}: {e}"));
     println!("axum native benchmark server on {}", addr);
     axum::serve(listener, router)
         .await
-        .expect("HTTP 服务启动失败");
+        .unwrap_or_else(|e| panic!("HTTP 服务启动失败: {e}"));
 }
