@@ -14,7 +14,7 @@
 //! use sz_rust_core::mem_pool::{MemPool, StackPool};
 //!
 //! let pool = StackPool::<1024>::new();
-//! let s = pool.alloc_str("hello");
+//! let s = unsafe { pool.alloc_str("hello") };
 //! assert_eq!(s, "hello");
 //! ```
 
@@ -32,12 +32,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// 用于热点路径零堆分配：在固定容量缓冲区内分配字符串/字节切片，
 /// 请求结束后 `reset()` 整体回收。
 ///
-/// ## Safety
+/// ## Safety（unsafe API 契约，2026-08-16 收紧）
+///
+/// `alloc_str` / `alloc_bytes` 返回的引用在 `reset()` **之前**有效；
+/// `reset()` 后所有先前返回的引用**立即失效**（后续 alloc 会覆盖同一区域）。
+/// 调用方必须保证：在使用返回引用期间不调用 `reset()`，否则构成 use-after-free。
 ///
 /// 实现者需确保：
 /// - `alloc_str` / `alloc_bytes` 返回的引用在 `reset()` 之前有效
 /// - `reset()` 后所有先前返回的引用失效
-/// - 线程安全：`&self` 方法可被多线程并发调用
+/// - 线程安全：`&self` 方法可被多线程并发调用，并发 `reset` 与 `alloc` 需要调用方同步
+///
+/// # 为什么是 unsafe fn（设计决策）
+///
+/// 本 trait 用 `&self` + 生命周期延长实现零拷贝分配，Rust 借用检查器无法
+/// 表达"引用在 reset 前有效"这一不变量（`reset` 是共享借用 `&self`）。
+/// 若保持 safe fn，Safe Rust 调用方可在不知情时触发 UB（reset 后使用引用）。
+/// 因此 `alloc_str`/`alloc_bytes` 为 **unsafe fn**：调用方必须显式承担契约。
 pub trait MemPool: Send + Sync {
     /// 在池内分配字符串切片（零拷贝，返回池内引用）
     ///
@@ -45,13 +56,18 @@ pub trait MemPool: Send + Sync {
     ///
     /// ## Safety
     ///
-    /// 返回的引用在 `reset()` 之前有效。调用方需保证在使用返回引用期间不调用 `reset()`。
-    fn alloc_str<'a>(&self, s: &'a str) -> &'a str;
+    /// 返回的引用在 `reset()` 之前有效。调用方需保证在使用返回引用期间
+    /// 不调用 `reset()`（包括其他线程的 `reset()`）。
+    unsafe fn alloc_str<'a>(&self, s: &'a str) -> &'a str;
 
     /// 在池内分配字节切片（零拷贝，返回池内引用）
     ///
     /// 如果池容量不足，回退返回输入切片本身。
-    fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8];
+    ///
+    /// ## Safety
+    ///
+    /// 同 [`MemPool::alloc_str`]：返回引用在 `reset()` 前有效，期间不得调用 `reset()`。
+    unsafe fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8];
 
     /// 重置池，回收所有内存（整体回收到起始位置）
     fn reset(&self);
@@ -105,7 +121,7 @@ unsafe impl<const CAP: usize> Send for StackPool<CAP> {}
 unsafe impl<const CAP: usize> Sync for StackPool<CAP> {}
 
 impl<const CAP: usize> MemPool for StackPool<CAP> {
-    fn alloc_str<'a>(&self, s: &'a str) -> &'a str {
+    unsafe fn alloc_str<'a>(&self, s: &'a str) -> &'a str {
         let bytes = s.as_bytes();
         let len = bytes.len();
         if len == 0 {
@@ -123,11 +139,12 @@ impl<const CAP: usize> MemPool for StackPool<CAP> {
         buf[start..start + len].copy_from_slice(bytes);
 
         // Safety: 从 buf 切片构造 &str，字节来自有效 UTF-8 字符串。
-        // 生命周期延长为 'a：区域分配器语义保证引用在 reset 前有效。
+        // 生命周期延长为 'a：区域分配器语义保证引用在 reset 前有效
+        // （调用方通过 unsafe 块显式承担该契约，见 trait Safety 文档）。
         unsafe { std::str::from_utf8_unchecked(&buf[start..start + len]) }
     }
 
-    fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8] {
+    unsafe fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8] {
         let len = b.len();
         if len == 0 {
             return &[];
@@ -201,15 +218,16 @@ mod bumpalo_backend {
     }
 
     impl MemPool for BumpaloPool {
-        fn alloc_str<'a>(&self, s: &'a str) -> &'a str {
+        unsafe fn alloc_str<'a>(&self, s: &'a str) -> &'a str {
             let bump = self.bump.lock().unwrap();
             let allocated = bump.alloc_str(s);
             self.used.fetch_add(s.len(), Ordering::Relaxed);
             // Safety: 分配的引用在 reset 前有效，bump 不会移动已分配内存
+            // （调用方通过 unsafe 块显式承担契约，见 trait Safety 文档）。
             unsafe { std::mem::transmute::<&str, &'a str>(allocated) }
         }
 
-        fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8] {
+        unsafe fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8] {
             let bump = self.bump.lock().unwrap();
             let allocated = bump.alloc_slice_copy(b);
             self.used.fetch_add(b.len(), Ordering::Relaxed);
@@ -302,8 +320,8 @@ mod tests {
     #[test]
     fn test_stack_pool_alloc_str() {
         let pool = StackPool::<256>::new();
-        let s1 = pool.alloc_str("hello");
-        let s2 = pool.alloc_str("world");
+        let s1 = unsafe { pool.alloc_str("hello") };
+        let s2 = unsafe { pool.alloc_str("world") };
         assert_eq!(s1, "hello");
         assert_eq!(s2, "world");
         assert_eq!(pool.used_bytes(), 10);
@@ -312,8 +330,8 @@ mod tests {
     #[test]
     fn test_stack_pool_alloc_bytes() {
         let pool = StackPool::<256>::new();
-        let b1 = pool.alloc_bytes(&[1, 2, 3]);
-        let b2 = pool.alloc_bytes(&[4, 5]);
+        let b1 = unsafe { pool.alloc_bytes(&[1, 2, 3]) };
+        let b2 = unsafe { pool.alloc_bytes(&[4, 5]) };
         assert_eq!(b1, &[1, 2, 3]);
         assert_eq!(b2, &[4, 5]);
         assert_eq!(pool.used_bytes(), 5);
@@ -322,9 +340,9 @@ mod tests {
     #[test]
     fn test_stack_pool_capacity_overflow() {
         let pool = StackPool::<8>::new();
-        let s1 = pool.alloc_str("hello");
+        let s1 = unsafe { pool.alloc_str("hello") };
         assert_eq!(s1, "hello");
-        let s2 = pool.alloc_str("world");
+        let s2 = unsafe { pool.alloc_str("world") };
         assert_eq!(s2, "world");
         assert_eq!(pool.used_bytes(), 5);
     }
@@ -332,7 +350,7 @@ mod tests {
     #[test]
     fn test_stack_pool_reset() {
         let pool = StackPool::<256>::new();
-        let _ = pool.alloc_str("hello");
+        let _ = unsafe { pool.alloc_str("hello") };
         assert_eq!(pool.used_bytes(), 5);
         pool.reset();
         assert_eq!(pool.used_bytes(), 0);
@@ -342,19 +360,19 @@ mod tests {
     fn test_stack_pool_used_bytes() {
         let pool = StackPool::<256>::new();
         assert_eq!(pool.used_bytes(), 0);
-        let _ = pool.alloc_str("abc");
+        let _ = unsafe { pool.alloc_str("abc") };
         assert_eq!(pool.used_bytes(), 3);
-        let _ = pool.alloc_bytes(&[1, 2]);
+        let _ = unsafe { pool.alloc_bytes(&[1, 2]) };
         assert_eq!(pool.used_bytes(), 5);
     }
 
     #[test]
     fn test_stack_pool_empty_alloc() {
         let pool = StackPool::<256>::new();
-        let s = pool.alloc_str("");
+        let s = unsafe { pool.alloc_str("") };
         assert_eq!(s, "");
         assert_eq!(pool.used_bytes(), 0);
-        let b = pool.alloc_bytes(&[][..]);
+        let b = unsafe { pool.alloc_bytes(&[][..]) };
         assert!(b.is_empty());
         assert_eq!(pool.used_bytes(), 0);
     }
@@ -363,7 +381,7 @@ mod tests {
     fn test_stack_pool_remaining() {
         let pool = StackPool::<256>::new();
         assert_eq!(pool.remaining(), 256);
-        let _ = pool.alloc_str("hello");
+        let _ = unsafe { pool.alloc_str("hello") };
         assert_eq!(pool.remaining(), 251);
     }
 
@@ -376,10 +394,10 @@ mod tests {
     #[test]
     fn test_stack_pool_request_isolation() {
         let pool = StackPool::<256>::new();
-        let s1 = pool.alloc_str("request1");
+        let s1 = unsafe { pool.alloc_str("request1") };
         assert_eq!(s1, "request1");
         pool.reset();
-        let s2 = pool.alloc_str("request2");
+        let s2 = unsafe { pool.alloc_str("request2") };
         assert_eq!(s2, "request2");
         assert_eq!(pool.used_bytes(), 8);
     }
@@ -388,7 +406,7 @@ mod tests {
     fn test_create_pool_stack() {
         let config = MemPoolConfig::default();
         let pool = create_pool(&config).unwrap();
-        let s = pool.alloc_str("hello");
+        let s = unsafe { pool.alloc_str("hello") };
         assert_eq!(s, "hello");
     }
 
@@ -409,7 +427,7 @@ mod tests {
                 capacity: cap,
             };
             let pool = create_pool(&config).unwrap();
-            let s = pool.alloc_str("test");
+            let s = unsafe { pool.alloc_str("test") };
             assert_eq!(s, "test");
         }
     }

@@ -5,6 +5,12 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-16（unsafe API 收紧）
+
+### Fixed
+
+- **MemPool unsafe fn 收紧（外部审查 HIGH 项，ADR-037）**：`MemPool::alloc_str`/`alloc_bytes` 从 safe fn 改为 **unsafe fn**（mem_pool.rs:61,70）——原 API 为 safe fn 却依赖"reset 前引用有效"的 unsafe 不变量，Safe Rust 调用方可触发 use-after-free 而无需 unsafe 块（unsound API）。trait Safety 文档强化（并发 reset 需调用方同步）。13 个 mem_pool 测试 + bumpalo-pool feature 462 测试通过。注：MemPool 生产 0 调用 + feature 默认关闭，无实际暴露
+
 ## [Unreleased] - 2026-08-15（幻影交付审计修复）
 
 > 审计报告：`docs/audit/2026-08-15-幻影交付审计报告.md`
