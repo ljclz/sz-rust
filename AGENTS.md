@@ -43,6 +43,7 @@
 | [sz-rust-auth-guard](.trae/skills/sz-rust-auth-guard/SKILL.md) | 路由/中间件变更 | auto |
 | [sz-rust-error-handling](.trae/skills/sz-rust-error-handling/SKILL.md) | Result 处理变更 | auto |
 | [sz-rust-ci-cd](.trae/skills/sz-rust-ci-cd/SKILL.md) | CI/Docker 变更 | auto |
+| [sz-rust-pr-review](.trae/skills/sz-rust-pr-review/SKILL.md) | 提交/PR 全量审查（diff+静态+安全门禁+报告） | auto |
 
 `preCommitCheck` 已配置前 4 个 auto Skill 为提交前必跑项。
 
