@@ -15,8 +15,8 @@ async fn main() {
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8403);
 
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let client = redis::Client::open(redis_url.as_str()).unwrap();
-    let conn = client.get_multiplexed_async_connection().await.unwrap();
+    let client = redis::Client::open(redis_url.as_str()).expect("Redis 连接失败");
+    let conn = client.get_multiplexed_async_connection().await.expect("Redis 连接池建立失败");
 
     let app = Router::new()
         .route("/simple", get(|| async { "Hello, World!" }))
@@ -26,6 +26,6 @@ async fn main() {
         .with_state(conn);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("绑定监听地址失败");
+    axum::serve(listener, app).await.expect("HTTP 服务启动失败");
 }

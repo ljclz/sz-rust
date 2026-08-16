@@ -455,7 +455,7 @@ mod tests {
             }));
         }
         for h in handles {
-            h.await.unwrap();
+            h.await.expect("并发注册任务应成功");
         }
         assert_eq!(registry.len(), 50);
 
@@ -478,7 +478,7 @@ mod tests {
             }));
         }
         for h in handles {
-            h.await.unwrap();
+            h.await.expect("并发注册任务应成功");
         }
         assert_eq!(registry.metrics().call_total, 100);
     }
@@ -525,7 +525,7 @@ mod tests {
             }));
         }
         for h in handles {
-            h.await.unwrap();
+            h.await.expect("并发注册任务应成功");
         }
         assert_eq!(registry.len(), 1);
     }

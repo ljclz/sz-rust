@@ -332,7 +332,7 @@ mod tests {
         let registry = CapabilityRegistry::new();
         let result = register_mcp_tools(&registry);
         assert!(result.is_ok());
-        let names = result.unwrap();
+        let names = result.expect("register_builtin_skills 应成功（前一行已断言 is_ok）");
         assert_eq!(names.len(), 21);
         assert!(names.contains(&"mcp.parse_path".to_string()));
         assert!(names.contains(&"mcp.sql_validate".to_string()));
@@ -404,7 +404,7 @@ mod tests {
         let skills = vec![Arc::new(DummySkill) as Arc<dyn Capability>];
         let result = register_builtin_skills(&registry, skills);
         assert!(result.is_ok());
-        let names = result.unwrap();
+        let names = result.expect("register_builtin_skills 应成功（前一行已断言 is_ok）");
         assert_eq!(names, vec!["dummy_skill"]);
         assert_eq!(registry.list_by_source(CapabilitySource::Skill).len(), 1);
     }
@@ -414,7 +414,7 @@ mod tests {
         let registry = CapabilityRegistry::new();
         let result = register_extended_mcp_tools(&registry);
         assert!(result.is_ok());
-        let names = result.unwrap();
+        let names = result.expect("register_builtin_skills 应成功（前一行已断言 is_ok）");
         assert_eq!(names.len(), 10, "应注册 10 个扩展工具");
         assert!(names.contains(&"mcp.crud_create".to_string()));
         assert!(names.contains(&"mcp.crud_read".to_string()));

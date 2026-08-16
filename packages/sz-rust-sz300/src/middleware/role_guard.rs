@@ -135,12 +135,17 @@ mod tests {
             .uri("/protected")
             .header("Authorization", format!("Bearer {}", token))
             .body(Body::empty())
-            .unwrap()
+            .expect("测试请求构造失败")
     }
 
     async fn fetch_body_string(resp: Response) -> String {
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
+        let bytes = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("响应体应为 UTF-8")
     }
 
     #[tokio::test]
@@ -150,7 +155,7 @@ mod tests {
             .method(Method::GET)
             .uri("/protected")
             .body(Body::empty())
-            .unwrap();
+            .expect("测试请求构造失败");
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         let body = fetch_body_string(resp).await;

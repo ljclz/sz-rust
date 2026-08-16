@@ -60,7 +60,7 @@ impl AppState {
     }
 
     fn register_device(&self, device_id: &str) {
-        let mut ids = self.device_ids.lock().unwrap();
+        let mut ids = self.device_ids.lock().unwrap_or_else(|e| e.into_inner());
         if !ids.iter().any(|d| d == device_id) {
             ids.push(device_id.to_string());
         }
@@ -83,11 +83,14 @@ impl AppState {
         // 温度超阈值 → 触发告警事件（state-facade 事件总线）
         if temperature > 60.0 {
             self.alert_count.fetch_add(1, Ordering::SeqCst);
-            self.alerts.lock().unwrap().push(json!({
-                "device_id": device_id,
-                "temperature": temperature,
-                "level": "critical",
-            }));
+            self.alerts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(json!({
+                    "device_id": device_id,
+                    "temperature": temperature,
+                    "level": "critical",
+                }));
             let _ = sz_rust_core::event::facade::dispatcher().trigger(
                 "TemperatureAlert",
                 &json!({"device_id": device_id, "temperature": temperature}),
@@ -99,7 +102,7 @@ impl AppState {
     fn status(&self, device_id: &str) -> Option<String> {
         self.cache
             .get(&format!("device:status:{device_id}"))
-            .unwrap()
+            .expect("缓存读取失败")
     }
 }
 
@@ -137,14 +140,18 @@ async fn device_status(
 }
 
 async fn alert_list(State(state): State<Arc<AppState>>) -> axum::response::Response {
-    let alerts = state.alerts.lock().unwrap().clone();
+    let alerts = state
+        .alerts
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     sz_rust_core::response::render_success(json!(alerts), "ok")
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> axum::response::Response {
     sz_rust_core::response::render_success(
         json!({
-            "device_count": state.device_ids.lock().unwrap().len(),
+            "device_count": state.device_ids.lock().unwrap_or_else(|e| e.into_inner()).len(),
             "report_count": state.report_count.load(Ordering::SeqCst),
             "alert_count": state.alert_count.load(Ordering::SeqCst),
         }),
@@ -178,9 +185,11 @@ async fn main() {
         .with_state(state);
 
     let addr = "127.0.0.1:8083";
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("绑定监听地址失败");
     tracing::info!(
         "IoT 示例运行于 http://{addr} （/device/{{id}}/report /device/{{id}}/status /device/alert/list）"
     );
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.expect("HTTP 服务启动失败");
 }

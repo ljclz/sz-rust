@@ -106,8 +106,12 @@ impl IpAccessControlConfig {
                 net
             } else if let Ok(ip) = IpAddr::from_str(entry) {
                 match ip {
-                    IpAddr::V4(v4) => ipnet::IpNet::V4(ipnet::Ipv4Net::new(v4, 32).unwrap()),
-                    IpAddr::V6(v6) => ipnet::IpNet::V6(ipnet::Ipv6Net::new(v6, 128).unwrap()),
+                    IpAddr::V4(v4) => ipnet::IpNet::V4(
+                        ipnet::Ipv4Net::new(v4, 32).expect("IPv4 /32 前缀必然合法"),
+                    ),
+                    IpAddr::V6(v6) => ipnet::IpNet::V6(
+                        ipnet::Ipv6Net::new(v6, 128).expect("IPv6 /128 前缀必然合法"),
+                    ),
                 }
             } else {
                 return Err(IpAccessControlError::InvalidIpOrCidr {

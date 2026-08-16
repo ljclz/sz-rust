@@ -76,7 +76,11 @@ async fn main() {
         .expect("invalid address");
 
     let router = build_router();
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("绑定监听地址失败");
     println!("axum native benchmark server on {}", addr);
-    axum::serve(listener, router).await.unwrap();
+    axum::serve(listener, router)
+        .await
+        .expect("HTTP 服务启动失败");
 }

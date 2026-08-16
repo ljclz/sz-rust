@@ -26,8 +26,8 @@ async fn main() -> std::io::Result<()> {
         .unwrap_or(8402);
 
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let client = redis::Client::open(redis_url.as_str()).unwrap();
-    let conn = client.get_multiplexed_async_connection().await.unwrap();
+    let client = redis::Client::open(redis_url.as_str()).expect("Redis 连接失败");
+    let conn = client.get_multiplexed_async_connection().await.expect("Redis 连接池建立失败");
 
     HttpServer::new(move || {
         App::new()

@@ -731,7 +731,12 @@ mod tests {
             "application/json; charset=utf-8"
         );
 
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert!(body.contains("Unsupported API version"));
         assert!(body.contains("v99"));
@@ -763,10 +768,15 @@ mod tests {
             .method(Method::GET)
             .uri("/api/v2/users")
             .body(Body::empty())
-            .unwrap();
+            .expect("测试请求构造失败");
 
-        let response = app.oneshot(req).await.unwrap();
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response = app.oneshot(req).await.expect("测试请求执行失败");
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert_eq!(body, "version=2");
     }
@@ -792,9 +802,9 @@ mod tests {
             .method(Method::GET)
             .uri("/api/v99/users")
             .body(Body::empty())
-            .unwrap();
+            .expect("测试请求构造失败");
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.oneshot(req).await.expect("测试请求执行失败");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
@@ -821,10 +831,15 @@ mod tests {
             .method(Method::GET)
             .uri("/users")
             .body(Body::empty())
-            .unwrap();
+            .expect("测试请求构造失败");
 
-        let response = app.oneshot(req).await.unwrap();
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let response = app.oneshot(req).await.expect("测试请求执行失败");
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert_eq!(body, "version=2");
     }
@@ -853,9 +868,14 @@ mod tests {
             .method(Method::GET)
             .uri("/api/v1/users")
             .body(Body::empty())
-            .unwrap();
-        let response = router.clone().oneshot(req).await.unwrap();
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            .expect("测试请求构造失败");
+        let response = router.clone().oneshot(req).await.expect("测试请求执行失败");
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
         assert_eq!(String::from_utf8_lossy(&bytes), "v1 response");
 
         // v2 路由
@@ -863,9 +883,14 @@ mod tests {
             .method(Method::GET)
             .uri("/api/v2/users")
             .body(Body::empty())
-            .unwrap();
-        let response = router.oneshot(req).await.unwrap();
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            .expect("测试请求构造失败");
+        let response = router.oneshot(req).await.expect("测试请求执行失败");
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
         assert_eq!(String::from_utf8_lossy(&bytes), "v2 response");
     }
 
@@ -883,8 +908,8 @@ mod tests {
             .method(Method::GET)
             .uri("/v1/posts")
             .body(Body::empty())
-            .unwrap();
-        let response = router.oneshot(req).await.unwrap();
+            .expect("测试请求构造失败");
+        let response = router.oneshot(req).await.expect("测试请求执行失败");
         assert_eq!(response.status(), StatusCode::OK);
     }
 
@@ -904,8 +929,8 @@ mod tests {
             .method(Method::GET)
             .uri("/api/v3/users")
             .body(Body::empty())
-            .unwrap();
-        let response = router.oneshot(req).await.unwrap();
+            .expect("测试请求构造失败");
+        let response = router.oneshot(req).await.expect("测试请求执行失败");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

@@ -92,13 +92,13 @@ impl AppState {
     }
 
     fn list(&self) -> Vec<Post> {
-        self.posts.lock().unwrap().clone()
+        self.posts.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn find(&self, id: i64) -> Option<Post> {
         self.posts
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .find(|p| p.id == id)
             .cloned()
@@ -112,7 +112,10 @@ impl AppState {
             content: content.to_string(),
             author: author.to_string(),
         };
-        self.posts.lock().unwrap().push(post.clone());
+        self.posts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(post.clone());
 
         // 缓存失效：新帖发布后列表缓存必须重建（读多写少的缓存一致性）
         self.cache.delete("posts:list").ok();
@@ -127,7 +130,7 @@ impl AppState {
     }
 
     fn delete(&self, id: i64) -> bool {
-        let mut posts = self.posts.lock().unwrap();
+        let mut posts = self.posts.lock().unwrap_or_else(|e| e.into_inner());
         let before = posts.len();
         posts.retain(|p| p.id != id);
         let removed = posts.len() != before;
@@ -249,7 +252,9 @@ async fn main() {
         .with_state(state);
 
     let addr = "127.0.0.1:8081";
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("绑定监听地址失败");
     tracing::info!("博客示例运行于 http://{addr} （/post/list /post/create /post/stats）");
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.expect("HTTP 服务启动失败");
 }

@@ -42,6 +42,19 @@
 - **首次全量运行暴露既有债务**：生产代码 51 处裸 unwrap（铁律 2）——pre-commit 钩子此前仅警告，现以 high 阻塞；已登记 doc-debt（DB-2026-08-16-04，限期 08-19）
 - 验证（真实输出）：全量 15 项门禁 EXIT=1（unwrap 51 处正确阻塞；此前 EXIT=0 为管道干扰误读）；check/clippy/test/integration/AI 各环节通过
 
+## [Unreleased] - 2026-08-16（unwrap 专项清偿：51 处生产裸 unwrap → 0）
+
+### Fixed
+
+- **生产代码裸 unwrap 专项清偿**（铁律 2，doc-debt DB-2026-08-16-04 RESOLVED）：
+  - `lock().unwrap()` 13 处 → `unwrap_or_else(|e| e.into_inner())`（锁中毒恢复，无 panic；mem_pool 3 + examples bin 10）
+  - 启动阶段 `bind().await` / `serve().await` unwrap → `expect("绑定监听地址失败"/"HTTP 服务启动失败")`（铁律 2 允许启动阶段 expect；examples bin 10 处 + perf-compare 4 处）
+  - 测试辅助函数 unwrap → `expect("测试请求构造失败"等)`（api_version 6 / handler_as_middleware 3 / role_guard 3 / mcp 3）
+  - 生产必有值 unwrap → `expect("明确原因")`（capability 3 / workflow 2 / ip_access_control 2 / examples 6）
+  - perf-compare 基准 11 处（Redis/启动）→ expect
+- **附带修复**：core container 测试预存漂移（hostport 断言 8802→3306，与 config/database.yml 一致）
+- 验证（真实输出）：AUTHORITATIVE_PROD_UNWRAP=0；cargo check 0 errors；受影响 crate 测试 1597 passed / 0 failed；clippy --workspace --all-targets -D warnings 0 警告；fmt 干净
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed
