@@ -21,15 +21,19 @@ agentMode: auto
 # 静态审查
 bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --severity-threshold medium
 
-# 静态 + AI 评审（需 CSDN_API_KEY）
-export CSDN_API_KEY=xxx
+# 静态 + AI 评审（OpenAI 兼容 Provider，默认 CSDN）
+export AI_API_KEY=xxx   # 兼容旧变量名 CSDN_API_KEY
+bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
+
+# 切换 Provider 示例（快手 KAT-Coder-Pro-V2.5）
+export AI_API_KEY=fPJ... AI_BASE_URL=https://wanqing.streamlakeapi.com/api/gateway/coding/v1 AI_MODEL=KAT-Coder-Pro-V2.5
 bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
 ```
 
 参数：
 - `--range <git-range>`：审查范围（默认 `HEAD~1..HEAD`；PR 场景用 `main...HEAD`）
 - `--severity-threshold <low|medium|high|critical>`：阻塞阈值（默认 medium，≥ 阈值的问题导致审查失败、禁止合入）
-- `--ai`：启用 AI 评审环节（CSDN OpenAI 兼容端点 `https://ai.csdn.net/api/model/v1/chat/completions`，`model=glm_for_coding` 套餐，底层 glm-5.2 上限 200k；`CSDN_API_KEY` 环境变量）
+- `--ai`：启用 AI 评审环节（OpenAI 兼容端点。默认 CSDN：`https://ai.csdn.net/api/model/v1` + `model=glm_for_coding` 套餐；可用 `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` 三个环境变量切换任意 OpenAI 兼容 Provider，如快手 `https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`；`CSDN_API_KEY` 为旧变量名兼容）
 - `--report <path>`：报告输出路径（默认 `docs/audit/<date>-pr-review-<branch>.md`）
 
 ## 状态机

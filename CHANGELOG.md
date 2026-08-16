@@ -15,7 +15,8 @@
   - 严重度模型：critical（clippy 编译错误 / EXPOSED）/ high（feature 门禁）/ medium（fmt / lint / whitespace）/ low（doc/adr/assertion WARN），`--severity-threshold` 控制阻塞阈值
   - 报告：`docs/audit/<date>-pr-review-<branch>.md`（状态流转 + 问题清单 + 结论）
   - 验证（真实输出）：当前工作区审查正确识别 3 个问题（fmt medium + clippy critical/lint）→ EXIT=1 阻塞；非法 range → fail-closed
-  - **AI 评审环节（2026-08-16 接入）**：`--ai` 参数启用，CSDN OpenAI 兼容端点（`https://ai.csdn.net/api/model/v1/chat/completions`，`model=glm_for_coding` 套餐，底层 glm-5.2 上限 200k，`CSDN_API_KEY` 环境变量）；prompt 设计对齐文章 ai_reviewer（diff 截断 8000 字符 + 问题清单 → 3-5 个最重要问题 + 建议 + 评分）；无 key/请求失败/解析失败 → medium 问题如实记录；AI 结论只进报告不影响阻塞判定
+  - **AI 评审环节（2026-08-16 接入）**：`--ai` 参数启用，OpenAI 兼容端点通用配置（`AI_API_KEY`/`AI_BASE_URL`/`AI_MODEL`，默认 CSDN `https://ai.csdn.net/api/model/v1` + `model=glm_for_coding` 套餐，旧变量名 `CSDN_API_KEY` 兼容）；prompt 设计对齐文章 ai_reviewer（diff 截断 8000 字符 + 问题清单 → 3-5 个最重要问题 + 建议 + 评分）；无 key/请求失败/解析失败 → medium 问题如实记录；AI 结论只进报告不影响阻塞判定
+  - **快手 Provider 实测通过（2026-08-16）**：`https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`，全量审查 EXIT=0，AI 评审给出 3 条有效建议（错误脱敏/临时文件 mktemp/python 版本保护，采纳 2 条）；编码 bug 修复（Windows python 管道 GBK → 强制 UTF-8）；错误信息增强（输出 Provider 原始 error 详情）
   - 说明：`sz-rust-ai-facade::llm::OpenAiProvider`（llm/openai.rs）为同协议库实现（早已存在，非本次新增），可配置 CSDN base_url/model 供 Rust 应用接线（如 sz300 /api/v1/ai/chat 真实化）
 
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）

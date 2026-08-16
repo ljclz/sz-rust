@@ -16,7 +16,7 @@
 | 依赖 | 说明 |
 |------|------|
 | git / cargo / node | 已有（门禁脚本依赖 node，静态检查依赖 cargo） |
-| CSDN_API_KEY（可选） | 仅 `--ai` 需要；CSDN 模型广场 → 密钥管理获取；`export CSDN_API_KEY=sk-xxx` |
+| AI_API_KEY（可选） | 仅 `--ai` 需要；OpenAI 兼容 Provider 的密钥（默认 CSDN，可用 `AI_BASE_URL`/`AI_MODEL` 切换，如快手 `https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`）；旧变量名 `CSDN_API_KEY` 兼容 |
 
 > 无 key 也能跑静态审查；`--ai` 无 key 时如实记录 `missing-key`（medium）问题，不静默。
 
@@ -26,8 +26,12 @@
 # 1. 静态审查（默认审查最近一次提交）
 bash scripts/audit/pr-review.sh --range HEAD~1..HEAD
 
-# 2. 静态 + AI 评审
-export CSDN_API_KEY=sk-xxx
+# 2. 静态 + AI 评审（默认 CSDN glm_for_coding）
+export AI_API_KEY=sk-xxx
+bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
+
+# 2b. AI 评审（切换快手 Provider）
+export AI_API_KEY=fPJ... AI_BASE_URL=https://wanqing.streamlakeapi.com/api/gateway/coding/v1 AI_MODEL=KAT-Coder-Pro-V2.5
 bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
 
 # 3. 审查整个分支相对 main 的改动
@@ -69,8 +73,9 @@ scanning → static → security → ai(可选) → done / failed
 
 ## 六、AI 评审环节
 
-- **端点**：`https://ai.csdn.net/api/model/v1/chat/completions`（OpenAI 兼容）
-- **模型**：`glm_for_coding`（套餐计费，底层 glm-5.2，上限 200k token；勿填 `glm-5.1`/`glm-5.2` 以免按普通模型计费）
+- **协议**：OpenAI 兼容（`POST {AI_BASE_URL}/chat/completions`，Bearer 鉴权），任意兼容端点可切换
+- **默认端点（CSDN）**：`https://ai.csdn.net/api/model/v1` + `model=glm_for_coding`（套餐计费，底层 glm-5.2，上限 200k token；勿填 `glm-5.1`/`glm-5.2` 以免按普通模型计费）
+- **已验证 Provider（快手）**：`https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`（2026-08-16 实测通过，评审输出含推理过程）
 - **Prompt 设计**：diff（截断 8000 字符）+ 已发现问题清单 → 要求输出 3-5 个最重要问题（性能/安全/可维护性/并发）+ 修改建议 + 1-10 评分，只输出 Markdown
 - **输出位置**：报告"补充信息 → AI 评审"章节；**不影响阻塞判定**（AI 结论仅供参考）
 
@@ -92,7 +97,7 @@ scanning → static → security → ai(可选) → done / failed
 
 | 现象 | 原因与处理 |
 |------|-----------|
-| 报告出现 `missing-key`（medium） | `CSDN_API_KEY` 未设置或拼写错误；`export CSDN_API_KEY=sk-xxx` 后重跑 `--ai` |
+| 报告出现 `missing-key`（medium） | `AI_API_KEY`（或旧 `CSDN_API_KEY`）未设置或拼写错误；export 后重跑 `--ai` |
 | 报告出现 `compile-error`（critical） | 工作区存在编译失败（可能是并行开发中的未完成代码）；修复后重跑 |
 | 提示"变更集为空" | `--range` 范围内无改动；换范围（如 `main...HEAD`） |
 | 报告显示 `failed` | 某环节命令失败（如 git range 非法）；按输出定位 |
