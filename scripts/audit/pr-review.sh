@@ -41,8 +41,7 @@ done
 # 临时文件（AI 评审建议：mktemp 防多实例竞态）
 TMPDIR_PREFIX="${TMPDIR:-/tmp}/pr-review"
 AI_ERR_LOG=$(mktemp "${TMPDIR_PREFIX}-ai-err.XXXXXX.log" 2>/dev/null || echo "/tmp/pr-review-ai-err.log")
-AI_BODY_TMP=$(mktemp "${TMPDIR_PREFIX}-body.XXXXXX.json" 2>/dev/null || echo "/tmp/pr-review-body.json")
-trap 'rm -f "$AI_ERR_LOG" "$AI_BODY_TMP"' EXIT
+trap 'rm -f "$AI_ERR_LOG"' EXIT
 
 SEVERITY_ORDER=(low medium high critical)
 THRESHOLD_IDX=1  # medium 默认
@@ -81,7 +80,7 @@ DIFF_CHECK=$(git diff --check "$RANGE" 2>&1)
 if [ -n "$DIFF_CHECK" ]; then
   note_issue "medium" "diff" "whitespace-error" "空白/冲突标记错误: $(echo "$DIFF_CHECK" | head -3 | tr '\n' ' ')"
 fi
-if ! echo "$DIFF_STAT" | grep -qE "[0-9]+ files? changed"; then
+if ! echo "$DIFF_STAT" | grep -qE "^ [0-9]+ files? changed"; then
   echo "⚠️ 变更集为空（$RANGE），仍执行静态检查"
 fi
 EXTRA+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
@@ -157,7 +156,8 @@ ${DIFF_TEXT}
     # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
     AI_BODY=$(REVIEW_PROMPT="$PROMPT" AI_MODEL="$AI_MODEL" python -c '
 import json, os, sys
-sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 print(json.dumps({
     "model": os.environ["AI_MODEL"],
     "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
@@ -179,7 +179,7 @@ if "error" in data:
     sys.exit(1)
 print(data["choices"][0]["message"]["content"])
 ' 2>"$AI_ERR_LOG"); then
-        EXTRA+=$'\n## AI 评审\n\n'"$AI_REVIEW"$'\n'
+        EXTRA+=$'\n## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）\n\n'"$AI_REVIEW"$'\n'
         echo "✅ AI 评审完成"
       else
         note_issue "medium" "ai" "parse-failed" "AI 响应解析失败: $(head -c 120 "$AI_ERR_LOG")"

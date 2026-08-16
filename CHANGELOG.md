@@ -19,6 +19,18 @@
   - **快手 Provider 实测通过（2026-08-16）**：`https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`，全量审查 EXIT=0，AI 评审给出 3 条有效建议（错误脱敏/临时文件 mktemp/python 版本保护，采纳 2 条）；编码 bug 修复（Windows python 管道 GBK → 强制 UTF-8）；错误信息增强（输出 Provider 原始 error 详情）
   - 说明：`sz-rust-ai-facade::llm::OpenAiProvider`（llm/openai.rs）为同协议库实现（早已存在，非本次新增），可配置 CSDN base_url/model 供 Rust 应用接线（如 sz300 /api/v1/ai/chat 真实化）
 
+## [Unreleased] - 2026-08-16（AI 交叉审查修复：stdout 版本保护 + 死变量清理 + 报告标注）
+
+### Fixed
+
+- **外部 AI 审查发现并核实 3 处真实问题**（交叉验证 `docs/audit/2026-08-16-pr-review-main.md`）：
+  - `pr-review.sh` stdout reconfigure 无 hasattr 保护（:160，与 stdin :174 不一致）——上轮"采纳 AI 建议"的批量替换因模式不匹配（`glm_for_coding` vs `os.environ["AI_MODEL"]`）静默失败，只生效了 mktemp 与 stdin 保护；已补 stdout 保护
+  - 死变量 `AI_BODY_TMP`（定义未使用）已清理
+  - 报告格式误导：AI 评审意见不进入 ISSUES 计数（设计如此）但未标注——现标注"仅供参考：不进入问题计数，不参与阻塞判定"
+- 正则加 `^` 行首锚定（外部 AI 建议 #4，低风险加固）
+
+> 教训：批量代码替换必须逐项验证落地（本次静默失败源于 python str.replace 无匹配返回原串且未 assert）
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed
