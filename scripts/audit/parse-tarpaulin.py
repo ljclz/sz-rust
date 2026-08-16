@@ -19,12 +19,16 @@ def main() -> None:
     total_cov = total_lines = 0
     rows = []
     for f in files:
-        name = (f.get("name") or f.get("path") or "").replace("\\", "/")
+        raw = f.get("name") or f.get("path") or ""
+        if isinstance(raw, list):
+            name = "/".join(raw).replace("\\", "/")
+        else:
+            name = str(raw).replace("\\", "/")
         if filt not in name:
             continue
         stats = f.get("coverage", {})
-        covered = stats.get("covered_lines", 0)
-        total = stats.get("total_lines", 0)
+        covered = stats.get("covered_lines", f.get("covered", 0))
+        total = stats.get("total_lines", f.get("coverable", 0))
         rows.append((name, covered, total))
         total_cov += covered
         total_lines += total
