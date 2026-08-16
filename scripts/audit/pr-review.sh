@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # PR 审查编排（sz-rust-pr-review Skill 的执行入口）
 #
-# 状态机: scanning → static → security → done / failed（任一步失败即 FAILED，退出非零）
-# 环节:   git diff 扫描 → fmt+clippy → 门禁脚本 → 汇总报告
+# 状态机: scanning → static → security → ai(可选) → done / failed（任一步失败即 FAILED，退出非零）
+# 环节:   git diff 扫描 → fmt+clippy → 门禁脚本 → AI 评审(--ai) → 汇总报告
 # 严重度: critical / high / medium / low；--severity-threshold 控制阻塞门禁（默认 medium）
 #
 # 用法:
-#   bash scripts/audit/pr-review.sh --range HEAD~1..HEAD [--severity-threshold medium] [--report path]
-# 依赖: git / cargo / node（门禁脚本）
+#   bash scripts/audit/pr-review.sh --range HEAD~1..HEAD [--severity-threshold medium] [--ai] [--report path]
+# 依赖: git / cargo / node（门禁脚本）；--ai 需要 CSDN_API_KEY（OpenAI 兼容端点，model=glm_for_coding 套餐）
 # fail-closed: 任何环节命令失败或输出不可解析 → 该环节失败 → 整体退出非零
 
 set -uo pipefail
@@ -27,11 +27,13 @@ fi
 RANGE="HEAD~1..HEAD"
 THRESHOLD="medium"
 REPORT=""
+AI=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --range) RANGE="$2"; shift 2 ;;
     --severity-threshold) THRESHOLD="$2"; shift 2 ;;
     --report) REPORT="$2"; shift 2 ;;
+    --ai) AI=1; shift ;;
     *) echo "未知参数: $1"; exit 2 ;;
   esac
 done
@@ -45,8 +47,9 @@ done
 # ---- 状态机 ----
 STATE="scanning"
 TRANSITIONS=""
-BODY=""          # 报告正文累积
-ISSUES=""        # 问题清单（severity|file|rule|message 每行）
+ISSUES_BODY=""   # 问题清单（报告 markdown 行）
+EXTRA=""         # 变更集 / AI 评审等补充章节
+ISSUES=""        # 问题清单（severity|file|rule|message 每行，供解析）
 FAILED=0
 
 fail() {
@@ -57,7 +60,7 @@ fail() {
 note_issue() { # note_issue <severity> <file> <rule> <message>
   local sev="$1"
   ISSUES+="$sev|$2|$3|$4"$'\n'
-  BODY+="- [$sev] \`$2\` **$3**: $4"$'\n'
+  ISSUES_BODY+="- [$sev] \`$2\` **$3**: $4"$'\n'
 }
 transition() {
   TRANSITIONS+="$STATE → $1; "
@@ -75,7 +78,7 @@ fi
 if [ -z "$(echo "$DIFF_STAT" | sed '/^$/d' | tail -n +3)" ]; then
   echo "⚠️ 变更集为空（$RANGE），仍执行静态检查"
 fi
-BODY+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
+EXTRA+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
 
 # ---- 环节 2: 静态检查（fmt + clippy） ----
 transition "static" "cargo fmt --all --check"
@@ -110,6 +113,64 @@ run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
 run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
 
+# ---- 环节 4（可选）: AI 评审（CSDN OpenAI 兼容端点，model=glm_for_coding 套餐） ----
+AI_REVIEW=""
+if [ "$AI" -eq 1 ]; then
+  transition "ai" "AI 评审（CSDN glm_for_coding）"
+  if [ -z "${CSDN_API_KEY:-}" ]; then
+    note_issue "medium" "ai" "missing-key" "CSDN_API_KEY 未设置，AI 评审跳过（设置后重跑 --ai）"
+  else
+    # prompt 设计（对齐文章 ai_reviewer）：diff + 问题清单 → 3-5 个最重要问题 + 建议 + 评分
+    DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
+    ISSUES_TEXT=$(printf '%s' "$ISSUES" | head -c 3000)
+    PROMPT="你是一个资深 Rust 工程师。请评审以下 PR 变更（sz-rust 项目）。
+
+要求：
+1. 结合已发现的静态问题清单，列出 3-5 个最重要的潜在问题（性能/安全/可维护性/并发）
+2. 给出具体修改建议（带代码示例）
+3. 整体评分 1-10
+
+已发现的问题清单:
+\`\`\`
+${ISSUES_TEXT}
+\`\`\`
+
+PR diff（截断至 8000 字符）:
+\`\`\`
+${DIFF_TEXT}
+\`\`\`
+
+只输出 Markdown，不要闲聊。"
+    # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
+    AI_BODY=$(REVIEW_PROMPT="$PROMPT" python -c '
+import json, os
+print(json.dumps({
+    "model": "glm_for_coding",
+    "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
+    "temperature": 0.2,
+}))
+')
+    if AI_RESP=$(curl -sS --max-time 120 \
+      -X POST "https://ai.csdn.net/api/model/v1/chat/completions" \
+      -H "Authorization: Bearer ${CSDN_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$AI_BODY" 2>/tmp/pr-review-ai-err.log); then
+      if AI_REVIEW=$(printf '%s' "$AI_RESP" | python -c '
+import json, sys
+data = json.load(sys.stdin)
+print(data["choices"][0]["message"]["content"])
+' 2>/tmp/pr-review-ai-err.log); then
+        EXTRA+=$'\n## AI 评审\n\n'"$AI_REVIEW"$'\n'
+        echo "✅ AI 评审完成"
+      else
+        note_issue "medium" "ai" "parse-failed" "AI 响应解析失败: $(head -c 120 /tmp/pr-review-ai-err.log)"
+      fi
+    else
+      note_issue "medium" "ai" "http-failed" "AI 请求失败: $(head -c 120 /tmp/pr-review-ai-err.log)"
+    fi
+  fi
+fi
+
 # ---- 汇总: 严重度计数与阻塞判定 ----
 transition "done" "汇总报告"
 declare -A COUNTS=([critical]=0 [high]=0 [medium]=0 [low]=0)
@@ -140,7 +201,12 @@ REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
   if [ -z "$ISSUES" ]; then
     echo "✅ 未发现问题"
   else
-    echo "$BODY"
+    echo "$ISSUES_BODY"
+  fi
+  if [ -n "$EXTRA" ]; then
+    echo ""
+    echo "## 补充信息"
+    echo "$EXTRA"
   fi
   echo ""
   echo "## 结论"
