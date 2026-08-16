@@ -207,9 +207,12 @@ done <<< "$ISSUES"
 # ---- 写报告 ----
 DATE=$(date +%Y-%m-%d)
 BRANCH=$(git branch --show-current)
+REVIEW_HEAD=$(git rev-parse --short HEAD)
 REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
 {
   echo "# PR 审查报告（$DATE，branch: $BRANCH，range: $RANGE）"
+  echo ""
+  echo "> 审查时点: \`HEAD @ $REVIEW_HEAD\`（报告为时点快照；后续新提交不在本报告范围内）"
   echo ""
   echo "## 状态机"
   echo "- ${TRANSITIONS}最终状态: **${STATE}**"
