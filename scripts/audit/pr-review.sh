@@ -75,7 +75,7 @@ DIFF_CHECK=$(git diff --check "$RANGE" 2>&1)
 if [ -n "$DIFF_CHECK" ]; then
   note_issue "medium" "diff" "whitespace-error" "空白/冲突标记错误: $(echo "$DIFF_CHECK" | head -3 | tr '\n' ' ')"
 fi
-if [ -z "$(echo "$DIFF_STAT" | sed '/^$/d' | tail -n +3)" ]; then
+if ! echo "$DIFF_STAT" | grep -qE "[0-9]+ files? changed"; then
   echo "⚠️ 变更集为空（$RANGE），仍执行静态检查"
 fi
 EXTRA+=$'\n## 变更集\n```\n'"$DIFF_STAT"$'\n```\n'
@@ -143,7 +143,8 @@ ${DIFF_TEXT}
 只输出 Markdown，不要闲聊。"
     # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
     AI_BODY=$(REVIEW_PROMPT="$PROMPT" python -c '
-import json, os
+import json, os, sys
+sys.stdout.reconfigure(encoding="utf-8")
 print(json.dumps({
     "model": "glm_for_coding",
     "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
@@ -157,7 +158,11 @@ print(json.dumps({
       -d "$AI_BODY" 2>/tmp/pr-review-ai-err.log); then
       if AI_REVIEW=$(printf '%s' "$AI_RESP" | python -c '
 import json, sys
+sys.stdin.reconfigure(encoding="utf-8")
 data = json.load(sys.stdin)
+if "error" in data:
+    print("CSDN API 错误: " + json.dumps(data["error"], ensure_ascii=False), file=sys.stderr)
+    sys.exit(1)
 print(data["choices"][0]["message"]["content"])
 ' 2>/tmp/pr-review-ai-err.log); then
         EXTRA+=$'\n## AI 评审\n\n'"$AI_REVIEW"$'\n'
