@@ -425,15 +425,15 @@ fn test_parity_build_internal_save_name_no_extension_path() {
 // 组 3：PHP `File::hashName` 默认规则对齐
 // ============================================================================
 
-#[test]
-fn test_parity_hash_name_default_rule_format() {
+#[tokio::test]
+async fn test_parity_hash_name_default_rule_format() {
     // PHP File.php 第 195 行：
     //   $this->hashName = date('Ymd') . DIRECTORY_SEPARATOR . md5(microtime(true) . $this->getPathname());
     //
     // 格式：{Ymd}/{md5(microtime.pathname)}{.ext}
     let temp_path = create_temp_file("test.jpg", b"test content");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+    let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
     // 必须包含 /
     assert!(
@@ -457,12 +457,12 @@ fn test_parity_hash_name_default_rule_format() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_parity_hash_name_default_rule_md5_length() {
+#[tokio::test]
+async fn test_parity_hash_name_default_rule_md5_length() {
     // PHP: md5() 返回 32 位十六进制字符串
     let temp_path = create_temp_file("test.jpg", b"test content");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+    let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
     let parts: Vec<&str> = hash_name.split('/').collect();
     let hash_with_ext = parts[1];
@@ -488,14 +488,14 @@ fn test_parity_hash_name_default_rule_md5_length() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_parity_hash_name_default_rule_extension_appended() {
+#[tokio::test]
+async fn test_parity_hash_name_default_rule_extension_appended() {
     // PHP 第 201-202 行：
     //   $extension = $this->extension ?? $this->extension();
     //   return $this->hashName . ($extension ? '.' . $extension : '');
     let temp_path = create_temp_file("photo.png", b"png content");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+    let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
     assert!(
         hash_name.ends_with(".png"),
@@ -506,14 +506,14 @@ fn test_parity_hash_name_default_rule_extension_appended() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_parity_hash_name_default_rule_caching() {
+#[tokio::test]
+async fn test_parity_hash_name_default_rule_caching() {
     // PHP: if (!$this->hashName) — 缓存机制，多次调用返回相同结果
     let temp_path = create_temp_file("cache.jpg", b"cached content");
     let mut file = File::new(&temp_path, false).unwrap();
 
-    let hash1 = file.hash_name(HashNameRule::Default).unwrap();
-    let hash2 = file.hash_name(HashNameRule::Default).unwrap();
+    let hash1 = file.hash_name(HashNameRule::Default).await.unwrap();
+    let hash2 = file.hash_name(HashNameRule::Default).await.unwrap();
 
     assert_eq!(
         hash1, hash2,
@@ -527,8 +527,8 @@ fn test_parity_hash_name_default_rule_caching() {
 // 组 4：PHP `File::hashName('md5')` 规则对齐
 // ============================================================================
 
-#[test]
-fn test_parity_hash_name_md5_rule_format() {
+#[tokio::test]
+async fn test_parity_hash_name_md5_rule_format() {
     // PHP File.php 第 187-190 行：
     //   case in_array($rule, hash_algos()):
     //       $hash = $this->hash($rule);
@@ -540,9 +540,12 @@ fn test_parity_hash_name_md5_rule_format() {
     let mut file = File::new(&temp_path, false).unwrap();
 
     // 先获取文件 md5
-    let file_md5 = file.hash(HashAlgo::Md5).unwrap();
+    let file_md5 = file.hash(HashAlgo::Md5).await.unwrap();
 
-    let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+    let hash_name = file
+        .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+        .await
+        .unwrap();
 
     // 格式：{md5[0..2]}/{md5[2..]}.ext
     let parts: Vec<&str> = hash_name.split('/').collect();
@@ -565,12 +568,15 @@ fn test_parity_hash_name_md5_rule_format() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_parity_hash_name_md5_rule_total_length() {
+#[tokio::test]
+async fn test_parity_hash_name_md5_rule_total_length() {
     // PHP: md5 总长 32 位，分隔符 1 位 → 33 位（不含扩展名）
     let temp_path = create_temp_file("md5len.jpg", b"length test");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+    let hash_name = file
+        .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+        .await
+        .unwrap();
 
     // 去掉 .jpg 扩展名
     let name_without_ext = hash_name
@@ -592,17 +598,20 @@ fn test_parity_hash_name_md5_rule_total_length() {
 // 组 5：PHP `File::hashName('sha1')` 规则对齐
 // ============================================================================
 
-#[test]
-fn test_parity_hash_name_sha1_rule_format() {
+#[tokio::test]
+async fn test_parity_hash_name_sha1_rule_format() {
     // PHP: 同 md5 规则，但使用 sha1 算法（40 位 hex）
     // 格式：{sha1[0..2]}/{sha1[2..]}{.ext}
     let temp_path = create_temp_file("sha1.jpg", b"sha1 content");
     let mut file = File::new(&temp_path, false).unwrap();
 
     // 先获取文件 sha1
-    let file_sha1 = file.hash(HashAlgo::Sha1).unwrap();
+    let file_sha1 = file.hash(HashAlgo::Sha1).await.unwrap();
 
-    let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Sha1)).unwrap();
+    let hash_name = file
+        .hash_name(HashNameRule::Hash(HashAlgo::Sha1))
+        .await
+        .unwrap();
 
     let parts: Vec<&str> = hash_name.split('/').collect();
     assert_eq!(parts.len(), 2, "hash_name should have 2 parts");
@@ -619,12 +628,15 @@ fn test_parity_hash_name_sha1_rule_format() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_parity_hash_name_sha1_rule_total_length() {
+#[tokio::test]
+async fn test_parity_hash_name_sha1_rule_total_length() {
     // PHP: sha1 总长 40 位，分隔符 1 位 → 41 位（不含扩展名）
     let temp_path = create_temp_file("sha1len.jpg", b"length test");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Sha1)).unwrap();
+    let hash_name = file
+        .hash_name(HashNameRule::Hash(HashAlgo::Sha1))
+        .await
+        .unwrap();
 
     let name_without_ext = hash_name
         .rsplit_once('.')
@@ -890,7 +902,7 @@ async fn test_parity_local_upload_external_uses_copy() {
 
     // 模拟 PHP $driver->setUploadFile('iFile')
     let uploaded = UploadedFile::new(&source_path, "source.jpg", None, Some(0), true).unwrap();
-    engine.set_upload_file(&uploaded).unwrap();
+    engine.set_upload_file(&uploaded).await.unwrap();
 
     // 模拟 PHP $driver->upload() — 外部上传返回 save_name
     let result = engine.upload().await;
@@ -952,7 +964,10 @@ async fn test_parity_local_upload_internal_uses_rename() {
     let mut engine = LocalStorageEngine::new(config);
 
     // 模拟 PHP $driver->setUploadFileByReal($filePath, $extension)
-    engine.set_upload_file_by_real(&source_path, "jpg").unwrap();
+    engine
+        .set_upload_file_by_real(&source_path, "jpg")
+        .await
+        .unwrap();
 
     // 验证 is_internal 状态
     assert!(engine.is_internal(), "is_internal should be true");
@@ -1006,7 +1021,7 @@ async fn test_parity_local_upload_internal_failure_sets_error() {
     let mut engine = LocalStorageEngine::new(config);
 
     // set_upload_file_by_real 会检查文件存在
-    let result = engine.set_upload_file_by_real(&fake_source, "jpg");
+    let result = engine.set_upload_file_by_real(&fake_source, "jpg").await;
     assert!(
         result.is_err(),
         "set_upload_file_by_real should fail for nonexistent file"
@@ -1025,7 +1040,7 @@ async fn test_parity_local_upload_external_returns_save_name() {
     let config = EngineConfig::new().with_base_path(base_path.to_string_lossy().to_string());
     let mut engine = LocalStorageEngine::new(config);
     let uploaded = UploadedFile::new(&source_path, "external2.jpg", None, Some(0), true).unwrap();
-    engine.set_upload_file(&uploaded).unwrap();
+    engine.set_upload_file(&uploaded).await.unwrap();
 
     let save_name = engine.upload().await.unwrap().unwrap();
 
@@ -1137,7 +1152,10 @@ async fn test_parity_get_real_path_internal_returns_tmp_name() {
 
     let config = EngineConfig::new().with_base_path(base_path.to_string_lossy().to_string());
     let mut engine = LocalStorageEngine::new(config);
-    engine.set_upload_file_by_real(&source_path, "jpg").unwrap();
+    engine
+        .set_upload_file_by_real(&source_path, "jpg")
+        .await
+        .unwrap();
 
     // 验证 is_internal
     assert!(engine.is_internal());
@@ -1154,8 +1172,8 @@ async fn test_parity_get_real_path_internal_returns_tmp_name() {
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_parity_get_real_path_external_returns_uploaded_path() {
+#[tokio::test]
+async fn test_parity_get_real_path_external_returns_uploaded_path() {
     // PHP: 外部上传时 getRealPath 返回 request()->file('iFile')->getRealPath()
     // Rust 端：real_path 返回 file_info.tmp_name（外部上传时 tmp_name 是 UploadedFile 的路径）
     let base_path = create_temp_base_path();
@@ -1165,7 +1183,7 @@ fn test_parity_get_real_path_external_returns_uploaded_path() {
     let mut engine = LocalStorageEngine::new(config);
     let uploaded =
         UploadedFile::new(&source_path, "realpath_external.jpg", None, Some(0), true).unwrap();
-    engine.set_upload_file(&uploaded).unwrap();
+    engine.set_upload_file(&uploaded).await.unwrap();
 
     // 验证 is_internal = false
     assert!(!engine.is_internal());
@@ -1186,8 +1204,8 @@ fn test_parity_get_real_path_external_returns_uploaded_path() {
 // 组 11：PHP `Server::setUploadFileByReal` `fileInfo` 6 字段对齐
 // ============================================================================
 
-#[test]
-fn test_parity_upload_file_info_six_fields() {
+#[tokio::test]
+async fn test_parity_upload_file_info_six_fields() {
     // PHP Server.php 第 45-59 行：
     //   $this->fileInfo = [
     //     'name' => basename($filePath),
@@ -1201,7 +1219,9 @@ fn test_parity_upload_file_info_six_fields() {
     let content = b"hello world";
     let source_path = create_temp_file("info_test.jpg", content);
 
-    let info = UploadFileInfo::from_real_path(&source_path, "jpg").unwrap();
+    let info = UploadFileInfo::from_real_path(&source_path, "jpg")
+        .await
+        .unwrap();
 
     // 6 字段验证
     assert_eq!(info.name, "info_test.jpg", "name should be basename");
@@ -1217,37 +1237,43 @@ fn test_parity_upload_file_info_six_fields() {
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_parity_upload_file_info_basename_extraction() {
+#[tokio::test]
+async fn test_parity_upload_file_info_basename_extraction() {
     // PHP: basename($filePath) — 提取文件名（不含目录）
     let source_path = create_temp_file("basename.jpg", b"x");
 
-    let info = UploadFileInfo::from_real_path(&source_path, "jpg").unwrap();
+    let info = UploadFileInfo::from_real_path(&source_path, "jpg")
+        .await
+        .unwrap();
     assert_eq!(info.name, "basename.jpg");
 
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_parity_upload_file_info_size_calculation() {
+#[tokio::test]
+async fn test_parity_upload_file_info_size_calculation() {
     // PHP: filesize($filePath) — 文件大小（字节）
     let content = b"0123456789"; // 10 bytes
     let source_path = create_temp_file("size.jpg", content);
 
-    let info = UploadFileInfo::from_real_path(&source_path, "jpg").unwrap();
+    let info = UploadFileInfo::from_real_path(&source_path, "jpg")
+        .await
+        .unwrap();
     assert_eq!(info.size, 10);
 
     // 空文件
     let empty_path = create_temp_file("empty.jpg", b"");
-    let info_empty = UploadFileInfo::from_real_path(&empty_path, "jpg").unwrap();
+    let info_empty = UploadFileInfo::from_real_path(&empty_path, "jpg")
+        .await
+        .unwrap();
     assert_eq!(info_empty.size, 0);
 
     cleanup_path(source_path);
     cleanup_path(empty_path);
 }
 
-#[test]
-fn test_parity_upload_file_info_from_uploaded_file() {
+#[tokio::test]
+async fn test_parity_upload_file_info_from_uploaded_file() {
     // PHP setUploadFile 隐式行为：$this->file = Request::file($name)
     // Rust 端：UploadFileInfo::from_uploaded_file 转换 UploadedFile → UploadFileInfo
 
@@ -1263,7 +1289,7 @@ fn test_parity_upload_file_info_from_uploaded_file() {
     )
     .unwrap();
 
-    let info = UploadFileInfo::from_uploaded_file(&uploaded).unwrap();
+    let info = UploadFileInfo::from_uploaded_file(&uploaded).await.unwrap();
 
     // 外部上传的 file_info 字段
     assert_eq!(info.name, "uploaded.jpg"); // original_name
@@ -1276,11 +1302,11 @@ fn test_parity_upload_file_info_from_uploaded_file() {
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_parity_upload_file_info_not_found() {
+#[tokio::test]
+async fn test_parity_upload_file_info_not_found() {
     // PHP: filesize/basename 在文件不存在时会报错
     // Rust 端：返回 UploadError::FileNotFound
-    let result = UploadFileInfo::from_real_path("/nonexistent/path/file.jpg", "jpg");
+    let result = UploadFileInfo::from_real_path("/nonexistent/path/file.jpg", "jpg").await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     let msg = err.to_string();
@@ -1322,7 +1348,7 @@ async fn test_parity_scenario_external_upload_local_driver() {
     // 2. set_upload_file（外部上传）
     let uploaded =
         UploadedFile::new(&source_path, "e2e_external.jpg", None, Some(0), true).unwrap();
-    driver.set_upload_file(&uploaded).unwrap();
+    driver.set_upload_file(&uploaded).await.unwrap();
 
     // 3. 验证 is_internal = false
     assert!(!driver.is_internal());
@@ -1378,7 +1404,10 @@ async fn test_parity_scenario_internal_upload_local_driver() {
     let mut driver = StorageDriver::new(StorageEngineKind::Local, config);
 
     // 1. set_upload_file_by_real（内部上传）
-    driver.set_upload_file_by_real(&source_path, "jpg").unwrap();
+    driver
+        .set_upload_file_by_real(&source_path, "jpg")
+        .await
+        .unwrap();
 
     // 2. 验证 is_internal = true
     assert!(driver.is_internal());
@@ -1419,7 +1448,7 @@ async fn test_parity_scenario_upload_file_info_lifecycle() {
 
     // set_upload_file 后 file_info 应有值
     let uploaded = UploadedFile::new(&source_path, "lifecycle.jpg", None, Some(0), true).unwrap();
-    driver.set_upload_file(&uploaded).unwrap();
+    driver.set_upload_file(&uploaded).await.unwrap();
 
     let info = driver
         .file_info()
@@ -1624,8 +1653,8 @@ fn test_r5_parity_internal_save_name_format() {
     assert_eq!(parts[2], "r5_internal.jpg"); // basename
 }
 
-#[test]
-fn test_r5_parity_local_upload_isinternal_branch() {
+#[tokio::test]
+async fn test_r5_parity_local_upload_isinternal_branch() {
     // R5-19：Local::upload 区分 isInternal（internal 用 rename，external 用 putFile）
     // 此处仅验证分支逻辑（不实际执行 IO），通过 StorageDriver::is_internal 判断
     let base_path = create_temp_base_path();
@@ -1636,7 +1665,7 @@ fn test_r5_parity_local_upload_isinternal_branch() {
     // 外部上传分支
     let mut external = LocalStorageEngine::new(config.clone());
     let uploaded = UploadedFile::new(&source_path, "r5_branch.jpg", None, Some(0), true).unwrap();
-    external.set_upload_file(&uploaded).unwrap();
+    external.set_upload_file(&uploaded).await.unwrap();
     assert!(
         !external.is_internal(),
         "external upload should set is_internal=false"
@@ -1646,6 +1675,7 @@ fn test_r5_parity_local_upload_isinternal_branch() {
     let mut internal = LocalStorageEngine::new(config);
     internal
         .set_upload_file_by_real(&source_path, "jpg")
+        .await
         .unwrap();
     assert!(
         internal.is_internal(),
@@ -1656,16 +1686,15 @@ fn test_r5_parity_local_upload_isinternal_branch() {
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_r5_parity_local_delete_elvis_short_circuit() {
+#[tokio::test]
+async fn test_r5_parity_local_delete_elvis_short_circuit() {
     // R5-20：Local::delete Elvis 短路 !file_exists($filePath) ?: unlink($filePath)
     // 不存在的文件直接返回 true（不调用 unlink）
     let base_path = create_temp_base_path();
     let config = EngineConfig::new().with_base_path(base_path.to_string_lossy().to_string());
     let mut engine = LocalStorageEngine::new(config);
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt.block_on(async { engine.delete("nonexistent.jpg").await.unwrap() });
+    let result = engine.delete("nonexistent.jpg").await.unwrap();
     assert!(
         result,
         "Elvis short-circuit should return true for nonexistent file"
@@ -1713,13 +1742,13 @@ fn test_r5_parity_file_type_classification_12_13() {
     assert_eq!(detect_file_type("pdf"), FileType::File);
 }
 
-#[test]
-fn test_r5_parity_hash_name_default_md5_microtime() {
+#[tokio::test]
+async fn test_r5_parity_hash_name_default_md5_microtime() {
     // R5-1：hashName 默认规则 = date('Ymd') . DIRECTORY_SEPARATOR . md5(microtime(true) . pathname)
     // 验证格式：{Ymd}/{32-char-md5}.{ext}
     let temp_path = create_temp_file("r5_hash.jpg", b"r5 hash content");
     let mut file = File::new(&temp_path, false).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+    let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
     let parts: Vec<&str> = hash_name.split('/').collect();
     assert_eq!(parts.len(), 2);
@@ -1737,13 +1766,16 @@ fn test_r5_parity_hash_name_default_md5_microtime() {
     cleanup_path(temp_path);
 }
 
-#[test]
-fn test_r5_parity_hash_name_md5_substrate_split() {
+#[tokio::test]
+async fn test_r5_parity_hash_name_md5_substrate_split() {
     // R5-2：hashName hash 算法规则 = substr(hash, 0, 2) . DIRECTORY_SEPARATOR . substr(hash, 2)
     let temp_path = create_temp_file("r5_md5.jpg", b"r5 md5 rule");
     let mut file = File::new(&temp_path, false).unwrap();
-    let file_md5 = file.hash(HashAlgo::Md5).unwrap();
-    let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+    let file_md5 = file.hash(HashAlgo::Md5).await.unwrap();
+    let hash_name = file
+        .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+        .await
+        .unwrap();
 
     let parts: Vec<&str> = hash_name.split('/').collect();
     assert_eq!(parts.len(), 2);
@@ -1785,8 +1817,8 @@ fn test_r5_parity_php_build_save_name_components_independence() {
     assert_eq!(parts2[1].len(), 8);
 }
 
-#[test]
-fn test_r5_parity_php_set_upload_file_by_real_sets_isinternal() {
+#[tokio::test]
+async fn test_r5_parity_php_set_upload_file_by_real_sets_isinternal() {
     // PHP Server.php 第 47 行：$this->isInternal = true;
     let base_path = create_temp_base_path();
     let source_path = create_temp_file("isinternal.jpg", b"x");
@@ -1797,7 +1829,10 @@ fn test_r5_parity_php_set_upload_file_by_real_sets_isinternal() {
     // set_upload_file_by_real 前应为 false
     assert!(!engine.is_internal());
 
-    engine.set_upload_file_by_real(&source_path, "jpg").unwrap();
+    engine
+        .set_upload_file_by_real(&source_path, "jpg")
+        .await
+        .unwrap();
 
     // set_upload_file_by_real 后应为 true
     assert!(engine.is_internal());
@@ -1806,8 +1841,8 @@ fn test_r5_parity_php_set_upload_file_by_real_sets_isinternal() {
     cleanup_path(source_path);
 }
 
-#[test]
-fn test_r5_parity_php_set_upload_file_sets_external() {
+#[tokio::test]
+async fn test_r5_parity_php_set_upload_file_sets_external() {
     // PHP Server.php 第 32-40 行：setUploadFile 不修改 isInternal（默认 false）
     let base_path = create_temp_base_path();
     let source_path = create_temp_file("external_set.jpg", b"x");
@@ -1817,7 +1852,7 @@ fn test_r5_parity_php_set_upload_file_sets_external() {
 
     let uploaded =
         UploadedFile::new(&source_path, "external_set.jpg", None, Some(0), true).unwrap();
-    engine.set_upload_file(&uploaded).unwrap();
+    engine.set_upload_file(&uploaded).await.unwrap();
 
     // 外部上传时 is_internal 应为 false
     assert!(!engine.is_internal());

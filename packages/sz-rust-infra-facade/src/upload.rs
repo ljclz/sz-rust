@@ -72,8 +72,7 @@
 //!   - 第 112-142 行：`getOriginalMime/Name/Extension` + `extension()` 方法
 
 use std::collections::HashMap;
-use std::fs;
-use std::io::Read;
+
 use std::path::{Path, PathBuf};
 
 use chrono::Local;
@@ -352,24 +351,24 @@ impl File {
     ///     return $this->hash[$type];
     /// }
     /// ```
-    pub fn hash(&mut self, algo: HashAlgo) -> Result<String, UploadError> {
+    pub async fn hash(&mut self, algo: HashAlgo) -> Result<String, UploadError> {
         let key = algo.as_str().to_string();
         if let Some(h) = self.hash.get(&key) {
             return Ok(h.clone());
         }
-        let h = compute_file_hash(&self.path, algo)?;
+        let h = compute_file_hash(&self.path, algo).await?;
         self.hash.insert(key, h.clone());
         Ok(h)
     }
 
     /// 获取文件 MD5 — 对齐 PHP `File::md5()` 第 68-71 行
-    pub fn md5(&mut self) -> Result<String, UploadError> {
-        self.hash(HashAlgo::Md5)
+    pub async fn md5(&mut self) -> Result<String, UploadError> {
+        self.hash(HashAlgo::Md5).await
     }
 
     /// 获取文件 SHA1 — 对齐 PHP `File::sha1()` 第 78-81 行
-    pub fn sha1(&mut self) -> Result<String, UploadError> {
-        self.hash(HashAlgo::Sha1)
+    pub async fn sha1(&mut self) -> Result<String, UploadError> {
+        self.hash(HashAlgo::Sha1).await
     }
 
     /// 获取文件 MIME — 对齐 PHP `File::getMime()` 第 88-93 行
@@ -396,24 +395,27 @@ impl File {
     /// 3. 失败抛 `FileException`
     /// 4. `chmod($target, 0666 & ~umask())` 设置权限
     /// 5. 返回新 `File` 实例
-    pub fn move_to<P: AsRef<Path>>(
+    pub async fn move_to<P: AsRef<Path>>(
         &mut self,
         directory: P,
         name: Option<&str>,
     ) -> Result<File, UploadError> {
-        let target = self.get_target_file(directory.as_ref(), name)?;
+        let target = self.get_target_file(directory.as_ref(), name).await?;
 
-        fs::rename(&self.path, &target.path).map_err(|e| UploadError::MoveFailed {
-            from: self.path.to_string_lossy().to_string(),
-            to: target.path.to_string_lossy().to_string(),
-            error: e.to_string(),
-        })?;
+        tokio::fs::rename(&self.path, &target.path)
+            .await
+            .map_err(|e| UploadError::MoveFailed {
+                from: self.path.to_string_lossy().to_string(),
+                to: target.path.to_string_lossy().to_string(),
+                error: e.to_string(),
+            })?;
 
         // 对齐 PHP `chmod($target, 0666 & ~umask())` 第 115 行
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&target.path, fs::Permissions::from_mode(0o666));
+            let _ =
+                tokio::fs::set_permissions(&target.path, fs::Permissions::from_mode(0o666)).await;
         }
 
         Ok(target)
@@ -426,9 +428,13 @@ impl File {
     /// 2. elseif 目录不可写：抛异常
     /// 3. target = `rtrim($directory, '/\\') . DIRECTORY_SEPARATOR . (name === null ? basename : getName(name))`
     /// 4. 返回 `new self($target, false)`
-    fn get_target_file(&self, directory: &Path, name: Option<&str>) -> Result<File, UploadError> {
+    async fn get_target_file(
+        &self,
+        directory: &Path,
+        name: Option<&str>,
+    ) -> Result<File, UploadError> {
         if !directory.is_dir() {
-            fs::create_dir_all(directory).map_err(|_| {
+            tokio::fs::create_dir_all(directory).await.map_err(|_| {
                 UploadError::DirectoryCreateFailed(directory.to_string_lossy().to_string())
             })?;
         }
@@ -495,12 +501,12 @@ impl File {
     /// ```
     ///
     /// Rust 端简化：只支持 `Default` 和 `Hash(algo)` 两种规则。
-    pub fn hash_name(&mut self, rule: HashNameRule) -> Result<String, UploadError> {
+    pub async fn hash_name(&mut self, rule: HashNameRule) -> Result<String, UploadError> {
         if self.hash_name.is_none() {
             let hash_name = match rule {
                 HashNameRule::Hash(algo) => {
                     // 对齐 PHP 第 187-190 行
-                    let hash = self.hash(algo)?;
+                    let hash = self.hash(algo).await?;
                     if hash.len() < 2 {
                         hash
                     } else {
@@ -646,7 +652,7 @@ impl UploadedFile {
     /// 4. 失败抛 `FileException`
     /// 5. `chmod($target, 0666 & ~umask())`
     /// 6. 返回新 `File`
-    pub fn move_to<P: AsRef<Path>>(
+    pub async fn move_to<P: AsRef<Path>>(
         &mut self,
         directory: P,
         name: Option<&str>,
@@ -659,23 +665,26 @@ impl UploadedFile {
 
         if self.test {
             // 对齐 PHP 第 54 行：`return parent::move($directory, $name);`
-            return self.file.move_to(directory, name);
+            return self.file.move_to(directory, name).await;
         }
 
         // 对齐 PHP 第 63 行：`move_uploaded_file($this->getPathname(), $target)`
         // Rust 端：使用 `fs::rename`（无 SAPI 等价物）
-        let target = self.file.get_target_file(directory.as_ref(), name)?;
-        fs::rename(self.file.path(), &target.path).map_err(|e| UploadError::MoveFailed {
-            from: self.file.path().to_string_lossy().to_string(),
-            to: target.path.to_string_lossy().to_string(),
-            error: e.to_string(),
-        })?;
+        let target = self.file.get_target_file(directory.as_ref(), name).await?;
+        tokio::fs::rename(self.file.path(), &target.path)
+            .await
+            .map_err(|e| UploadError::MoveFailed {
+                from: self.file.path().to_string_lossy().to_string(),
+                to: target.path.to_string_lossy().to_string(),
+                error: e.to_string(),
+            })?;
 
         // 对齐 PHP 第 69 行：`chmod($target, 0666 & ~umask())`
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&target.path, fs::Permissions::from_mode(0o666));
+            let _ =
+                tokio::fs::set_permissions(&target.path, fs::Permissions::from_mode(0o666)).await;
         }
 
         Ok(target)
@@ -764,10 +773,8 @@ fn get_name(name: &str) -> Result<String, UploadError> {
 }
 
 /// 计算文件哈希 — 对齐 PHP `hash_file($type, $pathname)`
-fn compute_file_hash(path: &Path, algo: HashAlgo) -> Result<String, UploadError> {
-    let mut file = fs::File::open(path)?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)?;
+async fn compute_file_hash(path: &Path, algo: HashAlgo) -> Result<String, UploadError> {
+    let buf = tokio::fs::read(path).await?;
 
     let hash = match algo {
         HashAlgo::Md5 => {
@@ -1097,50 +1104,50 @@ mod tests {
     // 组 4：File hash 测试
     // ------------------------------------------------------------------------
 
-    #[test]
-    fn test_file_md5() {
+    #[tokio::test]
+    async fn test_file_md5() {
         // 对齐 PHP `File::md5()` 第 68-71 行
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let md5 = file.md5().unwrap();
+        let md5 = file.md5().await.unwrap();
         // "hello" 的 MD5
         assert_eq!(md5, "5d41402abc4b2a76b9719d911017c592");
     }
 
-    #[test]
-    fn test_file_sha1() {
+    #[tokio::test]
+    async fn test_file_sha1() {
         // 对齐 PHP `File::sha1()` 第 78-81 行
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let sha1 = file.sha1().unwrap();
+        let sha1 = file.sha1().await.unwrap();
         // "hello" 的 SHA1
         assert_eq!(sha1, "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d");
     }
 
-    #[test]
-    fn test_file_hash_md5() {
+    #[tokio::test]
+    async fn test_file_hash_md5() {
         // 对齐 PHP `File::hash('md5')`
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash = file.hash(HashAlgo::Md5).unwrap();
+        let hash = file.hash(HashAlgo::Md5).await.unwrap();
         assert_eq!(hash, "5d41402abc4b2a76b9719d911017c592");
     }
 
-    #[test]
-    fn test_file_hash_sha1() {
+    #[tokio::test]
+    async fn test_file_hash_sha1() {
         // 对齐 PHP `File::hash('sha1')`
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash = file.hash(HashAlgo::Sha1).unwrap();
+        let hash = file.hash(HashAlgo::Sha1).await.unwrap();
         assert_eq!(hash, "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d");
     }
 
-    #[test]
-    fn test_file_hash_sha256() {
+    #[tokio::test]
+    async fn test_file_hash_sha256() {
         // 对齐 PHP `File::hash('sha256')`
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash = file.hash(HashAlgo::Sha256).unwrap();
+        let hash = file.hash(HashAlgo::Sha256).await.unwrap();
         // "hello" 的 SHA256
         assert_eq!(
             hash,
@@ -1148,35 +1155,35 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_file_hash_sha512() {
+    #[tokio::test]
+    async fn test_file_hash_sha512() {
         // 对齐 PHP `File::hash('sha512')`
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash = file.hash(HashAlgo::Sha512).unwrap();
+        let hash = file.hash(HashAlgo::Sha512).await.unwrap();
         // "hello" 的 SHA512（前 32 字符）
         assert!(hash.starts_with("9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca"));
     }
 
-    #[test]
-    fn test_file_hash_caching() {
+    #[tokio::test]
+    async fn test_file_hash_caching() {
         // 对齐 PHP 第 56-58 行：缓存机制
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash1 = file.hash(HashAlgo::Md5).unwrap();
-        let hash2 = file.hash(HashAlgo::Md5).unwrap();
+        let hash1 = file.hash(HashAlgo::Md5).await.unwrap();
+        let hash2 = file.hash(HashAlgo::Md5).await.unwrap();
         assert_eq!(hash1, hash2);
         // 缓存验证
         assert!(file.hash.contains_key("md5"));
     }
 
-    #[test]
-    fn test_file_hash_multiple_algos() {
+    #[tokio::test]
+    async fn test_file_hash_multiple_algos() {
         // 多算法独立缓存
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let md5 = file.hash(HashAlgo::Md5).unwrap();
-        let sha1 = file.hash(HashAlgo::Sha1).unwrap();
+        let md5 = file.hash(HashAlgo::Md5).await.unwrap();
+        let sha1 = file.hash(HashAlgo::Sha1).await.unwrap();
         assert_ne!(md5, sha1);
         assert!(file.hash.contains_key("md5"));
         assert!(file.hash.contains_key("sha1"));
@@ -1240,8 +1247,8 @@ mod tests {
     // 组 6：File move 测试
     // ------------------------------------------------------------------------
 
-    #[test]
-    fn test_file_move_with_default_name() {
+    #[tokio::test]
+    async fn test_file_move_with_default_name() {
         // 对齐 PHP `File::move($directory, null)` — 使用原文件名
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1249,7 +1256,7 @@ mod tests {
 
         let mut file = File::new(temp.path(), true).unwrap();
         let original_basename = file.basename();
-        let moved = file.move_to(&target_dir, None).unwrap();
+        let moved = file.move_to(&target_dir, None).await.unwrap();
 
         assert!(moved.path().is_file());
         assert_eq!(moved.basename(), original_basename);
@@ -1257,40 +1264,40 @@ mod tests {
         assert!(!temp.path().exists());
     }
 
-    #[test]
-    fn test_file_move_with_custom_name() {
+    #[tokio::test]
+    async fn test_file_move_with_custom_name() {
         // 对齐 PHP `File::move($directory, $name)`
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
 
         let mut file = File::new(temp.path(), true).unwrap();
-        let moved = file.move_to(&temp_dir, Some("custom.txt")).unwrap();
+        let moved = file.move_to(&temp_dir, Some("custom.txt")).await.unwrap();
 
         assert!(moved.path().is_file());
         assert_eq!(moved.basename(), "custom.txt");
     }
 
-    #[test]
-    fn test_file_move_creates_directory() {
+    #[tokio::test]
+    async fn test_file_move_creates_directory() {
         // 对齐 PHP `mkdir($directory, 0777, true)` — 递归创建目录
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
         let nested_dir = temp_dir.path().join("a").join("b").join("c");
 
         let mut file = File::new(temp.path(), true).unwrap();
-        let moved = file.move_to(&nested_dir, Some("file.txt")).unwrap();
+        let moved = file.move_to(&nested_dir, Some("file.txt")).await.unwrap();
 
         assert!(moved.path().is_file());
         assert!(nested_dir.is_dir());
     }
 
-    #[test]
-    fn test_file_move_preserves_content() {
+    #[tokio::test]
+    async fn test_file_move_preserves_content() {
         let temp = create_temp_file(b"hello world", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
 
         let mut file = File::new(temp.path(), true).unwrap();
-        let moved = file.move_to(&temp_dir, Some("moved.txt")).unwrap();
+        let moved = file.move_to(&temp_dir, Some("moved.txt")).await.unwrap();
 
         let content = std::fs::read_to_string(moved.path()).unwrap();
         assert_eq!(content, "hello world");
@@ -1300,12 +1307,12 @@ mod tests {
     // 组 7：File hashName 测试
     // ------------------------------------------------------------------------
 
-    #[test]
-    fn test_file_hash_name_default_format() {
+    #[tokio::test]
+    async fn test_file_hash_name_default_format() {
         // 对齐 PHP `File::hashName()` 默认规则：date('Ymd')/md5(microtime.pathname).ext
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+        let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
         // 格式：YYYYMMDD/32位md5.txt
         let parts: Vec<&str> = hash_name.split('/').collect();
@@ -1324,13 +1331,13 @@ mod tests {
         assert_eq!(ext_parts[1], "txt"); // 扩展名
     }
 
-    #[test]
-    fn test_file_hash_name_default_no_extension() {
+    #[tokio::test]
+    async fn test_file_hash_name_default_no_extension() {
         // 无扩展名 → 不追加 .ext
         let temp = NamedTempFile::new().unwrap();
         std::fs::write(temp.path(), b"hello").unwrap();
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+        let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
         // 格式：YYYYMMDD/32位md5（无 .ext）
         let parts: Vec<&str> = hash_name.split('/').collect();
@@ -1338,46 +1345,55 @@ mod tests {
         assert!(!parts[1].contains('.'));
     }
 
-    #[test]
-    fn test_file_hash_name_hash_md5() {
+    #[tokio::test]
+    async fn test_file_hash_name_hash_md5() {
         // 对齐 PHP `File::hashName('md5')`：substr(hash, 0, 2)/substr(hash, 2).ext
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+        let hash_name = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+            .await
+            .unwrap();
 
         // 格式：5d/41402abc4b2a76b9719d911017c592.txt
         assert_eq!(hash_name, "5d/41402abc4b2a76b9719d911017c592.txt");
     }
 
-    #[test]
-    fn test_file_hash_name_hash_sha1() {
+    #[tokio::test]
+    async fn test_file_hash_name_hash_sha1() {
         // 对齐 PHP `File::hashName('sha1')`
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Sha1)).unwrap();
+        let hash_name = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Sha1))
+            .await
+            .unwrap();
 
         // "hello" 的 SHA1 = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
         assert_eq!(hash_name, "aa/f4c61ddcc5e8a2dabede0f3b482cd9aea9434d.txt");
     }
 
-    #[test]
-    fn test_file_hash_name_caching() {
+    #[tokio::test]
+    async fn test_file_hash_name_caching() {
         // 对齐 PHP `if (!$this->hashName)` — 缓存机制
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let name1 = file.hash_name(HashNameRule::Default).unwrap();
-        let name2 = file.hash_name(HashNameRule::Default).unwrap();
+        let name1 = file.hash_name(HashNameRule::Default).await.unwrap();
+        let name2 = file.hash_name(HashNameRule::Default).await.unwrap();
         assert_eq!(name1, name2);
     }
 
-    #[test]
-    fn test_file_hash_name_with_set_extension() {
+    #[tokio::test]
+    async fn test_file_hash_name_with_set_extension() {
         // 对齐 PHP `$extension = $this->extension ?? $this->extension();`
         // setExtension 覆盖
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
         file.set_extension("jpg");
-        let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+        let hash_name = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+            .await
+            .unwrap();
         assert!(hash_name.ends_with(".jpg"));
     }
 
@@ -1560,8 +1576,8 @@ mod tests {
     // 组 10：UploadedFile move 测试
     // ------------------------------------------------------------------------
 
-    #[test]
-    fn test_uploaded_file_move_test_mode() {
+    #[tokio::test]
+    async fn test_uploaded_file_move_test_mode() {
         // test 模式：使用 rename（对齐 PHP 第 54 行 parent::move）
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1573,13 +1589,16 @@ mod tests {
             true,
         )
         .unwrap();
-        let moved = uploaded.move_to(&temp_dir, Some("moved.txt")).unwrap();
+        let moved = uploaded
+            .move_to(&temp_dir, Some("moved.txt"))
+            .await
+            .unwrap();
         assert!(moved.path().is_file());
         assert_eq!(moved.basename(), "moved.txt");
     }
 
-    #[test]
-    fn test_uploaded_file_move_invalid() {
+    #[tokio::test]
+    async fn test_uploaded_file_move_invalid() {
         // 无效上传 → 抛异常（对齐 PHP 第 74 行）
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1591,7 +1610,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let result = uploaded.move_to(&temp_dir, Some("moved.txt"));
+        let result = uploaded.move_to(&temp_dir, Some("moved.txt")).await;
         assert!(matches!(result, Err(UploadError::UploadFailed(_))));
         // 错误消息对齐 PHP `getErrorMessage()`
         if let Err(UploadError::UploadFailed(msg)) = result {
@@ -1599,8 +1618,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_uploaded_file_move_real() {
+    #[tokio::test]
+    async fn test_uploaded_file_move_real() {
         // 非 test 模式：move_uploaded_file（Rust 端用 rename）
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
@@ -1612,7 +1631,10 @@ mod tests {
             false,
         )
         .unwrap();
-        let moved = uploaded.move_to(&temp_dir, Some("uploaded.txt")).unwrap();
+        let moved = uploaded
+            .move_to(&temp_dir, Some("uploaded.txt"))
+            .await
+            .unwrap();
         assert!(moved.path().is_file());
         assert_eq!(moved.basename(), "uploaded.txt");
         // 原文件已移动
@@ -1699,34 +1721,40 @@ mod tests {
     // 组 13：PHP 行为对齐测试（R5 硬约束）
     // ------------------------------------------------------------------------
 
-    #[test]
-    fn test_php_behavior_hash_name_md5_split() {
+    #[tokio::test]
+    async fn test_php_behavior_hash_name_md5_split() {
         // R5-2：hashName('md5') = substr(md5, 0, 2) . '/' . substr(md5, 2)
         // "hello" 的 MD5 = 5d41402abc4b2a76b9719d911017c592
         // 期望：5d/41402abc4b2a76b9719d911017c592
         let temp = create_temp_file(b"hello", "");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
+        let hash_name = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+            .await
+            .unwrap();
         assert_eq!(hash_name, "5d/41402abc4b2a76b9719d911017c592");
     }
 
-    #[test]
-    fn test_php_behavior_hash_name_sha1_split() {
+    #[tokio::test]
+    async fn test_php_behavior_hash_name_sha1_split() {
         // R5-2：hashName('sha1') = substr(sha1, 0, 2) . '/' . substr(sha1, 2)
         // "hello" 的 SHA1 = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
         // 期望：aa/f4c61ddcc5e8a2dabede0f3b482cd9aea9434d
         let temp = create_temp_file(b"hello", "");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Hash(HashAlgo::Sha1)).unwrap();
+        let hash_name = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Sha1))
+            .await
+            .unwrap();
         assert_eq!(hash_name, "aa/f4c61ddcc5e8a2dabede0f3b482cd9aea9434d");
     }
 
-    #[test]
-    fn test_php_behavior_hash_name_default_format() {
+    #[tokio::test]
+    async fn test_php_behavior_hash_name_default_format() {
         // R5-1：hashName() 默认规则 = date('Ymd')/md5(microtime.pathname).ext
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let hash_name = file.hash_name(HashNameRule::Default).unwrap();
+        let hash_name = file.hash_name(HashNameRule::Default).await.unwrap();
 
         // 验证格式：YYYYMMDD/32位hex.txt
         let re = regex::Regex::new(r"^\d{8}/[0-9a-f]{32}\.txt$").unwrap();
@@ -1819,29 +1847,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_php_behavior_move_creates_directory() {
+    #[tokio::test]
+    async fn test_php_behavior_move_creates_directory() {
         // R5-8：mkdir(directory, 0777, true) 递归创建目录
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
         let nested = temp_dir.path().join("a").join("b").join("c");
 
         let mut file = File::new(temp.path(), true).unwrap();
-        let moved = file.move_to(&nested, Some("file.txt")).unwrap();
+        let moved = file.move_to(&nested, Some("file.txt")).await.unwrap();
 
         assert!(moved.path().is_file());
         assert!(nested.is_dir());
     }
 
-    #[test]
-    fn test_php_behavior_move_chmod_unix() {
+    #[tokio::test]
+    async fn test_php_behavior_move_chmod_unix() {
         // R5-8：chmod(target, 0666 & ~umask())
         // 仅在 Unix 平台验证
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
 
         let mut file = File::new(temp.path(), true).unwrap();
-        let moved = file.move_to(&temp_dir, Some("file.txt")).unwrap();
+        let moved = file.move_to(&temp_dir, Some("file.txt")).await.unwrap();
 
         #[cfg(unix)]
         {
@@ -1859,24 +1887,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_php_behavior_hash_caching() {
+    #[tokio::test]
+    async fn test_php_behavior_hash_caching() {
         // 对齐 PHP 第 56-58 行：hash 缓存
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let md5_1 = file.hash(HashAlgo::Md5).unwrap();
+        let md5_1 = file.hash(HashAlgo::Md5).await.unwrap();
         // 再次请求相同算法 → 从缓存读取
-        let md5_2 = file.hash(HashAlgo::Md5).unwrap();
+        let md5_2 = file.hash(HashAlgo::Md5).await.unwrap();
         assert_eq!(md5_1, md5_2);
     }
 
-    #[test]
-    fn test_php_behavior_hash_name_caching() {
+    #[tokio::test]
+    async fn test_php_behavior_hash_name_caching() {
         // 对齐 PHP 第 182 行：if (!$this->hashName) 缓存
         let temp = create_temp_file(b"hello", ".txt");
         let mut file = File::new(temp.path(), true).unwrap();
-        let name_1 = file.hash_name(HashNameRule::Hash(HashAlgo::Md5)).unwrap();
-        let name_2 = file.hash_name(HashNameRule::Hash(HashAlgo::Sha1)).unwrap();
+        let name_1 = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Md5))
+            .await
+            .unwrap();
+        let name_2 = file
+            .hash_name(HashNameRule::Hash(HashAlgo::Sha1))
+            .await
+            .unwrap();
         // 第二次调用使用缓存，返回第一次的结果（md5 格式）
         assert_eq!(name_1, name_2);
     }
@@ -1895,27 +1929,33 @@ mod tests {
         assert_eq!(file.get_mime().unwrap(), "image/png");
     }
 
-    #[test]
-    fn test_php_behavior_uploaded_file_move_test_uses_rename() {
+    #[tokio::test]
+    async fn test_php_behavior_uploaded_file_move_test_uses_rename() {
         // R5-4：test 模式使用 rename（parent::move）
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
         let mut uploaded =
             UploadedFile::new(temp.path(), "original.txt", None, Some(0), true).unwrap();
-        let moved = uploaded.move_to(&temp_dir, Some("moved.txt")).unwrap();
+        let moved = uploaded
+            .move_to(&temp_dir, Some("moved.txt"))
+            .await
+            .unwrap();
         assert!(moved.path().is_file());
         // 原文件已被 rename（不存在）
         assert!(!temp.path().exists());
     }
 
-    #[test]
-    fn test_php_behavior_uploaded_file_move_non_test_uses_move_uploaded_file() {
+    #[tokio::test]
+    async fn test_php_behavior_uploaded_file_move_non_test_uses_move_uploaded_file() {
         // R5-4：非 test 模式使用 move_uploaded_file（Rust 端用 rename）
         let temp = create_temp_file(b"hello", ".txt");
         let temp_dir = tempfile::tempdir().unwrap();
         let mut uploaded =
             UploadedFile::new(temp.path(), "original.txt", None, Some(0), false).unwrap();
-        let moved = uploaded.move_to(&temp_dir, Some("moved.txt")).unwrap();
+        let moved = uploaded
+            .move_to(&temp_dir, Some("moved.txt"))
+            .await
+            .unwrap();
         assert!(moved.path().is_file());
         assert!(!temp.path().exists());
     }
@@ -1936,8 +1976,8 @@ mod tests {
         assert_eq!(uploaded.as_file().extension(), "txt");
     }
 
-    #[test]
-    fn test_uploaded_file_as_file_mut_access() {
+    #[tokio::test]
+    async fn test_uploaded_file_as_file_mut_access() {
         let temp = create_temp_file(b"hello", ".txt");
         let mut uploaded = UploadedFile::new(
             temp.path(),
@@ -1948,7 +1988,7 @@ mod tests {
         )
         .unwrap();
         // 可变访问 — 调用 File 的 hash 方法
-        let md5 = uploaded.as_file_mut().md5().unwrap();
+        let md5 = uploaded.as_file_mut().md5().await.unwrap();
         assert_eq!(md5, "5d41402abc4b2a76b9719d911017c592");
     }
 }

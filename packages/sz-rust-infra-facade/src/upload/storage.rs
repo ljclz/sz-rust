@@ -307,9 +307,12 @@ impl UploadFileInfo {
     /// PHP `setUploadFile` 直接将 `Request::file($name)` 赋给 `$this->file`，
     /// 然后调用 `buildSaveName()` 生成文件名。
     /// Rust 端将 `UploadedFile` 转换为 `UploadFileInfo`。
-    pub fn from_uploaded_file(file: &UploadedFile) -> Result<Self, UploadError> {
+    pub async fn from_uploaded_file(file: &UploadedFile) -> Result<Self, UploadError> {
         let path = file.as_file().path();
-        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let size = tokio::fs::metadata(path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
         Ok(Self {
             name: file.original_name().to_string(),
             size,
@@ -323,7 +326,10 @@ impl UploadFileInfo {
     /// 从真实路径创建文件信息 — 对齐 PHP `Server::setUploadFileByReal`
     ///
     /// PHP 行为：`isInternal = true`，`name = basename($filePath)`，`size = filesize($filePath)`。
-    pub fn from_real_path<P: AsRef<Path>>(path: P, extension: &str) -> Result<Self, UploadError> {
+    pub async fn from_real_path<P: AsRef<Path>>(
+        path: P,
+        extension: &str,
+    ) -> Result<Self, UploadError> {
         let path = path.as_ref();
         if !path.exists() {
             return Err(UploadError::FileNotFound(
@@ -334,7 +340,10 @@ impl UploadFileInfo {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let size = tokio::fs::metadata(path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
         Ok(Self {
             name,
             size,
@@ -451,12 +460,12 @@ pub trait StorageEngine: Send + Sync {
     ///
     /// PHP 行为：从 `Request::file($name)` 获取文件，调用 `buildSaveName()` 生成文件名。
     /// Rust 端：从 `UploadedFile` 设置，调用 `build_save_name()` 生成文件名。
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError>;
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError>;
 
     /// 设置内部上传文件 — 对齐 PHP `Server::setUploadFileByReal($filePath, $extension)`
     ///
     /// PHP 行为：设置 `isInternal = true`，构造 `fileInfo`，文件名为 `storage/{Ymd}/{basename}`。
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
@@ -645,8 +654,8 @@ impl StorageEngine for LocalStorageEngine {
 
         // 安全：验证最终路径仍在 upload_dir 内（canonicalize 后比较）
         if let (Ok(upload_canon), Ok(file_canon)) = (
-            std::fs::canonicalize(self.upload_dir()),
-            std::fs::canonicalize(&file_path),
+            tokio::fs::canonicalize(self.upload_dir()).await,
+            tokio::fs::canonicalize(&file_path).await,
         ) {
             if !file_canon.starts_with(&upload_canon) {
                 return Err(UploadError::InvalidFileName(file_name.to_string()));
@@ -680,11 +689,11 @@ impl StorageEngine for LocalStorageEngine {
         self.error.as_deref()
     }
 
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
         // 对齐 PHP `Server::setUploadFile` 第 32-40 行：
         // `$this->file = Request::file($name);`
         // `$this->fileName = $this->buildSaveName();`
-        let info = UploadFileInfo::from_uploaded_file(file)?;
+        let info = UploadFileInfo::from_uploaded_file(file).await?;
         let save_name = build_save_name(&info.tmp_name, &info.extension);
         self.upload_source_path = Some(info.tmp_name.clone());
         self.file_info = Some(info);
@@ -693,7 +702,7 @@ impl StorageEngine for LocalStorageEngine {
         Ok(())
     }
 
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
@@ -702,7 +711,7 @@ impl StorageEngine for LocalStorageEngine {
         // `$this->isInternal = true;`
         // `$this->fileInfo = [...]`
         // `$this->fileName = 'storage/'.date('Ymd') ."/". $this->fileInfo['name'];`
-        let info = UploadFileInfo::from_real_path(file_path, extension)?;
+        let info = UploadFileInfo::from_real_path(file_path, extension).await?;
         let save_name = build_internal_save_name(file_path);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -822,8 +831,8 @@ impl StorageEngine for AliyunStorageEngine {
         self.error.as_deref()
     }
 
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_uploaded_file(file)?;
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+        let info = UploadFileInfo::from_uploaded_file(file).await?;
         let save_name = build_save_name(&info.tmp_name, &info.extension);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -831,12 +840,12 @@ impl StorageEngine for AliyunStorageEngine {
         Ok(())
     }
 
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
     ) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_real_path(file_path, extension)?;
+        let info = UploadFileInfo::from_real_path(file_path, extension).await?;
         let save_name = build_internal_save_name(file_path);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -951,8 +960,8 @@ impl StorageEngine for QcloudStorageEngine {
         self.error.as_deref()
     }
 
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_uploaded_file(file)?;
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+        let info = UploadFileInfo::from_uploaded_file(file).await?;
         let save_name = build_save_name(&info.tmp_name, &info.extension);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -960,12 +969,12 @@ impl StorageEngine for QcloudStorageEngine {
         Ok(())
     }
 
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
     ) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_real_path(file_path, extension)?;
+        let info = UploadFileInfo::from_real_path(file_path, extension).await?;
         let save_name = build_internal_save_name(file_path);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -1077,8 +1086,8 @@ impl StorageEngine for QiniuStorageEngine {
         self.error.as_deref()
     }
 
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_uploaded_file(file)?;
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+        let info = UploadFileInfo::from_uploaded_file(file).await?;
         let save_name = build_save_name(&info.tmp_name, &info.extension);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -1086,12 +1095,12 @@ impl StorageEngine for QiniuStorageEngine {
         Ok(())
     }
 
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
     ) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_real_path(file_path, extension)?;
+        let info = UploadFileInfo::from_real_path(file_path, extension).await?;
         let save_name = build_internal_save_name(file_path);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -1198,8 +1207,8 @@ impl StorageEngine for S3StorageEngine {
         self.error.as_deref()
     }
 
-    fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_uploaded_file(file)?;
+    async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+        let info = UploadFileInfo::from_uploaded_file(file).await?;
         let save_name = build_save_name(&info.tmp_name, &info.extension);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -1207,12 +1216,12 @@ impl StorageEngine for S3StorageEngine {
         Ok(())
     }
 
-    fn set_upload_file_by_real(
+    async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
     ) -> Result<(), UploadError> {
-        let info = UploadFileInfo::from_real_path(file_path, extension)?;
+        let info = UploadFileInfo::from_real_path(file_path, extension).await?;
         let save_name = build_internal_save_name(file_path);
         self.file_info = Some(info);
         self.file_name = Some(save_name);
@@ -1326,28 +1335,28 @@ impl StorageDriver {
     }
 
     /// 设置上传文件 — 对齐 PHP `Driver::setUploadFile($name)`
-    pub fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
+    pub async fn set_upload_file(&mut self, file: &UploadedFile) -> Result<(), UploadError> {
         match self {
-            Self::Local(e) => e.set_upload_file(file),
-            Self::Aliyun(e) => e.set_upload_file(file),
-            Self::Qcloud(e) => e.set_upload_file(file),
-            Self::Qiniu(e) => e.set_upload_file(file),
-            Self::S3(e) => e.set_upload_file(file),
+            Self::Local(e) => e.set_upload_file(file).await,
+            Self::Aliyun(e) => e.set_upload_file(file).await,
+            Self::Qcloud(e) => e.set_upload_file(file).await,
+            Self::Qiniu(e) => e.set_upload_file(file).await,
+            Self::S3(e) => e.set_upload_file(file).await,
         }
     }
 
     /// 设置内部上传文件 — 对齐 PHP `Driver::setUploadFileByReal($filePath, $extension)`
-    pub fn set_upload_file_by_real(
+    pub async fn set_upload_file_by_real(
         &mut self,
         file_path: &Path,
         extension: &str,
     ) -> Result<(), UploadError> {
         match self {
-            Self::Local(e) => e.set_upload_file_by_real(file_path, extension),
-            Self::Aliyun(e) => e.set_upload_file_by_real(file_path, extension),
-            Self::Qcloud(e) => e.set_upload_file_by_real(file_path, extension),
-            Self::Qiniu(e) => e.set_upload_file_by_real(file_path, extension),
-            Self::S3(e) => e.set_upload_file_by_real(file_path, extension),
+            Self::Local(e) => e.set_upload_file_by_real(file_path, extension).await,
+            Self::Aliyun(e) => e.set_upload_file_by_real(file_path, extension).await,
+            Self::Qcloud(e) => e.set_upload_file_by_real(file_path, extension).await,
+            Self::Qiniu(e) => e.set_upload_file_by_real(file_path, extension).await,
+            Self::S3(e) => e.set_upload_file_by_real(file_path, extension).await,
         }
     }
 
@@ -1603,10 +1612,10 @@ mod tests {
     // 组 4：UploadFileInfo 测试
     // ---------------------------------------------------------------------
 
-    #[test]
-    fn test_upload_file_info_from_real_path() {
+    #[tokio::test]
+    async fn test_upload_file_info_from_real_path() {
         let path = create_temp_file("test.txt", b"hello world");
-        let info = UploadFileInfo::from_real_path(&path, "txt").unwrap();
+        let info = UploadFileInfo::from_real_path(&path, "txt").await.unwrap();
         assert_eq!(info.name, "test.txt");
         assert_eq!(info.size, 11);
         assert_eq!(info.extension, "txt");
@@ -1616,9 +1625,9 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    #[test]
-    fn test_upload_file_info_from_real_path_not_found() {
-        let result = UploadFileInfo::from_real_path("/nonexistent/path.txt", "txt");
+    #[tokio::test]
+    async fn test_upload_file_info_from_real_path_not_found() {
+        let result = UploadFileInfo::from_real_path("/nonexistent/path.txt", "txt").await;
         assert!(result.is_err());
     }
 
@@ -1662,6 +1671,7 @@ mod tests {
 
         engine
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
 
         // 对齐 R5-17：内部上传文件名 = storage/{Ymd}/{basename}
@@ -1687,6 +1697,7 @@ mod tests {
 
         engine
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
         let file_name = engine.file_name().unwrap().to_string();
 
@@ -1717,6 +1728,7 @@ mod tests {
             .expect("UploadedFile::new failed");
         engine
             .set_upload_file(&file)
+            .await
             .expect("set_upload_file failed");
 
         let result = engine.upload().await;
@@ -1821,49 +1833,49 @@ mod tests {
     // 组 7：云存储引擎 set_upload_file_by_real 测试
     // ---------------------------------------------------------------------
 
-    #[test]
-    fn test_aliyun_set_upload_file_by_real() {
+    #[tokio::test]
+    async fn test_aliyun_set_upload_file_by_real() {
         let path = create_temp_file("aliyun.txt", b"aliyun");
         let config = EngineConfig::new()
             .with_bucket("bucket")
             .with_endpoint("endpoint");
         let mut engine = AliyunStorageEngine::new(config);
-        engine.set_upload_file_by_real(&path, "txt").unwrap();
+        engine.set_upload_file_by_real(&path, "txt").await.unwrap();
         assert!(engine.is_internal());
         assert!(engine.file_name().unwrap().starts_with("storage/"));
         std::fs::remove_file(&path).ok();
     }
 
-    #[test]
-    fn test_qcloud_set_upload_file_by_real() {
+    #[tokio::test]
+    async fn test_qcloud_set_upload_file_by_real() {
         let path = create_temp_file("qcloud.txt", b"qcloud");
         let config = EngineConfig::new()
             .with_bucket("bucket")
             .with_region("region");
         let mut engine = QcloudStorageEngine::new(config);
-        engine.set_upload_file_by_real(&path, "txt").unwrap();
+        engine.set_upload_file_by_real(&path, "txt").await.unwrap();
         assert!(engine.is_internal());
         std::fs::remove_file(&path).ok();
     }
 
-    #[test]
-    fn test_qiniu_set_upload_file_by_real() {
+    #[tokio::test]
+    async fn test_qiniu_set_upload_file_by_real() {
         let path = create_temp_file("qiniu.txt", b"qiniu");
         let config = EngineConfig::new().with_bucket("bucket");
         let mut engine = QiniuStorageEngine::new(config);
-        engine.set_upload_file_by_real(&path, "txt").unwrap();
+        engine.set_upload_file_by_real(&path, "txt").await.unwrap();
         assert!(engine.is_internal());
         std::fs::remove_file(&path).ok();
     }
 
-    #[test]
-    fn test_s3_set_upload_file_by_real() {
+    #[tokio::test]
+    async fn test_s3_set_upload_file_by_real() {
         let path = create_temp_file("s3.txt", b"s3");
         let config = EngineConfig::new()
             .with_bucket("bucket")
             .with_region("region");
         let mut engine = S3StorageEngine::new(config);
-        engine.set_upload_file_by_real(&path, "txt").unwrap();
+        engine.set_upload_file_by_real(&path, "txt").await.unwrap();
         assert!(engine.is_internal());
         std::fs::remove_file(&path).ok();
     }
@@ -1921,6 +1933,7 @@ mod tests {
 
         driver
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
         let file_name = driver.file_name().unwrap().to_string();
 
@@ -1947,6 +1960,7 @@ mod tests {
 
         driver
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
         let result = driver.upload().await;
         assert!(result.is_ok(), "upload should succeed");
@@ -2031,6 +2045,7 @@ mod tests {
         let mut engine = LocalStorageEngine::new(config.clone());
         engine
             .set_upload_file_by_real(&internal_path, "txt")
+            .await
             .unwrap();
         assert!(engine.is_internal());
         let real_path = engine.real_path().expect("real_path should be set");
@@ -2046,7 +2061,7 @@ mod tests {
             true,
         )
         .expect("UploadedFile::new failed");
-        engine2.set_upload_file(&file).unwrap();
+        engine2.set_upload_file(&file).await.unwrap();
         assert!(!engine2.is_internal());
         let real_path = engine2.real_path().expect("real_path should be set");
         assert_eq!(real_path, external_path);
@@ -2068,6 +2083,7 @@ mod tests {
         let mut engine = LocalStorageEngine::new(config.clone());
         engine
             .set_upload_file_by_real(&internal_path, "txt")
+            .await
             .unwrap();
         engine.upload().await.expect("internal upload failed");
         assert!(!internal_path.exists(), "rename should move file away");
@@ -2082,7 +2098,7 @@ mod tests {
             true,
         )
         .expect("UploadedFile::new failed");
-        engine2.set_upload_file(&file).unwrap();
+        engine2.set_upload_file(&file).await.unwrap();
         engine2.upload().await.expect("external upload failed");
         assert!(external_path.exists(), "copy should preserve source");
 
@@ -2138,6 +2154,7 @@ mod tests {
 
         engine
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
 
         // 删除源文件，使 rename 失败
@@ -2169,6 +2186,7 @@ mod tests {
 
         driver
             .set_upload_file_by_real(&path, "txt")
+            .await
             .expect("set_upload_file_by_real failed");
         let file_name = driver.file_name().unwrap().to_string();
 
@@ -2190,7 +2208,7 @@ mod tests {
 
         let file = UploadedFile::new(&path, "r5_23.txt", Some("text/plain"), Some(0), true)
             .expect("UploadedFile::new failed");
-        engine.set_upload_file(&file).unwrap();
+        engine.set_upload_file(&file).await.unwrap();
         let expected_name = engine.file_name().unwrap().to_string();
 
         let result = engine.upload().await;

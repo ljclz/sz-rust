@@ -413,7 +413,7 @@ impl Image {
     ///
     /// PHP 行为：用 `getimagesize()` 探测类型，分派到 `_createGif/_createJpeg/_createPng/_createWbmp`。
     /// Rust 端用 `image::open` 统一处理，再用 `guess_type` 推断类型。
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
+    pub async fn open<P: AsRef<Path>>(path: P) -> Result<Self, ImageError> {
         let path = path.as_ref();
         let dyn_image = image::open(path)?;
         let image_type = guess_image_type(path)?;
@@ -538,8 +538,8 @@ impl Editor {
     ///
     /// PHP 语义：`$image` 按引用传递，函数内部赋值为新 Image 对象。
     /// Rust 语义：返回新 `Image`，调用方自行赋值。
-    pub fn open<P: AsRef<Path>>(&self, path: P) -> Result<Image, ImageError> {
-        Image::open(path)
+    pub async fn open<P: AsRef<Path>>(&self, path: P) -> Result<Image, ImageError> {
+        Image::open(path).await
     }
 
     /// 强制尺寸缩放 — 对齐 `Editor::resizeExact(&$image, $newWidth, $newHeight)`
@@ -704,7 +704,7 @@ impl Editor {
     /// - 所以 Rust y = PHP y - size（反向偏移）
     /// - angle 暂不支持（imageproc 0.25 文本绘制不支持旋转）
     #[allow(clippy::too_many_arguments)]
-    pub fn text(
+    pub async fn text(
         &self,
         image: &mut Image,
         text: &str,
@@ -714,7 +714,7 @@ impl Editor {
         color: Color,
         font_path: Option<&Path>,
     ) -> Result<(), ImageError> {
-        let font = load_font(font_path)?;
+        let font = load_font(font_path).await?;
         // R5-30：GD y 是基线，Rust y 是顶部，反向偏移
         let rust_y = y - size as i32;
         let mut rgba_image = image.to_rgba8();
@@ -791,7 +791,7 @@ impl Editor {
     /// - JPEG：quality=null → 75；imageinterlace 控制渐进式；imagejpeg
     ///
     /// Rust 端用 `image::save` 简化处理，JPEG quality 通过 `image::codecs::jpeg::JpegEncoder` 设置。
-    pub fn save(
+    pub async fn save(
         &self,
         image: &Image,
         file: &Path,
@@ -817,14 +817,15 @@ impl Editor {
         // 2. 自动创建父目录（对齐 PHP `mkdir`）
         if let Some(parent) = file.parent() {
             if !parent.as_os_str().is_empty() && !parent.exists() {
-                std::fs::create_dir_all(parent)?;
+                tokio::fs::create_dir_all(parent).await?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(
+                    let _ = tokio::fs::set_permissions(
                         parent,
-                        std::fs::Permissions::from_mode(permission),
-                    );
+                        tokio::fs::Permissions::from_mode(permission),
+                    )
+                    .await;
                 }
             }
         }
@@ -840,9 +841,10 @@ impl Editor {
                 let q = q.clamp(1, 100);
                 let rgba = image.to_rgba8();
                 let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
-                let mut file = std::fs::File::create(file)?;
-                let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, q);
+                let mut buf = Vec::new();
+                let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, q);
                 encoder.encode_image(&image::DynamicImage::ImageRgb8(rgb))?;
+                tokio::fs::write(file, buf).await?;
             }
             ImageType::Gif => {
                 image.as_dynamic().save(file)?;
@@ -1118,10 +1120,11 @@ fn blend_screen(base: &mut RgbaImage, overlay: &RgbaImage, x: i32, y: i32, opaci
 /// 加载字体 — 优先用 FontRef（零拷贝），失败时返回内置默认字体
 ///
 /// 对齐 Grafika `text()` 默认字体 `LiberationSans-Regular.ttf`。
-fn load_font(font_path: Option<&Path>) -> Result<FontVec, ImageError> {
+async fn load_font(font_path: Option<&Path>) -> Result<FontVec, ImageError> {
     match font_path {
         Some(path) => {
-            let data = std::fs::read(path)
+            let data = tokio::fs::read(path)
+                .await
                 .map_err(|e| ImageError::FontLoadFailed(format!("{path:?}: {e}")))?;
             Ok(FontVec::try_from_vec(data)
                 .map_err(|e| ImageError::FontLoadFailed(format!("Invalid font {path:?}: {e}")))?)
@@ -1150,8 +1153,13 @@ fn load_font(font_path: Option<&Path>) -> Result<FontVec, ImageError> {
 /// Rust 端简化为返回 `(width, height)` — 大多数场景只需要这两个值。
 ///
 /// 注意：PHP `imagettfbbox` 的 y 轴向下，但返回值中"上"的 y 是负数。
-pub fn measure_text(font_path: &Path, size: u32, text: &str) -> Result<TextMetrics, ImageError> {
-    let data = std::fs::read(font_path)
+pub async fn measure_text(
+    font_path: &Path,
+    size: u32,
+    text: &str,
+) -> Result<TextMetrics, ImageError> {
+    let data = tokio::fs::read(font_path)
+        .await
         .map_err(|e| ImageError::FontLoadFailed(format!("{font_path:?}: {e}")))?;
     let font = FontVec::try_from_vec(data)
         .map_err(|e| ImageError::FontLoadFailed(format!("Invalid font: {e}")))?;
@@ -1241,14 +1249,15 @@ pub struct TextMetrics {
 /// - 用 `measure_text_with_font` 替代 `imagettfbbox`
 /// - 测量 `$content . ' ' . $l` 即 `format!("{content} {l}")`
 /// - 其余逻辑 1:1 对齐
-pub fn wrap_text(
+pub async fn wrap_text(
     font_path: &Path,
     fontsize: u32,
     string: &str,
     width: i32,
     max_line: Option<usize>,
 ) -> Result<String, ImageError> {
-    let data = std::fs::read(font_path)
+    let data = tokio::fs::read(font_path)
+        .await
         .map_err(|e| ImageError::FontLoadFailed(format!("{font_path:?}: {e}")))?;
     let font = FontVec::try_from_vec(data)
         .map_err(|e| ImageError::FontLoadFailed(format!("Invalid font: {e}")))?;
@@ -1518,12 +1527,12 @@ mod tests {
         assert!(img.file_path().is_none());
     }
 
-    #[test]
-    fn test_image_open_png() {
+    #[tokio::test]
+    async fn test_image_open_png() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let path = tmp.path();
         create_test_png(path, 80, 60, Rgba([255, 0, 0, 255]));
-        let img = Image::open(path).unwrap();
+        let img = Image::open(path).await.unwrap();
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
         assert_eq!(img.image_type(), ImageType::Png);
@@ -1555,25 +1564,26 @@ mod tests {
         let _editor2 = Editor;
     }
 
-    #[test]
-    fn test_editor_open() {
+    #[tokio::test]
+    async fn test_editor_open() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 0, 255, 255]));
         let editor = Editor::new();
-        let img = editor.open(tmp.path()).unwrap();
+        let img = editor.open(tmp.path()).await.unwrap();
         assert_eq!(img.width(), 100);
         assert_eq!(img.height(), 100);
     }
 
-    #[test]
-    fn test_editor_save_png() {
+    #[tokio::test]
+    async fn test_editor_save_png() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 50, 50, Rgba([0, 255, 0, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_out.path(), None, None, false, 0o755)
+            .await
             .unwrap();
         // 验证保存的文件可读
         let reopened = image::open(tmp_out.path()).unwrap();
@@ -1581,15 +1591,16 @@ mod tests {
         assert_eq!(reopened.height(), 50);
     }
 
-    #[test]
-    fn test_editor_save_jpeg_with_quality() {
+    #[tokio::test]
+    async fn test_editor_save_jpeg_with_quality() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 50, 50, Rgba([128, 64, 32, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_out.path(), None, Some(90), false, 0o755)
+            .await
             .unwrap();
         let reopened = image::open(tmp_out.path()).unwrap();
         assert_eq!(reopened.width(), 50);
@@ -1598,59 +1609,59 @@ mod tests {
 
     // ---- 组 6：Editor resize ----
 
-    #[test]
-    fn test_editor_resize_exact() {
+    #[tokio::test]
+    async fn test_editor_resize_exact() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([255, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.resize_exact(&mut img, 50, 80);
         assert_eq!(img.width(), 50);
         assert_eq!(img.height(), 80);
     }
 
-    #[test]
-    fn test_editor_resize_fit() {
+    #[tokio::test]
+    async fn test_editor_resize_fit() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 200, 100, Rgba([0, 255, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         // 200x100 → fit 100x100 → ratio=0.5 → 100x50
         editor.resize_fit(&mut img, 100, 100);
         assert_eq!(img.width(), 100);
         assert_eq!(img.height(), 50);
     }
 
-    #[test]
-    fn test_editor_resize_fill() {
+    #[tokio::test]
+    async fn test_editor_resize_fill() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 200, 100, Rgba([0, 0, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         // 200x100 → fill 100x100 → ratio=1.0（按高）→ 200x100 → crop center 100x100
         editor.resize_fill(&mut img, 100, 100);
         assert_eq!(img.width(), 100);
         assert_eq!(img.height(), 100);
     }
 
-    #[test]
-    fn test_editor_resize_exact_width() {
+    #[tokio::test]
+    async fn test_editor_resize_exact_width() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 200, 100, Rgba([255, 255, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         // 200x100 → width=50 → 50x25
         editor.resize_exact_width(&mut img, 50);
         assert_eq!(img.width(), 50);
         assert_eq!(img.height(), 25);
     }
 
-    #[test]
-    fn test_editor_resize_exact_height() {
+    #[tokio::test]
+    async fn test_editor_resize_exact_height() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 200, 100, Rgba([255, 0, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         // 200x100 → height=50 → 100x50
         editor.resize_exact_height(&mut img, 50);
         assert_eq!(img.width(), 100);
@@ -1659,12 +1670,12 @@ mod tests {
 
     // ---- 组 7：Editor crop/flip/rotate ----
 
-    #[test]
-    fn test_editor_crop_center() {
+    #[tokio::test]
+    async fn test_editor_crop_center() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor
             .crop(&mut img, 50, 50, Position::Center, 0, 0)
             .unwrap();
@@ -1672,81 +1683,81 @@ mod tests {
         assert_eq!(img.height(), 50);
     }
 
-    #[test]
-    fn test_editor_crop_too_large() {
+    #[tokio::test]
+    async fn test_editor_crop_too_large() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 50, 50, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         assert!(editor
             .crop(&mut img, 100, 100, Position::TopLeft, 0, 0)
             .is_err());
     }
 
-    #[test]
-    fn test_editor_flip_horizontal() {
+    #[tokio::test]
+    async fn test_editor_flip_horizontal() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([255, 128, 64, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.flip(&mut img, FlipMode::Horizontal);
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_flip_vertical() {
+    #[tokio::test]
+    async fn test_editor_flip_vertical() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([255, 128, 64, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.flip(&mut img, FlipMode::Vertical);
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_rotate_90() {
+    #[tokio::test]
+    async fn test_editor_rotate_90() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([64, 255, 128, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, 90.0).unwrap();
         assert_eq!(img.width(), 60); // 旋转 90 度后宽高互换
         assert_eq!(img.height(), 80);
     }
 
-    #[test]
-    fn test_editor_rotate_180() {
+    #[tokio::test]
+    async fn test_editor_rotate_180() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([64, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, 180.0).unwrap();
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_rotate_invalid_angle() {
+    #[tokio::test]
+    async fn test_editor_rotate_invalid_angle() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         assert!(editor.rotate(&mut img, 45.0).is_err());
     }
 
     // ---- 组 8：Editor blend ----
 
-    #[test]
-    fn test_editor_blend_normal() {
+    #[tokio::test]
+    async fn test_editor_blend_normal() {
         let tmp1 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let tmp2 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp1.path(), 100, 100, Rgba([0, 0, 0, 255]));
         create_test_png(tmp2.path(), 50, 50, Rgba([255, 255, 255, 255]));
         let editor = Editor::new();
-        let mut img1 = editor.open(tmp1.path()).unwrap();
-        let img2 = editor.open(tmp2.path()).unwrap();
+        let mut img1 = editor.open(tmp1.path()).await.unwrap();
+        let img2 = editor.open(tmp2.path()).await.unwrap();
         editor
             .blend(
                 &mut img1,
@@ -1768,15 +1779,15 @@ mod tests {
         assert_eq!(pixel[2], 255);
     }
 
-    #[test]
-    fn test_editor_blend_with_offset() {
+    #[tokio::test]
+    async fn test_editor_blend_with_offset() {
         let tmp1 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let tmp2 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp1.path(), 100, 100, Rgba([0, 0, 0, 255]));
         create_test_png(tmp2.path(), 50, 50, Rgba([255, 255, 255, 255]));
         let editor = Editor::new();
-        let mut img1 = editor.open(tmp1.path()).unwrap();
-        let img2 = editor.open(tmp2.path()).unwrap();
+        let mut img1 = editor.open(tmp1.path()).await.unwrap();
+        let img2 = editor.open(tmp2.path()).await.unwrap();
         // 偏移到 (30, 30)，叠加图 50x50，应影响 (30,30)-(80,80)
         editor
             .blend(
@@ -1801,15 +1812,15 @@ mod tests {
         assert_eq!(p3[0], 0);
     }
 
-    #[test]
-    fn test_editor_blend_opacity_half() {
+    #[tokio::test]
+    async fn test_editor_blend_opacity_half() {
         let tmp1 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let tmp2 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp1.path(), 50, 50, Rgba([0, 0, 0, 255]));
         create_test_png(tmp2.path(), 50, 50, Rgba([255, 255, 255, 255]));
         let editor = Editor::new();
-        let mut img1 = editor.open(tmp1.path()).unwrap();
-        let img2 = editor.open(tmp2.path()).unwrap();
+        let mut img1 = editor.open(tmp1.path()).await.unwrap();
+        let img2 = editor.open(tmp2.path()).await.unwrap();
         // opacity=0.5：黑色 + 50%白色 ≈ 128
         editor
             .blend(
@@ -1917,23 +1928,23 @@ mod tests {
     }
 
     // R5-27：Image::open 按 getimagesize 探测类型
-    #[test]
-    fn test_r5_27_image_open_detects_type() {
+    #[tokio::test]
+    async fn test_r5_27_image_open_detects_type() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([255, 255, 255, 255]));
-        let img = Image::open(tmp.path()).unwrap();
+        let img = Image::open(tmp.path()).await.unwrap();
         assert_eq!(img.image_type(), ImageType::Png);
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
     // R5-28：Editor::resize_exact 强制目标尺寸
-    #[test]
-    fn test_r5_28_resize_exact_forces_dimensions() {
+    #[tokio::test]
+    async fn test_r5_28_resize_exact_forces_dimensions() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 200, 100, Rgba([255, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         // 200x100 → 50x50（强制忽略宽高比）
         editor.resize_exact(&mut img, 50, 50);
         assert_eq!(img.width(), 50);
@@ -1941,15 +1952,15 @@ mod tests {
     }
 
     // R5-29：Editor::blend normal + opacity + offset
-    #[test]
-    fn test_r5_29_blend_normal_with_offset_and_opacity() {
+    #[tokio::test]
+    async fn test_r5_29_blend_normal_with_offset_and_opacity() {
         let tmp1 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let tmp2 = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp1.path(), 200, 200, Rgba([0, 0, 0, 255]));
         create_test_png(tmp2.path(), 100, 100, Rgba([255, 255, 255, 255]));
         let editor = Editor::new();
-        let mut img1 = editor.open(tmp1.path()).unwrap();
-        let img2 = editor.open(tmp2.path()).unwrap();
+        let mut img1 = editor.open(tmp1.path()).await.unwrap();
+        let img2 = editor.open(tmp2.path()).await.unwrap();
         // 对齐 PHP $editor->blend($bg, $fg, 'normal', 1.0, 'top-left', 30, 30)
         editor
             .blend(
@@ -1977,8 +1988,8 @@ mod tests {
     }
 
     // R5-30：Editor::text y 坐标基线偏移
-    #[test]
-    fn test_r5_30_text_y_baseline_offset() {
+    #[tokio::test]
+    async fn test_r5_30_text_y_baseline_offset() {
         // 无法精确测试像素布局（依赖字体），但验证 y - size 偏移逻辑：
         // PHP: imagettftext y 是基线，Grafika: y += size（y 变为顶部）
         // Rust: y 是顶部，所以 Rust y = PHP y - size
@@ -1986,22 +1997,25 @@ mod tests {
         let mut img = Image::create_blank(200, 100);
         let editor = Editor::new();
         // 无字体路径 → 期望 FontLoadFailed 错误
-        let result = editor.text(&mut img, "test", 30, 10, 50, Color::rgb(0, 0, 0), None);
+        let result = editor
+            .text(&mut img, "test", 30, 10, 50, Color::rgb(0, 0, 0), None)
+            .await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
     // R5-31：Editor::save 按扩展名猜类型 + JPEG 默认 quality=75
-    #[test]
-    fn test_r5_31_save_infers_type_from_extension() {
+    #[tokio::test]
+    async fn test_r5_31_save_infers_type_from_extension() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 128, 64, 255]));
 
         // 保存为 .png → 应识别为 PNG
         let tmp_png = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_png.path(), None, None, false, 0o755)
+            .await
             .unwrap();
         assert!(tmp_png.path().exists());
 
@@ -2009,17 +2023,18 @@ mod tests {
         let tmp_jpg = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
         editor
             .save(&img, tmp_jpg.path(), None, None, false, 0o755)
+            .await
             .unwrap();
         assert!(tmp_jpg.path().exists());
     }
 
     // R5-32：wrap_text 对齐 PHP wrapText（无字体文件时返回错误，但函数签名对齐）
-    #[test]
-    fn test_r5_32_wrap_text_signature_alignment() {
+    #[tokio::test]
+    async fn test_r5_32_wrap_text_signature_alignment() {
         // 对齐 PHP wrapText($fontsize, $angle, $fontface, $string, $width, $max_line)
         // Rust: wrap_text(font_path, fontsize, string, width, max_line)
         // 验证无字体文件时返回 FontLoadFailed
-        let result = wrap_text(Path::new("/nonexistent.ttf"), 30, "hello", 680, Some(2));
+        let result = wrap_text(Path::new("/nonexistent.ttf"), 30, "hello", 680, Some(2)).await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
@@ -2058,9 +2073,9 @@ mod tests {
 
     // ---- 组 11：measure_text ----
 
-    #[test]
-    fn test_measure_text_nonexistent_font() {
-        let result = measure_text(Path::new("/nonexistent.ttf"), 30, "hello");
+    #[tokio::test]
+    async fn test_measure_text_nonexistent_font() {
+        let result = measure_text(Path::new("/nonexistent.ttf"), 30, "hello").await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
@@ -2212,21 +2227,21 @@ mod tests {
         assert_eq!(dyn_mut.height(), 50);
     }
 
-    #[test]
-    fn test_image_open_nonexistent() {
-        let result = Image::open(Path::new("/nonexistent/file.png"));
+    #[tokio::test]
+    async fn test_image_open_nonexistent() {
+        let result = Image::open(Path::new("/nonexistent/file.png")).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_image_open_unknown_extension_fails() {
+    #[tokio::test]
+    async fn test_image_open_unknown_extension_fails() {
         // image crate uses extension for format detection; .bin is not recognized.
         // Create PNG with proper extension first, then rename to .bin.
         let tmp_png = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_png.path(), 60, 40, Rgba([255, 0, 0, 255]));
         let bin_path = tmp_png.path().with_extension("bin");
         std::fs::rename(tmp_png.path(), &bin_path).unwrap();
-        let result = Image::open(&bin_path);
+        let result = Image::open(&bin_path).await;
         assert!(result.is_err());
     }
 
@@ -2237,67 +2252,67 @@ mod tests {
         let _editor = Editor;
     }
 
-    #[test]
-    fn test_editor_rotate_0() {
+    #[tokio::test]
+    async fn test_editor_rotate_0() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, 0.0).unwrap();
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_rotate_270() {
+    #[tokio::test]
+    async fn test_editor_rotate_270() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, 270.0).unwrap();
         assert_eq!(img.width(), 60);
         assert_eq!(img.height(), 80);
     }
 
-    #[test]
-    fn test_editor_rotate_negative_90() {
+    #[tokio::test]
+    async fn test_editor_rotate_negative_90() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, -90.0).unwrap();
         assert_eq!(img.width(), 60);
         assert_eq!(img.height(), 80);
     }
 
-    #[test]
-    fn test_editor_rotate_negative_180() {
+    #[tokio::test]
+    async fn test_editor_rotate_negative_180() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, -180.0).unwrap();
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_rotate_360_normalized_to_0() {
+    #[tokio::test]
+    async fn test_editor_rotate_360_normalized_to_0() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 80, 60, Rgba([0, 0, 0, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor.rotate(&mut img, 360.0).unwrap();
         assert_eq!(img.width(), 80);
         assert_eq!(img.height(), 60);
     }
 
-    #[test]
-    fn test_editor_crop_with_positive_offset() {
+    #[tokio::test]
+    async fn test_editor_crop_with_positive_offset() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor
             .crop(&mut img, 50, 50, Position::Center, 10, 10)
             .unwrap();
@@ -2305,12 +2320,12 @@ mod tests {
         assert_eq!(img.height(), 50);
     }
 
-    #[test]
-    fn test_editor_crop_with_negative_offset_clamped() {
+    #[tokio::test]
+    async fn test_editor_crop_with_negative_offset_clamped() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor
             .crop(&mut img, 50, 50, Position::TopLeft, -100, -100)
             .unwrap();
@@ -2318,12 +2333,12 @@ mod tests {
         assert_eq!(img.height(), 50);
     }
 
-    #[test]
-    fn test_editor_crop_top_left() {
+    #[tokio::test]
+    async fn test_editor_crop_top_left() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor
             .crop(&mut img, 30, 30, Position::TopLeft, 0, 0)
             .unwrap();
@@ -2331,12 +2346,12 @@ mod tests {
         assert_eq!(img.height(), 30);
     }
 
-    #[test]
-    fn test_editor_crop_bottom_right() {
+    #[tokio::test]
+    async fn test_editor_crop_bottom_right() {
         let tmp = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp.path(), 100, 100, Rgba([0, 128, 255, 255]));
         let editor = Editor::new();
-        let mut img = editor.open(tmp.path()).unwrap();
+        let mut img = editor.open(tmp.path()).await.unwrap();
         editor
             .crop(&mut img, 30, 30, Position::BottomRight, 0, 0)
             .unwrap();
@@ -2499,50 +2514,55 @@ mod tests {
 
     // ---- 组 18：Editor save 补充 ----
 
-    #[test]
-    fn test_editor_save_gif() {
+    #[tokio::test]
+    async fn test_editor_save_gif() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".gif").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_out.path(), None, None, false, 0o755)
+            .await
             .unwrap();
         assert!(tmp_out.path().exists());
         let reopened = image::open(tmp_out.path()).unwrap();
         assert_eq!(reopened.width(), 30);
     }
 
-    #[test]
-    fn test_editor_save_wbmp_error() {
+    #[tokio::test]
+    async fn test_editor_save_wbmp_error() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".wbmp").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
-        let result = editor.save(&img, tmp_out.path(), None, None, false, 0o755);
+        let img = editor.open(tmp_in.path()).await.unwrap();
+        let result = editor
+            .save(&img, tmp_out.path(), None, None, false, 0o755)
+            .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_editor_save_unknown_type_error() {
+    #[tokio::test]
+    async fn test_editor_save_unknown_type_error() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".bin").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
-        let result = editor.save(&img, tmp_out.path(), None, None, false, 0o755);
+        let img = editor.open(tmp_in.path()).await.unwrap();
+        let result = editor
+            .save(&img, tmp_out.path(), None, None, false, 0o755)
+            .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_editor_save_with_explicit_png_type() {
+    #[tokio::test]
+    async fn test_editor_save_with_explicit_png_type() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(
                 &img,
@@ -2552,17 +2572,18 @@ mod tests {
                 false,
                 0o755,
             )
+            .await
             .unwrap();
         assert!(tmp_out.path().exists());
     }
 
-    #[test]
-    fn test_editor_save_jpeg_explicit_type() {
+    #[tokio::test]
+    async fn test_editor_save_jpeg_explicit_type() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(
                 &img,
@@ -2572,87 +2593,93 @@ mod tests {
                 false,
                 0o755,
             )
+            .await
             .unwrap();
         assert!(tmp_out.path().exists());
     }
 
-    #[test]
-    fn test_editor_save_quality_clamping_high() {
+    #[tokio::test]
+    async fn test_editor_save_quality_clamping_high() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_out.path(), None, Some(200), false, 0o755)
+            .await
             .unwrap();
         assert!(tmp_out.path().exists());
     }
 
-    #[test]
-    fn test_editor_save_quality_clamping_zero() {
+    #[tokio::test]
+    async fn test_editor_save_quality_clamping_zero() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([128, 64, 32, 255]));
         let tmp_out = tempfile::Builder::new().suffix(".jpg").tempfile().unwrap();
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, tmp_out.path(), None, Some(0), false, 0o755)
+            .await
             .unwrap();
         assert!(tmp_out.path().exists());
     }
 
-    #[test]
-    fn test_editor_save_creates_parent_dir() {
+    #[tokio::test]
+    async fn test_editor_save_creates_parent_dir() {
         let tmp_in = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
         create_test_png(tmp_in.path(), 30, 30, Rgba([255, 0, 0, 255]));
         let tmp_dir = tempfile::tempdir().unwrap();
         let output_path = tmp_dir.path().join("subdir").join("output.png");
         assert!(!output_path.parent().unwrap().exists());
         let editor = Editor::new();
-        let img = editor.open(tmp_in.path()).unwrap();
+        let img = editor.open(tmp_in.path()).await.unwrap();
         editor
             .save(&img, &output_path, None, None, false, 0o755)
+            .await
             .unwrap();
         assert!(output_path.exists());
     }
 
     // ---- 组 19：load_font / measure_text / wrap_text 补充 ----
 
-    #[test]
-    fn test_load_font_invalid_data() {
+    #[tokio::test]
+    async fn test_load_font_invalid_data() {
         let tmp = tempfile::Builder::new().suffix(".ttf").tempfile().unwrap();
         std::fs::write(tmp.path(), b"this is not a font").unwrap();
         let mut img = Image::create_blank(100, 50);
         let editor = Editor::new();
-        let result = editor.text(
-            &mut img,
-            "test",
-            20,
-            10,
-            30,
-            Color::rgb(0, 0, 0),
-            Some(tmp.path()),
-        );
+        let result = editor
+            .text(
+                &mut img,
+                "test",
+                20,
+                10,
+                30,
+                Color::rgb(0, 0, 0),
+                Some(tmp.path()),
+            )
+            .await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
-    #[test]
-    fn test_measure_text_invalid_font() {
+    #[tokio::test]
+    async fn test_measure_text_invalid_font() {
         let tmp = tempfile::Builder::new().suffix(".ttf").tempfile().unwrap();
         std::fs::write(tmp.path(), b"invalid font data").unwrap();
-        let result = measure_text(tmp.path(), 30, "hello");
+        let result = measure_text(tmp.path(), 30, "hello").await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
-    #[test]
-    fn test_wrap_text_nonexistent_font() {
-        let result = wrap_text(Path::new("/nonexistent.ttf"), 30, "hello", 680, None);
+    #[tokio::test]
+    async fn test_wrap_text_nonexistent_font() {
+        let result = wrap_text(Path::new("/nonexistent.ttf"), 30, "hello", 680, None).await;
         assert!(matches!(result, Err(ImageError::FontLoadFailed(_))));
     }
 
-    #[test]
-    fn test_editor_text_with_font() {
+    #[tokio::test]
+    async fn test_editor_text_with_font() {
         let font_path = Path::new("C:/Windows/Fonts/arial.ttf");
         if !font_path.exists() {
             eprintln!("Skipping test_editor_text_with_font: font not found");
@@ -2660,28 +2687,30 @@ mod tests {
         }
         let mut img = Image::create_blank(200, 100);
         let editor = Editor::new();
-        let result = editor.text(
-            &mut img,
-            "hello",
-            30,
-            10,
-            50,
-            Color::rgb(255, 0, 0),
-            Some(font_path),
-        );
+        let result = editor
+            .text(
+                &mut img,
+                "hello",
+                30,
+                10,
+                50,
+                Color::rgb(255, 0, 0),
+                Some(font_path),
+            )
+            .await;
         assert!(result.is_ok());
         assert_eq!(img.width(), 200);
         assert_eq!(img.height(), 100);
     }
 
-    #[test]
-    fn test_measure_text_with_font() {
+    #[tokio::test]
+    async fn test_measure_text_with_font() {
         let font_path = Path::new("C:/Windows/Fonts/arial.ttf");
         if !font_path.exists() {
             eprintln!("Skipping test_measure_text_with_font: font not found");
             return;
         }
-        let result = measure_text(font_path, 30, "hello").unwrap();
+        let result = measure_text(font_path, 30, "hello").await.unwrap();
         assert!(result.width > 0);
         assert!(result.height > 0);
     }
