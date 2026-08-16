@@ -146,7 +146,7 @@ impl AddonManifest {
 /// - `ManifestParse`：Plugin.php 不存在或 `$info` 数组格式错误
 /// - `ReadFile`：文件读取失败
 #[tracing::instrument]
-pub fn parse_manifest(addon_path: &Path) -> AddonLoaderResult<AddonManifest> {
+pub async fn parse_manifest(addon_path: &Path) -> AddonLoaderResult<AddonManifest> {
     let plugin_file = addon_path.join("Plugin.php");
     if !plugin_file.exists() {
         return Err(AddonLoaderError::ManifestParse {
@@ -160,10 +160,12 @@ pub fn parse_manifest(addon_path: &Path) -> AddonLoaderResult<AddonManifest> {
     }
 
     let plugin_content =
-        std::fs::read_to_string(&plugin_file).map_err(|e| AddonLoaderError::ReadFile {
-            path: plugin_file.display().to_string(),
-            source: e,
-        })?;
+        tokio::fs::read_to_string(&plugin_file)
+            .await
+            .map_err(|e| AddonLoaderError::ReadFile {
+                path: plugin_file.display().to_string(),
+                source: e,
+            })?;
 
     // 解析 Plugin.php 中的 $info 数组
     let mut info =
@@ -179,8 +181,9 @@ pub fn parse_manifest(addon_path: &Path) -> AddonLoaderResult<AddonManifest> {
     // 合并 info.ini（若存在）
     let info_ini_path = addon_path.join("info.ini");
     if info_ini_path.exists() {
-        let ini_content =
-            std::fs::read_to_string(&info_ini_path).map_err(|e| AddonLoaderError::ReadFile {
+        let ini_content = tokio::fs::read_to_string(&info_ini_path)
+            .await
+            .map_err(|e| AddonLoaderError::ReadFile {
                 path: info_ini_path.display().to_string(),
                 source: e,
             })?;
@@ -774,10 +777,10 @@ status = 1
         assert!(map.is_empty());
     }
 
-    #[test]
-    fn test_parse_manifest_missing_plugin_file() {
+    #[tokio::test]
+    async fn test_parse_manifest_missing_plugin_file() {
         let tmp = tempfile::tempdir().expect("create tempdir");
-        let result = parse_manifest(tmp.path());
+        let result = parse_manifest(tmp.path()).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             AddonLoaderError::ManifestParse { .. } => {}
@@ -785,8 +788,8 @@ status = 1
         }
     }
 
-    #[test]
-    fn test_parse_manifest_valid_plugin() {
+    #[tokio::test]
+    async fn test_parse_manifest_valid_plugin() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let plugin_path = tmp.path().join("Plugin.php");
         let php_content = r#"<?php
@@ -809,7 +812,7 @@ class Plugin extends Addons {
 "#;
         std::fs::write(&plugin_path, php_content).expect("write Plugin.php");
 
-        let result = parse_manifest(tmp.path());
+        let result = parse_manifest(tmp.path()).await;
         assert!(result.is_ok());
         let manifest = result.unwrap();
         assert_eq!(manifest.name, "operate");
@@ -823,8 +826,8 @@ class Plugin extends Addons {
         assert!(manifest.is_enabled());
     }
 
-    #[test]
-    fn test_parse_manifest_disabled_status() {
+    #[tokio::test]
+    async fn test_parse_manifest_disabled_status() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let plugin_path = tmp.path().join("Plugin.php");
         let php_content = r#"
@@ -835,15 +838,15 @@ public $info = [
 "#;
         std::fs::write(&plugin_path, php_content).expect("write Plugin.php");
 
-        let result = parse_manifest(tmp.path());
+        let result = parse_manifest(tmp.path()).await;
         assert!(result.is_ok());
         let manifest = result.unwrap();
         assert_eq!(manifest.name, "disabled");
         assert!(!manifest.is_enabled());
     }
 
-    #[test]
-    fn test_parse_manifest_with_info_ini_merge() {
+    #[tokio::test]
+    async fn test_parse_manifest_with_info_ini_merge() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let plugin_path = tmp.path().join("Plugin.php");
         let php_content = r#"
@@ -858,21 +861,21 @@ public $info = [
         let info_ini = tmp.path().join("info.ini");
         std::fs::write(&info_ini, "version = 2.0.0\nauthor = sz").expect("write info.ini");
 
-        let result = parse_manifest(tmp.path());
+        let result = parse_manifest(tmp.path()).await;
         assert!(result.is_ok());
         let manifest = result.unwrap();
         assert_eq!(manifest.version, "2.0.0"); // 被 ini 覆盖
         assert_eq!(manifest.author, "sz"); // 来自 ini
     }
 
-    #[test]
-    fn test_parse_manifest_malformed_info() {
+    #[tokio::test]
+    async fn test_parse_manifest_malformed_info() {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let plugin_path = tmp.path().join("Plugin.php");
         let php_content = "<?php class Plugin {}";
         std::fs::write(&plugin_path, php_content).expect("write Plugin.php");
 
-        let result = parse_manifest(tmp.path());
+        let result = parse_manifest(tmp.path()).await;
         assert!(result.is_err());
     }
 

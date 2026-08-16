@@ -22,12 +22,13 @@ tracing.workspace = true
 sz-rust-capability = { workspace = true }
 # 热重载（optional，仅 hot-reload feature 启用时）
 notify = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true, features = ["macros", "rt-multi-thread", "signal"] }
+# 生产依赖 tokio（registry 扫描 addons 目录用 tokio::fs，铁律 4 禁 std::fs）
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs"] }
 
 [features]
 default = []
 # 热重载（M2 方案：进程重启 + 状态迁移，避免 dlopen unsafe）
-hot-reload = ["dep:notify", "dep:tokio"]
+hot-reload = ["dep:notify"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
