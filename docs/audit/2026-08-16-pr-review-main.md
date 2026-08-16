@@ -1,5 +1,7 @@
 # PR 审查报告（2026-08-16，branch: main，range: HEAD~1..HEAD）
 
+> 审查时点: `HEAD @ f5fe5a4`（报告为时点快照；后续新提交不在本报告范围内）
+
 ## 状态机
 - scanning → scanning; scanning → static; static → static; static → security; security → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
@@ -12,77 +14,45 @@
 
 ## 变更集
 ```
- ...\346\211\247\350\241\214\346\214\207\345\215\227.md" | 17 +++++++++++++++--
- 1 file changed, 15 insertions(+), 2 deletions(-)
+ "docs/pr-review-\346\211\247\350\241\214\346\214\207\345\215\227.md" | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## PR 审查报告
+# PR Review: sz-rust 文档路径修复
 
-### 变更概述
-纯文档更新，新增 ZCode Skill 用法说明，更新版本号。无代码变更。
+## 变更概述
 
----
+仅修改 `docs/pr-review-执行指南.md` 中一处 Skill 说明路径，将硬编码的 Windows 绝对路径改为跨平台环境变量路径。
 
-### 潜在问题
+## 评审意见
 
-#### 1. 🔴 路径硬编码（可维护性）
-`C:\Users\Administrator\.zcode\skills\sz-rust-review\SKILL.md` 包含具体用户名 `Administrator`，其他开发者环境路径不同会导致文档指引失效。
+### ✅ 优点
 
-**建议**：使用环境变量或相对路径占位符：
-```markdown
-`%USERPROFILE%\.zcode\skills\sz-rust-review\SKILL.md`（Windows）
-`$HOME/.zcode/skills/sz-rust-review/SKILL.md`（macOS/Linux）
-```
+- **修复硬编码路径**：`C:\Users\Administrator\...` 是特定用户的绝对路径，不具备可移植性
+- **跨平台兼容**：同时覆盖 Windows (`%USERPROFILE%`) 和 macOS/Linux (`~`) 两种写法
+- **变更范围极小**：单行修改，风险极低
 
-#### 2. 🟡 命令风格不一致（可维护性）
-表格中 `/sz-rust-review fast` 缺少 `--` 前缀，与同表 `--ai`、`--range` 风格不统一。若 `fast` 确为子命令而非 flag，建议补充说明。
+### ⚠️ 建议改进
 
-**建议**：
-```markdown
-| `/sz-rust-review fast` | 门禁 1-3（fmt/check/clippy），`fast` 为子命令 |
-```
+1. **路径不一致问题**：原路径是 `.zcode\skills\sz-rust-review\`，但文档标题中提到的是 `sz-rust-pr-review`，目录名不一致可能导致用户困惑。建议确认实际目录名并统一。
 
-#### 3. 🟡 缺少回退指引（可维护性）
-文档未说明 ZCode Skill 不可用时的回退方案（如仅使用 Trae 方式）。
+2. **缺少验证说明**：建议补充一句说明，如：
+   ```markdown
+   > 请确保对应路径下的 SKILL.md 文件存在，否则相关技能命令将无法加载。
+   ```
 
-**建议**：在 ZCode 章节末尾补充：
-```markdown
-> **回退方案**：若 ZCode 不可用，可在 Trae 内使用 `/sz-rust-review` Skill。
-```
+3. **项目根目录仍是硬编码**：同文件第 6 行 `**项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`` 也是硬编码路径，建议一并修复为相对路径或环境变量形式。
 
-#### 4. 🟢 版本号说明不足（可维护性）
-`01f5da9` 仅标注提交哈希，未说明本次版本新增内容（"多 Provider" 具体指什么）。
+## 整体评分
 
-**建议**：补充简要变更说明：
-```markdown
-> **适用版本**：2026-08-16（含 AI 评审 + 多 Provider 支持，提交 `01f5da9`）
-> **新增**：支持 ZCode `/sz-rust-review` 命令、新增 `--range` 参数
-```
+**9/10**
 
----
-
-### 修改建议汇总
-
-| # | 问题 | 严重度 | 建议 |
-|---|------|--------|------|
-| 1 | 路径硬编码用户名 | 中 | 改用 `%USERPROFILE%` / `$HOME` |
-| 2 | 命令风格不一致 | 低 | 补充 `fast` 说明或统一前缀 |
-| 3 | 缺少回退指引 | 低 | 添加 Trae 回退说明 |
-| 4 | 版本说明不足 | 低 | 补充版本变更摘要 |
-
----
-
-### 整体评分：**7/10**
-
-**评分理由**：
-- ✅ 纯文档变更，无安全/性能风险
-- ✅ 新增内容结构清晰，表格易读
-- ⚠️ 路径硬编码影响跨环境可维护性
-- ⚠️ 细节一致性有待改进
+- 这是一个正确的文档修复，方向完全正确
+- 扣分原因：同文件中仍存在其他硬编码路径未一并处理，建议作者顺手修复
 
 
 ## 结论
