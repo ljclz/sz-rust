@@ -97,7 +97,7 @@ impl AppState {
         let product = self
             .products
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .find(|p| p.id == product_id)
             .cloned()?;
@@ -109,7 +109,10 @@ impl AppState {
             total_amount: product.price * quantity,
             status: "pending".to_string(),
         };
-        self.orders.lock().unwrap().push(order.clone());
+        self.orders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(order.clone());
         Some(order)
     }
 
@@ -117,7 +120,7 @@ impl AppState {
         let order = self
             .orders
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .find(|o| o.order_no == order_no)
             .cloned()?;
@@ -129,7 +132,7 @@ impl AppState {
             .notify_url("https://example.com/notify");
         let result = self.pay_provider.pay(pay_order).ok()?;
 
-        let mut orders = self.orders.lock().unwrap();
+        let mut orders = self.orders.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(o) = orders.iter_mut().find(|o| o.order_no == order_no) {
             o.status = if result.trade_status == "WAIT_BUYER_PAY" {
                 "paid"
@@ -145,7 +148,7 @@ impl AppState {
     fn find_order(&self, order_no: &str) -> Option<Order> {
         self.orders
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .iter()
             .find(|o| o.order_no == order_no)
             .cloned()
@@ -163,7 +166,11 @@ async fn list_products(State(state): State<Arc<AppState>>) -> axum::response::Re
         .from("products")
         .build(DbType::MySQL);
     tracing::info!("参数化查询：{sql}");
-    let products = state.products.lock().unwrap().clone();
+    let products = state
+        .products
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     sz_rust_core::response::render_success(json!(products), "ok")
 }
 
@@ -239,7 +246,7 @@ async fn openapi_spec() -> axum::response::Response {
     axum::response::Response::builder()
         .header("content-type", "application/json")
         .body(axum::body::Body::from(spec))
-        .unwrap()
+        .expect("响应体构造失败")
 }
 
 // ============================================================================
@@ -262,9 +269,11 @@ async fn main() {
         .with_state(state);
 
     let addr = "127.0.0.1:8082";
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("绑定监听地址失败");
     tracing::info!(
         "电商示例运行于 http://{addr} （/product/list /order/create /order/pay/{{no}} /openapi.json）"
     );
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await.expect("HTTP 服务启动失败");
 }

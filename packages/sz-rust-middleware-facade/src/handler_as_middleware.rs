@@ -200,7 +200,7 @@ mod tests {
 
     async fn read_body(resp: Response) -> String {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
+        String::from_utf8(bytes.to_vec()).expect("响应体应为 UTF-8")
     }
 
     fn make_request(method: &str, uri: &str) -> Request {
@@ -226,7 +226,10 @@ mod tests {
             .route("/", axum::routing::get(|| async { "route" }))
             .layer(axum::middleware::from_fn(handler_as_middleware(my_handler)));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         // handler_as_middleware 不调用 next，所以返回 handler 的响应
         assert_eq!(body, "handler called");
@@ -261,7 +264,10 @@ mod tests {
             )
             .layer(axum::middleware::from_fn(handler_as_middleware(my_handler)));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         assert_eq!(body, "handler response");
         assert!(
@@ -283,7 +289,10 @@ mod tests {
                 json_handler,
             )));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         assert_eq!(resp.status(), StatusCode::OK);
         let body = read_body(resp).await;
         assert!(body.contains("\"code\":1"));
@@ -303,7 +312,10 @@ mod tests {
                 error_handler,
             )));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
         let body = read_body(resp).await;
         assert_eq!(body, "not found");
@@ -348,8 +360,13 @@ mod tests {
     async fn test_handler_as_middleware_with_request_body() {
         // Handler 应能读取请求 body
         async fn body_handler(req: Request) -> String {
-            let bytes = req.into_body().collect().await.unwrap().to_bytes();
-            String::from_utf8(bytes.to_vec()).unwrap()
+            let bytes = req
+                .into_body()
+                .collect()
+                .await
+                .expect("响应体读取失败")
+                .to_bytes();
+            String::from_utf8(bytes.to_vec()).expect("响应体应为 UTF-8")
         }
 
         let app: Router = Router::new()
@@ -384,7 +401,10 @@ mod tests {
             axum::routing::get(middleware_as_handler(my_middleware)),
         );
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         assert_eq!(body, "middleware as handler");
     }
@@ -402,7 +422,10 @@ mod tests {
             axum::routing::get(middleware_as_handler(error_middleware)),
         );
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
         let body = read_body(resp).await;
         assert_eq!(body, "forbidden");
@@ -419,7 +442,10 @@ mod tests {
             axum::routing::get(middleware_as_handler(method_middleware)),
         );
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         assert_eq!(body, "GET");
     }
@@ -436,7 +462,10 @@ mod tests {
             axum::routing::get(middleware_as_handler(json_middleware)),
         );
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         assert!(body.contains("\"code\":1"));
         assert!(body.contains("\"msg\":\"ok\""));
@@ -459,7 +488,10 @@ mod tests {
             .route("/", axum::routing::get(|| async { "route" }))
             .layer(axum::middleware::from_fn(handler_as_middleware(my_handler)));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         assert_eq!(body, "handler"); // Middleware 不调用 next，返回 handler 响应
     }
@@ -501,7 +533,10 @@ mod tests {
             .layer(axum::middleware::from_fn(handler_as_middleware(my_handler)))
             .layer(axum::middleware::from_fn(first_middleware));
 
-        let resp = app.oneshot(make_request("GET", "/")).await.unwrap();
+        let resp = app
+            .oneshot(make_request("GET", "/"))
+            .await
+            .expect("测试请求执行失败");
         let body = read_body(resp).await;
         // first_middleware 调用 next → handler_as_middleware 不调用 next → 返回 handler 响应
         assert_eq!(body, "handler called at order 1");

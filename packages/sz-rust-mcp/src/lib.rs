@@ -732,7 +732,9 @@ mod tests {
         let resp = handle_request(
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"parse_path","arguments":{"uri":"/oapc/customer/index"}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
         let parsed: Value = serde_json::from_str(text).unwrap();
         assert_eq!(parsed["controller"], "Customer");
         assert_eq!(parsed["action"], "index");
@@ -743,8 +745,10 @@ mod tests {
         let resp = handle_request(
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"build_select_query","arguments":{"table":"users","columns":["id","name"],"where_eq":{"id":1}}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        let out: Value = serde_json::from_str(text).unwrap();
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
         assert!(out["sql"].as_str().unwrap().contains('?'));
         assert_eq!(out["params"], 1);
         // 防注入：显式列投影
@@ -756,8 +760,10 @@ mod tests {
         let resp = handle_request(
             r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"redaction_check","arguments":{"config":{"app_id":"app1","merchant_private_key":"SUPER_SECRET_KEY_12345"}}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        let out: Value = serde_json::from_str(text).unwrap();
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
         assert_eq!(out["redacted"], true);
     }
 
@@ -774,8 +780,10 @@ mod tests {
         let resp = handle_request(
             r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"sql_validate","arguments":{"sql":"SELECT * FROM users WHERE id = 1 OR 1=1"}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        let out: Value = serde_json::from_str(text).unwrap();
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
         // 危险模式（SELECT * + OR 恒真）应被识别
         assert_eq!(out["valid"], false);
     }
@@ -785,8 +793,10 @@ mod tests {
         let resp = handle_request(
             r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"sql_validate","arguments":{"sql":"SELECT id, name FROM users WHERE id = ?"}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        let out: Value = serde_json::from_str(text).unwrap();
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
         assert_eq!(out["valid"], true);
     }
 
@@ -798,8 +808,15 @@ mod tests {
                 {"method":"GET","path":"/user/list","handler":"Admin@list"}
             ]}}}"#,
         );
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        let out: Value = serde_json::from_str(text).unwrap();
-        assert!(out["conflict_count"].as_i64().unwrap() >= 1);
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(
+            out["conflict_count"]
+                .as_i64()
+                .expect("conflict_count 字段缺失")
+                >= 1
+        );
     }
 }

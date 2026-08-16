@@ -219,7 +219,7 @@ mod bumpalo_backend {
 
     impl MemPool for BumpaloPool {
         unsafe fn alloc_str<'a>(&self, s: &'a str) -> &'a str {
-            let bump = self.bump.lock().unwrap();
+            let bump = self.bump.lock().unwrap_or_else(|e| e.into_inner());
             let allocated = bump.alloc_str(s);
             self.used.fetch_add(s.len(), Ordering::Relaxed);
             // Safety: 分配的引用在 reset 前有效，bump 不会移动已分配内存
@@ -228,14 +228,14 @@ mod bumpalo_backend {
         }
 
         unsafe fn alloc_bytes<'a>(&self, b: &'a [u8]) -> &'a [u8] {
-            let bump = self.bump.lock().unwrap();
+            let bump = self.bump.lock().unwrap_or_else(|e| e.into_inner());
             let allocated = bump.alloc_slice_copy(b);
             self.used.fetch_add(b.len(), Ordering::Relaxed);
             unsafe { std::mem::transmute::<&[u8], &'a [u8]>(allocated) }
         }
 
         fn reset(&self) {
-            let mut bump = self.bump.lock().unwrap();
+            let mut bump = self.bump.lock().unwrap_or_else(|e| e.into_inner());
             bump.reset();
             self.used.store(0, Ordering::Release);
         }
