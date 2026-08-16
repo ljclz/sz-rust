@@ -3,7 +3,7 @@
 > **执行入口**：`scripts/audit/pr-review.sh`
 > **Skill 说明**：`.trae/skills/sz-rust-pr-review/SKILL.md`（Trae 内）+ `%USERPROFILE%\.zcode\skills\sz-rust-review\SKILL.md`（Windows）或 `~/.zcode/skills/sz-rust-review/SKILL.md`（macOS/Linux）（**ZCode 内 `/sz-rust-review`，推荐**）
 > **适用版本**：2026-08-16（含 AI 评审 + 多 Provider，提交 `01f5da9`）
-> **项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`
+> **项目根目录**：仓库根目录（含 `Cargo.toml` workspace 与 `scripts/audit/` 的目录；本机为 `e:\vue\test\鲜视达\rust\sz-rust`）
 
 ## ZCode Skill 用法（推荐）
 

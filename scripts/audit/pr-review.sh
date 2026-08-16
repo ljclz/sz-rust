@@ -206,8 +206,11 @@ done <<< "$ISSUES"
 
 # ---- 写报告 ----
 DATE=$(date +%Y-%m-%d)
-BRANCH=$(git branch --show-current)
-REVIEW_HEAD=$(git rev-parse --short HEAD)
+BRANCH=$(git branch --show-current | tr '/' '-')
+REVIEW_HEAD=$(git rev-parse --short HEAD 2>/dev/null) || {
+  echo "❌ 无法获取当前 HEAD，请确认在 Git 仓库中运行" >&2
+  exit 1
+}
 REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
 {
   echo "# PR 审查报告（$DATE，branch: $BRANCH，range: $RANGE）"
