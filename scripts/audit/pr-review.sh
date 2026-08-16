@@ -7,7 +7,7 @@
 #
 # 用法:
 #   bash scripts/audit/pr-review.sh --range HEAD~1..HEAD [--severity-threshold medium] [--ai] [--report path]
-# 依赖: git / cargo / node（门禁脚本）；--ai 需要 CSDN_API_KEY（OpenAI 兼容端点，model=glm_for_coding 套餐）
+# 依赖: git / cargo / node（门禁脚本）；--ai 需要 AI_API_KEY（OpenAI 兼容端点，默认 CSDN glm_for_coding，可用 AI_BASE_URL/AI_MODEL 切换 Provider）
 # fail-closed: 任何环节命令失败或输出不可解析 → 该环节失败 → 整体退出非零
 
 set -uo pipefail
@@ -37,6 +37,12 @@ while [ $# -gt 0 ]; do
     *) echo "未知参数: $1"; exit 2 ;;
   esac
 done
+
+# 临时文件（AI 评审建议：mktemp 防多实例竞态）
+TMPDIR_PREFIX="${TMPDIR:-/tmp}/pr-review"
+AI_ERR_LOG=$(mktemp "${TMPDIR_PREFIX}-ai-err.XXXXXX.log" 2>/dev/null || echo "/tmp/pr-review-ai-err.log")
+AI_BODY_TMP=$(mktemp "${TMPDIR_PREFIX}-body.XXXXXX.json" 2>/dev/null || echo "/tmp/pr-review-body.json")
+trap 'rm -f "$AI_ERR_LOG" "$AI_BODY_TMP"' EXIT
 
 SEVERITY_ORDER=(low medium high critical)
 THRESHOLD_IDX=1  # medium 默认
@@ -113,12 +119,19 @@ run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
 run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
 
-# ---- 环节 4（可选）: AI 评审（CSDN OpenAI 兼容端点，model=glm_for_coding 套餐） ----
+# ---- 环节 4（可选）: AI 评审（OpenAI 兼容端点，默认 CSDN glm_for_coding） ----
+# Provider 配置（环境变量覆盖，默认 CSDN）：
+#   AI_API_KEY  — 必填（兼容旧变量名 CSDN_API_KEY）
+#   AI_BASE_URL — 默认 https://ai.csdn.net/api/model/v1
+#   AI_MODEL    — 默认 glm_for_coding（CSDN 套餐；快手示例: KAT-Coder-Pro-V2.5）
+AI_API_KEY="${AI_API_KEY:-${CSDN_API_KEY:-}}"
+AI_BASE_URL="${AI_BASE_URL:-https://ai.csdn.net/api/model/v1}"
+AI_MODEL="${AI_MODEL:-glm_for_coding}"
 AI_REVIEW=""
 if [ "$AI" -eq 1 ]; then
-  transition "ai" "AI 评审（CSDN glm_for_coding）"
-  if [ -z "${CSDN_API_KEY:-}" ]; then
-    note_issue "medium" "ai" "missing-key" "CSDN_API_KEY 未设置，AI 评审跳过（设置后重跑 --ai）"
+  transition "ai" "AI 评审（${AI_MODEL}）"
+  if [ -z "$AI_API_KEY" ]; then
+    note_issue "medium" "ai" "missing-key" "AI_API_KEY 未设置（或旧变量 CSDN_API_KEY），AI 评审跳过（设置后重跑 --ai）"
   else
     # prompt 设计（对齐文章 ai_reviewer）：diff + 问题清单 → 3-5 个最重要问题 + 建议 + 评分
     DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
@@ -142,36 +155,37 @@ ${DIFF_TEXT}
 
 只输出 Markdown，不要闲聊。"
     # JSON body 用 python 构造（环境变量传 prompt，避免 shell 转义）
-    AI_BODY=$(REVIEW_PROMPT="$PROMPT" python -c '
+    AI_BODY=$(REVIEW_PROMPT="$PROMPT" AI_MODEL="$AI_MODEL" python -c '
 import json, os, sys
 sys.stdout.reconfigure(encoding="utf-8")
 print(json.dumps({
-    "model": "glm_for_coding",
+    "model": os.environ["AI_MODEL"],
     "messages": [{"role": "user", "content": os.environ["REVIEW_PROMPT"]}],
     "temperature": 0.2,
 }))
 ')
     if AI_RESP=$(curl -sS --max-time 120 \
-      -X POST "https://ai.csdn.net/api/model/v1/chat/completions" \
-      -H "Authorization: Bearer ${CSDN_API_KEY}" \
+      -X POST "${AI_BASE_URL}/chat/completions" \
+      -H "Authorization: Bearer ${AI_API_KEY}" \
       -H "Content-Type: application/json" \
-      -d "$AI_BODY" 2>/tmp/pr-review-ai-err.log); then
+      -d "$AI_BODY" 2>"$AI_ERR_LOG"); then
       if AI_REVIEW=$(printf '%s' "$AI_RESP" | python -c '
 import json, sys
-sys.stdin.reconfigure(encoding="utf-8")
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(encoding="utf-8")
 data = json.load(sys.stdin)
 if "error" in data:
     print("CSDN API 错误: " + json.dumps(data["error"], ensure_ascii=False), file=sys.stderr)
     sys.exit(1)
 print(data["choices"][0]["message"]["content"])
-' 2>/tmp/pr-review-ai-err.log); then
+' 2>"$AI_ERR_LOG"); then
         EXTRA+=$'\n## AI 评审\n\n'"$AI_REVIEW"$'\n'
         echo "✅ AI 评审完成"
       else
-        note_issue "medium" "ai" "parse-failed" "AI 响应解析失败: $(head -c 120 /tmp/pr-review-ai-err.log)"
+        note_issue "medium" "ai" "parse-failed" "AI 响应解析失败: $(head -c 120 "$AI_ERR_LOG")"
       fi
     else
-      note_issue "medium" "ai" "http-failed" "AI 请求失败: $(head -c 120 /tmp/pr-review-ai-err.log)"
+      note_issue "medium" "ai" "http-failed" "AI 请求失败: $(head -c 120 "$AI_ERR_LOG")"
     fi
   fi
 fi
