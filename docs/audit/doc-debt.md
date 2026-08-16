@@ -17,6 +17,8 @@
 | DB-2026-08-13-02 | 审计报告 `2026-08-13-文档已实现但生产零调用审计报告.md` | README.md 核心特性（13-38 行）与对标表（102-127 行） | 10 个 crate（tracing/pdf/operator/wasm/rag/workflow/ai-facade/capability/addons-loader/addons-*）与 20+ 模块（限流/熔断/SSE/SLO/视图/上传引擎等）声称「已落地」但生产路径零调用，需补充「生产接入状态」或降级表述 | 2026-08-13 | 2026-08-18 | RESOLVED（2026-08-14：README.md + README.en.md 核心特性区已为所有条目补充生产接入状态标注，附 file:line 调用点证据；审计报告新增「2026-08-14 状态更新」章节标注 d3c831f 后已接入/仍零调用清单） |
 | DB-2026-08-14-03 | d3c831f（sz-orm 3.5.0 升级遗留） | 各 crate 源码 | **预存 clippy 债务**：`cargo clippy --workspace --all-targets -D warnings` 有 93 处错误（security_headers 6 / mcp 2 / sso_bench 2 / core plugin 44 / workflow 14 / cli 12 / sz300 4 / addons 6 / rag 3 / ai-facade 17 等），含 deprecated `Query` 迁移、`impl can be derived`、missing_docs、`field assignment outside initializer` 等。与 2026-08-14 空洞测试提交无关（文件 hash 与 d3c831f 一致），pre-commit 钩子 3/3 clippy 门禁因此失败 | 2026-08-14 | 2026-08-14 | RESOLVED（881e1a1 全部修复，clippy 0 error） |
 
+| DB-2026-08-16-04 | pr-review 全量门禁上线（fbdeed8 前脚本 / 本轮 15 项门禁） | 各 crate 源码 | **生产代码裸 unwrap 债务（铁律 2）**：`scripts/check-unwrap.py` 检出 AUTHORITATIVE_PROD_UNWRAP=51 处（此前 pre-commit 钩子仅警告不阻塞；全量门禁纳入后每次 `/sz-rust-review` 以 high 阻塞）。既有债务（非本次变更引入），需专项清偿（参照 93 处 clippy 债务模式） | 2026-08-16 | 2026-08-19 | PENDING |
+
 ---
 
 > 初始创建于 2026-08-09，对应 P1 任务 2.3（文档同步强制规则约束）。
