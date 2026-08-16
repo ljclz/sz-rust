@@ -77,6 +77,16 @@
   - 剩余 std::fs 30 处：infra-facade upload（同步公共 API，待专项 async 化）、mvc-facade view（同步渲染链）、pdf（第三方库接口要求，建议豁免）、cli（同步工具无 runtime，建议铁律 4 增豁免条款）
 - 验证（真实输出）：addons-loader + 消费者 0 FAILED（231 passed）；workspace check 0 errors；clippy 0 警告；fmt 干净
 
+## [Unreleased] - 2026-08-16（铁律 4 专项：infra upload 全链 async 化 + 门禁豁免裁定）
+
+### Fixed
+
+- **std::fs 债务专项（doc-debt DB-2026-08-16-06 RESOLVED）**：
+  - infra-facade upload 全链 async 化：StorageEngine trait 5 引擎 set_upload_file/set_upload_file_by_real、from_uploaded_file/from_real_path、move_to/get_target_file/hash 链（compute_file_hash/hash/hash_name/md5/sha1）、image save/open/text/wrap_text/measure_text/load_font、debug_page load_source_snippet/with_source_snippet、JpegEncoder 改 Vec 缓冲 + tokio::fs::write
+  - addons-loader 生产路径（上一轮）保持；core upload_parity 测试适配（await + tokio::test，移除嵌套 runtime）
+  - 门禁 check-std-fs.py：**用户裁定豁免** pdf（umya 第三方库）/ cli（同步工具无 runtime）/ mvc view（引擎级 async 化单独排期，债务跟踪）
+- 验证（真实输出）：std-fs 门禁 EXIT=0；clippy workspace all-targets 0 警告；infra 670+8+1、core 835、addons-loader 231 全部通过
+
 ## [Unreleased] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed

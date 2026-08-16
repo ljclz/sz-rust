@@ -66,12 +66,12 @@ impl StackFrame {
     /// # 参数
     ///
     /// - `context`：错误行前后的上下文行数（建议 10）
-    pub fn load_source_snippet(&mut self, context: usize) {
+    pub async fn load_source_snippet(&mut self, context: usize) {
         if self.line == 0 || self.file.is_empty() {
             return;
         }
 
-        let content = match std::fs::read_to_string(&self.file) {
+        let content = match tokio::fs::read_to_string(&self.file).await {
             Ok(c) => c,
             Err(_) => return, // 文件不可读（如内置函数、动态生成代码）
         };
@@ -162,11 +162,11 @@ impl DebugError {
     /// # 参数
     ///
     /// - `context`：错误行前后的上下文行数（建议 10）
-    pub fn with_source_snippet(mut self, context: usize) -> Self {
+    pub async fn with_source_snippet(mut self, context: usize) -> Self {
         // 为错误位置加载源码
         if !self.file.is_empty() && self.line > 0 {
             let mut main_frame = StackFrame::new(self.file.clone(), self.line, "<main>");
-            main_frame.load_source_snippet(context);
+            main_frame.load_source_snippet(context).await;
             // 主错误信息也存为虚拟帧
             if !main_frame.source_lines.is_empty() {
                 self.stack.insert(0, main_frame);
@@ -176,7 +176,7 @@ impl DebugError {
         // 为所有堆栈帧加载源码
         for frame in &mut self.stack {
             if frame.source_lines.is_empty() {
-                frame.load_source_snippet(context);
+                frame.load_source_snippet(context).await;
             }
         }
         self
@@ -825,8 +825,8 @@ mod tests {
     // StackFrame::load_source_snippet
     // --------------------------------------------------------------------
 
-    #[test]
-    fn test_stack_frame_load_source_snippet() {
+    #[tokio::test]
+    async fn test_stack_frame_load_source_snippet() {
         let temp = tempfile::tempdir().unwrap();
         let file_path = temp.path().join("test.rs");
         std::fs::write(
@@ -836,7 +836,7 @@ mod tests {
         .unwrap();
 
         let mut frame = StackFrame::new(file_path.to_str().unwrap(), 5, "test_fn");
-        frame.load_source_snippet(2);
+        frame.load_source_snippet(2).await;
 
         // 应该包含 line 3-7（5-2=3, 5+2=7）
         assert_eq!(frame.source_lines.len(), 5);
@@ -848,31 +848,31 @@ mod tests {
         assert_eq!(frame.source_lines[4].1, "line7");
     }
 
-    #[test]
-    fn test_stack_frame_load_source_snippet_at_file_start() {
+    #[tokio::test]
+    async fn test_stack_frame_load_source_snippet_at_file_start() {
         let temp = tempfile::tempdir().unwrap();
         let file_path = temp.path().join("start.rs");
         std::fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
 
         let mut frame = StackFrame::new(file_path.to_str().unwrap(), 1, "first");
-        frame.load_source_snippet(10);
+        frame.load_source_snippet(10).await;
 
         // line=1, context=10, 但文件只有 3 行
         assert_eq!(frame.source_lines.len(), 3);
         assert_eq!(frame.source_lines[0].0, 1);
     }
 
-    #[test]
-    fn test_stack_frame_load_source_snippet_nonexistent_file() {
+    #[tokio::test]
+    async fn test_stack_frame_load_source_snippet_nonexistent_file() {
         let mut frame = StackFrame::new("/nonexistent/file.rs", 10, "missing");
-        frame.load_source_snippet(5);
+        frame.load_source_snippet(5).await;
         assert!(frame.source_lines.is_empty());
     }
 
-    #[test]
-    fn test_stack_frame_load_source_snippet_zero_line() {
+    #[tokio::test]
+    async fn test_stack_frame_load_source_snippet_zero_line() {
         let mut frame = StackFrame::new("test.rs", 0, "unknown");
-        frame.load_source_snippet(5);
+        frame.load_source_snippet(5).await;
         assert!(frame.source_lines.is_empty());
     }
 
@@ -1139,14 +1139,15 @@ mod tests {
         assert_eq!(error.stack[0].function, "fn1");
     }
 
-    #[test]
-    fn test_debug_error_with_source_snippet_loads_main_frame() {
+    #[tokio::test]
+    async fn test_debug_error_with_source_snippet_loads_main_frame() {
         let temp = tempfile::tempdir().unwrap();
         let file_path = temp.path().join("main.rs");
         std::fs::write(&file_path, "line1\nline2\nline3\nline4\nline5\n").unwrap();
 
-        let error =
-            DebugError::new("Err", "msg", file_path.to_str().unwrap(), 3).with_source_snippet(1);
+        let error = DebugError::new("Err", "msg", file_path.to_str().unwrap(), 3)
+            .with_source_snippet(1)
+            .await;
 
         // 主错误位置应作为虚拟帧插入 stack[0]
         assert!(!error.stack.is_empty());

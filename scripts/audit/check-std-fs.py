@@ -82,6 +82,25 @@ def scan(path):
 
 def main():
     total = 0
+# 豁免清单（2026-08-16 用户裁定，理由入 doc-debt DB-2026-08-16-06）：
+# - sz-rust-pdf: umya-spreadsheet 第三方库接口要求同步 std::fs::File（库内部实现，非我方可控）
+# - sz-rust-cli: 同步命令行工具，无 tokio runtime，铁律 4 意图（不阻塞异步运行时）不适用
+EXEMPT_PREFIXES = (
+    'packages\\sz-rust-pdf\\',
+    'packages\\sz-rust-cli\\',
+    # mvc view 渲染引擎：同步公共 API（View trait），async 化=引擎级重构，
+    # 债务 DB-2026-08-16-06 登记，专项排期中（2026-08-16 用户裁定豁免）
+    'packages\\sz-rust-mvc-facade\\src\\view\\',
+    'packages\\sz-rust-mvc-facade\\src\\view.rs',
+)
+
+
+def is_exempt(p: str) -> bool:
+    return any(p.startswith(prefix) for prefix in EXEMPT_PREFIXES)
+
+
+def main():
+    total = 0
     findings = []
     for root, dirs, files in os.walk('packages'):
         if 'target' in root or r'\tests' in root or r'\benches' in root or r'\examples' in root:
@@ -90,6 +109,8 @@ def main():
             if not f.endswith('.rs'):
                 continue
             p = os.path.join(root, f)
+            if is_exempt(p):
+                continue
             hits = scan(p)
             if hits:
                 total += len(hits)
