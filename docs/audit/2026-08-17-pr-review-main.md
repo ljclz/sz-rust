@@ -1,6 +1,6 @@
-# PR 审查报告（2026-08-17，branch: main，range: HEAD~5..HEAD）
+# PR 审查报告（2026-08-17，branch: main，range: HEAD~6..HEAD）
 
-> 审查时点: `HEAD @ 183422f`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ f426358`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
@@ -8,7 +8,7 @@
 
 ## 问题清单（0 critical / 0 high / 1 medium / 1 low）
 
-- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: docs/audit/2026-08-17-pr-review-main.md:11: trailing whitespace. +- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: scripts/collect-baseline.ps1:36: trailing whitespace. +     scripts/collect-baseline.ps1:38: trailing whitespace.  scripts/collect-baseline.ps1:36: trailing whitespace.
+- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: scripts/collect-baseline.ps1:46: trailing whitespace. +         
 - [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4775 测试 test_tag_clear_empty_no_error() 无断言宏但有 1 处 u
 
 
@@ -20,11 +20,11 @@
  .github/workflows/ci.yml                           |   73 +-
  .github/workflows/coverage.yml                     |  241 +++-
  Cargo.lock                                         |    5 +
- docs/audit/2026-08-17-pr-review-main.md            |  226 +++
+ docs/audit/2026-08-17-pr-review-main.md            |  228 +++
  docs/audit/coverage-exemption.md                   |   16 +
  docs/audit/coverage-priority.json                  |  328 +++++
  docs/audit/doc-debt.md                             |   11 +
- docs/audit/events.jsonl                            |    4 +
+ docs/audit/events.jsonl                            |    5 +
  ...211\247\350\241\214\346\214\207\345\215\227.md" |   22 +
  packages/sz-rust-addons-cms/Cargo.toml             |    5 +
  packages/sz-rust-addons-cms/src/capability/mod.rs  |  261 ++++
@@ -146,82 +146,91 @@
  scripts/coverage-local.sh                          |   77 ++
  scripts/summarize-baseline.ps1                     |   23 +
  tarpaulin.toml                                     |   15 +
- 130 files changed, 16760 insertions(+), 110 deletions(-)
+ 130 files changed, 16763 insertions(+), 110 deletions(-)
 ```
 
-## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）（缓存命中 c19d201eb2f33bc9）
+## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-</head>
-<body>
-<h2>🔍 Code Review: sz-rust CI 覆盖率门禁升级</h2>
-<p><strong>评分：6/10</strong> — CI 架构改进有价值，但遗留了关键代码质量问题，且引入了不必要的运行时依赖。</p>
-<hr/>
-<h3>🚨 关键问题清单 (Top 4)</h3>
-<h4>1. [严重] 并发测试失败被“规避”而非“修复” (Concurrency)</h4>
-<ul>
-<li><strong>现象</strong>：静态清单显示 <code>test_concurrent_workers_no_duplicate_execution</code> Panic 失败。但在 CI 配置中，针对 <code>sz-rust-sz300</code> 的 DB 集成测试使用了 <code>--test-threads=1</code> 强制串行执行。</li>
-<li><strong>风险</strong>：这是典型的“掩盖问题”。强制串行虽然能让 CI 变绿，但掩盖了 Worker 调度逻辑中可能存在的竞态条件（Race Condition）。如果生产环境是并发的，测试串行无法保证生产安全。</li>
-<li><strong>建议</strong>：移除 <code>--test-threads=1</code>，修复代码中的并发锁或状态管理，确保测试在并发下通过。</li>
-</ul>
-<pre><code class="language-diff">-      - name: Run sz300 DB integration coverage
--        run: |
--          cargo llvm-cov -p sz-rust-sz300 \
--            --ignore-tests-in-target \
--            --cobertura --output-path cobertura-sz300-db.xml \
--            -- --ignored --test-threads=1  # ❌ 掩盖并发问题
-+      - name: Run sz300 DB integration coverage
-+        run: |
-+          cargo llvm-cov -p sz-rust-sz300 \
-+            --cobertura --output-path cobertura-sz300-db.xml \
-+            -- --ignored  # ✅ 恢复并发测试，倒逼代码修复
-</code></pre>
+<![](file://c:\Users\51099\.cursor\mcp\oswatch\logs\20260127_071700.png)><![](file://c:\Users\51099\.cursor\mcp\oswatch\logs\20260127_071700.png)## PR 评审报告：覆盖率基础设施重构 (CI-001~007)
 
-<h4>2. [高危] 生产代码裸 unwrap (Safety)</h4>
-<ul>
-<li><strong>现象</strong>：清单明确指出生产代码存在 2 处裸 <code>unwrap()</code>。</li>
-<li><strong>风险</strong>：在异步任务或外部接口调用中，<code>unwrap()</code> 会导致整个进程 Panic 崩溃，违反 Rust 生产环境“铁律”。</li>
-<li><strong>建议</strong>：必须替换为 <code>match</code> 或 <code>?</code> 传播错误。</li>
-</ul>
-<pre><code class="language-rust">// ❌ 错误示范
-let config = load_config().unwrap();
+### 1. 潜在问题清单
 
-// ✅ 修正建议
-let config = match load_config() {
-    Ok(c) => c,
-    Err(e) => {
-        log::error!("Failed to load config: {}", e);
-        return Err(AppError::ConfigLoadFailed(e));
-    }
-};
-</code></pre>
+| 优先级 | 类别 | 问题描述 | 涉及文件 |
+| :--- | :--- | :--- | :--- |
+| **P0** | **可靠性** | **自定义 XML 合并脚本风险**：引入 `cobertura-merger.js` 手动合并覆盖率报告。Cobertura 格式对路径分隔符敏感，且 `cargo-llvm-cov` 原生支持 workspace 级别聚合，手动合并极易因路径不一致导致数据丢失或脚本崩溃，进而阻塞所有 PR。 | `scripts/audit/cobertura-merger.js`, `.github/workflows/ci.yml` |
+| **P1** | **性能/成本** | **CI 资源过度消耗**：`coverage.yml` 拆分为 P0-P3 四个并行 Job，且 `ci.yml` 的 coverage 任务同时启动了 MySQL + Postgres 两个重型容器。若无精准的分片逻辑（确保 P0-P3 互斥且全覆盖），这将导致 CI 分钟数翻倍，且可能因 GitHub Actions 并发限制导致排队。 | `.github/workflows/coverage.yml`, `.github/workflows/ci.yml` |
+| **P1** | **可维护性** | **Commit Message 耦合业务逻辑**：通过解析 Commit Message (`[coverage-stage:S1]`) 来动态调整覆盖率阈值。这是一种隐式耦合，极易因合并提交（Merge Commit）包含多个标签或格式不规范而导致阈值解析错误（例如始终走默认 85% 或意外降级）。 | `.github/workflows/ci.yml` (Parse coverage stage step) |
+| **P2** | **代码质量** | **无效测试未修复**：静态扫描发现 `test_tag_clear_empty_no_error` (lib.rs:4775) 缺少断言。本次 PR 重构了测试运行方式，但未修复此“永远通过”的无效测试，会导致覆盖率数据虚高（测试跑了但没验证逻辑）。 | `packages/sz-rust-cache-facade/src/lib.rs` |
+| **P2** | **规范性** | **脚本包含冲突标记/空白**：`collect-baseline.ps1` 第 46 行存在 trailing whitespace 或潜在的冲突标记残留。PowerShell 对特殊字符敏感，可能导致基线收集脚本在 Windows Runner 上执行失败。 | `scripts/collect-baseline.ps1` |
 
-<h4>3. [中] CI 引入 Node.js 运行时依赖 (Maintainability)</h4>
-<ul>
-<li><strong>现象</strong>：为了合并 Cobertura XML 报告和进行 Per-crate 校验，CI 引入了 <code>actions/setup-node</code> 和自定义 JS 脚本 (<code>cobertura-merger.js</code>)。</li>
-<li><strong>风险</strong>：Rust 项目引入 Node.js 运行时增加了环境复杂度和攻击面。如果 JS 脚本解析 XML 失败（如编码问题），CI 会误报。且维护两套语言栈的构建逻辑成本较高。</li>
-<li><strong>建议</strong>：尽量使用 <code>cargo-llvm-cov</code> 原生的 <code>--merge</code> 功能，或者编写一个小型 Rust 二进制工具来完成合并，保持技术栈纯粹。</li>
-</ul>
+---
 
-<h4>4. [低] 脚本空白字符与规范 (Style)</h4>
-<ul>
-<li><strong>现象</strong>：<code>scripts/collect-baseline.ps1</code> 存在 trailing whitespace。</li>
-<li><strong>建议</strong>：配置编辑器自动去除尾部空格，或在 CI 中增加 <code>check-trailing-whitespace</code> 步骤。</li>
-</ul>
-<hr/>
-<h3>📝 总结建议</h3>
-<ol>
-<li><strong>立即修复</strong>：处理 2 处生产代码 <code>unwrap()</code>，这是稳定性红线。</li>
-<li><strong>核心攻坚</strong>：不要接受 <code>--test-threads=1</code> 作为并发测试的解决方案，需深入排查 <code>sz-rust-sz300</code> 中的锁竞争或共享状态问题。</li>
-<li><strong>架构优化</strong>：评估是否可以用 Rust 工具链替代 CI 中的 Node.js 脚本，减少依赖。</li>
-</ol>
-</body>
-</html>
+### 2. 修改建议
+
+#### 建议 1：移除自定义合并脚本，使用原生 Workspace 聚合
+**理由**：`cargo-llvm-cov` 的 `--workspace` 标志已经能够正确处理多 crate 的覆盖率收集。拆分为多次运行再合并不仅增加了 Node.js 依赖，还引入了路径处理的脆弱性。如果必须拆分（为了并行速度），请确保使用 `cargo llvm-cov --no-report` 分片运行，最后统一运行一次 `cargo llvm-cov --report --cobertura` 生成最终报告。
+
+**修改示例**：
+```yaml
+# .github/workflows/ci.yml
+# 移除手动合并步骤，改为分片收集，最后统一生成报告
+- name: Run coverage (No Report)
+  run: cargo llvm-cov --workspace --no-report --exclude sz-orm-macros
+
+- name: Generate Final Report
+  run: cargo llvm-cov --report --cobertura --output-path cobertura-workspace.xml --fail-under-lines $THRESHOLD
+```
+
+#### 建议 2：解耦阈值配置
+**理由**：不要依赖 Commit Message 解析。建议使用 GitHub Repository Variables 或 Environment Secrets 管理阈值，或者简单地保持固定阈值。如果确实需要阶段性放宽，使用 GitHub 的 `environment` 保护规则更合适。
+
+**修改示例**：
+```yaml
+# 移除复杂的 case 解析逻辑
+- name: Set Threshold
+  id: cov-stage
+  run: |
+    # 优先读取环境变量，否则默认 85
+    echo "threshold=${COVERAGE_THRESHOLD:-85}" >> "$GITHUB_OUTPUT"
+```
+
+#### 建议 3：修复无效测试与脚本规范
+**理由**：确保覆盖率数据的真实性。
+
+**修改示例 (Rust)**：
+```rust
+// packages/sz-rust-cache-facade/src/lib.rs
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let mut cache = Cache::new();
+    // 补充断言：确保空操作不 panic 且状态符合预期
+    assert!(cache.tag_clear("").is_ok()); 
+    assert_eq!(cache.count(), 0);
+}
+```
+
+**修改示例 (PowerShell)**：
+```powershell
+# scripts/collect-baseline.ps1:46
+# 移除行尾多余空白
+```
+
+---
+
+### 3. 整体评分
+
+| 维度 | 评分 | 说明 |
+| :--- | :--- | :--- |
+| **架构设计** | 6/10 | 工具链从 tarpaulin 迁移到 llvm-cov 是正确的方向，但引入 JS 脚本合并 XML 是架构倒退。 |
+| **稳定性** | 5/10 | 复杂的 CI 依赖链（DB + Node + Rust + 自定义脚本）显著增加了构建失败的概率。 |
+| **可维护性** | 6/10 | Commit Message 解析逻辑增加了理解成本；分片策略需要持续维护以防遗漏新 Crate。 |
+| **安全性** | 9/10 | 未发现明显的安全漏洞，权限控制合理。 |
+
+**总评：6 / 10**
+
+**总结**：本次 PR 在工具链升级方面做出了积极尝试，解决了跨平台覆盖率统计的痛点。但**过度工程化**的合并方案和脆弱的阈值控制逻辑引入了新的风险点。建议在合入前简化报告生成流程（回归原生工具能力），并修复静态扫描发现的测试质量问题，以确保“覆盖率门禁”本身的可信度。
 
 
 ## 结论

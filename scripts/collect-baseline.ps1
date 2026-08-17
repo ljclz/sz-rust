@@ -43,7 +43,7 @@ foreach ($crate in $crates) {
         $linesValid = [int]$xml.coverage.'lines-valid'
         $linesCovered = [int]$xml.coverage.'lines-covered'
         $pct = [math]::Round($lineRate * 100, 2)
-        
+
         $results += [PSCustomObject]@{
             Crate = $crate
             LineRate = $pct
