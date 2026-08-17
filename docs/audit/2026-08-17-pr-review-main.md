@@ -1,6 +1,6 @@
-# PR 审查报告（2026-08-17，branch: main，range: HEAD~4..HEAD）
+# PR 审查报告（2026-08-17，branch: main，range: HEAD~5..HEAD）
 
-> 审查时点: `HEAD @ d6379c5`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ 183422f`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
@@ -8,7 +8,7 @@
 
 ## 问题清单（0 critical / 0 high / 1 medium / 1 low）
 
-- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: scripts/collect-baseline.ps1:36: trailing whitespace. +     scripts/collect-baseline.ps1:38: trailing whitespace. 
+- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: docs/audit/2026-08-17-pr-review-main.md:11: trailing whitespace. +- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: scripts/collect-baseline.ps1:36: trailing whitespace. +     scripts/collect-baseline.ps1:38: trailing whitespace.  scripts/collect-baseline.ps1:36: trailing whitespace.
 - [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4775 测试 test_tag_clear_empty_no_error() 无断言宏但有 1 处 u
 
 
@@ -20,10 +20,11 @@
  .github/workflows/ci.yml                           |   73 +-
  .github/workflows/coverage.yml                     |  241 +++-
  Cargo.lock                                         |    5 +
+ docs/audit/2026-08-17-pr-review-main.md            |  226 +++
  docs/audit/coverage-exemption.md                   |   16 +
  docs/audit/coverage-priority.json                  |  328 +++++
  docs/audit/doc-debt.md                             |   11 +
- docs/audit/events.jsonl                            |    1 +
+ docs/audit/events.jsonl                            |    4 +
  ...211\247\350\241\214\346\214\207\345\215\227.md" |   22 +
  packages/sz-rust-addons-cms/Cargo.toml             |    5 +
  packages/sz-rust-addons-cms/src/capability/mod.rs  |  261 ++++
@@ -46,7 +47,7 @@
  packages/sz-rust-ai-facade/tests/audit_test.rs     |   99 ++
  packages/sz-rust-ai-facade/tests/citation_test.rs  |   30 +
  .../tests/claude_provider_test.rs                  |  253 ++++
- .../sz-rust-ai-facade/tests/facade_error_test.rs   |   84 ++
+ .../sz-rust-ai-facade/tests/facade_error_test.rs   |   89 ++
  .../tests/gemini_provider_test.rs                  |  278 ++++
  .../sz-rust-ai-facade/tests/llm_fixture_test.rs    |  186 +++
  .../tests/local_embedding_test.rs                  |   81 ++
@@ -65,7 +66,7 @@
  packages/sz-rust-cli/src/safety_validator.rs       |   87 ++
  packages/sz-rust-cli/src/template_engine.rs        |  109 ++
  .../tests/coverage_tests.rs                        | 1449 ++++++++++++++++++++
- packages/sz-rust-mcp/src/lib.rs                    |  459 +++++++
+ packages/sz-rust-mcp/src/lib.rs                    |  461 +++++++
  packages/sz-rust-mcp/tests/tool_test.rs            |  332 +++++
  .../src/admin/sysinfo_collector.rs                 |   35 +-
  .../sz-rust-orm-facade/src/data_scope/cache.rs     |   13 +
@@ -140,11 +141,12 @@
  scripts/audit/cobertura-merger.js                  |   87 ++
  scripts/audit/coverage-gap-locator.js              |  149 ++
  scripts/audit/per-crate-coverage.js                |  127 ++
+ scripts/audit/pr-review.sh                         |    7 +-
  scripts/collect-baseline.ps1                       |   78 ++
  scripts/coverage-local.sh                          |   77 ++
  scripts/summarize-baseline.ps1                     |   23 +
  tarpaulin.toml                                     |   15 +
- 128 files changed, 16518 insertions(+), 109 deletions(-)
+ 130 files changed, 16760 insertions(+), 110 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）（缓存命中 c19d201eb2f33bc9）

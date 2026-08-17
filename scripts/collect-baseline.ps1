@@ -33,7 +33,7 @@ $results = @()
 foreach ($crate in $crates) {
     Write-Host "`n=== Collecting coverage for $crate ===" -ForegroundColor Cyan
     $xmlPath = "$outDir\cobertura-$crate.xml"
-    
+
     & $cargo llvm-cov -p $crate --cobertura --output-path $xmlPath 2>&1 | Out-Null
 
     if (Test-Path $xmlPath) {
