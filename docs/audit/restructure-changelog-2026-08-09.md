@@ -1,8 +1,8 @@
 # 文档重组变更记录
 
-> 重组日期：2026-08-09  
-> 重组范围：docs/audit/、docs/benchmarks/、docs/ 根目录  
-> 对应 spec：`.codeartsdoer/specs/docs_restructure_followup/spec.md`  
+> 重组日期：2026-08-09
+> 重组范围：docs/audit/、docs/benchmarks/、docs/ 根目录
+> 对应 spec：`.codeartsdoer/specs/docs_restructure_followup/spec.md`
 > 对应 design：`.codeartsdoer/specs/docs_restructure_followup/design.md`
 
 ---

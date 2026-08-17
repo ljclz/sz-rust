@@ -393,6 +393,8 @@ REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
     echo "❌ **失败**: 流程中断于 $STATE"
   fi
 } > "$REPORT"
+# 去除报告自身 trailing whitespace（避免被下次 git diff --check 检出）
+sed -i 's/[[:space:]]*$//' "$REPORT"
 echo "📄 报告: $REPORT"
 
 # ---- Choreography 事件落盘（第 8 篇方法论：ReviewCompleted / ReviewBlocked / ReviewFailed） ----
