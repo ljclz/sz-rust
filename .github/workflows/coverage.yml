@@ -1,8 +1,7 @@
 # SZ-Rust Code Coverage — 代码覆盖率
 #
-# 使用 cargo-tarpaulin 统计覆盖率并上传到 Codecov
-# 仅对 packages/sz-rust-core 运行（避免全 workspace 耗时过长）
-# 参考：sz-orm ci.yml 中的 coverage job
+# CI-004~007：分片并行覆盖率矩阵 + 合并校验 + COVERAGE_THRESHOLD 环境变量
+# 使用 cargo-llvm-cov 统计覆盖率，分 4 个优先级分片并行执行后合并
 
 name: Coverage
 
@@ -15,59 +14,144 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # 将 CODECOV_TOKEN 是否配置暴露为环境变量，供 step 条件判断使用
-  # （GitHub Actions 不允许在 if 中直接比较 secrets，需经 env 中转）
+  COVERAGE_THRESHOLD: 85
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
 jobs:
-  coverage:
-    name: Code Coverage
+  # ── CI-004：4 个并行分片 job ──
+
+  coverage-p0:
+    name: Coverage P0 (core/router/middleware/orm)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Checkout sz-orm dependency
         run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
-
-      - name: Install Rust toolchain (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
-
-      # 仅对 sz-rust-core 运行覆盖率统计
-      # P1-CICD-01：--fail-under 85 强制覆盖率阈值，与 ci.yml 门禁 14 一致（铁律 10），低于 85% 时 CI 失败
-      - name: Run coverage
-        run: cargo tarpaulin -p sz-rust-core --lib --out Xml --output-dir coverage/ --fail-under 85 -- --test-threads=1
-
-      # 仅在配置了 CODECOV_TOKEN 时上传到 Codecov
-      # P1-CICD-01：fail_ci_if_error: true — 上传失败时阻断 CI
-      - name: Upload coverage to Codecov
-        if: ${{ env.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage/cobertura.xml
-          fail_ci_if_error: true
-
-      # 始终上传覆盖率报告 artifact（无论测试成功与否）
-      - name: Upload coverage artifact
+          tool: cargo-llvm-cov
+      - name: Run coverage P0
+        run: |
+          cargo llvm-cov \
+            -p sz-rust-core \
+            -p sz-rust-router-facade \
+            -p sz-rust-middleware-facade \
+            -p sz-rust-orm-facade \
+            --exclude sz-rust-macros \
+            --cobertura --output-path cobertura-p0.xml
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report-${{ github.sha }}
-          path: coverage/
-          if-no-files-found: warn
+          name: cobertura-p0
+          path: cobertura-p0.xml
           retention-days: 14
 
-  # sz300 覆盖率：含 DB 集成测试（--ignored）的完整统计
-  # 背景：2026-08-15 实测 lib 视角仅 8.7%（226/2583 行）——controllers/services 的
-  # 覆盖集中在集成测试与 DB 集成测试（db_integration_test 26 个 ignored，需真实 DB）。
-  # 本 job 在 MySQL 9.6 + PostgreSQL 18 服务容器上统计完整覆盖率，作为达标基线。
-  # 阈值说明：暂不强制 --fail-under（当前未达标），随测试补齐后启用（铁律 10 目标 ≥85%）。
+  coverage-p1:
+    name: Coverage P1 (sz300/ai/auth/observability)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run coverage P1
+        run: |
+          cargo llvm-cov \
+            -p sz-rust-sz300 \
+            -p sz-rust-ai-facade --features all-providers \
+            -p sz-rust-auth-facade \
+            -p sz-rust-observability \
+            --exclude sz-rust-macros \
+            --cobertura --output-path cobertura-p1.xml
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-p1
+          path: cobertura-p1.xml
+          retention-days: 14
+
+  coverage-p2:
+    name: Coverage P2 (http/cache/state/infra/mvc/orm-ext/pay)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run coverage P2
+        run: |
+          cargo llvm-cov \
+            -p sz-rust-http-facade \
+            -p sz-rust-cache-facade \
+            -p sz-rust-state-facade \
+            -p sz-rust-infra-facade \
+            -p sz-rust-mvc-facade \
+            -p sz-rust-orm-ext-facade \
+            -p sz-rust-pay-facade \
+            --exclude sz-rust-macros \
+            --cobertura --output-path cobertura-p2.xml
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-p2
+          path: cobertura-p2.xml
+          retention-days: 14
+
+  coverage-p3:
+    name: Coverage P3 (addons/cli/mcp/rag/codegen/capability)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run coverage P3
+        run: |
+          cargo llvm-cov \
+            -p sz-rust-addons-crm \
+            -p sz-rust-addons-ecommerce \
+            -p sz-rust-addons-cms \
+            -p sz-rust-addons-loader \
+            -p sz-rust-cli \
+            -p sz-rust-mcp \
+            -p sz-rust-rag \
+            -p sz-rust-frontend-codegen \
+            -p sz-rust-capability \
+            -p sz-rust-examples \
+            -p sz-rust-facade-tests \
+            --exclude sz-rust-macros \
+            --cobertura --output-path cobertura-p3.xml
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-p3
+          path: cobertura-p3.xml
+          retention-days: 14
+
+  # ── CI-006：sz300 DB 集成覆盖率（含 --ignored + --fail-under 85）──
+
   coverage-sz300:
     name: Coverage sz300 (incl. DB integration)
     runs-on: ubuntu-latest
@@ -94,27 +178,76 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-
       - name: Checkout sz-orm dependency
         run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
-
-      - name: Install Rust toolchain (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
-
-      - name: Run coverage with DB integration tests
-        run: cargo tarpaulin -p sz-rust-sz300 --ignored --out Xml --output-dir coverage-sz300/ -- --test-threads=1
-
-      - name: Upload coverage artifact
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run sz300 coverage with DB integration tests
+        run: |
+          cargo llvm-cov -p sz-rust-sz300 \
+            --cobertura --output-path cobertura-sz300.xml \
+            --fail-under-lines ${COVERAGE_THRESHOLD} \
+            -- --ignored --test-threads=1
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-sz300-${{ github.sha }}
-          path: coverage-sz300/
-          if-no-files-found: warn
+          name: cobertura-sz300
+          path: cobertura-sz300.xml
           retention-days: 14
+
+  # ── CI-005：合并分片 + per-crate 校验 + Codecov 上报 ──
+
+  coverage-merge:
+    name: Coverage Merge & Verify
+    runs-on: ubuntu-latest
+    needs: [coverage-p0, coverage-p1, coverage-p2, coverage-p3, coverage-sz300]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: coverage-artifacts
+
+      - name: Flatten artifact files
+        run: |
+          mkdir -p coverage-merged
+          find coverage-artifacts -name "cobertura-*.xml" -exec cp {} coverage-merged/ \;
+          ls -la coverage-merged/
+
+      - name: Merge Cobertura XMLs
+        run: |
+          node scripts/audit/cobertura-merger.js \
+            --inputs "coverage-merged/cobertura-*.xml" \
+            --output cobertura-workspace.xml
+
+      - name: Per-crate coverage gate
+        run: |
+          node scripts/audit/per-crate-coverage.js \
+            --xml cobertura-workspace.xml \
+            --threshold ${COVERAGE_THRESHOLD} \
+            --exempt docs/audit/coverage-exemption.md
+
+      - name: Upload merged report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-workspace-${{ github.sha }}
+          path: cobertura-workspace.xml
+          retention-days: 14
+
+      - name: Upload to Codecov
+        if: ${{ env.CODECOV_TOKEN != '' }}
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: cobertura-workspace.xml
+          fail_ci_if_error: true
