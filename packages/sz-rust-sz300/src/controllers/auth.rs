@@ -333,4 +333,306 @@ mod tests {
             "退出登录应清除 CSRF Cookie（Max-Age=0）\nCookie: {cookie_str}"
         );
     }
+
+    #[test]
+    fn now_timestamp_returns_positive_value() {
+        let ts = now_timestamp();
+        assert!(ts > 0, "当前时间戳应为正数: {ts}");
+    }
+
+    #[test]
+    fn now_timestamp_close_to_system_time() {
+        let ts = now_timestamp();
+        let expected = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let diff = (ts - expected).abs();
+        assert!(
+            diff <= 5,
+            "时间戳偏差应 <=5s: ts={ts}, expected={expected}, diff={diff}"
+        );
+    }
+
+    #[test]
+    fn attach_csrf_cookie_sets_cookie_header() {
+        let mut resp = Response::default();
+        attach_csrf_cookie(&mut resp);
+        assert!(
+            resp.headers().get("set-cookie").is_some(),
+            "应设置 set-cookie 头"
+        );
+    }
+
+    #[test]
+    fn clear_csrf_cookie_sets_cookie_header() {
+        let mut resp = Response::default();
+        clear_csrf_cookie(&mut resp);
+        let cookie = resp.headers().get("set-cookie").unwrap();
+        let cookie_str = cookie.to_str().unwrap();
+        assert!(cookie_str.contains("Path=/"), "应包含 Path=/");
+        assert!(
+            cookie_str.contains("SameSite=Strict"),
+            "应包含 SameSite=Strict"
+        );
+    }
+
+    // ---- 路由级端点测试 ----
+
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn logout_returns_success_with_cleared_cookies() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/logout", post(logout))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/logout")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let cookies: Vec<_> = response.headers().get_all("set-cookie").iter().collect();
+        assert!(!cookies.is_empty(), "应设置 set-cookie 头");
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":1"), "应返回成功码: {}", body);
+    }
+
+    #[tokio::test]
+    async fn refresh_with_empty_body_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/refresh", post(refresh))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/refresh")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "应返回错误码: {}", body);
+    }
+
+    #[tokio::test]
+    async fn refresh_with_missing_token_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/refresh", post(refresh))
+            .with_state(state);
+        let body = serde_json::json!({}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/refresh")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":0"),
+            "应返回错误码: {}",
+            body_str
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_with_invalid_token_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/refresh", post(refresh))
+            .with_state(state);
+        let body = serde_json::json!({"refresh_token": "invalid.token.here"}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/refresh")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":0"),
+            "应返回错误码: {}",
+            body_str
+        );
+    }
+
+    /// 覆盖 login 空用户名/密码早返回路径
+    #[tokio::test]
+    async fn login_with_empty_credentials_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/login", post(login))
+            .with_state(state);
+        let body = serde_json::json!({"username": "", "password": ""}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":0"),
+            "空凭证应返回错误: {}",
+            body_str
+        );
+    }
+
+    /// 覆盖 me 无 token 早返回路径
+    #[tokio::test]
+    async fn me_without_token_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/me", post(me))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/me")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":0"),
+            "无 token 应返回错误: {}",
+            body_str
+        );
+    }
+
+    /// 覆盖 me 无效 token 路径
+    #[tokio::test]
+    async fn me_with_invalid_token_returns_error() {
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let router = Router::new()
+            .route("/api/v1/auth/me", post(me))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/me")
+                    .header("Authorization", "Bearer invalid.token.here")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":0"),
+            "无效 token 应返回错误: {}",
+            body_str
+        );
+    }
 }

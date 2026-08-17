@@ -124,3 +124,123 @@ fn value_to_json_ref(v: &Value) -> serde_json::Value {
         _ => serde_json::Value::Null,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn row_to_json_empty_map() {
+        let row: HashMap<String, Value> = HashMap::new();
+        let json = row_to_json(&row);
+        assert!(json.is_object());
+        assert_eq!(json.as_object().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn row_to_json_null_value() {
+        let mut row = HashMap::new();
+        row.insert("k".into(), Value::Null);
+        let json = row_to_json(&row);
+        assert_eq!(json["k"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn row_to_json_bool_value() {
+        let mut row = HashMap::new();
+        row.insert("flag".into(), Value::Bool(true));
+        let json = row_to_json(&row);
+        assert_eq!(json["flag"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn row_to_json_i32_i64_values() {
+        let mut row = HashMap::new();
+        row.insert("i32".into(), Value::I32(42));
+        row.insert("i64".into(), Value::I64(9_000_000_000));
+        row.insert("u32".into(), Value::U32(100));
+        row.insert("u64".into(), Value::U64(18_000_000_000));
+        let json = row_to_json(&row);
+        assert_eq!(json["i32"], 42);
+        assert_eq!(json["i64"].as_i64().unwrap(), 9_000_000_000_i64);
+        assert_eq!(json["u32"], 100);
+        assert_eq!(json["u64"].as_i64().unwrap(), 18_000_000_000_i64);
+    }
+
+    #[test]
+    fn row_to_json_f64_value() {
+        let mut row = HashMap::new();
+        row.insert("f".into(), Value::F64(3.5));
+        let json = row_to_json(&row);
+        assert_eq!(json["f"].as_f64().unwrap(), 3.5);
+    }
+
+    #[test]
+    fn row_to_json_string_value() {
+        let mut row = HashMap::new();
+        row.insert("s".into(), Value::String("hello".into()));
+        let json = row_to_json(&row);
+        assert_eq!(json["s"], "hello");
+    }
+
+    #[test]
+    fn row_to_json_string_variants() {
+        let mut row = HashMap::new();
+        row.insert("decimal".into(), Value::Decimal("1.23".into()));
+        row.insert("uuid".into(), Value::Uuid("abc".into()));
+        row.insert("date".into(), Value::Date("2026-01-01".into()));
+        row.insert(
+            "datetime".into(),
+            Value::DateTime("2026-01-01T00:00:00".into()),
+        );
+        row.insert("time".into(), Value::Time("00:00:00".into()));
+        row.insert("json".into(), Value::Json("{}".into()));
+        let json = row_to_json(&row);
+        assert_eq!(json["decimal"], "1.23");
+        assert_eq!(json["uuid"], "abc");
+        assert_eq!(json["date"], "2026-01-01");
+    }
+
+    #[test]
+    fn row_to_json_bytes_value() {
+        let mut row = HashMap::new();
+        row.insert("b".into(), Value::Bytes(vec![0xFF, 0x00, 0xAB]));
+        let json = row_to_json(&row);
+        assert_eq!(json["b"], "ff00ab");
+    }
+
+    #[test]
+    fn row_to_json_array_value() {
+        let mut row = HashMap::new();
+        row.insert(
+            "arr".into(),
+            Value::Array(vec![Value::I32(1), Value::I32(2)]),
+        );
+        let json = row_to_json(&row);
+        assert_eq!(json["arr"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn row_to_json_object_value() {
+        let mut row = HashMap::new();
+        let mut inner = HashMap::new();
+        inner.insert("key".into(), Value::String("val".into()));
+        row.insert("obj".into(), Value::Object(inner));
+        let json = row_to_json(&row);
+        assert_eq!(json["obj"]["key"], "val");
+    }
+
+    #[test]
+    fn row_to_json_multiple_fields() {
+        let mut row = HashMap::new();
+        row.insert("id".into(), Value::I64(1));
+        row.insert("name".into(), Value::String("test".into()));
+        row.insert("active".into(), Value::Bool(true));
+        let json = row_to_json(&row);
+        assert_eq!(json["id"], 1);
+        assert_eq!(json["name"], "test");
+        assert_eq!(json["active"], true);
+        assert_eq!(json.as_object().unwrap().len(), 3);
+    }
+}

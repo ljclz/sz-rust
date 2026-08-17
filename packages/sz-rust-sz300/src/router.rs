@@ -222,3 +222,61 @@ pub fn create_router(state: AppState) -> Router {
         // 注入共享状态
         .with_state(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_public_path_matches_whitelist() {
+        for path in PUBLIC_PATHS {
+            assert!(is_public_path(path), "公开路径应匹配: {}", path);
+        }
+    }
+
+    #[test]
+    fn is_public_path_rejects_non_whitelist() {
+        assert!(!is_public_path("/api/v1/auth/me"));
+        assert!(!is_public_path("/api/v1/auth/logout"));
+        assert!(!is_public_path("/api/v1/merchant/list"));
+        assert!(!is_public_path("/api/v1/device/list"));
+        assert!(!is_public_path("/unknown"));
+        assert!(!is_public_path(""));
+    }
+
+    #[test]
+    fn is_public_path_rejects_prefix_bypass() {
+        // 安全修复 P1：前缀匹配会绕过 /api/v1/auth/me 等需鉴权接口
+        assert!(!is_public_path("/api/v1/auth/login/extra"));
+        assert!(!is_public_path("/health/extra"));
+        assert!(!is_public_path("/metrics/extra"));
+    }
+
+    #[test]
+    fn public_paths_contains_expected_entries() {
+        assert!(PUBLIC_PATHS.contains(&"/health"));
+        assert!(PUBLIC_PATHS.contains(&"/health/ready"));
+        assert!(PUBLIC_PATHS.contains(&"/health/startup"));
+        assert!(PUBLIC_PATHS.contains(&"/metrics"));
+        assert!(PUBLIC_PATHS.contains(&"/api/v1/auth/login"));
+        assert!(PUBLIC_PATHS.contains(&"/api/v1/auth/refresh"));
+        assert!(PUBLIC_PATHS.contains(&"/api-docs"));
+    }
+
+    /// 覆盖 metrics_router 路由构建逻辑（注册 /metrics 路由 + 叠加中间件层）
+    #[test]
+    fn metrics_router_builds_without_panic() {
+        let router = metrics_router();
+        // 路由构建应成功，且包含 /metrics 路由
+        let _router = router;
+    }
+
+    /// 覆盖 create_router 完整路由注册逻辑（所有业务路由 + 中间件叠加）
+    #[tokio::test]
+    async fn create_router_builds_without_panic() {
+        let state = crate::state::mock_app_state();
+        let router = create_router(state);
+        // 路由构建应成功，包含所有业务路由 + 中间件
+        let _router = router;
+    }
+}

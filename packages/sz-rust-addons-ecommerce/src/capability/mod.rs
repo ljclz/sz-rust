@@ -717,4 +717,200 @@ mod tests {
         assert_eq!(names[0], "ecommerce.create_order");
         assert_eq!(names[5], "ecommerce.clear_cart");
     }
+
+    // --- 新增：Capability metadata 全覆盖 ---
+
+    #[test]
+    fn create_order_capability_metadata_full() {
+        let cap = CreateOrderCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.create_order");
+        assert!(cap.description().contains("创建订单"));
+        let schema = cap.schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["user_id"].is_object());
+        assert!(schema["properties"]["items"].is_object());
+        assert_eq!(schema["required"][0], "user_id");
+        assert!(cap.tags().contains(&"ecommerce"));
+        assert!(cap.tags().contains(&"write"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    #[test]
+    fn search_order_capability_metadata_full() {
+        let cap = SearchOrderCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.search_order");
+        assert!(cap.description().contains("搜索"));
+        let schema = cap.schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["status"].is_object());
+        assert_eq!(schema["properties"]["page"]["default"], 1);
+        assert!(cap.tags().contains(&"read"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    #[test]
+    fn cancel_order_capability_metadata_full() {
+        let cap = CancelOrderCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.cancel_order");
+        assert!(cap.description().contains("取消"));
+        let schema = cap.schema();
+        assert_eq!(schema["required"][0], "id");
+        assert!(cap.tags().contains(&"cancel"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    #[test]
+    fn query_cart_capability_metadata_full() {
+        let cap = QueryCartCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.query_cart");
+        assert!(cap.description().contains("查询"));
+        let schema = cap.schema();
+        assert_eq!(schema["required"][0], "user_id");
+        assert!(cap.tags().contains(&"cart"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    #[test]
+    fn add_to_cart_capability_metadata_full() {
+        let cap = AddToCartCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.add_to_cart");
+        assert!(cap.description().contains("添加"));
+        let schema = cap.schema();
+        assert!(schema["properties"]["quantity"]["minimum"]
+            .as_i64()
+            .is_some());
+        assert!(cap.tags().contains(&"add"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    #[test]
+    fn clear_cart_capability_metadata_full() {
+        let cap = ClearCartCapability::new(test_state());
+        assert_eq!(cap.name(), "ecommerce.clear_cart");
+        assert!(cap.description().contains("清空"));
+        let schema = cap.schema();
+        assert_eq!(schema["required"][0], "user_id");
+        assert!(cap.tags().contains(&"clear"));
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+    }
+
+    // --- 新增：controller_result_to_cap_result 错误分支 ---
+
+    #[test]
+    fn cap_result_422_maps_to_validation_error() {
+        let r = controller_result_to_cap_result(json!({"code": 422, "msg": "invalid"}));
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m == "invalid"));
+    }
+
+    #[test]
+    fn cap_result_400_maps_to_validation_error() {
+        let r = controller_result_to_cap_result(json!({"code": 400, "msg": "bad request"}));
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m == "bad request"));
+    }
+
+    #[test]
+    fn cap_result_500_maps_to_execution_error() {
+        let r = controller_result_to_cap_result(json!({"code": 500, "msg": "internal"}));
+        assert!(matches!(r, Err(CapError::ExecutionError(m)) if m == "internal"));
+    }
+
+    #[test]
+    fn cap_result_missing_code_maps_to_execution_error() {
+        let r = controller_result_to_cap_result(json!({"msg": "no code"}));
+        assert!(matches!(r, Err(CapError::ExecutionError(_))));
+    }
+
+    #[test]
+    fn cap_result_missing_msg_uses_default() {
+        let r = controller_result_to_cap_result(json!({"code": 500}));
+        assert!(matches!(r, Err(CapError::ExecutionError(m)) if m == "unknown error"));
+    }
+
+    #[test]
+    fn cap_result_zero_code_returns_ok() {
+        let r = controller_result_to_cap_result(json!({"code": 0, "msg": "ok"}));
+        assert!(r.is_ok());
+    }
+
+    // --- 新增：缺失参数分支 ---
+
+    #[tokio::test]
+    async fn create_order_capability_missing_user_id() {
+        let cap = CreateOrderCapability::new(test_state());
+        let r = cap
+            .call(json!({"items": [{"product_id": 1, "quantity": 1}]}))
+            .await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("user_id")));
+    }
+
+    #[tokio::test]
+    async fn create_order_capability_missing_items() {
+        let cap = CreateOrderCapability::new(test_state());
+        let r = cap.call(json!({"user_id": 1})).await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("items")));
+    }
+
+    #[tokio::test]
+    async fn create_order_capability_with_remark() {
+        let cap = CreateOrderCapability::new(test_state());
+        let r = cap
+            .call(json!({
+                "user_id": 1,
+                "remark": "加急",
+                "items": [{"product_id": 1, "product_name": "p", "unit_price": 10.0, "quantity": 1}]
+            }))
+            .await
+            .unwrap();
+        assert_eq!(r["data"]["order"]["remark"], "加急");
+    }
+
+    #[tokio::test]
+    async fn cancel_order_capability_missing_id() {
+        let cap = CancelOrderCapability::new(test_state());
+        let r = cap.call(json!({})).await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("id")));
+    }
+
+    #[tokio::test]
+    async fn query_cart_capability_missing_user_id() {
+        let cap = QueryCartCapability::new(test_state());
+        let r = cap.call(json!({})).await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("user_id")));
+    }
+
+    #[tokio::test]
+    async fn clear_cart_capability_missing_user_id() {
+        let cap = ClearCartCapability::new(test_state());
+        let r = cap.call(json!({})).await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("user_id")));
+    }
+
+    #[tokio::test]
+    async fn add_to_cart_capability_negative_quantity() {
+        let cap = AddToCartCapability::new(test_state());
+        let r = cap
+            .call(json!({"user_id": 1, "product_id": 1, "quantity": -5}))
+            .await;
+        assert!(matches!(r, Err(CapError::ValidationError(m)) if m.contains("数量")));
+    }
+
+    #[tokio::test]
+    async fn search_order_capability_with_pagination() {
+        let state = test_state();
+        for i in 1..=5 {
+            state
+                .orders
+                .save(Order {
+                    id: i,
+                    order_no: format!("ORD{:03}", i),
+                    user_id: 1,
+                    status: "pending".to_string(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let cap = SearchOrderCapability::new(state);
+        let r = cap.call(json!({"page": 1, "page_size": 2})).await.unwrap();
+        assert_eq!(r["data"]["total"], 5);
+    }
 }

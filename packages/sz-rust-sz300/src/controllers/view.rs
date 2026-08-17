@@ -45,3 +45,61 @@ pub async fn render_page(Path(template): Path<String>) -> impl IntoResponse {
             .into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn render_page_returns_html_content() {
+        let router = Router::new().route("/page/{template}", get(render_page));
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page/test-page")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let html = String::from_utf8(bytes.to_vec()).expect("UTF-8");
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("test-page"));
+    }
+
+    #[tokio::test]
+    async fn render_page_with_different_template() {
+        let router = Router::new().route("/page/{template}", get(render_page));
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let html = String::from_utf8(bytes.to_vec()).expect("UTF-8");
+        assert!(html.contains("dashboard"));
+    }
+}

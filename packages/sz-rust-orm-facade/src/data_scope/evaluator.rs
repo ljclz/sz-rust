@@ -172,4 +172,14 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_code(), "DATA_SCOPE_INVALID_RULE");
     }
+
+    #[tokio::test]
+    async fn test_evaluator_dept_and_sub_mode() {
+        let evaluator = make_evaluator();
+        let ctx = DataScopeContext::new(1, 5, false);
+        let rule =
+            DataScopeRule::new("order", DataScopeMode::DeptAndSub).with_dept_field("dept_id");
+        let conditions = evaluator.evaluate(&ctx, &rule).await.unwrap();
+        assert_eq!(conditions.len(), 1);
+    }
 }

@@ -109,7 +109,7 @@ impl ClaudeProvider {
         body
     }
 
-    fn parse_completion(resp: &serde_json::Value) -> Result<ChatCompletion, AiError> {
+    pub fn parse_completion(resp: &serde_json::Value) -> Result<ChatCompletion, AiError> {
         let id = resp
             .get("id")
             .and_then(|v| v.as_str())

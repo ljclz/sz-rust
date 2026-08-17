@@ -37,3 +37,91 @@ impl TagController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use sz_rust_core::orm::repository::InMemoryRepository;
+
+    type TagRepo = Arc<InMemoryRepository<Tag>>;
+
+    // --- list 边界 ---
+
+    #[tokio::test]
+    async fn list_returns_empty_when_no_tags() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        let result = TagController::list(&*repo).await;
+        assert_eq!(result["code"], 0);
+        assert!(result["data"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_returns_all_tags() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Tag {
+            id: 1,
+            name: "rust".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        repo.save(Tag {
+            id: 2,
+            name: "web".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = TagController::list(&*repo).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"].as_array().unwrap().len(), 2);
+    }
+
+    // --- create 边界 ---
+
+    #[tokio::test]
+    async fn create_returns_400_on_deserialize_failure() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        // name 字段类型不匹配
+        let result = TagController::create(&*repo, json!({"name": 123})).await;
+        assert_eq!(result["code"], 400);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_empty_name() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        let result = TagController::create(&*repo, json!({"id": 0, "name": ""})).await;
+        assert_eq!(result["code"], 400);
+        assert_eq!(result["msg"], "name is required");
+    }
+
+    #[tokio::test]
+    async fn create_succeeds_with_valid_name() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        let result = TagController::create(&*repo, json!({"id": 0, "name": "rust"})).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["name"], "rust");
+    }
+
+    // --- delete 边界 ---
+
+    #[tokio::test]
+    async fn delete_returns_404_when_not_found() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        let result = TagController::delete(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn delete_succeeds_when_found() {
+        let repo: TagRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Tag {
+            id: 1,
+            name: "rust".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = TagController::delete(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["rows"], 1);
+    }
+}

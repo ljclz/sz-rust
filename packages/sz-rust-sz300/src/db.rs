@@ -169,4 +169,38 @@ mod tests {
         assert_eq!(cfg.max_connections, 10);
         assert_eq!(cfg.min_connections, 5);
     }
+
+    /// 覆盖 init_pool 错误路径 — 使用不可达的 DB 地址，连接应失败
+    #[tokio::test]
+    async fn init_pool_returns_err_when_db_unreachable() {
+        let config = crate::config::AppConfig {
+            server: crate::config::ServerConfig {
+                port: 8300,
+                host: "0.0.0.0".to_string(),
+            },
+            database: crate::config::DatabaseConfig {
+                host: "127.0.0.1".to_string(),
+                port: 1, // 不可达端口
+                database: "fake".to_string(),
+                username: "fake".to_string(),
+                password: "fake".to_string(),
+            },
+        };
+        let result = init_pool(&config).await;
+        assert!(result.is_err(), "不可达 DB 应返回 Err");
+    }
+
+    /// 覆盖 init_pg_pool 错误路径 — 使用不可达的 DB 地址，连接应失败
+    #[tokio::test]
+    async fn init_pg_pool_returns_err_when_db_unreachable() {
+        let config = crate::config::PgDatabaseConfig {
+            host: "127.0.0.1".to_string(),
+            port: 1, // 不可达端口
+            database: "fake".to_string(),
+            username: "fake".to_string(),
+            password: "fake".to_string(),
+        };
+        let result = init_pg_pool(&config).await;
+        assert!(result.is_err(), "不可达 PG 应返回 Err");
+    }
 }

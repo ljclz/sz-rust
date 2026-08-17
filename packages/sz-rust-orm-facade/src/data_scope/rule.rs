@@ -129,4 +129,13 @@ mod tests {
         assert_eq!(rule.dept_field.as_deref(), Some("dept_id"));
         assert_eq!(rule.priority, 10);
     }
+
+    #[test]
+    fn test_mode_display() {
+        assert_eq!(format!("{}", DataScopeMode::All), "all");
+        assert_eq!(format!("{}", DataScopeMode::Dept), "dept");
+        assert_eq!(format!("{}", DataScopeMode::DeptAndSub), "dept_and_sub");
+        assert_eq!(format!("{}", DataScopeMode::Self_), "self");
+        assert_eq!(format!("{}", DataScopeMode::Custom), "custom");
+    }
 }

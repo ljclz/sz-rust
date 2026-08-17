@@ -33,4 +33,28 @@ mod tests {
     fn warning_code_snake_case() {
         assert_eq!(RagWarningCode::LowRecallScore.as_str(), "low_recall_score");
     }
+
+    #[test]
+    fn all_warning_codes_as_str() {
+        assert_eq!(
+            RagWarningCode::TokenBudgetExceeded.as_str(),
+            "token_budget_exceeded"
+        );
+        assert_eq!(
+            RagWarningCode::EmbeddingPartialFailure.as_str(),
+            "embedding_partial_failure"
+        );
+        assert_eq!(
+            RagWarningCode::ConfigFieldMissing.as_str(),
+            "config_field_missing"
+        );
+        assert_eq!(
+            RagWarningCode::StoreVersionMismatch.as_str(),
+            "store_version_mismatch"
+        );
+        assert_eq!(
+            RagWarningCode::IncrementalUpdateSkipped.as_str(),
+            "incremental_update_skipped"
+        );
+    }
 }

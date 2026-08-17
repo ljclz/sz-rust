@@ -605,4 +605,265 @@ mod tests {
             assert!(name.starts_with("cms."), "能力名 {name} 不以 cms. 开头");
         }
     }
+
+    // --- Capability 元信息方法测试 ---
+
+    #[test]
+    fn search_article_capability_metadata() {
+        let cap = SearchArticleCapability::new(test_state());
+        assert_eq!(cap.name(), "cms.search_article");
+        assert_eq!(
+            cap.description(),
+            "搜索文章列表，支持关键词、分类、状态过滤与分页"
+        );
+        assert_eq!(cap.tags(), &["cms", "article", "search", "read"]);
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        let schema = cap.schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["keyword"].is_object());
+        assert!(schema["properties"]["category_id"].is_object());
+        assert!(schema["properties"]["status"].is_object());
+        assert!(schema["properties"]["page"].is_object());
+        assert!(schema["properties"]["page_size"].is_object());
+    }
+
+    #[test]
+    fn create_article_capability_metadata() {
+        let cap = CreateArticleCapability::new(test_state());
+        assert_eq!(cap.name(), "cms.create_article");
+        assert_eq!(cap.description(), "创建文章，title 必填，status 默认 draft");
+        assert_eq!(cap.tags(), &["cms", "article", "create", "write"]);
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        let schema = cap.schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["title"].is_object());
+        assert_eq!(schema["required"], serde_json::json!(["title"]));
+    }
+
+    #[test]
+    fn publish_article_capability_metadata() {
+        let cap = PublishArticleCapability::new(test_state());
+        assert_eq!(cap.name(), "cms.publish_article");
+        assert_eq!(
+            cap.description(),
+            "发布文章，校验当前状态为 draft，更新为 published"
+        );
+        assert_eq!(cap.tags(), &["cms", "article", "publish", "write"]);
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        let schema = cap.schema();
+        assert_eq!(schema["required"], serde_json::json!(["id"]));
+    }
+
+    #[test]
+    fn manage_category_capability_metadata() {
+        let cap = ManageCategoryCapability::new(test_state());
+        assert_eq!(cap.name(), "cms.manage_category");
+        assert_eq!(
+            cap.description(),
+            "分类管理，支持 list/create/get/delete 操作"
+        );
+        assert_eq!(cap.tags(), &["cms", "category", "manage", "write"]);
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        let schema = cap.schema();
+        assert_eq!(schema["required"], serde_json::json!(["action"]));
+    }
+
+    #[test]
+    fn manage_tag_capability_metadata() {
+        let cap = ManageTagCapability::new(test_state());
+        assert_eq!(cap.name(), "cms.manage_tag");
+        assert_eq!(cap.description(), "标签管理，支持 list/create/delete 操作");
+        assert_eq!(cap.tags(), &["cms", "tag", "manage", "write"]);
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        let schema = cap.schema();
+        assert_eq!(schema["required"], serde_json::json!(["action"]));
+    }
+
+    // --- Capability 错误分支测试 ---
+
+    #[tokio::test]
+    async fn create_article_capability_rejects_empty_title() {
+        let cap = CreateArticleCapability::new(test_state());
+        let result = cap.call(json!({"title": ""})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn publish_article_capability_rejects_missing_id() {
+        let cap = PublishArticleCapability::new(test_state());
+        let result = cap.call(json!({})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn publish_article_capability_returns_not_found_error() {
+        let cap = PublishArticleCapability::new(test_state());
+        let result = cap.call(json!({"id": 999})).await;
+        assert!(matches!(result, Err(CapError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_rejects_missing_action() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_list_returns_empty() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "list"})).await.unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["total"], 0);
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_list_with_keyword_and_pagination() {
+        let state = test_state();
+        use crate::model::category::Category;
+        state
+            .categories
+            .save(Category {
+                id: 1,
+                name: "Tech".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        state
+            .categories
+            .save(Category {
+                id: 2,
+                name: "News".to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        let cap = ManageCategoryCapability::new(state.clone());
+        // 精确匹配
+        let result = cap
+            .call(json!({"action": "list", "keyword": "Tech", "page": 1, "page_size": 10}))
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_rejects_create_empty_name() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "create", "name": ""})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_rejects_get_missing_id() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "get"})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_rejects_delete_missing_id() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "delete"})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_rejects_unsupported_action() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "update"})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_category_capability_get_not_found_returns_error() {
+        let cap = ManageCategoryCapability::new(test_state());
+        let result = cap.call(json!({"action": "get", "id": 999})).await;
+        assert!(matches!(result, Err(CapError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_tag_capability_rejects_missing_action() {
+        let cap = ManageTagCapability::new(test_state());
+        let result = cap.call(json!({})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_tag_capability_rejects_create_empty_name() {
+        let cap = ManageTagCapability::new(test_state());
+        let result = cap.call(json!({"action": "create", "name": ""})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_tag_capability_rejects_delete_missing_id() {
+        let cap = ManageTagCapability::new(test_state());
+        let result = cap.call(json!({"action": "delete"})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_tag_capability_rejects_unsupported_action() {
+        let cap = ManageTagCapability::new(test_state());
+        let result = cap.call(json!({"action": "get"})).await;
+        assert!(matches!(result, Err(CapError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn manage_tag_capability_delete_not_found_returns_error() {
+        let cap = ManageTagCapability::new(test_state());
+        let result = cap.call(json!({"action": "delete", "id": 999})).await;
+        assert!(matches!(result, Err(CapError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn search_article_capability_with_filters() {
+        let state = test_state();
+        state
+            .articles
+            .save(Article {
+                id: 1,
+                title: "Rust Guide".to_string(),
+                status: "draft".to_string(),
+                category_id: 5,
+                ..Default::default()
+            })
+            .unwrap();
+        state
+            .articles
+            .save(Article {
+                id: 2,
+                title: "Go Tutorial".to_string(),
+                status: "published".to_string(),
+                category_id: 9,
+                ..Default::default()
+            })
+            .unwrap();
+        let cap = SearchArticleCapability::new(state.clone());
+        // 按关键词过滤
+        let r1 = cap
+            .call(json!({"keyword": "%Rust%", "page": 1, "page_size": 10}))
+            .await
+            .unwrap();
+        assert_eq!(r1["data"]["total"], 1);
+        // 按 category_id 过滤
+        let r2 = cap.call(json!({"category_id": 9})).await.unwrap();
+        assert_eq!(r2["data"]["total"], 1);
+        // 按 status 过滤
+        let r3 = cap.call(json!({"status": "published"})).await.unwrap();
+        assert_eq!(r3["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn create_article_capability_with_explicit_id_in_body() {
+        let cap = CreateArticleCapability::new(test_state());
+        // body 中带 id 字段，应被覆盖为 0 后由 repo 分配
+        let result = cap
+            .call(json!({"id": 999, "title": "Test", "status": "published"}))
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["title"], "Test");
+    }
 }

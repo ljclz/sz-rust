@@ -67,3 +67,135 @@ impl CategoryController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use sz_rust_core::orm::repository::InMemoryRepository;
+
+    type CategoryRepo = Arc<InMemoryRepository<Category>>;
+
+    // --- list 边界 ---
+
+    #[tokio::test]
+    async fn list_with_empty_keyword_returns_all() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Category {
+            id: 1,
+            name: "Tech".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = CategoryController::list(&*repo, 1, 20, Some(String::new())).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_with_keyword_filters_by_name() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Category {
+            id: 1,
+            name: "Tech".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        repo.save(Category {
+            id: 2,
+            name: "News".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = CategoryController::list(&*repo, 1, 20, Some("Tech".to_string())).await;
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_with_pagination() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        for i in 1..=3 {
+            repo.save(Category {
+                id: i,
+                name: format!("C{i}"),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+        let result = CategoryController::list(&*repo, 1, 2, None).await;
+        assert_eq!(result["data"]["total"], 3);
+        assert_eq!(result["data"]["page_size"], 2);
+    }
+
+    // --- create 边界 ---
+
+    #[tokio::test]
+    async fn create_returns_400_on_deserialize_failure() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        // name 字段类型不匹配
+        let result = CategoryController::create(&*repo, json!({"name": 123})).await;
+        assert_eq!(result["code"], 400);
+    }
+
+    #[tokio::test]
+    async fn create_rejects_empty_name() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        let result = CategoryController::create(&*repo, json!({"id": 0, "name": ""})).await;
+        assert_eq!(result["code"], 400);
+        assert_eq!(result["msg"], "name is required");
+    }
+
+    #[tokio::test]
+    async fn create_succeeds_with_valid_name() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        let result = CategoryController::create(&*repo, json!({"id": 0, "name": "Tech"})).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["name"], "Tech");
+    }
+
+    // --- get 边界 ---
+
+    #[tokio::test]
+    async fn get_returns_404_when_not_found() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        let result = CategoryController::get(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn get_returns_category_when_found() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Category {
+            id: 1,
+            name: "Tech".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = CategoryController::get(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["name"], "Tech");
+    }
+
+    // --- delete 边界 ---
+
+    #[tokio::test]
+    async fn delete_returns_404_when_not_found() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        let result = CategoryController::delete(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn delete_succeeds_when_found() {
+        let repo: CategoryRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Category {
+            id: 1,
+            name: "Tech".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = CategoryController::delete(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["rows"], 1);
+    }
+}

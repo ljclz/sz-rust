@@ -601,3 +601,623 @@ impl StorageConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// 环境变量是进程级全局状态，所有读写 SZ300_* 的测试必须持有此锁串行执行。
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_all_sz300_env() {
+        let keys = [
+            "SZ300_DB_PASSWORD",
+            "SZ300_DB_HOST",
+            "SZ300_DB_PORT",
+            "SZ300_DB_NAME",
+            "SZ300_DB_USER",
+            "SZ300_SERVER_HOST",
+            "SZ300_SERVER_PORT",
+            "SZ300_PG_PASSWORD",
+            "SZ300_PG_HOST",
+            "SZ300_PG_PORT",
+            "SZ300_PG_NAME",
+            "SZ300_PG_USER",
+            "SZ300_SHUTDOWN_TIMEOUT",
+            "SZ300_MQTT_SHUTDOWN_TIMEOUT",
+            "SZ300_FORCE_ABORT_ON_TIMEOUT",
+            "SZ300_RATE_LIMIT_CAPACITY",
+            "SZ300_RATE_LIMIT_REFILL",
+            "SZ300_RATE_LIMIT_TRUST_PROXY",
+            "SZ300_CIRCUIT_BREAKER_THRESHOLD",
+            "SZ300_CIRCUIT_BREAKER_COOLDOWN",
+            "SZ300_CIRCUIT_BREAKER_PROBE_REQUESTS",
+            "SZ300_CIRCUIT_BREAKER_STAT_WINDOW",
+            "SZ300_METRICS_ALLOWED_IPS",
+            "SZ300_METRICS_BEARER_TOKEN",
+            "SZ300_METRICS_AUTH_ENABLED",
+            "SZ300_READINESS_CHECKS",
+            "SZ300_HEALTH_CHECK_TIMEOUT",
+            "SZ300_STORAGE_DRIVER",
+            "SZ300_STORAGE_PATH",
+        ];
+        for k in keys {
+            std::env::remove_var(k);
+        }
+    }
+
+    // ---- DatabaseConfig / PgDatabaseConfig Debug 脱敏 ----
+
+    #[test]
+    fn database_config_debug_redacts_password() {
+        let cfg = DatabaseConfig {
+            host: "127.0.0.1".into(),
+            port: 3306,
+            database: "sz300".into(),
+            username: "root".into(),
+            password: "secret123".into(),
+        };
+        let dbg = format!("{:?}", cfg);
+        assert!(dbg.contains("[REDACTED]"), "password 应脱敏: {dbg}");
+        assert!(!dbg.contains("secret123"), "明文密码不应出现: {dbg}");
+        assert!(dbg.contains("root"), "username 应可见: {dbg}");
+    }
+
+    #[test]
+    fn pg_database_config_debug_redacts_password() {
+        let cfg = PgDatabaseConfig {
+            host: "127.0.0.1".into(),
+            port: 5432,
+            database: "sz300".into(),
+            username: "postgres".into(),
+            password: "pg_secret".into(),
+        };
+        let dbg = format!("{:?}", cfg);
+        assert!(dbg.contains("[REDACTED]"), "password 应脱敏: {dbg}");
+        assert!(!dbg.contains("pg_secret"), "明文密码不应出现: {dbg}");
+    }
+
+    // ---- load_config ----
+
+    #[test]
+    fn load_config_missing_password_returns_err() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let result = load_config();
+        assert!(result.is_err(), "缺少 SZ300_DB_PASSWORD 应返回错误");
+    }
+
+    #[test]
+    fn load_config_defaults_with_password() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_DB_PASSWORD", "testpass");
+        let cfg = load_config().expect("有密码应成功");
+        assert_eq!(cfg.server.port, 8300);
+        assert_eq!(cfg.server.host, "0.0.0.0");
+        assert_eq!(cfg.database.host, "127.0.0.1");
+        assert_eq!(cfg.database.port, 3306);
+        assert_eq!(cfg.database.database, "sz300");
+        assert_eq!(cfg.database.username, "root");
+        assert_eq!(cfg.database.password, "testpass");
+    }
+
+    #[test]
+    fn load_config_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_DB_PASSWORD", "p");
+        std::env::set_var("SZ300_DB_HOST", "10.0.0.1");
+        std::env::set_var("SZ300_DB_PORT", "3307");
+        std::env::set_var("SZ300_DB_NAME", "mydb");
+        std::env::set_var("SZ300_DB_USER", "admin");
+        std::env::set_var("SZ300_SERVER_HOST", "127.0.0.1");
+        std::env::set_var("SZ300_SERVER_PORT", "9000");
+        let cfg = load_config().unwrap();
+        assert_eq!(cfg.database.host, "10.0.0.1");
+        assert_eq!(cfg.database.port, 3307);
+        assert_eq!(cfg.database.database, "mydb");
+        assert_eq!(cfg.database.username, "admin");
+        assert_eq!(cfg.server.host, "127.0.0.1");
+        assert_eq!(cfg.server.port, 9000);
+    }
+
+    #[test]
+    fn load_config_invalid_port_falls_back() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_DB_PASSWORD", "p");
+        std::env::set_var("SZ300_DB_PORT", "not-a-number");
+        std::env::set_var("SZ300_SERVER_PORT", "bad");
+        let cfg = load_config().unwrap();
+        assert_eq!(cfg.database.port, 3306, "无效端口应回退默认");
+        assert_eq!(cfg.server.port, 8300);
+    }
+
+    // ---- pg_config ----
+
+    #[test]
+    fn pg_config_missing_password_returns_err() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        assert!(pg_config().is_err());
+    }
+
+    #[test]
+    fn pg_config_defaults_with_password() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_PG_PASSWORD", "pgpass");
+        let cfg = pg_config().unwrap();
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 5432);
+        assert_eq!(cfg.database, "sz300");
+        assert_eq!(cfg.username, "postgres");
+        assert_eq!(cfg.password, "pgpass");
+    }
+
+    #[test]
+    fn pg_config_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_PG_PASSWORD", "p");
+        std::env::set_var("SZ300_PG_HOST", "pg.example");
+        std::env::set_var("SZ300_PG_PORT", "5433");
+        std::env::set_var("SZ300_PG_NAME", "otherdb");
+        std::env::set_var("SZ300_PG_USER", "pguser");
+        let cfg = pg_config().unwrap();
+        assert_eq!(cfg.host, "pg.example");
+        assert_eq!(cfg.port, 5433);
+        assert_eq!(cfg.database, "otherdb");
+        assert_eq!(cfg.username, "pguser");
+    }
+
+    // ---- ShutdownConfig ----
+
+    #[test]
+    fn shutdown_config_default() {
+        let cfg = ShutdownConfig::default();
+        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+        assert!(cfg.mqtt_shutdown_timeout.is_none());
+        assert!(cfg.force_abort_on_timeout);
+    }
+
+    #[test]
+    fn shutdown_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = ShutdownConfig::from_env();
+        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(30));
+        assert!(cfg.mqtt_shutdown_timeout.is_none());
+        assert!(cfg.force_abort_on_timeout);
+    }
+
+    #[test]
+    fn shutdown_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_SHUTDOWN_TIMEOUT", "60");
+        std::env::set_var("SZ300_MQTT_SHUTDOWN_TIMEOUT", "15");
+        std::env::set_var("SZ300_FORCE_ABORT_ON_TIMEOUT", "false");
+        let cfg = ShutdownConfig::from_env();
+        assert_eq!(cfg.shutdown_timeout, Duration::from_secs(60));
+        assert_eq!(cfg.mqtt_shutdown_timeout, Some(Duration::from_secs(15)));
+        assert!(!cfg.force_abort_on_timeout);
+    }
+
+    #[test]
+    fn shutdown_config_mqtt_timeout_fallback() {
+        let cfg = ShutdownConfig {
+            shutdown_timeout: Duration::from_secs(45),
+            mqtt_shutdown_timeout: None,
+            force_abort_on_timeout: true,
+        };
+        assert_eq!(cfg.mqtt_timeout(), Duration::from_secs(45));
+    }
+
+    #[test]
+    fn shutdown_config_mqtt_timeout_explicit() {
+        let cfg = ShutdownConfig {
+            shutdown_timeout: Duration::from_secs(45),
+            mqtt_shutdown_timeout: Some(Duration::from_secs(10)),
+            force_abort_on_timeout: true,
+        };
+        assert_eq!(cfg.mqtt_timeout(), Duration::from_secs(10));
+    }
+
+    // ---- RateLimitProductionConfig ----
+
+    #[test]
+    fn rate_limit_config_default() {
+        let cfg = RateLimitProductionConfig::default();
+        assert_eq!(cfg.capacity, 2000);
+        assert_eq!(cfg.refill_per_second, 1000.0);
+        assert!(!cfg.trust_proxy_headers);
+        assert!(cfg.exclude_paths.contains(&"/health".to_string()));
+        assert!(cfg.exclude_paths.contains(&"/metrics".to_string()));
+        assert_eq!(cfg.key_prefix, "sz300:rl");
+    }
+
+    #[test]
+    fn rate_limit_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = RateLimitProductionConfig::from_env();
+        assert_eq!(cfg.capacity, 2000);
+        assert_eq!(cfg.refill_per_second, 1000.0);
+        assert!(!cfg.trust_proxy_headers);
+    }
+
+    #[test]
+    fn rate_limit_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_RATE_LIMIT_CAPACITY", "5000");
+        std::env::set_var("SZ300_RATE_LIMIT_REFILL", "2500.5");
+        std::env::set_var("SZ300_RATE_LIMIT_TRUST_PROXY", "true");
+        let cfg = RateLimitProductionConfig::from_env();
+        assert_eq!(cfg.capacity, 5000);
+        assert_eq!(cfg.refill_per_second, 2500.5);
+        assert!(cfg.trust_proxy_headers);
+    }
+
+    #[test]
+    fn rate_limit_config_trust_proxy_with_1() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_RATE_LIMIT_TRUST_PROXY", "1");
+        let cfg = RateLimitProductionConfig::from_env();
+        assert!(cfg.trust_proxy_headers);
+    }
+
+    // ---- CircuitBreakerProductionConfig ----
+
+    #[test]
+    fn circuit_breaker_config_default() {
+        let cfg = CircuitBreakerProductionConfig::default();
+        assert_eq!(cfg.error_threshold, 0.5);
+        assert_eq!(cfg.cooldown, Duration::from_secs(10));
+        assert_eq!(cfg.probe_requests, 5);
+        assert_eq!(cfg.stat_window, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn circuit_breaker_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = CircuitBreakerProductionConfig::from_env();
+        assert_eq!(cfg.error_threshold, 0.5);
+        assert_eq!(cfg.cooldown, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn circuit_breaker_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_CIRCUIT_BREAKER_THRESHOLD", "0.3");
+        std::env::set_var("SZ300_CIRCUIT_BREAKER_COOLDOWN", "20");
+        std::env::set_var("SZ300_CIRCUIT_BREAKER_PROBE_REQUESTS", "10");
+        std::env::set_var("SZ300_CIRCUIT_BREAKER_STAT_WINDOW", "120");
+        let cfg = CircuitBreakerProductionConfig::from_env();
+        assert_eq!(cfg.error_threshold, 0.3);
+        assert_eq!(cfg.cooldown, Duration::from_secs(20));
+        assert_eq!(cfg.probe_requests, 10);
+        assert_eq!(cfg.stat_window, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_ok() {
+        let cfg = CircuitBreakerProductionConfig::default();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_threshold_zero() {
+        let cfg = CircuitBreakerProductionConfig {
+            error_threshold: 0.0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_threshold_over_one() {
+        let cfg = CircuitBreakerProductionConfig {
+            error_threshold: 1.5,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_threshold_one_ok() {
+        let cfg = CircuitBreakerProductionConfig {
+            error_threshold: 1.0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_zero_cooldown() {
+        let cfg = CircuitBreakerProductionConfig {
+            cooldown: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_zero_probe() {
+        let cfg = CircuitBreakerProductionConfig {
+            probe_requests: 0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn circuit_breaker_config_validate_zero_stat_window() {
+        let cfg = CircuitBreakerProductionConfig {
+            stat_window: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    // ---- MetricsAuthConfig ----
+
+    #[test]
+    fn metrics_auth_config_default() {
+        let cfg = MetricsAuthConfig::default();
+        assert!(cfg.allowed_ips.is_empty());
+        assert!(cfg.bearer_token.is_none());
+        assert!(cfg.enabled);
+    }
+
+    #[test]
+    fn metrics_auth_config_debug_redacts_token() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["10.0.0.1".into()],
+            bearer_token: Some("secret-token".into()),
+            enabled: true,
+        };
+        let dbg = format!("{:?}", cfg);
+        assert!(dbg.contains("[REDACTED]"), "bearer_token 应脱敏: {dbg}");
+        assert!(!dbg.contains("secret-token"), "明文 token 不应出现: {dbg}");
+    }
+
+    #[test]
+    fn metrics_auth_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = MetricsAuthConfig::from_env();
+        assert!(cfg.allowed_ips.is_empty());
+        assert!(cfg.bearer_token.is_none());
+        assert!(cfg.enabled);
+    }
+
+    #[test]
+    fn metrics_auth_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_METRICS_ALLOWED_IPS", "10.0.0.1, 10.0.0.2");
+        std::env::set_var("SZ300_METRICS_BEARER_TOKEN", "abc123");
+        std::env::set_var("SZ300_METRICS_AUTH_ENABLED", "false");
+        let cfg = MetricsAuthConfig::from_env();
+        assert_eq!(cfg.allowed_ips, vec!["10.0.0.1", "10.0.0.2"]);
+        assert_eq!(cfg.bearer_token, Some("abc123".into()));
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn metrics_auth_config_validate_production_no_auth() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = MetricsAuthConfig::default();
+        assert!(
+            cfg.validate_production("production").is_err(),
+            "生产环境无鉴权应报错"
+        );
+    }
+
+    #[test]
+    fn metrics_auth_config_validate_production_with_ip() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["10.0.0.1".into()],
+            ..Default::default()
+        };
+        assert!(cfg.validate_production("production").is_ok());
+    }
+
+    #[test]
+    fn metrics_auth_config_validate_production_with_token() {
+        let cfg = MetricsAuthConfig {
+            bearer_token: Some("t".into()),
+            ..Default::default()
+        };
+        assert!(cfg.validate_production("production").is_ok());
+    }
+
+    #[test]
+    fn metrics_auth_config_validate_non_production_ok() {
+        let cfg = MetricsAuthConfig::default();
+        assert!(cfg.validate_production("development").is_ok());
+    }
+
+    #[test]
+    fn metrics_auth_config_validate_disabled_ok() {
+        let cfg = MetricsAuthConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(cfg.validate_production("production").is_ok());
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_disabled() {
+        let cfg = MetricsAuthConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(cfg.is_allowed(None, None), "禁用时应允许所有请求");
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_bearer_match() {
+        let cfg = MetricsAuthConfig {
+            bearer_token: Some("secret".into()),
+            ..Default::default()
+        };
+        assert!(cfg.is_allowed(Some("Bearer secret"), None));
+        assert!(cfg.is_allowed(Some("bearer secret"), None));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_bearer_mismatch() {
+        let cfg = MetricsAuthConfig {
+            bearer_token: Some("secret".into()),
+            ..Default::default()
+        };
+        assert!(!cfg.is_allowed(Some("Bearer wrong"), None));
+        assert!(!cfg.is_allowed(Some("no-prefix"), None));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_ip_exact() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["10.0.0.1".into()],
+            ..Default::default()
+        };
+        assert!(cfg.is_allowed(None, Some("10.0.0.1")));
+        assert!(!cfg.is_allowed(None, Some("10.0.0.2")));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_ip_cidr_v4() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["10.0.0.0/24".into()],
+            ..Default::default()
+        };
+        assert!(cfg.is_allowed(None, Some("10.0.0.100")));
+        assert!(!cfg.is_allowed(None, Some("10.0.1.1")));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_ip_cidr_v6() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["2001:db8::/32".into()],
+            ..Default::default()
+        };
+        assert!(cfg.is_allowed(None, Some("2001:db8:1::1")));
+        assert!(!cfg.is_allowed(None, Some("2001:db9::1")));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_no_credentials() {
+        let cfg = MetricsAuthConfig::default();
+        assert!(!cfg.is_allowed(None, None), "启用但无任何鉴权配置应拒绝");
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_invalid_ip() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["10.0.0.0/24".into()],
+            ..Default::default()
+        };
+        assert!(!cfg.is_allowed(None, Some("not-an-ip")));
+    }
+
+    #[test]
+    fn metrics_auth_is_allowed_invalid_cidr() {
+        let cfg = MetricsAuthConfig {
+            allowed_ips: vec!["bad-cidr/notbits".into()],
+            ..Default::default()
+        };
+        assert!(!cfg.is_allowed(None, Some("10.0.0.1")));
+    }
+
+    // ---- HealthCheckConfig ----
+
+    #[test]
+    fn health_check_config_default() {
+        let cfg = HealthCheckConfig::default();
+        assert_eq!(cfg.readiness_checks, vec!["db".to_string()]);
+        assert_eq!(cfg.check_timeout, Duration::from_secs(2));
+        assert!(!cfg.liveness_check_dependencies);
+    }
+
+    #[test]
+    fn health_check_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = HealthCheckConfig::from_env();
+        assert_eq!(cfg.readiness_checks, vec!["db".to_string()]);
+        assert_eq!(cfg.check_timeout, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn health_check_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_READINESS_CHECKS", "db, redis, mqtt, invalid");
+        std::env::set_var("SZ300_HEALTH_CHECK_TIMEOUT", "5");
+        let cfg = HealthCheckConfig::from_env();
+        assert_eq!(cfg.readiness_checks, vec!["db", "redis", "mqtt"]);
+        assert_eq!(cfg.check_timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn health_check_config_from_env_empty_checks() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_READINESS_CHECKS", "invalid,unknown");
+        let cfg = HealthCheckConfig::from_env();
+        assert_eq!(
+            cfg.readiness_checks,
+            vec!["db".to_string()],
+            "全无效项应回退默认"
+        );
+    }
+
+    #[test]
+    fn health_check_should_check() {
+        let cfg = HealthCheckConfig {
+            readiness_checks: vec!["db".into(), "redis".into()],
+            ..Default::default()
+        };
+        assert!(cfg.should_check("db"));
+        assert!(cfg.should_check("redis"));
+        assert!(!cfg.should_check("mqtt"));
+    }
+
+    // ---- StorageConfig ----
+
+    #[test]
+    fn storage_config_default() {
+        let cfg = StorageConfig::default();
+        assert_eq!(cfg.driver, "local");
+        assert_eq!(cfg.path, "./uploads");
+    }
+
+    #[test]
+    fn storage_config_from_env_defaults() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        let cfg = StorageConfig::from_env();
+        assert_eq!(cfg.driver, "local");
+        assert_eq!(cfg.path, "./uploads");
+    }
+
+    #[test]
+    fn storage_config_from_env_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        clear_all_sz300_env();
+        std::env::set_var("SZ300_STORAGE_DRIVER", "aliyun");
+        std::env::set_var("SZ300_STORAGE_PATH", "/data/uploads");
+        let cfg = StorageConfig::from_env();
+        assert_eq!(cfg.driver, "aliyun");
+        assert_eq!(cfg.path, "/data/uploads");
+    }
+}

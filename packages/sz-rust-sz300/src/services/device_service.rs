@@ -339,4 +339,63 @@ mod tests {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0], Value::I64(7));
     }
+
+    /// 覆盖 list acquire 失败路径
+    #[tokio::test]
+    async fn list_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let filters = DeviceFilters {
+            merchant_id: Some(1),
+        };
+        let result = DeviceService::list(&state.db_pool, 1, 20, filters).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 get acquire 失败路径
+    #[tokio::test]
+    async fn get_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::get(&state.db_pool, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 bind acquire 失败路径
+    #[tokio::test]
+    async fn bind_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::bind(&state.db_pool, "SN001", 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 unbind acquire 失败路径
+    #[tokio::test]
+    async fn unbind_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::unbind(&state.db_pool, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 exists acquire 失败路径
+    #[tokio::test]
+    async fn exists_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::exists(&state.db_pool, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 get_ota_version acquire 失败路径
+    #[tokio::test]
+    async fn get_ota_version_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::get_ota_version(&state.db_pool, "1.0.0").await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 update_status acquire 失败路径
+    #[tokio::test]
+    async fn update_status_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = DeviceService::update_status(&state.db_pool, 1, 1, -50, "1.0.0").await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
 }

@@ -420,4 +420,90 @@ mod tests {
         // 健康检查 4 + 认证 4 + AI 1 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 2 = 30
         assert_eq!(count, 30, "端点总数应为 30，实际: {}", count);
     }
+
+    // ---- 路由级端点测试 ----
+
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn swagger_ui_endpoint_returns_html() {
+        let router = Router::new().route("/api-docs", get(swagger_ui));
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api-docs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let html = String::from_utf8(bytes.to_vec()).expect("UTF-8");
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("swagger-ui"));
+    }
+
+    #[tokio::test]
+    async fn redoc_endpoint_returns_html() {
+        let router = Router::new().route("/api-docs/redoc", get(redoc));
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api-docs/redoc")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let html = String::from_utf8(bytes.to_vec()).expect("UTF-8");
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("redoc"));
+    }
+
+    #[tokio::test]
+    async fn openapi_json_endpoint_returns_json() {
+        let router = Router::new().route("/api-docs/openapi.json", get(openapi_json));
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api-docs/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.contains("application/json"));
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let json: Value = serde_json::from_slice(&bytes).expect("应为有效 JSON");
+        assert_eq!(json["openapi"], "3.0.3");
+    }
 }

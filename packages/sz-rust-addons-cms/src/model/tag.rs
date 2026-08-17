@@ -28,3 +28,34 @@ impl sz_rust_core::orm::repository::EntityAttributes for Tag {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sz_rust_core::orm::repository::EntityAttributes;
+    use sz_rust_core::orm::Value as V;
+
+    #[test]
+    fn new_returns_default() {
+        let t = Tag::new();
+        assert_eq!(t.id, 0);
+        assert!(t.name.is_empty());
+        assert_eq!(t.article_count, 0);
+        assert_eq!(t.created_at, 0);
+    }
+
+    #[test]
+    fn get_attribute_returns_all_fields() {
+        let t = Tag {
+            id: 1,
+            name: "rust".to_string(),
+            article_count: 5,
+            created_at: 100,
+        };
+        assert_eq!(t.get_attribute("id"), Some(V::I64(1)));
+        assert_eq!(t.get_attribute("name"), Some(V::String("rust".to_string())));
+        assert_eq!(t.get_attribute("article_count"), Some(V::I64(5)));
+        assert_eq!(t.get_attribute("created_at"), Some(V::I64(100)));
+        assert_eq!(t.get_attribute("unknown"), None);
+    }
+}

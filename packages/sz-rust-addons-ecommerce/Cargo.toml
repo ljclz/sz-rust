@@ -24,6 +24,10 @@ sz-rust-addons-loader.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+
 [lib]
 name = "sz_rust_addons_ecommerce"
 path = "src/lib.rs"

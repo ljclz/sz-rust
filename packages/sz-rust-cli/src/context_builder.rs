@@ -413,4 +413,102 @@ mod tests {
         assert_eq!(name, "id");
         assert_eq!(ty, "i32");
     }
+
+    #[test]
+    fn test_build_master_slave_missing_master() {
+        let args = PluginCommandArgs {
+            template: "master-slave".to_string(),
+            name: "test".to_string(),
+            table: None,
+            fields: None,
+            force: false,
+            output: None,
+            master: None,
+            slave: Some("orders".to_string()),
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let builder = TemplateContextBuilder::new(args);
+        let result = builder.build_master_slave();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--master is required"));
+    }
+
+    #[test]
+    fn test_build_master_slave_missing_slave() {
+        let args = PluginCommandArgs {
+            template: "master-slave".to_string(),
+            name: "test".to_string(),
+            table: None,
+            fields: None,
+            force: false,
+            output: None,
+            master: Some("users".to_string()),
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let builder = TemplateContextBuilder::new(args);
+        let result = builder.build_master_slave();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--slave is required"));
+    }
+
+    #[test]
+    fn test_build_master_slave_missing_foreign_key() {
+        let args = PluginCommandArgs {
+            template: "master-slave".to_string(),
+            name: "test".to_string(),
+            table: None,
+            fields: None,
+            force: false,
+            output: None,
+            master: Some("users".to_string()),
+            slave: Some("orders".to_string()),
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let builder = TemplateContextBuilder::new(args);
+        let result = builder.build_master_slave();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--foreign-key is required"));
+    }
+
+    #[test]
+    fn test_args_accessor() {
+        let args = make_crud_args();
+        let builder = TemplateContextBuilder::new(args.clone());
+        assert_eq!(builder.args().name, args.name);
+        assert_eq!(builder.args().template, args.template);
+    }
+
+    #[test]
+    fn test_to_snake_case_lowercase_input() {
+        assert_eq!(to_snake_case("users"), "users");
+        assert_eq!(to_snake_case(""), "");
+    }
+
+    #[test]
+    fn test_to_pascal_case_empty() {
+        assert_eq!(to_pascal_case(""), "");
+        assert_eq!(to_pascal_case("a"), "A");
+    }
+
+    #[test]
+    fn test_fields_to_json_empty() {
+        let json = fields_to_json(&[]);
+        assert!(json.is_empty());
+    }
 }

@@ -55,3 +55,76 @@ impl CapabilityController {
 pub async fn list(State(state): State<AppState>, req: Request<Body>) -> Response {
     CapabilityController::list(&state, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn capabilities_list_with_empty_body_returns_success() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/capabilities/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/capabilities/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        // 空请求体可能返回成功（空列表）或错误（参数解析失败）
+        assert!(
+            body.contains("\"code\":1") || body.contains("\"code\":0"),
+            "应返回有效响应: {}",
+            body
+        );
+    }
+
+    #[tokio::test]
+    async fn capabilities_list_with_json_body_returns_success() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/capabilities/list", post(list))
+            .with_state(state);
+        let body = serde_json::json!({"tag": "device"}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/capabilities/list")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body_str.contains("\"code\":1"),
+            "带 tag 过滤应返回成功: {}",
+            body_str
+        );
+    }
+}

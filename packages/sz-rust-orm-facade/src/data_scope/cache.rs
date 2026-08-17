@@ -163,4 +163,17 @@ mod tests {
         cache.invalidate_all();
         let _ = cache.get_with_sub(5).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn test_cache_ttl_expired_requeries() {
+        let provider = Arc::new(MockProvider {
+            tree: [(5, vec![6])].into_iter().collect(),
+        });
+        let cache = DeptTreeCache::new(provider, Duration::from_millis(1));
+        let r1 = cache.get_with_sub(5).await.unwrap();
+        assert_eq!(r1, vec![5, 6]);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let r2 = cache.get_with_sub(5).await.unwrap();
+        assert_eq!(r2, vec![5, 6]);
+    }
 }

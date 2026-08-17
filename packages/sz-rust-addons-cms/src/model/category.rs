@@ -37,3 +37,46 @@ impl sz_rust_core::orm::repository::EntityAttributes for Category {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sz_rust_core::orm::repository::EntityAttributes;
+    use sz_rust_core::orm::Value as V;
+
+    #[test]
+    fn new_returns_default() {
+        let c = Category::new();
+        assert_eq!(c.id, 0);
+        assert!(c.name.is_empty());
+        assert_eq!(c.parent_id, 0);
+        assert_eq!(c.sort, 0);
+        assert!(c.description.is_empty());
+        assert_eq!(c.created_at, 0);
+        assert_eq!(c.updated_at, 0);
+    }
+
+    #[test]
+    fn get_attribute_returns_all_fields() {
+        let c = Category {
+            id: 1,
+            name: "Tech".to_string(),
+            parent_id: 2,
+            sort: 3,
+            description: "desc".to_string(),
+            created_at: 100,
+            updated_at: 200,
+        };
+        assert_eq!(c.get_attribute("id"), Some(V::I64(1)));
+        assert_eq!(c.get_attribute("name"), Some(V::String("Tech".to_string())));
+        assert_eq!(c.get_attribute("parent_id"), Some(V::I64(2)));
+        assert_eq!(c.get_attribute("sort"), Some(V::I64(3)));
+        assert_eq!(
+            c.get_attribute("description"),
+            Some(V::String("desc".to_string()))
+        );
+        assert_eq!(c.get_attribute("created_at"), Some(V::I64(100)));
+        assert_eq!(c.get_attribute("updated_at"), Some(V::I64(200)));
+        assert_eq!(c.get_attribute("unknown"), None);
+    }
+}

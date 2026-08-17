@@ -568,4 +568,54 @@ cron = "0 * * * *"
         let config2 = SchedulerConfig::from_toml_str(&toml_str).unwrap();
         assert_eq!(config, config2);
     }
+
+    #[test]
+    fn test_execute_dispatch_list() {
+        let cmd = SchedulerCommand::List {
+            config: PathBuf::from("/nonexistent/scheduler.toml"),
+        };
+        let result = execute(&cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_dispatch_run() {
+        let cmd = SchedulerCommand::Run {
+            config: PathBuf::from("/nonexistent/scheduler.toml"),
+        };
+        let result = execute(&cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_dispatch_start_empty_config() {
+        let cmd = SchedulerCommand::Start {
+            tick_ms: 1000,
+            config: PathBuf::from("/nonexistent/scheduler.toml"),
+        };
+        let result = execute(&cmd);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no tasks to schedule"));
+    }
+
+    #[test]
+    fn test_execute_run_with_invalid_cron() {
+        // 包含无效 cron 的配置应触发 next_run_time 错误分支
+        let tmp = NamedTempFile::new().unwrap();
+        let toml_str = r#"
+[[tasks]]
+id = "bad-cron"
+name = "坏 cron"
+cron = "not a valid cron"
+callback = "demo::bad"
+"#;
+        std::fs::write(tmp.path(), toml_str).unwrap();
+
+        let result = execute_run(tmp.path());
+        // 无效 cron 在 schedule 时就会报错，build_scheduler 返回 Err
+        assert!(result.is_err());
+    }
 }

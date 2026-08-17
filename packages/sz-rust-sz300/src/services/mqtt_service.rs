@@ -294,4 +294,144 @@ mod tests {
             build_ota_command("", "http://example.com/f.bin", "1.0").expect("构建应成功");
         assert_eq!(topic, "/sz/server//ota");
     }
+
+    #[tokio::test]
+    async fn send_ota_command_succeeds() {
+        let result = send_ota_command("SN002", "http://ota.example.com/v.bin", "2.1").await;
+        assert!(result.is_ok(), "send_ota_command 应成功: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn send_ota_command_empty_sn_succeeds() {
+        let result = send_ota_command("", "http://x", "1.0").await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn get_mqtt_config_returns_valid_config() {
+        let cfg = get_mqtt_config();
+        let client_id = cfg.client_id.as_deref().unwrap_or("");
+        assert!(
+            client_id.starts_with("sz300-server-"),
+            "client_id 前缀正确: {}",
+            client_id
+        );
+        assert_eq!(cfg.keep_alive, 30);
+    }
+
+    #[test]
+    fn get_mqtt_config_unique_client_id() {
+        let cfg1 = get_mqtt_config();
+        let cfg2 = get_mqtt_config();
+        assert_ne!(
+            cfg1.client_id, cfg2.client_id,
+            "每次调用应生成唯一 client_id"
+        );
+    }
+
+    #[test]
+    fn get_subscribe_topics_returns_three() {
+        let topics = get_subscribe_topics();
+        assert_eq!(topics.len(), 3, "应订阅 3 个主题");
+    }
+
+    #[test]
+    fn get_subscribe_topics_contains_status() {
+        let topics = get_subscribe_topics();
+        assert!(
+            topics.iter().any(|t| t.name.contains("/status")),
+            "应包含 status 主题"
+        );
+    }
+
+    #[test]
+    fn get_subscribe_topics_contains_order() {
+        let topics = get_subscribe_topics();
+        assert!(
+            topics.iter().any(|t| t.name.contains("/order")),
+            "应包含 order 主题"
+        );
+    }
+
+    #[test]
+    fn get_subscribe_topics_contains_log() {
+        let topics = get_subscribe_topics();
+        assert!(
+            topics.iter().any(|t| t.name.contains("/log")),
+            "应包含 log 主题"
+        );
+    }
+
+    #[test]
+    fn sz_mqtt_topics_constants_defined() {
+        assert!(SzMqttTopics::DEVICE_STATUS.contains("{device_sn}"));
+        assert!(SzMqttTopics::SERVER_OTA.contains("{device_sn}"));
+        assert_eq!(SzMqttTopics::SERVER_BROADCAST, "/sz/server/broadcast");
+    }
+
+    /// 覆盖 handle_device_order 负金额早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn handle_device_order_negative_total_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({"total_fen": -100});
+        let result = MqttMessageHandler::handle_device_order(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "订单金额不能为负");
+    }
+
+    /// 覆盖 handle_device_order 负明细金额早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn handle_device_order_negative_item_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({
+            "total_fen": 100,
+            "items": [{"total_fen": -50, "price_fen": 50}]
+        });
+        let result = MqttMessageHandler::handle_device_order(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "订单明细金额不能为负");
+    }
+
+    /// 覆盖 handle_device_order 负单价早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn handle_device_order_negative_price_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({
+            "total_fen": 100,
+            "items": [{"total_fen": 50, "price_fen": -10}]
+        });
+        let result = MqttMessageHandler::handle_device_order(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "订单明细金额不能为负");
+    }
+
+    /// 覆盖 handle_device_status acquire 失败路径
+    #[tokio::test]
+    async fn handle_device_status_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({"status": 1, "signal_strength": -50, "fw_version": "1.0"});
+        let result = MqttMessageHandler::handle_device_status(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    /// 覆盖 handle_device_order acquire 失败路径（金额非负，进入 acquire）
+    #[tokio::test]
+    async fn handle_device_order_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({"total_fen": 100, "offline_seq": "SEQ001"});
+        let result = MqttMessageHandler::handle_device_order(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    /// 覆盖 handle_device_log acquire 失败路径
+    #[tokio::test]
+    async fn handle_device_log_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({"level": "info", "message": "test log"});
+        let result = MqttMessageHandler::handle_device_log(&state, "SN001", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
 }

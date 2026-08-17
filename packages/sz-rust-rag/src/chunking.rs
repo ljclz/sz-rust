@@ -198,4 +198,34 @@ mod tests {
         let chunks = chunker.chunk(&file);
         assert!(chunks.len() >= 2);
     }
+
+    #[test]
+    fn chunk_all_symbol_types() {
+        let chunker = SemanticChunker::new(800);
+        let content = "\
+mod foo {}
+pub mod bar {}
+impl Baz for Qux {}
+impl<T> Trait for T {}
+enum Color { Red, Green }
+pub enum Size { Small, Large }
+const MAX: usize = 100;
+pub const MIN: usize = 1;
+static GLOBAL: i32 = 0;
+pub static COUNTER: i32 = 0;
+";
+        let file = make_file(content);
+        let chunks = chunker.chunk(&file);
+        assert!(chunks.iter().any(|c| c.symbol_type == SymbolType::Mod));
+        assert!(chunks.iter().any(|c| c.symbol_type == SymbolType::Impl));
+        assert!(chunks.iter().any(|c| c.symbol_type == SymbolType::Enum));
+        assert!(chunks.iter().any(|c| c.symbol_type == SymbolType::Const));
+        assert!(chunks.iter().any(|c| c.symbol_type == SymbolType::Static));
+    }
+
+    #[test]
+    fn chunk_min_max_chars() {
+        let chunker = SemanticChunker::new(50);
+        assert!(chunker.max_chars >= 200);
+    }
 }

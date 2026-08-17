@@ -114,7 +114,7 @@ static RUST_VERSION: Lazy<String> = Lazy::new(|| {
 ///
 /// - `System::new_all()` 会枚举所有 CPU/内存/磁盘/网络/进程，耗时约 10-50ms
 /// - 建议调用间隔 ≥ 5s，避免频繁采集影响服务性能
-pub fn collect_server_info() -> ServerInfo {
+pub async fn collect_server_info() -> ServerInfo {
     let mut sys = System::new_all();
     sys.refresh_all();
 
@@ -136,7 +136,7 @@ pub fn collect_server_info() -> ServerInfo {
         },
         env: EnvInfo {
             rust_version: RUST_VERSION.clone(),
-            os: format!("{} {}", env::consts::OS, os_version()),
+            os: format!("{} {}", env::consts::OS, os_version().await),
             arch: env::consts::ARCH.to_string(),
             hostname: get_hostname(),
             process_start_time: get_current_process_start_time(),
@@ -184,7 +184,7 @@ fn collect_disk_partitions() -> Vec<DiskPartition> {
 }
 
 /// 获取操作系统版本字符串（跨平台）
-fn os_version() -> String {
+async fn os_version() -> String {
     #[cfg(target_os = "windows")]
     {
         // Windows: 通过 ver 命令或 OS 环境变量
@@ -195,8 +195,9 @@ fn os_version() -> String {
     }
     #[cfg(target_os = "linux")]
     {
-        // Linux: 读取 /etc/os-release
-        std::fs::read_to_string("/etc/os-release")
+        // Linux: 读取 /etc/os-release（tokio::fs 异步读取）
+        tokio::fs::read_to_string("/etc/os-release")
+            .await
             .ok()
             .and_then(|content| {
                 content
@@ -277,9 +278,9 @@ fn format_bytes(bytes: u64) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_collect_server_info_returns_all_sections() {
-        let info = collect_server_info();
+    #[tokio::test]
+    async fn test_collect_server_info_returns_all_sections() {
+        let info = collect_server_info().await;
 
         // memory 段
         assert!(!info.memory.total.is_empty());
@@ -304,24 +305,24 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_memory_rate_consistency() {
-        let info = collect_server_info();
+    #[tokio::test]
+    async fn test_memory_rate_consistency() {
+        let info = collect_server_info().await;
         let rate_parsed = info.memory.rate.parse::<f64>().unwrap();
         assert!(rate_parsed >= 0.0 && rate_parsed <= 100.0);
     }
 
-    #[test]
-    fn test_load_avg_fields_are_finite() {
-        let info = collect_server_info();
+    #[tokio::test]
+    async fn test_load_avg_fields_are_finite() {
+        let info = collect_server_info().await;
         assert!(info.env.load_avg_one.is_finite());
         assert!(info.env.load_avg_five.is_finite());
         assert!(info.env.load_avg_fifteen.is_finite());
     }
 
-    #[test]
-    fn test_server_info_serializes_to_json() {
-        let info = collect_server_info();
+    #[tokio::test]
+    async fn test_server_info_serializes_to_json() {
+        let info = collect_server_info().await;
         let json = serde_json::to_string(&info).expect("should serialize");
 
         // 顶层三段结构

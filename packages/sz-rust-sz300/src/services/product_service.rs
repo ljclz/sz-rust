@@ -288,3 +288,70 @@ impl ProductService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// 覆盖 update 空字段早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn update_empty_fields_returns_err() {
+        let state = crate::state::mock_app_state();
+        let fields = HashMap::new();
+        let result = ProductService::update(&state.db_pool, 1, fields).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "未提供需要更新的字段");
+    }
+
+    /// 覆盖 list acquire 失败路径 — mock_app_state 连接假地址，acquire 返回 Err
+    #[tokio::test]
+    async fn list_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let filters = ProductFilters {
+            merchant_id: Some(1),
+            cat_id: None,
+            keyword: None,
+        };
+        let result = ProductService::list(&state.db_pool, 1, 15, filters).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 get acquire 失败路径
+    #[tokio::test]
+    async fn get_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = ProductService::get(&state.db_pool, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 create acquire 失败路径
+    #[tokio::test]
+    async fn create_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let product = crate::models::product::Product {
+            good_id: None,
+            merchant_id: 1,
+            cat_id: 0,
+            name: "test".to_string(),
+            barcode: "".to_string(),
+            price: 100,
+            unit: "个".to_string(),
+            ai_class_id: 0,
+            image: "".to_string(),
+            status: 1,
+            created_at: None,
+            updated_at: None,
+        };
+        let result = ProductService::create(&state.db_pool, &product).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 delete acquire 失败路径
+    #[tokio::test]
+    async fn delete_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = ProductService::delete(&state.db_pool, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+}

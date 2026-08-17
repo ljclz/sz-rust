@@ -86,4 +86,21 @@ mod tests {
         let registry = CustomGeneratorRegistry::new();
         assert!(registry.get("nonexistent").is_none());
     }
+
+    #[test]
+    fn test_default_is_empty() {
+        let registry = CustomGeneratorRegistry::default();
+        assert!(registry.get("any").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_generate_produces_condition() {
+        let mut registry = CustomGeneratorRegistry::new();
+        registry.register(Arc::new(RegionGenerator));
+        let gen = registry.get("region_filter").unwrap();
+        let ctx = DataScopeContext::new(1, 5, false);
+        let conditions = gen.generate(&ctx).await.unwrap();
+        assert_eq!(conditions.len(), 1);
+        assert_eq!(conditions[0].field, "region");
+    }
 }

@@ -202,6 +202,7 @@ impl Default for Console {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
 
@@ -291,11 +292,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_unknown_command_falls_through() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().ok();
+        std::env::set_current_dir(temp.path()).unwrap();
         let console = Console::new();
         // "cache:clear" 是内置 clap 命令，未注册为自定义命令，应回退到 crate::run
         let result = console
             .run(vec!["sz-rust".to_string(), "cache:clear".to_string()])
             .await;
+        if let Some(ref orig) = original {
+            let _ = std::env::set_current_dir(orig);
+        }
         assert!(result.is_ok());
     }
 
@@ -323,5 +331,22 @@ mod tests {
         let commands = console.list();
         // HelloCommand 和 EchoCommand 名称不同，故应为 2
         assert_eq!(commands.len(), 2);
+    }
+
+    #[test]
+    fn test_print_list_empty() {
+        let console = Console::new();
+        // 空命令列表不应 panic
+        console.print_list();
+    }
+
+    #[test]
+    fn test_print_list_with_commands() {
+        let mut console = Console::new();
+        console
+            .register(Box::new(HelloCommand))
+            .register(Box::new(EchoCommand));
+        // 有命令时打印列表不应 panic
+        console.print_list();
     }
 }

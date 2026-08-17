@@ -195,3 +195,269 @@ impl ArticleController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use sz_rust_core::orm::repository::InMemoryRepository;
+
+    type ArticleRepo = Arc<InMemoryRepository<Article>>;
+
+    fn repo_with_one(id: i64, status: &str) -> ArticleRepo {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Article {
+            id,
+            title: format!("Article {id}"),
+            status: status.to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        repo
+    }
+
+    // --- 状态机校验 ---
+
+    #[test]
+    fn is_valid_transition_allows_draft_to_published() {
+        assert!(is_valid_transition("draft", "published"));
+    }
+
+    #[test]
+    fn is_valid_transition_allows_draft_to_archived() {
+        assert!(is_valid_transition("draft", "archived"));
+    }
+
+    #[test]
+    fn is_valid_transition_allows_published_to_archived() {
+        assert!(is_valid_transition("published", "archived"));
+    }
+
+    #[test]
+    fn is_valid_transition_rejects_archived_to_anything() {
+        assert!(!is_valid_transition("archived", "draft"));
+        assert!(!is_valid_transition("archived", "published"));
+        assert!(!is_valid_transition("archived", "archived"));
+    }
+
+    #[test]
+    fn is_valid_transition_rejects_published_to_draft() {
+        assert!(!is_valid_transition("published", "draft"));
+    }
+
+    // --- publish 边界 ---
+
+    #[tokio::test]
+    async fn publish_returns_404_when_not_found() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::publish(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+        assert_eq!(result["msg"], "not found");
+    }
+
+    #[tokio::test]
+    async fn publish_rejects_already_published() {
+        let repo = repo_with_one(1, "published");
+        let result = ArticleController::publish(&*repo, 1).await;
+        assert_eq!(result["code"], 422);
+        assert!(result["msg"].as_str().unwrap().contains("不可直接发布"));
+    }
+
+    // --- archive 边界 ---
+
+    #[tokio::test]
+    async fn archive_draft_to_archived_succeeds() {
+        let repo = repo_with_one(1, "draft");
+        let result = ArticleController::archive(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["status"], "archived");
+    }
+
+    #[tokio::test]
+    async fn archive_published_to_archived_succeeds() {
+        let repo = repo_with_one(1, "published");
+        let result = ArticleController::archive(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["status"], "archived");
+    }
+
+    #[tokio::test]
+    async fn archive_returns_404_when_not_found() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::archive(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn archive_rejects_already_archived() {
+        let repo = repo_with_one(1, "archived");
+        let result = ArticleController::archive(&*repo, 1).await;
+        assert_eq!(result["code"], 422);
+        assert!(result["msg"].as_str().unwrap().contains("不可归档"));
+    }
+
+    // --- get 边界 ---
+
+    #[tokio::test]
+    async fn get_returns_404_when_not_found() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::get(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn get_returns_article_when_found() {
+        let repo = repo_with_one(1, "draft");
+        let result = ArticleController::get(&*repo, 1).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["id"], 1);
+    }
+
+    // --- update 边界 ---
+
+    #[tokio::test]
+    async fn update_returns_404_when_not_found() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::update(&*repo, 999, json!({"title": "X"})).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn update_patches_all_fields() {
+        let repo = repo_with_one(1, "draft");
+        let result = ArticleController::update(
+            &*repo,
+            1,
+            json!({
+                "title": "Updated",
+                "content": "Content",
+                "summary": "Summary",
+                "category_id": 7,
+                "author_id": 3,
+                "status": "published"
+            }),
+        )
+        .await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["title"], "Updated");
+        assert_eq!(result["data"]["content"], "Content");
+        assert_eq!(result["data"]["summary"], "Summary");
+        assert_eq!(result["data"]["category_id"], 7);
+        assert_eq!(result["data"]["author_id"], 3);
+        assert_eq!(result["data"]["status"], "published");
+    }
+
+    #[tokio::test]
+    async fn update_with_non_object_body_keeps_article_unchanged() {
+        let repo = repo_with_one(1, "draft");
+        let result = ArticleController::update(&*repo, 1, json!("not an object")).await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["title"], "Article 1");
+    }
+
+    // --- delete 边界 ---
+
+    #[tokio::test]
+    async fn delete_returns_404_when_not_found() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::delete(&*repo, 999).await;
+        assert_eq!(result["code"], 404);
+    }
+
+    // --- create 边界 ---
+
+    #[tokio::test]
+    async fn create_returns_400_on_deserialize_failure() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        // title 字段类型不匹配，反序列化失败
+        let result = ArticleController::create(&*repo, json!({"title": 123})).await;
+        assert_eq!(result["code"], 400);
+    }
+
+    #[tokio::test]
+    async fn create_with_explicit_status_keeps_it() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        let result = ArticleController::create(
+            &*repo,
+            json!({"id": 0, "title": "T", "status": "published"}),
+        )
+        .await;
+        assert_eq!(result["code"], 0);
+        assert_eq!(result["data"]["status"], "published");
+    }
+
+    // --- list 边界 ---
+
+    #[tokio::test]
+    async fn list_with_empty_keyword_string_ignores_filter() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Article {
+            id: 1,
+            title: "A".to_string(),
+            status: "draft".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = ArticleController::list(&*repo, 1, 20, Some(String::new()), None, None).await;
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_with_zero_category_id_ignores_filter() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Article {
+            id: 1,
+            title: "A".to_string(),
+            status: "draft".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = ArticleController::list(&*repo, 1, 20, None, Some(0), None).await;
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_with_empty_status_string_ignores_filter() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Article {
+            id: 1,
+            title: "A".to_string(),
+            status: "draft".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let result = ArticleController::list(&*repo, 1, 20, None, None, Some(String::new())).await;
+        assert_eq!(result["data"]["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_combines_multiple_filters() {
+        let repo: ArticleRepo = Arc::new(InMemoryRepository::new());
+        repo.save(Article {
+            id: 1,
+            title: "Rust Intro".to_string(),
+            status: "draft".to_string(),
+            category_id: 5,
+            ..Default::default()
+        })
+        .unwrap();
+        repo.save(Article {
+            id: 2,
+            title: "Rust Advanced".to_string(),
+            status: "published".to_string(),
+            category_id: 5,
+            ..Default::default()
+        })
+        .unwrap();
+        let result = ArticleController::list(
+            &*repo,
+            1,
+            20,
+            Some("%Rust%".to_string()),
+            Some(5),
+            Some("draft".to_string()),
+        )
+        .await;
+        assert_eq!(result["data"]["total"], 1);
+    }
+}

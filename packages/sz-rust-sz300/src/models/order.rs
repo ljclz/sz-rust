@@ -168,3 +168,163 @@ impl RelationLoader for Order {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample() -> Order {
+        Order {
+            order_id: Some(1),
+            order_no: "O20260101001".into(),
+            merchant_id: 7,
+            device_id: 3,
+            total_fen: 12500,
+            total_weight_g: 500,
+            item_count: 2,
+            status: 1,
+            pay_method: 1,
+            pay_at: Some("2026-01-01 10:00:00".into()),
+            offline_seq: "SEQ001".into(),
+            created_at: Some("2026-01-01".into()),
+            updated_at: Some("2026-01-01".into()),
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(Order::table_name(), "order");
+        assert_eq!(Order::pk_name(), "order_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut o = sample();
+        assert_eq!(o.pk(), 1);
+        o.order_id = None;
+        assert_eq!(o.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut o = sample();
+        o.set_pk(77);
+        assert_eq!(o.order_id, Some(77));
+    }
+
+    #[test]
+    fn timestamp_fields_present() {
+        let tf = Order::timestamp_fields().expect("应有时间戳");
+        assert_eq!(tf.created_at, Some("created_at"));
+        assert_eq!(tf.updated_at, Some("updated_at"));
+    }
+
+    #[test]
+    fn columns_count() {
+        assert_eq!(Order::columns().len(), 13);
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = Order::fillable();
+        assert!(!f.contains(&"order_id"));
+        assert!(f.contains(&"order_no"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        assert_eq!(Order::guarded(), vec!["order_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let o = sample();
+        assert_eq!(o.get_column_value("order_id"), Some(Value::I64(1)));
+        assert_eq!(
+            o.get_column_value("order_no"),
+            Some(Value::String("O20260101001".into()))
+        );
+        assert_eq!(o.get_column_value("total_fen"), Some(Value::I64(12500)));
+        assert_eq!(o.get_column_value("status"), Some(Value::I32(1)));
+        assert_eq!(o.get_column_value("pay_method"), Some(Value::I32(1)));
+        assert_eq!(
+            o.get_column_value("offline_seq"),
+            Some(Value::String("SEQ001".into()))
+        );
+        assert_eq!(o.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_fields() {
+        let o = Order {
+            order_id: None,
+            pay_at: None,
+            created_at: None,
+            updated_at: None,
+            ..sample()
+        };
+        assert_eq!(o.get_column_value("order_id"), None);
+        assert_eq!(o.get_column_value("pay_at"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut o = Order {
+            order_id: None,
+            order_no: String::new(),
+            merchant_id: 0,
+            device_id: 0,
+            total_fen: 0,
+            total_weight_g: 0,
+            item_count: 0,
+            status: 0,
+            pay_method: 0,
+            pay_at: None,
+            offline_seq: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let mut m = HashMap::new();
+        m.insert("order_id".into(), Value::I64(5));
+        m.insert("order_no".into(), Value::String("O999".into()));
+        m.insert("merchant_id".into(), Value::I64(2));
+        m.insert("device_id".into(), Value::I64(1));
+        m.insert("total_fen".into(), Value::I64(9900));
+        m.insert("total_weight_g".into(), Value::I64(300));
+        m.insert("item_count".into(), Value::I64(1));
+        m.insert("status".into(), Value::I64(2));
+        m.insert("pay_method".into(), Value::I64(2));
+        m.insert("pay_at".into(), Value::String("2026-01-02".into()));
+        m.insert("offline_seq".into(), Value::String("S2".into()));
+        m.insert("created_at".into(), Value::String("2026-01-01".into()));
+        m.insert("updated_at".into(), Value::String("2026-01-02".into()));
+        o.from_value(m);
+        assert_eq!(o.order_id, Some(5));
+        assert_eq!(o.order_no, "O999");
+        assert_eq!(o.total_fen, 9900);
+        assert_eq!(o.status, 2);
+        assert_eq!(o.pay_method, 2);
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut o = sample();
+        o.from_value(HashMap::new());
+        assert_eq!(o.order_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let o = sample();
+        assert!(o.get_relation("any").is_none());
+        assert_eq!(o.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut o = sample();
+        o.set_relation_data("x", Value::Null);
+        assert!(o.get_relation("x").is_none());
+    }
+}

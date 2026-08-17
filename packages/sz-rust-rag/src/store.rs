@@ -228,4 +228,45 @@ mod tests {
         let store: FileVersionedStore<String> = FileVersionedStore::load(&path).await.unwrap();
         assert_eq!(store.get("k", "t").await.unwrap(), Some("v".into()));
     }
+
+    #[tokio::test]
+    async fn load_nonexistent_file() {
+        let store: FileVersionedStore<String> =
+            FileVersionedStore::load(std::path::Path::new("/nonexistent/store.json"))
+                .await
+                .unwrap();
+        assert!(store.list("t").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_nonexistent_key_fails() {
+        let store: FileVersionedStore<String> = FileVersionedStore::new_in_memory();
+        let result = store.update("nonexistent", "v".into(), "t", "u").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_nonexistent_key_returns_none() {
+        let store: FileVersionedStore<String> = FileVersionedStore::new_in_memory();
+        assert_eq!(store.get("nonexistent", "t").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn history_nonexistent_key_returns_empty() {
+        let store: FileVersionedStore<String> = FileVersionedStore::new_in_memory();
+        let history = store.history("nonexistent", "t").await.unwrap();
+        assert!(history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_empty_tenant() {
+        let store: FileVersionedStore<String> = FileVersionedStore::new_in_memory();
+        assert!(store.list("empty").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_key_succeeds() {
+        let store: FileVersionedStore<String> = FileVersionedStore::new_in_memory();
+        assert!(store.delete("nonexistent", "t").await.is_ok());
+    }
 }

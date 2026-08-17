@@ -23,7 +23,7 @@ use crate::state::AppState;
 /// 该函数内部使用 `sysinfo::System::new_all()`，首次调用约 10-50ms。
 #[tracing::instrument(skip_all)]
 pub async fn server_info() -> impl IntoResponse {
-    let info = sz_rust_observability::admin::collect_server_info();
+    let info = sz_rust_observability::admin::collect_server_info().await;
     Json(json!({
         "code": 1,
         "msg": "success",

@@ -146,4 +146,95 @@ mod tests {
     fn test_magic_bytes_unknown_ext() {
         assert!(!magic_bytes_match("txt", b"hello"));
     }
+
+    #[tokio::test]
+    async fn test_init_creates_upload_dir() {
+        // init 应幂等，目录存在时不报错
+        let result = FileService::init().await;
+        assert!(result.is_ok(), "init 应成功: {:?}", result);
+        assert!(Path::new(UPLOAD_DIR).exists(), "uploads 目录应存在");
+    }
+
+    #[tokio::test]
+    async fn test_save_file_too_large() {
+        // 6MB 超过 5MB 限制
+        let big_data = vec![0u8; (MAX_FILE_SIZE + 1) as usize];
+        let result = FileService::save("test.jpg", &big_data).await;
+        assert!(result.is_err(), "超大文件应拒绝");
+        assert!(result.unwrap_err().contains("文件大小超过限制"));
+    }
+
+    #[tokio::test]
+    async fn test_save_unsupported_extension() {
+        let result = FileService::save("test.txt", b"hello").await;
+        assert!(result.is_err(), "不支持的扩展名应拒绝");
+        assert!(result.unwrap_err().contains("不支持的文件格式"));
+    }
+
+    #[tokio::test]
+    async fn test_save_no_extension() {
+        let result = FileService::save("noext", b"hello").await;
+        assert!(result.is_err(), "无扩展名应拒绝");
+    }
+
+    #[tokio::test]
+    async fn test_save_magic_bytes_mismatch() {
+        // 扩展名是 jpg 但内容不是 JPEG
+        let result = FileService::save("fake.jpg", b"<html>not an image</html>").await;
+        assert!(result.is_err(), "magic bytes 不匹配应拒绝");
+        assert!(result.unwrap_err().contains("内容嗅探校验失败"));
+    }
+
+    #[tokio::test]
+    async fn test_save_png_magic_bytes_mismatch() {
+        let result = FileService::save("fake.png", b"GIF89a").await;
+        assert!(result.is_err(), "png 扩展名但 gif 内容应拒绝");
+    }
+
+    #[tokio::test]
+    async fn test_save_valid_jpeg_and_cleanup() {
+        // 构造合法 JPEG 头
+        let jpeg_data = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+        let result = FileService::save("valid.jpg", &jpeg_data).await;
+        assert!(result.is_ok(), "合法 JPEG 应保存成功: {:?}", result);
+        let url = result.unwrap();
+        assert!(
+            url.starts_with("/uploads/"),
+            "返回路径应以 /uploads/ 开头: {}",
+            url
+        );
+
+        // 清理：删除保存的文件
+        let file_path = format!(".{}", url);
+        let _ = tokio::fs::remove_file(&file_path).await;
+        // 清理日期目录（尝试删除，非-empty 时忽略错误）
+        if let Some(parent) = Path::new(&file_path).parent() {
+            let _ = tokio::fs::remove_dir(parent).await;
+            if let Some(grandparent) = parent.parent() {
+                let _ = tokio::fs::remove_dir(grandparent).await;
+                if let Some(ggp) = grandparent.parent() {
+                    let _ = tokio::fs::remove_dir(ggp).await;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_save_valid_png_and_cleanup() {
+        let png_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
+        let result = FileService::save("valid.png", &png_data).await;
+        assert!(result.is_ok(), "合法 PNG 应保存成功: {:?}", result);
+        let url = result.unwrap();
+        let file_path = format!(".{}", url);
+        let _ = tokio::fs::remove_file(&file_path).await;
+        if let Some(parent) = Path::new(&file_path).parent() {
+            let _ = tokio::fs::remove_dir(parent).await;
+            if let Some(gp) = parent.parent() {
+                let _ = tokio::fs::remove_dir(gp).await;
+                if let Some(ggp) = gp.parent() {
+                    let _ = tokio::fs::remove_dir(ggp).await;
+                }
+            }
+        }
+    }
 }

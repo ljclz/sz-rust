@@ -36,3 +36,17 @@ pub async fn ping_db(db_pool: &Arc<Pool>) -> bool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 覆盖 ping_db acquire 失败路径 — mock_app_state 使用 connect_lazy 到假地址，
+    /// acquire 会因连接失败返回 Err，ping_db 应返回 false。
+    #[tokio::test]
+    async fn ping_db_returns_false_when_pool_acquire_fails() {
+        let state = crate::state::mock_app_state();
+        let result = ping_db(&state.db_pool).await;
+        assert!(!result, "DB 不可用时 ping_db 应返回 false");
+    }
+}

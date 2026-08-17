@@ -115,3 +115,66 @@ impl MqttDispatcher {
         let _ = state;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_valid_device_sn_alphanumeric() {
+        assert!(is_valid_device_sn("device001"));
+        assert!(is_valid_device_sn("ABC123"));
+    }
+
+    #[test]
+    fn is_valid_device_sn_with_hyphen_and_underscore() {
+        assert!(is_valid_device_sn("dev-001"));
+        assert!(is_valid_device_sn("dev_001"));
+        assert!(is_valid_device_sn("a-b-c_1_2_3"));
+    }
+
+    #[test]
+    fn is_valid_device_sn_empty_rejected() {
+        assert!(!is_valid_device_sn(""));
+    }
+
+    #[test]
+    fn is_valid_device_sn_too_long_rejected() {
+        let long = "a".repeat(65);
+        assert!(!is_valid_device_sn(&long));
+        let max = "a".repeat(64);
+        assert!(is_valid_device_sn(&max));
+    }
+
+    #[test]
+    fn is_valid_device_sn_slash_rejected() {
+        assert!(!is_valid_device_sn("dev/001"));
+        assert!(!is_valid_device_sn("a/b"));
+    }
+
+    #[test]
+    fn is_valid_device_cn_space_rejected() {
+        assert!(!is_valid_device_sn("dev 001"));
+        assert!(!is_valid_device_sn(" dev"));
+        assert!(!is_valid_device_sn("dev "));
+    }
+
+    #[test]
+    fn is_valid_device_sn_special_chars_rejected() {
+        assert!(!is_valid_device_sn("dev@001"));
+        assert!(!is_valid_device_sn("dev.001"));
+        assert!(!is_valid_device_sn("dev#001"));
+        assert!(!is_valid_device_sn("中文"));
+    }
+
+    #[test]
+    fn is_valid_device_sn_control_chars_rejected() {
+        assert!(!is_valid_device_sn("dev\n001"));
+        assert!(!is_valid_device_sn("dev\t001"));
+    }
+
+    #[test]
+    fn max_mqtt_payload_bytes_is_256kb() {
+        assert_eq!(MAX_MQTT_PAYLOAD_BYTES, 256 * 1024);
+    }
+}

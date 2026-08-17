@@ -64,6 +64,9 @@ bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --report docs/audit/my-revi
 | `--range <git-range>` | `HEAD~1..HEAD` | 审查范围；PR 场景用 `main...HEAD` |
 | `--severity-threshold <low\|medium\|high\|critical>` | `medium` | 阻塞阈值：≥ 该级别的问题导致审查失败（退出码非零、禁止合入） |
 | `--ai` | 关 | 启用 AI 评审环节 |
+| `--ai-parallel` | 关（需配合 `--ai`） | AI 评审在 diff 扫描后**后台预启动**，与门禁并行（第 7 篇并发方法论）；门禁跑完后等待合并，总耗时 = max(门禁, AI) |
+| `--no-ai-cache` | 开（`--ai` 时） | 关闭 AI 评审缓存；默认按 diff sha256 缓存 `~/.cache/sz-rust-review/<hash>.md`，同 diff 二次运行直接复用（第 7 篇缓存去重复） |
+| `--ai-timeout <秒>` | `120` | AI 单次调用超时（`curl --max-time`）；超时/失败降级记录 `ai-failed`（medium），不挂死审查 |
 | `--deep` | 关 | 追加深验证（变异测试 + 变更行覆盖率，耗时 10+ 分钟） |
 | `--skip-integration` | 关 | 跳过真实集成测试（本机无 MySQL 时） |
 | `--report <path>` | `docs/audit/<日期>-pr-review-<分支>.md` | 报告输出路径 |
@@ -100,6 +103,25 @@ scanning → compile → static → security → test → integration(可跳过)
 - **已验证 Provider（快手）**：`https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`（2026-08-16 实测通过，评审输出含推理过程）
 - **Prompt 设计**：diff（截断 8000 字符）+ 已发现问题清单 → 要求输出 3-5 个最重要问题（性能/安全/可维护性/并发）+ 修改建议 + 1-10 评分，只输出 Markdown
 - **输出位置**：报告"补充信息 → AI 评审"章节；**不影响阻塞判定**（AI 结论仅供参考）
+
+### 6.1 性能优化（微信《Skill 性能优化》第 7 篇方法论）
+
+- **并发**：`--ai-parallel` 在 diff 扫描后后台启动 AI 评审，与门禁环节并行（对齐文章 asyncio.gather：互不依赖子任务并行）；门禁跑完等待合并
+- **缓存**：AI 评审结果按 diff sha256 前 16 位缓存 `~/.cache/sz-rust-review/<hash>.md`（对齐文章 L2 文件 hash 缓存）；同 diff 二次运行直接复用（CI 重复跑省 token 与时间）；`--no-ai-cache` 关闭
+- **限流与超时**：`--ai-timeout`（默认 120s）防 LLM 端点挂起拖死审查；超时/失败降级记录 `ai-failed`（medium），不阻塞判定
+- **注意**：`--ai-parallel` 后台任务使用 diff-only prompt（问题清单在门禁阶段动态累积，无法预先注入）；串行模式（默认）仍携带完整问题清单
+
+### 6.2 Choreography 事件联动（第 8 篇方法论）
+
+审查终态自动 publish 事件到 `docs/audit/events.jsonl`（JSON Lines 追加）：
+
+| 事件 | 触发 |
+|------|------|
+| `ReviewCompleted` | done 且无 ≥ 阈值问题 |
+| `ReviewBlocked` | done 但有阻塞问题 |
+| `ReviewFailed` | 流程中断 |
+
+每行载荷：`{ts, event, result, branch, commit, range, state, blocking, issues{critical/high/medium/low}, report}`。订阅者（现状/未来）：发布门禁（release 前检查最近一次 ReviewCompleted 才允许发布）、季度审计增量、关卡耗时 p50/p95 统计。事件失败静默，不影响审查主流程（钩子是增强，不是主流程）。
 
 ## 七、报告说明
 

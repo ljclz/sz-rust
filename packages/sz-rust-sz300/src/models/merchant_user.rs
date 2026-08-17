@@ -199,4 +199,145 @@ mod tests {
         assert_eq!(user.username, "testuser");
         assert_eq!(user.user_id, Some(99));
     }
+
+    // ---- Model / ModelExt / RelationLoader trait 覆盖 ----
+
+    fn sample_user() -> MerchantUser {
+        MerchantUser {
+            user_id: Some(1),
+            merchant_id: 7,
+            username: "admin".into(),
+            password: "hash".into(),
+            phone: "13800138000".into(),
+            role: 1,
+            last_login_at: Some("2026-01-01".into()),
+            created_at: Some("2026-01-01".into()),
+            updated_at: Some("2026-01-02".into()),
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(MerchantUser::table_name(), "merchant_user");
+        assert_eq!(MerchantUser::pk_name(), "user_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut u = sample_user();
+        assert_eq!(u.pk(), 1);
+        u.user_id = None;
+        assert_eq!(u.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut u = sample_user();
+        u.set_pk(42);
+        assert_eq!(u.user_id, Some(42));
+    }
+
+    #[test]
+    fn timestamp_fields_present() {
+        let tf = MerchantUser::timestamp_fields().expect("应有时间戳");
+        assert_eq!(tf.created_at, Some("created_at"));
+        assert_eq!(tf.updated_at, Some("updated_at"));
+    }
+
+    #[test]
+    fn columns_count() {
+        assert_eq!(MerchantUser::columns().len(), 9);
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = MerchantUser::fillable();
+        assert!(!f.contains(&"user_id"));
+        assert!(f.contains(&"username"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        assert_eq!(MerchantUser::guarded(), vec!["user_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let u = sample_user();
+        assert_eq!(u.get_column_value("user_id"), Some(Value::I64(1)));
+        assert_eq!(u.get_column_value("merchant_id"), Some(Value::I64(7)));
+        assert_eq!(
+            u.get_column_value("username"),
+            Some(Value::String("admin".into()))
+        );
+        assert_eq!(
+            u.get_column_value("password"),
+            Some(Value::String("hash".into()))
+        );
+        assert_eq!(u.get_column_value("role"), Some(Value::I32(1)));
+        assert_eq!(u.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_fields() {
+        let u = MerchantUser {
+            user_id: None,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+            ..sample_user()
+        };
+        assert_eq!(u.get_column_value("user_id"), None);
+        assert_eq!(u.get_column_value("last_login_at"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut u = MerchantUser {
+            user_id: None,
+            merchant_id: 0,
+            username: String::new(),
+            password: String::new(),
+            phone: String::new(),
+            role: 0,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut m = HashMap::new();
+        m.insert("user_id".into(), Value::I64(9));
+        m.insert("merchant_id".into(), Value::I64(2));
+        m.insert("username".into(), Value::String("test".into()));
+        m.insert("password".into(), Value::String("pw".into()));
+        m.insert("phone".into(), Value::String("139".into()));
+        m.insert("role".into(), Value::I64(0));
+        m.insert("last_login_at".into(), Value::String("2026-01-01".into()));
+        m.insert("created_at".into(), Value::String("2026-01-01".into()));
+        m.insert("updated_at".into(), Value::String("2026-01-02".into()));
+        u.from_value(m);
+        assert_eq!(u.user_id, Some(9));
+        assert_eq!(u.username, "test");
+        assert_eq!(u.role, 0);
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut u = sample_user();
+        u.from_value(HashMap::new());
+        assert_eq!(u.user_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let u = sample_user();
+        assert!(u.get_relation("any").is_none());
+        assert_eq!(u.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut u = sample_user();
+        u.set_relation_data("x", Value::Null);
+        assert!(u.get_relation("x").is_none());
+    }
 }

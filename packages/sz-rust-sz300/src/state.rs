@@ -37,6 +37,47 @@ pub struct AppState {
     pub redis_stats: Option<Arc<dyn sz_rust_observability::admin::RedisStats>>,
 }
 
+/// 测试专用：创建不连接真实数据库的 AppState（Pool 使用 connect_lazy，prewarm=false）
+#[cfg(test)]
+pub fn mock_app_state() -> AppState {
+    use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+    use sz_rust_core::orm::{PoolConfigBuilder, SqlxPoolConfig};
+
+    // connect_lazy 不实际连接数据库，仅创建池结构
+    let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+        .max_connections(1)
+        .connect_lazy("mysql://fake:fake@127.0.0.1:3306/fake")
+        .expect("connect_lazy 不应失败");
+    let factory = SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+
+    let pool_cfg = SqlxPoolConfig::default();
+    let base = pool_cfg.to_orm_pool_config();
+    let orm_cfg = PoolConfigBuilder::new()
+        .max_size(base.max_size)
+        .min_idle(0)
+        .acquire_timeout(5)
+        .idle_timeout(60)
+        .max_lifetime(300)
+        .prewarm(false)
+        .build()
+        .expect("PoolConfig 构建失败");
+    let pool = Pool::new(orm_cfg, Arc::new(factory)).expect("Pool 创建失败");
+
+    AppState {
+        db_pool: Arc::new(pool),
+        pg_pool: None,
+        metrics_registry: Arc::new(MetricsRegistry::default()),
+        capability_registry: Arc::new(CapabilityRegistry::default()),
+        ai: None,
+        event_bus: Arc::new(InMemoryEventBus::new()),
+        cache: None,
+        slo_monitor: Arc::new(SloMonitor::new(
+            sz_rust_observability::slo::SloConfig::default(),
+        )),
+        hook_registry: Arc::new(HookRegistry::new()),
+    }
+}
+
 // ============================================================================
 // admin feature：连接池状态采集适配器
 // ============================================================================

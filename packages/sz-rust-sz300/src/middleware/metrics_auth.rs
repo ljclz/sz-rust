@@ -47,3 +47,120 @@ pub async fn metrics_auth_middleware(
         (StatusCode::FORBIDDEN, "Forbidden").into_response()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::MetricsAuthConfig;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode as AxumStatusCode};
+    use axum::middleware;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    fn build_router(config: MetricsAuthConfig) -> Router {
+        Router::new()
+            .route("/test", get(|| async { AxumStatusCode::OK }))
+            .layer(middleware::from_fn_with_state(
+                config,
+                metrics_auth_middleware,
+            ))
+    }
+
+    #[test]
+    fn client_ip_clone_and_debug() {
+        let ip = ClientIp("192.168.1.1".to_string());
+        let cloned = ip.clone();
+        assert_eq!(ip.0, cloned.0);
+        let debug_str = format!("{:?}", ip);
+        assert!(debug_str.contains("192.168.1.1"));
+    }
+
+    #[tokio::test]
+    async fn metrics_auth_middleware_disabled_passes_through() {
+        let config = MetricsAuthConfig {
+            enabled: false,
+            ..MetricsAuthConfig::default()
+        };
+        let router = build_router(config);
+        let response = router
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), AxumStatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_auth_middleware_enabled_no_credentials_forbidden() {
+        let config = MetricsAuthConfig {
+            enabled: true,
+            ..MetricsAuthConfig::default()
+        };
+        let router = build_router(config);
+        let response = router
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), AxumStatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn metrics_auth_middleware_enabled_with_valid_token_passes() {
+        let config = MetricsAuthConfig {
+            enabled: true,
+            bearer_token: Some("test-token".to_string()),
+            ..Default::default()
+        };
+        let router = build_router(config);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("authorization", "Bearer test-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), AxumStatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_auth_middleware_enabled_with_ip_whitelist_passes() {
+        let config = MetricsAuthConfig {
+            enabled: true,
+            allowed_ips: vec!["10.0.0.1".to_string()],
+            ..Default::default()
+        };
+        let router = build_router(config);
+        let request = Request::builder()
+            .uri("/test")
+            .extension(ClientIp("10.0.0.1".to_string()))
+            .body(Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), AxumStatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_auth_middleware_enabled_wrong_token_forbidden() {
+        let config = MetricsAuthConfig {
+            enabled: true,
+            bearer_token: Some("correct-token".to_string()),
+            ..Default::default()
+        };
+        let router = build_router(config);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/test")
+                    .header("authorization", "Bearer wrong-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), AxumStatusCode::FORBIDDEN);
+    }
+}

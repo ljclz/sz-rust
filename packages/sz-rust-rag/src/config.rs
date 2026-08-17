@@ -242,4 +242,55 @@ vectorization_journal_path = "/data/logs/journal.jsonl"
         assert!(cfg.max_topk >= cfg.default_topk);
         assert!(cfg.low_recall_threshold > 0.0 && cfg.low_recall_threshold < 1.0);
     }
+
+    #[tokio::test]
+    async fn load_with_similarity_metric() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+similarity_metric = "dot"
+"#;
+        tokio::fs::write(tmp.path(), toml_content).await.unwrap();
+        let cfg = RagConfig::load(tmp.path()).await.unwrap();
+        assert!(matches!(
+            cfg.similarity_metric,
+            sz_rust_ai_facade::embedding::SimilarityMetric::Dot
+        ));
+    }
+
+    #[tokio::test]
+    async fn load_similarity_metric_l2() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+similarity_metric = "euclidean"
+"#;
+        tokio::fs::write(tmp.path(), toml_content).await.unwrap();
+        let cfg = RagConfig::load(tmp.path()).await.unwrap();
+        assert!(matches!(
+            cfg.similarity_metric,
+            sz_rust_ai_facade::embedding::SimilarityMetric::L2
+        ));
+    }
+
+    #[tokio::test]
+    async fn load_similarity_metric_unknown_defaults_cosine() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let toml_content = r#"
+similarity_metric = "unknown_metric"
+"#;
+        tokio::fs::write(tmp.path(), toml_content).await.unwrap();
+        let cfg = RagConfig::load(tmp.path()).await.unwrap();
+        assert!(matches!(
+            cfg.similarity_metric,
+            sz_rust_ai_facade::embedding::SimilarityMetric::Cosine
+        ));
+    }
+
+    // 注：RagConfigWatcher::start 在 Windows 上存在 notify 后台线程清理 panic 问题，
+    // 因此不在此处测试。该功能在集成测试中验证。
+
+    #[tokio::test]
+    async fn load_nonexistent_path_fails() {
+        let result = RagConfig::load(std::path::Path::new("/nonexistent/config.toml")).await;
+        assert!(result.is_err());
+    }
 }

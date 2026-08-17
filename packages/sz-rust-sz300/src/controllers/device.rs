@@ -401,3 +401,391 @@ pub async fn trigger_ota(State(state): State<AppState>, req: Request<Body>) -> R
 pub async fn status_report(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::status_report(&state, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn send_post(uri: &str, body: Body) -> String {
+        let state = mock_app_state();
+        let router = Router::new().route(uri, post(list)).with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .body(body)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(body_bytes.to_vec()).expect("UTF-8")
+    }
+
+    #[tokio::test]
+    async fn device_list_no_auth_returns_error() {
+        let body = send_post("/api/v1/device/list", Body::empty()).await;
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_list_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/device/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/list")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_status_report_with_valid_params_returns_db_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/status_report", post(status_report))
+            .with_state(state);
+        let body = serde_json::json!({
+            "device_id": 1,
+            "status": 1,
+            "signal_strength": -50,
+            "fw_version": "1.0.0"
+        })
+        .to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/status_report")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        // DB 不可用应返回错误
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_status_report_missing_device_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/status_report", post(status_report))
+            .with_state(state);
+        let body = serde_json::json!({"status": 1}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/status_report")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body.contains("\"code\":0"),
+            "缺少 device_id 应返回错误: {}",
+            body
+        );
+    }
+
+    #[tokio::test]
+    async fn device_info_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/info")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_bind_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/bind", post(bind))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/bind")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_unbind_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/unbind", post(unbind))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/unbind")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn device_trigger_ota_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/ota", post(trigger_ota))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/ota")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    /// 覆盖 device info 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn device_info_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/device/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/info")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 device bind 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn device_bind_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/device/bind", post(bind))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/bind")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 device unbind 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn device_unbind_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/device/unbind", post(unbind))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/unbind")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 device trigger_ota 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn device_trigger_ota_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/device/ota", post(trigger_ota))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/device/ota")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+}

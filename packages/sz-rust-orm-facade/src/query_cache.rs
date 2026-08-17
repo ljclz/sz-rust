@@ -338,4 +338,103 @@ mod tests {
         cache.clear();
         assert!(cache.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_get_or_query_miss_then_hit() {
+        let cache = QueryCache::new(QueryCacheConfig::default());
+        let key = "users:1";
+        let data = b"rowdata".to_vec();
+        let result = cache
+            .get_or_query(key, || async { Ok(data.clone()) })
+            .await
+            .unwrap();
+        assert_eq!(result, data);
+        assert_eq!(cache.misses(), 1);
+        assert_eq!(cache.hits(), 0);
+        let cached = cache
+            .get_or_query(key, || async {
+                Err(QueryCacheError::QueryFailed("x".into()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(cached, data);
+        assert_eq!(cache.hits(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_or_query_error_propagation() {
+        let cache = QueryCache::new(QueryCacheConfig::default());
+        let result = cache
+            .get_or_query("k", || async {
+                Err(QueryCacheError::QueryFailed("db down".into()))
+            })
+            .await;
+        assert!(matches!(result, Err(QueryCacheError::QueryFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_get_or_query_expired_requeries() {
+        let config = QueryCacheConfig {
+            ttl: Duration::from_millis(1),
+            ttl_jitter: 0.0,
+            ..Default::default()
+        };
+        let cache = QueryCache::new(config);
+        let key = "k";
+        let _ = cache
+            .get_or_query(key, || async { Ok(b"v1".to_vec()) })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let v2 = cache
+            .get_or_query(key, || async { Ok(b"v2".to_vec()) })
+            .await
+            .unwrap();
+        assert_eq!(v2, b"v2".to_vec());
+        assert_eq!(cache.misses(), 2);
+    }
+
+    #[test]
+    fn test_eviction_on_max_entries() {
+        let config = QueryCacheConfig {
+            max_entries: 2,
+            ttl_jitter: 0.0,
+            ..Default::default()
+        };
+        let cache = QueryCache::new(config);
+        cache.put("k1", b"a".to_vec());
+        cache.put("k2", b"b".to_vec());
+        cache.put("k3", b"c".to_vec());
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_hit_rate_nonzero() {
+        let cache = QueryCache::new(QueryCacheConfig::default());
+        cache.put("k", b"v".to_vec());
+        let _guard = cache.entries.read();
+        cache.stats.write().hits = 3;
+        cache.stats.write().misses = 1;
+        assert_eq!(cache.hit_rate(), 0.75);
+    }
+
+    #[test]
+    fn test_jitter_ttl_zero_jitter() {
+        let config = QueryCacheConfig {
+            ttl: Duration::from_secs(100),
+            ttl_jitter: 0.0,
+            ..Default::default()
+        };
+        let cache = QueryCache::new(config);
+        assert_eq!(cache.jitter_ttl(), Duration::from_secs(100));
+    }
+
+    #[test]
+    fn test_query_cache_debug_format() {
+        let cache = QueryCache::new(QueryCacheConfig::default());
+        cache.put("k", b"v".to_vec());
+        let s = format!("{cache:?}");
+        assert!(s.contains("QueryCache"));
+        assert!(s.contains("entries: 1"));
+    }
 }

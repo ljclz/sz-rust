@@ -328,3 +328,200 @@ pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::create(&state, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn order_list_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn order_list_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/order/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/list")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn order_info_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/info")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn order_create_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/create", post(create))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/create")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    /// 覆盖 order info 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn order_info_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/order/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/info")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 order create 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn order_create_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/order/create", post(create))
+            .with_state(state);
+        let body = serde_json::json!({"order_no": "O001", "total_fen": 100}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/order/create")
+                    .header("content-type", "application/json")
+                    .extension(user)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+}

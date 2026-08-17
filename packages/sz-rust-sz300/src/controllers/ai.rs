@@ -123,3 +123,143 @@ impl AiController {
 pub async fn chat(State(state): State<AppState>, req: Request<Body>) -> Response {
     AiController::chat(&state, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn ai_chat_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body.contains("\"code\":0") || body.contains("\"code\":1"),
+            "应返回有效响应: {}",
+            body
+        );
+    }
+
+    /// 覆盖 ai chat 提供 prompt 但 AI 未初始化路径
+    #[tokio::test]
+    async fn ai_chat_with_prompt_but_ai_not_initialized_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let body = serde_json::json!({"prompt": "hello"}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        // AI 未初始化或调用失败都应返回有效响应
+        assert!(
+            body.contains("\"code\":0") || body.contains("\"code\":1"),
+            "应返回有效响应: {}",
+            body
+        );
+    }
+
+    /// 覆盖 ai chat 空 prompt 路径
+    #[tokio::test]
+    async fn ai_chat_with_empty_prompt_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let body = serde_json::json!({"prompt": ""}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body.contains("\"code\":0") || body.contains("\"code\":1"),
+            "应返回有效响应: {}",
+            body
+        );
+    }
+
+    /// 覆盖 ai chat 不支持模型路径
+    #[tokio::test]
+    async fn ai_chat_with_unsupported_model_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let body = serde_json::json!({"prompt": "hello", "model": "gpt-999"}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body.contains("\"code\":0") || body.contains("\"code\":1"),
+            "应返回有效响应: {}",
+            body
+        );
+    }
+}

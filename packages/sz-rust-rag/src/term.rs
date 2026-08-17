@@ -222,4 +222,71 @@ mod tests {
         store.delete("SKU", "t").await.unwrap();
         assert!(store.get("SKU", "t").await.unwrap().is_none());
     }
+
+    #[tokio::test]
+    async fn new_from_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let store = FileTermStore::new(tmp.path()).await.unwrap();
+        store.add(make_entry("SKU"), "t").await.unwrap();
+        assert!(store.get("SKU", "t").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn references_returns_empty() {
+        let store = FileTermStore::in_memory();
+        store.add(make_entry("SKU"), "t").await.unwrap();
+        let refs = store.references("SKU", "t").await.unwrap();
+        assert!(refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_from_json_missing_file() {
+        let store = FileTermStore::in_memory();
+        let count = store
+            .load_from_json(std::path::Path::new("/nonexistent/glossary.json"))
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_invalid_json() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        tokio::fs::write(tmp.path(), "invalid json").await.unwrap();
+        let store = FileTermStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_valid() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{"categories": {"cat1": {"terms": [{"name": "SKU", "definition": "商品编码"}, {"name": "称重", "definition": "按重量计价"}]}}}"#;
+        tokio::fs::write(tmp.path(), json).await.unwrap();
+        let store = FileTermStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 2);
+        let results = store.search("sku", "default").await.unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_by_alias() {
+        let store = FileTermStore::in_memory();
+        store.add(make_entry("SKU"), "t").await.unwrap();
+        let results = store.search("alias1", "t").await.unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn fuzzy_match_short_strings() {
+        assert!(!fuzzy_match("a", "ab"));
+        assert!(!fuzzy_match("ab", "a"));
+    }
+
+    #[test]
+    fn fuzzy_match_matching() {
+        assert!(fuzzy_match("test", "testing"));
+        assert!(fuzzy_match("称重", "称重商品"));
+    }
 }

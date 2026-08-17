@@ -146,3 +146,113 @@ async fn append_pool_metrics(out: &mut String, prefix: &str, pool: &Arc<Pool>) {
         metrics.acquire_count, metrics.acquire_failed_count,
     ));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn read_body_string(body: Body) -> String {
+        body.collect()
+            .await
+            .expect("body collect")
+            .to_bytes()
+            .iter()
+            .map(|b| *b as char)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn health_check_returns_ok_status() {
+        let state = mock_app_state();
+        let router = Router::new().route("/health", get(check)).with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = read_body_string(response.into_body()).await;
+        assert!(body.contains("\"status\":\"ok\""));
+        assert!(body.contains("\"service\":\"sz300-server\""));
+    }
+
+    #[tokio::test]
+    async fn health_startup_returns_ok_with_metrics() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/health/startup", get(startup))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/health/startup")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // metrics_registry 可能为空（返回 503）或非空（返回 200）
+        let body = read_body_string(response.into_body()).await;
+        assert!(
+            body.contains("\"status\":\"started\"") || body.contains("\"status\":\"starting\""),
+            "应返回 started 或 starting 状态，实际: {}",
+            body
+        );
+    }
+
+    #[tokio::test]
+    async fn health_metrics_returns_text_format() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/metrics", get(metrics))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.contains("text/plain"));
+    }
+
+    #[tokio::test]
+    async fn health_readiness_returns_503_without_db() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/health/ready", get(readiness))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/health/ready")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // mock Pool 无法连接真实 DB，ping_db 应返回 false → 503
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = read_body_string(response.into_body()).await;
+        assert!(body.contains("\"status\":\"unavailable\""));
+    }
+}

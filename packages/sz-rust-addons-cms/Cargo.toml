@@ -24,6 +24,11 @@ sz-rust-addons-loader.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 
+[dev-dependencies]
+tower = { workspace = true }
+http-body-util = { workspace = true }
+http = { workspace = true }
+
 [lib]
 name = "sz_rust_addons_cms"
 path = "src/lib.rs"

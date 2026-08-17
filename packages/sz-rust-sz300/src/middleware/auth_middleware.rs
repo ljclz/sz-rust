@@ -74,3 +74,130 @@ pub async fn auth_middleware(mut req: Request<Body>, next: Next) -> Response {
         Err(_) => (StatusCode::UNAUTHORIZED, "令牌无效或已过期").into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_bearer_token_standard_prefix() {
+        assert_eq!(extract_bearer_token("Bearer abc123"), "abc123");
+    }
+
+    #[test]
+    fn extract_bearer_token_case_insensitive() {
+        assert_eq!(extract_bearer_token("bearer xyz"), "xyz");
+        assert_eq!(extract_bearer_token("BEARER token"), "token");
+        assert_eq!(extract_bearer_token("BeArEr mixed"), "mixed");
+    }
+
+    #[test]
+    fn extract_bearer_token_with_extra_spaces() {
+        assert_eq!(extract_bearer_token("Bearer   spaced"), "spaced");
+        assert_eq!(extract_bearer_token("  Bearer tok  "), "tok");
+    }
+
+    #[test]
+    fn extract_bearer_token_no_prefix_returns_original() {
+        assert_eq!(extract_bearer_token("abc123"), "abc123");
+        assert_eq!(extract_bearer_token("just-a-token"), "just-a-token");
+    }
+
+    #[test]
+    fn extract_bearer_token_empty_returns_empty() {
+        assert_eq!(extract_bearer_token(""), "");
+        assert_eq!(extract_bearer_token("   "), "");
+    }
+
+    #[test]
+    fn extract_bearer_token_short_string_returns_trimmed() {
+        // 长度 < 6，不可能是 "Bearer" 前缀
+        assert_eq!(extract_bearer_token("abc"), "abc");
+        assert_eq!(extract_bearer_token("Bear"), "Bear");
+    }
+
+    #[test]
+    fn extract_bearer_token_exact_six_chars_no_prefix() {
+        // 恰好 6 字符但不是 "Bearer"
+        assert_eq!(extract_bearer_token("Bearer"), "");
+        // "Bearer" 本身没有 token 部分，trim_start() 后为空
+    }
+
+    // ---- auth_middleware 路由级测试 ----
+
+    use axum::middleware;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    #[allow(deprecated)]
+    fn build_test_router() -> Router {
+        Router::new()
+            .route("/health", get(|| async { StatusCode::OK }))
+            .route("/api/v1/protected", get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn(auth_middleware))
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_public_path_passes_through() {
+        let router = build_test_router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_protected_path_no_token_returns_401() {
+        let router = build_test_router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/protected")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_protected_path_invalid_token_returns_401() {
+        crate::services::auth_service::init_auth_test_only("test-secret");
+        let router = build_test_router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/protected")
+                    .header("authorization", "Bearer invalid.token.here")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_protected_path_empty_bearer_returns_401() {
+        let router = build_test_router();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/protected")
+                    .header("authorization", "Bearer ")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+}

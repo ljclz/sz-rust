@@ -122,3 +122,142 @@ impl RelationLoader for Market {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample() -> Market {
+        Market {
+            market_id: Some(1),
+            name: "太平市场".into(),
+            address: "太平路1号".into(),
+            contact: "张三".into(),
+            phone: "13800138000".into(),
+            status: 1,
+            created_at: Some("2026-01-01".into()),
+            updated_at: Some("2026-01-02".into()),
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(Market::table_name(), "market");
+        assert_eq!(Market::pk_name(), "market_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut m = sample();
+        assert_eq!(m.pk(), 1);
+        m.market_id = None;
+        assert_eq!(m.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut m = sample();
+        m.set_pk(33);
+        assert_eq!(m.market_id, Some(33));
+    }
+
+    #[test]
+    fn timestamp_fields_present() {
+        let tf = Market::timestamp_fields().expect("应有时间戳");
+        assert_eq!(tf.created_at, Some("created_at"));
+        assert_eq!(tf.updated_at, Some("updated_at"));
+    }
+
+    #[test]
+    fn columns_count() {
+        assert_eq!(Market::columns().len(), 8);
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = Market::fillable();
+        assert!(!f.contains(&"market_id"));
+        assert!(f.contains(&"name"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        assert_eq!(Market::guarded(), vec!["market_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let m = sample();
+        assert_eq!(m.get_column_value("market_id"), Some(Value::I64(1)));
+        assert_eq!(
+            m.get_column_value("name"),
+            Some(Value::String("太平市场".into()))
+        );
+        assert_eq!(
+            m.get_column_value("address"),
+            Some(Value::String("太平路1号".into()))
+        );
+        assert_eq!(m.get_column_value("status"), Some(Value::I32(1)));
+        assert_eq!(m.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_fields() {
+        let m = Market {
+            market_id: None,
+            created_at: None,
+            updated_at: None,
+            ..sample()
+        };
+        assert_eq!(m.get_column_value("market_id"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut m = Market {
+            market_id: None,
+            name: String::new(),
+            address: String::new(),
+            contact: String::new(),
+            phone: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("market_id".into(), Value::I64(5));
+        map.insert("name".into(), Value::String("新市场".into()));
+        map.insert("address".into(), Value::String("地址".into()));
+        map.insert("contact".into(), Value::String("李四".into()));
+        map.insert("phone".into(), Value::String("13900139000".into()));
+        map.insert("status".into(), Value::I64(0));
+        map.insert("created_at".into(), Value::String("2026-01-01".into()));
+        map.insert("updated_at".into(), Value::String("2026-01-02".into()));
+        m.from_value(map);
+        assert_eq!(m.market_id, Some(5));
+        assert_eq!(m.name, "新市场");
+        assert_eq!(m.status, 0);
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut m = sample();
+        m.from_value(HashMap::new());
+        assert_eq!(m.market_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let m = sample();
+        assert!(m.get_relation("any").is_none());
+        assert_eq!(m.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut m = sample();
+        m.set_relation_data("x", Value::Null);
+        assert!(m.get_relation("x").is_none());
+    }
+}

@@ -155,3 +155,165 @@ impl RelationLoader for Device {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample() -> Device {
+        Device {
+            device_id: Some(1),
+            merchant_id: 7,
+            device_sn: "SN001".into(),
+            device_model: "M100".into(),
+            fw_version: "1.0".into(),
+            status: 1,
+            signal_strength: -60,
+            bind_at: Some("2026-01-01".into()),
+            last_online_at: Some("2026-01-02".into()),
+            created_at: Some("2026-01-01".into()),
+            updated_at: Some("2026-01-02".into()),
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(Device::table_name(), "device");
+        assert_eq!(Device::pk_name(), "device_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut d = sample();
+        assert_eq!(d.pk(), 1);
+        d.device_id = None;
+        assert_eq!(d.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut d = sample();
+        d.set_pk(99);
+        assert_eq!(d.device_id, Some(99));
+    }
+
+    #[test]
+    fn timestamp_fields_present() {
+        let tf = Device::timestamp_fields().expect("应有时间戳字段");
+        assert_eq!(tf.created_at, Some("created_at"));
+        assert_eq!(tf.updated_at, Some("updated_at"));
+    }
+
+    #[test]
+    fn columns_count() {
+        let cols = Device::columns();
+        assert_eq!(cols.len(), 11);
+        assert!(cols.contains(&"device_id"));
+        assert!(cols.contains(&"device_sn"));
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = Device::fillable();
+        assert!(!f.contains(&"device_id"));
+        assert!(f.contains(&"device_sn"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        let g = Device::guarded();
+        assert_eq!(g, vec!["device_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let d = sample();
+        assert_eq!(d.get_column_value("device_id"), Some(Value::I64(1)));
+        assert_eq!(d.get_column_value("merchant_id"), Some(Value::I64(7)));
+        assert_eq!(
+            d.get_column_value("device_sn"),
+            Some(Value::String("SN001".into()))
+        );
+        assert_eq!(d.get_column_value("status"), Some(Value::I32(1)));
+        assert_eq!(d.get_column_value("signal_strength"), Some(Value::I32(-60)));
+        assert_eq!(
+            d.get_column_value("bind_at"),
+            Some(Value::String("2026-01-01".into()))
+        );
+        assert_eq!(d.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_fields() {
+        let d = Device {
+            device_id: None,
+            bind_at: None,
+            last_online_at: None,
+            created_at: None,
+            updated_at: None,
+            ..sample()
+        };
+        assert_eq!(d.get_column_value("device_id"), None);
+        assert_eq!(d.get_column_value("bind_at"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut d = Device {
+            device_id: None,
+            merchant_id: 0,
+            device_sn: String::new(),
+            device_model: String::new(),
+            fw_version: String::new(),
+            status: 0,
+            signal_strength: 0,
+            bind_at: None,
+            last_online_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut m = HashMap::new();
+        m.insert("device_id".into(), Value::I64(5));
+        m.insert("merchant_id".into(), Value::I64(3));
+        m.insert("device_sn".into(), Value::String("SNX".into()));
+        m.insert("device_model".into(), Value::String("M200".into()));
+        m.insert("fw_version".into(), Value::String("2.0".into()));
+        m.insert("status".into(), Value::I64(0));
+        m.insert("signal_strength".into(), Value::I64(-50));
+        m.insert("bind_at".into(), Value::String("2026-03-01".into()));
+        m.insert("last_online_at".into(), Value::String("2026-03-02".into()));
+        m.insert("created_at".into(), Value::String("2026-03-01".into()));
+        m.insert("updated_at".into(), Value::String("2026-03-02".into()));
+        d.from_value(m);
+        assert_eq!(d.device_id, Some(5));
+        assert_eq!(d.merchant_id, 3);
+        assert_eq!(d.device_sn, "SNX");
+        assert_eq!(d.device_model, "M200");
+        assert_eq!(d.fw_version, "2.0");
+        assert_eq!(d.status, 0);
+        assert_eq!(d.signal_strength, -50);
+        assert_eq!(d.bind_at, Some("2026-03-01".into()));
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut d = sample();
+        d.from_value(HashMap::new());
+        assert_eq!(d.device_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let d = sample();
+        assert!(d.get_relation("any").is_none());
+        assert_eq!(d.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut d = sample();
+        d.set_relation_data("x", Value::Null);
+        assert!(d.get_relation("x").is_none());
+    }
+}

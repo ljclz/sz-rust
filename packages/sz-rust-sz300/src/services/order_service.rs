@@ -335,4 +335,51 @@ mod tests {
         assert_eq!(clause, "WHERE merchant_id = ?");
         assert_eq!(params.len(), 1);
     }
+
+    /// 覆盖 list acquire 失败路径
+    #[tokio::test]
+    async fn list_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let filters = OrderFilters {
+            merchant_id: Some(1),
+            device_id: None,
+            status: None,
+            start_date: None,
+            end_date: None,
+        };
+        let result = OrderService::list(&state.db_pool, 1, 15, filters).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 get_with_items acquire 失败路径
+    #[tokio::test]
+    async fn get_with_items_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let result = OrderService::get_with_items(&state.db_pool, 1, 1).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
+
+    /// 覆盖 create acquire 失败路径
+    #[tokio::test]
+    async fn create_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        let order = crate::models::order::Order {
+            order_id: None,
+            order_no: "O001".to_string(),
+            merchant_id: 1,
+            device_id: 1,
+            total_fen: 100,
+            total_weight_g: 500,
+            item_count: 1,
+            status: 1,
+            pay_method: 0,
+            pay_at: None,
+            offline_seq: "".to_string(),
+            created_at: None,
+            updated_at: None,
+        };
+        let items: Vec<crate::models::order_item::OrderItem> = vec![];
+        let result = OrderService::create(&state.db_pool, &order, &items).await;
+        assert!(matches!(result, Err(ref e) if e == "数据库连接失败"));
+    }
 }

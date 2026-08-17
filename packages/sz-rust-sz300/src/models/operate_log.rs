@@ -115,3 +115,143 @@ impl RelationLoader for OperateLog {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample() -> OperateLog {
+        OperateLog {
+            log_id: Some(1),
+            merchant_id: 7,
+            operator: "admin".into(),
+            action: "login".into(),
+            detail: "用户登录".into(),
+            ip: "127.0.0.1".into(),
+            created_at: Some("2026-01-01".into()),
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(OperateLog::table_name(), "operate_log");
+        assert_eq!(OperateLog::pk_name(), "log_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut l = sample();
+        assert_eq!(l.pk(), 1);
+        l.log_id = None;
+        assert_eq!(l.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut l = sample();
+        l.set_pk(44);
+        assert_eq!(l.log_id, Some(44));
+    }
+
+    #[test]
+    fn timestamp_fields_created_only() {
+        let tf = OperateLog::timestamp_fields().expect("应有时间戳");
+        assert_eq!(tf.created_at, Some("created_at"));
+        assert_eq!(tf.updated_at, None);
+    }
+
+    #[test]
+    fn columns_count() {
+        assert_eq!(OperateLog::columns().len(), 7);
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = OperateLog::fillable();
+        assert!(!f.contains(&"log_id"));
+        assert!(f.contains(&"operator"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        assert_eq!(OperateLog::guarded(), vec!["log_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let l = sample();
+        assert_eq!(l.get_column_value("log_id"), Some(Value::I64(1)));
+        assert_eq!(l.get_column_value("merchant_id"), Some(Value::I64(7)));
+        assert_eq!(
+            l.get_column_value("operator"),
+            Some(Value::String("admin".into()))
+        );
+        assert_eq!(
+            l.get_column_value("action"),
+            Some(Value::String("login".into()))
+        );
+        assert_eq!(
+            l.get_column_value("ip"),
+            Some(Value::String("127.0.0.1".into()))
+        );
+        assert_eq!(l.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_fields() {
+        let l = OperateLog {
+            log_id: None,
+            created_at: None,
+            ..sample()
+        };
+        assert_eq!(l.get_column_value("log_id"), None);
+        assert_eq!(l.get_column_value("created_at"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut l = OperateLog {
+            log_id: None,
+            merchant_id: 0,
+            operator: String::new(),
+            action: String::new(),
+            detail: String::new(),
+            ip: String::new(),
+            created_at: None,
+        };
+        let mut m = HashMap::new();
+        m.insert("log_id".into(), Value::I64(9));
+        m.insert("merchant_id".into(), Value::I64(2));
+        m.insert("operator".into(), Value::String("sys".into()));
+        m.insert("action".into(), Value::String("bind".into()));
+        m.insert("detail".into(), Value::String("绑定".into()));
+        m.insert("ip".into(), Value::String("10.0.0.1".into()));
+        m.insert("created_at".into(), Value::String("2026-01-01".into()));
+        l.from_value(m);
+        assert_eq!(l.log_id, Some(9));
+        assert_eq!(l.operator, "sys");
+        assert_eq!(l.action, "bind");
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut l = sample();
+        l.from_value(HashMap::new());
+        assert_eq!(l.log_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let l = sample();
+        assert!(l.get_relation("any").is_none());
+        assert_eq!(l.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut l = sample();
+        l.set_relation_data("x", Value::Null);
+        assert!(l.get_relation("x").is_none());
+    }
+}

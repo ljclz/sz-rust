@@ -59,3 +59,50 @@ pub async fn serve_file(
         Err(_) => (StatusCode::NOT_FOUND, "File not found").into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn serve_file_rejects_path_traversal() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/uploads/{*path}", get(serve_file))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/uploads/../../etc/passwd")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn serve_file_nonexistent_returns_not_found() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/uploads/{*path}", get(serve_file))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/uploads/nonexistent_file.png")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}

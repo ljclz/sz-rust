@@ -89,3 +89,123 @@ impl RelationLoader for Category {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn sample() -> Category {
+        Category {
+            cat_id: Some(1),
+            name: "蔬菜".into(),
+            parent_id: 0,
+            sort_order: 1,
+        }
+    }
+
+    #[test]
+    fn table_and_pk_name() {
+        assert_eq!(Category::table_name(), "category");
+        assert_eq!(Category::pk_name(), "cat_id");
+    }
+
+    #[test]
+    fn pk_returns_id_or_zero() {
+        let mut c = sample();
+        assert_eq!(c.pk(), 1);
+        c.cat_id = None;
+        assert_eq!(c.pk(), 0);
+    }
+
+    #[test]
+    fn set_pk_updates_id() {
+        let mut c = sample();
+        c.set_pk(11);
+        assert_eq!(c.cat_id, Some(11));
+    }
+
+    #[test]
+    fn timestamp_fields_none() {
+        assert!(Category::timestamp_fields().is_none());
+    }
+
+    #[test]
+    fn columns_count() {
+        assert_eq!(Category::columns().len(), 4);
+    }
+
+    #[test]
+    fn fillable_excludes_pk() {
+        let f = Category::fillable();
+        assert!(!f.contains(&"cat_id"));
+        assert!(f.contains(&"name"));
+    }
+
+    #[test]
+    fn guarded_contains_pk() {
+        assert_eq!(Category::guarded(), vec!["cat_id"]);
+    }
+
+    #[test]
+    fn get_column_value_all_fields() {
+        let c = sample();
+        assert_eq!(c.get_column_value("cat_id"), Some(Value::I64(1)));
+        assert_eq!(
+            c.get_column_value("name"),
+            Some(Value::String("蔬菜".into()))
+        );
+        assert_eq!(c.get_column_value("parent_id"), Some(Value::I64(0)));
+        assert_eq!(c.get_column_value("sort_order"), Some(Value::I32(1)));
+        assert_eq!(c.get_column_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn get_column_value_none_pk() {
+        let c = Category {
+            cat_id: None,
+            ..sample()
+        };
+        assert_eq!(c.get_column_value("cat_id"), None);
+    }
+
+    #[test]
+    fn from_value_populates_all() {
+        let mut c = Category {
+            cat_id: None,
+            name: String::new(),
+            parent_id: 0,
+            sort_order: 0,
+        };
+        let mut m = HashMap::new();
+        m.insert("cat_id".into(), Value::I64(5));
+        m.insert("name".into(), Value::String("水果".into()));
+        m.insert("parent_id".into(), Value::I64(2));
+        m.insert("sort_order".into(), Value::I64(10));
+        c.from_value(m);
+        assert_eq!(c.cat_id, Some(5));
+        assert_eq!(c.name, "水果");
+        assert_eq!(c.sort_order, 10);
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut c = sample();
+        c.from_value(HashMap::new());
+        assert_eq!(c.cat_id, Some(1));
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let c = sample();
+        assert!(c.get_relation("any").is_none());
+        assert_eq!(c.get_relation_fk_value("any"), "");
+    }
+
+    #[test]
+    fn set_relation_data_no_op() {
+        let mut c = sample();
+        c.set_relation_data("x", Value::Null);
+        assert!(c.get_relation("x").is_none());
+    }
+}

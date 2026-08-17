@@ -296,3 +296,288 @@ pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Respon
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::delete(&state, req).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn merchant_list_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/list")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn merchant_list_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/merchant/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/list")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn merchant_info_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/info")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    #[tokio::test]
+    async fn merchant_create_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/create", post(create))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/create")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    /// 覆盖 merchant info 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn merchant_info_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/merchant/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/info")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 merchant update 无认证路径
+    #[tokio::test]
+    async fn merchant_update_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/update", post(update))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/update")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    /// 覆盖 merchant update 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn merchant_update_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/merchant/update", post(update))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/update")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+
+    /// 覆盖 merchant delete 无认证路径
+    #[tokio::test]
+    async fn merchant_delete_no_auth_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/delete", post(delete))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/delete")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "无认证应返回错误: {}", body);
+    }
+
+    /// 覆盖 merchant delete 有认证但 DB 不可用路径
+    #[tokio::test]
+    async fn merchant_delete_with_auth_but_no_db_returns_error() {
+        use sz_rust_core::orm::auth::User;
+        let state = mock_app_state();
+        crate::services::auth_service::init_auth(
+            "test-secret",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let user = std::sync::Arc::new(User::new(1, "testuser"));
+        let router = Router::new()
+            .route("/api/v1/merchant/delete", post(delete))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/merchant/delete")
+                    .extension(user)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "DB 不可用应返回错误: {}", body);
+    }
+}

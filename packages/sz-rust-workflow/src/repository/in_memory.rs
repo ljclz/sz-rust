@@ -79,7 +79,7 @@ impl DefinitionRepository for InMemoryDefinitionRepository {
                 d.active = false;
             }
         }
-        defs.get_mut(id).unwrap().active = true;
+        defs.get_mut(id).expect("激活的定义必须存在").active = true;
         Ok(())
     }
 

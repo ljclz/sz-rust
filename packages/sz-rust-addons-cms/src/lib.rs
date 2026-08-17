@@ -89,14 +89,14 @@ where
         }
     });
 
-    let builder = builder.get(&format!("{}/articles/:id", base), {
+    let builder = builder.get(&format!("{}/articles/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::article::ArticleController::get(&*s.articles, path.id).await)
         }
     });
 
-    let builder = builder.put(&format!("{}/articles/:id", base), {
+    let builder = builder.put(&format!("{}/articles/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(
@@ -105,7 +105,7 @@ where
         }
     });
 
-    let builder = builder.delete(&format!("{}/articles/:id", base), {
+    let builder = builder.delete(&format!("{}/articles/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::article::ArticleController::delete(&*s.articles, path.id).await)
@@ -134,14 +134,14 @@ where
         }
     });
 
-    let builder = builder.get(&format!("{}/categories/:id", base), {
+    let builder = builder.get(&format!("{}/categories/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::category::CategoryController::get(&*s.categories, path.id).await)
         }
     });
 
-    let builder = builder.delete(&format!("{}/categories/:id", base), {
+    let builder = builder.delete(&format!("{}/categories/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::category::CategoryController::delete(&*s.categories, path.id).await)
@@ -160,7 +160,7 @@ where
         }
     });
 
-    let builder = builder.delete(&format!("{}/tags/:id", base), {
+    let builder = builder.delete(&format!("{}/tags/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::tag::TagController::delete(&*s.tags, path.id).await)
@@ -168,4 +168,296 @@ where
     });
 
     builder
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use http::Request;
+    use http_body_util::BodyExt;
+    use serde_json::json;
+    use sz_rust_core::orm::repository::Repository;
+    use tower::ServiceExt;
+
+    async fn body_to_json(body: Body) -> Value {
+        let bytes = body.collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    fn make_app() -> axum::Router {
+        let state = CmsState::default();
+        let builder: RouterBuilder<()> = RouterBuilder::new();
+        register_routes(builder, state).build()
+    }
+
+    // --- Article 路由 ---
+
+    #[tokio::test]
+    async fn route_get_articles_returns_list() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/articles")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn route_post_articles_creates_article() {
+        let app = make_app();
+        let body = serde_json::to_vec(&json!({"id": 0, "title": "Hello"})).unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/cms/articles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+        assert_eq!(json["data"]["title"], "Hello");
+    }
+
+    #[tokio::test]
+    async fn route_get_article_by_id_returns_404_when_not_found() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/articles/999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn route_delete_article_returns_404_when_not_found() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/cms/articles/999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn route_put_article_returns_404_when_not_found() {
+        let app = make_app();
+        let body = serde_json::to_vec(&json!({"title": "X"})).unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/cms/articles/999")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn route_get_articles_with_query_params() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/articles?page=1&page_size=5&keyword=test&status=draft")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+    }
+
+    // --- Category 路由 ---
+
+    #[tokio::test]
+    async fn route_get_categories_returns_list() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/categories")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn route_post_categories_creates_category() {
+        let app = make_app();
+        let body = serde_json::to_vec(&json!({"id": 0, "name": "Tech"})).unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/cms/categories")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+        assert_eq!(json["data"]["name"], "Tech");
+    }
+
+    #[tokio::test]
+    async fn route_get_category_by_id_returns_404_when_not_found() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/categories/999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    #[tokio::test]
+    async fn route_delete_category_returns_404_when_not_found() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/cms/categories/999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    // --- Tag 路由 ---
+
+    #[tokio::test]
+    async fn route_get_tags_returns_list() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/cms/tags")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+    }
+
+    #[tokio::test]
+    async fn route_post_tags_creates_tag() {
+        let app = make_app();
+        let body = serde_json::to_vec(&json!({"id": 0, "name": "rust"})).unwrap();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/cms/tags")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 0);
+        assert_eq!(json["data"]["name"], "rust");
+    }
+
+    #[tokio::test]
+    async fn route_delete_tag_returns_404_when_not_found() {
+        let app = make_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/api/cms/tags/999")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let json = body_to_json(resp.into_body()).await;
+        assert_eq!(json["code"], 404);
+    }
+
+    // --- 状态共享测试 ---
+
+    #[tokio::test]
+    async fn route_create_then_get_article_full_cycle() {
+        let state = CmsState::default();
+        let builder: RouterBuilder<()> = RouterBuilder::new();
+        let app = register_routes(builder, state.clone()).build();
+
+        // 创建文章
+        let create_body = serde_json::to_vec(&json!({"id": 0, "title": "Cycle Test"})).unwrap();
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/cms/articles")
+                    .header("content-type", "application/json")
+                    .body(Body::from(create_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let created = body_to_json(resp.into_body()).await;
+        assert_eq!(created["code"], 0);
+        let id = created["data"]["id"].as_i64().unwrap();
+
+        // 直接通过 state 验证文章已存入仓储
+        let article = state
+            .articles
+            .find_by_id(&sz_rust_core::orm::Value::I64(id))
+            .unwrap();
+        assert!(article.is_some());
+        assert_eq!(article.unwrap().title, "Cycle Test");
+    }
 }

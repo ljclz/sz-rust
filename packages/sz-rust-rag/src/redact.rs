@@ -89,4 +89,31 @@ mod tests {
         let out = r.redact(input);
         assert!(out.contains(REDACTED));
     }
+
+    #[test]
+    fn redact_default() {
+        let r = SourceCodeRedactor::default();
+        let input = r#"api_key = "sk-1234567890abcdef""#;
+        let out = r.redact(input);
+        assert!(out.contains(REDACTED));
+    }
+
+    #[test]
+    fn redact_token_and_bearer() {
+        let r = SourceCodeRedactor::new();
+        let input = r#"token = "abcd1234efgh5678ijkl9012""#;
+        let out = r.redact(input);
+        assert!(out.contains(REDACTED));
+        let input2 = "Bearer abcdef1234567890ijklmnop";
+        let out2 = r.redact(input2);
+        assert!(out2.contains(REDACTED));
+    }
+
+    #[test]
+    fn redact_aws_secret() {
+        let r = SourceCodeRedactor::new();
+        let input = r#"aws_secret_access_key = "abcdefghijklmnopqrstuvwxyz0123456789ABCD""#;
+        let out = r.redact(input);
+        assert!(out.contains(REDACTED));
+    }
 }

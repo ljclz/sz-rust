@@ -115,4 +115,17 @@ mod tests {
         assert_eq!(metrics.reject_total(), 1);
         assert_eq!(metrics.avg_eval_ms(), 10.0);
     }
+
+    #[test]
+    fn test_avg_eval_ms_zero_count() {
+        let metrics = DataScopeMetrics::new();
+        assert_eq!(metrics.avg_eval_ms(), 0.0);
+    }
+
+    #[test]
+    fn test_default() {
+        let metrics = DataScopeMetrics::default();
+        assert_eq!(metrics.hit_total(), 0);
+        assert_eq!(metrics.avg_eval_ms(), 0.0);
+    }
 }

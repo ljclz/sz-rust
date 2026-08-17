@@ -356,9 +356,121 @@ pub fn init_auth_test_only(secret: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_auth_constants_unused() {
         // 确保 PasswordVerifier / DbPasswordVerifier 已被移除
         // 编译时检查：如果残留引用会编译失败
+    }
+
+    #[test]
+    fn init_auth_test_only_succeeds() {
+        // OnceLock 只能设置一次，重复调用静默失败但不 panic
+        init_auth_test_only("test-secret-key-for-coverage");
+        // 验证 get_auth 不会 panic（已初始化）
+        let _auth = get_auth();
+    }
+
+    #[test]
+    fn verify_token_invalid_returns_err() {
+        init_auth_test_only("test-secret-key-for-coverage");
+        // 无效 token 应返回错误
+        let result = verify_token("invalid.token.here");
+        assert!(result.is_err(), "无效 token 应返回错误");
+    }
+
+    #[test]
+    fn verify_token_empty_returns_err() {
+        init_auth_test_only("test-secret-key-for-coverage");
+        let result = verify_token("");
+        assert!(result.is_err(), "空 token 应返回错误");
+    }
+
+    #[test]
+    fn current_user_returns_none_without_extension() {
+        let req = axum::http::Request::builder()
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert!(current_user(&req).is_none(), "无认证扩展的请求应返回 None");
+    }
+
+    #[test]
+    fn current_user_returns_some_with_extension() {
+        use sz_rust_core::orm::auth::User;
+        let user = Arc::new(User::new(1, "testuser"));
+        let req = axum::http::Request::builder()
+            .extension(user)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let result = current_user(&req);
+        assert!(result.is_some(), "有认证扩展的请求应返回 Some");
+        assert_eq!(result.unwrap().id, 1);
+    }
+
+    /// 覆盖 authenticate_async 空用户名早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn authenticate_async_empty_username_returns_err() {
+        let result = authenticate_async("", "password").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
+    }
+
+    /// 覆盖 authenticate_async 空密码早返回分支（不依赖 DB）
+    #[tokio::test]
+    async fn authenticate_async_empty_password_returns_err() {
+        let result = authenticate_async("user", "").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
+    }
+
+    /// 覆盖 authenticate_async 空白用户名早返回分支（trim 后为空）
+    #[tokio::test]
+    async fn authenticate_async_blank_username_returns_err() {
+        let result = authenticate_async("   ", "password").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
+    }
+
+    /// 覆盖 resolve_merchant_id acquire 失败路径 — 需先 init_auth 注入 pool
+    #[tokio::test]
+    async fn resolve_merchant_id_returns_err_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        init_auth(
+            "test-secret-coverage",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let result = resolve_merchant_id(1, None).await;
+        assert!(result.is_err());
+    }
+
+    /// 覆盖 get_user_info_by_username acquire 失败路径 — 返回 None
+    #[tokio::test]
+    async fn get_user_info_by_username_returns_none_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        init_auth(
+            "test-secret-coverage-2",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let result = get_user_info_by_username("nonexistent").await;
+        assert!(result.is_none(), "DB 不可用时应返回 None");
+    }
+
+    /// 覆盖 get_user_info_by_id acquire 失败路径 — 返回 None
+    #[tokio::test]
+    async fn get_user_info_by_id_returns_none_when_db_unavailable() {
+        let state = crate::state::mock_app_state();
+        init_auth(
+            "test-secret-coverage-3",
+            "sz300-test",
+            86400,
+            state.db_pool.clone(),
+        );
+        let result = get_user_info_by_id(999).await;
+        assert!(result.is_none(), "DB 不可用时应返回 None");
     }
 }

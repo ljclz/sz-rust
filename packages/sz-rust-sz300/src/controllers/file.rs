@@ -93,3 +93,122 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {}", e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_decode_plain_string() {
+        let result = base64_decode("aGVsbG8=").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    #[test]
+    fn base64_decode_data_url_prefix() {
+        let result = base64_decode("data:image/png;base64,aGVsbG8=").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    #[test]
+    fn base64_decode_empty_string() {
+        let result = base64_decode("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn base64_decode_binary_data() {
+        let original = vec![0xFF, 0x00, 0xAB, 0xCD];
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&original);
+        let result = base64_decode(&encoded).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn base64_decode_invalid_returns_err() {
+        let result = base64_decode("!!!invalid!!!");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("base64 解码失败"));
+    }
+
+    #[test]
+    fn base64_decode_comma_only() {
+        let result = base64_decode(",");
+        assert!(result.unwrap().is_empty());
+    }
+
+    /// 覆盖 upload 空文件数据路径
+    #[tokio::test]
+    async fn upload_with_empty_file_returns_error() {
+        use crate::state::mock_app_state;
+        use axum::routing::post;
+        use axum::Router;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let body = serde_json::json!({"filename": "test.txt", "file": ""}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/file/upload")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(body.contains("\"code\":0"), "空文件应返回错误: {}", body);
+    }
+
+    /// 覆盖 upload 无效 base64 路径
+    #[tokio::test]
+    async fn upload_with_invalid_base64_returns_error() {
+        use crate::state::mock_app_state;
+        use axum::routing::post;
+        use axum::Router;
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let body = serde_json::json!({"filename": "test.txt", "file": "!!!invalid!!!"}).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/file/upload")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("UTF-8");
+        assert!(
+            body.contains("\"code\":0"),
+            "无效 base64 应返回错误: {}",
+            body
+        );
+    }
+}

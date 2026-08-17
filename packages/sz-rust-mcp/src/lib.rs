@@ -65,6 +65,36 @@ pub enum McpError {
     Execution(String),
 }
 
+/// 校验 SQL 标识符（表名 / 列名），防止 SQL 注入。
+///
+/// 规则：
+/// - 非空，长度 ≤ 64（MySQL 标识符上限）
+/// - 仅允许字母、数字、下划线
+/// - 必须以字母或下划线开头（不能以数字开头）
+fn validate_identifier(name: &str) -> Result<(), McpError> {
+    if name.is_empty() {
+        return Err(McpError::InvalidArguments("标识符不能为空".into()));
+    }
+    if name.len() > 64 {
+        return Err(McpError::InvalidArguments(format!(
+            "标识符过长（>64）：{name}"
+        )));
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return Err(McpError::InvalidArguments(format!(
+            "标识符必须以字母或下划线开头：{name}"
+        )));
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(McpError::InvalidArguments(format!(
+            "标识符含非法字符（仅允许字母/数字/下划线）：{name}"
+        )));
+    }
+    Ok(())
+}
+
 /// 处理一条 JSON-RPC 请求，返回响应 JSON
 pub fn handle_request(raw: &str) -> Value {
     let req: Value = match serde_json::from_str(raw) {
@@ -326,12 +356,17 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                     "columns 不能为空（禁止 SELECT *）".into(),
                 ));
             }
+            validate_identifier(table)?;
+            for col in &columns {
+                validate_identifier(col)?;
+            }
             let mut q = sz_rust_orm_facade::SelectQuery::new()
                 .columns(&columns)
                 .from(table);
             // where_eq: {"id": 1, "status": "active"}
             if let Some(where_map) = args.get("where_eq").and_then(|v| v.as_object()) {
                 for (col, val) in where_map {
+                    validate_identifier(col)?;
                     q = q.where_eq(col.as_str(), json_to_orm_value(val));
                 }
             }
@@ -468,6 +503,10 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
             if data.is_empty() {
                 return Err(McpError::InvalidArguments("data 不能为空".into()));
             }
+            validate_identifier(table)?;
+            for k in data.keys() {
+                validate_identifier(k)?;
+            }
             let columns: Vec<&str> = data.keys().map(|k| k.as_str()).collect();
             let placeholders: Vec<&str> = columns.iter().map(|_| "?").collect();
             let sql = format!(
@@ -490,11 +529,18 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
             if set_map.is_empty() {
                 return Err(McpError::InvalidArguments("set 不能为空".into()));
             }
+            validate_identifier(table)?;
+            for k in set_map.keys() {
+                validate_identifier(k)?;
+            }
             let set_clause: Vec<String> = set_map.keys().map(|k| format!("{} = ?", k)).collect();
             let mut sql = format!("UPDATE {} SET {}", table, set_clause.join(", "));
             let mut param_count = set_map.len();
             if let Some(where_map) = args.get("where_eq").and_then(|v| v.as_object()) {
                 if !where_map.is_empty() {
+                    for k in where_map.keys() {
+                        validate_identifier(k)?;
+                    }
                     let where_clause: Vec<String> =
                         where_map.keys().map(|k| format!("{} = ?", k)).collect();
                     sql.push_str(&format!(" WHERE {}", where_clause.join(" AND ")));
@@ -516,6 +562,10 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                 return Err(McpError::InvalidArguments(
                     "where_eq 不能为空（禁止无条件删除）".into(),
                 ));
+            }
+            validate_identifier(table)?;
+            for k in where_map.keys() {
+                validate_identifier(k)?;
             }
             let where_clause: Vec<String> =
                 where_map.keys().map(|k| format!("{} = ?", k)).collect();
@@ -539,10 +589,17 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                     "columns 不能为空（禁止 SELECT *）".into(),
                 ));
             }
+            validate_identifier(table)?;
+            for col in &columns {
+                validate_identifier(col)?;
+            }
             let mut sql = format!("SELECT {} FROM {}", columns.join(", "), table);
             let mut param_count = 0;
             if let Some(where_map) = args.get("where_eq").and_then(|v| v.as_object()) {
                 if !where_map.is_empty() {
+                    for k in where_map.keys() {
+                        validate_identifier(k)?;
+                    }
                     let where_clause: Vec<String> =
                         where_map.keys().map(|k| format!("{} = ?", k)).collect();
                     sql.push_str(&format!(" WHERE {}", where_clause.join(" AND ")));
@@ -818,5 +875,407 @@ mod tests {
                 .expect("conflict_count 字段缺失")
                 >= 1
         );
+    }
+
+    #[test]
+    fn validate_identifier_accepts_valid() {
+        assert!(validate_identifier("users").is_ok());
+        assert!(validate_identifier("_users").is_ok());
+        assert!(validate_identifier("user_orders").is_ok());
+        assert!(validate_identifier("t1").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_rejects_empty() {
+        assert!(validate_identifier("").is_err());
+    }
+
+    #[test]
+    fn validate_identifier_rejects_leading_digit() {
+        assert!(validate_identifier("1table").is_err());
+    }
+
+    #[test]
+    fn validate_identifier_rejects_special_chars() {
+        assert!(validate_identifier("user; DROP TABLE users; --").is_err());
+        assert!(validate_identifier("user' OR '1'='1").is_err());
+        assert!(validate_identifier("user--").is_err());
+        assert!(validate_identifier("user name").is_err());
+        assert!(validate_identifier("user.name").is_err());
+    }
+
+    #[test]
+    fn build_insert_rejects_injection_in_table() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"build_insert_query","arguments":{"table":"users; DROP TABLE orders; --","data":{"name":"test"}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn build_insert_rejects_injection_in_column() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"build_insert_query","arguments":{"table":"users","data":{"name' OR '1'='1":"test"}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn crud_read_rejects_injection_in_table() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"crud_read","arguments":{"table":"users UNION SELECT password FROM admin","columns":["id"]}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn build_delete_rejects_injection_in_where_key() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"build_delete_query","arguments":{"table":"users","where_eq":{"id = 1 OR 1=1; --":1}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    // ===== 新增覆盖率测试 =====
+
+    #[test]
+    fn validate_identifier_rejects_too_long() {
+        let long_name = "a".repeat(65);
+        assert!(validate_identifier(&long_name).is_err());
+    }
+
+    #[test]
+    fn handle_request_parse_error_returns_error() {
+        let resp = handle_request("not a valid json");
+        assert_eq!(resp["error"]["code"], -32700);
+        assert!(resp["id"].is_null());
+    }
+
+    #[test]
+    fn handle_request_notifications_initialized_returns_null() {
+        let resp = handle_request(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+        assert!(resp.is_null());
+    }
+
+    #[test]
+    fn handle_request_unknown_method_with_id_returns_error() {
+        let resp = handle_request(r#"{"jsonrpc":"2.0","id":99,"method":"foo/bar"}"#);
+        assert_eq!(resp["error"]["code"], -32601);
+        assert_eq!(resp["id"], 99);
+    }
+
+    #[test]
+    fn handle_request_unknown_method_without_id_returns_null() {
+        let resp = handle_request(r#"{"jsonrpc":"2.0","method":"foo/bar"}"#);
+        assert!(resp.is_null());
+    }
+
+    #[test]
+    fn openapi_spec_tool_generates_spec() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"openapi_spec","arguments":{"routes":[{"method":"GET","path":"/users","handler":"User@list"},{"method":"POST","path":"/users","handler":"User@create"}],"title":"MyAPI","version":"2.0.0"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        assert!(text.contains("openapi"));
+    }
+
+    #[test]
+    fn url_decode_tool_decodes_percent_encoding() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"url_decode","arguments":{"value":"%E4%B8%AD%E6%96%87"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["decoded"], "中文");
+    }
+
+    #[test]
+    fn build_update_query_tool_generates_sql() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"build_update_query","arguments":{"table":"users","set":{"name":"alice"},"where_eq":{"id":1}}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["sql"].as_str().unwrap().contains("UPDATE"));
+        assert_eq!(out["params"], 2);
+    }
+
+    #[test]
+    fn build_update_query_without_where_eq() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"build_update_query","arguments":{"table":"users","set":{"name":"alice"}}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["params"], 1);
+    }
+
+    #[test]
+    fn build_update_query_rejects_empty_set() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"build_update_query","arguments":{"table":"users","set":{}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn migrate_status_tool_returns_placeholder() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"migrate_status","arguments":{"migrations_dir":"custom_migrations"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["migrations_dir"], "custom_migrations");
+    }
+
+    #[test]
+    fn migrate_run_tool_up_direction() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":26,"method":"tools/call","params":{"name":"migrate_run","arguments":{"direction":"up","steps":3}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("--steps 3"));
+    }
+
+    #[test]
+    fn migrate_run_tool_down_direction() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"migrate_run","arguments":{"direction":"down"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("--down"));
+    }
+
+    #[test]
+    fn test_run_tool_generates_command() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":28,"method":"tools/call","params":{"name":"test_run","arguments":{"package":"sz-rust-mcp","test_name":"parse_path_tool","flags":"--nocapture"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("cargo test"));
+        assert!(out["command"].as_str().unwrap().contains("-p sz-rust-mcp"));
+    }
+
+    #[test]
+    fn test_coverage_tool_generates_command() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":29,"method":"tools/call","params":{"name":"test_coverage","arguments":{"package":"sz-rust-mcp","output_format":"text"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("cargo llvm-cov"));
+    }
+
+    #[test]
+    fn deploy_check_tool_returns_checks() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"deploy_check","arguments":{"config_path":"/etc/sz-rust/config.toml","target":"k8s"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["target"], "k8s");
+        assert!(out["checks"].is_array());
+    }
+
+    #[test]
+    fn deploy_status_tool_k8s_target() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"deploy_status","arguments":{"target":"k8s"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("kubectl"));
+    }
+
+    #[test]
+    fn deploy_status_tool_bare_metal_target() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"deploy_status","arguments":{"target":"bare_metal"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("systemctl"));
+    }
+
+    #[test]
+    fn deploy_status_tool_default_docker_target() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":33,"method":"tools/call","params":{"name":"deploy_status","arguments":{}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("docker ps"));
+    }
+
+    #[test]
+    fn plugin_list_tool_returns_empty_list() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":34,"method":"tools/call","params":{"name":"plugin_list","arguments":{"source":"skill","tags":["auth","cache"]}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["source"], "skill");
+        assert!(out["plugins"].is_array());
+    }
+
+    #[test]
+    fn plugin_install_tool_generates_command() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"plugin_install","arguments":{"plugin_name":"sz-rust-addon-cache","version":"1.0.0"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("cargo add"));
+        assert!(out["command"].as_str().unwrap().contains("--version 1.0.0"));
+    }
+
+    #[test]
+    fn plugin_uninstall_tool_generates_command() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"plugin_uninstall","arguments":{"plugin_name":"sz-rust-addon-cache"}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["command"].as_str().unwrap().contains("cargo remove"));
+    }
+
+    #[test]
+    fn build_select_query_rejects_empty_columns() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"build_select_query","arguments":{"table":"users","columns":[]}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn build_insert_query_rejects_empty_data() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"build_insert_query","arguments":{"table":"users","data":{}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn build_delete_query_rejects_empty_where_eq() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"build_delete_query","arguments":{"table":"users","where_eq":{}}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn crud_read_rejects_empty_columns() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"crud_read","arguments":{"table":"users","columns":[]}}}"#,
+        );
+        assert!(resp["error"]["code"].as_i64().unwrap() < 0);
+    }
+
+    #[test]
+    fn crud_read_with_limit_generates_sql() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"crud_read","arguments":{"table":"users","columns":["id","name"],"where_eq":{"status":"active"},"limit":10}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert!(out["sql"].as_str().unwrap().contains("LIMIT 10"));
+        assert_eq!(out["params"], 1);
+    }
+
+    #[test]
+    fn crud_read_without_where_eq() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"crud_read","arguments":{"table":"users","columns":["id","name"]}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["params"], 0);
+    }
+
+    #[test]
+    fn json_to_orm_value_null() {
+        let v = json_to_orm_value(&Value::Null);
+        assert!(matches!(v, sz_rust_orm_facade::Value::Null));
+    }
+
+    #[test]
+    fn json_to_orm_value_bool() {
+        let v = json_to_orm_value(&json!(true));
+        assert!(matches!(v, sz_rust_orm_facade::Value::Bool(true)));
+    }
+
+    #[test]
+    fn json_to_orm_value_string() {
+        let v = json_to_orm_value(&json!("hello"));
+        assert!(matches!(v, sz_rust_orm_facade::Value::String(_)));
+    }
+
+    #[test]
+    fn json_to_orm_value_array() {
+        let v = json_to_orm_value(&json!([1, 2, 3]));
+        assert!(matches!(v, sz_rust_orm_facade::Value::String(_)));
+    }
+
+    #[test]
+    fn json_to_orm_value_object() {
+        let v = json_to_orm_value(&json!({"key": "val"}));
+        assert!(matches!(v, sz_rust_orm_facade::Value::String(_)));
+    }
+
+    #[test]
+    fn json_to_orm_value_f64() {
+        let v = json_to_orm_value(&json!(3.5));
+        assert!(matches!(v, sz_rust_orm_facade::Value::F64(_)));
+    }
+
+    #[test]
+    fn build_select_query_with_where_eq_string_value() {
+        let resp = handle_request(
+            r#"{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"build_select_query","arguments":{"table":"users","columns":["id"],"where_eq":{"name":"alice"}}}}"#,
+        );
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("响应 text 字段缺失");
+        let out: Value = serde_json::from_str(text).expect("响应 JSON 解析失败");
+        assert_eq!(out["params"], 1);
     }
 }
