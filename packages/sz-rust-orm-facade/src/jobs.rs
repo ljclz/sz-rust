@@ -902,7 +902,7 @@ mod tests {
     fn make_mock_pool() -> Arc<Pool> {
         let config = PoolConfig::default();
         let factory: Arc<dyn ConnectionFactory> = Arc::new(MockConnectionFactory);
-        Arc::new(Pool::new(config, factory).unwrap())
+        Arc::new(Pool::new(config, factory).expect("mock pool creation should not fail"))
     }
 
     #[test]

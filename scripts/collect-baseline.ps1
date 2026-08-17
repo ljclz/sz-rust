@@ -35,7 +35,7 @@ foreach ($crate in $crates) {
     $xmlPath = "$outDir\cobertura-$crate.xml"
     
     & $cargo llvm-cov -p $crate --cobertura --output-path $xmlPath 2>&1 | Out-Null
-    
+
     if (Test-Path $xmlPath) {
         [xml]$xml = Get-Content $xmlPath
         $lineRate = [double]$xml.coverage.'line-rate'
