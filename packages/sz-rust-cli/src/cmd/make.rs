@@ -970,14 +970,19 @@ mod tests {
     /// 确保与 optimize 模块测试的 set_current_dir 互斥。
     struct CwdGuard {
         original: Option<PathBuf>,
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl CwdGuard {
         /// 切换到 `new_dir` 并返回守卫。守卫 drop 时恢复原目录。
         fn switch(new_dir: &Path) -> std::io::Result<Self> {
+            let lock = super::super::test_support::acquire_global_lock();
             let original = std::env::current_dir().ok();
             std::env::set_current_dir(new_dir)?;
-            Ok(Self { original })
+            Ok(Self {
+                original,
+                _lock: lock,
+            })
         }
     }
 
@@ -1088,7 +1093,6 @@ mod tests {
     #[test]
     fn test_execute_make_model_in_temp() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_model("TestUser").unwrap();
@@ -1144,11 +1148,7 @@ mod tests {
     #[tokio::test]
     async fn test_make_validate_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        // 锁仅保护目录切换（set_current_dir），await 前释放避免跨 await 持锁
-        let _guard = {
-            let _lock = super::super::test_support::acquire_global_lock();
-            CwdGuard::switch(temp_dir.path()).unwrap()
-        };
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         // 通过顶层 execute 入口调用 make validate（验证命令分发正常）
         let cmd = MakeCommand::Validate {
@@ -1182,7 +1182,6 @@ mod tests {
     #[test]
     fn test_execute_make_validate_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_validate("User").unwrap();
@@ -1201,7 +1200,6 @@ mod tests {
     #[test]
     fn test_execute_make_validate_file_already_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         // 第一次创建应成功
@@ -1214,7 +1212,6 @@ mod tests {
     #[test]
     fn test_execute_make_validate_nested_path() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         // 嵌套路径：admin/User → app/validate/admin/User.rs
@@ -1233,7 +1230,6 @@ mod tests {
     #[test]
     fn test_execute_make_event_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_event("UserLogin").unwrap();
@@ -1253,7 +1249,6 @@ mod tests {
     #[test]
     fn test_execute_make_event_file_already_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_event("UserLogin").unwrap();
@@ -1264,7 +1259,6 @@ mod tests {
     #[test]
     fn test_execute_make_event_nested_path() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_event("admin/UserLogin").unwrap();
@@ -1279,7 +1273,6 @@ mod tests {
     #[test]
     fn test_execute_make_listener_default_event_name() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         // 未指定 --event，事件名默认使用类名
@@ -1301,7 +1294,6 @@ mod tests {
     #[test]
     fn test_execute_make_listener_custom_event_name() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         // 指定 --event UserLogin
@@ -1319,7 +1311,6 @@ mod tests {
     #[test]
     fn test_execute_make_listener_file_already_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_listener("SendWelcomeEmail", None).unwrap();
@@ -1330,7 +1321,6 @@ mod tests {
     #[test]
     fn test_execute_make_command_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_command("SyncData").unwrap();
@@ -1351,7 +1341,6 @@ mod tests {
     #[test]
     fn test_execute_make_command_file_already_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_command("SyncData").unwrap();
@@ -1362,7 +1351,6 @@ mod tests {
     #[test]
     fn test_execute_make_command_nested_path() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_command("admin/SyncData").unwrap();
@@ -1377,7 +1365,6 @@ mod tests {
     #[test]
     fn test_execute_make_service_creates_file() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_service("UserService").unwrap();
@@ -1396,7 +1383,6 @@ mod tests {
     #[test]
     fn test_execute_make_service_file_already_exists() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_service("UserService").unwrap();
@@ -1407,7 +1393,6 @@ mod tests {
     #[test]
     fn test_execute_make_service_nested_path() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let _lock = super::super::test_support::acquire_global_lock();
         let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
 
         execute_make_service("admin/UserService").unwrap();
@@ -1417,5 +1402,296 @@ mod tests {
 
         let content = std::fs::read_to_string(&service_path).unwrap();
         assert!(content.contains("app::service::admin"));
+    }
+
+    // ---------- make controller/guard/middleware/scaffold 测试 ----------
+
+    #[test]
+    fn test_execute_make_controller_creates_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_controller("User", false, false).unwrap();
+
+        let controller_path = temp_dir.path().join("app/controller/User.rs");
+        assert!(controller_path.exists());
+
+        let content = std::fs::read_to_string(&controller_path).unwrap();
+        assert!(content.contains("User"));
+        assert!(content.contains("app::controller"));
+        assert!(!content.contains("{%"));
+    }
+
+    #[test]
+    fn test_execute_make_controller_api() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_controller("User", true, false).unwrap();
+
+        let controller_path = temp_dir.path().join("app/controller/User.rs");
+        assert!(controller_path.exists());
+
+        let content = std::fs::read_to_string(&controller_path).unwrap();
+        assert!(!content.contains("{%"));
+    }
+
+    #[test]
+    fn test_execute_make_controller_plain() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_controller("User", false, true).unwrap();
+
+        let controller_path = temp_dir.path().join("app/controller/User.rs");
+        assert!(controller_path.exists());
+
+        let content = std::fs::read_to_string(&controller_path).unwrap();
+        assert!(!content.contains("{%"));
+    }
+
+    #[test]
+    fn test_execute_make_controller_file_already_exists() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_controller("User", false, false).unwrap();
+        let result = execute_make_controller("User", false, false);
+        assert!(matches!(result, Err(CliError::FileExists(_))));
+    }
+
+    #[test]
+    fn test_execute_make_guard_creates_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_guard("Admin").unwrap();
+
+        let guard_path = temp_dir.path().join("app/guard/Admin.rs");
+        assert!(guard_path.exists());
+
+        let content = std::fs::read_to_string(&guard_path).unwrap();
+        assert!(content.contains("pub struct Admin;"));
+        assert!(content.contains("impl Guard for Admin"));
+        assert!(content.contains("use sz_rust_core::guard::Guard"));
+    }
+
+    #[test]
+    fn test_execute_make_guard_file_already_exists() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_guard("Admin").unwrap();
+        let result = execute_make_guard("Admin");
+        assert!(matches!(result, Err(CliError::FileExists(_))));
+    }
+
+    #[test]
+    fn test_execute_make_middleware_creates_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_middleware("Cors").unwrap();
+
+        let middleware_path = temp_dir.path().join("app/middleware/Cors.rs");
+        assert!(middleware_path.exists());
+
+        let content = std::fs::read_to_string(&middleware_path).unwrap();
+        assert!(content.contains("Cors"));
+        assert!(content.contains("app::middleware"));
+        assert!(!content.contains("{%"));
+    }
+
+    #[test]
+    fn test_execute_make_middleware_file_already_exists() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_middleware("Cors").unwrap();
+        let result = execute_make_middleware("Cors");
+        assert!(matches!(result, Err(CliError::FileExists(_))));
+    }
+
+    #[test]
+    fn test_execute_make_scaffold_creates_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        execute_make_scaffold("Post").unwrap();
+
+        // scaffold 应生成 model + controller + migration
+        let model_path = temp_dir.path().join("app/model/Post.rs");
+        let controller_path = temp_dir.path().join("app/controller/Post.rs");
+        assert!(model_path.exists(), "model should be created");
+        assert!(controller_path.exists(), "controller should be created");
+        // migration 目录应有文件
+        let migrations_dir = temp_dir.path().join("migrations");
+        assert!(migrations_dir.exists(), "migrations dir should be created");
+        let migration_count = std::fs::read_dir(&migrations_dir).unwrap().count();
+        assert_eq!(
+            migration_count, 2,
+            "should create up + down migration files"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_model() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Model {
+            name: "User".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let model_path = temp_dir.path().join("app/model/User.rs");
+        assert!(model_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_controller() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Controller {
+            name: "User".to_string(),
+            api: false,
+            plain: false,
+        };
+        execute(&cmd).await.unwrap();
+
+        let controller_path = temp_dir.path().join("app/controller/User.rs");
+        assert!(controller_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_migration() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let migrations_path = temp_dir.path().join("migrations");
+        let cmd = MakeCommand::Migration {
+            name: "create_users".to_string(),
+            path: migrations_path.to_string_lossy().to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let migration_count = std::fs::read_dir(&migrations_path).unwrap().count();
+        assert_eq!(migration_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_seeder() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let seeds_path = temp_dir.path().join("seeds");
+        let cmd = MakeCommand::Seeder {
+            name: "001_users".to_string(),
+            path: seeds_path.to_string_lossy().to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let seeder_path = seeds_path.join("001_users.sql");
+        assert!(seeder_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_guard() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Guard {
+            name: "Admin".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let guard_path = temp_dir.path().join("app/guard/Admin.rs");
+        assert!(guard_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_event() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Event {
+            name: "UserLogin".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let event_path = temp_dir.path().join("app/event/UserLogin.rs");
+        assert!(event_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_listener() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Listener {
+            name: "SendEmail".to_string(),
+            event: None,
+        };
+        execute(&cmd).await.unwrap();
+
+        let listener_path = temp_dir.path().join("app/listener/SendEmail.rs");
+        assert!(listener_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_command() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Command {
+            name: "SyncData".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let command_path = temp_dir.path().join("app/command/SyncData.rs");
+        assert!(command_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_service() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Service {
+            name: "UserService".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let service_path = temp_dir.path().join("app/service/UserService.rs");
+        assert!(service_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_middleware() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Middleware {
+            name: "Cors".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let middleware_path = temp_dir.path().join("app/middleware/Cors.rs");
+        assert!(middleware_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_scaffold() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Scaffold {
+            name: "Post".to_string(),
+        };
+        execute(&cmd).await.unwrap();
+
+        let model_path = temp_dir.path().join("app/model/Post.rs");
+        assert!(model_path.exists());
     }
 }

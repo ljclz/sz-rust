@@ -255,6 +255,7 @@ impl Cli {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use clap::Parser;
@@ -418,5 +419,202 @@ mod tests {
         let result = cli.execute().await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_model() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::Make {
+                make_command: cmd::make::MakeCommand::Model {
+                    name: "User".to_string(),
+                },
+            }),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+        assert!(temp.path().join("app/model/User.rs").exists());
+    }
+
+    #[tokio::test]
+    async fn test_execute_migrate_offline() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::Migrate {
+                args: cmd::migrate::MigrateArgs {
+                    rollback: false,
+                    path: temp.path().to_string_lossy().to_string(),
+                    db_type: "postgres".to_string(),
+                    show_sql: false,
+                    url: None,
+                },
+            }),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_migrate_status_offline() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::MigrateStatus {
+                path: temp.path().to_string_lossy().to_string(),
+                db_type: "postgres".to_string(),
+                show_sql: false,
+                url: None,
+            }),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_route_list() {
+        let cli = Cli {
+            command: Some(Command::RouteList {
+                format: "table".to_string(),
+            }),
+        };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_cache_clear() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::CacheClear { store: None }),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_seed_offline() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::Seed {
+                path: temp.path().to_string_lossy().to_string(),
+                db_type: "postgres".to_string(),
+                show_sql: false,
+                url: None,
+                class: None,
+            }),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_scheduler_list() {
+        let cli = Cli {
+            command: Some(Command::Scheduler {
+                scheduler_command: cmd::scheduler::SchedulerCommand::List {
+                    config: std::path::PathBuf::from("/nonexistent/scheduler.toml"),
+                },
+            }),
+        };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_optimize_route() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::OptimizeRoute),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_optimize_config() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // execute_optimize_config 需要 config 目录存在
+        std::fs::create_dir_all(temp.path().join("config")).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::OptimizeConfig),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_optimize_schema() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::OptimizeSchema),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_route_clear() {
+        let _lock = crate::cmd::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        let cli = Cli {
+            command: Some(Command::RouteClear),
+        };
+        let result = cli.execute().await;
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_plugin_list() {
+        let cli = Cli {
+            command: Some(Command::Plugin {
+                plugin_command: cmd::plugin::PluginCommand::List,
+            }),
+        };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
     }
 }

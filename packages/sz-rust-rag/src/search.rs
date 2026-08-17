@@ -423,4 +423,218 @@ mod tests {
             .iter()
             .any(|c| c.knowledge_type == KnowledgeType::Term));
     }
+
+    // Embedding 失败的 stub
+    struct FailEmbedding;
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for FailEmbedding {
+        fn name(&self) -> &str {
+            "fail"
+        }
+        async fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResult, AiError> {
+            Err(AiError::ProviderUnavailable("down".into()))
+        }
+        fn dimensions(&self) -> usize {
+            8
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["fail"]
+        }
+    }
+
+    // VectorStore 查询失败的 stub
+    struct FailVectorStore;
+    #[async_trait::async_trait]
+    impl VectorStore for FailVectorStore {
+        async fn upsert(
+            &self,
+            _records: &[sz_rust_ai_facade::embedding::VectorRecord],
+        ) -> Result<(), AiError> {
+            Ok(())
+        }
+        async fn query(
+            &self,
+            _vector: &[f32],
+            _topk: usize,
+            _metric: SimilarityMetric,
+            _tenant: &str,
+        ) -> Result<Vec<VectorHit>, AiError> {
+            Err(AiError::VectorStoreUnavailable("down".into()))
+        }
+        async fn delete(&self, _ids: &[&str], _tenant: &str) -> Result<(), AiError> {
+            Ok(())
+        }
+    }
+
+    // 返回低分 hit 的 VectorStore
+    struct LowScoreVectorStore;
+    #[async_trait::async_trait]
+    impl VectorStore for LowScoreVectorStore {
+        async fn upsert(
+            &self,
+            _records: &[sz_rust_ai_facade::embedding::VectorRecord],
+        ) -> Result<(), AiError> {
+            Ok(())
+        }
+        async fn query(
+            &self,
+            _vector: &[f32],
+            _topk: usize,
+            _metric: SimilarityMetric,
+            _tenant: &str,
+        ) -> Result<Vec<VectorHit>, AiError> {
+            Ok(vec![VectorHit {
+                id: "low:1".into(),
+                score: 0.1,
+                metadata: serde_json::json!({}),
+                text: "low score hit".into(),
+            }])
+        }
+        async fn delete(&self, _ids: &[&str], _tenant: &str) -> Result<(), AiError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn search_embedding_failure() {
+        let searcher = IndustryRagSearcher::new(
+            Arc::new(FailEmbedding),
+            Arc::new(StubVectorStore),
+            Arc::new(FileTermStore::in_memory()),
+            Arc::new(FileRuleStore::in_memory()),
+            Arc::new(FileTemplateStore::in_memory()),
+            Arc::new(RagConfig::for_testing()),
+            RagAuditLogger::noop(),
+            Arc::new(RagMetrics::register()),
+        );
+        let req = RagSearchRequest::new("query", "t");
+        let result = searcher.search(req).await.unwrap();
+        assert!(result
+            .warnings
+            .contains(&RagWarningCode::EmbeddingPartialFailure));
+    }
+
+    #[tokio::test]
+    async fn search_vector_store_failure() {
+        let searcher = IndustryRagSearcher::new(
+            Arc::new(StubEmbedding),
+            Arc::new(FailVectorStore),
+            Arc::new(FileTermStore::in_memory()),
+            Arc::new(FileRuleStore::in_memory()),
+            Arc::new(FileTemplateStore::in_memory()),
+            Arc::new(RagConfig::for_testing()),
+            RagAuditLogger::noop(),
+            Arc::new(RagMetrics::register()),
+        );
+        let req = RagSearchRequest::new("query", "t");
+        let result = searcher.search(req).await.unwrap();
+        assert!(result
+            .warnings
+            .contains(&RagWarningCode::StoreVersionMismatch));
+    }
+
+    #[tokio::test]
+    async fn search_low_recall_warning() {
+        let searcher = IndustryRagSearcher::new(
+            Arc::new(StubEmbedding),
+            Arc::new(LowScoreVectorStore),
+            Arc::new(FileTermStore::in_memory()),
+            Arc::new(FileRuleStore::in_memory()),
+            Arc::new(FileTemplateStore::in_memory()),
+            Arc::new(RagConfig::for_testing()),
+            RagAuditLogger::noop(),
+            Arc::new(RagMetrics::register()),
+        );
+        let req = RagSearchRequest::new("query", "t");
+        let result = searcher.search(req).await.unwrap();
+        assert!(result.warnings.contains(&RagWarningCode::LowRecallScore));
+    }
+
+    #[tokio::test]
+    async fn search_token_budget_exceeded() {
+        let searcher = IndustryRagSearcher::new(
+            Arc::new(StubEmbedding),
+            Arc::new(StubVectorStore),
+            Arc::new(FileTermStore::in_memory()),
+            Arc::new(FileRuleStore::in_memory()),
+            Arc::new(FileTemplateStore::in_memory()),
+            Arc::new(RagConfig::for_testing()),
+            RagAuditLogger::noop(),
+            Arc::new(RagMetrics::register()),
+        );
+        let req = RagSearchRequest {
+            query: "query".into(),
+            topk: 10,
+            token_token_budget: 1,
+            tenant_id: "t".into(),
+        };
+        let result = searcher.search(req).await.unwrap();
+        assert!(result
+            .warnings
+            .contains(&RagWarningCode::TokenBudgetExceeded));
+    }
+
+    #[tokio::test]
+    async fn search_with_rule_and_template() {
+        let rule_store = FileRuleStore::in_memory();
+        rule_store
+            .add(
+                crate::rule::RuleEntry {
+                    rule_name: "test-rule".into(),
+                    rule_text: "WHERE 必须参数化".into(),
+                    source_crate: "test".into(),
+                    source_file_path: "src/lib.rs".into(),
+                    source_line_start: 1,
+                    source_line_end: 10,
+                    applicable_scene: Some("repository".into()),
+                    acceptance_criteria: Some("无拼接 SQL".into()),
+                    version: 1,
+                    updated_at: chrono::Utc::now(),
+                    updated_by: "tester".into(),
+                },
+                "t",
+            )
+            .await
+            .unwrap();
+
+        let template_store = FileTemplateStore::in_memory();
+        template_store
+            .add(
+                crate::template::ModelTemplate {
+                    object_name: "test-template".into(),
+                    fields: vec![crate::template::TemplateField {
+                        field_name: "sku".into(),
+                        business_meaning: "商品编码".into(),
+                        constraint: Some("non-empty".into()),
+                    }],
+                    version: 1,
+                    updated_at: chrono::Utc::now(),
+                    updated_by: "tester".into(),
+                },
+                "t",
+            )
+            .await
+            .unwrap();
+
+        let searcher = IndustryRagSearcher::new(
+            Arc::new(StubEmbedding),
+            Arc::new(StubVectorStore),
+            Arc::new(FileTermStore::in_memory()),
+            Arc::new(rule_store),
+            Arc::new(template_store),
+            Arc::new(RagConfig::for_testing()),
+            RagAuditLogger::noop(),
+            Arc::new(RagMetrics::register()),
+        );
+        let req = RagSearchRequest::new("test", "t");
+        let result = searcher.search(req).await.unwrap();
+        assert!(result
+            .citations
+            .iter()
+            .any(|c| c.knowledge_type == KnowledgeType::Rule));
+        assert!(result
+            .citations
+            .iter()
+            .any(|c| c.knowledge_type == KnowledgeType::Template));
+    }
 }

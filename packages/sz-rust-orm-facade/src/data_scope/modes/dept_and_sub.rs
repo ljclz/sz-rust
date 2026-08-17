@@ -73,4 +73,17 @@ mod tests {
         let conditions = mode.evaluate(&ctx, &rule).await.unwrap();
         assert_eq!(conditions.len(), 1);
     }
+
+    #[tokio::test]
+    async fn test_dept_and_sub_mode_missing_field() {
+        let cache = Arc::new(DeptTreeCache::new(
+            Arc::new(MockProvider),
+            std::time::Duration::from_secs(300),
+        ));
+        let mode = DeptAndSubMode::new(cache);
+        let ctx = DataScopeContext::new(1, 5, false);
+        let rule = DataScopeRule::new("order", crate::data_scope::rule::DataScopeMode::DeptAndSub);
+        let err = mode.evaluate(&ctx, &rule).await.unwrap_err();
+        assert_eq!(err.error_code(), "DATA_SCOPE_INVALID_RULE");
+    }
 }

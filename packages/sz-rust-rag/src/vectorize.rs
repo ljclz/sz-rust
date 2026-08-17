@@ -379,4 +379,257 @@ mod tests {
         assert!(journal.is_ok());
         assert!(journal.unwrap().success_keys().is_empty());
     }
+
+    #[tokio::test]
+    async fn journal_append_and_success_keys() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let mut journal = VectorizationJournal::load(&path).await.unwrap();
+        let entry = VectorizationJournalEntry {
+            crate_name: "test".into(),
+            file_path: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 10,
+            status: JournalStatus::Success,
+            timestamp: chrono::Utc::now(),
+        };
+        journal.append(entry).await.unwrap();
+        let entry2 = VectorizationJournalEntry {
+            crate_name: "test".into(),
+            file_path: "src/lib.rs".into(),
+            line_start: 11,
+            line_end: 20,
+            status: JournalStatus::Failed,
+            timestamp: chrono::Utc::now(),
+        };
+        journal.append(entry2).await.unwrap();
+
+        let keys = journal.success_keys();
+        assert_eq!(keys.len(), 1);
+        assert!(keys.contains(&("src/lib.rs".to_string(), 1, 10)));
+
+        let reloaded = VectorizationJournal::load(&path).await.unwrap();
+        assert_eq!(reloaded.success_keys().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cold_start_real_workspace() {
+        let embedding = Arc::new(StubEmbeddingProvider) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(StubVectorStore) as Arc<dyn VectorStore>;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let journal_path = tmp.path().to_path_buf();
+        let mut config = RagConfig::for_testing();
+        config.vectorization_journal_path = journal_path.to_string_lossy().to_string();
+        let orch = VectorizationOrchestrator::new(
+            embedding,
+            store,
+            Arc::new(config),
+            Arc::new(RagMetrics::register()),
+        );
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch.cold_start(workspace, "t").await.unwrap();
+        assert!(result.total > 0);
+        assert!(result.success > 0);
+        assert_eq!(result.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn cold_start_with_existing_journal_skips() {
+        let embedding = Arc::new(StubEmbeddingProvider) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(StubVectorStore) as Arc<dyn VectorStore>;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let journal_path = tmp.path().to_path_buf();
+
+        let mut config = RagConfig::for_testing();
+        config.vectorization_journal_path = journal_path.to_string_lossy().to_string();
+        let orch = VectorizationOrchestrator::new(
+            embedding.clone(),
+            store.clone(),
+            Arc::new(config.clone()),
+            Arc::new(RagMetrics::register()),
+        );
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let first = orch.cold_start(workspace, "t").await.unwrap();
+        assert!(first.success > 0);
+
+        let orch2 = VectorizationOrchestrator::new(
+            embedding,
+            store,
+            Arc::new(config),
+            Arc::new(RagMetrics::register()),
+        );
+        let second = orch2.cold_start(workspace, "t").await.unwrap();
+        assert!(second.skipped > 0);
+        assert_eq!(second.success, 0);
+    }
+
+    #[tokio::test]
+    async fn revectorize_crate_real() {
+        let embedding = Arc::new(StubEmbeddingProvider) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(StubVectorStore) as Arc<dyn VectorStore>;
+        let orch = make_orchestrator(embedding, store);
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch
+            .revectorize_crate(workspace, "sz-rust-rag", "t")
+            .await
+            .unwrap();
+        assert!(result.total > 0);
+        assert!(result.success > 0);
+        assert_eq!(result.skipped, 0);
+    }
+
+    // Embedding 失败的 stub
+    struct FailEmbedding;
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for FailEmbedding {
+        fn name(&self) -> &str {
+            "fail"
+        }
+        async fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResult, AiError> {
+            Err(AiError::ProviderUnavailable("down".into()))
+        }
+        fn dimensions(&self) -> usize {
+            8
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["fail"]
+        }
+    }
+
+    // 返回空 embeddings 的 stub
+    struct EmptyEmbedding;
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for EmptyEmbedding {
+        fn name(&self) -> &str {
+            "empty"
+        }
+        async fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResult, AiError> {
+            Ok(EmbeddingResult {
+                model: "empty".into(),
+                embeddings: vec![],
+                dimensions: 8,
+                usage_tokens: 0,
+            })
+        }
+        fn dimensions(&self) -> usize {
+            8
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["empty"]
+        }
+    }
+
+    // VectorStore upsert 失败的 stub
+    struct FailVectorStore;
+    #[async_trait::async_trait]
+    impl VectorStore for FailVectorStore {
+        async fn upsert(&self, _records: &[VectorRecord]) -> Result<(), AiError> {
+            Err(AiError::VectorStoreUnavailable("down".into()))
+        }
+        async fn query(
+            &self,
+            _vector: &[f32],
+            _topk: usize,
+            _metric: SimilarityMetric,
+            _tenant: &str,
+        ) -> Result<Vec<VectorHit>, AiError> {
+            Ok(Vec::new())
+        }
+        async fn delete(&self, _ids: &[&str], _tenant: &str) -> Result<(), AiError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn revectorize_crate_with_embedding_failure() {
+        let embedding = Arc::new(FailEmbedding) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(StubVectorStore) as Arc<dyn VectorStore>;
+        let orch = make_orchestrator(embedding, store);
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch
+            .revectorize_crate(workspace, "sz-rust-rag", "t")
+            .await
+            .unwrap();
+        assert!(result.total > 0);
+        assert_eq!(result.success, 0);
+        assert!(result.failed > 0);
+    }
+
+    #[tokio::test]
+    async fn revectorize_crate_with_empty_embedding() {
+        let embedding = Arc::new(EmptyEmbedding) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(StubVectorStore) as Arc<dyn VectorStore>;
+        let orch = make_orchestrator(embedding, store);
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch
+            .revectorize_crate(workspace, "sz-rust-rag", "t")
+            .await
+            .unwrap();
+        assert!(result.total > 0);
+        assert_eq!(result.success, 0);
+        assert!(result.failed > 0);
+    }
+
+    #[tokio::test]
+    async fn revectorize_crate_with_vector_store_failure() {
+        let embedding = Arc::new(StubEmbeddingProvider) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(FailVectorStore) as Arc<dyn VectorStore>;
+        let orch = make_orchestrator(embedding, store);
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch
+            .revectorize_crate(workspace, "sz-rust-rag", "t")
+            .await
+            .unwrap();
+        assert!(result.total > 0);
+        assert_eq!(result.success, 0);
+        assert!(result.failed > 0);
+    }
+
+    #[tokio::test]
+    async fn cold_start_with_vector_store_failure() {
+        let embedding = Arc::new(StubEmbeddingProvider) as Arc<dyn EmbeddingProvider>;
+        let store = Arc::new(FailVectorStore) as Arc<dyn VectorStore>;
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut config = RagConfig::for_testing();
+        config.vectorization_journal_path = tmp.path().to_string_lossy().to_string();
+        let orch = VectorizationOrchestrator::new(
+            embedding,
+            store,
+            Arc::new(config),
+            Arc::new(RagMetrics::register()),
+        );
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = orch.cold_start(workspace, "t").await.unwrap();
+        assert!(result.total > 0);
+        assert_eq!(result.success, 0);
+        assert!(result.failed > 0);
+    }
 }

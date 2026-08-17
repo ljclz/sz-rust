@@ -166,4 +166,91 @@ mod tests {
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].rule, "铁律8");
     }
+
+    #[test]
+    fn test_std_fs_violation() {
+        let files = vec![(
+            "src/foo.rs".to_string(),
+            "let content = std::fs::read_to_string(path)?;\n".to_string(),
+        )];
+        let violations = SafetyValidator::validate_files(&files);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "铁律4");
+        assert!(violations[0].message.contains("std::fs"));
+    }
+
+    #[test]
+    fn test_format_report_empty() {
+        let report = SafetyValidator::format_report(&[]);
+        assert_eq!(report, "安全检查通过：0 个违规项");
+    }
+
+    #[test]
+    fn test_format_report_with_violations() {
+        let violations = vec![
+            Violation {
+                rule: "铁律3".to_string(),
+                file: "src/foo.rs".to_string(),
+                line: 10,
+                message: "发现 unsafe 代码".to_string(),
+                suggestion: "使用安全 API".to_string(),
+            },
+            Violation {
+                rule: "铁律3".to_string(),
+                file: "src/bar.rs".to_string(),
+                line: 20,
+                message: "发现 unsafe 代码".to_string(),
+                suggestion: "使用安全 API".to_string(),
+            },
+            Violation {
+                rule: "铁律8".to_string(),
+                file: "migrations/t.sql".to_string(),
+                line: 1,
+                message: "发现 SELECT *".to_string(),
+                suggestion: "显式列投影".to_string(),
+            },
+        ];
+        let report = SafetyValidator::format_report(&violations);
+        assert!(report.contains("安全检查失败：发现 3 个违规项"));
+        assert!(report.contains("[铁律3] (2 个违规)"));
+        assert!(report.contains("[铁律8] (1 个违规)"));
+        assert!(report.contains("src/foo.rs:10"));
+        assert!(report.contains("src/bar.rs:20"));
+        assert!(report.contains("migrations/t.sql:1"));
+    }
+
+    #[test]
+    fn test_validate_files_mixed_extensions() {
+        // 非 .rs/.sql 文件应被忽略
+        let files = vec![
+            (
+                "readme.md".to_string(),
+                "unsafe { } std::fs::read\n".to_string(),
+            ),
+            ("src/safe.rs".to_string(), "pub fn ok() {}\n".to_string()),
+        ];
+        let violations = SafetyValidator::validate_files(&files);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_check_rust_file_skips_comments() {
+        // 注释中的 unsafe/unwrap/std::fs 应被忽略
+        let files = vec![(
+            "src/foo.rs".to_string(),
+            "// unsafe { } unwrap() std::fs::\n//! doc: unsafe unwrap std::fs\n".to_string(),
+        )];
+        let violations = SafetyValidator::validate_files(&files);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_check_sql_file_no_select_star() {
+        let files = vec![(
+            "migrations/t.sql".to_string(),
+            "SELECT id, name FROM users;\n".to_string(),
+        )];
+        let violations = SafetyValidator::validate_files(&files);
+        assert!(violations.is_empty());
+    }
 }

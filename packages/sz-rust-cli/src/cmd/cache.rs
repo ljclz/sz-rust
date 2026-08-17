@@ -209,4 +209,50 @@ mod tests {
         let result = execute_cache_clear(Some("nonexistent_store_xyz"));
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_execute_cache_clear_all_with_existing_cache() {
+        // 当 runtime/cache 存在且有文件时，execute_cache_clear(None) 应清空并返回 Ok
+        let _lock = super::super::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // 创建缓存目录和文件
+        let cache_root = temp.path().join("runtime/cache");
+        fs::create_dir_all(&cache_root).unwrap();
+        let cache_file = cache_root.join("data.txt");
+        fs::write(&cache_file, "cache data").unwrap();
+        assert!(cache_file.exists());
+
+        let result = execute_cache_clear(None);
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+        // 缓存文件#件应已被删除
+        assert!(!cache_file.exists());
+    }
+
+    #[test]
+    fn test_execute_cache_clear_store_with_existing_cache() {
+        // 当指定 store 且目录存在时，execute_cache_clear(Some) 应清空并返回 Ok
+        let _lock = super::super::test_support::acquire_global_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(temp.path()).unwrap();
+
+        // 创建指定存储目录和文件
+        let store_dir = temp.path().join("runtime/cache/redis");
+        fs::create_dir_all(&store_dir).unwrap();
+        let cache_file = store_dir.join("key1.txt");
+        fs::write(&cache_file, "redis data").unwrap();
+        assert!(cache_file.exists());
+
+        let result = execute_cache_clear(Some("redis"));
+        std::env::set_current_dir(&original).unwrap();
+        assert!(result.is_ok());
+        // 缓存文件应已被删除
+        assert!(!cache_file.exists());
+        // 存储目录本身应保留
+        assert!(store_dir.exists());
+    }
 }

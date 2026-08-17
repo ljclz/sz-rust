@@ -725,4 +725,247 @@ mod tests {
         let p = JobError::Permanent("user not found".into());
         assert_eq!(p.kind(), JobErrorKind::Permanent);
     }
+
+    fn make_row() -> HashMap<String, Value> {
+        let mut row = HashMap::new();
+        row.insert("id".into(), Value::I64(42));
+        row.insert("kind".into(), Value::String("email".into()));
+        row.insert("payload".into(), Value::String(r#"{"to":"a@b"}"#.into()));
+        row.insert("status".into(), Value::String("pending".into()));
+        row.insert("attempts".into(), Value::I64(3));
+        row.insert("run_after".into(), Value::I64(1000));
+        row.insert("last_error".into(), Value::String("timeout".into()));
+        row.insert("dedupe_key".into(), Value::String("k1".into()));
+        row.insert("created_at".into(), Value::I64(500));
+        row
+    }
+
+    #[test]
+    fn test_row_to_job_success() {
+        let job = row_to_job(make_row()).unwrap();
+        assert_eq!(job.id, 42);
+        assert_eq!(job.kind, "email");
+        assert_eq!(job.status, JobStatus::Pending);
+        assert_eq!(job.attempts, 3);
+        assert_eq!(job.run_after, 1000);
+        assert_eq!(job.last_error.as_deref(), Some("timeout"));
+        assert_eq!(job.dedupe_key.as_deref(), Some("k1"));
+        assert_eq!(job.created_at, 500);
+    }
+
+    #[test]
+    fn test_row_to_job_missing_id() {
+        let mut row = make_row();
+        row.remove("id");
+        let err = row_to_job(row).unwrap_err();
+        assert!(matches!(err, JobQueueError::InvalidRow(_)));
+    }
+
+    #[test]
+    fn test_row_to_job_missing_kind() {
+        let mut row = make_row();
+        row.remove("kind");
+        let err = row_to_job(row).unwrap_err();
+        assert!(matches!(err, JobQueueError::InvalidRow(_)));
+    }
+
+    #[test]
+    fn test_row_to_job_missing_payload() {
+        let mut row = make_row();
+        row.remove("payload");
+        let err = row_to_job(row).unwrap_err();
+        assert!(matches!(err, JobQueueError::InvalidRow(_)));
+    }
+
+    #[test]
+    fn test_row_to_job_invalid_status() {
+        let mut row = make_row();
+        row.insert("status".into(), Value::String("unknown".into()));
+        let err = row_to_job(row).unwrap_err();
+        assert!(matches!(err, JobQueueError::InvalidRow(_)));
+    }
+
+    #[test]
+    fn test_row_to_job_invalid_payload_json() {
+        let mut row = make_row();
+        row.insert("payload".into(), Value::String("{bad json".into()));
+        let err = row_to_job(row).unwrap_err();
+        assert!(matches!(err, JobQueueError::Json(_)));
+    }
+
+    #[test]
+    fn test_row_to_job_optional_fields_default() {
+        let mut row = make_row();
+        row.remove("last_error");
+        row.remove("dedupe_key");
+        row.remove("attempts");
+        row.remove("run_after");
+        row.remove("created_at");
+        let job = row_to_job(row).unwrap();
+        assert_eq!(job.attempts, 0);
+        assert_eq!(job.run_after, 0);
+        assert!(job.last_error.is_none());
+        assert!(job.dedupe_key.is_none());
+        assert_eq!(job.created_at, 0);
+    }
+
+    #[test]
+    fn test_job_queue_config_default() {
+        let config = JobQueueConfig::default();
+        assert_eq!(config.batch_size, 10);
+        assert_eq!(config.max_attempts, 8);
+        assert_eq!(config.backoff_base_secs, 1);
+        assert_eq!(config.backoff_cap_secs, 64);
+        assert_eq!(config.lease_seconds, 60);
+    }
+
+    // ---- mock Pool 用于覆盖 JobQueue 构造与访问器 ----
+
+    use std::future::Future;
+    use std::pin::Pin;
+    use sz_orm_core::{Connection, ConnectionFactory, PoolConfig, QueryRows};
+
+    struct MockConnection;
+
+    impl Connection for MockConnection {
+        fn execute<'a>(
+            &'a mut self,
+            _sql: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(0) })
+        }
+        fn query<'a>(
+            &'a mut self,
+            _sql: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<QueryRows, DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(vec![]) })
+        }
+        fn execute_with_params<'a>(
+            &'a mut self,
+            _sql: &'a str,
+            _params: &'a [Value],
+        ) -> Pin<Box<dyn Future<Output = Result<u64, DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(1) })
+        }
+        fn query_with_params<'a>(
+            &'a mut self,
+            sql: &'a str,
+            _params: &'a [Value],
+        ) -> Pin<Box<dyn Future<Output = Result<QueryRows, DbError>> + Send + 'a>> {
+            Box::pin(async move {
+                if sql.contains("LAST_INSERT_ID") {
+                    let mut row = HashMap::new();
+                    row.insert("id".into(), Value::I64(1));
+                    Ok(vec![row])
+                } else {
+                    Ok(vec![])
+                }
+            })
+        }
+        fn begin_transaction<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn commit<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn rollback<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn ping<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+            Box::pin(async { true })
+        }
+        fn close<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    struct MockConnectionFactory;
+
+    #[async_trait]
+    impl ConnectionFactory for MockConnectionFactory {
+        async fn create(&self) -> Result<Box<dyn Connection>, DbError> {
+            Ok(Box::new(MockConnection))
+        }
+    }
+
+    fn make_mock_pool() -> Arc<Pool> {
+        let config = PoolConfig::default();
+        let factory: Arc<dyn ConnectionFactory> = Arc::new(MockConnectionFactory);
+        Arc::new(Pool::new(config, factory).unwrap())
+    }
+
+    #[test]
+    fn test_job_queue_new_and_pool() {
+        let pool = make_mock_pool();
+        let queue = JobQueue::new(pool.clone());
+        assert!(Arc::ptr_eq(queue.pool(), &pool));
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_init_schema() {
+        let queue = JobQueue::new(make_mock_pool());
+        let result = queue.init_schema().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_enqueue() {
+        let queue = JobQueue::new(make_mock_pool());
+        let id = queue
+            .enqueue("email", serde_json::json!({"to": "a@b"}), None)
+            .await
+            .unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_enqueue_with_dedupe() {
+        let queue = JobQueue::new(make_mock_pool());
+        let id = queue
+            .enqueue("email", serde_json::json!({}), Some("k1"))
+            .await
+            .unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_enqueue_delayed() {
+        let queue = JobQueue::new(make_mock_pool());
+        let id = queue
+            .enqueue_delayed(
+                "email",
+                serde_json::json!({}),
+                None,
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_retry_dead() {
+        let queue = JobQueue::new(make_mock_pool());
+        let result = queue.retry_dead(42).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_job_queue_snapshot() {
+        let queue = JobQueue::new(make_mock_pool());
+        let snap = queue.queue_snapshot().await.unwrap();
+        assert_eq!(snap.pending, 0);
+        assert_eq!(snap.running, 0);
+    }
 }

@@ -242,4 +242,61 @@ mod tests {
             .await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn new_from_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let store = FileRuleStore::new(tmp.path()).await.unwrap();
+        store.add(make_entry("R1"), "t").await.unwrap();
+        let got = store.get("R1", "t").await.unwrap();
+        assert!(got.is_some());
+    }
+
+    #[tokio::test]
+    async fn delete_rule() {
+        let store = FileRuleStore::in_memory();
+        store.add(make_entry("R1"), "t").await.unwrap();
+        assert!(store.get("R1", "t").await.unwrap().is_some());
+        store.delete("R1", "t").await.unwrap();
+        assert!(store.get("R1", "t").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn load_from_json_missing_file() {
+        let store = FileRuleStore::in_memory();
+        let count = store
+            .load_from_json(Path::new("/nonexistent/rules.json"))
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_invalid_json() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        tokio::fs::write(tmp.path(), "invalid json").await.unwrap();
+        let store = FileRuleStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_valid() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{"rules": [{"name": "R1", "description": "desc", "source_project": "p", "source_location": "loc", "severity": "high", "condition": "cond"}]}"#;
+        tokio::fs::write(tmp.path(), json).await.unwrap();
+        let store = FileRuleStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 1);
+        let results = store.search("R1", "default").await.unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_by_applicable_scene() {
+        let store = FileRuleStore::in_memory();
+        store.add(make_entry("R1"), "t").await.unwrap();
+        let results = store.search("repository", "t").await.unwrap();
+        assert!(!results.is_empty());
+    }
 }

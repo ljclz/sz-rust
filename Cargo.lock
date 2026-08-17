@@ -5469,12 +5469,15 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "chrono",
+ "http",
+ "http-body-util",
  "serde",
  "serde_json",
  "sz-rust-addons-loader",
  "sz-rust-capability",
  "sz-rust-core",
  "tokio",
+ "tower 0.5.3",
  "tracing",
 ]
 
@@ -5501,12 +5504,14 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "chrono",
+ "http-body-util",
  "serde",
  "serde_json",
  "sz-rust-addons-loader",
  "sz-rust-capability",
  "sz-rust-core",
  "tokio",
+ "tower 0.5.3",
  "tracing",
 ]
 

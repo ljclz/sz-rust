@@ -43,3 +43,31 @@ impl ModeEvaluator for CustomMode {
         Ok(conditions)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data_scope::custom::CustomGeneratorRegistry;
+    use crate::data_scope::rule::DataScopeMode;
+
+    #[tokio::test]
+    async fn test_custom_mode_missing_generator_name() {
+        let registry = Arc::new(CustomGeneratorRegistry::new());
+        let mode = CustomMode::new(registry);
+        let ctx = DataScopeContext::new(1, 5, false);
+        let rule = DataScopeRule::new("order", DataScopeMode::Custom);
+        let err = mode.evaluate(&ctx, &rule).await.unwrap_err();
+        assert_eq!(err.error_code(), "DATA_SCOPE_INVALID_RULE");
+    }
+
+    #[tokio::test]
+    async fn test_custom_mode_generator_not_found() {
+        let registry = Arc::new(CustomGeneratorRegistry::new());
+        let mode = CustomMode::new(registry);
+        let ctx = DataScopeContext::new(1, 5, false);
+        let rule =
+            DataScopeRule::new("order", DataScopeMode::Custom).with_custom_generator("nonexistent");
+        let err = mode.evaluate(&ctx, &rule).await.unwrap_err();
+        assert_eq!(err.error_code(), "DATA_SCOPE_GENERATOR_NOT_FOUND");
+    }
+}

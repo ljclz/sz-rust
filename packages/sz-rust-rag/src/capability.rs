@@ -180,4 +180,37 @@ mod tests {
         let result = cap.call(args).await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn capability_description() {
+        let cap = make_capability();
+        assert_eq!(cap.description(), "生鲜零售行业 RAG 知识检索");
+    }
+
+    #[tokio::test]
+    async fn capability_schema_structure() {
+        let cap = make_capability();
+        let schema = cap.schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["query"].is_object());
+        assert!(schema["properties"]["tenant_id"].is_object());
+        assert!(schema["required"].is_array());
+    }
+
+    #[tokio::test]
+    async fn capability_call_missing_tenant_id() {
+        let cap = make_capability();
+        let args = serde_json::json!({"query": "称重"});
+        let result = cap.call(args).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn capability_call_with_topk_and_budget() {
+        let cap = make_capability();
+        let args =
+            serde_json::json!({"query": "称重", "tenant_id": "t", "topk": 5, "token_budget": 2048});
+        let result = cap.call(args).await.unwrap();
+        assert!(result.get("citations").is_some());
+    }
 }

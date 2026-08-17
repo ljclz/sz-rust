@@ -94,7 +94,7 @@ impl GeminiProvider {
         body
     }
 
-    fn parse_completion(resp: &serde_json::Value) -> Result<ChatCompletion, AiError> {
+    pub fn parse_completion(resp: &serde_json::Value) -> Result<ChatCompletion, AiError> {
         let candidates = resp
             .get("candidates")
             .and_then(|v| v.as_array())

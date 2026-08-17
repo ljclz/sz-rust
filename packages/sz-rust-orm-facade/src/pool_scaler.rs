@@ -301,4 +301,23 @@ mod tests {
         assert_eq!(scaler.scale_up_count(), 0);
         assert_eq!(scaler.scale_down_count(), 1);
     }
+
+    #[test]
+    fn test_pool_metrics_idle_rate_zero_connections() {
+        let metrics = PoolMetrics {
+            current_connections: 0,
+            idle_connections: 0,
+            timeout_count: 0,
+            total_acquire: 0,
+        };
+        assert_eq!(metrics.idle_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_pool_scaler_debug_format() {
+        let scaler = PoolScaler::new(PoolScalerConfig::default());
+        let s = format!("{scaler:?}");
+        assert!(s.contains("PoolScaler"));
+        assert!(s.contains("target: 5"));
+    }
 }

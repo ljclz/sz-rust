@@ -1,0 +1,1 @@
+{"ts": "2026-08-16T17:18:15", "event": "ReviewCompleted", "result": "passed", "branch": "main", "commit": "bff78e4", "range": "HEAD~1..HEAD", "state": "done", "blocking": 0, "issues": {"critical": 0, "high": 0, "medium": 0, "low": 0}, "report": "docs/audit/2026-08-16-pr-review-main.md"}

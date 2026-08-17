@@ -172,4 +172,138 @@ mod tests {
         let result = execute_login(&args).await;
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_execute_login_without_token() {
+        let args = LoginArgs { token: None };
+        let result = execute_login(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_search_no_tags() {
+        let args = SearchArgs {
+            keyword: "orm".into(),
+            tags: vec![],
+            source: None,
+            sort: "relevance".into(),
+            page: 1,
+            page_size: 20,
+        };
+        let result = execute_search(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_search_with_tags() {
+        let args = SearchArgs {
+            keyword: "orm".into(),
+            tags: vec!["db".into(), "sql".into()],
+            source: Some("official".into()),
+            sort: "stars".into(),
+            page: 2,
+            page_size: 10,
+        };
+        let result = execute_search(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_install() {
+        let args = InstallArgs {
+            identifier: "orm@1.0".into(),
+        };
+        let result = execute_install(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_publish() {
+        let args = PublishArgs {
+            path: "/tmp/plugin.tar.gz".into(),
+            sign: "/tmp/key.pem".into(),
+            changelog: Some("v1.0 release".into()),
+        };
+        let result = execute_publish(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_uninstall() {
+        let args = UninstallArgs {
+            identifier: "orm".into(),
+        };
+        let result = execute_uninstall(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_update() {
+        let args = UpdateArgs {
+            identifier: "orm".into(),
+            version: Some("2.0".into()),
+        };
+        let result = execute_update(&args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_search() {
+        let cmd = PluginCommand::Search(SearchArgs {
+            keyword: "k".into(),
+            tags: vec![],
+            source: None,
+            sort: "relevance".into(),
+            page: 1,
+            page_size: 20,
+        });
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_install() {
+        let cmd = PluginCommand::Install(InstallArgs {
+            identifier: "x".into(),
+        });
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_publish() {
+        let cmd = PluginCommand::Publish(PublishArgs {
+            path: "p".into(),
+            sign: "s".into(),
+            changelog: None,
+        });
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_uninstall() {
+        let cmd = PluginCommand::Uninstall(UninstallArgs {
+            identifier: "x".into(),
+        });
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_update() {
+        let cmd = PluginCommand::Update(UpdateArgs {
+            identifier: "x".into(),
+            version: None,
+        });
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_list() {
+        let cmd = PluginCommand::List;
+        assert!(execute(&cmd).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_login() {
+        let cmd = PluginCommand::Login(LoginArgs { token: None });
+        assert!(execute(&cmd).await.is_ok());
+    }
 }

@@ -657,4 +657,113 @@ mod tests {
         assert!(output.contains("FOREIGN KEY (user_id)"));
         assert!(output.contains("REFERENCES users (id)"));
     }
+
+    /// 测试 TemplateEngine 的 Debug 实现
+    #[tokio::test]
+    async fn test_template_engine_debug() {
+        let (_temp, template_dir) = setup_test_templates().await;
+        let engine = TemplateEngine::init(&template_dir)
+            .await
+            .expect("init failed");
+        let debug_str = format!("{:?}", engine);
+        assert!(debug_str.contains("TemplateEngine"));
+        assert!(debug_str.contains("template_dir"));
+        assert!(debug_str.contains("template_types"));
+    }
+
+    /// 测试 template_dir 访问器
+    #[tokio::test]
+    async fn test_template_dir_accessor() {
+        let (_temp, template_dir) = setup_test_templates().await;
+        let engine = TemplateEngine::init(&template_dir)
+            .await
+            .expect("init failed");
+        assert_eq!(engine.template_dir(), template_dir.as_path());
+    }
+
+    /// 测试 pascal_case filter
+    #[tokio::test]
+    async fn test_pascal_case_filter() {
+        let (_temp, template_dir) = setup_test_templates().await;
+        // 写入使用 pascal_case filter 的模板
+        let crud_dir = template_dir.join("plugin-crud");
+        tokio::fs::write(
+            &crud_dir.join("pascal_test.rs.tera"),
+            "{{ table_name | pascal_case }}",
+        )
+        .await
+        .expect("write failed");
+
+        let engine = TemplateEngine::init(&template_dir)
+            .await
+            .expect("init failed");
+        let mut ctx = Context::new();
+        ctx.insert("table_name", "user_orders");
+        let result = engine.render("plugin-crud/pascal_test.rs.tera", &ctx);
+        assert!(result.is_ok(), "Render failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), "UserOrders");
+    }
+
+    /// 测试 snake_case filter
+    #[tokio::test]
+    async fn test_snake_case_filter() {
+        let (_temp, template_dir) = setup_test_templates().await;
+        let crud_dir = template_dir.join("plugin-crud");
+        tokio::fs::write(
+            &crud_dir.join("snake_test.rs.tera"),
+            "{{ class_name | snake_case }}",
+        )
+        .await
+        .expect("write failed");
+
+        let engine = TemplateEngine::init(&template_dir)
+            .await
+            .expect("init failed");
+        let mut ctx = Context::new();
+        ctx.insert("class_name", "UserOrders");
+        let result = engine.render("plugin-crud/snake_test.rs.tera", &ctx);
+        assert!(result.is_ok(), "Render failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), "userorders");
+    }
+
+    /// 测试 map_render_error 的 Generic 分支（非变量未找到错误）
+    #[tokio::test]
+    async fn test_render_generic_error() {
+        let (_temp, template_dir) = setup_test_templates().await;
+        let engine = TemplateEngine::init(&template_dir)
+            .await
+            .expect("init failed");
+        // 渲染不存在的模板应触发错误（模板未找到，非变量错误）
+        let ctx = Context::new();
+        let result = engine.render("plugin-crud/nonexistent_template.rs.tera", &ctx);
+        assert!(result.is_err());
+        // 错误应为 Generic 或其他非 VarNotFound 类型
+        let err = result.unwrap_err();
+        // 确保不是 VarNotFound（模板未找到不是变量错误）
+        assert!(!matches!(err, CliError::VarNotFound { .. }));
+    }
+
+    #[test]
+    fn test_take_number_empty() {
+        assert_eq!(take_number("abc"), None);
+    }
+
+    #[test]
+    fn test_take_number_valid() {
+        assert_eq!(take_number("123abc"), Some(123));
+    }
+
+    #[test]
+    fn test_parse_line_col_only_line() {
+        let (line, col) = parse_line_col("error at line 42");
+        assert_eq!(line, 42);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn test_extract_variable_name_prefix_no_close() {
+        // 有前缀但没有反引号闭合
+        let name = extract_variable_name("Variable `unclosed");
+        assert_eq!(name, None);
+    }
 }

@@ -167,6 +167,14 @@ fn is_ascii_simd(bytes: &[u8]) -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
+/// SSE2 加速的 ASCII 检测（x86_64 专用）。
+///
+/// # Safety
+///
+/// - 调用方必须确保 CPU 支持 SSE2（由 `is_x86_feature_detected!("sse2")` 运行时检测保证）
+/// - `bytes` 切片引用有效内存，`_mm_loadu_si128` 读取 16 字节但 while 循环
+///   条件 `i + 16 <= bytes.len()` 保证不越界
+/// - 剩余字节用标量处理，无 SIMD 越界风险
 unsafe fn is_ascii_sse2(bytes: &[u8]) -> bool {
     use core::arch::x86_64::*;
 
@@ -196,6 +204,14 @@ unsafe fn is_ascii_sse2(bytes: &[u8]) -> bool {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
+/// SSE2 加速的分隔符查找（x86_64 专用）。
+///
+/// # Safety
+///
+/// - 调用方必须确保 CPU 支持 SSE2（由 `is_x86_feature_detected!("sse2")` 运行时检测保证）
+/// - `haystack` 切片引用有效内存，`_mm_loadu_si128` 读取 16 字节但 while 循环
+///   条件 `i + 16 <= haystack.len()` 保证不越界
+/// - 剩余字节用标量处理，无 SIMD 越界风险
 unsafe fn find_separator_sse2(haystack: &[u8], needle: u8) -> Option<usize> {
     use core::arch::x86_64::*;
 

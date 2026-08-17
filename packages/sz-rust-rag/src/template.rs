@@ -229,4 +229,66 @@ mod tests {
         store.delete("Order", "t").await.unwrap();
         assert!(store.get("Order", "t").await.unwrap().is_none());
     }
+
+    #[tokio::test]
+    async fn new_from_file() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let store = FileTemplateStore::new(tmp.path()).await.unwrap();
+        store.add(make_template("T1"), "t").await.unwrap();
+        assert!(store.get("T1", "t").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn history() {
+        let store = FileTemplateStore::in_memory();
+        store.add(make_template("T1"), "t").await.unwrap();
+        let mut t2 = make_template("T1");
+        t2.fields.push(TemplateField {
+            field_name: "x".into(),
+            business_meaning: "y".into(),
+            constraint: None,
+        });
+        store.update("T1", t2, "t").await.unwrap();
+        let history = store.history("T1", "t").await.unwrap();
+        assert_eq!(history.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_missing_file() {
+        let store = FileTemplateStore::in_memory();
+        let count = store
+            .load_from_json(std::path::Path::new("/nonexistent/templates.json"))
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_invalid_json() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        tokio::fs::write(tmp.path(), "invalid json").await.unwrap();
+        let store = FileTemplateStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn load_from_json_valid() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let json = r#"{"templates": [{"entity_name": "Product", "fields": [{"name": "sku", "type": "string", "comment": "商品编码", "nullable": false}, {"name": "price", "type": "f64", "nullable": true}]}]}"#;
+        tokio::fs::write(tmp.path(), json).await.unwrap();
+        let store = FileTemplateStore::in_memory();
+        let count = store.load_from_json(tmp.path()).await.unwrap();
+        assert_eq!(count, 1);
+        let results = store.search("product", "default").await.unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_by_field_name() {
+        let store = FileTemplateStore::in_memory();
+        store.add(make_template("Product"), "t").await.unwrap();
+        let results = store.search("sku_code", "t").await.unwrap();
+        assert!(!results.is_empty());
+    }
 }

@@ -97,4 +97,50 @@ mod tests {
         let result = ProjectCorpusScanner::scan_crate(Path::new("/nonexistent"), "foo").await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn scan_real_workspace() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = ProjectCorpusScanner::scan(workspace).await;
+        assert!(result.is_ok());
+        let files = result.unwrap();
+        assert!(!files.is_empty(), "workspace should contain rust files");
+        assert!(files.iter().any(|f| f.crate_name.contains("sz-rust-rag")));
+    }
+
+    #[tokio::test]
+    async fn scan_crate_real() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = ProjectCorpusScanner::scan_crate(workspace, "sz-rust-rag").await;
+        assert!(result.is_ok());
+        let files = result.unwrap();
+        assert!(!files.is_empty());
+        assert!(files.iter().all(|f| f.crate_name == "sz-rust-rag"));
+        assert!(files.iter().any(|f| f.path.extension().unwrap() == "rs"));
+    }
+
+    #[tokio::test]
+    async fn scan_crate_with_subdirs() {
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let result = ProjectCorpusScanner::scan_crate(workspace, "sz-rust-rag").await;
+        let files = result.unwrap();
+        assert!(files.iter().any(|f| f
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("lib.rs")));
+    }
 }

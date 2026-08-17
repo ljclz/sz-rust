@@ -96,4 +96,66 @@ mod tests {
         assert!(RagError::VectorStore("x".into()).is_retryable());
         assert!(!RagError::ConfigInvalid("x".into()).is_retryable());
     }
+
+    #[test]
+    fn all_error_codes() {
+        assert_eq!(
+            RagError::CorpusScanFailed("x".into()).error_code(),
+            "RAG_CORPUS_SCAN_FAILED"
+        );
+        assert_eq!(
+            RagError::ChunkingFailed("x".into()).error_code(),
+            "RAG_CHUNKING_FAILED"
+        );
+        assert_eq!(
+            RagError::VectorStore("x".into()).error_code(),
+            "RAG_VECTOR_STORE"
+        );
+        assert_eq!(
+            RagError::StoreLoadFailed("x".into()).error_code(),
+            "RAG_STORE_LOAD_FAILED"
+        );
+        assert_eq!(
+            RagError::StoreSaveFailed("x".into()).error_code(),
+            "RAG_STORE_SAVE_FAILED"
+        );
+        assert_eq!(
+            RagError::TermNotFound("x".into()).error_code(),
+            "RAG_TERM_NOT_FOUND"
+        );
+        assert_eq!(
+            RagError::RuleNotFound("x".into()).error_code(),
+            "RAG_RULE_NOT_FOUND"
+        );
+        assert_eq!(
+            RagError::TemplateNotFound("x".into()).error_code(),
+            "RAG_TEMPLATE_NOT_FOUND"
+        );
+        assert_eq!(
+            RagError::SearchFailed("x".into()).error_code(),
+            "RAG_SEARCH_FAILED"
+        );
+        assert_eq!(
+            RagError::Io(std::io::Error::other("x")).error_code(),
+            "RAG_IO"
+        );
+        assert_eq!(
+            RagError::Json(serde_json::from_str::<String>("bad").unwrap_err()).error_code(),
+            "RAG_JSON"
+        );
+    }
+
+    #[test]
+    fn is_retryable_io() {
+        assert!(RagError::Io(std::io::Error::other("x")).is_retryable());
+    }
+
+    #[test]
+    fn is_retryable_embedding() {
+        use sz_rust_ai_facade::common::AiError;
+        let retryable = AiError::ProviderUnavailable("timeout".into());
+        assert!(RagError::Embedding(retryable).is_retryable());
+        let non_retryable = AiError::ProviderAuthFailed("auth".into());
+        assert!(!RagError::Embedding(non_retryable).is_retryable());
+    }
 }

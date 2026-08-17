@@ -1,0 +1,279 @@
+{
+  "generated_at": "2026-08-16",
+  "target_coverage": 85,
+  "total_exec_lines": 19734,
+  "total_covered_lines": 438,
+  "current_coverage": 2.22,
+  "crates": [
+    {
+      "name": "sz-rust-core",
+      "priority_level": "P0",
+      "dependency_count": 18,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 1
+    },
+    {
+      "name": "sz-rust-router-facade",
+      "priority_level": "P0",
+      "dependency_count": 12,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 1
+    },
+    {
+      "name": "sz-rust-middleware-facade",
+      "priority_level": "P0",
+      "dependency_count": 10,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 1
+    },
+    {
+      "name": "sz-rust-orm-facade",
+      "priority_level": "P0",
+      "dependency_count": 15,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 1
+    },
+    {
+      "name": "sz-rust-sz300",
+      "priority_level": "P1",
+      "dependency_count": 0,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 2
+    },
+    {
+      "name": "sz-rust-ai-facade",
+      "priority_level": "P1",
+      "dependency_count": 3,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 2
+    },
+    {
+      "name": "sz-rust-auth-facade",
+      "priority_level": "P1",
+      "dependency_count": 8,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 2
+    },
+    {
+      "name": "sz-rust-observability",
+      "priority_level": "P1",
+      "dependency_count": 5,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 2
+    },
+    {
+      "name": "sz-rust-http-facade",
+      "priority_level": "P2",
+      "dependency_count": 11,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-cache-facade",
+      "priority_level": "P2",
+      "dependency_count": 9,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-state-facade",
+      "priority_level": "P2",
+      "dependency_count": 7,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-infra-facade",
+      "priority_level": "P2",
+      "dependency_count": 6,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-mvc-facade",
+      "priority_level": "P2",
+      "dependency_count": 8,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-orm-ext-facade",
+      "priority_level": "P2",
+      "dependency_count": 4,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-pay-facade",
+      "priority_level": "P2",
+      "dependency_count": 3,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 3
+    },
+    {
+      "name": "sz-rust-addons-loader",
+      "priority_level": "P3",
+      "dependency_count": 4,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-addons-crm",
+      "priority_level": "P3",
+      "dependency_count": 1,
+      "has_tests_dir": false,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-addons-ecommerce",
+      "priority_level": "P3",
+      "dependency_count": 1,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-addons-cms",
+      "priority_level": "P3",
+      "dependency_count": 1,
+      "has_tests_dir": false,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-cli",
+      "priority_level": "P3",
+      "dependency_count": 0,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-mcp",
+      "priority_level": "P3",
+      "dependency_count": 2,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-rag",
+      "priority_level": "P3",
+      "dependency_count": 2,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-frontend-codegen",
+      "priority_level": "P3",
+      "dependency_count": 1,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-capability",
+      "priority_level": "P3",
+      "dependency_count": 3,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-examples",
+      "priority_level": "P3",
+      "dependency_count": 0,
+      "has_tests_dir": false,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-facade-tests",
+      "priority_level": "P3",
+      "dependency_count": 0,
+      "has_tests_dir": true,
+      "current_coverage": 0,
+      "target_coverage": 85,
+      "gap_lines": 0,
+      "batch_order": 4
+    },
+    {
+      "name": "sz-rust-macros",
+      "priority_level": "EXCLUDED",
+      "dependency_count": 5,
+      "has_tests_dir": false,
+      "current_coverage": 0,
+      "target_coverage": 0,
+      "gap_lines": 0,
+      "batch_order": 0
+    }
+  ]
+}
