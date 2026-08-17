@@ -222,7 +222,12 @@ fi
 transition "security" "门禁脚本（sensitive-field / doc-code / feature / assertion / adr）"
 run_gate() { # run_gate <name> <severity-on-fail> <script...>
   local name="$1" sev="$2"; shift 2
-  if ! node "$@" >/tmp/pr-review-gate.log 2>&1; then
+  local runner
+  case "$1" in
+    *.py) runner=python ;;
+    *)    runner=node ;;
+  esac
+  if ! $runner "$@" >/tmp/pr-review-gate.log 2>&1; then
     note_issue "$sev" "gate" "$name" "$(grep -m1 -E '❌|EXPOSED|error|FAIL' /tmp/pr-review-gate.log | head -c 120)"
   fi
 }

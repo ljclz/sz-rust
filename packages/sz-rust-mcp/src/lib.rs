@@ -81,7 +81,9 @@ fn validate_identifier(name: &str) -> Result<(), McpError> {
         )));
     }
     let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    let first = chars.next().expect(
+        "validate_identifier: non-empty string should have first char (checked empty above)",
+    );
     if !first.is_ascii_alphabetic() && first != '_' {
         return Err(McpError::InvalidArguments(format!(
             "标识符必须以字母或下划线开头：{name}"
