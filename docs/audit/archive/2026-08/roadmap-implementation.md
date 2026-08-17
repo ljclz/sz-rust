@@ -2,9 +2,9 @@
 
 > ⚠️ 已归档，原因：部分过时，任务状态需核实，归档日期：2026-08-09
 
-> **制定日期**：2026-08-02  
-> **版本**：v1.0  
-> **状态**：Level 4 定量管理级 → 冲刺 Level 5 优化级  
+> **制定日期**：2026-08-02
+> **版本**：v1.0
+> **状态**：Level 4 定量管理级 → 冲刺 Level 5 优化级
 > **综合评分**：91.2 / 100
 
 ---
@@ -452,20 +452,20 @@ pub struct Oauth2Plugin;
 #[sz_rust_core::plugin]
 impl Plugin for Oauth2Plugin {
     fn name(&self) -> &'static str { "oauth2" }
-    
+
     fn version(&self) -> &'static str { "1.0.0" }
-    
+
     fn on_init(&self, ctx: &PluginContext) -> PluginResult {
         // 注册路由
         ctx.router.get("/auth/oauth2/login", login_handler);
         ctx.router.get("/auth/oauth2/callback", callback_handler);
-        
+
         // 注册中间件
         ctx.middleware.add(Oauth2Middleware);
-        
+
         Ok(())
     }
-    
+
     fn on_shutdown(&self) -> PluginResult {
         Ok(())
     }

@@ -1,7 +1,7 @@
 # sz-rust 最终质量报告
 
-> **日期**：2026-08-12  
-> **范围**：全 workspace 38 个 crate（排除 examples）  
+> **日期**：2026-08-12
+> **范围**：全 workspace 38 个 crate（排除 examples）
 > **结论**：**全部通过**，0 failed，5065 passed
 
 ---

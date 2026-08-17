@@ -53,7 +53,7 @@ INSTALL_K6() {
     # GitHub release 二进制下载
     K6_URL="https://github.com/grafana/k6/releases/download/${K6_VERSION}/k6-${K6_VERSION}-linux-amd64.tar.gz"
     K6_TMP="/tmp/k6-download.tar.gz"
-    
+
     if curl -sL "$K6_URL" -o "$K6_TMP"; then
         tar -xzf "$K6_TMP" -C /tmp/
         cp /tmp/k6-${K6_VERSION}-linux-amd64/k6 /usr/local/bin/k6
