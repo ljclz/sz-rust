@@ -43,6 +43,12 @@ ignore = [
     # 影响: 不在任何编译产物中；sz-orm 路径依赖传递引入
     # 跟踪: 待 sz-orm 上游消除 rkyv 依赖后自动移除
     { id = "RUSTSEC-2026-0235", reason = "rkyv 不在编译产物中（cargo tree -i rkyv = nothing to print 含 --all-features）；Cargo.lock 残留来自 sz-orm 路径依赖" },
+    # RUSTSEC-2026-0258 / RUSTSEC-2024-0437 / RUSTSEC-2024-0370
+    # 来源: sz-orm 路径依赖传递引入的 Cargo.lock 残留条目
+    # 影响: 不在本仓实际编译产物中；待 sz-orm 上游升级后自动移除
+    { id = "RUSTSEC-2026-0258", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    { id = "RUSTSEC-2024-0437", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    { id = "RUSTSEC-2024-0370", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
 ]
 # 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
 unmaintained = "none"
