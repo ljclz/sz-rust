@@ -590,4 +590,89 @@ mod tests {
         assert_eq!(ExcelType::Xlsb.as_str(), "Xlsb");
         assert_eq!(ExcelType::Ods.as_str(), "Ods");
     }
+
+    #[test]
+    fn test_row_count() {
+        let tmp = make_test_xlsx();
+        let reader = create_reader(ExcelType::Xlsx);
+        let mut workbook = reader.load(tmp.path()).unwrap();
+        let sheet = workbook.sheet_by_index(0).unwrap();
+        assert_eq!(sheet.row_count(), 3);
+    }
+
+    #[test]
+    fn test_column_count() {
+        let tmp = make_test_xlsx();
+        let reader = create_reader(ExcelType::Xlsx);
+        let mut workbook = reader.load(tmp.path()).unwrap();
+        let sheet = workbook.sheet_by_index(0).unwrap();
+        assert_eq!(sheet.column_count(), 3);
+    }
+
+    #[test]
+    fn test_reader_load_type_mismatch() {
+        let tmp = make_test_xlsx();
+        let reader = create_reader(ExcelType::Xls);
+        let result = reader.load(tmp.path());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_identify_xlsb_extension() {
+        let tmp = tempfile::Builder::new().suffix(".xlsb").tempfile().unwrap();
+        let result = identify(tmp.path());
+        assert_eq!(result.unwrap(), ExcelType::Xlsb);
+    }
+
+    #[test]
+    fn test_identify_xlsm_extension() {
+        let tmp = tempfile::Builder::new().suffix(".xlsm").tempfile().unwrap();
+        let result = identify(tmp.path());
+        assert_eq!(result.unwrap(), ExcelType::Xlsx);
+    }
+
+    #[test]
+    fn test_identify_nonexistent_with_unknown_extension() {
+        let result = identify("/nonexistent/path/file.txt");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cell_data_variants() {
+        assert_eq!(CellData::Int(42).to_string_value(), "42");
+        assert_eq!(CellData::Float(2.5).to_string_value(), "2.5");
+        assert_eq!(CellData::Bool(true).to_string_value(), "TRUE");
+        assert_eq!(CellData::Empty.to_string_value(), "");
+    }
+
+    #[test]
+    fn test_identify_by_content_detection() {
+        let tmp_xlsx = make_test_xlsx();
+        let bytes = std::fs::read(tmp_xlsx.path()).unwrap();
+        let tmp_no_ext = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp_no_ext.path(), &bytes).unwrap();
+        let result = identify(tmp_no_ext.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), ExcelType::Xlsx);
+    }
+
+    #[test]
+    fn test_identify_unknown_extension_falls_back_to_content() {
+        let tmp_xlsx = make_test_xlsx();
+        let bytes = std::fs::read(tmp_xlsx.path()).unwrap();
+        let tmp = tempfile::Builder::new().suffix(".bin").tempfile().unwrap();
+        std::fs::write(tmp.path(), &bytes).unwrap();
+        let result = identify(tmp.path());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), ExcelType::Xlsx);
+    }
+
+    #[test]
+    fn test_sheet_count_and_names() {
+        let tmp = make_test_xlsx();
+        let reader = create_reader(ExcelType::Xlsx);
+        let workbook = reader.load(tmp.path()).unwrap();
+        assert_eq!(workbook.sheet_count(), 1);
+        assert_eq!(workbook.sheet_names(), vec!["Sheet1"]);
+    }
 }

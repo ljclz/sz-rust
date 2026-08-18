@@ -354,4 +354,248 @@ mod tests {
         assert_eq!(value_to_string(&json!(42)), "42");
         assert_eq!(value_to_string(&json!(true)), "true");
     }
+
+    #[test]
+    fn test_from_env_all_with_env_vars() {
+        std::env::set_var("CCB_API_URL", "https://api.ccb.com");
+        std::env::set_var("CCB_MERCHANT_ID", "merchant123");
+        std::env::set_var("CCB_POS_ID", "pos456");
+        std::env::set_var("CCB_SIGN_KEY", "signkey");
+        let ccb = HttpBankConfig::from_env_ccb().unwrap();
+        assert_eq!(ccb.api_url, "https://api.ccb.com");
+        assert_eq!(ccb.merchant_id, "merchant123/pos456");
+        assert_eq!(ccb.sign_key, "signkey");
+        assert_eq!(ccb.timeout_secs, 30);
+        std::env::remove_var("CCB_API_URL");
+        std::env::remove_var("CCB_MERCHANT_ID");
+        std::env::remove_var("CCB_POS_ID");
+        std::env::remove_var("CCB_SIGN_KEY");
+
+        std::env::set_var("ICBC_API_URL", "https://api.icbc.com");
+        std::env::set_var("ICBC_MER_ID", "mer123");
+        std::env::set_var("ICBC_SIGN_KEY", "icbc_key");
+        let icbc = HttpBankConfig::from_env_icbc().unwrap();
+        assert_eq!(icbc.api_url, "https://api.icbc.com");
+        assert_eq!(icbc.merchant_id, "mer123");
+        assert_eq!(icbc.sign_key, "icbc_key");
+        assert_eq!(icbc.timeout_secs, 30);
+        std::env::remove_var("ICBC_API_URL");
+        std::env::remove_var("ICBC_MER_ID");
+        std::env::remove_var("ICBC_SIGN_KEY");
+
+        std::env::set_var("FUIOU_API_URL", "https://api.fuiou.com");
+        std::env::set_var("FUIOU_MCHNT_CD", "mchnt123");
+        std::env::set_var("FUIOU_KEY", "fuiou_key");
+        let fuiou = HttpBankConfig::from_env_fuiou().unwrap();
+        assert_eq!(fuiou.api_url, "https://api.fuiou.com");
+        assert_eq!(fuiou.merchant_id, "mchnt123");
+        assert_eq!(fuiou.sign_key, "fuiou_key");
+        assert_eq!(fuiou.timeout_secs, 30);
+        std::env::remove_var("FUIOU_API_URL");
+        std::env::remove_var("FUIOU_MCHNT_CD");
+        std::env::remove_var("FUIOU_KEY");
+
+        std::env::set_var("FUIOU_API_URL", "https://api.fuiou.com");
+        std::env::set_var("FUIOU_MCHNT_CD", "mchnt123");
+        std::env::remove_var("FUIOU_KEY");
+        assert!(HttpBankConfig::from_env_fuiou().is_none());
+        std::env::remove_var("FUIOU_API_URL");
+        std::env::remove_var("FUIOU_MCHNT_CD");
+    }
+
+    #[test]
+    fn test_http_bank_client_new_and_accessors() {
+        let config = HttpBankConfig {
+            api_url: "https://api.example.com".to_string(),
+            merchant_id: "m1".to_string(),
+            sign_key: "k1".to_string(),
+            timeout_secs: 10,
+        };
+        let client = HttpBankClient::new(config);
+        assert_eq!(client.config().api_url, "https://api.example.com");
+        assert_eq!(client.config().merchant_id, "m1");
+        assert_eq!(client.config().timeout_secs, 10);
+        let _ = client.http();
+    }
+
+    #[test]
+    fn test_md5_sign_empty_sign_key() {
+        let mut params = serde_json::Map::new();
+        params.insert("a".to_string(), Value::String("1".to_string()));
+        let sign = md5_sign(&params, "");
+        assert_eq!(sign.len(), 32);
+    }
+
+    #[test]
+    fn test_is_empty_value_branches_via_md5_sign() {
+        let mut params = serde_json::Map::new();
+        params.insert("null_val".to_string(), Value::Null);
+        params.insert("empty_arr".to_string(), Value::Array(vec![]));
+        params.insert(
+            "empty_obj".to_string(),
+            Value::Object(serde_json::Map::new()),
+        );
+        params.insert("num".to_string(), json!(42));
+        params.insert("bool".to_string(), json!(true));
+        let sign = md5_sign(&params, "key");
+        assert_eq!(sign.len(), 32);
+    }
+
+    #[test]
+    fn test_value_to_string_all_branches() {
+        assert_eq!(value_to_string(&json!(false)), "false");
+        assert_eq!(value_to_string(&json!([1, 2])), "[1,2]");
+        assert_eq!(value_to_string(&json!({"a": 1})), "{\"a\":1}");
+    }
+
+    #[tokio::test]
+    async fn test_post_json_success() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"{"result":"ok"}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        let config = HttpBankConfig {
+            api_url: format!("http://127.0.0.1:{port}"),
+            merchant_id: "m".to_string(),
+            sign_key: "k".to_string(),
+            timeout_secs: 5,
+        };
+        let client = HttpBankClient::new(config);
+        let result = client.post_json("", &json!({"data": "test"})).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()["result"], "ok");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_post_json_http_error_status() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        let config = HttpBankConfig {
+            api_url: format!("http://127.0.0.1:{port}"),
+            merchant_id: "m".to_string(),
+            sign_key: "k".to_string(),
+            timeout_secs: 5,
+        };
+        let client = HttpBankClient::new(config);
+        let result = client.post_json("", &json!({})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("HTTP 状态码"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_post_json_with_path_and_trailing_slash() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"{"ok":true}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        let config = HttpBankConfig {
+            api_url: format!("http://127.0.0.1:{port}/"),
+            merchant_id: "m".to_string(),
+            sign_key: "k".to_string(),
+            timeout_secs: 5,
+        };
+        let client = HttpBankClient::new(config);
+        let result = client.post_json("pay", &json!({})).await;
+        assert!(result.is_ok());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_post_xml_success() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let body = r#"<?xml version="1.0"?><root><code>000000</root></root>"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        let config = HttpBankConfig {
+            api_url: format!("http://127.0.0.1:{port}"),
+            merchant_id: "m".to_string(),
+            sign_key: "k".to_string(),
+            timeout_secs: 5,
+        };
+        let client = HttpBankClient::new(config);
+        let result = client.post_xml("", "<request/>").await;
+        assert!(result.is_ok());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_post_xml_http_error_status() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        let config = HttpBankConfig {
+            api_url: format!("http://127.0.0.1:{port}"),
+            merchant_id: "m".to_string(),
+            sign_key: "k".to_string(),
+            timeout_secs: 5,
+        };
+        let client = HttpBankClient::new(config);
+        let result = client.post_xml("", "<request/>").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("HTTP 状态码"));
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn test_parse_simple_xml_empty_and_no_match() {
+        let result = parse_simple_xml("").unwrap();
+        assert!(result.as_object().unwrap().is_empty());
+        let result2 = parse_simple_xml("<?xml version=\"1.0\"?>").unwrap();
+        assert!(result2.as_object().unwrap().is_empty());
+    }
 }

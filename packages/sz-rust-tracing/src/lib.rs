@@ -889,4 +889,241 @@ mod tests {
         let json = serde_json::to_string(&err).expect("serialize");
         assert_eq!(json, "\"Span not found: s1\"");
     }
+
+    #[test]
+    fn test_sz_tracer_default() {
+        let tracer = SzTracer::default();
+        assert_eq!(tracer.service_name, "unknown");
+        assert!(tracer.get_spans().is_empty());
+    }
+
+    #[test]
+    fn test_extract_legacy_with_parent_span_id() {
+        let tracer = SzTracer::new("svc");
+        let mut headers = HashMap::new();
+        headers.insert("trace-id".to_string(), "trace123".to_string());
+        headers.insert("span-id".to_string(), "span456".to_string());
+        headers.insert("parent-span-id".to_string(), "parent789".to_string());
+
+        let span = tracer.extract(&headers).expect("extract with parent");
+        assert_eq!(span.trace_id, "trace123");
+        assert_eq!(span.span_id, "span456");
+        assert_eq!(span.parent_id, Some("parent789".to_string()));
+        assert_eq!(span.service_name, "svc");
+    }
+
+    #[test]
+    fn test_inject_legacy_with_parent_id() {
+        let tracer = SzTracer::new("svc");
+        let span = tracer
+            .start_span("op")
+            .with_parent("parent-span".to_string());
+        let headers = tracer.inject_legacy(&span);
+
+        assert_eq!(headers.get("trace-id"), Some(&span.trace_id.to_string()));
+        assert_eq!(headers.get("span-id"), Some(&span.span_id.to_string()));
+        assert_eq!(
+            headers.get("parent-span-id"),
+            Some(&"parent-span".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_legacy_with_parent_id() {
+        let tracer = SzTracer::new("svc");
+        let mut headers = HashMap::new();
+        headers.insert("trace-id".to_string(), "abc".to_string());
+        headers.insert("span-id".to_string(), "def".to_string());
+        headers.insert("parent-span-id".to_string(), "ghi".to_string());
+
+        let span = tracer
+            .extract_legacy(&headers)
+            .expect("legacy extract with parent");
+        assert_eq!(span.trace_id, "abc");
+        assert_eq!(span.span_id, "def");
+        assert_eq!(span.parent_id, Some("ghi".to_string()));
+        assert_eq!(span.service_name, "svc");
+    }
+
+    #[test]
+    fn test_extract_legacy_missing_returns_none() {
+        let tracer = SzTracer::new("svc");
+        let headers = HashMap::new();
+        assert!(tracer.extract_legacy(&headers).is_none());
+    }
+
+    #[test]
+    fn test_tracing_error_source_chain() {
+        let err = TracingError::Internal("lock poisoned".to_string());
+        assert!(std::error::Error::source(&err).is_none());
+        assert_eq!(err.to_string(), "Tracing internal error: lock poisoned");
+    }
+
+    #[test]
+    fn test_tracing_error_serialize_all_variants() {
+        let invalid = TracingError::InvalidTraceId("bad-id".to_string());
+        assert_eq!(
+            serde_json::to_string(&invalid).unwrap(),
+            "\"Invalid trace id: bad-id\""
+        );
+
+        let internal = TracingError::Internal("err".to_string());
+        assert_eq!(
+            serde_json::to_string(&internal).unwrap(),
+            "\"Tracing internal error: err\""
+        );
+    }
+
+    #[test]
+    fn test_span_clone_and_serialize_roundtrip() {
+        let span = Span::new("trace1", "span1", "op")
+            .with_service("svc")
+            .with_parent("parent1")
+            .with_tag("k", "v");
+
+        let cloned = span.clone();
+        assert_eq!(cloned.trace_id, span.trace_id);
+        assert_eq!(cloned.span_id, span.span_id);
+        assert_eq!(cloned.parent_id, span.parent_id);
+
+        let json = serde_json::to_string(&span).expect("serialize");
+        let de: Span = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.trace_id, span.trace_id);
+        assert_eq!(de.span_id, span.span_id);
+        assert_eq!(de.service_name, span.service_name);
+        assert_eq!(de.tags, span.tags);
+    }
+
+    #[test]
+    fn test_span_log_clone_and_serialize() {
+        let mut log = SpanLog {
+            timestamp: 1000,
+            message: "msg".to_string(),
+            fields: HashMap::new(),
+        };
+        log.fields.insert("f".to_string(), "v".to_string());
+
+        let cloned = log.clone();
+        assert_eq!(cloned.timestamp, log.timestamp);
+        assert_eq!(cloned.message, log.message);
+
+        let json = serde_json::to_string(&log).expect("serialize");
+        let de: SpanLog = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.fields.get("f"), Some(&"v".to_string()));
+    }
+
+    #[test]
+    fn test_span_duration_none_before_finish() {
+        let span = Span::new("trace1", "span1", "op");
+        assert!(span.duration().is_none());
+    }
+
+    #[test]
+    fn test_span_with_multiple_tags() {
+        let span = Span::new("trace1", "span1", "op")
+            .with_tag("k1", "v1")
+            .with_tag("k2", "v2")
+            .with_tag("k3", "v3");
+        assert_eq!(span.tags().len(), 3);
+        assert_eq!(span.tags().get("k1"), Some(&"v1".to_string()));
+        assert_eq!(span.tags().get("k2"), Some(&"v2".to_string()));
+        assert_eq!(span.tags().get("k3"), Some(&"v3".to_string()));
+    }
+
+    #[test]
+    fn test_span_add_multiple_logs() {
+        let mut span = Span::new("trace1", "span1", "op");
+        span.add_log("log1");
+        span.add_log("log2");
+        span.add_log("log3");
+        assert_eq!(span.logs().len(), 3);
+        assert_eq!(span.logs()[0].message, "log1");
+        assert_eq!(span.logs()[1].message, "log2");
+        assert_eq!(span.logs()[2].message, "log3");
+        for log in span.logs() {
+            assert!(log.fields.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_tracer_end_span_multiple_accumulates() {
+        let tracer = SzTracer::new("svc");
+        for i in 0..5 {
+            let span = tracer.start_span(&format!("op-{i}"));
+            tracer.end_span(span);
+        }
+        let spans = tracer.get_spans();
+        assert_eq!(spans.len(), 5);
+        for (i, s) in spans.iter().enumerate() {
+            assert_eq!(s.operation_name(), format!("op-{i}"));
+            assert!(s.end_time.is_some());
+        }
+    }
+
+    #[test]
+    fn test_in_memory_tracer_clear_via_inner() {
+        let tracer = InMemoryTracer::new("svc");
+        let span = tracer.start_span("op");
+        tracer.end_span(span);
+        assert_eq!(tracer.inner().get_spans().len(), 1);
+
+        tracer.inner().clear();
+        assert!(tracer.inner().get_spans().is_empty());
+    }
+
+    #[test]
+    fn test_w3c_extract_with_parent_span_id_header() {
+        let tracer = SzTracer::new("svc");
+        let mut headers = HashMap::new();
+        headers.insert(
+            "traceparent".to_string(),
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01".to_string(),
+        );
+        headers.insert("parent-span-id".to_string(), "parent123".to_string());
+
+        let span = tracer.extract(&headers).expect("extract with parent");
+        assert_eq!(span.trace_id, "0af7651916cd43dd8448eb211c80319c");
+        assert_eq!(span.span_id, "b7ad6b7169203331");
+        assert_eq!(span.parent_id, Some("parent123".to_string()));
+    }
+
+    #[test]
+    fn test_parse_traceparent_non_hex_trace_id_rejected() {
+        assert!(SzTracer::parse_traceparent(
+            "00-0af7651916cd43dd8448eb211c80319g-b7ad6b7169203331-01"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_traceparent_non_hex_span_id_rejected() {
+        assert!(SzTracer::parse_traceparent(
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b716920333g-01"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_traceparent_non_hex_version_rejected() {
+        assert!(SzTracer::parse_traceparent(
+            "zz-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_parse_traceparent_empty_string() {
+        assert!(SzTracer::parse_traceparent("").is_none());
+    }
+
+    #[test]
+    fn test_otel_tracer_deprecated_alias_compiles() {
+        #[allow(deprecated)]
+        let tracer: OtelTracer = OtelTracer::new("svc");
+        #[allow(deprecated)]
+        let span = tracer.start_span("op");
+        assert_eq!(span.service_name(), "svc");
+        tracer.end_span(span);
+        assert_eq!(tracer.inner().get_spans().len(), 1);
+    }
 }

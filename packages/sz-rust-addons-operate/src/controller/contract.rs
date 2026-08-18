@@ -814,4 +814,158 @@ mod tests {
         let result = ContractController::get_list(&repo, &json!({"app_id": 10001}), "list");
         assert!(result["list"].is_array());
     }
+
+    #[test]
+    fn test_get_customer_list_basic() {
+        let repo = make_repo();
+        let result = ContractController::get_customer_list(&repo, &json!({"app_id": 10001}));
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_get_customer_list_with_customer_id() {
+        let repo = make_repo();
+        let result = ContractController::get_customer_list(
+            &repo,
+            &json!({"app_id": 10001, "customer_id": 100}),
+        );
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn test_bind_contract_success() {
+        let repo = make_repo();
+        let result = ContractController::bind_contract(
+            &repo,
+            1,
+            &json!({"contract_id": 1, "app_id": 10001, "formData": "{}", "customer_id": 999}),
+        );
+        assert!(result.is_ok());
+        let conditions = [WhereCondition::new(
+            "contract_id",
+            WhereOp::Eq,
+            OrmValue::I64(1),
+        )];
+        let updated = repo.find_one_by(&conditions).unwrap().unwrap();
+        assert_eq!(updated.to_json()["customer_id"], 999);
+    }
+
+    #[test]
+    fn test_bind_contract_not_found() {
+        let repo = make_repo();
+        let result = ContractController::bind_contract(&repo, 999, &json!({}));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "合同不存在");
+    }
+
+    #[test]
+    fn test_get_list_with_dept_id() {
+        let repo = make_repo();
+        let result =
+            ContractController::get_list(&repo, &json!({"app_id": 10001, "dept_id": 34}), "list");
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_get_list_with_company_id() {
+        let repo = make_repo();
+        let result =
+            ContractController::get_list(&repo, &json!({"app_id": 10001, "company_id": 0}), "list");
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_get_list_with_contract_status() {
+        let repo = make_repo();
+        let result = ContractController::get_list(
+            &repo,
+            &json!({"app_id": 10001, "contract_status": 1}),
+            "list",
+        );
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_get_list_with_keyword() {
+        let repo = make_repo();
+        let result = ContractController::get_list(
+            &repo,
+            &json!({"app_id": 10001, "keyword": "合同"}),
+            "list",
+        );
+        let list = result["list"].as_array().unwrap();
+        assert!(!list.is_empty());
+    }
+
+    #[test]
+    fn test_get_list_pagination() {
+        let repo = make_repo();
+        let r1 = ContractController::get_list(
+            &repo,
+            &json!({"app_id": 10001, "list_rows": 1, "page": 1}),
+            "list",
+        );
+        assert_eq!(r1["list"].as_array().unwrap().len(), 1);
+        let r2 = ContractController::get_list(
+            &repo,
+            &json!({"app_id": 10001, "list_rows": 1, "page": 2}),
+            "list",
+        );
+        assert_eq!(r2["list"].as_array().unwrap().len(), 1);
+        let r3 = ContractController::get_list(
+            &repo,
+            &json!({"app_id": 10001, "list_rows": 1, "page": 10}),
+            "list",
+        );
+        assert_eq!(r3["list"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_get_list_export_returns_all() {
+        let repo = make_repo();
+        let result = ContractController::get_list(&repo, &json!({"app_id": 10001}), "export");
+        let list = result["list"].as_array().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_edit_contract_not_found() {
+        let repo = make_repo();
+        let result = ContractController::edit_contract(&repo, 999, &json!({"name": "test"}));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "数据不存在");
+    }
+
+    #[test]
+    fn test_set_delete_not_found() {
+        let repo = make_repo();
+        let result = ContractController::set_delete(&repo, 999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cancel_contract_not_found() {
+        let repo = make_repo();
+        let result = ContractController::cancel_contract(&repo, 999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_contract_status_not_found() {
+        let repo = make_repo();
+        let result = ContractController::set_contract_status(&repo, 999, 3);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_contract_with_non_object_data() {
+        let repo = make_repo();
+        let result = ContractController::add_contract(&repo, &json!(42));
+        assert!(result.is_ok());
+    }
 }

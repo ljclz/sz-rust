@@ -244,6 +244,7 @@ pub(crate) fn csv_to_vec_i64(value: &str) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_csv_to_vec_i64_aligns_php_explode_intval_filter() {
@@ -262,5 +263,42 @@ mod tests {
     fn test_vec_i64_to_csv_aligns_php_implode() {
         assert_eq!(vec_i64_to_csv(&[1, 2, 3]), "1,2,3");
         assert_eq!(vec_i64_to_csv(&[]), "");
+    }
+
+    #[test]
+    fn test_get_str_helper() {
+        let mut data = HashMap::new();
+        data.insert("name".to_string(), Value::String("hello".to_string()));
+        data.insert("num".to_string(), json!(42));
+        assert_eq!(get_str(&data, "name"), Some("hello".to_string()));
+        assert_eq!(get_str(&data, "num"), None);
+        assert_eq!(get_str(&data, "missing"), None);
+    }
+
+    #[test]
+    fn test_relation_loader_get_and_set() {
+        use sz_rust_core::orm::RelationLoader;
+        let mut customer = Customer::new().with_data("customer_id", json!(123));
+        customer.set_relation_data("rentarea", sz_rust_core::orm::Value::I64(42));
+        let rel = customer.get_relation("rentarea");
+        assert!(rel.is_some());
+        assert!(customer.get_relation("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_relation_loader_fk_value_all_branches() {
+        use sz_rust_core::orm::RelationLoader;
+        let c = Customer::new().with_data("name", json!("hello"));
+        assert_eq!(c.get_relation_fk_value("name"), "hello");
+        let c = Customer::new().with_data("customer_id", json!(123));
+        assert_eq!(c.get_relation_fk_value("customer_id"), "123");
+        let c = Customer::new().with_data("flag", json!(true));
+        assert_eq!(c.get_relation_fk_value("flag"), "true");
+        let c = Customer::new().with_data("null_field", Value::Null);
+        assert_eq!(c.get_relation_fk_value("null_field"), "");
+        let c = Customer::new();
+        assert_eq!(c.get_relation_fk_value("nonexistent"), "");
+        let c = Customer::new().with_data("arr", json!([1, 2]));
+        assert_eq!(c.get_relation_fk_value("arr"), "[1,2]");
     }
 }
