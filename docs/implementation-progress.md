@@ -2,7 +2,7 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-08-11
+> **最后更新**：2026-08-19
 
 ---
 
@@ -406,6 +406,19 @@ Trace → BodySizeLimit → IpAccessControl → SecurityHeaders → Cors → Log
 - [ ] 是否先补充 FSSADMIN 缺失的安全功能（CSRF/XSS/数据权限），再开始 Phase 1？
 - [ ] Capability Registry 是放在开源版还是企业版？
 - [ ] 是否需要先做开源/企业 crate 分离（P1-T2），再做 Capability Registry（P1-T1）？
+
+---
+
+## 2026-08-19 更新：7 P1 死 crate 复活 + 生产接线 + 安全复核
+
+| 提交 | 内容 | 验证 |
+|------|------|------|
+| `6225cb5` | 7 crate 复活到 workspace（tracing/pdf/workflow/operate/erp/forum/im） | `cargo check` 全部通过 |
+| `5d5147c` | 3 crate 补测试（tracing 55/100% + pdf 164/95.86% + operate 495/87.84%） | `cargo test` 全部通过 |
+| `c371148` | 7 crate 生产接线 sz300（erp/forum/im 路由 + operate/workflow/tracing/pdf 依赖 + addons status 端点） | sz300 447 + erp 23 + forum 23 + im 23 测试通过 |
+| `c371148` | R001-R007 安全项全部人工复核完成 | doc-debt DB-2026-08-16-05 RESOLVED |
+| `d6379c5` | CI-001~007 覆盖率 CI 集成增强（4 并行分片 + per-crate 门槛） | ci.yml + coverage.yml |
+| — | 全部提交已 push 到 origin/main | `git rev-list --count origin/main..main` = 0 |
 
 ---
 

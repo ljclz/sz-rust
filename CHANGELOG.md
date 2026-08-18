@@ -5,6 +5,46 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-19（7 P1 死 crate 复活 + 生产接线 + R001-R007 安全复核）
+
+### Added
+
+- **7 个 P1 死 crate 全部复活到 workspace**（`6225cb5`）：
+  - sz-rust-tracing / sz-rust-pdf / sz-rust-workflow / sz-rust-addons-operate / sz-rust-addons-erp / sz-rust-addons-forum / sz-rust-addons-im
+  - 全部编译通过 + clippy 0 warning
+- **3 crate 补测试**（`5d5147c`）：
+  - sz-rust-tracing: 55 测试，100% 行覆盖率（新增 20）
+  - sz-rust-pdf: 164 测试，95.86% 行覆盖率（新增 29）
+  - sz-rust-addons-operate: 495 测试，87.84% 行覆盖率（新增 29）
+- **7 crate 生产接线到 sz300**（`c371148`）：
+  - erp/forum/im: 路由注册（`/api/erp/*`、`/api/forum/*`、`/api/im/*`），路径参数 `:id` → `{{id}}` 适配 axum 0.8
+  - operate/workflow/tracing/pdf: sz300 依赖链接 + `/api/addons/status` 端点暴露生产入口
+  - 验证: sz300 447 测试 + erp 23 + forum 23 + im 23 全部通过
+
+### Fixed
+
+- **R001-R007 安全项全部人工复核完成**（doc-debt DB-2026-08-16-05 RESOLVED）：
+  - R001 mem_pool transmute: arena 标准模式，unsafe fn 契约 + ADR-037（`mem_pool.rs:227`）
+  - R002 MCP SQL 注入: `validate_identifier` 白名单校验阻止注入（`mcp/lib.rs:74-98`）
+  - R003 from_utf8_unchecked: 输入为合法 &str 副本（`mem_pool.rs:144`）
+  - R004 std::fs: 已修，`PROD_STD_FS=0`
+  - R005 admin 信息暴露: `admin_role_guard` 保护（`router.rs:173`）
+  - R006 hot_reload unsafe: feature-gated 默认关闭（`hot_reload.rs:82`）
+  - R007 SIMD unsafe: 不暴露 unsafe 到公开 API（`simd_safe.rs:8`）
+
+### Changed
+
+- workspace crate 数 28 → 35（新增 7 个 member）
+- 全部提交已 push 到 origin/main（`c371148`）
+
+## [Unreleased] - 2026-08-19（CI-001~007 覆盖率 CI 集成增强）
+
+### Added
+
+- **CI-001~007 覆盖率 CI 集成增强**（`d6379c5`）：
+  - ci.yml 门禁 14: 拆分 llvm-cov 为常规+DB 两步 + per-crate-coverage.js 分 crate 门槛校验 + needs:[assertion-value] 联动 + COVERAGE_THRESHOLD 环境变量
+  - coverage.yml: 4 并行分片 job (p0/p1/p2/p3) + coverage-merge job + sz300 --fail-under 85 + COVERAGE_THRESHOLD
+
 ## [Unreleased] - 2026-08-16（PR 审查编排 Skill：状态机 + 5 环节 + 严重度模型）
 
 ### Added
