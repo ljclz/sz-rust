@@ -30,6 +30,14 @@ members = [
     "packages/sz-rust-capability",
     "packages/sz-rust-rag",
     "packages/sz-rust-frontend-codegen",
+
+    "packages/sz-rust-tracing",
+    "packages/sz-rust-pdf",
+    "packages/sz-rust-workflow",
+    "packages/sz-rust-addons-operate",
+    "packages/sz-rust-addons-erp",
+    "packages/sz-rust-addons-forum",
+    "packages/sz-rust-addons-im",
 ]
 
 [workspace.package]

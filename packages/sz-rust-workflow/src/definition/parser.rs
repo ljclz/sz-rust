@@ -13,7 +13,8 @@ pub struct DefinitionParser {
 impl DefinitionParser {
     pub fn new() -> Self {
         Self {
-            flow_key_re: Regex::new(r"^[a-z][a-z0-9_.]{0,63}$").expect("flow_key 正则编译失败（编译期常量，必然合法）"),
+            flow_key_re: Regex::new(r"^[a-z][a-z0-9_.]{0,63}$")
+                .expect("flow_key 正则编译失败（编译期常量，必然合法）"),
         }
     }
 
