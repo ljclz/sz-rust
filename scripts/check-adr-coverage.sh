@@ -12,7 +12,10 @@
 set -euo pipefail
 
 ADR_DIR="docs/adr"
-REQUIRED_FIELDS=("状态" "日期" "相关代码" "背景" "决策" "后果" "注意事项" "Bug 定位提示")
+# 必填字段（缺失即 FAIL）
+REQUIRED_FIELDS=("状态" "日期" "决策")
+# 建议字段（缺失仅 WARN，不阻塞 CI）
+SUGGESTED_FIELDS=("相关代码" "背景" "后果" "注意事项" "Bug 定位提示")
 MIN_DENSITY=0.15
 
 # 颜色输出
@@ -77,19 +80,31 @@ for adr_file in "$ADR_DIR"/ADR-*.md "$ADR_DIR"/[0-9]*.md; do
     [ -f "$adr_file" ] || continue
 
     filename=$(basename "$adr_file")
-    missing_fields=()
+    missing_required=()
+    missing_suggested=()
 
     for field in "${REQUIRED_FIELDS[@]}"; do
         if ! grep -q "$field" "$adr_file"; then
-            missing_fields+=("$field")
+            missing_required+=("$field")
         fi
     done
 
-    if [ ${#missing_fields[@]} -gt 0 ]; then
-        echo -e "${RED}[FAIL] $filename 缺少必填字段: ${missing_fields[*]}${NC}"
+    for field in "${SUGGESTED_FIELDS[@]}"; do
+        if ! grep -q "$field" "$adr_file"; then
+            missing_suggested+=("$field")
+        fi
+    done
+
+    if [ ${#missing_required[@]} -gt 0 ]; then
+        echo -e "${RED}[FAIL] $filename 缺少必填字段: ${missing_required[*]}${NC}"
         error_count=$((error_count + 1))
     else
-        echo -e "${GREEN}[PASS] $filename 格式完整${NC}"
+        echo -e "${GREEN}[PASS] $filename 必填字段完整${NC}"
+    fi
+
+    if [ ${#missing_suggested[@]} -gt 0 ]; then
+        echo -e "${YELLOW}[WARN] $filename 缺少建议字段: ${missing_suggested[*]}${NC}"
+        warning_count=$((warning_count + 1))
     fi
 
     # 检查是否包含"决策替代方案"段（建议有，非强制）

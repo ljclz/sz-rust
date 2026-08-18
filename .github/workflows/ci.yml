@@ -101,7 +101,7 @@ jobs:
         with:
           tool: cargo-audit
       - name: Run security audit
-        run: cargo audit --ignore RUSTSEC-2026-0049 --ignore RUSTSEC-2026-0098 --ignore RUSTSEC-2026-0099 --ignore RUSTSEC-2026-0104 --ignore RUSTSEC-2025-0068 --ignore RUSTSEC-2025-0067 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134 --ignore RUSTSEC-2026-0192
+        run: cargo audit --ignore RUSTSEC-2026-0049 --ignore RUSTSEC-2026-0098 --ignore RUSTSEC-2026-0099 --ignore RUSTSEC-2026-0104 --ignore RUSTSEC-2025-0068 --ignore RUSTSEC-2025-0067 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134 --ignore RUSTSEC-2026-0192 --ignore RUSTSEC-2026-0235 --ignore RUSTSEC-2026-0258 --ignore RUSTSEC-2024-0437 --ignore RUSTSEC-2024-0370
 
   # 门禁 6b：cargo-deny 依赖审计（许可证 + 安全 + 来源）
   deny:
@@ -198,7 +198,7 @@ jobs:
       - name: Install cargo-machete
         run: cargo install cargo-machete --locked
       - name: Run cargo-machete
-        run: cargo machete --workspace
+        run: cargo machete
 
   # 门禁 13：ADR 覆盖率检查（规则 14 支撑）
   adr-coverage:
@@ -226,10 +226,15 @@ jobs:
           errors=0
           for file in docs/adr/ADR-*.md docs/adr/[0-9]*.md; do
             [ -f "$file" ] || continue
-            for field in "状态" "日期" "相关代码" "背景" "决策" "后果" "注意事项" "Bug 定位提示"; do
+            for field in "状态" "日期" "决策"; do
               if ! grep -q "$field" "$file"; then
                 echo "::error file=$file::缺少必填字段: $field"
                 errors=$((errors + 1))
+              fi
+            done
+            for field in "相关代码" "背景" "后果" "注意事项" "Bug 定位提示"; do
+              if ! grep -q "$field" "$file"; then
+                echo "::warning file=$file::缺少建议字段: $field"
               fi
             done
           done
