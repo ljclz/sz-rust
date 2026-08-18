@@ -960,11 +960,95 @@ mod tests {
     fn test_set_column_width_boundary() {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
-        // 列 0 (A)
         sheet.set_column_width(0, 10.0).unwrap();
-        // 列 25 (Z)
         sheet.set_column_width(25, 20.0).unwrap();
-        // 列 26 (AA)
         sheet.set_column_width(26, 30.0).unwrap();
+    }
+
+    #[test]
+    fn test_cell_value_from_u32() {
+        let v: CellValue = 42u32.into();
+        assert!(matches!(v, CellValue::Int(42)));
+    }
+
+    #[test]
+    fn test_cell_value_from_u64() {
+        let v: CellValue = 42u64.into();
+        assert!(matches!(v, CellValue::Int(42)));
+    }
+
+    #[test]
+    fn test_cell_value_from_f32() {
+        let v: CellValue = 2.5f32.into();
+        assert!(matches!(v, CellValue::Float(_)));
+    }
+
+    #[test]
+    fn test_spreadsheet_default() {
+        let mut spreadsheet = Spreadsheet::default();
+        assert_eq!(spreadsheet.worksheet_count(), 1);
+    }
+
+    #[test]
+    fn test_set_cell_value_by_row_col_basic() {
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value_by_row_col(0, 0, "hello").unwrap();
+        sheet.set_cell_value_by_row_col(1, 1, 42i64).unwrap();
+        sheet.set_cell_value_by_row_col(2, 2, 2.5f64).unwrap();
+        sheet.set_cell_value_by_row_col(3, 3, true).unwrap();
+        sheet
+            .set_cell_value_by_row_col(4, 4, CellValue::Null)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_set_cell_value_float_string_auto_infer() {
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value("A1", "2.5").unwrap();
+        sheet.set_cell_value("A2", "3.14").unwrap();
+    }
+
+    #[test]
+    fn test_set_cell_value_inf_nan_string() {
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet.set_cell_value("A1", "inf").unwrap();
+        sheet.set_cell_value("A2", "nan").unwrap();
+        sheet.set_cell_value("A3", "-inf").unwrap();
+    }
+
+    #[test]
+    fn test_set_cell_value_explicit_auto_type() {
+        let mut spreadsheet = Spreadsheet::new();
+        let mut sheet = spreadsheet.active_sheet();
+        sheet
+            .set_cell_value_explicit("A1", "123", CellType::Auto)
+            .unwrap();
+        sheet
+            .set_cell_value_explicit("A2", "text", CellType::Auto)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_set_cell_value_by_row_col_then_save() {
+        let mut spreadsheet = Spreadsheet::new();
+        {
+            let mut sheet = spreadsheet.active_sheet();
+            sheet.set_title("BatchSheet").unwrap();
+            for row in 0..5u32 {
+                sheet
+                    .set_cell_value_by_row_col(row, 0, format!("R{row}"))
+                    .unwrap();
+                sheet
+                    .set_cell_value_by_row_col(row, 1, (row as i64) * 10)
+                    .unwrap();
+            }
+        }
+        let writer = create_writer(spreadsheet);
+        let bytes = writer.save_to_buffer().unwrap();
+        assert!(!bytes.is_empty());
+        assert_eq!(&bytes[..4], b"PK\x03\x04");
     }
 }

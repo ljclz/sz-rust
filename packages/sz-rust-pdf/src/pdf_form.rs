@@ -609,4 +609,258 @@ mod tests {
         assert_eq!(pdf.filled_count(), 0);
         assert!(!pdf.is_flattened());
     }
+
+    #[test]
+    fn test_fill_form_field_without_t() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut field_no_t = Dictionary::new();
+        field_no_t.set(
+            "V",
+            Object::String(Vec::new(), lopdf::StringFormat::Literal),
+        );
+        let field_no_t_id = doc.add_object(field_no_t);
+
+        let mut field_with_t = Dictionary::new();
+        field_with_t.set(
+            "T",
+            Object::String(b"named_field".to_vec(), lopdf::StringFormat::Literal),
+        );
+        field_with_t.set(
+            "V",
+            Object::String(Vec::new(), lopdf::StringFormat::Literal),
+        );
+        let field_with_t_id = doc.add_object(field_with_t);
+
+        let mut acroform = Dictionary::new();
+        acroform.set(
+            "Fields",
+            Object::Array(vec![
+                Object::Reference(field_no_t_id),
+                Object::Reference(field_with_t_id),
+            ]),
+        );
+        let acroform_id = doc.add_object(acroform);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Reference(acroform_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let mut data = HashMap::new();
+        data.insert("named_field".to_string(), "value".to_string());
+        let pdf = Pdf::load(tmp.path()).unwrap().fill_form(&data).unwrap();
+        assert_eq!(pdf.filled_count(), 1);
+    }
+
+    #[test]
+    fn test_fill_form_fields_not_array_error() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut acroform = Dictionary::new();
+        acroform.set("Fields", Object::Integer(42));
+        let acroform_id = doc.add_object(acroform);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Reference(acroform_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let data = HashMap::new();
+        let result = Pdf::load(tmp.path()).unwrap().fill_form(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fill_form_field_item_not_reference_error() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut acroform = Dictionary::new();
+        acroform.set("Fields", Object::Array(vec![Object::Integer(42)]));
+        let acroform_id = doc.add_object(acroform);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Reference(acroform_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let data = HashMap::new();
+        let result = Pdf::load(tmp.path()).unwrap().fill_form(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fill_form_acroform_not_reference_error() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Integer(42));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let mut data = HashMap::new();
+        data.insert("field".to_string(), "value".to_string());
+        let result = Pdf::load(tmp.path()).unwrap().fill_form(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fill_form_field_with_name_type_t() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut field = Dictionary::new();
+        field.set("T", Object::Name(b"name_type_field".to_vec()));
+        field.set(
+            "V",
+            Object::String(Vec::new(), lopdf::StringFormat::Literal),
+        );
+        let field_id = doc.add_object(field);
+
+        let mut acroform = Dictionary::new();
+        acroform.set("Fields", Object::Array(vec![Object::Reference(field_id)]));
+        let acroform_id = doc.add_object(acroform);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Reference(acroform_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let mut data = HashMap::new();
+        data.insert("name_type_field".to_string(), "value".to_string());
+        let pdf = Pdf::load(tmp.path()).unwrap().fill_form(&data).unwrap();
+        assert_eq!(pdf.filled_count(), 1);
+    }
+
+    #[test]
+    fn test_fill_form_field_with_invalid_t_type_error() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+
+        let mut field = Dictionary::new();
+        field.set("T", Object::Integer(42));
+        field.set(
+            "V",
+            Object::String(Vec::new(), lopdf::StringFormat::Literal),
+        );
+        let field_id = doc.add_object(field);
+
+        let mut acroform = Dictionary::new();
+        acroform.set("Fields", Object::Array(vec![Object::Reference(field_id)]));
+        let acroform_id = doc.add_object(acroform);
+
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        catalog_dict.set("AcroForm", Object::Reference(acroform_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let mut data = HashMap::new();
+        data.insert("field".to_string(), "value".to_string());
+        let result = Pdf::load(tmp.path()).unwrap().fill_form(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_flatten_no_acroform_error() {
+        let mut doc = Document::new();
+        let mut pages_dict = Dictionary::new();
+        pages_dict.set("Count", Object::Integer(0));
+        pages_dict.set("Kids", Object::Array(Vec::new()));
+        let pages_id = doc.add_object(pages_dict);
+        let mut catalog_dict = Dictionary::new();
+        catalog_dict.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog_dict.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(catalog_dict);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let tmp = tempfile::Builder::new().suffix(".pdf").tempfile().unwrap();
+        doc.save(tmp.path()).unwrap();
+
+        let result = Pdf::load(tmp.path()).unwrap().flatten();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_mem_invalid_bytes() {
+        let invalid_bytes = b"not a pdf";
+        let result = Pdf::load_mem(invalid_bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fill_form_all_fields_matched() {
+        let tmp = make_test_pdf();
+        let mut data = HashMap::new();
+        data.insert("store_name".to_string(), "太平店".to_string());
+        data.insert("amount".to_string(), "2500".to_string());
+        data.insert("year".to_string(), "2026".to_string());
+        let pdf = Pdf::load(tmp.path()).unwrap().fill_form(&data).unwrap();
+        assert_eq!(pdf.filled_count(), 3);
+    }
+
+    #[test]
+    fn test_fill_form_then_to_bytes() {
+        let tmp = make_test_pdf();
+        let mut data = HashMap::new();
+        data.insert("store_name".to_string(), "测试".to_string());
+        let bytes = Pdf::load(tmp.path())
+            .unwrap()
+            .fill_form(&data)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+    }
 }
