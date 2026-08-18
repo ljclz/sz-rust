@@ -26,6 +26,13 @@ sz-rust-capability.workspace = true
 sz-rust-ai-facade = { workspace = true, features = ["all-providers"] }
 sz-rust-cache-facade.workspace = true
 sz-rust-addons-ecommerce.workspace = true
+sz-rust-addons-erp.workspace = true
+sz-rust-addons-forum.workspace = true
+sz-rust-addons-im.workspace = true
+sz-rust-addons-operate.workspace = true
+sz-rust-tracing.workspace = true
+sz-rust-pdf.workspace = true
+sz-rust-workflow.workspace = true
 sz-rust-rag.workspace = true
 sz-orm-sqlx.workspace = true
 # 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。

@@ -78,7 +78,7 @@ where
         }
     });
 
-    let builder = builder.get(&format!("{}/conversations/:id/messages", base), {
+    let builder = builder.get(&format!("{}/conversations/{{id}}/messages", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(
@@ -88,7 +88,7 @@ where
         }
     });
 
-    let builder = builder.post(&format!("{}/conversations/:id/messages", base), {
+    let builder = builder.post(&format!("{}/conversations/{{id}}/messages", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(
@@ -97,7 +97,7 @@ where
         }
     });
 
-    let builder = builder.get(&format!("{}/users/:id/status", base), {
+    let builder = builder.get(&format!("{}/users/{{id}}/status", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(
@@ -107,7 +107,7 @@ where
         }
     });
 
-    let builder = builder.put(&format!("{}/users/:id/status", base), {
+    let builder = builder.put(&format!("{}/users/{{id}}/status", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(

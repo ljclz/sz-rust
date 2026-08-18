@@ -1,5 +1,6 @@
 use crate::controllers::{
-    ai, auth, capabilities, device, file, file_serve, health, merchant, order, product, view,
+    addons, ai, auth, capabilities, device, file, file_serve, health, merchant, order, product,
+    view,
 };
 use crate::middleware::auth_middleware;
 use crate::middleware::metrics_auth::{metrics_auth_middleware, ClientIp};
@@ -40,6 +41,7 @@ pub const PUBLIC_PATHS: &[&str] = &[
     "/api-docs",
     "/api-docs/redoc",
     "/api-docs/openapi.json",
+    "/api/addons/status",
 ];
 
 /// 判断路径是否在公开白名单中（精确匹配，避免前缀绕过）
@@ -154,7 +156,9 @@ pub fn create_router(state: AppState) -> Router {
         // 视图模板渲染
         .route("/page/{template}", get(view::render_page))
         // 静态文件服务
-        .route("/uploads/{*path}", get(file_serve::serve_file));
+        .route("/uploads/{*path}", get(file_serve::serve_file))
+        // Addon 状态查询（列出所有已链接的 addon crate）
+        .route("/api/addons/status", get(addons::status));
 
     // Admin Monitor API（admin feature 门控）
     // 需要 admin 角色才能访问（role_guard 在 auth_middleware 之上叠加角色检查）
@@ -176,6 +180,19 @@ pub fn create_router(state: AppState) -> Router {
     let ec_state = sz_rust_addons_ecommerce::EcommerceState::default();
     let builder = sz_rust_core::router::RouterBuilder::with_router(router);
     let builder = sz_rust_addons_ecommerce::register_routes(builder, ec_state);
+
+    // 接入 erp 插件路由（/api/erp/*）
+    let erp_state = sz_rust_addons_erp::ErpState::default();
+    let builder = sz_rust_addons_erp::register_routes(builder, erp_state);
+
+    // 接入 forum 插件路由（/api/forum/*）
+    let forum_state = sz_rust_addons_forum::ForumState::default();
+    let builder = sz_rust_addons_forum::register_routes(builder, forum_state);
+
+    // 接入 im 插件路由（/api/im/*）
+    let im_state = sz_rust_addons_im::ImState::default();
+    let builder = sz_rust_addons_im::register_routes(builder, im_state);
+
     let router = builder.build();
 
     // 限流配置（令牌桶，从环境变量读取阈值，健康检查/metrics 排除）

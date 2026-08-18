@@ -95,13 +95,13 @@ where
             Json(controller::product::ProductController::create(&*s.products, body.0).await)
         }
     });
-    let builder = builder.get(&format!("{}/products/:id", base), {
+    let builder = builder.get(&format!("{}/products/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::product::ProductController::get(&*s.products, path.id).await)
         }
     });
-    let builder = builder.put(&format!("{}/products/:id", base), {
+    let builder = builder.put(&format!("{}/products/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(
@@ -109,7 +109,7 @@ where
             )
         }
     });
-    let builder = builder.delete(&format!("{}/products/:id", base), {
+    let builder = builder.delete(&format!("{}/products/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::product::ProductController::delete(&*s.products, path.id).await)
@@ -137,13 +137,13 @@ where
             Json(controller::supplier::SupplierController::create(&*s.suppliers, body.0).await)
         }
     });
-    let builder = builder.get(&format!("{}/suppliers/:id", base), {
+    let builder = builder.get(&format!("{}/suppliers/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::supplier::SupplierController::get(&*s.suppliers, path.id).await)
         }
     });
-    let builder = builder.put(&format!("{}/suppliers/:id", base), {
+    let builder = builder.put(&format!("{}/suppliers/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(
@@ -152,7 +152,7 @@ where
             )
         }
     });
-    let builder = builder.delete(&format!("{}/suppliers/:id", base), {
+    let builder = builder.delete(&format!("{}/suppliers/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::supplier::SupplierController::delete(&*s.suppliers, path.id).await)
@@ -186,7 +186,7 @@ where
             )
         }
     });
-    let builder = builder.get(&format!("{}/purchase_orders/:id", base), {
+    let builder = builder.get(&format!("{}/purchase_orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(
@@ -198,7 +198,7 @@ where
             )
         }
     });
-    let builder = builder.put(&format!("{}/purchase_orders/:id", base), {
+    let builder = builder.put(&format!("{}/purchase_orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(
@@ -211,7 +211,7 @@ where
             )
         }
     });
-    let builder = builder.delete(&format!("{}/purchase_orders/:id", base), {
+    let builder = builder.delete(&format!("{}/purchase_orders/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(
@@ -223,7 +223,7 @@ where
             )
         }
     });
-    let builder = builder.post(&format!("{}/purchase_orders/:id/approve", base), {
+    let builder = builder.post(&format!("{}/purchase_orders/{{id}}/approve", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(

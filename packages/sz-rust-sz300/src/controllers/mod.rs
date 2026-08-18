@@ -1,3 +1,5 @@
+/// Addon 状态控制器（列出所有已链接的 addon crate）
+pub mod addons;
 /// 管理监控控制器（admin feature 门控）
 #[cfg(feature = "admin")]
 pub mod admin;

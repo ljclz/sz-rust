@@ -89,28 +89,28 @@ where
         }
     });
 
-    let builder = builder.get(&format!("{}/topics/:id", base), {
+    let builder = builder.get(&format!("{}/topics/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::topic::TopicController::get(&*s.topics, path.id).await)
         }
     });
 
-    let builder = builder.delete(&format!("{}/topics/:id", base), {
+    let builder = builder.delete(&format!("{}/topics/{{id}}", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::topic::TopicController::delete(&*s.topics, path.id).await)
         }
     });
 
-    let builder = builder.get(&format!("{}/topics/:id/replies", base), {
+    let builder = builder.get(&format!("{}/topics/{{id}}/replies", base), {
         let s = state.clone();
         move |path: Path<IdPath>| async move {
             Json(controller::reply::ReplyController::list_by_topic(&*s.replies, path.id).await)
         }
     });
 
-    let builder = builder.post(&format!("{}/topics/:id/replies", base), {
+    let builder = builder.post(&format!("{}/topics/{{id}}/replies", base), {
         let s = state.clone();
         move |path: Path<IdPath>, body: Json<Value>| async move {
             Json(controller::reply::ReplyController::create(&*s.replies, path.id, body.0).await)
