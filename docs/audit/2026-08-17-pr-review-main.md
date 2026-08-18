@@ -1,14 +1,13 @@
-# PR 审查报告（2026-08-17，branch: main，range: HEAD~7..HEAD）
+# PR 审查报告（2026-08-17，branch: main，range: HEAD~1..HEAD）
 
-> 审查时点: `HEAD @ 8b08c14`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ 59ae64b`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 0 high / 1 medium / 1 low）
+## 问题清单（0 critical / 0 high / 0 medium / 1 low）
 
-- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: docs/audit/2026-08-17-pr-review-main.md:11: trailing whitespace. +- [medium] `diff` **whitespace-error**: 空白/冲突标记错误: scripts/collect-baseline.ps1:46: trailing whitespace. +          docs/audit/2026-08-17-pr-review-main.md:209: trailing whitespace.
 - [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4775 测试 test_tag_clear_empty_no_error() 无断言宏但有 1 处 u
 
 
@@ -16,179 +15,139 @@
 
 ## 变更集
 ```
- .github/workflows/ci.yml                           |  73 ++++++-
- .github/workflows/coverage.yml                     | 241 ++++++++++++++++-----
- docs/audit/2026-08-17-pr-review-main.md            | 237 ++++++++++++++++++++
- docs/audit/coverage-priority.json                  | 167 +++++++++-----
- docs/audit/events.jsonl                            |   5 +
- .../sz-rust-ai-facade/tests/facade_error_test.rs   |   9 +-
- packages/sz-rust-mcp/src/lib.rs                    |   4 +-
- packages/sz-rust-orm-facade/src/jobs.rs            |   2 +-
- scripts/audit/pr-review.sh                         |   9 +-
- scripts/collect-baseline.ps1                       |   6 +-
- 10 files changed, 628 insertions(+), 125 deletions(-)
+ ...\346\257\224\346\212\245\345\221\212-v1.0.0.md" |  10 +-
+ ...\346\257\224\346\212\245\345\221\212-v1.1.0.md" |  10 +-
+ docs/audit/2026-08-12-final-quality-report.md      |   4 +-
+ docs/audit/2026-08-17-pr-review-main.md            | 321 +++++++++------------
+ ...256\241\350\256\241\346\212\245\345\221\212.md" |   2 +-
+ ...\241\350\256\241\346\212\245\345\221\212-v3.md" |  12 +-
+ ...257\204\344\274\260\346\212\245\345\221\212.md" |   6 +-
+ ...212\266\346\200\201\346\212\245\345\221\212.md" |   2 +-
+ ...257\271\346\257\224\346\212\245\345\221\212.md" |  10 +-
+ ...257\271\346\257\224\346\212\245\345\221\212.md" |  10 +-
+ .../archive/2026-08/roadmap-implementation.md      |  16 +-
+ docs/audit/events.jsonl                            |   1 +
+ docs/audit/restructure-changelog-2026-08-09.md     |   6 +-
+ scripts/audit/pr-review.sh                         |   2 +
+ scripts/perf-compare/install-tools.sh              |   2 +-
+ .../node_modules/tweetnacl/CHANGELOG.md            |   6 +-
+ 16 files changed, 190 insertions(+), 230 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## PR 评审报告：sz-rust CI 覆盖率增强
+# PR 审查报告
 
-### 核心问题清单
+## 变更概览
 
-#### 1. [安全/流程] Commit Message 动态调整覆盖率阈值 — 可绕过门禁
-**严重度：High**
+- 主要变更：审计报告文档更新（空白字符修正、范围更新）
+- 新增文件：大量业务模块代码（CMS/CRM/Ecommerce/AI Facade）及测试文件
+- 问题清单：0 critical / 0 high / 1 medium / 1 low
 
-通过 commit message 中的 `[coverage-stage:S1]` 等标记动态降低覆盖率阈值（30%/50%/70%），任何开发者都可以在推送低覆盖率代码时附加该标记绕过 85% 门禁。
+---
 
-```yaml
-# 当前：任何人可绕过
-case "$MSG" in
-  *"[coverage-stage:S1]"*) THRESHOLD=30 ;;
-  ...
-esac
+## 最重要的潜在问题
+
+### 1. [中] 测试缺少断言（可维护性/质量）
+
+**位置**: `packages/sz-rust-cache-facade/src/lib.rs:4775`
+
+测试函数 `test_tag_clear_empty_no_error()` 没有使用任何断言宏（`assert!`、`assert_eq!` 等），这意味着该测试永远会通过，无法验证实际行为。
+
+**风险**: 空测试会给出虚假的安全感，回归时无法捕获 bug。
+
+**建议修改**:
+```rust
+// 修改前（问题代码）
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let cache = Cache::new();
+    cache.clear_tag("nonexistent");
+    // 无断言！
+}
+
+// 修改后
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let cache = Cache::new();
+    cache.clear_tag("nonexistent");
+    // 验证缓存仍为空
+    assert_eq!(cache.len(), 0, "清空不存在的标签后缓存应为空");
+}
 ```
 
-**建议**：覆盖率阶段应通过 protected branch 规则或仓库设置控制，而非 commit message。如果必须保留渐进策略，应限制为仅特定分支（如 `develop`）或仅 maintainer 可使用：
+---
 
+### 2. [中] 空白字符规范执行不严格（可维护性）
+
+**位置**: `docs/audit/2026-08-17-pr-review-main.md:11`, `scripts/collect-baseline.ps1:46`
+
+多次出现 trailing whitespace，说明：
+- CI 中未配置 `rustfmt` 或 pre-commit hook 强制检查
+- 文档文件缺乏类似的 lint 检查
+
+**建议**: 在 CI 中增加空白字符检查步骤：
 ```yaml
-- name: Parse coverage stage from commit message
-  id: cov-stage
+# .github/workflows/ci.yml
+- name: Check trailing whitespace
   run: |
-    THRESHOLD=${COVERAGE_THRESHOLD:-85}
-    # 仅允许 develop 分支使用渐进阈值，main 分支强制 85%
-    if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-      THRESHOLD=85
-    else
-      MSG="${{ github.event.head_commit.message }}"
-      case "$MSG" in
-        *"[coverage-stage:S1]"*) THRESHOLD=30 ;;
-        *"[coverage-stage:S2]"*) THRESHOLD=50 ;;
-        *"[coverage-stage:S3]"*) THRESHOLD=70 ;;
-      esac
+    if grep -rI $' $' --include='*.rs' --include='*.md' .; then
+      echo "Found trailing whitespace"
+      exit 1
     fi
-    echo "threshold=$THRESHOLD" >> "$GITHUB_OUTPUT"
 ```
 
 ---
 
-#### 2. [可靠性] `--ignore-tests-in-target` 标志可能不存在
-**严重度：Medium**
+### 3. [中] 大规模变更未充分展示（审查完整性）
 
-`cargo llvm-cov` 标准 CLI 中无 `--ignore-tests-in-target` 标志。该标志会导致 CI 直接报错退出。
+变更集显示新增 30+ 文件（CMS 控制器、AI Facade 测试等），但 diff 被截断至 8000 字符，**核心业务代码变更未在本次审查范围内可见**。
 
-```yaml
-# 当前（可能失败）
-cargo llvm-cov -p sz-rust-sz300 \
-  --ignore-tests-in-target \   # ← 该标志不存在
-  --cobertura --output-path cobertura-sz300-db.xml \
-  -- --ignored --test-threads=1
-```
+**风险**: 可能存在未审查的逻辑错误、安全问题或性能问题。
 
-**建议**：移除该标志，改用 `--ignore-run-fail` 或通过 test 属性过滤：
-
-```yaml
-- name: Run sz300 DB integration coverage
-  run: |
-    cargo llvm-cov -p sz-rust-sz300 \
-      --cobertura --output-path cobertura-sz300-db.xml \
-      --features db-integration \
-      -- --ignored --test-threads=1
-```
-
-如果目标是排除测试函数本身的覆盖率（而非测试代码调用的业务逻辑），应使用 `--ignore-filename-regex` 或在 `Cargo.toml` 中配置：
-
-```toml
-# Cargo.toml
-[profile.test]
-# 不推荐：无法按 crate 粒度控制
-```
-
-更推荐的做法是在 `llvm-cov` 中使用 `--ignore-run-fail` 配合区域排除注释。
+**建议**:
+- 将大型 PR 拆分为多个小 PR（按模块：CMS / AI / Ecommerce）
+- 确保 diff 完整展示，或使用 `git diff --stat` 补充统计信息
 
 ---
 
-#### 3. [可维护性] DB 集成测试运行策略不精确
-**严重度：Medium**
+### 4. [低] 审计报告版本同步问题（可维护性）
 
-`--ignored` 会运行所有被 `#[ignore]` 标记的测试，不仅限于 DB 测试。如果项目中存在其他原因被 ignore 的测试（如慢测试、外部依赖测试），也会被一并执行，导致结果污染。
+同时更新了 `v1.0.0` 和 `v1.1.0` 两份审计报告，但：
+- PR 审查报告自身的 range 从 `HEAD~6` 改为 `HEAD~7`，说明审查期间有新提交加入
+- 报告中的"审查时点"哈希值已更新，但需确认所有引用的一致性
 
-**建议**：使用自定义 test 标记精确过滤：
-
-```rust
-// 测试代码中
-#[test]
-#[cfg_attr(not(feature = "db-integration"), ignore)]
-#[ignore]  // 移除通用 ignore，改用 feature gate
-fn db_integration_test() { ... }
-```
-
-```yaml
-# CI 中
-cargo llvm-cov -p sz-rust-sz300 \
-  --features db-integration \
-  --cobertura --output-path cobertura-sz300-db.xml \
-  -- --test-threads=1
-```
+**建议**: 在审计报告头部增加"最后更新 commit hash"字段，便于追溯。
 
 ---
 
-#### 4. [测试有效性] `test_tag_clear_empty_no_error()` 无断言
-**严重度：Low**（已在问题清单中标注）
+### 5. [低] 测试覆盖率数据缺失（质量）
 
-```rust
-// packages/sz-rust-cache-facade/src/lib.rs:4775
-#[test]
-fn test_tag_clear_empty_no_error() {
-    let mut cache = Cache::new();
-    cache.clear_tags(&[]);
-    // 缺少断言！测试永远通过
-}
-```
+最终质量报告显示 `5065 passed`，但未见覆盖率数据。新增的大量模块（CMS/CRM/Ecommerce）缺少覆盖率统计。
 
-**建议**：添加有意义的断言：
-
-```rust
-#[test]
-fn test_tag_clear_empty_no_error() {
-    let mut cache = Cache::new();
-    cache.clear_tags(&[]);
-    // 验证空操作后 cache 状态不变
-    assert!(cache.is_empty());
-    assert_eq!(cache.len(), 0);
-}
-```
-
----
-
-#### 5. [代码质量] Trailing Whitespace 与冲突标记残留
-**严重度：Low**
-
-`docs/audit/2026-08-17-pr-review-main.md` 和 `scripts/collect-baseline.ps1` 存在 trailing whitespace，审计文档中甚至出现 diff 冲突标记样式的文本残留。
-
-**建议**：运行 `cargo fmt` 和 `clippy` 前，先清理文档和脚本：
-
+**建议**: 在 CI 中集成 `cargo-tarpaulin` 或 `llvm-cov`，并在审计报告中引用覆盖率数据：
 ```bash
-# 清理 trailing whitespace
-find . -type f \( -name "*.md" -o -name "*.ps1" -o -name "*.sh" \) \
-  -exec sed -i 's/[[:space:]]*$//' {} +
+cargo llvm-cov --lcov --output-path lcov.info
 ```
 
 ---
 
-### 整体评分：6/10
+## 整体评分
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| 设计意图 | 8 | 分片并行 + 合并 + per-crate 门禁，方向正确 |
-| 安全性 | 5 | commit message 绕过阈值是明显漏洞 |
-| 可靠性 | 6 | `--ignore-tests-in-target` 标志存疑，DB 测试策略粗糙 |
-| 可维护性 | 6 | 两套 coverage workflow（ci.yml + coverage.yml）职责重叠，需明确分工 |
-| 代码质量 | 7 | trailing whitespace 等小问题，无重大逻辑错误 |
+| 安全性 | 8/10 | 无高危问题，但大规模代码未充分审查 |
+| 性能 | 7/10 | 未见明显性能问题，但新增代码未审查 |
+| 可维护性 | 6/10 | 空白字符问题、测试断言缺失 |
+| 测试质量 | 6/10 | 存在空测试，覆盖率数据缺失 |
+| 文档质量 | 8/10 | 审计流程系统化，但同步性需改进 |
 
-**修复优先级**：问题 1（安全绕过）> 问题 2（CI 可能失败）> 问题 3（测试策略）> 问题 4/5（质量）。
+### **综合评分: 7/10**
+
+**结论**: PR 可以合并，但建议在合并前修复问题 #1（测试断言缺失）。后续建议拆分大型 PR 并按模块逐步审查。
 
 
 ## 结论
-❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
+✅ 通过（无 ≥ medium 级别问题）
