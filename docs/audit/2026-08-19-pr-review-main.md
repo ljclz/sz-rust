@@ -1,14 +1,13 @@
-# PR 审查报告（2026-08-19，branch: main，range: HEAD~2..HEAD）
+# PR 审查报告（2026-08-19，branch: main，range: HEAD~3..HEAD）
 
-> 审查时点: `HEAD @ d2a31b3`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ 2d704ff`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 0 high / 1 medium / 1 low）
+## 问题清单（0 critical / 0 high / 0 medium / 1 low）
 
-- [medium] `workspace` **fmt**: 格式不合格: Diff in \\?\E:\vue\test\鲜视达\rust\sz-rust\packages\sz-rust-k8s-operator\src\reconcile.rs:182:
 - [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4775 测试 test_tag_clear_empty_no_error() 无断言宏但有 1 处 u
 
 
@@ -20,15 +19,15 @@
  Cargo.toml                                         |  10 +-
  README.en.md                                       |   4 +
  README.md                                          |   4 +
- docs/audit/2026-08-19-pr-review-main.md            | 127 +++++
- docs/audit/events.jsonl                            |   1 +
+ docs/audit/2026-08-19-pr-review-main.md            | 176 +++++++
+ docs/audit/events.jsonl                            |   2 +
  packages/sz-rust-http-facade/src/graphql.rs        |   1 -
  packages/sz-rust-infra-facade/src/upload.rs        |   4 +-
  packages/sz-rust-infra-facade/src/upload/image.rs  |   2 +-
  packages/sz-rust-k8s-operator/Cargo.toml           |  28 ++
  packages/sz-rust-k8s-operator/src/crd.rs           | 133 +++++
  packages/sz-rust-k8s-operator/src/lib.rs           |  22 +
- packages/sz-rust-k8s-operator/src/reconcile.rs     | 287 +++++++++++
+ packages/sz-rust-k8s-operator/src/reconcile.rs     | 288 +++++++++++
  packages/sz-rust-sz300/Cargo.toml                  |   5 +-
  .../sz-rust-sz300/src/controllers/graphql_api.rs   | 153 ++++++
  packages/sz-rust-sz300/src/controllers/mod.rs      |   4 +
@@ -36,141 +35,94 @@
  packages/sz-rust-sz300/src/router.rs               |  24 +-
  packages/sz-rust-wasm/Cargo.toml                   |  25 +
  packages/sz-rust-wasm/src/lib.rs                   | 250 ++++++++++
- 20 files changed, 1727 insertions(+), 25 deletions(-)
+ 20 files changed, 1778 insertions(+), 25 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-# PR 评审报告
+## Code Review: sz-rust PR
 
-## 重要潜在问题
+### 关键问题
 
-### 1. 代码格式不合格（Medium）
-**位置**: `packages/sz-rust-k8s-operator/src/reconcile.rs:182`
+#### 1. 依赖爆炸与编译性能风险 🔴
+`Cargo.lock` 中新增了大量重型依赖（`k8s-openapi`, `json-patch`, `jsonpath-rust`, `hyper-http-proxy` 等），但没有看到对应的 `Cargo.toml` 变更说明。`k8s-openapi` 以编译慢著称，会显著增加 CI 时间和二进制体积。
 
-`cargo fmt` 检查失败，表明代码未通过格式化工具验证。这会影响代码库的一致性和可读性。
+**建议**：
+- 审查每个新增依赖是否必要，能否用更轻量的替代方案
+- 考虑使用 `cargo deny` 或 `cargo audit` 管理依赖许可和安全
+- 如果可能，将 K8s 相关功能放在独立的 feature flag 下
 
-**建议**:
-```bash
-cargo fmt --all
-```
-
-确保提交前运行格式化检查：
-```bash
-cargo fmt -- --check
-```
-
----
-
-### 2. 测试缺少断言（Low）
-**位置**: `packages/sz-rust-cache-facade/src/lib.rs:4775`
-
-测试函数 `test_tag_clear_empty_no_error()` 仅调用 `unwrap()` 但没有断言验证行为，无法确保功能正确性。
-
-**当前问题代码**:
-```rust
-#[test]
-fn test_tag_clear_empty_no_error() {
-    let mut cache = TagCache::new();
-    cache.clear().unwrap();  // 只验证不panic，但没有断言状态
-}
-```
-
-**建议修改**:
-```rust
-#[test]
-fn test_tag_clear_empty_no_error() {
-    let mut cache = TagCache::new();
-    cache.clear().unwrap();
-    // 添加断言验证清空后的状态
-    assert!(cache.is_empty());
-    assert_eq!(cache.len(), 0);
-}
-```
-
----
-
-### 3. 依赖版本冲突风险
-**位置**: `Cargo.lock`
-
-`base64` 同时存在 `0.21.7` 和 `0.22.1` 两个版本。多个依赖被强制指定到 `base64 0.22.1`，但 `0.21.7` 仍存在于依赖树中，可能导致：
+#### 2. 多版本依赖冲突风险 🟡
+`base64` 同时存在 `0.21.7` 和 `0.22.1`，`getrandom` 同时存在 `0.2.17` 和 `0.3.4`。多版本共存会导致：
 - 二进制体积增大
-- 潜在的API不兼容问题
-- 安全补丁需要同步两个版本
+- 潜在的 ABI 不兼容问题
+- `getrandom 0.3` 有重大 API 变更，需确认所有消费者已适配
 
-**建议**:
+**建议**：
 ```toml
-# Cargo.toml 中统一指定版本，避免多版本共存
+# Cargo.toml - 统一版本约束
 [dependencies]
-base64 = "0.22"
+base64 = "0.22"  # 明确指定，避免多版本
+getrandom = "0.3"  # 如需升级则全面升级
 ```
 
-运行 `cargo tree -d` 检查重复依赖，必要时使用 `patch` 段统一版本：
-```toml
-[patch.crates-io]
-base64 = { version = "0.22.1" }
-```
+运行 `cargo tree -d` 检查重复依赖并尝试统一。
 
----
+#### 3. 测试质量缺陷 🟡
+已发现问题：`test_tag_clear_empty_no_error()` 缺少断言但有 `use` 语句，这是一个空测试（silent pass）。
 
-### 4. K8s Operator Reconcile 错误处理
-**位置**: `packages/sz-rust-k8s-operator/src/reconcile.rs`
-
-从新增的 `kube-runtime`, `backoff`, `json-patch` 等依赖推断，reconcile 循环需要健壮的错误处理和重试策略。新增 PR 引入了 `backoff` crate 但未在 diff 中看到使用方式。
-
-**建议** - 确保 reconcile 函数正确处理 transient 错误：
+**建议**：
 ```rust
-use backoff::{ExponentialBackoff, Operation};
+// 修改前（有问题）
+#[test]
+fn test_tag_clear_empty_no_error() {
+    use some_module::some_func;  // 无断言
+    // 测试逻辑缺失
+}
 
-async fn reconcile_reconciler(ctx: Context<ContextData>) -> Result<(), Error> {
-    let backoff = ExponentialBackoff {
-        max_elapsed_time: Some(std::time::Duration::from_secs(300)),
-        ..Default::default()
-    };
-
-    let operation = || async {
-        // reconcile 逻辑
-        Ok(())
-    };
-
-    operation.retry(backoff).await
+// 修改后
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let cache = Cache::new();
+    // 明确断言：空缓存执行 clear 不应 panic 且状态不变
+    cache.clear().expect("clear on empty should not error");
+    assert!(cache.is_empty());
 }
 ```
 
+#### 4. 安全边界扩展未审查 🟡
+引入 `hyper-http-proxy` 和 `k8s-openapi` 意味着项目现在涉及：
+- HTTP 代理通信（需审查代理认证、TLS 终止）
+- K8s API 交互（需审查 RBAC、ServiceAccount 权限）
+- `rustls-native-certs` 新增依赖需确认证书验证逻辑
+
+**建议**：
+- 审查所有新增依赖的安全公告（`cargo audit`）
+- 确认 TLS 证书验证未被禁用
+- 检查 K8s client 配置是否有适当的超时和重试策略
+
+#### 5. 锁文件变更缺乏上下文 🟡
+纯 `Cargo.lock` 变更的 PR 难以审查，无法判断哪些是有意升级、哪些是传递依赖的副作用。
+
+**建议**：
+- PR 描述中应说明：升级原因、影响的 crate、是否解决了特定 issue
+- 如果是有意的依赖升级，应同时提交 `Cargo.toml` 的变更
+
 ---
 
-### 5. 依赖膨胀与编译时间
-**位置**: `Cargo.lock`
-
-新增约 30+ 个依赖包（`k8s-openapi`, `kube`, `json-patch`, `jsonpath-rust`, `hyper-http-proxy` 等），将显著增加：
-- 首次编译时间
-- CI/CD 构建时长
-- 安全审计面
-
-**建议**:
-- 评估是否所有依赖都是必需的
-- 考虑使用 `kube` 的 feature flags 减少 `k8s-openapi` 生成的资源类型：
-```toml
-[dependencies]
-kube = { version = "0.92", features = ["runtime", "client"], default-features = false }
-k8s-openapi = { version = "0.23", features = ["v1_30"], default-features = false }
-```
-
----
-
-## 整体评分: **6/10**
+### 整体评分: 4/10
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| 安全性 | 7 | 无明显安全漏洞，但依赖膨胀增加攻击面 |
-| 性能 | 6 | 依赖增加影响编译时间，运行时影响待观察 |
-| 可维护性 | 5 | 格式问题未解决，测试质量不足 |
-| 并发安全 | 7 | 新增 `async-broadcast` 使用需审查 |
+| 安全性 | 5 | 依赖扩展需进一步安全审查 |
+| 性能 | 4 | 依赖膨胀风险高 |
+| 可维护性 | 4 | 多版本依赖、缺少文档 |
+| 测试质量 | 3 | 存在空测试 |
 
-**主要扣分项**: 代码格式不合格、测试缺少断言、依赖管理不够精细。建议在合并前修复上述问题。
+**结论**：此 PR 需要补充变更说明，审查新增依赖的必要性，并修复测试质量问题后再合并。
 
 
 ## 结论
-❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
+✅ 通过（无 ≥ medium 级别问题）
