@@ -1,103 +1,105 @@
 # PR 审查报告（2026-08-20，branch: main，range: HEAD~1..HEAD）
 
-> 审查时点: `HEAD @ e8c805e`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ e961bcb`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 0 high / 1 medium / 1 low）
+## 问题清单（0 critical / 0 high / 0 medium / 1 low）
 
-- [medium] `workspace` **fmt**: 格式不合格: Diff in \\?\E:\vue\test\鲜视达\rust\sz-rust\packages\sz-rust-cache-facade\src\lib.rs:4866:      fn test_redis_tag_clear_empty_no_error() {
-- [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4952 测试 test_tagset_clear_empty_tag_no_error() 无断言宏但有
+- [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-core/src/runtime/mqtt.rs:347 测试 test_publish_without_connect_returns_error() 无断言（s
 
 
 ## 补充信息
 
 ## 变更集
 ```
- docs/audit/2026-08-19-pr-review-main.md  | 181 +++++++++++++++++--------------
+ docs/audit/2026-08-20-pr-review-main.md  | 103 +++++++++++++++++++++++++++++++
  docs/audit/events.jsonl                  |   1 +
- packages/sz-rust-cache-facade/src/lib.rs |   3 +-
- 3 files changed, 104 insertions(+), 81 deletions(-)
+ packages/sz-rust-cache-facade/src/lib.rs |   8 ++-
+ 3 files changed, 110 insertions(+), 2 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## PR 评审意见
+## PR 评审报告
 
-### 重要潜在问题
+### 1. 潜在问题清单
 
-#### 1. 🔴 测试断言缺失 — 空测试导致静默通过
-静态检查已捕获：`test_redis_tag_clear_empty_no_error()` 函数体中无有效断言宏，仅有表达式 `1`，测试永远 pass，失去回归保护意义。
+#### 🔴 问题 1：Redis 单元测试的网络依赖风险 (可靠性)
+在 `test_redis_tag_clear_empty_no_error` 中，直接实例化了 `RedisCacheDriver`。
+- **风险**：如果 `RedisCacheDriver::new` 或 `tag_clear` 内部涉及真实的网络连接（即使是惰性连接），该测试在没有 Redis 服务的 CI 环境或本地环境中将会失败（Flaky Test）。
+- **现状**：断言 `result.is_ok()` 暗示了期望不联网直接成功，但这强依赖于驱动内部实现细节（是否检查了空列表直接返回）。如果驱动实现变更，测试极易变红。
+- **建议**：确认该驱动是否为 Mock，或者增加 `#[ignore]` 标记如果它确实需要外部依赖。
 
-```rust
-// ❌ 当前（无效测试）
-#[test]
-fn test_redis_tag_clear_empty_no_error() {
-    // ... 执行了操作但无断言
-    1;  // 表达式值被丢弃，不构成断言
-}
+#### 🟡 问题 2：审计清单中的 `mqtt.rs` 问题未修复 (流程完整性)
+- **风险**：提供的 "已发现的问题清单" 明确指出 `packages/sz-rust-core/src/runtime/mqtt.rs:347` 存在无断言测试，但本次 Diff 仅修改了 `sz-rust-cache-facade`。
+- **现状**：这导致审计流水线中的技术债务未被完全清偿，下次扫描仍会报警。
+- **建议**：确认是否有意遗漏，或需补充对 `mqtt.rs` 的修复。
 
-// ✅ 建议修改
-#[test]
-fn test_redis_tag_clear_empty_no_error() {
-    let result = your_cache.clear_tags(&[]);
-    assert!(result.is_ok(), "clear on empty tag set should not error");
-}
-```
-
-#### 2. 🟡 `Cargo.lock` 变更与 `Cargo.toml` 变更不匹配
-`Cargo.toml` 仅 4 行变更，但 `Cargo.lock` 有 136 行变化。如果确实升级了 `tower` 0.4→0.5、`secrecy` 0.8→0.10 等破坏性版本，必须在 `Cargo.toml` 中有对应的版本约束更新，且需要源码适配。
-
-```toml
-# 检查 Cargo.toml 中是否有以下变更（当前 diff 未见）
-tower = "0.5"        # 若有，需验证 Service/Layer trait 适配
-secrecy = "0.10"     # 若有，需验证 Secret<T> 的 serde 支持
-```
-
-**建议**：运行 `cargo tree -d` 确认无多版本冲突，运行 `cargo check --all-features` 确认编译通过。
-
-#### 3. 🟡 格式检查失败（CI 门控风险）
-静态检查报告 `fmt|格式不合格`，说明 `cargo fmt --check` 会失败。如果 CI 配置了 fmt 门控，此 PR 将被阻塞。
-
-```bash
-# 修复命令
-cargo fmt -- packages/sz-rust-cache-facade/src/lib.rs
-```
-
-#### 4. 🟢 测试函数命名不一致
-审查报告中问题清单显示函数名从 `test_tag_clear_empty_no_error` 变为 `test_redis_tag_clear_empty_no_error`，但行号 4866 与 4952 对应的是两个不同测试。需确认是否存在重复测试或命名混乱。
-
-```rust
-// 确认是否两个测试测试的是同一逻辑
-#[test]
-fn test_redis_tag_clear_empty_no_error() { ... }  // line 4866
-
-#[test]
-fn test_tagset_clear_empty_tag_no_error() { ... } // line 4952
-```
-
-**建议**：如果逻辑重复，合并为一个测试；如果场景不同，补充注释说明差异。
-
-#### 5. 🟢 依赖升级缺少 changelog 审查记录
-如果此 PR 确实包含 `tower`、`secrecy`、`kube` 等 crate 的主版本升级，审查报告中应包含对破坏性变更的逐项确认清单，而不是仅靠 AI 评审的"仅供参考"提示。
+#### 🟡 问题 3：测试命名与逻辑的语义歧义 (可维护性)
+- **风险**：`test_tagset_clear_empty_tag_no_error` 中 `cache.tag("empty")` 的 `"empty"` 是 Tag 的名称，而非表示 "Tag 集合为空"。
+- **现状**：命名容易误导后续维护者认为这是在测试空集合逻辑，实际上是在测试 "未写入数据的 Tag 清除操作"。
+- **建议**：重命名测试函数以准确反映测试意图。
 
 ---
 
-### 整体评分：**5/10**
+### 2. 修改建议
+
+#### 针对问题 1 (Redis 依赖)
+如果 `RedisCacheDriver` 是真实驱动，建议检查其实现是否对空列表做了短路处理。如果没有，建议增加 Mock 或忽略属性：
+```rust
+// 如果该测试依赖外部 Redis，请标记忽略，避免 CI 不稳定
+#[test]
+#[ignore = "requires external redis instance"]
+fn test_redis_tag_clear_empty_no_error() { ... }
+```
+
+#### 针对问题 2 (遗漏的 mqtt 修复)
+请检查 `packages/sz-rust-core/src/runtime/mqtt.rs`，如果存在无断言测试，应一并修复：
+```rust
+// packages/sz-rust-core/src/runtime/mqtt.rs
+#[test]
+fn test_publish_without_connect_returns_error() {
+    // ... 执行操作
+    // ✅ 必须添加断言
+    assert!(result.is_err(), "publishing without connect should fail");
+}
+```
+
+#### 针对问题 3 (命名优化)
+建议将 `test_tagset_clear_empty_tag_no_error` 重命名为更准确的名称：
+```rust
+// ✅ 更清晰的命名：明确是 "未初始化的 tag" 而非 "空 tag"
+#[test]
+fn test_clear_unwritten_tag_returns_ok() {
+    let mut cache = TagCache::new();
+    cache.register_default(MemoryCacheDriver::new());
+
+    let result = cache.tag("any_key").clear();
+    assert!(result.is_ok(), "clearing a tag with no data should not error");
+}
+```
+
+---
+
+### 3. 整体评分
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| 正确性 | 6 | 功能逻辑未见明显错误，但测试无效 |
-| 安全性 | 7 | 无新引入的不安全代码 |
-| 可维护性 | 4 | 空测试、格式问题、命名不一致 |
-| 依赖管理 | 5 | Lock 变更与 toml 不匹配，升级风险未充分验证 |
+| **正确性** | 8 | 修复了 `unwrap` 到 `assert` 的问题，逻辑正确 |
+| **安全性** | 10 | 仅测试代码变更，无安全风险 |
+| **可维护性** | 6 | 命名有歧义，且遗漏了关联的 `mqtt` 测试修复 |
+| **规范性** | 9 | 修复了 fmt 格式问题，符合规范 |
 
-**合并建议**：修复测试断言和格式问题后重新提交；如含破坏性依赖升级，补充 API 兼容性验证记录。
+**整体评分：8/10**
+
+**结论**：✅ **建议合入**（针对当前 Diff）。
+当前代码变更本身质量良好，修复了断言缺失和格式问题。但请作者在合并后新建一个 Task 跟进 `mqtt.rs` 中的遗留测试问题，并确认 Redis 测试在 CI 中的稳定性。
 
 
 ## 结论
-❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
+✅ 通过（无 ≥ medium 级别问题）
