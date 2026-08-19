@@ -36,6 +36,10 @@
 - **metrics 端点访问控制（T7）**：`MetricsAuthConfig` 提供 Bearer token + IP 白名单（支持 CIDR，v4/v6）双机制；`/metrics` 路由独立挂载 `metrics_auth_middleware`（`router.rs:54` metrics_router()，独立子路由不污染业务 API），未授权返回 403；`SZ300_ENV=production` 时启动强制校验必须配置鉴权否则拒绝启动（`main.rs:243`），客户端真实 IP 通过 `into_make_service_with_connect_info` 注入（`main.rs:262`）。（✅ 生产已接入）
 - **分布式追踪**：sz300 用原生 `tracing` + `sz_rust_observability::otlp`（OTLP gRPC exporter，`main.rs:169`）。（✅ 生产已接入：`otlp` feature 门控）
 - **Admin Monitor API（v1.1.0 新增）**：`admin` feature（默认关闭）提供 3 个管理端点：`GET /api/admin/server/info`（CPU/内存/磁盘/负载/Rust版本/主机名）、`GET /api/admin/db/pool`（连接池 active/idle/max/usage）、`GET /api/admin/redis/info`（Redis 版本/模式/连接数/内存/角色）。路由级 `RoleGuard` 中间件校验 `admin` 角色，无 Redis 连接时自动降级返回 `connected: false`。
+- **GraphQL API**：基于 async-graphql 7.x，提供 `POST /graphql` 查询端点 + `GET /graphiql` IDE。（✅ 生产已接入：sz300 `router.rs:196` 挂载 `graphql_api::graphql_router()`，Schema 定义 health/serverInfo/product 查询）
+- **WebSocket**：基于 sz-orm-websocket（tokio-tungstenite），支持 HTTP 端口复用 + 独立端口两种模式，`WsHandler` trait 对齐 PHP Workerman onConnect/onMessage/onClose。（✅ 生产已接入：sz300 `router.rs:201` 挂载 `/ws/echo` 回显端点）
+- **WASM 边缘计算**：`sz-rust-wasm` crate 基于 wasmi（纯 Rust WASM 解释器），提供 `WasmRuntime` 加载/执行 WASM 模块。（✅ 生产已接入：sz300 `POST /api/wasm/execute` 端点，接受 base64 编码的 WASM 模块 + 函数名 + 参数，返回执行结果）
+- **K8s Operator**：`sz-rust-k8s-operator` crate 定义 `Sz300App` CRD（apiVersion: sz-rust.dev/v1），reconcile loop 自动管理 Deployment + Service。（✅ 已实现：CRD 定义 + reconcile 逻辑 + 11 个测试）
 
 ---
 

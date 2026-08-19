@@ -19,7 +19,7 @@ sz-rust-core.workspace = true
 # C4 验证：业务包 facade 直连（类型与 core re-export 同一，可逐步替换 sz_rust_core:: 引用）
 sz-rust-mvc-facade.workspace = true
 sz-rust-middleware-facade.workspace = true
-sz-rust-http-facade.workspace = true
+sz-rust-http-facade = { workspace = true, features = ["graphql"] }
 sz-rust-state-facade.workspace = true
 sz-rust-observability.workspace = true
 sz-rust-capability.workspace = true
@@ -34,6 +34,7 @@ sz-rust-tracing.workspace = true
 sz-rust-pdf.workspace = true
 sz-rust-workflow.workspace = true
 sz-rust-rag.workspace = true
+sz-rust-wasm.workspace = true
 sz-orm-sqlx.workspace = true
 # 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。
 # features 取 sz-orm-sqlx 的子集，Cargo 按并集解析，与 sz-orm-sqlx 共享同一编译产物，不增加主包体积。
@@ -48,6 +49,7 @@ chrono.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 axum.workspace = true
+async-graphql.workspace = true
 reqwest.workspace = true
 tracing-subscriber.workspace = true
 base64.workspace = true
@@ -83,3 +85,4 @@ futures.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
 tempfile = { workspace = true }
+wat = "1"

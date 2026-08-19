@@ -50,6 +50,10 @@ pub const PUBLIC_PATHS: &[&str] = &[
     "/api/tracing/spans",
     "/api/tracing/health",
     "/api/pdf/health",
+    "/graphql",
+    "/graphiql",
+    "/ws/echo",
+    "/api/wasm/execute",
 ];
 
 /// 判断路径是否在公开白名单中（精确匹配，避免前缀绕过）
@@ -187,7 +191,25 @@ pub fn create_router(state: AppState) -> Router {
             "/api/pdf/export/csv/download",
             post(pdf_api::export_csv_download),
         )
-        .route("/api/pdf/health", get(pdf_api::health));
+        .route("/api/pdf/health", get(pdf_api::health))
+        // WASM 边缘计算（POST /api/wasm/execute）
+        .route(
+            "/api/wasm/execute",
+            post(crate::controllers::wasm_api::execute),
+        );
+
+    // GraphQL 端点（POST /graphql + GET /graphiql）
+    let graphql_router = crate::controllers::graphql_api::graphql_router();
+    router = router.merge(graphql_router.with_state(()));
+
+    // WebSocket 端点（GET /ws/echo — 回显处理器）
+    router = router.route(
+        "/ws/echo",
+        sz_rust_core::websocket_route::ws_handler(
+            sz_rust_core::websocket_route::EchoWsHandler::new(),
+        )
+        .with_state(()),
+    );
 
     // Admin Monitor API（admin feature 门控）
     // 需要 admin 角色才能访问（role_guard 在 auth_middleware 之上叠加角色检查）

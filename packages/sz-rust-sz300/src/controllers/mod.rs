@@ -17,6 +17,8 @@ pub mod device;
 pub mod file;
 /// 静态文件服务控制器
 pub mod file_serve;
+/// GraphQL API 控制器（/graphql + /graphiql 端点）
+pub mod graphql_api;
 /// 健康检查控制器
 pub mod health;
 /// 商户管理控制器（对齐 PHP MerchantController）
@@ -33,5 +35,7 @@ pub mod product;
 pub mod tracing_api;
 /// 视图模板控制器（对接 sz-rust-core::view）
 pub mod view;
+/// WASM 边缘计算控制器（/api/wasm/execute 端点）
+pub mod wasm_api;
 /// workflow 深度接线控制器（工作流定义/实例/任务管理）
 pub mod workflow_api;

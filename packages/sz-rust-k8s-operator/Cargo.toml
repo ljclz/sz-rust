@@ -1,0 +1,28 @@
+[package]
+name = "sz-rust-k8s-operator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust K8s Operator — 管理 sz300 应用部署的 Kubernetes Operator"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["k8s", "operator", "kubernetes", "sz-rust"]
+categories = ["network-programming"]
+
+[dependencies]
+kube.workspace = true
+schemars.workspace = true
+k8s-openapi.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+[lints]
+workspace = true

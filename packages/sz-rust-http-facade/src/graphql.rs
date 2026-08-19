@@ -342,7 +342,6 @@ mod tests {
     #[tokio::test]
     async fn test_graphql_router_dynamic_custom_path() {
         use axum::body::Body;
-        use http_body_util::BodyExt;
 
         let schema = test_dynamic_schema();
         let app = graphql_router_dynamic(schema, GraphQLConfig::new().with_path("/api/gql"));
