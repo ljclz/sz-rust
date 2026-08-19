@@ -12,10 +12,10 @@ pub async fn status() -> Json<Value> {
                 { "name": "erp", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/erp/*", "status": "active" },
                 { "name": "forum", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/forum/*", "status": "active" },
                 { "name": "im", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/im/*", "status": "active" },
-                { "name": "operate", "version": env!("CARGO_PKG_VERSION"), "type": "library", "status": "linked" },
-                { "name": "workflow", "version": env!("CARGO_PKG_VERSION"), "type": "library", "status": "linked" },
-                { "name": "tracing", "version": env!("CARGO_PKG_VERSION"), "type": "library", "status": "linked" },
-                { "name": "pdf", "version": env!("CARGO_PKG_VERSION"), "type": "library", "status": "linked" }
+                { "name": "operate", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/operate/*", "status": "active" },
+                { "name": "workflow", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/workflow/*", "status": "active" },
+                { "name": "tracing", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/tracing/*", "status": "active" },
+                { "name": "pdf", "version": env!("CARGO_PKG_VERSION"), "routes": "/api/pdf/*", "status": "active" }
             ]
         }
     }))

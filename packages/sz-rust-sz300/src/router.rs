@@ -1,6 +1,6 @@
 use crate::controllers::{
-    addons, ai, auth, capabilities, device, file, file_serve, health, merchant, order, product,
-    view,
+    addons, ai, auth, capabilities, device, file, file_serve, health, merchant, operate_api, order,
+    pdf_api, product, tracing_api, view, workflow_api,
 };
 use crate::middleware::auth_middleware;
 use crate::middleware::metrics_auth::{metrics_auth_middleware, ClientIp};
@@ -42,6 +42,14 @@ pub const PUBLIC_PATHS: &[&str] = &[
     "/api-docs/redoc",
     "/api-docs/openapi.json",
     "/api/addons/status",
+    "/api/operate/models",
+    "/api/operate/health",
+    "/api/workflow/health",
+    "/api/workflow/definitions",
+    "/api/workflow/instances",
+    "/api/tracing/spans",
+    "/api/tracing/health",
+    "/api/pdf/health",
 ];
 
 /// 判断路径是否在公开白名单中（精确匹配，避免前缀绕过）
@@ -158,7 +166,28 @@ pub fn create_router(state: AppState) -> Router {
         // 静态文件服务
         .route("/uploads/{*path}", get(file_serve::serve_file))
         // Addon 状态查询（列出所有已链接的 addon crate）
-        .route("/api/addons/status", get(addons::status));
+        .route("/api/addons/status", get(addons::status))
+        // operate 深度接线（客户/合同/分类模型查询）
+        .route("/api/operate/models", get(operate_api::list_models))
+        .route("/api/operate/health", get(operate_api::health))
+        // workflow 深度接线（工作流定义/实例管理）
+        .route("/api/workflow/health", get(workflow_api::health))
+        .route(
+            "/api/workflow/definitions",
+            get(workflow_api::list_definitions),
+        )
+        .route("/api/workflow/instances", get(workflow_api::list_instances))
+        // tracing 深度接线（Span 查询/创建 + 链路追踪）
+        .route("/api/tracing/spans", get(tracing_api::list_spans))
+        .route("/api/tracing/spans", post(tracing_api::create_span))
+        .route("/api/tracing/health", get(tracing_api::health))
+        // PDF/Excel 导出深度接线（CSV/Excel 导出 + PDF 表单填充）
+        .route("/api/pdf/export/csv", post(pdf_api::export_csv))
+        .route(
+            "/api/pdf/export/csv/download",
+            post(pdf_api::export_csv_download),
+        )
+        .route("/api/pdf/health", get(pdf_api::health));
 
     // Admin Monitor API（admin feature 门控）
     // 需要 admin 角色才能访问（role_guard 在 auth_middleware 之上叠加角色检查）
