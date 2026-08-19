@@ -4865,7 +4865,8 @@ mod tests {
     #[test]
     fn test_redis_tag_clear_empty_no_error() {
         let driver = RedisCacheDriver::new(RedisConfig::default());
-        driver.tag_clear(&[]).unwrap();
+        let result = driver.tag_clear(&[]);
+        assert!(result.is_ok(), "redis tag_clear on empty list should succeed");
     }
 
     // ========================================================================
