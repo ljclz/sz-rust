@@ -36,7 +36,7 @@ base64 = { workspace = true }
 http-body-util = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
-async-trait = { workspace = true }
+
 ipnet = { workspace = true }
 
 # 远程校验（可选，feature = "remote-validate"）
