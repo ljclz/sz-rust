@@ -415,7 +415,7 @@ impl File {
         {
             use std::os::unix::fs::PermissionsExt;
             let _ =
-                tokio::fs::set_permissions(&target.path, std::fs::Permissions::from_mode(0o666))
+                tokio::fs::set_permissions(&target.path, tokio::fs::Permissions::from_mode(0o666))
                     .await;
         }
 
@@ -685,7 +685,7 @@ impl UploadedFile {
         {
             use std::os::unix::fs::PermissionsExt;
             let _ =
-                tokio::fs::set_permissions(&target.path, std::fs::Permissions::from_mode(0o666))
+                tokio::fs::set_permissions(&target.path, tokio::fs::Permissions::from_mode(0o666))
                     .await;
         }
 

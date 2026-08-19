@@ -181,7 +181,9 @@ fn create_params() -> kube::api::PostParams {
 }
 
 fn patch_strategy<T: serde::Serialize>(obj: &T) -> kube::api::Patch<serde_json::Value> {
-    kube::api::Patch::Apply(serde_json::to_value(obj).unwrap())
+    kube::api::Patch::Apply(
+        serde_json::to_value(obj).expect("patch_strategy: serialize manually-constructed CRD object"),
+    )
 }
 
 #[cfg(test)]
