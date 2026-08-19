@@ -4952,13 +4952,13 @@ mod tests {
     }
 
     #[test]
-    fn test_tagset_clear_empty_tag_no_error() {
+    fn test_clear_unwritten_tag_returns_ok() {
         let cache = Cache::new();
         cache.register_default(MemoryCacheDriver::new());
 
         // 没有写入任何缓存，clear 不报错
-        let result = cache.tag("empty").clear();
-        assert!(result.is_ok(), "clear on empty tag should succeed");
+        let result = cache.tag("unwritten").clear();
+        assert!(result.is_ok(), "clear on unwritten tag should succeed");
     }
 
     #[test]

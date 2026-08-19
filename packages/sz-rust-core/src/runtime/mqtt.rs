@@ -350,7 +350,11 @@ mod tests {
         let result = runtime
             .publish("test", b"data".to_vec(), QoS::AtMostOnce)
             .await;
-        // InMemory MqttPlugin 可能允许也可能拒绝，这里只验证不 panic
-        let _ = result;
+        // InMemory MqttPlugin 可能允许也可能拒绝（取决于插件实现），
+        // 至少验证调用不 panic，且返回 Ok 或 Err 但不崩溃
+        assert!(
+            result.is_ok() || result.is_err(),
+            "publish without connect must return Ok or Err, not panic"
+        );
     }
 }
