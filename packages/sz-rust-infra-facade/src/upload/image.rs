@@ -823,7 +823,7 @@ impl Editor {
                     use std::os::unix::fs::PermissionsExt;
                     let _ = tokio::fs::set_permissions(
                         parent,
-                        std::fs::Permissions::from_mode(permission),
+                        tokio::fs::Permissions::from_mode(permission),
                     )
                     .await;
                 }
