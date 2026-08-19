@@ -17,11 +17,8 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
-once_cell.workspace = true
 parking_lot.workspace = true
-regex.workspace = true
 chrono.workspace = true
-indexmap.workspace = true
 sz-orm-logger.workspace = true
 sz-orm-macros.workspace = true
 sz-orm-sql-validator.workspace = true
@@ -36,7 +33,7 @@ futures.workspace = true
 # HTTP 服务器 + 路由 + 请求/响应
 axum.workspace = true
 tower.workspace = true
-tower-http.workspace = true
+
 tokio.workspace = true
 http.workspace = true
 http-body-util.workspace = true
@@ -44,18 +41,12 @@ http-body-util.workspace = true
 tokio-rustls.workspace = true
 # P0-2: rustls-pemfile(unmaintained) 迁移至 rustls-pki-types::pem::PemObject（rustls 0.23 内置）
 # 文件上传
-sha1.workspace = true
-sha2.workspace = true
 md-5.workspace = true
-hex.workspace = true
-base64.workspace = true
-mime_guess.workspace = true
-infer.workspace = true
 tempfile.workspace = true
 # 存储对接（复用 sz-orm-storage 7 种驱动）
 sz-orm-storage.workspace = true
 async-trait.workspace = true
-rand.workspace = true
+
 # 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
 image = { workspace = true }
 # P0-2: imageproc/ab_glyph 移至 sz-rust-infra-facade（实际使用方），core 不直接使用

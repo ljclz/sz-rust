@@ -15,12 +15,9 @@ exclude = ["docs/**"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
-tracing.workspace = true
 axum.workspace = true
 sz-rust-core.workspace = true
 tokio.workspace = true
-async-trait.workspace = true
 
 [lib]
 name = "sz_rust_addons_im"

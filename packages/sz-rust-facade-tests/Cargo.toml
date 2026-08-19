@@ -24,11 +24,9 @@ sz-rust-middleware-facade = { workspace = true }
 sz-rust-mvc-facade = { workspace = true }
 # core（验证 P3 提取后向后兼容 re-export 路径）
 sz-rust-core = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 sha1 = { workspace = true }
 hex = { workspace = true }
-tokio = { workspace = true }
 tempfile = { workspace = true }
 
 [lib]

@@ -21,7 +21,7 @@ serde_yaml = { workspace = true }
 tower = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 http-body-util = { workspace = true }
-http = { workspace = true }
+
 
 
 # P3: simd_str.rs 需要 unsafe SIMD intrinsics（SSE2/AVX2），

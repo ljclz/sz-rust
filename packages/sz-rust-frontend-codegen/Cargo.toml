@@ -18,9 +18,6 @@ name = "sz_rust_frontend_codegen"
 [dependencies]
 # SZ-Rust 内部依赖
 
-sz-rust-orm-facade = { workspace = true }
-sz-rust-router-facade = { workspace = true }
-sz-rust-auth-facade = { workspace = true }
 # 异步运行时
 tokio = { workspace = true }
 # 序列化
@@ -29,7 +26,6 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 # 错误与工具
 thiserror = { workspace = true }
-tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 # 模板引擎
@@ -37,10 +33,6 @@ tera = { workspace = true }
 # AST 解析
 syn = { workspace = true }
 quote = { workspace = true }
-# 正则
-regex = { workspace = true }
-# CLI 表格输出
-tabled = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -48,6 +40,3 @@ tempfile = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["sz-rust-auth-facade", "sz-rust-orm-facade", "sz-rust-router-facade", "tabled", "tracing"]

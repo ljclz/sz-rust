@@ -22,9 +22,7 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 arc-swap = { workspace = true }
-parking_lot = { workspace = true }
 regex = { workspace = true }
-futures = { workspace = true }
 async-trait = { workspace = true }
 prometheus = "0.13"
 notify = { workspace = true }
