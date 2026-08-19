@@ -96,8 +96,8 @@ prost = "0.13"
 async-graphql = "7"
 async-graphql-axum = "7"
 # K8s Operator 支持（kube + schemars for CRD）
-kube = { version = "0.95", features = ["runtime", "derive", "client"] }
-kube-derive = "0.95"
+kube = { version = "0.96", features = ["runtime", "derive", "client"] }
+kube-derive = "0.96"
 schemars = "0.8"
 # K8s API 类型（kube 依赖）
 k8s-openapi = { version = "0.23", features = ["latest"] }

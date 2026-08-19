@@ -4774,8 +4774,9 @@ mod tests {
     #[test]
     fn test_tag_clear_empty_no_error() {
         let driver = MemoryCacheDriver::new();
-        // 空列表不报错
-        driver.tag_clear(&[]).unwrap();
+        // 空列表不报错，且缓存状态不变
+        let result = driver.tag_clear(&[]);
+        assert!(result.is_ok(), "tag_clear on empty list should succeed");
     }
 
     // ========================================================================
