@@ -366,10 +366,7 @@ jobs:
             --fail-under-lines ${{ steps.cov-stage.outputs.threshold }}
       - name: Run sz300 DB integration coverage
         run: |
-          cargo llvm-cov -p sz-rust-sz300 \
-
-            --cobertura --output-path cobertura-sz300-db.xml \
-            -- --ignored --test-threads=1
+          cargo llvm-cov -p sz-rust-sz300 --cobertura --output-path cobertura-sz300-db.xml -- --ignored --test-threads=1
       - name: Merge coverage reports
         run: |
           node scripts/audit/cobertura-merger.js \
