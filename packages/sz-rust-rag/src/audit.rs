@@ -54,6 +54,7 @@ impl RagAuditLogger {
             .await?;
         use tokio::io::AsyncWriteExt;
         file.write_all(line_with_newline.as_bytes()).await?;
+        file.flush().await?;
         Ok(())
     }
 }
@@ -94,11 +95,7 @@ mod tests {
         };
         logger.log(entry).await.unwrap();
         let content = tokio::fs::read_to_string(tmp.path()).await.unwrap();
-        eprintln!(
-            "DEBUG content_len={} contains_redacted={}",
-            content.len(),
-            content.contains("***REDACTED***")
-        );
+
         assert!(content.contains("***REDACTED***"));
         assert!(!content.contains("sk-1234567890abcdef"));
     }
