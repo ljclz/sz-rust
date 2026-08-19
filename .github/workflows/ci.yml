@@ -367,7 +367,7 @@ jobs:
       - name: Run sz300 DB integration coverage
         run: |
           cargo llvm-cov -p sz-rust-sz300 \
-            --ignore-tests-in-target \
+
             --cobertura --output-path cobertura-sz300-db.xml \
             -- --ignored --test-threads=1
       - name: Merge coverage reports
@@ -422,6 +422,8 @@ jobs:
           components: miri
       - name: Run Miri on facade integration tests
         run: cargo +nightly miri test -p sz-rust-facade-tests --jobs 1
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
 
   # 门禁 17：Windows 兼容性验证
   # 规避 rustc STATUS_STACK_BUFFER_OVERRUN bug：强制 CARGO_INCREMENTAL=0
