@@ -1,4 +1,4 @@
-﻿//! RAG 审计日志。
+//! RAG 审计日志。
 
 use crate::error::{RagError, RagResult};
 use crate::redact::SourceCodeRedactor;
@@ -94,7 +94,11 @@ mod tests {
         };
         logger.log(entry).await.unwrap();
         let content = tokio::fs::read_to_string(tmp.path()).await.unwrap();
-        eprintln!("DEBUG file_logger_redacts content={content}");
+        eprintln!(
+            "DEBUG content_len={} contains_redacted={}",
+            content.len(),
+            content.contains("***REDACTED***")
+        );
         assert!(content.contains("***REDACTED***"));
         assert!(!content.contains("sk-1234567890abcdef"));
     }
