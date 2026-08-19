@@ -187,7 +187,7 @@ jobs:
           cargo llvm-cov -p sz-rust-sz300 \
             --cobertura --output-path cobertura-sz300.xml \
             --fail-under-lines ${COVERAGE_THRESHOLD} \
-            -- --ignored --test-threads=1
+            -- --include-ignored --test-threads=1
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
