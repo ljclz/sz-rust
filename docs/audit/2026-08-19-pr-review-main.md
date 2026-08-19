@@ -1,15 +1,14 @@
-# PR 审查报告（2026-08-19，branch: main，range: HEAD~1..HEAD）
+# PR 审查报告（2026-08-19，branch: main，range: HEAD~2..HEAD）
 
-> 审查时点: `HEAD @ de8c658`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ d2a31b3`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 2 high / 0 medium / 1 low）
+## 问题清单（0 critical / 0 high / 1 medium / 1 low）
 
-- [high] `workspace` **bare-unwrap**: 生产代码 1 处裸 unwrap（铁律 2）
-- [high] `gate` **std-fs**: ❌ 铁律 4 违反：生产代码使用 std::fs，统一改为 tokio::fs
+- [medium] `workspace` **fmt**: 格式不合格: Diff in \\?\E:\vue\test\鲜视达\rust\sz-rust\packages\sz-rust-k8s-operator\src\reconcile.rs:182:
 - [low] `gate` **assertion-value**:   [WARN] packages/sz-rust-cache-facade/src/lib.rs:4775 测试 test_tag_clear_empty_no_error() 无断言宏但有 1 处 u
 
 
@@ -21,11 +20,15 @@
  Cargo.toml                                         |  10 +-
  README.en.md                                       |   4 +
  README.md                                          |   4 +
+ docs/audit/2026-08-19-pr-review-main.md            | 127 +++++
+ docs/audit/events.jsonl                            |   1 +
  packages/sz-rust-http-facade/src/graphql.rs        |   1 -
+ packages/sz-rust-infra-facade/src/upload.rs        |   4 +-
+ packages/sz-rust-infra-facade/src/upload/image.rs  |   2 +-
  packages/sz-rust-k8s-operator/Cargo.toml           |  28 ++
  packages/sz-rust-k8s-operator/src/crd.rs           | 133 +++++
  packages/sz-rust-k8s-operator/src/lib.rs           |  22 +
- packages/sz-rust-k8s-operator/src/reconcile.rs     | 285 +++++++++++
+ packages/sz-rust-k8s-operator/src/reconcile.rs     | 287 +++++++++++
  packages/sz-rust-sz300/Cargo.toml                  |   5 +-
  .../sz-rust-sz300/src/controllers/graphql_api.rs   | 153 ++++++
  packages/sz-rust-sz300/src/controllers/mod.rs      |   4 +
@@ -33,95 +36,141 @@
  packages/sz-rust-sz300/src/router.rs               |  24 +-
  packages/sz-rust-wasm/Cargo.toml                   |  25 +
  packages/sz-rust-wasm/src/lib.rs                   | 250 ++++++++++
- 16 files changed, 1594 insertions(+), 22 deletions(-)
+ 20 files changed, 1727 insertions(+), 25 deletions(-)
 ```
 
 ## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
 
 
 
-## Code Review: sz-rust PR
+# PR 评审报告
 
-### 🔴 关键问题清单
+## 重要潜在问题
 
-#### 1. [高危] 生产代码使用 `std::fs` 阻塞异步运行时 (铁律 4 违反)
-**位置**: 未在当前 diff 直接体现，但静态扫描已捕获
-**风险**: 在 Tokio 异步运行时中调用 `std::fs` 会阻塞 worker 线程，导致整个异步任务调度停滞，高并发下性能急剧下降甚至死锁。
-**现状**: `packages/sz-rust-cache-facade/src/lib.rs` 中存在 `std::fs` 调用。
-**建议**: 替换为 `tokio::fs` 异步 API。
+### 1. 代码格式不合格（Medium）
+**位置**: `packages/sz-rust-k8s-operator/src/reconcile.rs:182`
 
-```rust
-// ❌ 错误：阻塞调用
-use std::fs;
-let contents = fs::read_to_string(path)?;
+`cargo fmt` 检查失败，表明代码未通过格式化工具验证。这会影响代码库的一致性和可读性。
 
-// ✅ 正确：异步调用
-use tokio::fs;
-let contents = fs::read_to_string(path).await?;
-```
-
-#### 2. [高危] 生产代码裸 `unwrap()` (铁律 2 违反)
-**位置**: 生产代码逻辑中
-**风险**: `unwrap()` 在 `None` 或 `Err` 时会触发 panic，导致当前任务崩溃。在生产环境中，应优雅处理错误而非直接崩溃。
-**建议**: 使用 `?` 操作符向上传播错误，或使用 `unwrap_or`/`match` 提供降级逻辑。
-
-```rust
-// ❌ 错误：可能 panic
-let value = config.get("key").unwrap();
-
-// ✅ 正确：传播错误
-let value = config.get("key").ok_or_else(|| Error::ConfigMissing("key"))?;
-
-// ✅ 正确：安全降级
-let value = config.get("key").cloned().unwrap_or_default();
-```
-
-#### 3. [中危] 依赖树膨胀与版本冲突
-**位置**: `Cargo.lock`
-**风险**: 本次变更引入了大量新依赖（`k8s-openapi`, `hyper-http-proxy`, `json-patch` 等），且出现了 `base64` (0.21.7 vs 0.22.1)、`getrandom` (0.2 vs 0.3)、`thiserror` 的多版本共存。
-**影响**:
-- 编译时间显著增加（尤其是 `k8s-openapi` 这种大型 crate）。
-- 二进制体积膨胀。
-- 潜在的依赖冲突维护成本。
 **建议**:
-- 检查是否真的需要引入 Kubernetes 支持，如果仅需部分功能，考虑更轻量的 crate。
-- 统一 `base64` 等常用库的版本，避免多版本链接。
+```bash
+cargo fmt --all
+```
 
-#### 4. [低危] 测试断言缺失
-**位置**: `test_tag_clear_empty_no_error()`
-**风险**: 测试函数没有断言宏（`assert!` 等），仅依赖不 panic 作为通过标准。这导致测试无法验证业务逻辑的正确性，容易漏测回归。
-**建议**: 补充明确的断言逻辑。
+确保提交前运行格式化检查：
+```bash
+cargo fmt -- --check
+```
 
+---
+
+### 2. 测试缺少断言（Low）
+**位置**: `packages/sz-rust-cache-facade/src/lib.rs:4775`
+
+测试函数 `test_tag_clear_empty_no_error()` 仅调用 `unwrap()` 但没有断言验证行为，无法确保功能正确性。
+
+**当前问题代码**:
 ```rust
-#[tokio::test]
-async fn test_tag_clear_empty_no_error() {
-    let result = cache.clear_tags(&[]).await;
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let mut cache = TagCache::new();
+    cache.clear().unwrap();  // 只验证不panic，但没有断言状态
+}
+```
 
-    // ❌ 仅依赖不 panic
-    // assert!(result.is_ok());
-
-    // ✅ 明确验证状态
-    assert!(result.is_ok());
-    let inner = result.unwrap();
-    assert_eq!(inner.affected_count, 0);
+**建议修改**:
+```rust
+#[test]
+fn test_tag_clear_empty_no_error() {
+    let mut cache = TagCache::new();
+    cache.clear().unwrap();
+    // 添加断言验证清空后的状态
+    assert!(cache.is_empty());
+    assert_eq!(cache.len(), 0);
 }
 ```
 
 ---
 
-### 📊 整体评分: 4/10
+### 3. 依赖版本冲突风险
+**位置**: `Cargo.lock`
 
-**评分理由**:
-- **安全性 (-3)**: 违反铁律 2 和铁律 4，存在 panic 风险和阻塞异步运行时的严重隐患，这是生产环境的大忌。
-- **可维护性 (-2)**: `Cargo.lock` 引入了大量重型依赖且存在版本冲突，增加了构建复杂度和长期维护负担。
-- **测试质量 (-1)**: 关键逻辑测试缺乏断言，无法保证功能正确性。
+`base64` 同时存在 `0.21.7` 和 `0.22.1` 两个版本。多个依赖被强制指定到 `base64 0.22.1`，但 `0.21.7` 仍存在于依赖树中，可能导致：
+- 二进制体积增大
+- 潜在的API不兼容问题
+- 安全补丁需要同步两个版本
 
-**修复优先级**:
-1. 立即修复 `std::fs` -> `tokio::fs` 的替换（阻塞问题是性能杀手）。
-2. 消除所有生产代码的裸 `unwrap`。
-3. 审查新引入依赖的必要性，裁剪依赖树。
-4. 补充测试断言。
+**建议**:
+```toml
+# Cargo.toml 中统一指定版本，避免多版本共存
+[dependencies]
+base64 = "0.22"
+```
+
+运行 `cargo tree -d` 检查重复依赖，必要时使用 `patch` 段统一版本：
+```toml
+[patch.crates-io]
+base64 = { version = "0.22.1" }
+```
+
+---
+
+### 4. K8s Operator Reconcile 错误处理
+**位置**: `packages/sz-rust-k8s-operator/src/reconcile.rs`
+
+从新增的 `kube-runtime`, `backoff`, `json-patch` 等依赖推断，reconcile 循环需要健壮的错误处理和重试策略。新增 PR 引入了 `backoff` crate 但未在 diff 中看到使用方式。
+
+**建议** - 确保 reconcile 函数正确处理 transient 错误：
+```rust
+use backoff::{ExponentialBackoff, Operation};
+
+async fn reconcile_reconciler(ctx: Context<ContextData>) -> Result<(), Error> {
+    let backoff = ExponentialBackoff {
+        max_elapsed_time: Some(std::time::Duration::from_secs(300)),
+        ..Default::default()
+    };
+
+    let operation = || async {
+        // reconcile 逻辑
+        Ok(())
+    };
+
+    operation.retry(backoff).await
+}
+```
+
+---
+
+### 5. 依赖膨胀与编译时间
+**位置**: `Cargo.lock`
+
+新增约 30+ 个依赖包（`k8s-openapi`, `kube`, `json-patch`, `jsonpath-rust`, `hyper-http-proxy` 等），将显著增加：
+- 首次编译时间
+- CI/CD 构建时长
+- 安全审计面
+
+**建议**:
+- 评估是否所有依赖都是必需的
+- 考虑使用 `kube` 的 feature flags 减少 `k8s-openapi` 生成的资源类型：
+```toml
+[dependencies]
+kube = { version = "0.92", features = ["runtime", "client"], default-features = false }
+k8s-openapi = { version = "0.23", features = ["v1_30"], default-features = false }
+```
+
+---
+
+## 整体评分: **6/10**
+
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 安全性 | 7 | 无明显安全漏洞，但依赖膨胀增加攻击面 |
+| 性能 | 6 | 依赖增加影响编译时间，运行时影响待观察 |
+| 可维护性 | 5 | 格式问题未解决，测试质量不足 |
+| 并发安全 | 7 | 新增 `async-broadcast` 使用需审查 |
+
+**主要扣分项**: 代码格式不合格、测试缺少断言、依赖管理不够精细。建议在合并前修复上述问题。
 
 
 ## 结论
-❌ **阻塞**: 2 个 ≥ medium 级别问题，禁止合入
+❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
