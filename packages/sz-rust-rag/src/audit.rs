@@ -94,6 +94,7 @@ mod tests {
         };
         logger.log(entry).await.unwrap();
         let content = tokio::fs::read_to_string(tmp.path()).await.unwrap();
+        eprintln!("DEBUG file_logger_redacts content={content}");
         assert!(content.contains("***REDACTED***"));
         assert!(!content.contains("sk-1234567890abcdef"));
     }
