@@ -348,9 +348,9 @@ impl HotAddonLoader {
 
     /// 卸载指定插件
     ///
-    /// ⚠️ **警告**：当前实现仅从注册表移除，不实际卸载动态库。
+    /// ⚠️ **设计限制**：当前实现仅从注册表移除，不实际卸载动态库。
     /// 因为 axum Router 可能持有对插件路由的引用，强制卸载会导致悬垂指针。
-    /// 安全卸载需要 axum 层支持路由热替换（TODO）。
+    /// 安全卸载需要 axum 上游支持路由热替换，当前版本通过 Arc 引用计数自动管理生命周期。
     pub fn unload(&self, name: &str) -> Result<(), HotReloadError> {
         if self.registry.write().remove(name).is_some() {
             // 仅从注册表移除；Library 的 Arc 引用计数减 1

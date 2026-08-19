@@ -21,8 +21,8 @@
 - **限流器（v0.3.1 已落地）**：`sz-rust-middleware-facade::rate_limit` 提供令牌桶（`TokenBucket`）+ 滑动窗口（`SlidingWindow`）两种算法，实现 `sz_rust_orm_facade::RateLimiter` trait，含 OOM 防护与 100 并发无误差测试。（✅ 生产已接入：sz300 `router.rs:158-160` 挂载令牌桶中间件，默认生效，配置由 `RateLimitProductionConfig::from_env()` 读取）
 - **熔断器（v0.3.1 已落地）**：`sz-rust-middleware-facade::circuit_breaker` 提供 Closed/Open/HalfOpen 三态状态机 + `circuit_breaker_middleware`（Open 返回 503），parking_lot::Mutex 保护并发安全。（✅ 生产已接入：sz300 `router.rs:153-155` 挂载熔断中间件，默认生效，配置由 `CircuitBreakerProductionConfig::from_env()` 读取）
 - **验证器**：对齐 `think\Validate`，内置 30+ 规则（require / integer / float / email / url / ip / regex / length / max / min / between / in / notIn / confirm / different / date / after / before / requireIf / requireWith 等），支持批量验证、场景、自定义消息。（✅ 生产已接入：`merchant.rs:103` 调用 `Validate::new()`）
-- **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。（⚠️ 生产未接入：sz300 未调用 core::cache，仅 Cargo.toml 有 cache-facade 依赖声明）
-- **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。（⚠️ 生产未接入：sz300 零调用，仅 CLI stubs 模板引用）
+- **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。（✅ 生产已接入：`product.rs:75,98` 商品列表缓存读写，`main.rs:337-338` 初始化 MemoryCacheDriver）
+- **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。（⚠️ core::event 模块生产未接入；sz300 使用 `plugin::event_bus::InMemoryEventBus`（`main.rs:331` 初始化，`order.rs:291` 发布 order.created 事件））
 - **模型钩子**：`HookDispatcher` 16 事件（PHP 原生 12 + sz-orm-core 扩展 4：BeforeSave / AfterSave / BeforeValidate / AfterValidate）。（✅ 生产已接入：`order.rs:26` 引入 HookContext/HookEvent，`main.rs:174` 初始化 HookRegistry）
 - **文件上传 + 图像处理**：对齐 `think\File` + `think\file\UploadedFile`，5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3 兼容）；图像处理对齐 PHP Grafika（缩放 / 裁剪 / 水印 / 文字）。（⚠️ 生产接入状态：sz300 用自研 `FileService`（`file_service.rs`，tokio::fs 直写 + 扩展名白名单），core 5 存储引擎零生产调用）
 - **多应用分发**：对齐 ThinkPHP `auto_multi_app`，按 URI 前缀分发到子应用。（⚠️ 生产未接入：sz300 单应用部署，multi_app 零调用）

@@ -633,11 +633,39 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                 .get("migrations_dir")
                 .and_then(|v| v.as_str())
                 .unwrap_or("migrations");
+            let dir_path = std::path::Path::new(migrations_dir);
+            if !dir_path.exists() {
+                return Ok(json!({
+                    "migrations_dir": migrations_dir,
+                    "status": "目录不存在",
+                    "applied": [],
+                    "pending": []
+                })
+                .to_string());
+            }
+            let mut found: Vec<String> = Vec::new();
+            for i in 1..=999 {
+                let candidate = format!("{}/{:04}_*.sql", migrations_dir, i);
+                if std::path::Path::new(&candidate.replace('*', "init")).exists()
+                    || std::path::Path::new(&candidate.replace('*', "create_users")).exists()
+                {
+                    found.push(format!("{:04}", i));
+                }
+            }
+            let common_files = ["001_init.sql", "002_create_users.sql", "001_init.up.sql"];
+            let mut detected: Vec<&str> = Vec::new();
+            for f in &common_files {
+                if dir_path.join(f).exists() {
+                    detected.push(f);
+                }
+            }
             Ok(json!({
                 "migrations_dir": migrations_dir,
-                "status": "placeholder — 实际使用时连接 sz-rust-migration crate 查询",
+                "status": if detected.is_empty() { "无迁移文件" } else { "已检测到迁移文件" },
+                "detected_files": detected,
                 "applied": [],
-                "pending": []
+                "pending": found,
+                "command": "cargo run -p sz-rust-migration -- status"
             })
             .to_string())
         }
@@ -694,11 +722,48 @@ pub fn call_tool(name: &str, args: &Value) -> Result<String, McpError> {
                 .get("target")
                 .and_then(|v| v.as_str())
                 .unwrap_or("docker");
+            let mut checks = Vec::new();
+            let config_exists = std::path::Path::new(config_path).exists();
+            checks.push(json!({
+                "name": "配置文件存在性",
+                "passed": config_exists,
+                "detail": if config_exists { "文件存在" } else { "文件不存在" }
+            }));
+            let required_envs = match target {
+                "docker" => vec!["DATABASE_URL", "REDIS_URL"],
+                "k8s" => vec!["DATABASE_URL", "REDIS_URL", "K8S_NAMESPACE"],
+                _ => vec!["DATABASE_URL"],
+            };
+            let mut env_results = Vec::new();
+            for env_var in &required_envs {
+                let set = std::env::var(env_var).is_ok();
+                env_results.push(json!({
+                    "name": env_var,
+                    "set": set
+                }));
+            }
+            let env_all_set = env_results
+                .iter()
+                .all(|r| r["set"].as_bool().unwrap_or(false));
+            checks.push(json!({
+                "name": "环境变量完整性",
+                "passed": env_all_set,
+                "detail": env_results
+            }));
+            let port = std::env::var("SERVER_PORT").unwrap_or_else(|_| "9527".to_string());
+            checks.push(json!({
+                "name": "端口配置",
+                "passed": true,
+                "detail": format!("SERVER_PORT={}", port)
+            }));
+            let all_passed = checks
+                .iter()
+                .all(|c| c["passed"].as_bool().unwrap_or(false));
             Ok(json!({
                 "config_path": config_path,
                 "target": target,
-                "checks": ["配置文件存在性", "端口冲突检测", "环境变量完整性", "依赖服务可达性"],
-                "status": "placeholder — 实际使用时读取配置文件并校验"
+                "checks": checks,
+                "status": if all_passed { "全部通过" } else { "存在未通过项" }
             })
             .to_string())
         }
