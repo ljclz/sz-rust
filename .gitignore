@@ -45,6 +45,9 @@ build_rs_cov.profraw
 # WASM build artifacts
 packages/sz-rust-wasm/target/
 
+# Benchmark comparison build artifacts (4 frameworks × ~300MB)
+scripts/perf-compare/benchmarks/*/target/
+
 # Artifacts
 artifacts/
 *.tar.gz

@@ -1,4 +1,4 @@
-//! ORM 模型解析器（stub — 任务组 4 实现）
+//! ORM 模型解析器：解析 Rust 源码中的 ORM 模型定义，提取字段元数据用于前端代码生成。
 
 use std::path::{Path, PathBuf};
 
