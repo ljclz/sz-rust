@@ -56,7 +56,7 @@ impl EntityAttributes for BenchEntity {
 // 基准测试组 1：route_matching — 路由匹配
 // ============================================================================
 
-fn bench_parse_path(c: &mut Criterion) {
+fn bench_route_matching(c: &mut Criterion) {
     let mut group = c.benchmark_group("route_matching");
 
     group.bench_function("parse_path_static", |b| {
@@ -411,7 +411,7 @@ fn bench_di_container(c: &mut Criterion) {
 // ============================================================================
 
 /// 原生风格：手写静态路由匹配（近似 axum matchit 的开销下限）
-fn bench_vs_native(c: &mut Criterion) {
+fn bench_framework_vs_native(c: &mut Criterion) {
     let mut group = c.benchmark_group("framework_vs_native");
 
     group.bench_function("native_match_static", |b| {
@@ -615,7 +615,7 @@ fn bench_cache_read_write(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_parse_path,
+    bench_route_matching,
     bench_handler_ref_parse,
     bench_route_config,
     bench_json_serialization,
@@ -623,7 +623,7 @@ criterion_group!(
     bench_json_dto,
     bench_middleware_chain,
     bench_di_container,
-    bench_vs_native,
+    bench_framework_vs_native,
     bench_rate_limiting,
     bench_circuit_breaker,
     bench_orm_query_build,
