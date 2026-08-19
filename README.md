@@ -24,13 +24,13 @@
 - **缓存系统**：对齐 `think\facade\Cache`，复用 sz-orm-storage 驱动。（✅ 生产已接入：`product.rs:75,98` 商品列表缓存读写，`main.rs:337-338` 初始化 MemoryCacheDriver）
 - **事件系统**：对齐 `think\Event`，支持 Listener / Subscriber / Observer 三种模式。（⚠️ core::event 模块生产未接入；sz300 使用 `plugin::event_bus::InMemoryEventBus`（`main.rs:331` 初始化，`order.rs:291` 发布 order.created 事件））
 - **模型钩子**：`HookDispatcher` 16 事件（PHP 原生 12 + sz-orm-core 扩展 4：BeforeSave / AfterSave / BeforeValidate / AfterValidate）。（✅ 生产已接入：`order.rs:26` 引入 HookContext/HookEvent，`main.rs:174` 初始化 HookRegistry）
-- **文件上传 + 图像处理**：对齐 `think\File` + `think\file\UploadedFile`，5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3 兼容）；图像处理对齐 PHP Grafika（缩放 / 裁剪 / 水印 / 文字）。（⚠️ 生产接入状态：sz300 用自研 `FileService`（`file_service.rs`，tokio::fs 直写 + 扩展名白名单），core 5 存储引擎零生产调用）
-- **多应用分发**：对齐 ThinkPHP `auto_multi_app`，按 URI 前缀分发到子应用。（⚠️ 生产未接入：sz300 单应用部署，multi_app 零调用）
-- **Guard 认证授权**：自研 Guard 模式（融合 NestJS Guard + Spring Security 思路）。（⚠️ 生产未接入：sz300 用自研 `auth_middleware` + `role_guard`，未走 core::guard）
+- **文件上传 + 图像处理**：对齐 `think\File` + `think\file\UploadedFile`，5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3 兼容）；图像处理对齐 PHP Grafika（缩放 / 裁剪 / 水印 / 文字）。（ℹ️ 有意设计：sz300 用自研 `FileService`（`file_service.rs`，本地存储 + 扩展名白名单）；core 5 引擎为框架能力，激活条件=云存储/多租户文件服务需求）
+- **多应用分发**：对齐 ThinkPHP `auto_multi_app`，按 URI 前缀分发到子应用。（ℹ️ 有意设计：sz300 单应用部署；激活条件=多应用部署需求）
+- **Guard 认证授权**：自研 Guard 模式（融合 NestJS Guard + Spring Security 思路）。（ℹ️ 有意设计：sz300 用自研 `auth_middleware` + `role_guard`（`router.rs:202,250`）；core::guard 为框架能力，激活条件=插件/复杂应用复用）
 - **视图模板**：对齐 PHP 模板引擎，支持 layout 布局与模板渲染。（✅ 生产已接入：`view.rs:18` 调用 `View::with_default_engine()`）
-- **HTTP/2 + TLS**：基于 rustls + tokio-rustls，对齐 think-swoole SSL。（⚠️ 生产未接入：sz300 用裸 `axum::serve`，无 TLS）
+- **HTTP/2 + TLS**：基于 rustls + tokio-rustls，对齐 think-swoole SSL。（ℹ️ 有意设计：sz300 用裸 `axum::serve`，TLS 由 nginx/k8s ingress 终止；激活条件=需进程内 TLS/HTTP2）
 - **CLI 命令行工具**：`sz-rust-cli` 提供 make / migrate / route / cache / scheduler 等命令。
-- **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。（⚠️ 生产接入状态：core 编译期依赖并 re-export；运行时由 hot-reload feature 门控，sz300 默认 `default = []` 关闭，`main.rs:104-106` 仅打日志）
+- **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。（ℹ️ 有意设计：core 编译期依赖并 re-export；hot-reload feature 门控，sz300 默认 `default = []` 关闭；激活条件=开发环境热加载需求，生产应启动时加载）
 - **基于 SZ-ORM**：L4 金融级 ORM（Data Mapper + Repository 模式），编译时 SQL 校验（`sql_string!` / `query!` 宏）。
 - **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。（✅ 生产已接入：`main.rs:125` MetricsRegistry + `main.rs:168` SLO 监控器，`health.rs:37/39` 记录燃烧率）
 - **metrics 端点访问控制（T7）**：`MetricsAuthConfig` 提供 Bearer token + IP 白名单（支持 CIDR，v4/v6）双机制；`/metrics` 路由独立挂载 `metrics_auth_middleware`（`router.rs:54` metrics_router()，独立子路由不污染业务 API），未授权返回 403；`SZ300_ENV=production` 时启动强制校验必须配置鉴权否则拒绝启动（`main.rs:243`），客户端真实 IP 通过 `into_make_service_with_connect_info` 注入（`main.rs:262`）。（✅ 生产已接入）
