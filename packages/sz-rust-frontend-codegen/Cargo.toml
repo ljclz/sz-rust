@@ -48,3 +48,6 @@ tempfile = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["sz-rust-auth-facade", "sz-rust-orm-facade", "sz-rust-router-facade", "tabled", "tracing"]

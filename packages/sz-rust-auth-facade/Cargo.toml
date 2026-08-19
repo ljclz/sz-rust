@@ -86,3 +86,6 @@ harness = false
 [[example]]
 name = "bench-runner"
 required-features = ["redis-store"]
+
+[package.metadata.cargo-udeps.ignore]
+development = ["futures", "redis", "reqwest", "sysinfo", "tracing-subscriber"]

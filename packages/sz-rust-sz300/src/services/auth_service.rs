@@ -300,7 +300,7 @@ pub fn current_user(req: &axum::http::Request<axum::body::Body>) -> Option<std::
 /// 返回 `Ok(merchant_id)`：服务端权威的商户 ID（数据边界）。
 ///
 /// 注意：参数为 `user_id` 而非 `&Request` —— 避免 `&Request` 跨 await 捕获导致
-/// handler future 不 Send（axum 0.8 Handler 要求 Send + Sync，Request<Body> 不 Sync）。
+/// handler future 不 Send（axum 0.8 Handler 要求 Send + Sync，`Request<Body>` 不 Sync）。
 /// 调用方先用 [`current_user`] 同步提取 user_id 再调用本函数。
 pub async fn resolve_merchant_id(user_id: i64, requested: Option<i64>) -> Result<i64, String> {
     // 反查用户归属商户（参数化查询）

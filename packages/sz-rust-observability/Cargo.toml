@@ -53,3 +53,6 @@ path = "src/lib.rs"
 
 [package.metadata.cargo-machete]
 ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "redis", "reqwest", "serde", "serde_json", "sysinfo", "thiserror", "tokio", "tracing"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["chrono"]

@@ -126,15 +126,12 @@ expected_num=1
 for adr_file in $(find "$ADR_DIR" -name "*.md" ! -name "README.md" | sort); do
     filename=$(basename "$adr_file")
     # 提取编号（支持 ADR-NNN 或 NNN- 两种格式）
-    num=$(echo "$filename" | grep -oE '[0-9]+' | head -1)
-
-    if [ -z "$num" ]; then
+    if [[ "$filename" =~ ([0-9]+) ]]; then
+        num=$((10#${BASH_REMATCH[1]}))
+    else
         echo -e "${YELLOW}[WARN] $filename 无法提取编号，跳过${NC}"
         continue
     fi
-
-    # 移除前导零
-    num=$((10#$num))
 
     if [ "$num" -lt "$expected_num" ]; then
         # 允许已存在的旧 ADR（不报错）

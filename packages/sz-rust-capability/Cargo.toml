@@ -40,3 +40,6 @@ harness = false
 [[bench]]
 name = "cap_bench"
 harness = false
+
+[package.metadata.cargo-udeps.ignore]
+development = ["proptest"]

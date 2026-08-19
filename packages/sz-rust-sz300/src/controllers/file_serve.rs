@@ -30,7 +30,7 @@ pub async fn serve_file(
     // canonicalize 会解析符号链接、`../`、`.` 等路径变体，是路径遍历防护的权威手段
     let canonical_base = match base_dir.canonicalize() {
         Ok(p) => p,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Upload dir missing").into_response(),
+        Err(_) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
     };
     let canonical_file = match file_path.canonicalize() {
         Ok(p) => p,
