@@ -71,11 +71,14 @@ impl OpenApiBuilder {
 /// 挂载 Swagger UI 路由
 ///
 /// 需启用 `swagger-ui` feature。
+/// utoipa-swagger-ui 8.x 依赖 axum 0.7，与本 crate axum 0.8 不兼容，
+/// 返回占位路由；实际 Swagger UI 由应用层直接挂载。
 #[cfg(feature = "swagger-ui")]
 pub fn swagger_ui_routes() -> axum::Router {
-    utoipa_swagger_ui::SwaggerUi::new("/docs/{_:.*}")
-        .url("/api-docs/openapi.json", utoipa::OpenApi::default())
-        .into()
+    axum::Router::new().route(
+        "/docs/{_:.*}",
+        axum::routing::get(|| async { "Swagger UI" }),
+    )
 }
 
 #[cfg(test)]

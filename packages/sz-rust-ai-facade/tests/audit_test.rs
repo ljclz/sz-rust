@@ -14,8 +14,8 @@ fn audit_http_client_new_and_client() {
     let client = reqwest::Client::new();
     let cfg = RateLimitConfig::default();
     let audit = AuditHttpClient::new(client, cfg);
-    // client() 返回内部 reqwest::Client 引用
-    let _ = audit.client();
+    let c = audit.client();
+    assert!(c.get("https://example.com").build().is_ok());
 }
 
 #[test]

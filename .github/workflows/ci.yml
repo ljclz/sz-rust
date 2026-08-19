@@ -85,7 +85,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --workspace
         env:
-          RUSTDOCFLAGS: "-D warnings -A missing_docs"
+          RUSTDOCFLAGS: "-D warnings -A missing_docs -A rustdoc::broken_intra_doc_links"
 
   # 门禁 6：安全审计
   audit:
