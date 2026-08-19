@@ -1668,7 +1668,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2421,7 +2421,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2729,7 +2729,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3335,7 +3335,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4166,7 +4166,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -4204,9 +4204,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4742,7 +4742,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5519,9 +5519,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-auth"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8ee77712ebf64e6f122c983fc664cfa4d5e75a2ad8b5095c7bfdf3f2b0ea84"
+checksum = "2ea4e6eff5a8ecfc37bd6d90e72947b0988eb1e8b929bc80176c1cead18f8f76"
 dependencies = [
  "async-trait",
  "base64",
@@ -5539,9 +5539,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3f41184d4cb65fda1fe0153af9e9fe3549549b9d76d764973415febdf318da3"
+checksum = "1c1fddc963670f58649a6b786c4ed28db56e08b8629b75c17cfe05f05d55966e"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5561,9 +5561,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-graphql"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b43ad99c45446eb9f31501f9d4aad1125b807ab83ab9f4a436c0aa0d1f45f71d"
+checksum = "cdf7d315da30e933b3cf6002ad5ddb65b64660b83e3295f2f2a9639893da4581"
 dependencies = [
  "serde",
  "serde_json",
@@ -5572,9 +5572,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-grpc"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a2133842ee58cad2abecb1fed6c04789de9d56647ff5ed847c124a6941a3911"
+checksum = "c3c674b77055676f8d0515aff73704d2cec9bb721365914ab6425323781b41b9"
 dependencies = [
  "parking_lot",
  "serde",
@@ -5584,9 +5584,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-limit"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87628486223fe26fe753bbbab12f9a62654f36a76a40ff528781c257a6a5b768"
+checksum = "29cbfb2e176d5e931bd0fc5bc8541b81d69be7fe3ad3321855c2ebb371c03d3f"
 dependencies = [
  "serde",
  "serde_json",
@@ -5594,9 +5594,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-logger"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9be0a144daffce7e165bc25d33f68a0a9a0647e85c0e81d1f21e7a41942459eb"
+checksum = "a0d7bbfcfebb86bc4c4296a5fcf315bc01a984938f0b6572523e24c347b7db0b"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -5606,9 +5606,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-macros"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5765dbbcde959ed3419ae2c381f307d029be98b16fd80e9b1a0e6b78f566512"
+checksum = "0bb3a390262c3df74dfa87f8cd37498fb6b054b491284677cfffc51377990ee3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5617,9 +5617,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mqtt"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a763f3fee1c1ef3454856f84c6695952f225b46e6c3c1e25a87fe9a05df409b"
+checksum = "09c6aacda5bbf60f6a484e4a730fb7ef33b4090b84365238611854618758c00c"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -5631,18 +5631,18 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-query-builder"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f034284d44b2742507f69e89e955319648173e341642198471bda2480908fd6"
+checksum = "e8aba4d9d60b59722fcc5c99379f541028cafc0d69674adbd0779987f0ef2eb0"
 dependencies = [
  "sz-orm-core",
 ]
 
 [[package]]
 name = "sz-orm-queue"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b91c6dc7253b7137f311bf57b0cd387e7ff1a4933f6cc903e28daddf3c90da"
+checksum = "72337011d050fed4672478dc54e10f284eb80e673780d83089d1d111b953443c"
 dependencies = [
  "async-trait",
  "futures",
@@ -5654,9 +5654,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-scheduler"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26eab4f69375a0a03b0d1e4d0426d1e6c5eddd7c7278eef499c1181599958160"
+checksum = "5d06a46e2bb5f239631dec89391c0400a0b96c5f0cfa5da4187431232a129ed9"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5668,9 +5668,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sql-validator"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffc85921a4e31c7e03d1358db32913a6691d5d50d6f098f239cfef14243f15e6"
+checksum = "be264684351e4e28864cb437e5955a791ebe666d407c6ad3dc9d04befbf337ef"
 dependencies = [
  "regex",
  "thiserror 2.0.19",
@@ -5678,9 +5678,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b65c17c884dfdb70ceee4f2ed6a5c22015bd331537e374001931b569cf745bb"
+checksum = "6d6db7ef409409acf3b66ec80998ee6485fe249f8fda12cf80503928220ba167"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5694,9 +5694,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-storage"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b3c88b1920c953246964e0424bf0c0ff5db034c62ca82e6af26d30fe05f83e2"
+checksum = "2fb476b8475cfd37ed59f6e0b5d003ef7405c54f4c7c1942ebb0e2e952da001a"
 dependencies = [
  "async-trait",
  "serde",
@@ -5707,9 +5707,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "4.7.0"
+version = "4.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6d39f37259e739452c087e00454857412b3cc5f6360ffab5928c27425dd8e5"
+checksum = "51795777a71de7a449bcad65b6413e8316ed9e5b09ee3c970f938d0ce8c81f6c"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -6536,10 +6536,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7538,7 +7538,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
