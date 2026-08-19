@@ -1880,8 +1880,9 @@ mod tests {
                 .unwrap()
                 .permissions()
                 .mode();
-            // 0666 & ~umask()，umask 通常是 022，所以最终权限是 0644
-            assert_eq!(perms & 0o777, 0o644);
+            // 0666 & ~umask()：不设执行位（umask 因环境而异，022→0644 / 0→0666）
+            assert_eq!(perms & 0o111, 0, "chmod 不应设置执行位");
+            assert!(perms & 0o600 == 0o600, "owner 应有读写权限");
         }
         #[cfg(not(unix))]
         {

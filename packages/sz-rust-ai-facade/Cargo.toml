@@ -65,5 +65,9 @@ gemini = []
 # 全部 Provider
 all-providers = ["openai", "claude", "gemini"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["validator"]
+development = ["proptest"]
+
 [lints]
 workspace = true

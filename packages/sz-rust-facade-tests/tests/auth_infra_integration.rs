@@ -91,6 +91,7 @@ fn path_safety_and_mime_detection() {
 }
 
 /// upload 保存文件名生成（infra-facade）—— 供 auth 头像等上传业务复用
+#[cfg_attr(miri, ignore)]
 #[test]
 fn upload_save_name_generation() {
     use std::path::Path;
