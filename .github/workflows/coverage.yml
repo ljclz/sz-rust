@@ -40,7 +40,6 @@ jobs:
             -p sz-rust-router-facade \
             -p sz-rust-middleware-facade \
             -p sz-rust-orm-facade \
-
             --cobertura --output-path cobertura-p0.xml
       - name: Upload artifact
         if: always()
@@ -70,7 +69,6 @@ jobs:
             -p sz-rust-ai-facade --features all-providers \
             -p sz-rust-auth-facade \
             -p sz-rust-observability \
-
             --cobertura --output-path cobertura-p1.xml
       - name: Upload artifact
         if: always()
@@ -103,7 +101,6 @@ jobs:
             -p sz-rust-mvc-facade \
             -p sz-rust-orm-ext-facade \
             -p sz-rust-pay-facade \
-
             --cobertura --output-path cobertura-p2.xml
       - name: Upload artifact
         if: always()
@@ -140,7 +137,6 @@ jobs:
             -p sz-rust-capability \
             -p sz-rust-examples \
             -p sz-rust-facade-tests \
-
             --cobertura --output-path cobertura-p3.xml
       - name: Upload artifact
         if: always()
