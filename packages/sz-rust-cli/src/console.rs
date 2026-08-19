@@ -336,8 +336,8 @@ mod tests {
     #[test]
     fn test_print_list_empty() {
         let console = Console::new();
-        // 空命令列表不应 panic
-        console.print_list();
+        let commands = console.list();
+        assert!(commands.is_empty(), "空命令列表应返回空切片");
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
         console
             .register(Box::new(HelloCommand))
             .register(Box::new(EchoCommand));
-        // 有命令时打印列表不应 panic
-        console.print_list();
+        let commands = console.list();
+        assert_eq!(commands.len(), 2, "应有两个注册命令");
     }
 }

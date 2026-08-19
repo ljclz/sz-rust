@@ -55,6 +55,7 @@ fn wechat_signature_and_jwt_auth_chain() {
 }
 
 /// infra 路径安全 + MIME 识别（静态资源防护与类型识别）
+#[cfg_attr(miri, ignore)]
 #[test]
 fn path_safety_and_mime_detection() {
     // 1. 路径穿越防护（规则 8：路径归一化）

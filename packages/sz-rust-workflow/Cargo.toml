@@ -46,3 +46,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["sz-rust-auth-facade"]

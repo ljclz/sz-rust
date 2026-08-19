@@ -36,3 +36,6 @@ mockall = "0.13"
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[package.metadata.cargo-udeps.ignore]
+development = ["mockall"]

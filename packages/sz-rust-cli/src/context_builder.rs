@@ -20,7 +20,7 @@ pub struct PluginCommandArgs {
     pub fields: Option<String>,
     /// 是否强制覆盖已存在目录
     pub force: bool,
-    /// 输出目录（可选，默认 plugins/<name>/）
+    /// 输出目录（可选，默认 `plugins/<name>/`）
     pub output: Option<String>,
     /// 主表名（主从模板，可选）
     pub master: Option<String>,
