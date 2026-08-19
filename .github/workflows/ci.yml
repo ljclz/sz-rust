@@ -370,7 +370,7 @@ jobs:
       - name: Merge coverage reports
         run: |
           node scripts/audit/cobertura-merger.js \
-            --inputs "cobertura.xml cobertura-sz300-db.xml" \
+            --inputs "cobertura*.xml" \
             --output cobertura-workspace.xml
       - name: Per-crate coverage gate
         run: |
