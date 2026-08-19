@@ -35,6 +35,10 @@ All features below are from actual `sz-rust-core` source code. Module structure:
 - **Observability (v0.2.0)**: `sz-rust-observability` package provides `MetricsRegistry` + Counter/Gauge/Histogram metric types, SLO multi-window burn-rate alerting (1h/5m + 6h/30m dual-window pairs, aligned with Google SRE Workbook Chapter 5). (✅ Production: `main.rs:125` MetricsRegistry + `main.rs:168` SLO monitor, `health.rs:37/39` records burn rate)
 - **Metrics Endpoint Access Control (T7)**: `MetricsAuthConfig` provides Bearer token + IP allowlist (CIDR, v4/v6) dual mechanisms; the `/metrics` route mounts `metrics_auth_middleware` as an isolated sub-router (`router.rs:54` metrics_router(), no pollution to business APIs), returning 403 when unauthorized; with `SZ300_ENV=production` startup fails unless auth is configured (`main.rs:243`); real client IP injected via `into_make_service_with_connect_info` (`main.rs:262`). (✅ Production: wired)
 - **Distributed Tracing**: sz300 uses native `tracing` + `sz_rust_observability::otlp` (OTLP gRPC exporter, `main.rs:169`). (✅ Production: wired, `otlp` feature gated)
+- **GraphQL API**: Based on async-graphql 7.x, provides `POST /graphql` query endpoint + `GET /graphiql` IDE. (✅ Production: sz300 `router.rs:196` mounts `graphql_api::graphql_router()`, Schema defines health/serverInfo/product queries)
+- **WebSocket**: Based on sz-orm-websocket (tokio-tungstenite), supports HTTP port multiplexing + standalone port modes, `WsHandler` trait aligned with PHP Workerman onConnect/onMessage/onClose. (✅ Production: sz300 `router.rs:201` mounts `/ws/echo` echo endpoint)
+- **WASM Edge Compute**: `sz-rust-wasm` crate based on wasmi (pure Rust WASM interpreter), provides `WasmRuntime` for loading/executing WASM modules. (✅ Production: sz300 `POST /api/wasm/execute` endpoint, accepts base64-encoded WASM module + function name + args, returns execution result)
+- **K8s Operator**: `sz-rust-k8s-operator` crate defines `Sz300App` CRD (apiVersion: sz-rust.dev/v1), reconcile loop auto-manages Deployment + Service. (✅ Implemented: CRD definition + reconcile logic + 11 tests)
 
 ---
 
