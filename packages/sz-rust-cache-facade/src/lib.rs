@@ -4866,7 +4866,10 @@ mod tests {
     fn test_redis_tag_clear_empty_no_error() {
         let driver = RedisCacheDriver::new(RedisConfig::default());
         let result = driver.tag_clear(&[]);
-        assert!(result.is_ok(), "redis tag_clear on empty list should succeed");
+        assert!(
+            result.is_ok(),
+            "redis tag_clear on empty list should succeed"
+        );
     }
 
     // ========================================================================
@@ -4954,7 +4957,8 @@ mod tests {
         cache.register_default(MemoryCacheDriver::new());
 
         // 没有写入任何缓存，clear 不报错
-        cache.tag("empty").clear().unwrap();
+        let result = cache.tag("empty").clear();
+        assert!(result.is_ok(), "clear on empty tag should succeed");
     }
 
     #[test]
