@@ -62,7 +62,7 @@ impl QueryRoot {
         Some(ProductGql {
             good_id,
             name: format!("商品#{}", good_id),
-            price: 100 * good_id,
+            price: 100i64.checked_mul(good_id)?,
             status: 1,
         })
     }
@@ -149,5 +149,164 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
+    // === 边界与极端测试 ===
+
+    fn make_schema() -> Schema<QueryRoot, EmptyMutation, EmptySubscription> {
+        Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish()
+    }
+
+    #[tokio::test]
+    async fn test_product_good_id_max_returns_none() {
+        let schema = make_schema();
+        let res = schema
+            .execute("{ product(goodId: 9223372036854775807) { goodId } }")
+            .await;
+        let data = res.data.into_json().unwrap();
+        assert!(data["product"].is_null(), "i64::MAX 应溢出返回 null");
+    }
+
+    #[tokio::test]
+    async fn test_product_good_id_min_returns_none() {
+        let schema = make_schema();
+        let res = schema
+            .execute("{ product(goodId: -9223372036854775808) { goodId } }")
+            .await;
+        let data = res.data.into_json().unwrap();
+        assert!(data["product"].is_null(), "i64::MIN <= 0 返回 null");
+    }
+
+    #[tokio::test]
+    async fn test_product_good_id_negative_returns_none() {
+        let schema = make_schema();
+        let res = schema.execute("{ product(goodId: -1) { goodId } }").await;
+        let data = res.data.into_json().unwrap();
+        assert!(data["product"].is_null(), "负数 goodId 返回 null");
+    }
+
+    #[tokio::test]
+    async fn test_product_good_id_critical_non_overflow() {
+        let schema = make_schema();
+        let critical = i64::MAX / 100;
+        let query = format!("{{ product(goodId: {}) {{ goodId price }} }}", critical);
+        let res = schema.execute(&query).await;
+        let data = res.data.into_json().unwrap();
+        assert_eq!(data["product"]["goodId"], critical);
+        assert_eq!(data["product"]["price"], 100 * critical);
+    }
+
+    #[tokio::test]
+    async fn test_health_stability_100_calls() {
+        let schema = make_schema();
+        for _ in 0..100 {
+            let res = schema.execute("{ health { status version } }").await;
+            let data = res.data.into_json().unwrap();
+            assert_eq!(data["health"]["status"], "ok");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_graphql_empty_query() {
+        let router = graphql_router();
+        let res = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"query":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_graphql_invalid_json() {
+        let router = graphql_router();
+        let res = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from("not json"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.status() != axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_graphql_long_query() {
+        let router = graphql_router();
+        let long_query = "x".repeat(1024 * 1024);
+        let body = format!(r#"{{"query":"{long_query}"}}"#);
+        let res = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_graphql_deep_nesting() {
+        let router = graphql_router();
+        let query = "{ health { status } }".repeat(100);
+        let body = format!(r#"{{"query":"{query}"}}"#);
+        let res = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_graphiql_content_type() {
+        let router = graphql_router();
+        let res = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/graphiql")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+        let ct = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(
+            ct.contains("text/html"),
+            "Content-Type 应含 text/html, got: {ct}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_graphql_error_response_format() {
+        let schema = make_schema();
+        let res = schema.execute("{ unknownField }").await;
+        assert!(!res.errors.is_empty(), "未知字段应返回 errors");
     }
 }
