@@ -181,24 +181,24 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，从 crates.io 4.9.0 拉取）
-sz-orm-core = "4.9.0"
-sz-orm-auth = "4.9.0"
-sz-orm-storage = "4.9.0"
-sz-orm-queue = "4.9.0"
-sz-orm-mqtt = "4.9.0"
-sz-orm-websocket = "4.9.1"
-sz-orm-scheduler = "4.9.0"
-sz-orm-tracing = "4.9.0"
-sz-orm-logger = "4.9.0"
-sz-orm-limit = "4.9.0"
-sz-orm-config = "4.9.0"
-sz-orm-macros = "4.9.0"
-sz-orm-sql-validator = "4.9.0"
-sz-orm-sqlx = "4.9.0"
-sz-orm-query-builder = "4.9.0"
-sz-orm-graphql = "4.9.0"
-sz-orm-grpc = "4.9.0"
+# 内部依赖（SZ-ORM 全家桶，从 crates.io 5.0.0 拉取）
+sz-orm-core = "5.0.0"
+sz-orm-auth = "5.0.0"
+sz-orm-storage = "5.0.0"
+sz-orm-queue = "5.0.0"
+sz-orm-mqtt = "5.0.0"
+sz-orm-websocket = "5.0.0"
+sz-orm-scheduler = "5.0.0"
+sz-orm-tracing = "5.0.0"
+sz-orm-logger = "5.0.0"
+sz-orm-limit = "5.0.0"
+sz-orm-config = "5.0.0"
+sz-orm-macros = "5.0.0"
+sz-orm-sql-validator = "5.0.0"
+sz-orm-sqlx = "5.0.0"
+sz-orm-query-builder = "5.0.0"
+sz-orm-graphql = "5.0.0"
+sz-orm-grpc = "5.0.0"
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "1.1.0", path = "packages/sz-rust-core" }
