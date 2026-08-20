@@ -5,6 +5,20 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-21（sz-orm 5.0.0 统一升级）
+
+### Changed
+
+- **sz-orm 全家桶 17 个子 crate 从 4.9.0/4.9.1 统一升级到 5.0.0**：
+  - workspace 根 `Cargo.toml:184-201` 版本号更新
+  - 8 个未发布 crate（auth/mqtt/websocket/scheduler/logger/config/query-builder/graphql）已发布 5.0.0 到 crates.io
+  - `cargo tree -d` 无 sz-orm-* 重复版本（全部统一 5.0.0）
+
+### Verified
+
+- 编译验证：sz-rust-orm-facade / sz-rust-core / sz-rust-mcp / sz-rust-sz300 / sz-rust-cli 全部 `cargo check` 通过
+- 测试验证（零回归）：orm-facade 111 + core 835 + mcp 101 + sz300 477 + facade-tests 16 + cli 364 = 1904 passed, 0 failed
+
 ## [Unreleased] - 2026-08-20（边界测试补齐 + 性能压测基线）
 
 ### Added
