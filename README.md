@@ -241,5 +241,7 @@ MIT
 - `scripts/e2e_deploy.js` — ssh2 部署脚本（禁止 sshpass/killall）
 - `scripts/e2e_orchestrate.js` — E2E 8 阶段编排
 - `docs/benchmarks/2026-08-12-w5-w6-baseline.md` — 性能基线报告
+- `scripts/perf-baseline/` — 生产实例压测脚手架（ab + ssh2 + 资源采样 + 健康探测）
+- `docs/audit/2026-08-20-perf-baseline.md` — sz300 生产性能基线报告（3 端点 × 5 并发）
 - `docs/audit/2026-08-12-w5-w6-security-audit.md` — 安全审计报告
 - `docs/audit/2026-08-12-w5-w6-e2e-report.md` — E2E 验证报告
