@@ -5,6 +5,34 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-20（边界测试补齐 + 性能压测基线）
+
+### Added
+
+- **WASM/K8s/GraphQL 边界测试补齐**（`d08bbfe`）：
+  - sz-rust-wasm: 新增 12 边界测试（i64 溢出、空 wasm、非法 opcode），20 passed + 1 ignored
+  - sz-rust-k8s-operator: 新增 11 边界测试（空 spec、无效 image、label 冲突），22 passed
+  - sz-rust-sz300 graphql_api: 新增 11 边界测试（空 query、嵌套深度、product 溢出），17 passed
+- **性能压测基线脚手架**（`scripts/perf-baseline/`）：
+  - 5 脚本：install-hey.js / run-hey.js / sample-resource.js / health-probe.js / generate-report.js
+  - 使用 ssh2 远程执行，禁用 sshpass/powershell
+  - 压测工具：ab (Apache Benchmark 2.3)，oha 编译过慢改用服务器已有 ab
+- **生产实例压测报告**（`docs/audit/2026-08-20-perf-baseline.md`）：
+  - 3 端点 × 5 并发梯度 × 30s，错误率 0.00%，健康率 100%
+  - health: QPS 2090-5562, P95 0-122ms
+  - graphql: QPS 5916-13465, P95 0-17ms
+  - wasm: QPS 6019-13531, P95 0-17ms
+  - 峰值 RSS 28.8 MB，平均 CPU 109.4%
+
+### Fixed
+
+- **GraphQL product 查询溢出**（`d08bbfe`）：`100 * good_id` → `100i64.checked_mul(good_id)?`（`graphql_api.rs:65`）
+- **WASM product 溢出**（`d08bbfe`）：同上 checked_mul 改造（`sz-rust-wasm/src/lib.rs`）
+
+### Changed
+
+- doc-debt 新增 reconcile 测试缺口记录（DB-2026-08-20-05）
+
 ## [Unreleased] - 2026-08-19（7 P1 死 crate 复活 + 生产接线 + R001-R007 安全复核）
 
 ### Added
