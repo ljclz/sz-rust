@@ -628,7 +628,34 @@ async fn chaos_error_response_into_response_does_not_panic() {
     let reset_at = chrono::Local::now().timestamp() + 60;
     let result = sz_orm_limit::RateLimitResult::rejected(0, reset_at);
     let response = rate_limit_rejected_response(&result);
-    // 验证 IntoResponse trait 正确工作
-    let _status = response.status();
-    let _resp: axum::response::Response = response.into_response();
+
+    // 显式断言：状态码 429
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    // 显式断言：Content-Type 为 JSON
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .map(|v| v.to_str().unwrap_or("")),
+        Some("application/json; charset=utf-8")
+    );
+
+    // 显式断言：限流 headers 存在且非空
+    assert!(response.headers().get("x-ratelimit-remaining").is_some());
+    assert!(response.headers().get("x-ratelimit-reset").is_some());
+    let retry_after = response
+        .headers()
+        .get("retry-after")
+        .expect("retry-after header must exist")
+        .to_str()
+        .unwrap();
+    assert!(
+        retry_after.parse::<u64>().unwrap_or(0) >= 1,
+        "retry-after must be >= 1 second"
+    );
+
+    // 验证 IntoResponse trait 正确工作（不 panic）
+    let resp: axum::response::Response = response.into_response();
+    assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
 }
