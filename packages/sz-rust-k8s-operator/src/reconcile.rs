@@ -30,6 +30,7 @@ pub struct ReconcileResult {
 }
 
 /// Reconcile — 根据 Sz300App CRD 确保 Deployment + Service 存在且配置正确
+// TODO: 可测性改进建议 — 引入 trait ReconcileApi 抽象 Api<Deployment> 与 Api<Service>，便于 mock 错误传播（reconcile 的 Err(e) => return Err(e.into()) 分支未被测试覆盖）
 pub async fn reconcile(
     app: &Sz300App,
     deploy_api: &Api<Deployment>,
@@ -284,5 +285,185 @@ mod tests {
         };
         assert!(!r.deployment_created);
         assert!(!r.deployment_updated);
+    }
+
+    // === 边界与极端测试 ===
+
+    #[test]
+    fn test_build_deployment_replicas_zero() {
+        let app = make_app("app", "img:v1", 0, 8080);
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        assert_eq!(deploy.spec.as_ref().unwrap().replicas, Some(0));
+    }
+
+    #[test]
+    fn test_build_deployment_replicas_negative() {
+        let app = make_app("app", "img:v1", -1, 8080);
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        assert_eq!(deploy.spec.as_ref().unwrap().replicas, Some(-1));
+    }
+
+    #[test]
+    fn test_build_deployment_replicas_max() {
+        let app = make_app("app", "img:v1", i32::MAX, 8080);
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        assert_eq!(deploy.spec.as_ref().unwrap().replicas, Some(i32::MAX));
+    }
+
+    #[test]
+    fn test_build_deployment_env_empty() {
+        let app = make_app("app", "img:v1", 1, 8080);
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        let containers = &deploy
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers;
+        assert!(containers[0].env.is_none());
+    }
+
+    #[test]
+    fn test_build_deployment_env_duplicate_keys() {
+        let app = Sz300App::new(
+            "app",
+            Sz300AppSpec {
+                image: "img:v1".into(),
+                replicas: 1,
+                port: 8080,
+                env: vec![
+                    EnvVar {
+                        name: "KEY".into(),
+                        value: "v1".into(),
+                    },
+                    EnvVar {
+                        name: "KEY".into(),
+                        value: "v2".into(),
+                    },
+                ],
+            },
+        );
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        let env = deploy
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers[0]
+            .env
+            .as_ref()
+            .unwrap();
+        assert_eq!(env.len(), 2);
+    }
+
+    #[test]
+    fn test_build_deployment_env_long_value() {
+        let long_val = "x".repeat(1024 * 1024);
+        let app = Sz300App::new(
+            "app",
+            Sz300AppSpec {
+                image: "img:v1".into(),
+                replicas: 1,
+                port: 8080,
+                env: vec![EnvVar {
+                    name: "LONG".into(),
+                    value: long_val.clone(),
+                }],
+            },
+        );
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        let env = deploy
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers[0]
+            .env
+            .as_ref()
+            .unwrap();
+        assert_eq!(env[0].value.as_ref().unwrap().len(), 1024 * 1024);
+    }
+
+    #[test]
+    fn test_build_deployment_env_special_chars() {
+        let special = "a\nb$c d";
+        let app = Sz300App::new(
+            "app",
+            Sz300AppSpec {
+                image: "img:v1".into(),
+                replicas: 1,
+                port: 8080,
+                env: vec![EnvVar {
+                    name: "S".into(),
+                    value: special.into(),
+                }],
+            },
+        );
+        let labels = labels_for("app");
+        let deploy = build_deployment("app", &app.spec, &labels);
+        let env = deploy
+            .spec
+            .as_ref()
+            .unwrap()
+            .template
+            .spec
+            .as_ref()
+            .unwrap()
+            .containers[0]
+            .env
+            .as_ref()
+            .unwrap();
+        assert_eq!(env[0].value.as_deref(), Some("a\nb$c d"));
+    }
+
+    #[test]
+    fn test_build_service_port_one() {
+        let app = make_app("app", "img:v1", 1, 1);
+        let labels = labels_for("app");
+        let svc = build_service("app", &app.spec, &labels);
+        let ports = svc.spec.as_ref().unwrap().ports.as_ref().unwrap();
+        assert_eq!(ports[0].port, 1);
+    }
+
+    #[test]
+    fn test_build_service_port_max() {
+        let app = make_app("app", "img:v1", 1, 65535);
+        let labels = labels_for("app");
+        let svc = build_service("app", &app.spec, &labels);
+        let ports = svc.spec.as_ref().unwrap().ports.as_ref().unwrap();
+        assert_eq!(ports[0].port, 65535);
+    }
+
+    #[test]
+    fn test_build_service_port_negative() {
+        let app = make_app("app", "img:v1", 1, -1);
+        let labels = labels_for("app");
+        let svc = build_service("app", &app.spec, &labels);
+        let ports = svc.spec.as_ref().unwrap().ports.as_ref().unwrap();
+        assert_eq!(ports[0].port, -1);
+    }
+
+    #[test]
+    fn test_labels_for_consistency() {
+        let l1 = labels_for("test");
+        let l2 = labels_for("test");
+        assert_eq!(l1, l2);
+        assert_eq!(l1.get("app").unwrap(), "test");
+        assert_eq!(l1.get("managed-by").unwrap(), "sz-rust-operator");
     }
 }

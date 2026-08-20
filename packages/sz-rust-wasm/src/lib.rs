@@ -21,7 +21,7 @@ pub enum WasmRuntimeError {
 }
 
 /// WASM 值类型包装（支持 i32/i64）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum WasmValue {
     /// i32
@@ -246,5 +246,121 @@ mod tests {
         let v = WasmValue::from(100i64);
         assert_eq!(v.as_i64(), Some(100));
         assert_eq!(v.as_i32(), None);
+    }
+
+    // === 边界与极端测试 ===
+
+    #[test]
+    fn test_wasm_value_i32_boundaries() {
+        for v in [i32::MIN, i32::MAX, 0, -1] {
+            let wv = WasmValue::I32(v);
+            assert_eq!(wv.as_i32(), Some(v));
+            assert_eq!(wv.as_i64(), None);
+            assert_eq!(WasmValue::from_value(&wv.to_value()), Some(wv));
+        }
+    }
+
+    #[test]
+    fn test_wasm_value_i64_boundaries() {
+        for v in [i64::MIN, i64::MAX, 0, -1] {
+            let wv = WasmValue::I64(v);
+            assert_eq!(wv.as_i64(), Some(v));
+            assert_eq!(wv.as_i32(), None);
+            assert_eq!(WasmValue::from_value(&wv.to_value()), Some(wv));
+        }
+    }
+
+    #[test]
+    fn test_wasm_value_roundtrip_boundaries() {
+        let values = [
+            WasmValue::I32(i32::MIN),
+            WasmValue::I32(i32::MAX),
+            WasmValue::I32(0),
+            WasmValue::I64(i64::MIN),
+            WasmValue::I64(i64::MAX),
+            WasmValue::I64(0),
+        ];
+        for v in &values {
+            assert_eq!(WasmValue::from_value(&v.to_value()), Some(v.clone()));
+        }
+    }
+
+    #[test]
+    fn test_wasm_compile_empty_bytes() {
+        let rt = WasmRuntime::new();
+        assert!(rt.compile(&[]).is_err());
+    }
+
+    #[test]
+    fn test_wasm_compile_single_byte() {
+        let rt = WasmRuntime::new();
+        assert!(rt.compile(&[0x00]).is_err());
+    }
+
+    #[test]
+    fn test_wasm_compile_1mb_garbage() {
+        let rt = WasmRuntime::new();
+        let garbage = vec![0xAA; 1024 * 1024];
+        assert!(rt.compile(&garbage).is_err());
+    }
+
+    #[test]
+    fn test_wasm_compile_damaged_section() {
+        let rt = WasmRuntime::new();
+        let mut wasm = add_wasm();
+        wasm.truncate(wasm.len().saturating_sub(4));
+        assert!(rt.compile(&wasm).is_err());
+    }
+
+    #[test]
+    fn test_wasm_execute_arg_count_mismatch() {
+        let rt = WasmRuntime::new();
+        let module = rt.compile(&add_wasm()).unwrap();
+        assert!(module.execute("add", &[WasmValue::I32(1)]).is_err());
+    }
+
+    #[test]
+    fn test_wasm_execute_arg_type_mismatch() {
+        let rt = WasmRuntime::new();
+        let module = rt.compile(&add_wasm()).unwrap();
+        assert!(module
+            .execute("add", &[WasmValue::I64(1), WasmValue::I64(2)])
+            .is_err());
+    }
+
+    #[test]
+    fn test_wasm_exports_memory_only() {
+        let rt = WasmRuntime::new();
+        let wasm = wat::parse_str(r#"(module (memory (export "mem") 1))"#).unwrap();
+        let module = rt.compile(&wasm).unwrap();
+        assert!(module.exports().is_empty());
+    }
+
+    #[test]
+    fn test_wasm_exports_empty_module() {
+        let rt = WasmRuntime::new();
+        let wasm = wat::parse_str(r#"(module)"#).unwrap();
+        let module = rt.compile(&wasm).unwrap();
+        assert!(module.exports().is_empty());
+    }
+
+    #[test]
+    fn test_wasm_compile_large_memory_not_panic() {
+        let rt = WasmRuntime::new();
+        let wasm = wat::parse_str(r#"(module (memory 65536))"#).unwrap();
+        let _ = rt.compile(&wasm);
+    }
+
+    #[test]
+    #[ignore = "无限循环子线程会阻止进程退出，手动运行: cargo test -- --ignored"]
+    fn test_wasm_infinite_loop_not_finished_in_200ms() {
+        let rt = WasmRuntime::new();
+        let wasm = wat::parse_str(r#"(module (func (export "loop") (loop (br 0))))"#).unwrap();
+        let module = rt.compile(&wasm).unwrap();
+        let handle = std::thread::spawn(move || {
+            let _ = module.execute("loop", &[]);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(!handle.is_finished(), "无限循环应仍在执行");
     }
 }
