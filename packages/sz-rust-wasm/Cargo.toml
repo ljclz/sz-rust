@@ -14,9 +14,7 @@ categories = ["wasm"]
 [dependencies]
 wasmi = "0.31"
 serde.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 
 [lints]
 workspace = true

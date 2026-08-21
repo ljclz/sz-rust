@@ -56,3 +56,6 @@ tower = { workspace = true, features = ["util"] }
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["serde", "prost", "utoipa-swagger-ui"]

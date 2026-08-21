@@ -157,7 +157,7 @@ harness = false
 unsafe_code = "allow"
 
 [package.metadata.cargo-machete]
-ignored = ["md-5"]
+ignored = ["md-5", "redis"]
 
 # SIMD JSON 加速（仅 x86_64 平台启用）
 [target.'cfg(target_arch = "x86_64")'.dependencies]

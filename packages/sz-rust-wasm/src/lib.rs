@@ -184,7 +184,10 @@ mod tests {
 
     #[test]
     fn test_wasm_runtime_creation() {
-        let _rt = WasmRuntime::new();
+        let rt = WasmRuntime::new();
+        let module = rt.compile(&add_wasm()).unwrap();
+        let result = module.execute("add", &[1.into(), 2.into()]).unwrap();
+        assert_eq!(result[0].as_i32(), Some(3));
     }
 
     #[test]
