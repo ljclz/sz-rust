@@ -433,19 +433,23 @@ fn resolve_template_path(name: &str, config: &ViewConfig) -> PathBuf {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     // =========================================================================
     // 辅助函数
     // =========================================================================
 
+    /// 使用 `纳秒时间戳 + 全局递增计数器` 保证目录名唯一，
+    /// 避免多线程测试下的目录名冲突（Windows SystemTime 精度仅 100ns）。
     fn make_temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sz_rust_inheritance_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
+        let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sz_rust_inheritance_test_{}_{}", nanos, id));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
