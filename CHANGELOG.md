@@ -5,6 +5,22 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-08-21（sz-rust 1.2.0 发布到 crates.io）
+
+### Changed
+
+- **sz-rust 全部 18 个 crate 发布 1.2.0 到 crates.io**（`596c11f`）：
+  - workspace 版本 1.1.0 → 1.2.0，33 个内部依赖版本同步
+  - 18 crate 按依赖顺序发布：macros → facades → mcp → capability → addons-loader → core
+  - sz-rust-core 1.2.0 依赖 sz-orm-core 5.0.0，外部消费者可直接 `sz-rust-core = "1.2.0"`
+  - sz-pay 已改回 crates.io 依赖，5159 passed, 0 failed
+
+### Verified
+
+- `cargo search sz-rust-core` → `sz-rust-core = "1.2.0"`
+- 18/18 crate 在 crates.io 验证通过
+- sz-rust-core 450 + mcp 52 + sz300 477 = 979 passed, 0 failed
+
 ## [Unreleased] - 2026-08-21（sz-orm 5.0.0 统一升级）
 
 ### Changed
