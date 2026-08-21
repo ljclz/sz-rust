@@ -34,4 +34,4 @@ path = "src/lib.rs"
 
 # cargo-machete 误报 serde 未使用（实际通过 `use serde::{Serialize, Deserialize};` 使用）
 [package.metadata.cargo-machete]
-ignored = ["serde"]
+ignored = ["serde", "md-5"]

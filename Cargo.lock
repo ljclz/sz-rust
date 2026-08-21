@@ -6492,17 +6492,12 @@ dependencies = [
 name = "sz-rust-k8s-operator"
 version = "1.2.0"
 dependencies = [
- "async-trait",
- "futures",
  "k8s-openapi",
  "kube",
  "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -6792,9 +6787,7 @@ name = "sz-rust-wasm"
 version = "1.2.0"
 dependencies = [
  "serde",
- "serde_json",
  "thiserror 2.0.20",
- "tracing",
  "wasmi",
  "wat",
 ]
