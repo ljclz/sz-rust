@@ -12,10 +12,84 @@ pub enum Role {
     Tool,
 }
 
+/// 多模态内容部分
+///
+/// `#[serde(untagged)]` 确保纯文本序列化为字符串（向后兼容），
+/// 多模态序列化为对象。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum ContentPart {
+    Text(String),
+    Image { url: String, detail: ImageDetail },
+    ImageBase64 { data: String, mime_type: String },
+}
+
+impl ContentPart {
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            ContentPart::Text(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn text_or_empty(&self) -> &str {
+        self.as_text().unwrap_or("")
+    }
+
+    pub fn is_image(&self) -> bool {
+        matches!(
+            self,
+            ContentPart::Image { .. } | ContentPart::ImageBase64 { .. }
+        )
+    }
+}
+
+impl From<String> for ContentPart {
+    fn from(s: String) -> Self {
+        ContentPart::Text(s)
+    }
+}
+
+impl From<&str> for ContentPart {
+    fn from(s: &str) -> Self {
+        ContentPart::Text(s.to_string())
+    }
+}
+
+impl std::fmt::Display for ContentPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContentPart::Text(s) => write!(f, "{s}"),
+            ContentPart::Image { url, .. } => write!(f, "[image:{url}]"),
+            ContentPart::ImageBase64 { mime_type, .. } => write!(f, "[image:{mime_type}]"),
+        }
+    }
+}
+
+impl Default for ContentPart {
+    fn default() -> Self {
+        ContentPart::Text(String::new())
+    }
+}
+
+impl std::hash::Hash for ContentPart {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageDetail {
+    Low,
+    High,
+    Auto,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub role: Role,
-    pub content: String,
+    pub content: ContentPart,
     pub tool_call_id: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
 }

@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Once};
 use sz_rust_ai_facade::common::AiError;
 use sz_rust_ai_facade::llm::provider::{
-    ChatCompletion, ChatMessage, ChatRequest, Choice, FinishReason, LlmProvider, Role, StreamDelta,
-    Usage,
+    ChatCompletion, ChatMessage, ChatRequest, Choice, ContentPart, FinishReason, LlmProvider, Role,
+    StreamDelta, Usage,
 };
 use sz_rust_ai_facade::llm::{provider::ProviderRef, ModelRouter};
 
@@ -37,7 +37,7 @@ impl LlmProvider for StubProvider {
                 index: 0,
                 message: ChatMessage {
                     role: Role::Assistant,
-                    content: "Stub response".to_string(),
+                    content: ContentPart::Text("Stub response".into()),
                     tool_call_id: None,
                     tool_calls: None,
                 },
@@ -59,7 +59,10 @@ impl LlmProvider for StubProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
 
     fn supported_models(&self) -> &[&str] {
@@ -100,7 +103,7 @@ async fn ai_chat_returns_response_with_stub_provider() {
         "gpt-4o-mini",
         vec![ChatMessage {
             role: Role::User,
-            content: "你好".to_string(),
+            content: "你好".into(),
             tool_call_id: None,
             tool_calls: None,
         }],
@@ -112,7 +115,10 @@ async fn ai_chat_returns_response_with_stub_provider() {
     let completion = result.unwrap();
     assert_eq!(completion.model, "gpt-4o-mini");
     assert!(!completion.choices.is_empty());
-    assert_eq!(completion.choices[0].message.content, "Stub response");
+    assert_eq!(
+        completion.choices[0].message.content.text_or_empty(),
+        "Stub response"
+    );
     assert_eq!(completion.usage.total_tokens, 30);
 }
 
@@ -124,7 +130,7 @@ async fn ai_chat_with_unknown_model_returns_error() {
         "nonexistent-model",
         vec![ChatMessage {
             role: Role::User,
-            content: "test".to_string(),
+            content: "test".into(),
             tool_call_id: None,
             tool_calls: None,
         }],
@@ -147,7 +153,7 @@ async fn ai_chat_with_gpt4o_model_routes_correctly() {
         "gpt-4o",
         vec![ChatMessage {
             role: Role::User,
-            content: "用 gpt-4o 回答".to_string(),
+            content: "用 gpt-4o 回答".into(),
             tool_call_id: None,
             tool_calls: None,
         }],
@@ -168,7 +174,7 @@ async fn ai_chat_with_gpt41_mini_model_routes_correctly() {
         "gpt-4.1-mini",
         vec![ChatMessage {
             role: Role::User,
-            content: "用 gpt-4.1-mini 回答".to_string(),
+            content: "用 gpt-4.1-mini 回答".into(),
             tool_call_id: None,
             tool_calls: None,
         }],

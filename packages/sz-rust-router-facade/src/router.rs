@@ -24,7 +24,8 @@
 //! | `pathinfo_depr` | `/` | 路径分隔符 |
 //! | `empty_controller` | `Error` | 空控制器名（暂未实现） |
 
-use axum::routing::{delete as route_delete, get, post, put};
+use axum::routing::{delete as route_delete, get, head, patch, post, put};
+
 use axum::Router;
 
 use std::borrow::Cow;
@@ -236,8 +237,8 @@ pub fn capitalize_first(s: &str) -> Cow<'_, str> {
 
 /// 路由构建器
 ///
-/// 对 axum::Router 的薄封装，提供链式 API 和未来扩展点（如 PHP 风格的
-/// `Route::group()` / `Route::resource()`）。
+/// 对 axum::Router 的薄封装，提供链式 API（含 PHP 风格的
+/// `group()` / `nest()` / `resource()` 等分组能力）。
 ///
 /// ## 用法
 ///
@@ -351,6 +352,42 @@ where
         }
     }
 
+    /// 注册 PATCH 路由
+    pub fn patch<H, T>(self, path: &str, handler: H) -> Self
+    where
+        H: axum::handler::Handler<T, S>,
+        T: 'static,
+    {
+        Self {
+            inner: self.inner.route(path, patch(handler)),
+        }
+    }
+
+    /// 注册 HEAD 路由
+    pub fn head<H, T>(self, path: &str, handler: H) -> Self
+    where
+        H: axum::handler::Handler<T, S>,
+        T: 'static,
+    {
+        Self {
+            inner: self.inner.route(path, head(handler)),
+        }
+    }
+
+    /// 注册 OPTIONS 路由
+    pub fn options<H, T>(self, path: &str, handler: H) -> Self
+    where
+        H: axum::handler::Handler<T, S>,
+        T: 'static,
+    {
+        Self {
+            inner: self.inner.route(
+                path,
+                axum::routing::on(axum::routing::MethodFilter::OPTIONS, handler),
+            ),
+        }
+    }
+
     /// 注册 WebSocket 路由（原生框架集成，无需独立端口）
     ///
     /// 在主 HTTP 端口上处理 WebSocket 升级请求（如 `GET /ws/chat`）。
@@ -396,6 +433,51 @@ where
         Self {
             inner: self.inner.merge(other),
         }
+    }
+
+    /// 嵌套另一个 Router 到指定前缀下（对齐 axum::Router::nest）
+    ///
+    /// ## 用法
+    ///
+    /// ```ignore
+    /// let api_routes = RouterBuilder::new()
+    ///     .get("/users", get_users)
+    ///     .build();
+    ///
+    /// let router = RouterBuilder::new()
+    ///     .nest("/api", api_routes)
+    ///     .build();
+    /// // GET /api/users -> get_users
+    /// ```
+    pub fn nest(self, prefix: &str, other: Router<S>) -> Self {
+        Self {
+            inner: self.inner.nest(prefix, other),
+        }
+    }
+
+    /// 路由分组：返回一个新的 RouterBuilder，后续注册的路由自动添加前缀
+    ///
+    /// 对齐 PHP `Route::group()` + axum `Router::nest` 语义。
+    /// 内部实现：创建子 RouterBuilder，通过 nest 挂载到前缀。
+    ///
+    /// ## 用法
+    ///
+    /// ```ignore
+    /// let router = RouterBuilder::new()
+    ///     .group("/api", |group| {
+    ///         group.get("/users", get_users)
+    ///              .post("/users", create_user)
+    ///     })
+    ///     .build();
+    /// // GET /api/users -> get_users
+    /// // POST /api/users -> create_user
+    /// ```
+    pub fn group<F>(self, prefix: &str, f: F) -> Self
+    where
+        F: FnOnce(RouterBuilder<S>) -> RouterBuilder<S>,
+    {
+        let sub_builder = f(RouterBuilder::new());
+        self.nest(prefix, sub_builder.build())
     }
 
     /// 构建最终的 axum::Router

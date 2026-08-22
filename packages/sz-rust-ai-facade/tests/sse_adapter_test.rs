@@ -30,7 +30,7 @@ async fn sse_adapter_adapt_maps_delta_to_event() {
 }
 
 #[tokio::test]
-async fn sse_adapter_adapt_drops_error_items() {
+async fn sse_adapter_adapt_propagates_error_items() {
     use sz_rust_ai_facade::common::AiError;
     let deltas: Vec<Result<StreamDelta, AiError>> = vec![
         Ok(StreamDelta {
@@ -49,8 +49,11 @@ async fn sse_adapter_adapt_drops_error_items() {
     let adapted = SseAdapter::adapt(stream);
 
     let events: Vec<_> = adapted.collect().await;
-    // 错误项被 filter_map 丢弃，只保留 2 个 Ok
-    assert_eq!(events.len(), 2);
+    // 错误项现在被传播（任务组 18），3 个项：Ok, Err, Ok
+    assert_eq!(events.len(), 3);
+    assert!(events[0].is_ok());
+    assert!(events[1].is_err(), "error should be propagated");
+    assert!(events[2].is_ok());
 }
 
 #[tokio::test]

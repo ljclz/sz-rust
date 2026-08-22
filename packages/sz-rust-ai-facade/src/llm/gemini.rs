@@ -1,7 +1,7 @@
 use crate::common::{AiError, AuditHttpClient};
 use crate::llm::provider::{
-    ChatCompletion, ChatMessage, ChatRequest, Choice, FinishReason, LlmProvider, Role, StreamDelta,
-    ToolCall, Usage,
+    ChatCompletion, ChatMessage, ChatRequest, Choice, ContentPart, FinishReason, LlmProvider, Role,
+    StreamDelta, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -34,6 +34,18 @@ impl GeminiProvider {
         self
     }
 
+    fn content_to_parts(content: &ContentPart) -> Vec<serde_json::Value> {
+        match content {
+            ContentPart::Text(s) => vec![serde_json::json!({"text": s})],
+            ContentPart::Image { url, .. } => vec![serde_json::json!({
+                "file_data": {"mime_type": "image/jpeg", "file_uri": url}
+            })],
+            ContentPart::ImageBase64 { data, mime_type } => vec![serde_json::json!({
+                "inline_data": {"mime_type": mime_type, "data": data}
+            })],
+        }
+    }
+
     fn build_request_body(&self, req: &ChatRequest) -> serde_json::Value {
         let mut system_instruction = None;
         let contents: Vec<serde_json::Value> = req
@@ -42,21 +54,21 @@ impl GeminiProvider {
             .filter_map(|m| match m.role {
                 Role::System => {
                     system_instruction = Some(serde_json::json!({
-                        "parts": [{"text": m.content}]
+                        "parts": Self::content_to_parts(&m.content)
                     }));
                     None
                 }
                 Role::User => Some(serde_json::json!({
                     "role": "user",
-                    "parts": [{"text": m.content}],
+                    "parts": Self::content_to_parts(&m.content),
                 })),
                 Role::Assistant => Some(serde_json::json!({
                     "role": "model",
-                    "parts": [{"text": m.content}],
+                    "parts": Self::content_to_parts(&m.content),
                 })),
                 Role::Tool => Some(serde_json::json!({
                     "role": "function",
-                    "parts": [{"text": m.content}],
+                    "parts": Self::content_to_parts(&m.content),
                 })),
             })
             .collect();
@@ -148,7 +160,7 @@ impl GeminiProvider {
                     index: i as u32,
                     message: ChatMessage {
                         role: Role::Assistant,
-                        content: text_content,
+                        content: text_content.into(),
                         tool_call_id: None,
                         tool_calls: tc,
                     },
@@ -334,11 +346,100 @@ impl LlmProvider for GeminiProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        let total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+        let total_chars: usize = messages
+            .iter()
+            .map(|m| m.content.text_or_empty().chars().count())
+            .sum();
         Ok((total_chars as f32 * 0.25) as u32)
     }
 
     fn supported_models(&self) -> &[&str] {
         &["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{AuditHttpClient, RateLimitConfig};
+    use crate::llm::provider::ImageDetail;
+
+    fn make_provider() -> GeminiProvider {
+        let http = Arc::new(AuditHttpClient::new(
+            reqwest::Client::new(),
+            RateLimitConfig::default(),
+        ));
+        GeminiProvider::new(
+            "test-key",
+            "https://generativelanguage.googleapis.com",
+            http,
+        )
+    }
+
+    #[test]
+    fn build_body_text_content_serializes_as_text_part() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gemini-2.0-flash",
+            vec![ChatMessage {
+                role: Role::User,
+                content: "hello".into(),
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let parts = &body["contents"][0]["parts"];
+        assert!(parts.is_array());
+        assert_eq!(parts[0]["text"], "hello");
+    }
+
+    #[test]
+    fn build_body_image_url_content_serializes_as_file_data() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gemini-2.0-flash",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::Image {
+                    url: "https://example.com/img.png".to_string(),
+                    detail: ImageDetail::Auto,
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let parts = &body["contents"][0]["parts"];
+        assert!(parts.is_array());
+        assert!(parts[0]["file_data"].is_object());
+        assert_eq!(parts[0]["file_data"]["mime_type"], "image/jpeg");
+        assert_eq!(
+            parts[0]["file_data"]["file_uri"],
+            "https://example.com/img.png"
+        );
+    }
+
+    #[test]
+    fn build_body_image_base64_content_serializes_as_inline_data() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gemini-2.0-flash",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::ImageBase64 {
+                    data: "iVBORw0KGgo=".to_string(),
+                    mime_type: "image/png".to_string(),
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let parts = &body["contents"][0]["parts"];
+        assert!(parts.is_array());
+        assert!(parts[0]["inline_data"].is_object());
+        assert_eq!(parts[0]["inline_data"]["mime_type"], "image/png");
+        assert_eq!(parts[0]["inline_data"]["data"], "iVBORw0KGgo=");
     }
 }

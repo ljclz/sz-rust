@@ -84,7 +84,7 @@ impl AiController {
                     model,
                     vec![ChatMessage {
                         role: Role::User,
-                        content: enhanced_prompt,
+                        content: enhanced_prompt.into(),
                         tool_call_id: None,
                         tool_calls: None,
                     }],

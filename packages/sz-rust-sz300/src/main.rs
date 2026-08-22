@@ -265,29 +265,70 @@ async fn main() -> anyhow::Result<()> {
             ))
                 as Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider>;
 
-            let vector_store_path = std::path::Path::new("data/rag-vectors.json");
-            let vector_store = match sz_rust_ai_facade::embedding::FileVectorStore::load(
-                vector_store_path,
-            )
-            .await
-            {
-                Ok(vs) => {
-                    tracing::info!(
-                        "RAG VectorStore 从 {} 加载成功",
-                        vector_store_path.display()
-                    );
-                    Arc::new(vs) as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "RAG VectorStore 加载失败（{}），降级为纯内存模式: {}",
-                        vector_store_path.display(),
-                        e
-                    );
-                    Arc::new(sz_rust_ai_facade::embedding::FileVectorStore::new_in_memory())
-                        as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
+            #[cfg(feature = "qdrant")]
+            let qdrant_store: Option<
+                Arc<dyn sz_rust_ai_facade::embedding::VectorStore>,
+            > = {
+                if let Ok(qdrant_url) = std::env::var("SZ300_QDRANT_URL") {
+                    let collection = std::env::var("SZ300_QDRANT_COLLECTION")
+                        .unwrap_or_else(|_| "sz300_vectors".to_string());
+                    let mut store =
+                        sz_rust_vector_db::QdrantVectorStore::new(&qdrant_url, &collection);
+                    if let Ok(key) = std::env::var("SZ300_QDRANT_API_KEY") {
+                        store = store.with_api_key(&key);
+                    }
+                    match store.ensure_collection(rag_config.vector_dimensions).await {
+                        Ok(()) => {
+                            tracing::info!(
+                                "RAG VectorStore 使用 Qdrant ({}/{})，dim={}",
+                                qdrant_url,
+                                collection,
+                                rag_config.vector_dimensions
+                            );
+                            Some(Arc::new(store)
+                                as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>)
+                        }
+                        Err(e) => {
+                            tracing::warn!("Qdrant 连接失败（{}），降级为 FileVectorStore", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
                 }
             };
+
+            #[cfg(not(feature = "qdrant"))]
+            let qdrant_store: Option<
+                Arc<dyn sz_rust_ai_facade::embedding::VectorStore>,
+            > = None;
+
+            let vector_store_path = std::path::Path::new("data/rag-vectors.json");
+            let vector_store: Arc<dyn sz_rust_ai_facade::embedding::VectorStore> =
+                if let Some(store) = qdrant_store {
+                    store
+                } else {
+                    match sz_rust_ai_facade::embedding::FileVectorStore::load(vector_store_path)
+                        .await
+                    {
+                        Ok(vs) => {
+                            tracing::info!(
+                                "RAG VectorStore 从 {} 加载成功",
+                                vector_store_path.display()
+                            );
+                            Arc::new(vs) as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "RAG VectorStore 加载失败（{}），降级为纯内存模式: {}",
+                                vector_store_path.display(),
+                                e
+                            );
+                            Arc::new(sz_rust_ai_facade::embedding::FileVectorStore::new_in_memory())
+                                as Arc<dyn sz_rust_ai_facade::embedding::VectorStore>
+                        }
+                    }
+                };
 
             let knowledge_dir = std::path::Path::new(&rag_config.knowledge_dir);
             let init_result = (async {

@@ -57,6 +57,8 @@ bcrypt = "0.16"
 once_cell.workspace = true
 # Admin Monitor API 依赖（可选，启用 admin feature）
 redis = { workspace = true, optional = true }
+# Qdrant 向量数据库适配器（可选，启用 qdrant feature）
+sz-rust-vector-db = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -70,6 +72,8 @@ otlp = ["sz-rust-observability/otlp"]
 otlp-http = ["sz-rust-observability/otlp-http"]
 # 启用 Admin Monitor API（/api/admin/* 端点：服务器信息 / DB 连接池 / Redis 状态）
 admin = ["sz-rust-observability/admin", "dep:redis"]
+# 启用 Qdrant 向量数据库（需 Qdrant 实例运行，通过 SZ300_QDRANT_URL 环境变量配置）
+qdrant = ["dep:sz-rust-vector-db", "sz-rust-vector-db/qdrant"]
 
 [[bin]]
 name = "sz300-server"
@@ -86,3 +90,4 @@ tower.workspace = true
 http-body-util.workspace = true
 tempfile = { workspace = true }
 wat = "1"
+testcontainers = "0.23"

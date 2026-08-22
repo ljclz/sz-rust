@@ -8,8 +8,10 @@ use sz_rust_ai_facade::embedding::{EmbeddingProvider, EmbeddingRequest};
 fn local_embedding_new_pseudo_default_dimensions() {
     let emb = LocalEmbedding::new_pseudo(384);
     assert_eq!(emb.dimensions(), 384);
-    assert_eq!(emb.name(), "local-embedding");
+    assert_eq!(emb.name(), "local-embedding-pseudo");
     assert_eq!(emb.supported_models(), &["local"]);
+    assert!(!emb.is_model_loaded());
+    assert_eq!(emb.model_path(), "");
 }
 
 #[test]
@@ -78,4 +80,33 @@ fn local_embedding_new_nonexistent_path_errors() {
         result,
         Err(AiError::LocalModelLoadFailed(ref msg)) if msg.contains("model file not found")
     ));
+}
+
+#[test]
+fn local_embedding_load_model_empty_path_errors() {
+    let mut emb = LocalEmbedding::new_pseudo(384);
+    let result = emb.load_model();
+    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(AiError::LocalModelLoadFailed(ref msg)) if msg.contains("model path is empty")
+    ));
+}
+
+#[test]
+fn local_embedding_is_model_loaded_false_for_pseudo() {
+    let emb = LocalEmbedding::new_pseudo(384);
+    assert!(!emb.is_model_loaded());
+}
+
+#[test]
+fn local_embedding_model_path_returns_path() {
+    let emb = LocalEmbedding::new_pseudo(384);
+    assert_eq!(emb.model_path(), "");
+}
+
+#[test]
+fn local_embedding_name_reflects_state() {
+    let pseudo = LocalEmbedding::new_pseudo(384);
+    assert_eq!(pseudo.name(), "local-embedding-pseudo");
 }

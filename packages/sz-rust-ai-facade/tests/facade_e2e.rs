@@ -50,7 +50,10 @@ impl LlmProvider for MockLlm {
         Err(AiError::Internal("stream not supported in e2e mock".into()))
     }
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
     fn supported_models(&self) -> &[&str] {
         &["gpt-4o"]
@@ -145,7 +148,10 @@ async fn facade_chat_e2e() {
         }],
     );
     let result = Ai::chat(req).await.unwrap();
-    assert_eq!(result.choices[0].message.content, "E2E response");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("E2E response")
+    );
 }
 
 #[tokio::test]

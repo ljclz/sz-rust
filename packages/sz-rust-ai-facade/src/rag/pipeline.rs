@@ -4,6 +4,8 @@ use crate::embedding::{
 };
 use crate::llm::provider::{ChatMessage, ChatRequest, LlmProvider, Role};
 use crate::rag::citation::Citation;
+use crate::rag::hybrid::HybridRetrieverTrait;
+use crate::rag::reranker::{NoopReranker, Reranker};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -44,6 +46,8 @@ pub struct RagPipeline {
     embedding: Arc<dyn EmbeddingProvider>,
     vector_store: Arc<dyn VectorStore>,
     llm: Arc<dyn LlmProvider>,
+    reranker: Arc<dyn Reranker>,
+    hybrid_retriever: Option<Arc<dyn HybridRetrieverTrait>>,
     embedding_model: String,
     llm_model: String,
     metric: SimilarityMetric,
@@ -59,10 +63,25 @@ impl RagPipeline {
             embedding,
             vector_store,
             llm,
+            reranker: Arc::new(NoopReranker::new()),
+            hybrid_retriever: None,
             embedding_model: "text-embedding-3-small".to_string(),
             llm_model: "gpt-4o".to_string(),
             metric: SimilarityMetric::Cosine,
         }
+    }
+
+    pub fn with_reranker(mut self, reranker: Arc<dyn Reranker>) -> Self {
+        self.reranker = reranker;
+        self
+    }
+
+    /// 启用混合检索（运行时切换）
+    ///
+    /// 传入 HybridRetriever 实例后，retrieve 阶段将使用混合检索替代纯向量检索。
+    pub fn with_hybrid_retriever(mut self, retriever: Arc<dyn HybridRetrieverTrait>) -> Self {
+        self.hybrid_retriever = Some(retriever);
+        self
     }
 
     pub fn with_embedding_model(mut self, model: impl Into<String>) -> Self {
@@ -81,13 +100,41 @@ impl RagPipeline {
     }
 
     pub async fn rag(&self, req: RagRequest) -> Result<RagResult, AiError> {
+        let mut warnings = Vec::new();
+
         let hits = self.retrieve(&req.query, req.topk).await?;
-        let context = self.assemble(&hits, req.token_budget).await?;
-        let result = self.generate(&hits, &context, &req.query).await?;
+        let final_hits = match self
+            .reranker
+            .rerank(&req.query, hits.clone(), req.topk)
+            .await
+        {
+            Ok(reranked) if !reranked.is_empty() => reranked,
+            Ok(_) => {
+                warnings.push(WarningCode::RerankerSkipped);
+                hits
+            }
+            Err(e) => {
+                tracing::warn!(target: "ai_rag", "reranker failed, using original order: {e}");
+                warnings.push(WarningCode::RerankerSkipped);
+                hits
+            }
+        };
+        let context = self.assemble(&final_hits, req.token_budget).await?;
+
+        if context.chars().count() as u32 >= req.token_budget * 4 {
+            warnings.push(WarningCode::ContextTruncated);
+        }
+
+        let mut result = self.generate(&final_hits, &context, &req.query).await?;
+        result.warnings.extend(warnings);
         Ok(result)
     }
 
     pub async fn retrieve(&self, query: &str, topk: usize) -> Result<Vec<VectorHit>, AiError> {
+        if let Some(ref hybrid) = self.hybrid_retriever {
+            return hybrid.retrieve(query, topk, "").await;
+        }
+
         let embed_req = EmbeddingRequest::new(&self.embedding_model, vec![query.to_string()]);
         let embed_result = self.embedding.embed(embed_req).await?;
 
@@ -100,6 +147,16 @@ impl RagPipeline {
         self.vector_store
             .query(&query_vec, topk, self.metric, "")
             .await
+    }
+
+    /// 检索 + 重排序的便捷方法
+    pub async fn retrieve_with_rerank(
+        &self,
+        query: &str,
+        topk: usize,
+    ) -> Result<Vec<VectorHit>, AiError> {
+        let hits = self.retrieve(query, topk).await?;
+        self.reranker.rerank(query, hits, topk).await
     }
 
     pub async fn assemble(&self, hits: &[VectorHit], budget: u32) -> Result<String, AiError> {
@@ -143,13 +200,13 @@ impl RagPipeline {
             vec![
                 ChatMessage {
                     role: Role::System,
-                    content: system_prompt,
+                    content: system_prompt.into(),
                     tool_call_id: None,
                     tool_calls: None,
                 },
                 ChatMessage {
                     role: Role::User,
-                    content: query.to_string(),
+                    content: query.to_string().into(),
                     tool_call_id: None,
                     tool_calls: None,
                 },
@@ -161,7 +218,7 @@ impl RagPipeline {
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
+            .map(|c| c.message.content.to_string())
             .unwrap_or_default();
 
         let citations: Vec<Citation> = hits

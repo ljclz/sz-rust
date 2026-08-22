@@ -156,6 +156,7 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-middleware-facade/ # 中间件 facade（rate_limit/circuit_breaker/csrf）
     ├── sz-rust-mvc-facade/       # MVC facade
     ├── sz-rust-ai-facade/        # AI facade（LLM/Embedding/RAG/Agent/MCP Bridge）
+    ├── sz-rust-vector-db/        # 向量数据库适配器（Qdrant HTTP，feature gate `qdrant`）<!-- 来源: P1 任务组4 -->
     ├── sz-rust-mcp/              # MCP 协议（stdio JSON-RPC）
     ├── sz-rust-addons-loader/    # 插件加载器
     ├── sz-rust-addons-ecommerce/ # 电商插件
@@ -235,7 +236,7 @@ MIT
 
 ### 新增文件
 
-- `scripts/check_iron_laws.py` — 22 条铁律自动化检查
+- `scripts/check_iron_laws.py` — 23 条铁律自动化检查 <!-- 来源: P0 对账 -->
 - `scripts/run_security_audit.py` — 漏洞与许可证扫描
 - `scripts/measure_startup_rss.ps1` — 启动内存 RSS 测量
 - `scripts/e2e_deploy.js` — ssh2 部署脚本（禁止 sshpass/killall）

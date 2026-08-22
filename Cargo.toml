@@ -40,6 +40,8 @@ members = [
     "packages/sz-rust-addons-im",
     "packages/sz-rust-wasm",
 
+    "packages/sz-rust-vector-db",
+
 ]
 
 [workspace.package]
@@ -228,6 +230,7 @@ sz-rust-addons-erp = { version = "1.2.0", path = "packages/sz-rust-addons-erp" }
 sz-rust-addons-forum = { version = "1.2.0", path = "packages/sz-rust-addons-forum" }
 sz-rust-addons-im = { version = "1.2.0", path = "packages/sz-rust-addons-im" }
 sz-rust-wasm = { version = "1.2.0", path = "packages/sz-rust-wasm" }
+sz-rust-vector-db = { version = "1.2.0", path = "packages/sz-rust-vector-db" }
 
 
 # Ed25519 签名（P3-T2 插件市场）

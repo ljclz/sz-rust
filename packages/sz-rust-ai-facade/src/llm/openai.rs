@@ -1,7 +1,7 @@
 use crate::common::{AiError, AuditHttpClient};
 use crate::llm::provider::{
-    ChatCompletion, ChatMessage, ChatRequest, Choice, FinishReason, LlmProvider, Role, StreamDelta,
-    ToolCall, Usage,
+    ChatCompletion, ChatMessage, ChatRequest, Choice, ContentPart, FinishReason, ImageDetail,
+    LlmProvider, Role, StreamDelta, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -45,9 +45,33 @@ impl OpenAiProvider {
                     Role::Assistant => "assistant",
                     Role::Tool => "tool",
                 };
+                let content_value = match &m.content {
+                    ContentPart::Text(s) => serde_json::Value::String(s.clone()),
+                    ContentPart::Image { url, detail } => {
+                        let detail_str = match detail {
+                            ImageDetail::Low => "low",
+                            ImageDetail::High => "high",
+                            ImageDetail::Auto => "auto",
+                        };
+                        serde_json::json!([{
+                            "type": "image_url",
+                            "image_url": {
+                                "url": url,
+                                "detail": detail_str,
+                            }
+                        }])
+                    }
+                    ContentPart::ImageBase64 { data, mime_type } => {
+                        let data_url = format!("data:{mime_type};base64,{data}");
+                        serde_json::json!([{
+                            "type": "image_url",
+                            "image_url": {"url": data_url}
+                        }])
+                    }
+                };
                 let mut msg = serde_json::json!({
                     "role": role,
-                    "content": m.content,
+                    "content": content_value,
                 });
                 if let Some(ref tool_call_id) = m.tool_call_id {
                     msg["tool_call_id"] = serde_json::Value::String(tool_call_id.clone());
@@ -171,7 +195,7 @@ impl OpenAiProvider {
                     index,
                     message: ChatMessage {
                         role: role_enum,
-                        content,
+                        content: content.into(),
                         tool_call_id: None,
                         tool_calls,
                     },
@@ -344,11 +368,149 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        let total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+        let texts: Vec<&str> = messages.iter().map(|m| m.content.text_or_empty()).collect();
+
+        #[cfg(feature = "tiktoken")]
+        {
+            use std::sync::OnceLock;
+            static BPE: OnceLock<Option<tiktoken_rs::CoreBPE>> = OnceLock::new();
+            let bpe = BPE.get_or_init(|| tiktoken_rs::cl100k_base().ok());
+            if let Some(bpe) = bpe {
+                let total: usize = texts
+                    .iter()
+                    .map(|text| bpe.encode_with_special_tokens(text).len())
+                    .sum();
+                return Ok(total as u32);
+            }
+        }
+
+        let total_chars: usize = texts.iter().map(|t| t.chars().count()).sum();
         Ok((total_chars as f32 * 0.25) as u32)
     }
 
     fn supported_models(&self) -> &[&str] {
         &["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{AuditHttpClient, RateLimitConfig};
+
+    fn make_provider() -> OpenAiProvider {
+        let http = Arc::new(AuditHttpClient::new(
+            reqwest::Client::new(),
+            RateLimitConfig::default(),
+        ));
+        OpenAiProvider::new("test-key", "https://api.openai.com", http)
+    }
+
+    #[test]
+    fn build_body_text_content_serializes_as_string() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gpt-4o",
+            vec![ChatMessage {
+                role: Role::User,
+                content: "hello".into(),
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content, &serde_json::Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn build_body_image_url_content_serializes_as_vision_array() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gpt-4o",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::Image {
+                    url: "https://example.com/img.png".to_string(),
+                    detail: ImageDetail::High,
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "image_url");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "https://example.com/img.png"
+        );
+        assert_eq!(content[0]["image_url"]["detail"], "high");
+    }
+
+    #[test]
+    fn build_body_image_base64_content_serializes_as_data_url() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gpt-4o",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::ImageBase64 {
+                    data: "iVBORw0KGgo=".to_string(),
+                    mime_type: "image/png".to_string(),
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "image_url");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "data:image/png;base64,iVBORw0KGgo="
+        );
+    }
+
+    #[test]
+    fn build_body_image_detail_auto() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gpt-4o",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::Image {
+                    url: "https://example.com/img.jpg".to_string(),
+                    detail: ImageDetail::Auto,
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content[0]["image_url"]["detail"], "auto");
+    }
+
+    #[test]
+    fn build_body_image_detail_low() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "gpt-4o",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::Image {
+                    url: "https://example.com/img.jpg".to_string(),
+                    detail: ImageDetail::Low,
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content[0]["image_url"]["detail"], "low");
     }
 }

@@ -98,7 +98,10 @@ async fn claude_chat_completion_success_via_mock() {
     );
     let result = provider.chat_completion(req).await.unwrap();
     assert_eq!(result.id, "msg_mock");
-    assert_eq!(result.choices[0].message.content, "Claude mock response");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("Claude mock response")
+    );
 
     server.stop();
 }
@@ -202,7 +205,7 @@ async fn claude_chat_completion_with_system_message_via_mock() {
         ],
     );
     let result = provider.chat_completion(req).await.unwrap();
-    assert_eq!(result.choices[0].message.content, "ok");
+    assert_eq!(result.choices[0].message.content.as_text(), Some("ok"));
 
     server.stop();
 }
