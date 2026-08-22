@@ -39,7 +39,7 @@ members = [
     "packages/sz-rust-addons-forum",
     "packages/sz-rust-addons-im",
     "packages/sz-rust-wasm",
-    "packages/sz-rust-k8s-operator",
+
 ]
 
 [workspace.package]
@@ -95,13 +95,8 @@ prost = "0.13"
 # GraphQL 支持（async-graphql 7.x + axum 集成）
 async-graphql = "7"
 async-graphql-axum = "7"
-# K8s Operator 支持（kube + schemars for CRD）
-kube = { version = "0.96", features = ["runtime", "derive", "client"] }
-kube-derive = "0.96"
+# JSON Schema 生成
 schemars = "0.8"
-# K8s API 类型（kube 依赖）
-k8s-openapi = { version = "0.23", features = ["latest"] }
-# JSON Schema 生成（kube CRD 需要）
 json-patch = "3"
 
 
@@ -233,7 +228,7 @@ sz-rust-addons-erp = { version = "1.2.0", path = "packages/sz-rust-addons-erp" }
 sz-rust-addons-forum = { version = "1.2.0", path = "packages/sz-rust-addons-forum" }
 sz-rust-addons-im = { version = "1.2.0", path = "packages/sz-rust-addons-im" }
 sz-rust-wasm = { version = "1.2.0", path = "packages/sz-rust-wasm" }
-sz-rust-k8s-operator = { version = "1.2.0", path = "packages/sz-rust-k8s-operator" }
+
 
 # Ed25519 签名（P3-T2 插件市场）
 ed25519-dalek = "2"

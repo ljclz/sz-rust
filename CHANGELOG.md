@@ -5,10 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased] - 2026-08-21（sz-rust 1.2.0 发布到 crates.io）
+## [Unreleased] - 2026-08-21
+
+### Removed
+
+- **移除 sz-rust-k8s-operator 孤儿 crate**（`ADR-038`）：
+  - workspace 成员 37 → 36，移除 k8s-openapi/kube/kube-derive workspace 依赖
+  - 理由：无消费者、无生产入口、CI 无 K8s 集群、reconcile.rs:33 TODO 自承认测试覆盖缺口
+  - 22 个测试保留在 git 历史，未来需要时可恢复
 
 ### Changed
 
+- **README.md 版本号对账**：v0.7.0 → v1.2.0，sz300 测试数 171 → 642，铁律数 22 → 23
 - **sz-rust 全部 18 个 crate 发布 1.2.0 到 crates.io**（`596c11f`）：
   - workspace 版本 1.1.0 → 1.2.0，33 个内部依赖版本同步
   - 18 crate 按依赖顺序发布：macros → facades → mcp → capability → addons-loader → core
