@@ -989,6 +989,7 @@ fn build_test_state(pool: Arc<Pool>) -> AppState {
         cache: None,
         slo_monitor: Arc::new(SloMonitor::new(SloConfig::default())),
         hook_registry: Arc::new(HookRegistry::new()),
+        long_term_memory: None,
     }
 }
 

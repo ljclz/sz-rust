@@ -40,6 +40,7 @@
 - **WebSocket**：基于 sz-orm-websocket（tokio-tungstenite），支持 HTTP 端口复用 + 独立端口两种模式，`WsHandler` trait 对齐 PHP Workerman onConnect/onMessage/onClose。（✅ 生产已接入：sz300 `router.rs:201` 挂载 `/ws/echo` 回显端点）
 - **WASM 边缘计算**：`sz-rust-wasm` crate 基于 wasmi（纯 Rust WASM 解释器），提供 `WasmRuntime` 加载/执行 WASM 模块。（✅ 生产已接入：sz300 `POST /api/wasm/execute` 端点，接受 base64 编码的 WASM 模块 + 函数名 + 参数，返回执行结果）
 - **K8s Operator**：（⚠️ 已移除：`sz-rust-k8s-operator` 孤儿 crate，无消费者，22 测试保留在 git 历史，详见 ADR-0021）
+- **AI 能力栈生产接线（v1.2.0 audit_remediation_v2）**：sz300 Cargo.toml 启用 `tiktoken`/`reranker`/`hybrid`/`local-model` 4 feature；main.rs 构造 `RagPipeline` + `with_reranker` + `with_hybrid_retriever` 注入 `Ai::init_default`；`Ai::agent` 内部接入 `with_rag_pipeline`（citations）；`FileLongTermMemoryStore` + `ToolRegistry` 通过 `SZ300_AGENT_ENABLED=1` 驱动；`LocalEmbedding` 真实加载通过 `SZ300_LOCAL_EMBEDDING_MODEL` 驱动；7 端到端测试验证接线（非幻影交付）。（✅ 生产已接入）
 
 ---
 

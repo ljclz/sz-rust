@@ -29,6 +29,8 @@ pub struct AppState {
     pub slo_monitor: Arc<SloMonitor>,
     /// ORM 钩子注册表（16 事件生命周期钩子）
     pub hook_registry: Arc<HookRegistry>,
+    /// Agent 长期记忆存储（可选，SZ300_AGENT_ENABLED=1 时注入）
+    pub long_term_memory: Option<Arc<sz_rust_ai_facade::agent::memory::FileLongTermMemoryStore>>,
     /// 数据库连接池状态采集适配器（admin feature 启用时有效）
     #[cfg(feature = "admin")]
     pub db_pool_stats: Arc<dyn sz_rust_observability::admin::DbPoolStats>,
@@ -75,6 +77,7 @@ pub fn mock_app_state() -> AppState {
             sz_rust_observability::slo::SloConfig::default(),
         )),
         hook_registry: Arc::new(HookRegistry::new()),
+        long_term_memory: None,
     }
 }
 

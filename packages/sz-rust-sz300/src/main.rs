@@ -63,6 +63,68 @@ impl sz_rust_core::orm::jobs::TaskHandler for OrderExpireCheckHandler {
     }
 }
 
+/// 构建 Reranker（环境变量驱动，默认 NoopReranker）
+fn build_reranker() -> Arc<dyn sz_rust_ai_facade::rag::Reranker> {
+    use sz_rust_ai_facade::rag::reranker::{CrossEncoderReranker, NoopReranker};
+    if let Ok(key) = std::env::var("SZ300_RERANKER_API_KEY") {
+        let endpoint = std::env::var("SZ300_RERANKER_ENDPOINT")
+            .unwrap_or_else(|_| "https://api.cohere.ai/v1/rerank".to_string());
+        tracing::info!("Reranker 使用 CrossEncoder（{}）", endpoint);
+        Arc::new(CrossEncoderReranker::new(endpoint, key))
+    } else {
+        Arc::new(NoopReranker::new())
+    }
+}
+
+/// 构建 Hybrid Retriever
+async fn build_hybrid_retriever(
+    embedding: Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider>,
+    vector_store: Arc<dyn sz_rust_ai_facade::embedding::VectorStore>,
+) -> Arc<dyn sz_rust_ai_facade::rag::HybridRetrieverTrait> {
+    use sz_rust_ai_facade::rag::bm25::Bm25Index;
+    use sz_rust_ai_facade::rag::hybrid::HybridRetriever;
+    let bm25 = Arc::new(tokio::sync::RwLock::new(Bm25Index::new()));
+    Arc::new(HybridRetriever::new(embedding, vector_store, bm25))
+}
+
+/// 构建 LocalEmbedding（环境变量驱动，默认 new_pseudo）
+fn build_local_embedding(dim: usize) -> Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider> {
+    use sz_rust_ai_facade::embedding::LocalEmbedding;
+    if let Ok(model_path) = std::env::var("SZ300_LOCAL_EMBEDDING_MODEL") {
+        match LocalEmbedding::new(&model_path) {
+            Ok(mut emb) => match emb.load_model() {
+                Ok(()) => {
+                    tracing::info!("LocalEmbedding 模型加载成功（{}）", model_path);
+                    Arc::new(emb)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "LocalEmbedding load_model 失败（{}），降级 new_pseudo: {}",
+                        model_path,
+                        e
+                    );
+                    Arc::new(LocalEmbedding::new_pseudo(dim))
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "LocalEmbedding 构造失败（{}），降级 new_pseudo: {}",
+                    model_path,
+                    e
+                );
+                Arc::new(LocalEmbedding::new_pseudo(dim))
+            }
+        }
+    } else {
+        Arc::new(LocalEmbedding::new_pseudo(dim))
+    }
+}
+
+/// 构建 ToolRegistry（空 registry，后续可扩展）
+fn build_tool_registry() -> sz_rust_ai_facade::agent::tool::ToolRegistry {
+    sz_rust_ai_facade::agent::tool::ToolRegistry::new()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志 — EnvFilter + JSON 格式（生产环境友好）
@@ -199,58 +261,13 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => tracing::warn!("Cap facade 已初始化（跳过重复初始化）"),
     }
 
-    // 初始化 AI facade（可选，从环境变量读取 API Key）
-    // 启用 SZ300_AI_API_KEY 后，构建 OpenAI Provider + ModelRouter，调用 Ai::init_default()
-    // 未设置时 AI 功能降级（/api/v1/ai/chat 返回 503）
-    let ai = match std::env::var("SZ300_AI_API_KEY") {
-        Ok(api_key) => {
-            let base_url = std::env::var("SZ300_AI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-
-            let http_client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-                .map_err(|e| anyhow::anyhow!("构建 reqwest::Client 失败: {e}"))?;
-            let audit_http = Arc::new(sz_rust_ai_facade::common::AuditHttpClient::new(
-                http_client,
-                sz_rust_ai_facade::common::RateLimitConfig::default(),
-            ));
-
-            let provider =
-                sz_rust_ai_facade::llm::openai::OpenAiProvider::new(api_key, base_url, audit_http);
-            let provider_ref: sz_rust_ai_facade::llm::provider::ProviderRef = Arc::new(provider);
-
-            let mut routes = HashMap::new();
-            routes.insert("gpt-4o-mini".to_string(), provider_ref.clone());
-            routes.insert("gpt-4o".to_string(), provider_ref.clone());
-            routes.insert("gpt-4.1-mini".to_string(), provider_ref.clone());
-
-            let router =
-                sz_rust_ai_facade::llm::ModelRouter::new(routes, "gpt-4o-mini".to_string());
-
-            match sz_rust_ai_facade::Ai::init_default(router, None, None, None, None) {
-                Ok(()) => {
-                    tracing::info!("AI facade 初始化完成（OpenAI Provider，默认模型 gpt-4o-mini）");
-                    Some(Arc::new(sz_rust_ai_facade::Ai))
-                }
-                Err(e) => {
-                    tracing::warn!("AI facade 初始化失败（非致命）: {e}");
-                    None
-                }
-            }
-        }
-        Err(_) => {
-            tracing::info!(
-                "AI facade 未配置（SZ300_AI_API_KEY 未设置，/api/v1/ai/chat 将返回降级响应）"
-            );
-            None
-        }
-    };
-
-    // 初始化行业 RAG 知识库（可选，需 config/rag.toml）
-    // 使用 LocalEmbedding（伪嵌入）+ FileVectorStore（文件持久化）
-    // 未配置时 ai::chat fallback 使用原始 prompt，不阻塞正常流程
-    match sz_rust_rag::config::RagConfig::load(std::path::Path::new("config/rag.toml")).await {
+    // 先加载 RAG 配置并构造 embedding + vector_store（供 AI facade 和 IndustryRag 共用）
+    #[allow(clippy::type_complexity)]
+    let rag_setup: Option<(
+        Arc<sz_rust_rag::config::RagConfig>,
+        Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider>,
+        Arc<dyn sz_rust_ai_facade::embedding::VectorStore>,
+    )> = match sz_rust_rag::config::RagConfig::load(std::path::Path::new("config/rag.toml")).await {
         Ok(rag_config) => {
             let rag_config = Arc::new(rag_config);
             tracing::info!(
@@ -260,10 +277,7 @@ async fn main() -> anyhow::Result<()> {
                 rag_config.vector_dimensions
             );
 
-            let embedding = Arc::new(sz_rust_ai_facade::embedding::LocalEmbedding::new_pseudo(
-                rag_config.vector_dimensions,
-            ))
-                as Arc<dyn sz_rust_ai_facade::embedding::EmbeddingProvider>;
+            let embedding = build_local_embedding(rag_config.vector_dimensions);
 
             #[cfg(feature = "qdrant")]
             let qdrant_store: Option<
@@ -297,7 +311,6 @@ async fn main() -> anyhow::Result<()> {
                     None
                 }
             };
-
             #[cfg(not(feature = "qdrant"))]
             let qdrant_store: Option<
                 Arc<dyn sz_rust_ai_facade::embedding::VectorStore>,
@@ -329,42 +342,123 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 };
-
-            let knowledge_dir = std::path::Path::new(&rag_config.knowledge_dir);
-            let init_result = (async {
-                let term_store =
-                    sz_rust_rag::term::FileTermStore::new(&knowledge_dir.join("terms.json"))
-                        .await?;
-                let rule_store =
-                    sz_rust_rag::rule::FileRuleStore::new(&knowledge_dir.join("rules.json"))
-                        .await?;
-                let template_store = sz_rust_rag::template::FileTemplateStore::new(
-                    &knowledge_dir.join("templates.json"),
-                )
-                .await?;
-                let metrics = Arc::new(sz_rust_rag::metrics::RagMetrics::register());
-                sz_rust_rag::facade::IndustryRag::init(
-                    embedding,
-                    vector_store,
-                    rag_config.clone(),
-                    Arc::new(term_store),
-                    Arc::new(rule_store),
-                    Arc::new(template_store),
-                    metrics,
-                )
-            })
-            .await;
-
-            match init_result {
-                Ok(()) => tracing::info!("RAG 行业知识库初始化完成"),
-                Err(e) => tracing::warn!("RAG 初始化失败（非致命，ai::chat 将 fallback）: {}", e),
-            }
+            Some((rag_config, embedding, vector_store))
         }
         Err(e) => {
             tracing::info!(
                 "RAG 未配置（config/rag.toml 加载失败: {}），ai::chat 将使用原始 prompt",
                 e
             );
+            None
+        }
+    };
+
+    // 初始化 AI facade（可选，从环境变量读取 API Key）
+    let ai = match std::env::var("SZ300_AI_API_KEY") {
+        Ok(api_key) => {
+            let base_url = std::env::var("SZ300_AI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+            let http_client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .map_err(|e| anyhow::anyhow!("构建 reqwest::Client 失败: {e}"))?;
+            let audit_http = Arc::new(sz_rust_ai_facade::common::AuditHttpClient::new(
+                http_client,
+                sz_rust_ai_facade::common::RateLimitConfig::default(),
+            ));
+            let provider =
+                sz_rust_ai_facade::llm::openai::OpenAiProvider::new(api_key, base_url, audit_http);
+            let provider_ref: sz_rust_ai_facade::llm::provider::ProviderRef = Arc::new(provider);
+            let mut routes = HashMap::new();
+            routes.insert("gpt-4o-mini".to_string(), provider_ref.clone());
+            routes.insert("gpt-4o".to_string(), provider_ref.clone());
+            routes.insert("gpt-4.1-mini".to_string(), provider_ref.clone());
+            let router =
+                sz_rust_ai_facade::llm::ModelRouter::new(routes, "gpt-4o-mini".to_string());
+
+            // 构造 RagPipeline + ToolRegistry（从 rag_setup 注入）
+            let (embedding_opt, vector_store_opt, rag_pipeline, tools) = match &rag_setup {
+                Some((_, emb, vs)) => {
+                    let pipeline = sz_rust_ai_facade::rag::RagPipeline::new(
+                        emb.clone(),
+                        vs.clone(),
+                        provider_ref.clone(),
+                    )
+                    .with_reranker(build_reranker());
+                    let pipeline = if std::env::var("SZ300_HYBRID_ENABLED").as_deref() == Ok("1") {
+                        pipeline.with_hybrid_retriever(
+                            build_hybrid_retriever(emb.clone(), vs.clone()).await,
+                        )
+                    } else {
+                        pipeline
+                    };
+                    let tools = if std::env::var("SZ300_AGENT_ENABLED").as_deref() == Ok("1") {
+                        Some(Arc::new(build_tool_registry()))
+                    } else {
+                        None
+                    };
+                    (
+                        Some(emb.clone()),
+                        Some(vs.clone()),
+                        Some(Arc::new(pipeline)),
+                        tools,
+                    )
+                }
+                None => (None, None, None, None),
+            };
+
+            match sz_rust_ai_facade::Ai::init_default(
+                router,
+                embedding_opt,
+                vector_store_opt,
+                rag_pipeline,
+                tools,
+            ) {
+                Ok(()) => {
+                    tracing::info!("AI facade 初始化完成（OpenAI Provider，默认模型 gpt-4o-mini，RagPipeline + Agent 已接线）");
+                    Some(Arc::new(sz_rust_ai_facade::Ai))
+                }
+                Err(e) => {
+                    tracing::warn!("AI facade 初始化失败（非致命）: {e}");
+                    None
+                }
+            }
+        }
+        Err(_) => {
+            tracing::info!(
+                "AI facade 未配置（SZ300_AI_API_KEY 未设置，/api/v1/ai/chat 将返回降级响应）"
+            );
+            None
+        }
+    };
+
+    // 初始化行业 RAG 知识库（IndustryRag，与 Ai facade 的 RagPipeline 并行共存）
+    if let Some((rag_config, embedding, vector_store)) = &rag_setup {
+        let knowledge_dir = std::path::Path::new(&rag_config.knowledge_dir);
+        let init_result = (async {
+            let term_store =
+                sz_rust_rag::term::FileTermStore::new(&knowledge_dir.join("terms.json")).await?;
+            let rule_store =
+                sz_rust_rag::rule::FileRuleStore::new(&knowledge_dir.join("rules.json")).await?;
+            let template_store = sz_rust_rag::template::FileTemplateStore::new(
+                &knowledge_dir.join("templates.json"),
+            )
+            .await?;
+            let metrics = Arc::new(sz_rust_rag::metrics::RagMetrics::register());
+            sz_rust_rag::facade::IndustryRag::init(
+                embedding.clone(),
+                vector_store.clone(),
+                rag_config.clone(),
+                Arc::new(term_store),
+                Arc::new(rule_store),
+                Arc::new(template_store),
+                metrics,
+            )
+        })
+        .await;
+        match init_result {
+            Ok(()) => tracing::info!("RAG 行业知识库初始化完成"),
+            Err(e) => tracing::warn!("RAG 初始化失败（非致命，ai::chat 将 fallback）: {}", e),
         }
     }
 
@@ -472,6 +566,16 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    // 构造 Agent LongTermMemory（SZ300_AGENT_ENABLED=1 时）
+    let long_term_memory: Option<Arc<sz_rust_ai_facade::agent::memory::FileLongTermMemoryStore>> =
+        if std::env::var("SZ300_AGENT_ENABLED").as_deref() == Ok("1") {
+            let store =
+                sz_rust_ai_facade::agent::memory::FileLongTermMemoryStore::new("data/agent-memory");
+            tracing::info!("Agent LongTermMemory 已启用（data/agent-memory）");
+            Some(Arc::new(store))
+        } else {
+            None
+        };
     let app_state = AppState {
         db_pool: pool.clone(),
         pg_pool,
@@ -482,6 +586,7 @@ async fn main() -> anyhow::Result<()> {
         cache,
         slo_monitor,
         hook_registry,
+        long_term_memory,
         #[cfg(feature = "admin")]
         db_pool_stats: Arc::new(
             sz_rust_sz300::state::DbPoolStatsAdapter::new(pool.clone())

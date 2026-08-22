@@ -23,7 +23,7 @@ sz-rust-http-facade = { workspace = true, features = ["graphql"] }
 sz-rust-state-facade.workspace = true
 sz-rust-observability.workspace = true
 sz-rust-capability.workspace = true
-sz-rust-ai-facade = { workspace = true, features = ["all-providers"] }
+sz-rust-ai-facade = { workspace = true, features = ["all-providers", "tiktoken", "reranker", "hybrid", "local-model"] }
 sz-rust-cache-facade.workspace = true
 sz-rust-addons-ecommerce.workspace = true
 sz-rust-addons-erp.workspace = true
