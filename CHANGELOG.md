@@ -84,6 +84,15 @@
   - **7 端到端测试通过**：rag_pipeline（reranker+hybrid）、agent（citations+LongTermMemory roundtrip）、local_embedding（real_load+degrade）、tiktoken（BPE 精确值≠估算值）
   - **IndustryRag 保留**：与 RagPipeline 并行共存（ADR-001），非替换
 
+- **audit_remediation_v3：5 项高风险幻影交付生产接线**（第三轮审计修复）：
+  - **LlmChatCapability 注册到 CapabilityRegistry**：sz300 main.rs 在 `Cap::init_with` 后调用 `Cap::register(Arc::new(LlmChatCapability))`，能力名 `ai.llm_chat` 可被 CapabilityRegistry 发现
+  - **Ai::embed 端点接线**：sz300 新增 `POST /api/v1/ai/embed` 端点（controllers/ai.rs:embed + router.rs），调用 `Ai::embed(texts, model)` 返回嵌入向量
+  - **Ai::stream_chat 端点接线**：sz300 新增 `POST /api/v1/ai/stream` 端点（controllers/ai.rs:stream + router.rs），SSE 格式输出 `StreamDelta`，`StreamDelta` 未实现 Serialize 故用 `serde_json::json!` 手动构造
+  - **McpToolBridge 工具注入**：sz300 main.rs `build_tool_registry` 改为通过 `McpToolBridge::new(&["parse_path","build_select_query","openapi_spec","redaction_check","url_decode","sql_validate"]).adapters()` 注入 6 个 MCP 工具到 ToolRegistry，Agent 获得真实可用工具
+  - **AiMetrics 接入 Prometheus**：sz300 main.rs 在 MetricsRegistry 初始化后调用 `AiMetrics::global().register(&metrics_registry)`，12 项 AI 指标（request_count/latency/token_usage/error_rate 等）导出到 Prometheus
+  - **5 端到端测试通过**：llm_chat_capability（trait 实现）、ai_embed（可调用返回向量）、ai_stream_chat（可调用返回流）、mcp_tool_bridge（3 工具注入 registry）、ai_metrics（global 实例可获取）
+  - **futures 依赖提升**：sz300 Cargo.toml 将 `futures` 从 dev-dependency 提升到 dependencies（stream handler 需 `futures::StreamExt`）
+
 ### Removed
 
 - **移除 sz-rust-k8s-operator 孤儿 crate**（`ADR-038`）：
