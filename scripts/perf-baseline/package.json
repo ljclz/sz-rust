@@ -1,0 +1,14 @@
+{
+    "name": "sz-rust-perf-baseline",
+    "version": "1.0.0",
+    "description": "sz300 生产实例性能基线压测 — hey + 资源采样 + 健康探测",
+    "type": "module",
+    "scripts": {
+        "install-hey": "node install-hey.js",
+        "bench": "node run-hey.js",
+        "report": "node generate-report.js"
+    },
+    "dependencies": {
+        "ssh2": "^1.17.0"
+    }
+}

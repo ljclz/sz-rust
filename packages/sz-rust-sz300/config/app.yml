@@ -1,0 +1,10 @@
+server:
+  port: 8300
+  host: "0.0.0.0"
+
+# Addon 热加载配置（启用 hot-reload feature 时生效）
+addons:
+  # 插件扫描目录（相对于工作目录）
+  # 将编译好的 .dll（Windows）/ .so（Linux）/ .dylib（macOS）放入此目录
+  # 启动时自动扫描并动态加载所有共享库
+  scan_dir: "addons"

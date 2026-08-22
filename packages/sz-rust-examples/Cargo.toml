@@ -1,0 +1,67 @@
+[package]
+name = "sz-rust-examples"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 框架示例代码 — 快速入门与 CRUD 演示"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sz-rust-core = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true, features = ["util"] }
+http-body-util = { workspace = true }
+http = { workspace = true }
+sz-rust-capability = { workspace = true }
+sz-rust-addons-loader = { workspace = true }
+sz-rust-addons-cms = { workspace = true }
+sz-rust-addons-crm = { workspace = true }
+sz-rust-addons-ecommerce = { workspace = true }
+
+[lib]
+name = "sz_rust_examples"
+path = "src/lib.rs"
+
+[[bin]]
+name = "quick_start"
+path = "src/bin/quick_start.rs"
+
+[[bin]]
+name = "crud_demo"
+path = "src/bin/crud_demo.rs"
+
+[[bin]]
+name = "blog_demo"
+path = "src/bin/blog_demo.rs"
+
+[[bin]]
+name = "ecommerce_demo"
+path = "src/bin/ecommerce_demo.rs"
+
+[[bin]]
+name = "iot_demo"
+path = "src/bin/iot_demo.rs"
+
+# P2-6 横向对比 benchmark
+[[bin]]
+name = "bench_sz_rust"
+path = "src/bin/bench_sz_rust.rs"
+
+[[bin]]
+name = "bench_axum_native"
+path = "src/bin/bench_axum_native.rs"

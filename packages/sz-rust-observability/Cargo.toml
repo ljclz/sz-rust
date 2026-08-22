@@ -1,0 +1,58 @@
+[package]
+name = "sz-rust-observability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 可观测性模块：Prometheus exporter + SLO 燃烧率 + Grafana 仪表盘模板"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[features]
+default = ["otlp"]
+# P1-TEST-01：otlp 测试默认启用，避免 23 个测试被静默跳过
+# 启用 Prometheus exporter（暴露 /metrics HTTP 端点）
+prometheus = ["dep:hyper", "dep:http-body-util"]
+# 启用 OTLP gRPC exporter（导出 traces 到 OpenTelemetry Collector，端口 4317）
+otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk"]
+# 启用 OTLP HTTP/protobuf exporter（端口 4318），自动启用 otlp
+otlp-http = ["otlp", "opentelemetry-otlp/http-proto", "dep:reqwest"]
+# 启用 Admin Monitor API（管理面板：服务器信息 / DB 连接池 / Redis 状态）
+admin = ["dep:sysinfo", "dep:redis"]
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+once_cell = { workspace = true }
+# Prometheus exporter 依赖（可选）
+hyper = { version = "1.4", optional = true, features = ["server", "http1"] }
+http-body-util = { version = "0.1", optional = true }
+# OTLP exporter 依赖（可选）
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry-otlp = { version = "0.27", optional = true, features = ["tokio"] }
+opentelemetry_sdk = { version = "0.27", optional = true, features = ["rt-tokio"] }
+# OTLP HTTP/protobuf exporter 依赖（可选，启用 otlp-http feature）
+reqwest = { workspace = true, optional = true }
+# Admin Monitor API 依赖（可选，启用 admin feature）
+sysinfo = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+
+[lib]
+name = "sz_rust_observability"
+path = "src/lib.rs"
+
+[package.metadata.cargo-machete]
+ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "redis", "reqwest", "serde", "serde_json", "sysinfo", "thiserror", "tokio", "tracing"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["chrono"]

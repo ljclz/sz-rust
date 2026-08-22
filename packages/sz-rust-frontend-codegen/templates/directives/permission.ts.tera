@@ -1,0 +1,15 @@
+{# v-permission 指令模板 #}
+import { Directive } from 'vue'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
+
+export const vPermission: Directive<HTMLElement, string | string[]> = {
+  mounted(el, binding) {
+    const value = binding.value
+    const perms = Array.isArray(value) ? value : [value]
+    if (!perms.some(p => hasPermission(p))) {
+      el.parentNode?.removeChild(el)
+    }
+  },
+}

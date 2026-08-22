@@ -1,0 +1,165 @@
+{
+    "name": "sz-rust-addons-cms",
+    "version": "1.1.0",
+    "title": "CMS 内容管理插件",
+    "description": "文章/分类/标签管理骨架，提供 CMS 基础 CRUD 与状态机校验",
+    "author": "SZ-Rust Team",
+    "license": "Apache-2.0",
+    "sz_rust_version": ">=1.1.0",
+    "capabilities": [
+        {
+            "name": "cms.search_article",
+            "description": "搜索文章列表，支持关键词、分类、状态过滤与分页",
+            "tags": [
+                "cms",
+                "article",
+                "search",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "cms.create_article",
+            "description": "创建文章，title 必填，status 默认 draft",
+            "tags": [
+                "cms",
+                "article",
+                "create",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "cms.publish_article",
+            "description": "发布文章，校验当前状态为 draft，更新为 published",
+            "tags": [
+                "cms",
+                "article",
+                "publish",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "cms.manage_category",
+            "description": "分类管理，支持 list/create/get/delete 操作",
+            "tags": [
+                "cms",
+                "category",
+                "manage",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "cms.manage_tag",
+            "description": "标签管理，支持 list/create/delete 操作",
+            "tags": [
+                "cms",
+                "tag",
+                "manage",
+                "write"
+            ],
+            "requires_confirmation": false
+        }
+    ],
+    "dependencies": {
+        "plugins": [],
+        "shared_schemas": [
+            "sys_users"
+        ]
+    },
+    "routes": [
+        {
+            "method": "GET",
+            "path": "/api/cms/articles",
+            "handler": "ArticleController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/cms/articles",
+            "handler": "ArticleController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/cms/articles/:id",
+            "handler": "ArticleController::get"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/cms/articles/:id",
+            "handler": "ArticleController::update"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/cms/articles/:id",
+            "handler": "ArticleController::delete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/cms/categories",
+            "handler": "CategoryController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/cms/categories",
+            "handler": "CategoryController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/cms/categories/:id",
+            "handler": "CategoryController::get"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/cms/categories/:id",
+            "handler": "CategoryController::delete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/cms/tags",
+            "handler": "TagController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/cms/tags",
+            "handler": "TagController::create"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/cms/tags/:id",
+            "handler": "TagController::delete"
+        }
+    ],
+    "migrations": [],
+    "events_published": [
+        {
+            "name": "cms.article.published",
+            "description": "文章发布事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "article_id": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        {
+            "name": "cms.article.archived",
+            "description": "文章归档事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "article_id": {
+                        "type": "integer"
+                    }
+                }
+            }
+        }
+    ],
+    "events_subscribed": []
+}

@@ -1,0 +1,24 @@
+[package]
+name = "sz-rust-addons-forum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust Forum 模板插件 — 板块/帖子/回复管理骨架，可作论坛项目起点"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["forum", "sz-rust", "addons", "template"]
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+tokio.workspace = true
+
+[lib]
+name = "sz_rust_addons_forum"
+path = "src/lib.rs"

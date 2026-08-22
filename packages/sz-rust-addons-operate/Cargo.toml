@@ -1,0 +1,37 @@
+[package]
+name = "sz-rust-addons-operate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust addons-operate 模块：CRUD 操作，对齐 ThinkPHP addons/operate"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+md-5 = { workspace = true }
+hex.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+
+[lib]
+name = "sz_rust_addons_operate"
+path = "src/lib.rs"
+
+# cargo-machete 误报 serde 未使用（实际通过 `use serde::{Serialize, Deserialize};` 使用）
+[package.metadata.cargo-machete]
+ignored = ["serde", "md-5"]

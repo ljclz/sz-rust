@@ -1,0 +1,54 @@
+/target
+*.log
+*.tmp
+
+# 敏感信息预防性排除
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+deploy_key
+deploy_key.pub
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时编译错误日志
+errors*.txt
+errors*.log
+
+# 测试覆盖率输出（开发临时文件）
+coverage/
+
+
+# cargo-mutants 输出（变异测试产物）
+mutants.out/
+# 临时测试脚本
+_*.py
+
+# ZCode agent
+.zcode/
+# Coverage raw data
+build_rs_cov.profraw
+
+# WASM build artifacts
+packages/sz-rust-wasm/target/
+
+# Benchmark comparison build artifacts (4 frameworks × ~300MB)
+scripts/perf-compare/benchmarks/*/target/
+
+# Artifacts
+artifacts/
+*.tar.gz
+*.bundle

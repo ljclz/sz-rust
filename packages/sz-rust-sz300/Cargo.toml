@@ -1,0 +1,97 @@
+[package]
+name = "sz-rust-sz300"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust sz300 业务应用 — 设备/商户/商品/订单管理示例"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# sz-orm 穿透依赖已迁移至 sz-rust-core::orm facade（v0.2.0+）
+# 保留的直接依赖：
+#   - sz-orm-sqlx：SQLx 后端实现（sz-rust-core 不提供）
+sz-rust-core.workspace = true
+# C4 验证：业务包 facade 直连（类型与 core re-export 同一，可逐步替换 sz_rust_core:: 引用）
+sz-rust-mvc-facade.workspace = true
+sz-rust-middleware-facade.workspace = true
+sz-rust-http-facade = { workspace = true, features = ["graphql"] }
+sz-rust-state-facade.workspace = true
+sz-rust-observability.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-ai-facade = { workspace = true, features = ["all-providers", "tiktoken", "reranker", "hybrid", "local-model"] }
+sz-rust-cache-facade.workspace = true
+sz-rust-addons-ecommerce.workspace = true
+sz-rust-addons-erp.workspace = true
+sz-rust-addons-forum.workspace = true
+sz-rust-addons-im.workspace = true
+sz-rust-addons-operate.workspace = true
+sz-rust-addons-crm.workspace = true
+sz-rust-addons-cms.workspace = true
+sz-rust-addons-loader.workspace = true
+sz-rust-tracing.workspace = true
+sz-rust-pdf.workspace = true
+sz-rust-workflow.workspace = true
+sz-rust-rag.workspace = true
+sz-rust-wasm.workspace = true
+sz-orm-sqlx.workspace = true
+# 直接依赖 sqlx 仅为配置底层 MySQL 连接池容量（max_connections 需与 sz-orm Pool.max_size 对齐）。
+# features 取 sz-orm-sqlx 的子集，Cargo 按并集解析，与 sz-orm-sqlx 共享同一编译产物，不增加主包体积。
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "mysql"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# 实现可靠任务队列 TaskHandler 所需（jobs 模块 trait 用 async_trait 宏）
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+async-graphql.workspace = true
+reqwest.workspace = true
+tracing-subscriber.workspace = true
+base64.workspace = true
+bcrypt = "0.16"
+once_cell.workspace = true
+# Admin Monitor API 依赖（可选，启用 admin feature）
+redis = { workspace = true, optional = true }
+# Qdrant 向量数据库适配器（可选，启用 qdrant feature）
+sz-rust-vector-db = { workspace = true, optional = true }
+futures.workspace = true
+
+[features]
+default = []
+# Addon 热加载：运行时动态加载 .dll/.so/.dylib 插件（libloading 后端）
+# 启用后，启动时自动扫描 addons/ 目录并加载所有共享库
+hot-reload = ["sz-rust-core/hot-reload"]
+real-broker = ["sz-rust-core/real-broker"]
+# 启用 OTLP gRPC 分布式追踪导出（需要 OpenTelemetry Collector，端口 4317）
+otlp = ["sz-rust-observability/otlp"]
+# 启用 OTLP HTTP/protobuf 分布式追踪导出（端口 4318）
+otlp-http = ["sz-rust-observability/otlp-http"]
+# 启用 Admin Monitor API（/api/admin/* 端点：服务器信息 / DB 连接池 / Redis 状态）
+admin = ["sz-rust-observability/admin", "dep:redis"]
+# 启用 Qdrant 向量数据库（需 Qdrant 实例运行，通过 SZ300_QDRANT_URL 环境变量配置）
+qdrant = ["dep:sz-rust-vector-db", "sz-rust-vector-db/qdrant"]
+
+[[bin]]
+name = "sz300-server"
+path = "src/main.rs"
+
+[[bench]]
+name = "api_bench"
+harness = false
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+futures.workspace = true
+tower.workspace = true
+http-body-util.workspace = true
+tempfile = { workspace = true }
+wat = "1"
+testcontainers = "0.23"

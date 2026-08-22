@@ -1,0 +1,42 @@
+[package]
+name = "sz-rust-frontend-codegen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 前端代码生成器 — 根据 ORM 模型自动生成 Vue/React 组件、路由、权限、API 客户端"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[lib]
+name = "sz_rust_frontend_codegen"
+
+[dependencies]
+# SZ-Rust 内部依赖
+
+# 异步运行时
+tokio = { workspace = true }
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+# 错误与工具
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+# 模板引擎
+tera = { workspace = true }
+# AST 解析
+syn = { workspace = true }
+quote = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

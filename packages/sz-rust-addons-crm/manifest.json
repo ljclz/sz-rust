@@ -1,0 +1,221 @@
+{
+    "name": "sz-rust-addons-crm",
+    "version": "1.1.0",
+    "title": "CRM 客户关系管理插件",
+    "description": "联系人/线索/商机管理骨架，提供 CRM 基础 CRUD、线索转化原子性与商机阶段流转校验",
+    "author": "SZ-Rust Team",
+    "license": "Apache-2.0",
+    "sz_rust_version": ">=1.1.0",
+    "capabilities": [
+        {
+            "name": "crm.search_contact",
+            "description": "搜索联系人列表，支持关键词过滤与分页",
+            "tags": [
+                "crm",
+                "contact",
+                "search",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "crm.create_contact",
+            "description": "创建联系人，name 必填",
+            "tags": [
+                "crm",
+                "contact",
+                "create",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "crm.search_lead",
+            "description": "搜索线索列表，支持关键词、状态过滤与分页",
+            "tags": [
+                "crm",
+                "lead",
+                "search",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "crm.convert_lead",
+            "description": "线索转化：创建关联 Contact 和 Deal，三步原子操作",
+            "tags": [
+                "crm",
+                "lead",
+                "convert",
+                "write"
+            ],
+            "requires_confirmation": true
+        },
+        {
+            "name": "crm.search_deal",
+            "description": "搜索商机列表，支持关键词、阶段过滤与分页",
+            "tags": [
+                "crm",
+                "deal",
+                "search",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "crm.update_deal_stage",
+            "description": "更新商机阶段，校验合法流转表",
+            "tags": [
+                "crm",
+                "deal",
+                "update",
+                "write"
+            ],
+            "requires_confirmation": true
+        },
+        {
+            "name": "crm.query_pipeline",
+            "description": "查询销售漏斗，返回各阶段分组统计",
+            "tags": [
+                "crm",
+                "deal",
+                "pipeline",
+                "read"
+            ],
+            "requires_confirmation": false
+        }
+    ],
+    "dependencies": {
+        "plugins": [],
+        "shared_schemas": [
+            "sys_users"
+        ]
+    },
+    "routes": [
+        {
+            "method": "GET",
+            "path": "/api/crm/contacts",
+            "handler": "ContactController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/crm/contacts",
+            "handler": "ContactController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/contacts/:id",
+            "handler": "ContactController::get"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/crm/contacts/:id",
+            "handler": "ContactController::update"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/crm/contacts/:id",
+            "handler": "ContactController::delete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/leads",
+            "handler": "LeadController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/crm/leads",
+            "handler": "LeadController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/leads/:id",
+            "handler": "LeadController::get"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/crm/leads/:id",
+            "handler": "LeadController::update"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/crm/leads/:id",
+            "handler": "LeadController::delete"
+        },
+        {
+            "method": "POST",
+            "path": "/api/crm/leads/:id/convert",
+            "handler": "LeadController::convert"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/deals",
+            "handler": "DealController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/crm/deals",
+            "handler": "DealController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/deals/:id",
+            "handler": "DealController::get"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/crm/deals/:id",
+            "handler": "DealController::update"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/crm/deals/:id",
+            "handler": "DealController::delete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/crm/deals/pipeline",
+            "handler": "DealController::pipeline"
+        }
+    ],
+    "migrations": [],
+    "events_published": [
+        {
+            "name": "crm.lead.converted",
+            "description": "线索转化事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "lead_id": {
+                        "type": "integer"
+                    },
+                    "contact_id": {
+                        "type": "integer"
+                    },
+                    "deal_id": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        {
+            "name": "crm.deal.stage_updated",
+            "description": "商机阶段变更事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "deal_id": {
+                        "type": "integer"
+                    },
+                    "old_stage": {
+                        "type": "string"
+                    },
+                    "new_stage": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    ],
+    "events_subscribed": []
+}

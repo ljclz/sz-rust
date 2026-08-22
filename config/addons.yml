@@ -1,0 +1,15 @@
+# 插件配置 — 对齐 PHP addons 目录
+# 40+ 插件，按优先级分批迁移
+addons_path: "addons"
+
+# 插件优先级（P0=核心 / P1=重要 / P2=一般）
+priority:
+  p0:
+    - operate
+    - cashier
+    - food
+  p1:
+    - erp
+    - sale
+    - finance
+  p2: []

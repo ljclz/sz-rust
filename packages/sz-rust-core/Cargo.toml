@@ -1,0 +1,165 @@
+[package]
+name = "sz-rust-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 核心库：HTTP 服务器、路由、控制器、中间件，对标 ThinkPHP 8"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+chrono.workspace = true
+sz-orm-logger.workspace = true
+sz-orm-macros.workspace = true
+sz-orm-sql-validator.workspace = true
+sz-orm-core.workspace = true
+sz-orm-query-builder.workspace = true
+sz-orm-auth.workspace = true
+sz-orm-limit.workspace = true
+sz-orm-tracing.workspace = true
+tracing.workspace = true
+# P4-3: 缓存预热管道
+futures.workspace = true
+# HTTP 服务器 + 路由 + 请求/响应
+axum.workspace = true
+tower.workspace = true
+
+tokio.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+# HTTP/2 + TLS
+tokio-rustls.workspace = true
+# P0-2: rustls-pemfile(unmaintained) 迁移至 rustls-pki-types::pem::PemObject（rustls 0.23 内置）
+# 文件上传
+md-5.workspace = true
+tempfile.workspace = true
+# 存储对接（复用 sz-orm-storage 7 种驱动）
+sz-orm-storage.workspace = true
+async-trait.workspace = true
+
+# 图像处理（对齐 PHP Grafika\Gd\Editor + Image + Color + Position）
+image = { workspace = true }
+# P0-2: imageproc/ab_glyph 移至 sz-rust-infra-facade（实际使用方），core 不直接使用
+# 二维码生成（对齐 PHP endroid/qr-code）
+qrcode = { workspace = true }
+# Swoole/Worker 适配（tokio 替代）
+sz-orm-queue.workspace = true
+sz-orm-mqtt.workspace = true
+sz-orm-websocket = { workspace = true, features = ["server"] }
+sz-orm-scheduler.workspace = true
+tokio-util.workspace = true
+num_cpus.workspace = true
+# H-6 修复：过程宏包提升为正式依赖，使 sz_rust_core::macros 可重导出
+sz-rust-macros.workspace = true
+# H-6 修复：addons 加载器提升为正式依赖，使 sz_rust_core::addons 可重导出
+sz-rust-addons-loader.workspace = true
+# P2 拆包：ORM facade（下游业务包通过此 crate 统一访问 sz-orm-* 全家桶）
+sz-rust-orm-facade.workspace = true
+# P3 拆包：ORM 扩展层 facade（model/hooks/relation 框架层抽象）
+sz-rust-orm-ext-facade.workspace = true
+# P3 拆包：路由层 facade（router/routing/websocket_route/openapi 三层路由机制）
+sz-rust-router-facade.workspace = true
+# P3 拆包：MVC 层 facade（controller/guard/view 控制器与视图抽象）
+sz-rust-mvc-facade.workspace = true
+# P2 拆包：HTTP facade（response/error/request 基础模块，下游可直接依赖以减少耦合）
+sz-rust-http-facade.workspace = true
+# P2 拆包：Cache facade（CacheDriver trait + Memory/Redis/Memcached/MultiLevel 驱动）
+sz-rust-cache-facade.workspace = true
+# P2 拆包：State facade（session/cookie/env/event/i18n/mail/notify 应用状态模块）
+sz-rust-state-facade.workspace = true
+# P3 拆包：Middleware facade（auth/sanctum/jwt_blacklist 等 14 个中间件 + log 门面）
+sz-rust-middleware-facade.workspace = true
+# P2 拆包：Infra facade（config/validate/static_files/upload/debug_page 基础设施模块）
+sz-rust-infra-facade.workspace = true
+# P2 拆包：Auth facade（wechat/oauth/gateway 认证与网关模块）
+sz-rust-auth-facade.workspace = true
+# P2 拆包：Pay facade（支付聚合抽象层，Alipay/WechatPay 统一抽象）
+sz-rust-pay-facade.workspace = true
+# Redis Session 持久化（可选）
+redis = { version = "0.27", features = ["aio", "tokio-comp", "connection-manager"], optional = true }
+# P2: GraphQL 集成（sz-orm-graphql facade）
+sz-orm-graphql = { workspace = true, optional = true }
+# P2: gRPC 支持（sz-orm-grpc facade）
+sz-orm-grpc = { workspace = true, optional = true }
+# P2: Addon 热加载探索（运行时动态加载 .dylib/.so/.dll）
+libloading = { version = "0.8", optional = true }
+# P3: bumpalo 区域分配器（可选，bumpalo-pool feature）
+bumpalo = { version = "3", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+http-body-util.workspace = true
+rcgen = "0.13"
+criterion = { version = "0.5", features = ["html_reports"] }
+chrono = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+default = []
+# 启用真实 MQTT broker（默认 in-memory mock），透传至 sz-orm-mqtt
+real-broker = ["sz-orm-mqtt/real-broker"]
+# 启用 Redis Session 持久化驱动
+redis-session = ["redis"]
+# P2: GraphQL facade — 通过 sz_rust_core::orm::graphql 访问
+graphql = ["dep:sz-orm-graphql", "sz-rust-orm-facade/graphql"]
+# P2: gRPC facade — 通过 sz_rust_core::orm::grpc 访问
+grpc = ["dep:sz-orm-grpc", "sz-rust-orm-facade/grpc"]
+# P2: Addon 热加载探索
+hot-reload = ["dep:libloading"]
+# P2 全量功能开关（同时启用 graphql + grpc + hot-reload）
+p2-addons = ["graphql", "grpc", "hot-reload"]
+# SIMD JSON 加速（x86_64 平台启用 simd-json）
+simd-json = ["dep:simd-json"]
+# P3: alloc 计数 GlobalAlloc wrapper（仅 test/bench 启用，默认不启用）
+alloc-count = []
+# P3: 内存池（区域分配器，默认不启用）
+mem-pool = []
+# P3: bumpalo 内存池后端（需 mem-pool + bumpalo 依赖）
+bumpalo-pool = ["dep:bumpalo", "mem-pool"]
+
+[lib]
+name = "sz_rust_core"
+path = "src/lib.rs"
+
+[[test]]
+name = "soak"
+path = "tests/soak.rs"
+
+[[test]]
+name = "fuzz"
+path = "tests/fuzz.rs"
+
+[[bench]]
+name = "core_bench"
+harness = false
+
+[[bench]]
+name = "p3_bench"
+harness = false
+
+# P3: alloc_counter.rs 需要 unsafe impl GlobalAlloc，
+# 在包级别覆盖 workspace 的 unsafe_code = "forbid" 为 allow，
+# lib.rs 的 #![deny(unsafe_code)] 仍保持 crate 默认 deny，
+# 仅 alloc_counter.rs 通过 #![allow(unsafe_code)] 覆盖。
+[lints.rust]
+unsafe_code = "allow"
+
+[package.metadata.cargo-machete]
+ignored = ["md-5", "redis"]
+
+# SIMD JSON 加速（仅 x86_64 平台启用）
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+simd-json = { workspace = true, optional = true }
+

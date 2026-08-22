@@ -1,0 +1,123 @@
+# cargo-deny 配置 — 依赖许可证与安全审计
+#
+# 对齐 sz-orm/deny.toml 结构，确保依赖链安全合规
+
+[graph]
+all-features = true
+
+[advisories]
+# 已知安全漏洞 advisory 检查
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# 忽略的 advisory（需注明理由）
+ignore = [
+    # === rustls-webpki 0.101.7 / 0.102.8 系列漏洞（同步自 sz-orm）===
+    # 来源: rumqttc 0.25 / elasticsearch 8.5.0-alpha.1 → reqwest 0.11 → rustls 0.21 → rustls-webpki 0.101.7/0.102.8
+    # 影响: CRL 验证在默认编译中不参与；上游 rustls-webpki 0.103 为不兼容大版本
+    # 跟踪: 待 rumqttc / elasticsearch 升级至依赖 rustls-webpki 0.103+ 后自动移除
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8/0.101.7 传递依赖，上游 0.103 为不兼容大版本；CRL 验证默认不参与" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8/0.101.7 URI name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8/0.101.7 wildcard name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },
+    # serde_yml 0.0.12 unsound（RUSTSEC-2025-0068）
+    # 来源: sz-rust-core 依赖 serde_yml 用于 YAML 配置解析
+    # 影响: 仅在调用 `Serializer.emitter` 时存在 segfault 风险，本项目不使用该 API
+    # 跟踪: 待 serde_norway / serde_yaml_ng 稳定后迁移
+    { id = "RUSTSEC-2025-0068", reason = "serde_yml 0.0.12 unsound（仅 emitter API segfault）；本项目不使用 emitter API；待 serde_norway 稳定后迁移" },
+    # ttf-parser 0.25.1 unmaintained（RUSTSEC-2026-0192）
+    # 来源: imageproc text feature → ab_glyph → owned_ttf_parser → ttf-parser
+    # 影响: 仅 unmaintained 无安全漏洞；ab_glyph 是 Rust 生态标准字体渲染库，无 unmaintained-free 替代品
+    # 跟踪: 待 ab_glyph 迁移至 read-fonts 或其他维护 crate 后自动移除
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser 通过 ab_glyph→owned_ttf_parser 引入（imageproc text feature）；ab_glyph 是标准字体库无替代品；仅 unmaintained 无安全漏洞" },
+    # paste 1.0.15 unmaintained（RUSTSEC-2024-0436）
+    # 来源: Cargo.lock 残留条目（sz-orm 路径依赖传递引入）；cargo tree -i paste 返回 nothing to print
+    # 影响: 不在实际编译产物中（default features）；仅 unmaintained 无安全漏洞
+    # 跟踪: 待 sz-orm 上游消除 paste 依赖后自动移除
+    { id = "RUSTSEC-2024-0436", reason = "paste 不在实际编译产物中（cargo tree -i paste = nothing to print）；Cargo.lock 残留来自 sz-orm 路径依赖；仅 unmaintained 无安全漏洞" },
+    # rustls-pemfile 2.2.0 unmaintained（RUSTSEC-2025-0134）
+    # 来源: rumqttc 0.25 → sz-orm-mqtt（--all-features 下引入）；本仓已迁移至 rustls-pki-types::pem::PemObject
+    # 影响: default features 下不在编译产物中（cargo tree -i rustls-pemfile = no match）；仅 unmaintained 无安全漏洞
+    # 跟踪: 待 rumqttc 升级消除 rustls-pemfile 依赖后自动移除
+    { id = "RUSTSEC-2025-0134", reason = "本仓已迁移至 rustls-pki-types PemObject；rustls-pemfile 仅通过 sz-orm-mqtt→rumqttc 在 --all-features 下引入；default features 下不在编译产物中" },
+    # rkyv 0.7.46 漏洞（RUSTSEC-2026-0235）
+    # 来源: Cargo.lock 残留条目；cargo tree -i rkyv = nothing to print（含 --all-features）
+    # 影响: 不在任何编译产物中；sz-orm 路径依赖传递引入
+    # 跟踪: 待 sz-orm 上游消除 rkyv 依赖后自动移除
+    { id = "RUSTSEC-2026-0235", reason = "rkyv 不在编译产物中（cargo tree -i rkyv = nothing to print 含 --all-features）；Cargo.lock 残留来自 sz-orm 路径依赖" },
+    # RUSTSEC-2026-0258 / RUSTSEC-2024-0437 / RUSTSEC-2024-0370
+    # 来源: sz-orm 路径依赖传递引入的 Cargo.lock 残留条目
+    # 影响: 不在本仓实际编译产物中；待 sz-orm 上游升级后自动移除
+    { id = "RUSTSEC-2026-0258", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    { id = "RUSTSEC-2024-0437", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    { id = "RUSTSEC-2024-0370", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+]
+# 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
+unmaintained = "none"
+# 已被 yanked 的 crate 视为告警
+yanked = "warn"
+
+[licenses]
+# 许可证白名单
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    "Unlicense",
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    # MPL-2.0 是 copyleft 但文件级弱 copyleft，允许
+    "MPL-2.0",
+]
+# 置信度阈值（文件扫描置信度）
+confidence-threshold = 0.8
+
+[licenses.private]
+# 忽略私有 crate（path 依赖）
+ignore = true
+ignore-sources = []
+
+# webpki-roots 使用 CDLA-Permissive-2.0（OSI 批准），
+# cargo-deny 新版本要求 expression 字段 + license-files hash，
+# 但 webpki-roots 的 CDLA-Permissive-2.0 已在 allow 列表中，
+# 此处仅跳过其文件扫描（许可证本身已是白名单许可，无风险）。
+[[licenses.clarify]]
+name = "webpki-roots"
+version = "*"
+expression = "CDLA-Permissive-2.0"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
+[bans]
+# 重复依赖仅警告（对齐 sz-orm，避免 CI 因传递依赖冲突过度阻塞）
+multiple-versions = "warn"
+# 通配符依赖仅警告
+wildcards = "warn"
+# 允许的通配符路径
+allow-wildcard-paths = false
+# 高亮重复依赖
+highlight = "all"
+
+# 禁止的 crate（已知问题或不安全）
+# 注：openssl 暂时不禁止，因 reqwest 默认引入 native-tls → openssl
+# 后续优化：让 reqwest 使用 rustls-tls feature 后可重新启用 openssl 禁令
+deny = []
+
+# 跳过重复版本检查的 crate（传递依赖无法控制）
+skip = [
+    { name = "zip", version = "2.4.2" },
+]
+
+[sources]
+# 允许的 crate 源
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+# 禁止未知源
+unknown-registry = "deny"
+unknown-git = "deny"

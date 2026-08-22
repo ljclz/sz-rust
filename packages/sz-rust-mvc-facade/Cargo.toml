@@ -1,0 +1,39 @@
+[package]
+name = "sz-rust-mvc-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "MVC 层 facade（P3）— view/controller/guard 基于 http/infra/middleware facade 的控制器与视图抽象"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["mvc", "controller", "view", "guard", "thinkphp"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[dependencies]
+axum = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# sz-rust 生态（P2/P3 facade，无环依赖方向）
+sz-rust-http-facade = { workspace = true }
+sz-rust-infra-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-state-facade = { workspace = true }
+http-body-util = { workspace = true }
+tower = { workspace = true }
+sha2 = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

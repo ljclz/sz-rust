@@ -1,0 +1,12 @@
+# Grafana Dashboard 提供器 - 自动加载 sz300 面板
+apiVersion: 1
+
+providers:
+  - name: "sz300"
+    orgId: 1
+    folder: "sz300"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
