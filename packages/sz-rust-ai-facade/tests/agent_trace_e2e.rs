@@ -76,7 +76,10 @@ impl LlmProvider for ScriptedLlm {
         Err(AiError::Internal("not supported".into()))
     }
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
     fn supported_models(&self) -> &[&str] {
         &["gpt-4o"]

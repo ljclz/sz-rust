@@ -280,26 +280,133 @@ impl SimpleTemplateEngine {
     ///
     /// 对齐 PHP `Template::parse()` 的解析顺序：
     /// 1. parseLiteral（暂存 literal 内容）
-    /// 2. parseTagLib（控制流标签：if/foreach/volist/switch/for）
-    /// 3. parseTag（变量/函数/注释）
-    /// 4. 还原 literal
+    /// 2. parseInclude（文件包含）
+    /// 3. parseTagLib（控制流标签：if/foreach/volist/switch/for）
+    /// 4. parseTag（变量/函数/注释）
+    /// 5. 还原 literal
     fn render_content(&self, content: &str, data: &ViewData) -> Result<String, ViewError> {
+        let include_stack =
+            std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashSet::new()));
+        self.render_content_with_include_stack(content, data, &include_stack)
+    }
+
+    /// 带包含栈的渲染（循环包含检测）
+    fn render_content_with_include_stack(
+        &self,
+        content: &str,
+        data: &ViewData,
+        include_stack: &std::rc::Rc<
+            std::cell::RefCell<std::collections::HashSet<std::path::PathBuf>>,
+        >,
+    ) -> Result<String, ViewError> {
         // 1. 暂存 {literal}...{/literal} 内容
         let (content, literals) = self.extract_literals(content);
 
-        // 2. 解析控制流标签（对齐 PHP `TagLib::parseTag`）
+        // 2. 解析 {include file="..." /} 标签
+        let content = self.render_includes(&content, data, include_stack)?;
+
+        // 3. 解析控制流标签（对齐 PHP `TagLib::parseTag`）
         let config = self.config.read().clone();
-        let content = template::render_control_flow(&content, data, &config, |c, d| {
-            self.render_content(c, d)
+        let stack_ref = std::rc::Rc::clone(include_stack);
+        let content = template::render_control_flow(&content, data, &config, move |c, d| {
+            self.render_content_with_include_stack(c, d, &stack_ref)
         })?;
 
-        // 3. 解析标签（变量/函数/注释）
+        // 4. 解析标签（变量/函数/注释）
         let content = self.parse_tags(&content, data)?;
 
-        // 4. 还原 literal
+        // 5. 还原 literal
         let content = self.restore_literals(&content, &literals);
 
         Ok(content)
+    }
+
+    /// 解析 {include file="..." /} 标签（对齐 PHP `parseInclude`）
+    ///
+    /// 支持语法：
+    /// - `{include file="header" /}`
+    /// - `{include file="header"}`
+    ///
+    /// 安全特性：
+    /// - 循环包含检测（include_stack）
+    /// - 路径越狱防护（禁止 `../` 逃逸 view_path）
+    fn render_includes(
+        &self,
+        content: &str,
+        data: &ViewData,
+        include_stack: &std::rc::Rc<
+            std::cell::RefCell<std::collections::HashSet<std::path::PathBuf>>,
+        >,
+    ) -> Result<String, ViewError> {
+        let config = self.config.read();
+        let begin = regex::escape(&config.tpl_begin);
+        let end = regex::escape(&config.tpl_end);
+
+        // 匹配 {include file="..." /} 或 {include file="..."}
+        let pattern = format!(r#"{}include\s+file\s*=\s*"([^"]+)"\s*/?\s*{}"#, begin, end);
+        let re = Regex::new(&pattern).map_err(|e| ViewError::SyntaxError(e.to_string()))?;
+        drop(config);
+
+        let mut result = String::with_capacity(content.len());
+        let mut last_end = 0;
+
+        for caps in re.captures_iter(content) {
+            let full_match = caps.get(0).expect("正则捕获组 0 必定存在");
+            let file_name = caps.get(1).expect("正则捕获组 1 必定存在").as_str();
+
+            result.push_str(&content[last_end..full_match.start()]);
+
+            // 解析模板路径
+            let template_path = self.parse_template_path(file_name);
+
+            // 路径越狱防护
+            let config = self.config.read();
+            let view_path = config
+                .view_path
+                .canonicalize()
+                .unwrap_or(config.view_path.clone());
+            drop(config);
+
+            let canonical = template_path
+                .canonicalize()
+                .unwrap_or(template_path.clone());
+            if !canonical.starts_with(&view_path) {
+                return Err(ViewError::SyntaxError(format!(
+                    "path traversal detected: {file_name}"
+                )));
+            }
+
+            // 循环包含检测
+            {
+                let stack = include_stack.borrow();
+                if stack.contains(&canonical) {
+                    let chain: Vec<String> =
+                        stack.iter().map(|p| p.display().to_string()).collect();
+                    return Err(ViewError::SyntaxError(format!(
+                        "circular include detected: {} -> {}",
+                        chain.join(" -> "),
+                        canonical.display()
+                    )));
+                }
+            }
+
+            // 读取模板文件
+            let template_content = std::fs::read_to_string(&template_path).map_err(|e| {
+                ViewError::TemplateNotFound(format!("{}: {}", template_path.display(), e))
+            })?;
+
+            // 递归渲染被包含的模板
+            include_stack.borrow_mut().insert(canonical.clone());
+            let rendered =
+                self.render_content_with_include_stack(&template_content, data, include_stack)?;
+            include_stack.borrow_mut().remove(&canonical);
+
+            result.push_str(&rendered);
+            last_end = full_match.end();
+        }
+
+        result.push_str(&content[last_end..]);
+        Ok(result)
     }
 
     /// 暂存 {literal}...{/literal} 内容（对齐 PHP `parseLiteral`）

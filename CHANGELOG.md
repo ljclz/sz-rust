@@ -5,7 +5,75 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased] - 2026-08-21
+## [Unreleased] - 2026-08-22
+
+### Added
+
+- **新增 sz-rust-vector-db crate**（P1 任务组4，AIH-1）：
+  - Qdrant HTTP API 适配器，实现 `sz-rust-ai-facade::embedding::VectorStore` trait
+  - 支持 upsert / query / delete / ensure_collection，多租户 payload filter 隔离
+  - UUID v5 确定性 ID 映射，保证 upsert 幂等
+  - feature gate `qdrant`（默认不启用），`qdrant-integration`（testcontainers 集成测试，需 Docker）
+  - 14 单元测试通过，异常映射覆盖 401/403/404/429/5xx + 网络错误
+  - sz300 接线：`qdrant` feature + `SZ300_QDRANT_URL` 环境变量，未配置时降级 FileVectorStore
+  - workspace 成员 36 → 37
+
+- **多模态 vision 支持**（P1 任务组6，AIH-2）：
+  - 新增 `ContentPart` 枚举（Text / Image / ImageBase64）+ `ImageDetail`（Low / High / Auto）
+  - `ChatMessage.content` 从 `String` 升级为 `ContentPart`，`#[serde(untagged)]` 保证 JSON 向后兼容
+  - `From<String>` / `From<&str>` / `Display` / `Default` / `Hash` impl 保持源码兼容
+  - `as_text()` / `text_or_empty()` / `is_image()` 方法提供文本访问
+  - OpenAI Provider：`build_request_body` 适配 vision API 格式（image_url + detail）
+  - Claude Provider：适配 vision API 格式（image + source.url / source.base64）
+  - Gemini Provider：适配 vision API 格式（file_data / inline_data）
+  - 18 序列化兼容性测试 + 11 Provider vision 格式单元测试，全部通过
+  - `real-api` feature gate + 3 个 OpenAI vision 真实测试（ignored，需 API Key + 网络）
+
+- **tiktoken 精确 token_count**（P1 任务组7，AIM-2）：
+  - 新增 `tiktoken` feature gate（`tiktoken-rs = "0.5"` optional dep），默认不启用
+  - OpenAI Provider `token_count` 使用 `cl100k_base` BPE 编码器，`OnceLock` 全局单例缓存
+  - feature 未启用时回退到 `chars * 0.25` 估算，保持零依赖开销
+  - 10 个精确性测试通过（英文/中文/代码/JSON/特殊字符/长文本）
+
+- **LocalEmbedding 模型加载验证**（P1 任务组8，AIM-3）：
+  - 移除 `#[allow(dead_code)]`，新增 `model_path()` / `is_model_loaded()` / `load_model()` API
+  - `local-model` feature gate，`load_model` 验证 ONNX 模型文件非空
+  - 11 测试通过（pseudo/loaded/error 路径覆盖）
+
+- **LongTermMemory 持久化实现**（P1 任务组9，AIM-4）：
+  - `LongTermMemoryStore` trait（store/retrieve/decay/by_agent 异步方法）
+  - `FileLongTermMemoryStore` 实现：JSONL 持久化 + `tokio::fs` + `parking_lot::RwLock` 缓存
+  - 衰减策略：`importance * exp(-λ * age)`，age 以天为单位，低于 threshold 删除
+  - 10 测试通过（store/retrieve/decay/by_agent/persistence/tenant_filter）
+
+- **Agent citations 端到端接入**（P1 任务组10，AIM-5）：
+  - `Agent` 新增 `rag_pipeline: Option<Arc<RagPipeline>>` + `with_rag_pipeline()` 方法
+  - `run` 方法开始时若 RAG pipeline 存在则检索 top 5 + 转换为 `Citation` + 注入 context
+  - 5 端到端测试通过（非空 citations / doc_id+score 保持 / 无 RAG 时空 / context 注入 / 空向量存储）
+
+- **RAG 重排序（Reranker）**（P1 任务组11，AIM-6）：
+  - `Reranker` trait（`rerank(query, candidates, topk)` 异步方法）
+  - `NoopReranker` 兜底实现（直接透传）+ `WeightedReranker`（向量分数+文本长度加权）
+  - `CrossEncoderReranker`（Cohere Rerank API），feature gate `reranker` 默认不启用
+  - `RagPipeline` 集成 `with_reranker()`，retrieve 后调用 reranker，失败时回退原序
+  - 8 重排序测试 + 6 单元测试通过
+
+- **RAG 混合检索（Hybrid Search）**（P1 任务组12，AIM-7）：
+  - `Bm25Index`：内存 BM25 全文索引，支持增量添加/删除/搜索，case-insensitive 分词
+  - `HybridRetriever`：向量检索 + BM25 关键词检索 + RRF（Reciprocal Rank Fusion）融合
+  - `RagPipeline` 新增 `with_hybrid_retriever()` 运行时切换，默认纯向量检索
+  - feature gate `hybrid`，7 混合检索测试 + 14 BM25 单元测试通过
+
+- **RouterBuilder patch/head/options 方法**（P2 任务组13，FM-1）：
+  - `RouterBuilder<S>` 新增 `patch()` / `head()` / `options()` 三个便捷方法
+  - 与 get/post/put/delete 签名对齐，options 使用 `MethodFilter::OPTIONS`
+  - 5 路由分发测试通过（PATCH/HEAD/OPTIONS 分发 + 错误方法 405 + 全方法共存）
+
+- **模板 {include} 实现**（P2 任务组14，FM-2）：
+  - `render_includes` 方法：解析 `{include file="header" /}` → 读取模板文件 → 递归渲染
+  - 循环包含检测：`Rc<RefCell<HashSet<PathBuf>>>` 包含栈，递归前检查路径是否在栈中
+  - 路径越狱防护：规范化路径后检查是否在 `view_path` 子树内，禁止 `../` 逃逸
+  - 8 综合测试通过（单层/嵌套/循环检测/路径越狱/变量插值/自引用/不存在/多include）
 
 ### Removed
 

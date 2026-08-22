@@ -5,6 +5,7 @@ use crate::agent::trace::{AgentStep, AgentTrace, TerminateReason};
 use crate::common::AiError;
 use crate::llm::provider::{ChatMessage, ChatRequest, LlmProvider, Role};
 use crate::rag::citation::Citation;
+use crate::rag::pipeline::RagPipeline;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -55,6 +56,7 @@ pub struct Agent {
     llm: Arc<dyn LlmProvider>,
     tools: Arc<ToolRegistry>,
     model: String,
+    rag_pipeline: Option<Arc<RagPipeline>>,
 }
 
 impl Agent {
@@ -63,11 +65,17 @@ impl Agent {
             llm,
             tools,
             model: "gpt-4o".to_string(),
+            rag_pipeline: None,
         }
     }
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    pub fn with_rag_pipeline(mut self, rag: Arc<RagPipeline>) -> Self {
+        self.rag_pipeline = Some(rag);
         self
     }
 
@@ -81,13 +89,48 @@ impl Agent {
             policy = policy.with_timeout(timeout);
         }
 
+        let mut citations: Vec<Citation> = Vec::new();
+
         let mut memory = ShortTermMemory::new(100);
         memory.push(ChatMessage {
             role: Role::System,
-            content: task.instruction.clone(),
+            content: task.instruction.clone().into(),
             tool_call_id: None,
             tool_calls: None,
         });
+
+        if let Some(ref rag) = self.rag_pipeline {
+            match rag.retrieve(&task.instruction, 5).await {
+                Ok(hits) => {
+                    citations = hits
+                        .iter()
+                        .enumerate()
+                        .map(|(i, hit)| Citation {
+                            doc_id: hit.id.clone(),
+                            offset: i as u32,
+                            length: hit.text.len() as u32,
+                            score: hit.score,
+                            text: hit.text.clone(),
+                        })
+                        .collect();
+                    if !hits.is_empty() {
+                        let context = rag.assemble(&hits, 2000).await.unwrap_or_default();
+                        if !context.is_empty() {
+                            memory.push(ChatMessage {
+                                role: Role::System,
+                                content: format!("Retrieved context:\n{context}").into(),
+                                tool_call_id: None,
+                                tool_calls: None,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(target: "ai_agent", "RAG retrieval failed: {e}");
+                }
+            }
+        }
+
         for msg in &task.context {
             memory.push(msg.clone());
         }
@@ -109,7 +152,7 @@ impl Agent {
                 return Ok(AgentResult {
                     final_answer,
                     trace,
-                    citations: Vec::new(),
+                    citations,
                 });
             }
 
@@ -160,7 +203,7 @@ impl Agent {
                     };
 
                     let step = AgentStep {
-                        thought: thought.clone(),
+                        thought: thought.to_string(),
                         tool_call: Some(tool_call.clone()),
                         tool_result: Some(result_val.clone()),
                         observation,
@@ -176,13 +219,13 @@ impl Agent {
                     });
                     memory.push(ChatMessage {
                         role: Role::Tool,
-                        content: result_val.to_string(),
+                        content: result_val.to_string().into(),
                         tool_call_id: Some(tool_call.id.clone()),
                         tool_calls: None,
                     });
                 }
             } else {
-                final_answer = thought.clone();
+                final_answer = thought.to_string();
                 memory.push(ChatMessage {
                     role: Role::Assistant,
                     content: thought,
@@ -195,7 +238,7 @@ impl Agent {
                 return Ok(AgentResult {
                     final_answer,
                     trace,
-                    citations: Vec::new(),
+                    citations,
                 });
             }
         }

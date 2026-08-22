@@ -25,8 +25,8 @@ fn claude_parse_text_response() {
     assert_eq!(result.model, "claude-3-opus-20240229");
     assert_eq!(result.choices.len(), 1);
     assert_eq!(
-        result.choices[0].message.content,
-        "Hello! How can I help you?"
+        result.choices[0].message.content.as_text(),
+        Some("Hello! How can I help you?")
     );
     assert_eq!(result.choices[0].message.role, Role::Assistant);
     assert_eq!(result.choices[0].finish_reason, Some(FinishReason::Stop));
@@ -88,7 +88,7 @@ fn claude_parse_empty_content_array() {
         "usage": {"input_tokens": 0, "output_tokens": 0}
     });
     let result = ClaudeProvider::parse_completion(&resp).unwrap();
-    assert_eq!(result.choices[0].message.content, "");
+    assert_eq!(result.choices[0].message.content.as_text(), Some(""));
 }
 
 // ===== Gemini fixture 测试 =====
@@ -108,7 +108,10 @@ fn gemini_parse_text_response() {
     });
     let result = GeminiProvider::parse_completion(&resp).unwrap();
     assert_eq!(result.choices.len(), 1);
-    assert_eq!(result.choices[0].message.content, "Hi there!");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("Hi there!")
+    );
     assert_eq!(result.choices[0].message.role, Role::Assistant);
     assert_eq!(result.choices[0].finish_reason, Some(FinishReason::Stop));
 }
@@ -181,6 +184,12 @@ fn gemini_parse_multiple_candidates() {
     });
     let result = GeminiProvider::parse_completion(&resp).unwrap();
     assert_eq!(result.choices.len(), 2);
-    assert_eq!(result.choices[0].message.content, "Answer 1");
-    assert_eq!(result.choices[1].message.content, "Answer 2");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("Answer 1")
+    );
+    assert_eq!(
+        result.choices[1].message.content.as_text(),
+        Some("Answer 2")
+    );
 }

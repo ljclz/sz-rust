@@ -1,7 +1,7 @@
 use crate::common::{AiError, AuditHttpClient};
 use crate::llm::provider::{
-    ChatCompletion, ChatMessage, ChatRequest, Choice, FinishReason, LlmProvider, Role, StreamDelta,
-    ToolCall, Usage,
+    ChatCompletion, ChatMessage, ChatRequest, Choice, ContentPart, FinishReason, LlmProvider, Role,
+    StreamDelta, ToolCall, Usage,
 };
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -37,22 +37,37 @@ impl ClaudeProvider {
     fn build_request_body(&self, req: &ChatRequest) -> serde_json::Value {
         let mut system_text = String::new();
         let messages: Vec<serde_json::Value> = req.messages.iter().filter_map(|m| {
+            let content_value = match &m.content {
+                ContentPart::Text(s) => serde_json::Value::String(s.clone()),
+                ContentPart::Image { url, .. } => serde_json::json!([{
+                    "type": "image",
+                    "source": {"type": "url", "url": url}
+                }]),
+                ContentPart::ImageBase64 { data, mime_type } => serde_json::json!([{
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": data,
+                    }
+                }]),
+            };
             match m.role {
                 Role::System => {
                     if !system_text.is_empty() {
                         system_text.push('\n');
                     }
-                    system_text.push_str(&m.content);
+                    system_text.push_str(m.content.text_or_empty());
                     None
                 }
                 Role::User => Some(serde_json::json!({
                     "role": "user",
-                    "content": m.content,
+                    "content": content_value,
                 })),
                 Role::Assistant => {
                     let mut msg = serde_json::json!({
                         "role": "assistant",
-                        "content": m.content,
+                        "content": content_value,
                     });
                     if let Some(ref tool_calls) = m.tool_calls {
                         let blocks: Vec<serde_json::Value> = tool_calls.iter().map(|tc| {
@@ -73,7 +88,7 @@ impl ClaudeProvider {
                         "content": [{
                             "type": "tool_result",
                             "tool_use_id": m.tool_call_id.as_deref().unwrap_or(""),
-                            "content": m.content,
+                            "content": content_value,
                         }],
                     }))
                 }
@@ -196,7 +211,7 @@ impl ClaudeProvider {
             index: 0,
             message: ChatMessage {
                 role: Role::Assistant,
-                content: text_content,
+                content: text_content.into(),
                 tool_call_id: None,
                 tool_calls: tc,
             },
@@ -350,7 +365,10 @@ impl LlmProvider for ClaudeProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        let total_chars: usize = messages.iter().map(|m| m.content.chars().count()).sum();
+        let total_chars: usize = messages
+            .iter()
+            .map(|m| m.content.text_or_empty().chars().count())
+            .sum();
         Ok((total_chars as f32 * 0.3) as u32)
     }
 
@@ -360,5 +378,84 @@ impl LlmProvider for ClaudeProvider {
             "claude-3-5-haiku-20241022",
             "claude-3-opus-20240229",
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::{AuditHttpClient, RateLimitConfig};
+    use crate::llm::provider::ImageDetail;
+
+    fn make_provider() -> ClaudeProvider {
+        let http = Arc::new(AuditHttpClient::new(
+            reqwest::Client::new(),
+            RateLimitConfig::default(),
+        ));
+        ClaudeProvider::new("test-key", "https://api.anthropic.com", http)
+    }
+
+    #[test]
+    fn build_body_text_content_serializes_as_string() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "claude-3-5-sonnet-20241022",
+            vec![ChatMessage {
+                role: Role::User,
+                content: "hello".into(),
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content, &serde_json::Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn build_body_image_url_content_serializes_as_claude_vision() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "claude-3-5-sonnet-20241022",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::Image {
+                    url: "https://example.com/img.png".to_string(),
+                    detail: ImageDetail::High,
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["type"], "url");
+        assert_eq!(content[0]["source"]["url"], "https://example.com/img.png");
+    }
+
+    #[test]
+    fn build_body_image_base64_content_serializes_as_claude_vision() {
+        let provider = make_provider();
+        let req = ChatRequest::new(
+            "claude-3-5-sonnet-20241022",
+            vec![ChatMessage {
+                role: Role::User,
+                content: ContentPart::ImageBase64 {
+                    data: "iVBORw0KGgo=".to_string(),
+                    mime_type: "image/png".to_string(),
+                },
+                tool_call_id: None,
+                tool_calls: None,
+            }],
+        );
+        let body = provider.build_request_body(&req);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["type"], "base64");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[0]["source"]["data"], "iVBORw0KGgo=");
     }
 }

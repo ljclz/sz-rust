@@ -26,6 +26,8 @@ uuid = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 arc-swap = "1"
+tiktoken-rs = { version = "0.5", optional = true }
+
 
 # sz-rust 内部 facade 依赖
 sz-rust-http-facade = { workspace = true }
@@ -59,6 +61,16 @@ claude = []
 gemini = []
 # 全部 Provider
 all-providers = ["openai", "claude", "gemini"]
+# 真实 API 测试（需要 API Key + 网络）
+real-api = ["openai"]
+# tiktoken 精确 token_count
+tiktoken = ["dep:tiktoken-rs"]
+# 本地模型加载验证
+local-model = []
+# RAG 重排序（CrossEncoderReranker，Cohere API）
+reranker = []
+# RAG 混合检索（BM25 + 向量 RRF 融合）
+hybrid = []
 
 [package.metadata.cargo-udeps.ignore]
 

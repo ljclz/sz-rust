@@ -87,7 +87,7 @@ fn openai_parse_completion_text_response() {
     assert_eq!(result.id, "chatcmpl-001");
     assert_eq!(result.model, "gpt-4o");
     assert_eq!(result.choices.len(), 1);
-    assert_eq!(result.choices[0].message.content, "Hello!");
+    assert_eq!(result.choices[0].message.content.as_text(), Some("Hello!"));
     assert_eq!(result.choices[0].message.role, Role::Assistant);
     assert_eq!(result.choices[0].finish_reason, Some(FinishReason::Stop));
     assert_eq!(result.usage.total_tokens, 8);
@@ -138,8 +138,8 @@ fn openai_parse_completion_multiple_choices() {
     });
     let result = OpenAiProvider::parse_completion(&resp).unwrap();
     assert_eq!(result.choices.len(), 2);
-    assert_eq!(result.choices[0].message.content, "A");
-    assert_eq!(result.choices[1].message.content, "B");
+    assert_eq!(result.choices[0].message.content.as_text(), Some("A"));
+    assert_eq!(result.choices[1].message.content.as_text(), Some("B"));
     assert_eq!(result.choices[1].finish_reason, Some(FinishReason::Length));
 }
 
@@ -228,7 +228,7 @@ fn openai_parse_completion_empty_content_defaults_empty() {
         "choices": [{"index": 0, "message": {"role": "assistant"}, "finish_reason": "stop"}],
     });
     let result = OpenAiProvider::parse_completion(&resp).unwrap();
-    assert_eq!(result.choices[0].message.content, "");
+    assert_eq!(result.choices[0].message.content.as_text(), Some(""));
 }
 
 // ===== chat_completion 集成测试（mock 服务器） =====
@@ -265,7 +265,10 @@ async fn openai_chat_completion_success_via_mock() {
     );
     let result = provider.chat_completion(req).await.unwrap();
     assert_eq!(result.id, "chatcmpl-mock");
-    assert_eq!(result.choices[0].message.content, "Mock response");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("Mock response")
+    );
 
     server.stop();
 }

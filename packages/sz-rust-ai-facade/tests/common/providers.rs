@@ -66,7 +66,10 @@ impl LlmProvider for StubProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
 
     fn supported_models(&self) -> &[&str] {
@@ -136,7 +139,10 @@ impl LlmProvider for ScriptedProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
 
     fn supported_models(&self) -> &[&str] {
@@ -228,7 +234,7 @@ impl LlmProvider for StreamingProvider {
                 index: 0,
                 message: ChatMessage {
                     role: sz_rust_ai_facade::llm::provider::Role::Assistant,
-                    content,
+                    content: content.into(),
                     tool_call_id: None,
                     tool_calls: None,
                 },
@@ -265,7 +271,10 @@ impl LlmProvider for StreamingProvider {
     }
 
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
 
     fn supported_models(&self) -> &[&str] {

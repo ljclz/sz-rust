@@ -85,7 +85,7 @@ impl LlmProvider for MockLlm {
                 index: 0,
                 message: ChatMessage {
                     role: Role::Assistant,
-                    content: format!("Answer based on context: {}", user_msg),
+                    content: format!("Answer based on context: {}", user_msg).into(),
                     tool_call_id: None,
                     tool_calls: None,
                 },
@@ -105,7 +105,10 @@ impl LlmProvider for MockLlm {
         Err(AiError::Internal("stream not supported in mock".into()))
     }
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
     fn supported_models(&self) -> &[&str] {
         &["gpt-4o"]

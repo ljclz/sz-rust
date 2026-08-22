@@ -96,20 +96,37 @@ impl AiMetrics {
         });
     }
 
-    pub fn record_llm_request(&self, _provider: &str, _model: &str, _status: &str) {
+    pub fn record_llm_request(&self, provider: &str, model: &str, status: &str) {
         *self.llm_request_count.lock() += 1;
         let handles = self.handles.lock();
         if let Some(h) = handles.as_ref() {
             h.llm_request_total.inc();
         }
+        tracing::debug!(
+            target: "ai_metrics",
+            metric = "ai_llm_request_total",
+            provider = provider,
+            model = model,
+            status = status,
+            "LLM request recorded"
+        );
     }
 
-    pub fn record_llm_tokens(&self, _provider: &str, _model: &str, _direction: &str, count: u32) {
+    pub fn record_llm_tokens(&self, provider: &str, model: &str, direction: &str, count: u32) {
         *self.llm_tokens_count.lock() += count as u64;
         let handles = self.handles.lock();
         if let Some(h) = handles.as_ref() {
             h.llm_tokens_total.inc_by(count as f64);
         }
+        tracing::debug!(
+            target: "ai_metrics",
+            metric = "ai_llm_tokens_total",
+            provider = provider,
+            model = model,
+            direction = direction,
+            count = count,
+            "LLM tokens recorded"
+        );
     }
 
     pub fn record_llm_request_duration(&self, seconds: f64) {
@@ -127,28 +144,48 @@ impl AiMetrics {
         }
     }
 
-    pub fn record_agent_step(&self, _agent_id: &str, _terminated_by: &str) {
+    pub fn record_agent_step(&self, agent_id: &str, terminated_by: &str) {
         *self.agent_steps_count.lock() += 1;
         let handles = self.handles.lock();
         if let Some(h) = handles.as_ref() {
             h.agent_steps_total.inc();
         }
+        tracing::debug!(
+            target: "ai_metrics",
+            metric = "ai_agent_steps_total",
+            agent_id = agent_id,
+            terminated_by = terminated_by,
+            "Agent step recorded"
+        );
     }
 
-    pub fn record_embedding(&self, _provider: &str, _model: &str) {
+    pub fn record_embedding(&self, provider: &str, model: &str) {
         *self.embedding_count.lock() += 1;
         let handles = self.handles.lock();
         if let Some(h) = handles.as_ref() {
             h.embedding_total.inc();
         }
+        tracing::debug!(
+            target: "ai_metrics",
+            metric = "ai_embedding_total",
+            provider = provider,
+            model = model,
+            "Embedding request recorded"
+        );
     }
 
-    pub fn record_cache_hit(&self, _type: &str) {
+    pub fn record_cache_hit(&self, cache_type: &str) {
         *self.cache_hit_count.lock() += 1;
         let handles = self.handles.lock();
         if let Some(h) = handles.as_ref() {
             h.cache_hit_total.inc();
         }
+        tracing::debug!(
+            target: "ai_metrics",
+            metric = "ai_cache_hit_total",
+            cache_type = cache_type,
+            "Cache hit recorded"
+        );
     }
 
     pub fn llm_request_count(&self) -> u64 {

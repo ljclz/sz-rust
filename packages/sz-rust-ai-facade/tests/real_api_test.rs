@@ -29,7 +29,7 @@ fn make_chat_request(model: &str, prompt: &str) -> ChatRequest {
         model,
         vec![ChatMessage {
             role: Role::User,
-            content: prompt.to_string(),
+            content: prompt.to_string().into(),
             tool_call_id: None,
             tool_calls: None,
         }],
@@ -54,7 +54,7 @@ async fn deepseek_chat_completion() {
             assert!(!completion.id.is_empty(), "id 不应为空");
             assert!(!completion.choices.is_empty(), "choices 不应为空");
             let content = &completion.choices[0].message.content;
-            assert!(!content.is_empty(), "回复内容不应为空");
+            assert!(!content.text_or_empty().is_empty(), "回复内容不应为空");
             println!(
                 "[DeepSeek] model={}, content={}, usage={:?}",
                 completion.model, content, completion.usage
@@ -107,7 +107,7 @@ async fn deepseek_token_count() {
 
     let messages = vec![ChatMessage {
         role: Role::User,
-        content: "你好，世界".to_string(),
+        content: "你好，世界".to_string().into(),
         tool_call_id: None,
         tool_calls: None,
     }];

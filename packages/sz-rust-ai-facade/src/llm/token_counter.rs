@@ -87,7 +87,10 @@ mod tests {
         }
         async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
-            Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+            Ok(messages
+                .iter()
+                .map(|m| m.content.text_or_empty().len() as u32)
+                .sum())
         }
         fn supported_models(&self) -> &[&str] {
             &[]

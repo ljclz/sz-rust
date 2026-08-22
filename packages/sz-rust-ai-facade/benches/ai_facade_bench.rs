@@ -78,7 +78,10 @@ impl LlmProvider for StubLlm {
         Ok(stream.boxed())
     }
     async fn token_count(&self, messages: &[ChatMessage]) -> Result<u32, AiError> {
-        Ok(messages.iter().map(|m| m.content.len() as u32).sum())
+        Ok(messages
+            .iter()
+            .map(|m| m.content.text_or_empty().len() as u32)
+            .sum())
     }
     fn supported_models(&self) -> &[&str] {
         &["stub-model"]
@@ -395,7 +398,8 @@ fn context_truncation(c: &mut Criterion) {
                         content: format!(
                             "Message {} with some content for truncation benchmark",
                             i
-                        ),
+                        )
+                        .into(),
                         tool_call_id: None,
                         tool_calls: None,
                     })

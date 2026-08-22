@@ -38,7 +38,14 @@ async fn it_failover_openai_to_claude_to_gemini() {
                     }],
                 );
                 let result = p.chat_completion(req).await?;
-                Ok(result.choices.into_iter().next().unwrap().message.content)
+                Ok(result
+                    .choices
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .message
+                    .content
+                    .to_string())
             }
         })
         .await;
@@ -77,7 +84,14 @@ async fn it_failover_all_providers_fail() {
                     }],
                 );
                 let result = p.chat_completion(req).await?;
-                Ok(result.choices.into_iter().next().unwrap().message.content)
+                Ok(result
+                    .choices
+                    .into_iter()
+                    .next()
+                    .unwrap()
+                    .message
+                    .content
+                    .to_string())
             }
         })
         .await;

@@ -98,7 +98,10 @@ async fn gemini_chat_completion_success_via_mock() {
         }],
     );
     let result = provider.chat_completion(req).await.unwrap();
-    assert_eq!(result.choices[0].message.content, "Gemini mock");
+    assert_eq!(
+        result.choices[0].message.content.as_text(),
+        Some("Gemini mock")
+    );
     assert_eq!(result.model, "gemini-2.0-flash");
 
     server.stop();
@@ -224,7 +227,7 @@ async fn gemini_chat_completion_with_system_instruction_via_mock() {
         ],
     );
     let result = provider.chat_completion(req).await.unwrap();
-    assert_eq!(result.choices[0].message.content, "ok");
+    assert_eq!(result.choices[0].message.content.as_text(), Some("ok"));
 
     server.stop();
 }
