@@ -75,6 +75,15 @@
   - 路径越狱防护：规范化路径后检查是否在 `view_path` 子树内，禁止 `../` 逃逸
   - 8 综合测试通过（单层/嵌套/循环检测/路径越狱/变量插值/自引用/不存在/多include）
 
+- **audit_remediation_v2：6 项幻影交付生产接线**（第二轮审计修复）：
+  - **sz300 Cargo.toml 启用 4 个 feature**：`tiktoken`/`reranker`/`hybrid`/`local-model`，使 ai-facade 内 `#[cfg(feature)]` 分支参与 sz300 编译
+  - **RagPipeline 生产接线**：sz300 main.rs 构造 `RagPipeline::new` + `with_reranker` + `with_hybrid_retriever`，通过 `Ai::init_default` 第 4 参数注入；`Ai::agent` 内部接入 `with_rag_pipeline`（facade.rs:93）
+  - **Agent + LongTermMemory 生产接线**：sz300 main.rs 构造 `ToolRegistry` + `FileLongTermMemoryStore`（`SZ300_AGENT_ENABLED=1` 时），`AppState` 新增 `long_term_memory` 字段
+  - **LocalEmbedding 真实加载**：`build_local_embedding` 辅助函数，`SZ300_LOCAL_EMBEDDING_MODEL` 环境变量驱动，未设置时降级 `new_pseudo`
+  - **环境变量驱动**：`SZ300_RERANKER_API_KEY`/`SZ300_HYBRID_ENABLED`/`SZ300_AGENT_ENABLED`/`SZ300_LOCAL_EMBEDDING_MODEL`，默认行为不破坏（无环境变量时降级 NoopReranker/纯向量/无 Agent/pseudo）
+  - **7 端到端测试通过**：rag_pipeline（reranker+hybrid）、agent（citations+LongTermMemory roundtrip）、local_embedding（real_load+degrade）、tiktoken（BPE 精确值≠估算值）
+  - **IndustryRag 保留**：与 RagPipeline 并行共存（ADR-001），非替换
+
 ### Removed
 
 - **移除 sz-rust-k8s-operator 孤儿 crate**（`ADR-038`）：

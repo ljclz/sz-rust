@@ -88,7 +88,10 @@ impl Ai {
             .as_ref()
             .ok_or_else(|| AiError::Internal("tool registry not configured".to_string()))?;
         let provider = inst.router.route(None)?;
-        let agent = Agent::new(provider, tools.clone());
+        let mut agent = Agent::new(provider, tools.clone());
+        if let Some(ref rag) = inst.rag {
+            agent = agent.with_rag_pipeline(rag.clone());
+        }
         agent.run(task, opts).await
     }
 
