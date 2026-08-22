@@ -4,9 +4,9 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v0.7.0**（2026-08-10）— crates.io 全量发布 + 4 框架 × 3 路由 × 4 并发压测 + 资源监控集成 + 深度评估更新
+**当前版本：v1.2.0**（2026-08-21）— crates.io 18 crate 发布 + sz-orm 5.0.0 全量升级 + CI 22 jobs 实跑通过 + AI 能力栈（3 Provider + Agent + RAG）
 
-> **v0.6.7 → v0.7.0 变更摘要**：见 [docs/CHANGELOG.md](docs/CHANGELOG.md)
+> **v1.1.0 → v1.2.0 变更摘要**：见 [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 ---
 
@@ -39,7 +39,7 @@
 - **GraphQL API**：基于 async-graphql 7.x，提供 `POST /graphql` 查询端点 + `GET /graphiql` IDE。（✅ 生产已接入：sz300 `router.rs:196` 挂载 `graphql_api::graphql_router()`，Schema 定义 health/serverInfo/product 查询）
 - **WebSocket**：基于 sz-orm-websocket（tokio-tungstenite），支持 HTTP 端口复用 + 独立端口两种模式，`WsHandler` trait 对齐 PHP Workerman onConnect/onMessage/onClose。（✅ 生产已接入：sz300 `router.rs:201` 挂载 `/ws/echo` 回显端点）
 - **WASM 边缘计算**：`sz-rust-wasm` crate 基于 wasmi（纯 Rust WASM 解释器），提供 `WasmRuntime` 加载/执行 WASM 模块。（✅ 生产已接入：sz300 `POST /api/wasm/execute` 端点，接受 base64 编码的 WASM 模块 + 函数名 + 参数，返回执行结果）
-- **K8s Operator**：`sz-rust-k8s-operator` crate 定义 `Sz300App` CRD（apiVersion: sz-rust.dev/v1），reconcile loop 自动管理 Deployment + Service。（✅ 已实现：CRD 定义 + reconcile 逻辑 + 11 个测试）
+- **K8s Operator**：（⚠️ 已移除：`sz-rust-k8s-operator` 孤儿 crate，无消费者，22 测试保留在 git 历史，详见 ADR-0021）
 
 ---
 
@@ -188,7 +188,7 @@ sz-rust/                          # workspace 根目录
 
 ---
 
-## CI 门禁与质量保障（v0.7.0 增强）
+## CI 门禁与质量保障（v1.2.0 增强）
 
 项目通过 GitHub Actions 实施 23 道门禁，所有门禁严格生效（无 `continue-on-error`）：
 
@@ -228,9 +228,9 @@ MIT
 
 | 任务域 | 结论 | 关键数字 | 来源 |
 |--------|------|---------|------|
-| TF（测试修复） | ✅ | 171 passed, 0 failed | `cargo test -p sz-rust-sz300` |
+| TF（测试修复） | ✅ | 642 passed, 0 failed | `cargo test -p sz-rust-sz300` |
 | PB（性能基准） | ✅ | 45 bench case, RSS 7 MB | `docs/benchmarks/2026-08-12-w5-w6-baseline.md` |
-| SA（安全审计） | ✅ | 22 条铁律全通过 | `docs/audit/2026-08-12-w5-w6-security-audit.md` |
+| SA（安全审计） | ✅ | 23 条铁律全通过 | `docs/audit/2026-08-12-w5-w6-security-audit.md` |
 | E2E（端到端） | ✅ | 8 阶段全执行 | `docs/audit/2026-08-12-w5-w6-e2e-report.md` |
 
 ### 新增文件
