@@ -116,12 +116,143 @@ impl AiController {
             Err(e) => ctrl.render_error(&e, json!({}), 0),
         }
     }
+
+    /// AI Embedding 接口 — 接收文本数组，返回嵌入向量（audit_remediation_v3）
+    async fn embed(_state: &AppState, req: Request<Body>) -> Response {
+        let ctrl = AiController;
+        match ctrl.post_data(req).await {
+            Ok(data) => {
+                if !sz_rust_ai_facade::Ai::is_initialized() {
+                    return ctrl.render_error(
+                        "AI 服务未配置 — 请设置 SZ300_AI_API_KEY 环境变量",
+                        json!({}),
+                        0,
+                    );
+                }
+                let texts: Vec<String> = match data.get("texts").and_then(|v| v.as_array()) {
+                    Some(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect(),
+                    None => {
+                        return ctrl.render_error("texts 不能为空且必须是字符串数组", json!({}), 0)
+                    }
+                };
+                if texts.is_empty() {
+                    return ctrl.render_error("texts 不能为空", json!({}), 0);
+                }
+                let model = data
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("text-embedding-3-small")
+                    .to_string();
+                match sz_rust_ai_facade::Ai::embed(texts, &model).await {
+                    Ok(result) => ctrl.render_success(
+                        "success",
+                        json!({
+                            "embeddings": result.embeddings,
+                            "model": result.model,
+                            "dimensions": result.dimensions,
+                            "usage_tokens": result.usage_tokens,
+                        }),
+                    ),
+                    Err(e) => ctrl.render_error(format!("Embedding 调用失败: {}", e), json!({}), 0),
+                }
+            }
+            Err(e) => ctrl.render_error(&e, json!({}), 0),
+        }
+    }
+
+    /// AI 流式聊天接口 — SSE 流式返回（audit_remediation_v3）
+    async fn stream(_state: &AppState, req: Request<Body>) -> Response {
+        let ctrl = AiController;
+        match ctrl.post_data(req).await {
+            Ok(data) => {
+                if !sz_rust_ai_facade::Ai::is_initialized() {
+                    return ctrl.render_error(
+                        "AI 服务未配置 — 请设置 SZ300_AI_API_KEY 环境变量",
+                        json!({}),
+                        0,
+                    );
+                }
+                let prompt = match data.get("prompt").and_then(|v| v.as_str()) {
+                    Some(p) if !p.is_empty() => p.to_string(),
+                    _ => return ctrl.render_error("prompt 不能为空", json!({}), 0),
+                };
+                if prompt.chars().count() > MAX_PROMPT_CHARS {
+                    return ctrl.render_error(
+                        format!("prompt 过长（上限 {} 字符）", MAX_PROMPT_CHARS),
+                        json!({}),
+                        0,
+                    );
+                }
+                let model = data
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(DEFAULT_MODEL)
+                    .to_string();
+                if !ALLOWED_MODELS.contains(&model.as_str()) {
+                    return ctrl.render_error(
+                        format!("不支持的模型: {}（允许: {:?}）", model, ALLOWED_MODELS),
+                        json!({}),
+                        0,
+                    );
+                }
+                let chat_req = ChatRequest::new(
+                    model,
+                    vec![ChatMessage {
+                        role: Role::User,
+                        content: prompt.into(),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    }],
+                );
+                match sz_rust_ai_facade::Ai::stream_chat(chat_req).await {
+                    Ok(stream) => {
+                        use futures::StreamExt;
+                        let sse_stream = stream.map(|result| {
+                            let msg = match result {
+                                Ok(delta) => {
+                                    let json = serde_json::json!({
+                                        "content_delta": delta.content_delta,
+                                        "finish_reason": format!("{:?}", delta.finish_reason),
+                                    });
+                                    format!("data: {}\n\n", json)
+                                }
+                                Err(e) => format!("data: {{\"error\":\"{}\"}}\n\n", e),
+                            };
+                            Ok::<_, std::convert::Infallible>(msg)
+                        });
+                        Response::builder()
+                            .header("content-type", "text/event-stream")
+                            .header("cache-control", "no-cache")
+                            .body(axum::body::Body::from_stream(sse_stream))
+                            .unwrap()
+                    }
+                    Err(e) => ctrl.render_error(format!("AI 流式调用失败: {}", e), json!({}), 0),
+                }
+            }
+            Err(e) => ctrl.render_error(&e, json!({}), 0),
+        }
+    }
 }
 
 /// AI 聊天接口（对齐 PHP AiController::chat）
 #[tracing::instrument(skip(state, req))]
 pub async fn chat(State(state): State<AppState>, req: Request<Body>) -> Response {
     AiController::chat(&state, req).await
+}
+
+/// AI Embedding 接口 — 接收文本数组，返回嵌入向量（audit_remediation_v3）
+#[tracing::instrument(skip(state, req))]
+pub async fn embed(State(state): State<AppState>, req: Request<Body>) -> Response {
+    AiController::embed(&state, req).await
+}
+
+/// AI 流式聊天接口 — SSE 流式返回（audit_remediation_v3）
+#[tracing::instrument(skip(state, req))]
+pub async fn stream(State(state): State<AppState>, req: Request<Body>) -> Response {
+    AiController::stream(&state, req).await
 }
 
 #[cfg(test)]

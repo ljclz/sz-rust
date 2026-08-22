@@ -41,6 +41,7 @@
 - **WASM 边缘计算**：`sz-rust-wasm` crate 基于 wasmi（纯 Rust WASM 解释器），提供 `WasmRuntime` 加载/执行 WASM 模块。（✅ 生产已接入：sz300 `POST /api/wasm/execute` 端点，接受 base64 编码的 WASM 模块 + 函数名 + 参数，返回执行结果）
 - **K8s Operator**：（⚠️ 已移除：`sz-rust-k8s-operator` 孤儿 crate，无消费者，22 测试保留在 git 历史，详见 ADR-0021）
 - **AI 能力栈生产接线（v1.2.0 audit_remediation_v2）**：sz300 Cargo.toml 启用 `tiktoken`/`reranker`/`hybrid`/`local-model` 4 feature；main.rs 构造 `RagPipeline` + `with_reranker` + `with_hybrid_retriever` 注入 `Ai::init_default`；`Ai::agent` 内部接入 `with_rag_pipeline`（citations）；`FileLongTermMemoryStore` + `ToolRegistry` 通过 `SZ300_AGENT_ENABLED=1` 驱动；`LocalEmbedding` 真实加载通过 `SZ300_LOCAL_EMBEDDING_MODEL` 驱动；7 端到端测试验证接线（非幻影交付）。（✅ 生产已接入）
+- **AI 能力栈生产接线（v1.2.0 audit_remediation_v3）**：5 项高风险幻影交付修复——`LlmChatCapability` 注册到 CapabilityRegistry（`ai.llm_chat`）；`POST /api/v1/ai/embed` 端点接线 `Ai::embed`；`POST /api/v1/ai/stream` SSE 端点接线 `Ai::stream_chat`；`McpToolBridge` 注入 6 个 MCP 工具（parse_path/build_select_query/openapi_spec/redaction_check/url_decode/sql_validate）到 Agent ToolRegistry；`AiMetrics` 12 项指标接入 Prometheus；5 端到端测试验证接线。（✅ 生产已接入）
 
 ---
 
@@ -230,7 +231,7 @@ MIT
 
 | 任务域 | 结论 | 关键数字 | 来源 |
 |--------|------|---------|------|
-| TF（测试修复） | ✅ | 642 passed, 0 failed | `cargo test -p sz-rust-sz300` |
+| TF（测试修复） | ✅ | 647 passed, 0 failed | `cargo test -p sz-rust-sz300` |
 | PB（性能基准） | ✅ | 45 bench case, RSS 7 MB | `docs/benchmarks/2026-08-12-w5-w6-baseline.md` |
 | SA（安全审计） | ✅ | 23 条铁律全通过 | `docs/audit/2026-08-12-w5-w6-security-audit.md` |
 | E2E（端到端） | ✅ | 8 阶段全执行 | `docs/audit/2026-08-12-w5-w6-e2e-report.md` |

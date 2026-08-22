@@ -120,9 +120,27 @@ fn build_local_embedding(dim: usize) -> Arc<dyn sz_rust_ai_facade::embedding::Em
     }
 }
 
-/// 构建 ToolRegistry（空 registry，后续可扩展）
+/// 构建 ToolRegistry（通过 McpToolBridge 注入 MCP 工具，audit_remediation_v3）
 fn build_tool_registry() -> sz_rust_ai_facade::agent::tool::ToolRegistry {
-    sz_rust_ai_facade::agent::tool::ToolRegistry::new()
+    use sz_rust_ai_facade::agent::tool::Tool;
+    use sz_rust_ai_facade::agent::tool::ToolRegistry;
+    use sz_rust_ai_facade::mcp_bridge::bridge::McpToolBridge;
+
+    let mut registry = ToolRegistry::new();
+    let bridge = McpToolBridge::new(&[
+        "parse_path",
+        "build_select_query",
+        "openapi_spec",
+        "redaction_check",
+        "url_decode",
+        "sql_validate",
+    ]);
+    for adapter in bridge.adapters() {
+        let name = adapter.name().to_string();
+        registry.register(Box::new(adapter));
+        tracing::info!("MCP 工具已注册到 Agent ToolRegistry: {}", name);
+    }
+    registry
 }
 
 #[tokio::main]
@@ -249,6 +267,10 @@ async fn main() -> anyhow::Result<()> {
     );
     tracing::info!("可观测性模块初始化完成（Prometheus /metrics 端点已启用）");
 
+    // 接线 AiMetrics 到 Prometheus 指标注册中心（audit_remediation_v3）
+    sz_rust_ai_facade::common::metrics::AiMetrics::global().register(&metrics_registry);
+    tracing::info!("AiMetrics 已接入 Prometheus（ai_llm_request_total/ai_llm_tokens_total 等）");
+
     // 初始化 Capability Registry（能力注册表，用于 AI/MCP 能力发现与调用）
     // 同时初始化 Cap 全局 facade（OnceLock 单例），使 Cap::register/call/metrics 可用
     // 注意：必须用 init_with 注入同一实例——若用 Cap::init() 会创建第二个 registry，
@@ -259,6 +281,14 @@ async fn main() -> anyhow::Result<()> {
             "Capability Registry 初始化完成（Cap facade 已接线，与 AppState 共享实例）"
         ),
         Err(_) => tracing::warn!("Cap facade 已初始化（跳过重复初始化）"),
+    }
+
+    // 注册 LlmChatCapability 到 CapabilityRegistry（audit_remediation_v3）
+    match sz_rust_capability::Cap::register(std::sync::Arc::new(
+        sz_rust_ai_facade::capability::LlmChatCapability,
+    )) {
+        Ok(_) => tracing::info!("LlmChatCapability 已注册（ai.llm_chat 能力可调用）"),
+        Err(e) => tracing::warn!("LlmChatCapability 注册失败（非致命）: {}", e),
     }
 
     // 先加载 RAG 配置并构造 embedding + vector_store（供 AI facade 和 IndustryRag 共用）

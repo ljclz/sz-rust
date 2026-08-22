@@ -59,6 +59,7 @@ once_cell.workspace = true
 redis = { workspace = true, optional = true }
 # Qdrant 向量数据库适配器（可选，启用 qdrant feature）
 sz-rust-vector-db = { workspace = true, optional = true }
+futures.workspace = true
 
 [features]
 default = []

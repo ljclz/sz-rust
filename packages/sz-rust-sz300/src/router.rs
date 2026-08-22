@@ -163,6 +163,10 @@ pub fn create_router(state: AppState) -> Router {
         )
         // AI 聊天接口
         .route("/api/v1/ai/chat", post(ai::chat))
+        // AI Embedding 接口（audit_remediation_v3）
+        .route("/api/v1/ai/embed", post(ai::embed))
+        // AI 流式聊天接口（audit_remediation_v3）
+        .route("/api/v1/ai/stream", post(ai::stream))
         // Capability 注册表查询（AI Agent 能力发现）
         .route("/api/v1/capabilities/list", post(capabilities::list))
         // 视图模板渲染
