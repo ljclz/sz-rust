@@ -17,6 +17,13 @@
   - **CRM/CMS Capability 注册**：`CrmPlugin::new(CrmState::default()).register_capabilities(&capability_registry)`（7 项 CRM Capability）+ `CmsPlugin::new(CmsState::default()).register_capabilities(&capability_registry)`（5 项 CMS Capability）
   - **8 端到端测试通过**：CRM 4 测试（contacts/leads/deals list + contact detail）+ CMS 4 测试（articles/category/tags list + article detail），验证路由从 sz300 入口可达（非 404）
   - **README 版本号同步**：CRM/CMS README v1.1.0 → v1.2.0，与 workspace 一致
+  - **T2 服务器代码同步**：服务器 `/www/rust/sz-rust-new` git pull `4167f10` → `210157b`（87 files changed），Rust 升级 1.75.0 → 1.97.1，`cargo build --release` Finished（7m46s），sz300-server 重启（PID 3914540，端口 8300），日志确认 `CRM Capability 已注册（7 项）` + `CMS Capability 已注册（5 项）`，端点验证 `/health → 200` + `/api/crm/contacts → 200` + `/api/cms/articles → 200`
+  - **T3 workflow 触发验证**：
+    - `ai-facade-perf-gate` ✅ conclusion=success（run 32574835756）
+    - `mcdc` ✅ conclusion=success（run 32575534407，修复 nightly 工具链 `-Z instrument-coverage` 兼容性，commit `30fa598`）
+    - `mutants` 🔄 运行中（run 32574837713，变异测试 timeout 120min）
+    - `publish-oss` / `release` 跳过（需 tag 触发，有不可逆发布副作用）
+    - `marketplace-ci` 跳过（已定性虚构，`sz-rust-marketplace` crate 不存在）
 
 - **新增 sz-rust-vector-db crate**（P1 任务组4，AIH-1）：
   - Qdrant HTTP API 适配器，实现 `sz-rust-ai-facade::embedding::VectorStore` trait
