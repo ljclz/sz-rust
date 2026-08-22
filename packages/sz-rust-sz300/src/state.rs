@@ -31,6 +31,10 @@ pub struct AppState {
     pub hook_registry: Arc<HookRegistry>,
     /// Agent 长期记忆存储（可选，SZ300_AGENT_ENABLED=1 时注入）
     pub long_term_memory: Option<Arc<sz_rust_ai_facade::agent::memory::FileLongTermMemoryStore>>,
+    /// CRM addon 状态（客户/线索/商机管理）
+    pub crm_state: sz_rust_addons_crm::CrmState,
+    /// CMS addon 状态（文章/分类/标签管理）
+    pub cms_state: sz_rust_addons_cms::CmsState,
     /// 数据库连接池状态采集适配器（admin feature 启用时有效）
     #[cfg(feature = "admin")]
     pub db_pool_stats: Arc<dyn sz_rust_observability::admin::DbPoolStats>,
@@ -78,6 +82,8 @@ pub fn mock_app_state() -> AppState {
         )),
         hook_registry: Arc::new(HookRegistry::new()),
         long_term_memory: None,
+        crm_state: sz_rust_addons_crm::CrmState::default(),
+        cms_state: sz_rust_addons_cms::CmsState::default(),
     }
 }
 

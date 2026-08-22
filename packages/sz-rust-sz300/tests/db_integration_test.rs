@@ -990,6 +990,8 @@ fn build_test_state(pool: Arc<Pool>) -> AppState {
         slo_monitor: Arc::new(SloMonitor::new(SloConfig::default())),
         hook_registry: Arc::new(HookRegistry::new()),
         long_term_memory: None,
+        crm_state: sz_rust_addons_crm::CrmState::default(),
+        cms_state: sz_rust_addons_cms::CmsState::default(),
     }
 }
 

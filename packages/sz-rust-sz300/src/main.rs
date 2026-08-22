@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use sz_rust_addons_loader::capability_hook::CapabilityHook;
 use sz_rust_observability::MetricsRegistry;
 use sz_rust_sz300::{config, db, router, services, state::AppState};
 use tokio::signal;
@@ -289,6 +290,22 @@ async fn main() -> anyhow::Result<()> {
     )) {
         Ok(_) => tracing::info!("LlmChatCapability 已注册（ai.llm_chat 能力可调用）"),
         Err(e) => tracing::warn!("LlmChatCapability 注册失败（非致命）: {}", e),
+    }
+
+    // 注册 CRM/CMS Capability 到 CapabilityRegistry（addon_deploy_ci_v3）
+    {
+        let crm_plugin =
+            sz_rust_addons_crm::capability::CrmPlugin::new(sz_rust_addons_crm::CrmState::default());
+        match crm_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("CRM Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("CRM Capability 注册失败（非致命）: {}", e),
+        }
+        let cms_plugin =
+            sz_rust_addons_cms::capability::CmsPlugin::new(sz_rust_addons_cms::CmsState::default());
+        match cms_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("CMS Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("CMS Capability 注册失败（非致命）: {}", e),
+        }
     }
 
     // 先加载 RAG 配置并构造 embedding + vector_store（供 AI facade 和 IndustryRag 共用）
@@ -617,6 +634,8 @@ async fn main() -> anyhow::Result<()> {
         slo_monitor,
         hook_registry,
         long_term_memory,
+        crm_state: sz_rust_addons_crm::CrmState::default(),
+        cms_state: sz_rust_addons_cms::CmsState::default(),
         #[cfg(feature = "admin")]
         db_pool_stats: Arc::new(
             sz_rust_sz300::state::DbPoolStatsAdapter::new(pool.clone())

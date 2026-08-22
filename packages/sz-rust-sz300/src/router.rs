@@ -248,6 +248,12 @@ pub fn create_router(state: AppState) -> Router {
     let im_state = sz_rust_addons_im::ImState::default();
     let builder = sz_rust_addons_im::register_routes(builder, im_state);
 
+    // 接入 CRM 插件路由（/api/crm/*）
+    let builder = sz_rust_addons_crm::register_routes(builder, state.crm_state.clone());
+
+    // 接入 CMS 插件路由（/api/cms/*）
+    let builder = sz_rust_addons_cms::register_routes(builder, state.cms_state.clone());
+
     let router = builder.build();
 
     // 限流配置（令牌桶，从环境变量读取阈值，健康检查/metrics 排除）

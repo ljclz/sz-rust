@@ -1032,17 +1032,11 @@ fn crm_plugin_capability_names_match_registered() {
 // ============================================================================
 // register_routes 测试
 // ============================================================================
-// 注意：register_routes 使用 `:id` 路径参数格式，axum 0.7+ 要求 `{id}` 格式。
-// 调用 register_routes 会在注册 `:id` 路由时 panic，因此使用 catch_unwind 捕获，
-// 覆盖 register_routes 函数开头到 panic 点之间的代码行。
+// register_routes 使用 `{id}` 路径参数格式（axum 0.8 兼容），调用成功。
 
 #[test]
-fn register_routes_executes_until_path_param_panic() {
-    let result = std::panic::catch_unwind(|| {
-        let builder: RouterBuilder = RouterBuilder::new();
-        let state = CrmState::default();
-        register_routes(builder, state)
-    });
-    // 预期 panic（axum 路径参数格式问题）
-    assert!(result.is_err());
+fn register_routes_executes_successfully() {
+    let builder: RouterBuilder = RouterBuilder::new();
+    let state = CrmState::default();
+    let _ = register_routes(builder, state);
 }
