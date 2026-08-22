@@ -9,6 +9,15 @@
 
 ### Added
 
+- **addon_deploy_ci_v3：CRM/CMS addon 接线到 sz300 生产环境**（第四轮审计修复）：
+  - **CRM 路由 panic 修复**：`packages/sz-rust-addons-crm/src/lib.rs` 10 处旧式 `:id` 路径参数改为 axum 0.8 新式 `{{id}}` 格式，消除路由注册 panic
+  - **sz300 Cargo.toml 添加 CRM/CMS 依赖**：`sz-rust-addons-crm` + `sz-rust-addons-cms` + `sz-rust-addons-loader`
+  - **AppState 新增 CRM/CMS state 字段**：`crm_state: sz_rust_addons_crm::CrmState` + `cms_state: sz_rust_addons_cms::CmsState`
+  - **router.rs 挂载 CRM/CMS 路由**：`register_routes(builder, state.crm_state.clone())` + `register_routes(builder, state.cms_state.clone())`，路由前缀 /api/crm/* + /api/cms/*
+  - **CRM/CMS Capability 注册**：`CrmPlugin::new(CrmState::default()).register_capabilities(&capability_registry)`（7 项 CRM Capability）+ `CmsPlugin::new(CmsState::default()).register_capabilities(&capability_registry)`（5 项 CMS Capability）
+  - **8 端到端测试通过**：CRM 4 测试（contacts/leads/deals list + contact detail）+ CMS 4 测试（articles/category/tags list + article detail），验证路由从 sz300 入口可达（非 404）
+  - **README 版本号同步**：CRM/CMS README v1.1.0 → v1.2.0，与 workspace 一致
+
 - **新增 sz-rust-vector-db crate**（P1 任务组4，AIH-1）：
   - Qdrant HTTP API 适配器，实现 `sz-rust-ai-facade::embedding::VectorStore` trait
   - 支持 upsert / query / delete / ensure_collection，多租户 payload filter 隔离
