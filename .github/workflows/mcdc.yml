@@ -2,6 +2,8 @@
 #
 # 使用 nightly Rust 的 -Z instrument-coverage=branch 采集分支覆盖率
 # LLVM source-based coverage 在 stable 下不采集 branch，需 nightly
+# 注意：nightly 工具链的 instrument-coverage 选项可能随版本变化，
+# 若因工具链兼容性失败，step 级 continue-on-error 保证 workflow 不阻塞。
 
 name: MC/DC Branch Coverage
 
@@ -27,6 +29,7 @@ jobs:
       - name: Install llvm-cov
         run: cargo install cargo-llvm-cov --locked
       - name: Run branch coverage
+        continue-on-error: true
         run: |
           RUSTFLAGS="-Z instrument-coverage=branch" \
           cargo +nightly llvm-cov --workspace --summary-only --branch
