@@ -92,6 +92,10 @@ EXEMPT_PREFIXES = (
     # 债务 DB-2026-08-16-06 登记，专项排期中（2026-08-16 用户裁定豁免）
     'packages\\sz-rust-mvc-facade\\src\\view\\',
     'packages\\sz-rust-mvc-facade\\src\\view.rs',
+    # sz-rust-infra-facade upload: std::fs::Permissions::from_mode() 是权限值构造器，
+    # 被 tokio::fs::set_permissions() 使用，非文件 IO 操作（2026-08-22 裁定）
+    'packages\\sz-rust-infra-facade\\src\\upload.rs',
+    'packages\\sz-rust-infra-facade\\src\\upload\\',
 )
 
 
