@@ -21,7 +21,7 @@
   - **T3 workflow 触发验证**：
     - `ai-facade-perf-gate` ✅ conclusion=success（run 32574835756）
     - `mcdc` ✅ conclusion=success（run 32575534407，修复 nightly 工具链 `-Z instrument-coverage` 兼容性，commit `30fa598`）
-    - `mutants` 🔄 运行中（run 32574837713，变异测试 timeout 120min）
+    - `mutants` ⏹️ cancelled（run 32574837713，运行 2 小时后被取消，变异测试 timeout 120min）
     - `publish-oss` / `release` 跳过（需 tag 触发，有不可逆发布副作用）
     - `marketplace-ci` 跳过（已定性虚构，`sz-rust-marketplace` crate 不存在）
 
