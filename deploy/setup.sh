@@ -24,7 +24,7 @@ echo "✅ Docker 已安装"
 
 # 检查 sz300-server（提示开机启动）
 echo ""
-echo "⚠️  确保 sz300-server 已启动并监听 8080 端口"
+echo "⚠️  确保 sz300-server 已启动并监听 8300 端口"
 echo "   启动命令示例："
 echo "     cd ~/sz-rust && cargo run --release -p sz-rust-sz300"
 echo "     或使用 systemd 服务："

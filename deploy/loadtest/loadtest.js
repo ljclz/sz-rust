@@ -8,7 +8,7 @@ const latencyTrend = new Trend('api_latency');
 const requestCount = new Counter('total_requests');
 
 // 压测目标配置
-const BASE_URL = __ENV.TARGET_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.TARGET_URL || 'http://localhost:8300';
 
 export const options = {
   // 阶梯式加压：模拟真实流量波动
