@@ -67,9 +67,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev:arm64
+      - name: Configure ARM64 OpenSSL vendor (aarch64 only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo "OPENSSL_NO_VENDOR=0" >> $GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p sz-rust-sz300
       - name: Package binary
