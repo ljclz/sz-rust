@@ -19,6 +19,8 @@ name = "sz_rust_workflow"
 # SZ-Rust 内部依赖
 sz-rust-capability = { workspace = true }
 sz-rust-addons-loader = { workspace = true }
+sz-rust-core = { workspace = true }
+axum = { workspace = true }
 # 异步运行时
 tokio = { workspace = true }
 async-trait = { workspace = true }

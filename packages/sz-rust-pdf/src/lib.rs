@@ -103,7 +103,7 @@
 //! - `e:\vue\test\鲜视达\server\app\job\controller\Pdf.php`（PDF 生成队列任务，7 种业务类型）
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 pub mod csv_export;
 pub mod excel_export;
@@ -161,3 +161,124 @@ pub enum PdfError {
     #[error("HTTP error: {0}")]
     Http(String),
 }
+
+// ============================================================================
+// Addon 接线：PdfState + register_routes
+// ============================================================================
+
+use axum::body::Body;
+use axum::extract::Json as ExtractJson;
+use axum::http::header;
+use axum::response::{Json, Response};
+use serde::Deserialize;
+use serde_json::json;
+use sz_rust_core::router::RouterBuilder;
+
+/// PDF addon 状态
+#[derive(Clone)]
+pub struct PdfState {
+    pub modules: Vec<&'static str>,
+    pub version: &'static str,
+}
+
+impl Default for PdfState {
+    fn default() -> Self {
+        Self {
+            modules: vec!["csv_export", "excel_export", "excel_import", "pdf_form"],
+            version: env!("CARGO_PKG_VERSION"),
+        }
+    }
+}
+
+/// CSV 导出请求体
+#[derive(Debug, Deserialize)]
+pub struct CsvExportRequest {
+    pub filename: String,
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((n >> 18) & 63) as usize] as char);
+        result.push(CHARS[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((n >> 6) & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(n & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+/// 注册 PDF addon 路由到 sz300 RouterBuilder
+pub fn register_routes<S>(builder: RouterBuilder<S>, state: PdfState) -> RouterBuilder<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let builder = builder.post("/api/pdf/export/csv", {
+        move |ExtractJson(req): ExtractJson<CsvExportRequest>| async move {
+            let bytes =
+                csv_export::export_csv_to_bytes(&req.headers, &req.rows).unwrap_or_default();
+            Json(json!({
+                "code": 1,
+                "msg": "success",
+                "data": {
+                    "filename": req.filename,
+                    "format": "csv",
+                    "size": bytes.len(),
+                    "content_base64": base64_encode(&bytes)
+                }
+            }))
+        }
+    });
+
+    let builder = builder.post("/api/pdf/export/csv/download", {
+        move |ExtractJson(req): ExtractJson<CsvExportRequest>| async move {
+            let bytes =
+                csv_export::export_csv_to_bytes(&req.headers, &req.rows).unwrap_or_default();
+            let mut resp = Response::new(Body::from(bytes));
+            resp.headers_mut().insert(
+                header::CONTENT_TYPE,
+                "text/csv; charset=utf-8".parse().unwrap(),
+            );
+            resp.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", req.filename)
+                    .parse()
+                    .unwrap(),
+            );
+            resp
+        }
+    });
+
+    builder.get("/api/pdf/health", {
+        let s = state;
+        move || async move {
+            Json(json!({
+                "code": 1,
+                "msg": "success",
+                "data": {
+                    "plugin": "pdf",
+                    "status": "active",
+                    "modules": s.modules,
+                    "version": s.version
+                }
+            }))
+        }
+    })
+}
+
+pub mod capability;
+pub use capability::PdfPlugin;

@@ -18,6 +18,13 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 # Excel 导出（替代 PHP phpspreadsheet 写入）— 对齐 PHP `new Spreadsheet()` / `setCellValue` / `setTitle` / `getColumnDimension->setWidth` / `IOFactory::createWriter` / `save`
 rust_xlsxwriter.workspace = true
