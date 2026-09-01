@@ -31,7 +31,7 @@ jobs:
   mutants:
     name: Mutation Testing (sz-rust-core)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +49,7 @@ jobs:
 
       # 仅对 sz-rust-core 运行变异测试（-p 指定包，--in-place 避免拷贝整个 workspace）
       - name: Run cargo mutants
-        run: cargo mutants -p sz-rust-core --in-place --no-shuffle
+        run: cargo mutants -p sz-rust-core --in-place --no-shuffle -j 2
 
       # 失败时上传突变测试报告（mutants.out/ 目录 + mutants.json 汇总）
       - name: Upload mutants report
