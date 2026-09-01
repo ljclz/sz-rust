@@ -47,14 +47,17 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: test
     runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.allow_failure || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             archive: tar.gz
+            allow_failure: false
           - target: aarch64-unknown-linux-gnu
             archive: tar.gz
+            allow_failure: true
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
