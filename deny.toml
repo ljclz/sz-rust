@@ -20,6 +20,11 @@ ignore = [
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },
     # RUSTSEC-2024-0437: sz-orm 路径依赖传递引入的 Cargo.lock 残留条目
     { id = "RUSTSEC-2024-0437", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    # tokio-tar 0.3.1 PAX 扩展头解析漏洞（RUSTSEC-2025-0111 / CVE-2025-62518）
+    # 来源: testcontainers v0.23.3 dev-dependency → tokio-tar（仅测试用，不在生产编译产物中）
+    # 影响: tokio-tar 已 archived/unmaintained，无补丁版本；仅 dev-dependency 引入，不影响生产安全
+    # 跟踪: 待 testcontainers 迁移至 astral-tokio-tar 后自动移除
+    { id = "RUSTSEC-2025-0111", reason = "tokio-tar 通过 testcontainers dev-dependency 引入（仅测试用）；tokio-tar 已 archived 无补丁版本；待 testcontainers 迁移至 astral-tokio-tar 后移除" },
 ]
 # 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
 unmaintained = "none"
