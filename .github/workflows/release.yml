@@ -67,6 +67,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev:arm64
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p sz-rust-sz300
       - name: Package binary
