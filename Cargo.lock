@@ -6112,6 +6112,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
  "sz-rust-core",
  "tokio",
  "tracing",
@@ -6574,6 +6576,8 @@ dependencies = [
 name = "sz-rust-pdf"
 version = "1.2.0"
 dependencies = [
+ "async-trait",
+ "axum 0.8.9",
  "calamine",
  "chrono",
  "lopdf",
@@ -6581,9 +6585,13 @@ dependencies = [
  "rust_xlsxwriter",
  "serde",
  "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6696,8 +6704,16 @@ dependencies = [
 name = "sz-rust-tracing"
 version = "1.2.0"
 dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
  "serde",
  "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6731,6 +6747,7 @@ name = "sz-rust-workflow"
 version = "1.2.0"
 dependencies = [
  "async-trait",
+ "axum 0.8.9",
  "chrono",
  "parking_lot",
  "regex",
@@ -6740,6 +6757,7 @@ dependencies = [
  "serde_yaml",
  "sz-rust-addons-loader",
  "sz-rust-capability",
+ "sz-rust-core",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

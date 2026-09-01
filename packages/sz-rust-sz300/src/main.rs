@@ -306,6 +306,30 @@ async fn main() -> anyhow::Result<()> {
             Ok(names) => tracing::info!("CMS Capability 已注册（{} 项）", names.len()),
             Err(e) => tracing::warn!("CMS Capability 注册失败（非致命）: {}", e),
         }
+        let pdf_plugin = sz_rust_pdf::PdfPlugin::new(sz_rust_pdf::PdfState::default());
+        match pdf_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("PDF Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("PDF Capability 注册失败（非致命）: {}", e),
+        }
+        let operate_plugin = sz_rust_addons_operate::OperatePlugin::new(
+            sz_rust_addons_operate::OperateState::default(),
+        );
+        match operate_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("operate Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("operate Capability 注册失败（非致命）: {}", e),
+        }
+        let tracing_plugin =
+            sz_rust_tracing::TracingPlugin::new(sz_rust_tracing::TracingState::default());
+        match tracing_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("tracing Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("tracing Capability 注册失败（非致命）: {}", e),
+        }
+        let workflow_plugin =
+            sz_rust_workflow::WorkflowPlugin::new(sz_rust_workflow::WorkflowState::default());
+        match workflow_plugin.register_capabilities(&capability_registry) {
+            Ok(names) => tracing::info!("workflow Capability 已注册（{} 项）", names.len()),
+            Err(e) => tracing::warn!("workflow Capability 注册失败（非致命）: {}", e),
+        }
     }
 
     // 先加载 RAG 配置并构造 embedding + vector_store（供 AI facade 和 IndustryRag 共用）
@@ -636,6 +660,10 @@ async fn main() -> anyhow::Result<()> {
         long_term_memory,
         crm_state: sz_rust_addons_crm::CrmState::default(),
         cms_state: sz_rust_addons_cms::CmsState::default(),
+        pdf_state: sz_rust_pdf::PdfState::default(),
+        operate_state: sz_rust_addons_operate::OperateState::default(),
+        tracing_state: sz_rust_tracing::TracingState::default(),
+        workflow_state: sz_rust_workflow::WorkflowState::default(),
         #[cfg(feature = "admin")]
         db_pool_stats: Arc::new(
             sz_rust_sz300::state::DbPoolStatsAdapter::new(pool.clone())

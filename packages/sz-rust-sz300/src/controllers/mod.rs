@@ -23,19 +23,14 @@ pub mod graphql_api;
 pub mod health;
 /// 商户管理控制器（对齐 PHP MerchantController）
 pub mod merchant;
-/// operate 插件深度接线控制器（客户/合同/分类模型查询）
-pub mod operate_api;
+
 /// 订单管理控制器（对齐 PHP OrderController）
 pub mod order;
-/// PDF/Excel 导出深度接线控制器（CSV/Excel 导出 + PDF 表单填充）
-pub mod pdf_api;
+
 /// 商品管理控制器（对齐 PHP ProductController）
 pub mod product;
-/// tracing 深度接线控制器（Span 查询/创建 + 链路追踪）
-pub mod tracing_api;
+
 /// 视图模板控制器（对接 sz-rust-core::view）
 pub mod view;
 /// WASM 边缘计算控制器（/api/wasm/execute 端点）
 pub mod wasm_api;
-/// workflow 深度接线控制器（工作流定义/实例/任务管理）
-pub mod workflow_api;

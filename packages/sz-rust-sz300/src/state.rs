@@ -35,6 +35,14 @@ pub struct AppState {
     pub crm_state: sz_rust_addons_crm::CrmState,
     /// CMS addon 状态（文章/分类/标签管理）
     pub cms_state: sz_rust_addons_cms::CmsState,
+    /// PDF addon 状态（CSV/Excel 导出 + PDF 表单填充）
+    pub pdf_state: sz_rust_pdf::PdfState,
+    /// operate addon 状态（客户/合同/分类模型管理）
+    pub operate_state: sz_rust_addons_operate::OperateState,
+    /// tracing addon 状态（链路追踪 Span 管理）
+    pub tracing_state: sz_rust_tracing::TracingState,
+    /// workflow addon 状态（工作流引擎）
+    pub workflow_state: sz_rust_workflow::WorkflowState,
     /// 数据库连接池状态采集适配器（admin feature 启用时有效）
     #[cfg(feature = "admin")]
     pub db_pool_stats: Arc<dyn sz_rust_observability::admin::DbPoolStats>,
@@ -84,6 +92,10 @@ pub fn mock_app_state() -> AppState {
         long_term_memory: None,
         crm_state: sz_rust_addons_crm::CrmState::default(),
         cms_state: sz_rust_addons_cms::CmsState::default(),
+        pdf_state: sz_rust_pdf::PdfState::default(),
+        operate_state: sz_rust_addons_operate::OperateState::default(),
+        tracing_state: sz_rust_tracing::TracingState::default(),
+        workflow_state: sz_rust_workflow::WorkflowState::default(),
     }
 }
 

@@ -992,6 +992,10 @@ fn build_test_state(pool: Arc<Pool>) -> AppState {
         long_term_memory: None,
         crm_state: sz_rust_addons_crm::CrmState::default(),
         cms_state: sz_rust_addons_cms::CmsState::default(),
+        pdf_state: sz_rust_pdf::PdfState::default(),
+        operate_state: sz_rust_addons_operate::OperateState::default(),
+        tracing_state: sz_rust_tracing::TracingState::default(),
+        workflow_state: sz_rust_workflow::WorkflowState::default(),
     }
 }
 

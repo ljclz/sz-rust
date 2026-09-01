@@ -18,6 +18,14 @@ default = []
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
 
 [lib]
 name = "sz_rust_tracing"

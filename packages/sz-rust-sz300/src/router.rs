@@ -1,6 +1,6 @@
 use crate::controllers::{
-    addons, ai, auth, capabilities, device, file, file_serve, health, merchant, operate_api, order,
-    pdf_api, product, tracing_api, view, workflow_api,
+    addons, ai, auth, capabilities, device, file, file_serve, health, merchant, order, product,
+    view,
 };
 use crate::middleware::auth_middleware;
 use crate::middleware::metrics_auth::{metrics_auth_middleware, ClientIp};
@@ -175,27 +175,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/uploads/{*path}", get(file_serve::serve_file))
         // Addon 状态查询（列出所有已链接的 addon crate）
         .route("/api/addons/status", get(addons::status))
-        // operate 深度接线（客户/合同/分类模型查询）
-        .route("/api/operate/models", get(operate_api::list_models))
-        .route("/api/operate/health", get(operate_api::health))
-        // workflow 深度接线（工作流定义/实例管理）
-        .route("/api/workflow/health", get(workflow_api::health))
-        .route(
-            "/api/workflow/definitions",
-            get(workflow_api::list_definitions),
-        )
-        .route("/api/workflow/instances", get(workflow_api::list_instances))
-        // tracing 深度接线（Span 查询/创建 + 链路追踪）
-        .route("/api/tracing/spans", get(tracing_api::list_spans))
-        .route("/api/tracing/spans", post(tracing_api::create_span))
-        .route("/api/tracing/health", get(tracing_api::health))
-        // PDF/Excel 导出深度接线（CSV/Excel 导出 + PDF 表单填充）
-        .route("/api/pdf/export/csv", post(pdf_api::export_csv))
-        .route(
-            "/api/pdf/export/csv/download",
-            post(pdf_api::export_csv_download),
-        )
-        .route("/api/pdf/health", get(pdf_api::health))
         // WASM 边缘计算（POST /api/wasm/execute）
         .route(
             "/api/wasm/execute",
@@ -253,6 +232,18 @@ pub fn create_router(state: AppState) -> Router {
 
     // 接入 CMS 插件路由（/api/cms/*）
     let builder = sz_rust_addons_cms::register_routes(builder, state.cms_state.clone());
+
+    // 接入 PDF 插件路由（/api/pdf/*）
+    let builder = sz_rust_pdf::register_routes(builder, state.pdf_state.clone());
+
+    // 接入 operate 插件路由（/api/operate/*）
+    let builder = sz_rust_addons_operate::register_routes(builder, state.operate_state.clone());
+
+    // 接入 tracing 插件路由（/api/tracing/*）
+    let builder = sz_rust_tracing::register_routes(builder, state.tracing_state.clone());
+
+    // 接入 workflow 插件路由（/api/workflow/*）
+    let builder = sz_rust_workflow::register_routes(builder, state.workflow_state.clone());
 
     let router = builder.build();
 

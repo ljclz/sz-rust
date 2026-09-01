@@ -22,7 +22,7 @@
 //! header 以向后兼容旧版本客户端。
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -488,6 +488,127 @@ impl serde::Serialize for TracingError {
         serializer.serialize_str(&self.to_string())
     }
 }
+
+// ============================================================================
+// Addon 接线：TracingState + register_routes
+// ============================================================================
+
+use axum::extract::Json as ExtractJson;
+use axum::response::Json;
+use serde_json::json;
+use sz_rust_core::router::RouterBuilder;
+
+/// tracing addon 状态
+#[derive(Clone)]
+pub struct TracingState {
+    pub version: &'static str,
+    pub tracer: Arc<InMemoryTracer>,
+}
+
+impl Default for TracingState {
+    fn default() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            tracer: Arc::new(InMemoryTracer::new("sz300")),
+        }
+    }
+}
+
+/// 创建 Span 请求体
+#[derive(Debug, Deserialize)]
+pub struct CreateSpanRequest {
+    pub operation_name: String,
+    #[serde(default = "default_service")]
+    pub service_name: String,
+    #[serde(default)]
+    pub tags: std::collections::HashMap<String, String>,
+}
+
+fn default_service() -> String {
+    "sz300".to_string()
+}
+
+/// 注册 tracing addon 路由到 sz300 RouterBuilder
+pub fn register_routes<S>(builder: RouterBuilder<S>, state: TracingState) -> RouterBuilder<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let builder = builder.get("/api/tracing/spans", {
+        let t = state.tracer.clone();
+        move || async move {
+            let spans = t.inner().get_spans();
+            Json(json!({
+                "code": 1,
+                "msg": "success",
+                "data": {
+                    "spans": spans.iter().map(|s| json!({
+                        "trace_id": s.trace_id,
+                        "span_id": s.span_id,
+                        "parent_id": s.parent_id,
+                        "operation_name": s.operation_name,
+                        "service_name": s.service_name,
+                        "start_time": s.start_time,
+                        "end_time": s.end_time,
+                        "tags": s.tags,
+                    })).collect::<Vec<_>>(),
+                    "total": spans.len()
+                }
+            }))
+        }
+    });
+
+    let builder = builder.post("/api/tracing/spans", {
+        let t = state.tracer.clone();
+        move |ExtractJson(req): ExtractJson<CreateSpanRequest>| async move {
+            let trace_id = SzTracer::generate_trace_id();
+            let span_id = SzTracer::generate_span_id();
+            let mut span =
+                Span::new(&trace_id, &span_id, &req.operation_name).with_service(&req.service_name);
+            for (k, v) in &req.tags {
+                span = span.with_tag(k, v);
+            }
+            span.finish();
+            let resp = json!({
+                "trace_id": span.trace_id,
+                "span_id": span.span_id,
+                "operation_name": span.operation_name,
+                "service_name": span.service_name,
+                "start_time": span.start_time,
+                "end_time": span.end_time,
+            });
+            t.end_span(span);
+            Json(json!({
+                "code": 1,
+                "msg": "success",
+                "data": resp
+            }))
+        }
+    });
+
+    let builder = builder.get("/api/tracing/health", {
+        let t = state.tracer.clone();
+        let v = state.version;
+        move || async move {
+            let spans = t.inner().get_spans();
+            Json(json!({
+                "code": 1,
+                "msg": "success",
+                "data": {
+                    "plugin": "tracing",
+                    "status": "active",
+                    "spans_recorded": spans.len(),
+                    "tracer_type": "InMemoryTracer",
+                    "version": v
+                }
+            }))
+        }
+    });
+
+    builder
+}
+
+pub mod capability;
+pub use capability::TracingPlugin;
 
 #[cfg(test)]
 mod tests {
