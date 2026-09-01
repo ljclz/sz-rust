@@ -47,7 +47,7 @@ COPY <<'EOF' /hc/main.rs
 use std::net::TcpStream;
 use std::process;
 fn main() {
-    let addr = std::env::var("HEALTHCHECK_ADDR").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    let addr = std::env::var("HEALTHCHECK_ADDR").unwrap_or_else(|_| "127.0.0.1:8300".to_string());
     match TcpStream::connect(&addr) {
         Ok(_) => process::exit(0),
         Err(e) => { eprintln!("healthcheck failed: {e}"); process::exit(1) }
@@ -72,7 +72,7 @@ COPY --from=healthcheck-builder /hc/healthcheck /app/healthcheck
 USER nonroot:nonroot
 
 # 暴露服务端口
-EXPOSE 8080
+EXPOSE 8300
 
 # P1-CICD-02：健康检查（每 30s 探测，超时 3s，3 次失败后标记 unhealthy）
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

@@ -4,7 +4,7 @@ global:
   smtp_smarthost: "smtp.example.com:587"
   smtp_from: "alertmanager@sz300.example.com"
   smtp_auth_username: "alertmanager@sz300.example.com"
-  smtp_auth_password: "<smtp-password>"
+  smtp_auth_password: "alertmanager-local"
   smtp_require_tls: true
 
 # 告警模板
@@ -75,11 +75,11 @@ receivers:
     send_resolved: true
   # 钉钉 Webhook
   webhook_configs:
-  - url: "https://oapi.dingtalk.com/robot/send?access_token=<dingtalk-critical-token>"
+  - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
     send_resolved: true
   # PagerDuty（需要配置 service_key）
   pagerduty_configs:
-  - service_key: "<pagerduty-service-key>"
+  - service_key: "local-dev-key"
     severity: critical
     send_resolved: true
 
@@ -89,11 +89,11 @@ receivers:
   - to: "ops-team@sz300.example.com"
     send_resolved: true
   webhook_configs:
-  - url: "https://oapi.dingtalk.com/robot/send?access_token=<dingtalk-warning-token>"
+  - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
     send_resolved: true
 
 # 信息告警接收器
 - name: "info-notifications"
   webhook_configs:
-  - url: "https://oapi.dingtalk.com/robot/send?access_token=<dingtalk-info-token>"
+  - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
     send_resolved: true

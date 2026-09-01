@@ -1,5 +1,5 @@
 # Prometheus 配置 - sz300-server 单机版
-# 假设 sz300-server 运行在 host 的 8080 端口
+# sz300-server 运行在 host 的 8300 端口
 # 如果端口不同，修改 targets 中的端口号
 
 global:
@@ -19,10 +19,11 @@ scrape_configs:
   # sz300-server 应用指标
   - job_name: "sz300-server"
     static_configs:
-      - targets: ["host.docker.internal:8080"]
+      - targets: ["host.docker.internal:8300"]
     metrics_path: "/metrics"
     scrape_interval: 15s
     scrape_timeout: 10s
+    bearer_token: "prometheus-scrape-token"
 
   # Docker 主机指标（通过 cadvisor，可选）
   - job_name: "cadvisor"

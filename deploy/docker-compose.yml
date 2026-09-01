@@ -1,5 +1,5 @@
 # sz300-server 可观测性栈（单机版）
-# 依赖：需要先启动 sz300-server（监听 8080 端口）
+# 依赖：需要先启动 sz300-server（监听 8300 端口）
 # 使用：docker compose up -d
 # 访问：
 #   Grafana:    http://服务器IP:3000  (admin/admin)
@@ -27,13 +27,15 @@ services:
       - ./monitoring/alerting_rules.yml:/etc/prometheus/alerting_rules.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=30d"
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - monitoring
 
@@ -49,7 +51,7 @@ services:
       - ./grafana/sz300-server-overview.json:/var/lib/grafana/dashboards/sz300-server-overview.json:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -65,7 +67,7 @@ services:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     ports:
-      - "9094:9093"
+      - "127.0.0.1:9093:9093"
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
