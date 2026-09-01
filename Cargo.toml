@@ -121,7 +121,7 @@ notify = "6"
 
 
 # HTTP 客户端
-reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "charset", "http2"] }
 
 # 校验
 validator = { version = "0.20", features = ["derive"] }
