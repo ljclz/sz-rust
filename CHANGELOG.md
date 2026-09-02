@@ -10,25 +10,20 @@
 ### Added
 
 - **sz-rust-core 变异测试质量改进**（mutants_quality_improvement）：
-  - 新增 29 个单元测试函数，覆盖 119 个存活变异体中的 ≥ 89 个
-  - **测试文件清单**（13 个源文件，480 行新增）：
-    - `runtime/worker.rs`：`new_unchecked` 测试辅助构造器（`#[cfg(test)]`）+ 6 个越界 validate 测试
-    - `seed.rs`：`MockConnection`（`#[cfg(test)]`）+ `test_execute_calls_all_seeders`
-    - `alloc_counter.rs`：2 个计数器测试（全局 Mutex 串行化避免并行干扰）
-    - `mem_pool.rs`：`MemPool` trait 加 `Debug` supertrait + 2 个测试 + bumpalo feature-gated 模块
-    - `runtime/hot_reload.rs`：2 个热加载测试
-    - `plugin/schema.rs`：3 个 table_name 测试
-    - `plugin/event_bus.rs`：2 个 ID 递增测试
-    - `container/tests.rs`：5 个 Container/App 测试
-    - `runtime/websocket.rs`：1 个 is_running 测试
-    - `error_handler.rs`：1 个 fallback_router 测试
-    - `h2.rs`：3 个 TLS 测试 + `ensure_crypto_provider` helper（解决 `--all-features` 下 aws-lc-rs/ring CryptoProvider 冲突）
-    - `runtime.rs`：1 个 for_balanced 测试
-    - `runtime/scheduler.rs`：1 个 scheduler 测试
-  - **验证结果**：`cargo test -p sz-rust-core --all-features` 全量通过（512 lib + 多组集成测试 + doc tests，0 failed）
-  - **feature 矩阵验证**：默认 (474 passed) / hot-reload (490) / bumpalo-pool (490) / simd-json (474) / all-features (512) 全部通过
+  - **最终结果**：missed 从 119 降至 **10**（目标 ≤ 30 达成），caught 从 233 升至 325
+  - **两轮测试补强**：
+    - 第一轮：29 个新增测试函数（13 文件，480 行），missed 119→95
+    - 第二轮：16 新增 + 2 修改测试函数（5 文件，+316/-112 行），missed 95→10
+  - **mutants.yml 优化**：添加 `--all-features` 启用 feature-gated 模块变异测试（解决 32 个 feature gate missed）
+  - **变异测试 CI 验证**：Run ID 33605977190，434 mutants tested in 2h: **10 missed**, 325 caught, 98 unviable, 1 timeout
+  - **10 个存活变异体**（均为语义等价或需真实环境）：
+    - `runtime.rs:185` for_balanced → Default::default()（Default 调用 new()，语义等价）
+    - `runtime/websocket.rs:156,161` connection_count/broadcast_to_all（需真实 WS 连接）
+    - `runtime/hot_reload.rs:209,214,367` loaded_addons/get_manifest/registry（空状态语义等价）
+    - `runtime/hot_reload.rs:253,320` delete !（需 .so 文件/加载插件）
+    - `mem_pool.rs:297` delete match arm 4096（create_pool 默认容量语义等价）
+  - **验证结果**：`cargo test -p sz-rust-core --lib` 476 passed / `--all-features --lib` 522 passed，0 failed
   - **侵入式扩展**（仅 3 处，均为 `#[cfg(test)]` 或 trait bound）：`WorkerConfig::new_unchecked`、`MockConnection`、`MemPool: Debug`
-  - **missed 括余配额**（≤ 30）：WebSocketRuntime 无连接语义等价 3 个 + Container constructing_depth 不可观测 1 个 + simd_json 非 x86_64 1 个 + create_pool 4096 语义等价 1 个 + 其他 ≤ 24 个
 
 - **addon_deploy_ci_v3：CRM/CMS addon 接线到 sz300 生产环境**（第四轮审计修复）：
   - **CRM 路由 panic 修复**：`packages/sz-rust-addons-crm/src/lib.rs` 10 处旧式 `:id` 路径参数改为 axum 0.8 新式 `{{id}}` 格式，消除路由注册 panic
