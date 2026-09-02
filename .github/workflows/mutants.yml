@@ -51,7 +51,7 @@ jobs:
       # 排除非核心业务模块（pay/qr_code/schema_cache/cache_warmer/api_version/multi_tenant/migration_history）
       # 保留核心模块：container/runtime/json/server/error_handler/health/mem_pool/orm/plugin 等
       - name: Run cargo mutants
-        run: cargo mutants -p sz-rust-core --in-place --no-shuffle --exclude '**/pay.rs' --exclude '**/qr_code.rs' --exclude '**/schema_cache.rs' --exclude '**/cache_warmer.rs' --exclude '**/api_version.rs' --exclude '**/multi_tenant.rs' --exclude '**/migration_history.rs'
+        run: cargo mutants -p sz-rust-core --in-place --no-shuffle --all-features --exclude '**/pay.rs' --exclude '**/qr_code.rs' --exclude '**/schema_cache.rs' --exclude '**/cache_warmer.rs' --exclude '**/api_version.rs' --exclude '**/multi_tenant.rs' --exclude '**/migration_history.rs'
 
       # 失败时上传突变测试报告（mutants.out/ 目录 + mutants.json 汇总）
       - name: Upload mutants report

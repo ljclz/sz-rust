@@ -291,7 +291,6 @@ mod tests {
     use std::sync::Mutex;
 
     // 全局锁：串行化所有触碰全局 AtomicUsize 计数器的测试，避免并行 reset() 互相干扰。
-    // 不引入 serial_test crate，用 std::sync::Mutex 即可实现。
     static GLOBAL_COUNTER_LOCK: Mutex<()> = Mutex::new(());
 
     // 测试辅助：手动递增计数器，模拟全局分配器行为
@@ -306,140 +305,183 @@ mod tests {
         DEALLOC_BYTES.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    // 全局计数器测试合并为单个串行测试，避免并行执行互相干扰
+    // 捕获 count/dealloc_count/alloc_bytes/dealloc_bytes -> 0/1 变异体
+    // 4 组值（含 0、1、5、100）使所有常量替换变异失败
     #[test]
-    fn test_alloc_counter_measure_and_stats() {
+    fn test_alloc_counter_getters_strict() {
         let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+        for &(an, ab, dn, db) in &[
+            (0usize, 0usize, 0usize, 0usize),
+            (1, 8, 0, 0),
+            (5, 100, 3, 60),
+            (100, 8000, 40, 3200),
+        ] {
+            AllocCounter::reset();
+            inc_alloc(an, ab);
+            inc_dealloc(dn, db);
+            assert_eq!(AllocCounter::count(), an, "count an={an}");
+            assert_eq!(AllocCounter::dealloc_count(), dn, "dealloc_count dn={dn}");
+            assert_eq!(AllocCounter::alloc_bytes(), ab, "alloc_bytes ab={ab}");
+            assert_eq!(AllocCounter::dealloc_bytes(), db, "dealloc_bytes db={db}");
+        }
+    }
 
-        // --- measure 基本逻辑 ---
-        AllocCounter::reset();
-        let (result, count) = AllocCounter::measure(|| {
-            inc_alloc(2, 64);
-            let s = "hello".to_string();
-            s + " world"
-        });
-        assert_eq!(result, "hello world");
-        assert_eq!(count, 2, "measure 应检测到 2 次 alloc");
+    // 捕获 net_count/net_bytes -> 0/1/-1 及 `-`→`+`/`/` 变异体
+    // 3 组数据使算术变异全部失败（`-`→`+` 与 `-`→`/` 在 3 组数据上无法同时成立）
+    #[test]
+    fn test_alloc_counter_net_arithmetic_strict() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+        for &(an, ab, dn, db, nc, nb) in &[
+            (10usize, 1000usize, 4usize, 400usize, 6isize, 600isize),
+            (20, 2000, 5, 500, 15, 1500),
+            (7, 700, 2, 200, 5, 500),
+        ] {
+            AllocCounter::reset();
+            inc_alloc(an, ab);
+            inc_dealloc(dn, db);
+            assert_eq!(AllocCounter::net_count(), nc, "net_count {an}-{dn}");
+            assert_eq!(AllocCounter::net_bytes(), nb, "net_bytes {ab}-{db}");
+        }
+    }
 
-        // --- measure 零分配 ---
-        AllocCounter::reset();
-        let (result, count) = AllocCounter::measure(|| {
-            let a: i32 = 1;
-            let b: i32 = 2;
-            a + b
-        });
-        assert_eq!(result, 3);
-        assert_eq!(count, 0, "纯栈运算不应触发堆 alloc");
-
-        // --- measure Vec ---
-        AllocCounter::reset();
-        let (result, count) = AllocCounter::measure(|| {
-            inc_alloc(3, 400);
-            let v: Vec<i32> = (0..100).collect();
-            v.len()
-        });
-        assert_eq!(result, 100);
-        assert_eq!(count, 3, "measure 应检测到 3 次 alloc");
-
-        // --- measure_detailed ---
-        AllocCounter::reset();
-        let (result, stats) = AllocCounter::measure_detailed(|| {
-            inc_alloc(10, 1000);
-            inc_dealloc(2, 200);
-            let v: Vec<String> = (0..10).map(|i| format!("item_{i}")).collect();
-            v.len()
-        });
-        assert_eq!(result, 10);
-        assert_eq!(stats.alloc_count, 10);
-        assert_eq!(stats.dealloc_count, 2);
-        assert_eq!(stats.alloc_bytes, 1000);
-        assert_eq!(stats.dealloc_bytes, 200);
-
-        // --- reset 清零 ---
-        inc_alloc(5, 500);
-        inc_dealloc(3, 300);
+    // 捕获 reset() -> () 变异体：reset 后所有计数器必须归零
+    #[test]
+    fn test_alloc_counter_reset_strict() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+        inc_alloc(50, 5000);
+        inc_dealloc(30, 3000);
         AllocCounter::reset();
         assert_eq!(AllocCounter::count(), 0);
         assert_eq!(AllocCounter::dealloc_count(), 0);
         assert_eq!(AllocCounter::alloc_bytes(), 0);
         assert_eq!(AllocCounter::dealloc_bytes(), 0);
-
-        // --- net_count / net_bytes ---
-        inc_alloc(10, 1000);
-        inc_dealloc(4, 400);
-        assert_eq!(AllocCounter::net_count(), 6);
-        assert_eq!(AllocCounter::net_bytes(), 600);
+        assert_eq!(AllocCounter::net_count(), 0);
+        assert_eq!(AllocCounter::net_bytes(), 0);
     }
 
+    // 捕获 measure -> (Default, 0)/(Default, 1) 变异体
+    // 3 组数据（delta=0/7/13）使常量替换变异失败
     #[test]
-    fn test_alloc_stats_net_count() {
-        let stats = AllocStats {
-            alloc_count: 10,
-            dealloc_count: 3,
-            alloc_bytes: 1000,
-            dealloc_bytes: 300,
-        };
-        assert_eq!(stats.net_count(), 7);
-        assert_eq!(stats.net_bytes(), 700);
-        assert!(!stats.is_zero_alloc());
+    fn test_alloc_counter_measure_strict() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+
+        AllocCounter::reset();
+        let (r, c) = AllocCounter::measure(|| 1 + 2);
+        assert_eq!((r, c), (3, 0));
+
+        AllocCounter::reset();
+        let (r, c) = AllocCounter::measure(|| {
+            inc_alloc(7, 700);
+            "hello"
+        });
+        assert_eq!((r, c), ("hello", 7));
+
+        AllocCounter::reset();
+        let (r, c) = AllocCounter::measure(|| {
+            inc_alloc(13, 1300);
+            42i64
+        });
+        assert_eq!((r, c), (42, 13));
     }
 
+    // 捕获 measure_detailed -> (Default, Default) 变异体
+    // 2 组数据使所有字段被验证
     #[test]
-    fn test_alloc_stats_zero_alloc() {
-        let stats = AllocStats {
+    fn test_alloc_counter_measure_detailed_strict() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+
+        AllocCounter::reset();
+        let (r, s) = AllocCounter::measure_detailed(|| {
+            inc_alloc(10, 1000);
+            inc_dealloc(2, 200);
+            99i32
+        });
+        assert_eq!(r, 99);
+        assert_eq!(s.alloc_count, 10);
+        assert_eq!(s.dealloc_count, 2);
+        assert_eq!(s.alloc_bytes, 1000);
+        assert_eq!(s.dealloc_bytes, 200);
+
+        AllocCounter::reset();
+        let (r, s) = AllocCounter::measure_detailed(|| {
+            inc_alloc(3, 30);
+            inc_dealloc(1, 10);
+            "ok"
+        });
+        assert_eq!(r, "ok");
+        assert_eq!(s.alloc_count, 3);
+        assert_eq!(s.dealloc_count, 1);
+        assert_eq!(s.alloc_bytes, 30);
+        assert_eq!(s.dealloc_bytes, 10);
+    }
+
+    // 捕获 AllocStats::net_count/net_bytes -> 0/1/-1 及 `-`→`+`/`/` 变异体
+    // 3 组数据（含 net=0 边界）使算术变异全部失败
+    #[test]
+    fn test_alloc_stats_arithmetic_strict() {
+        for &(ac, ab, dc, db, nc, nb) in &[
+            (10usize, 1000usize, 3usize, 300usize, 7isize, 700isize),
+            (20, 2000, 5, 500, 15, 1500),
+            (8, 80, 8, 80, 0, 0),
+        ] {
+            let s = AllocStats {
+                alloc_count: ac,
+                alloc_bytes: ab,
+                dealloc_count: dc,
+                dealloc_bytes: db,
+            };
+            assert_eq!(s.net_count(), nc, "net_count {ac}-{dc}");
+            assert_eq!(s.net_bytes(), nb, "net_bytes {ab}-{db}");
+        }
+    }
+
+    // 捕获 is_zero_alloc -> true/false 及 == -> != 变异体
+    // 3 个实例（alloc_count=0/1/100）使常量替换与比较运算符变异失败
+    #[test]
+    fn test_alloc_stats_is_zero_alloc_strict() {
+        let zero = AllocStats {
             alloc_count: 0,
-            dealloc_count: 0,
             alloc_bytes: 0,
+            dealloc_count: 0,
             dealloc_bytes: 0,
         };
-        assert!(stats.is_zero_alloc());
-        assert_eq!(stats.net_count(), 0);
+        assert!(zero.is_zero_alloc());
+
+        let one = AllocStats {
+            alloc_count: 1,
+            alloc_bytes: 8,
+            dealloc_count: 0,
+            dealloc_bytes: 0,
+        };
+        assert!(!one.is_zero_alloc());
+
+        let large = AllocStats {
+            alloc_count: 100,
+            alloc_bytes: 8000,
+            dealloc_count: 50,
+            dealloc_bytes: 4000,
+        };
+        assert!(!large.is_zero_alloc());
     }
 
+    // 捕获 Display::fmt -> Ok(Default::default()) 变异体
+    // 精确字符串比较（而非 contains）使空输出与格式错误均失败
     #[test]
-    fn test_alloc_stats_display() {
-        let stats = AllocStats {
+    fn test_alloc_stats_display_strict() {
+        let s = AllocStats {
             alloc_count: 5,
-            dealloc_count: 2,
             alloc_bytes: 500,
+            dealloc_count: 2,
             dealloc_bytes: 200,
         };
-        let s = format!("{stats}");
-        assert!(s.contains("alloc=5/500"));
-        assert!(s.contains("dealloc=2/200"));
-        assert!(s.contains("net=3/300"));
-    }
+        assert_eq!(format!("{s}"), "alloc=5/500, dealloc=2/200, net=3/300");
 
-    // 全局计数器测试：每个测试开头 reset() 后立即操作+断言，缩小并行干扰窗口
-    #[test]
-    fn test_alloc_counter_all_getters_reflect_real_values() {
-        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
-        AllocCounter::reset();
-        inc_alloc(5, 100);
-        inc_dealloc(3, 60);
-        assert_eq!(AllocCounter::count(), 5);
-        assert_eq!(AllocCounter::dealloc_count(), 3);
-        assert_eq!(AllocCounter::alloc_bytes(), 100);
-        assert_eq!(AllocCounter::dealloc_bytes(), 60);
-    }
-
-    #[test]
-    fn test_alloc_counter_net_count_subtraction_semantics() {
-        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
-
-        // 第一组：alloc=10/dealloc=4 → net_count=6, net_bytes=600
-        AllocCounter::reset();
-        inc_alloc(10, 1000);
-        inc_dealloc(4, 400);
-        assert_eq!(AllocCounter::net_count(), 6);
-        assert_eq!(AllocCounter::net_bytes(), 600);
-
-        // 第二组：alloc=20/dealloc=5 → net_count=15, net_bytes=1500
-        // 双组数据使 `-`→`+`（25/2500）与 `-`→`/`（2/4）变异均失败
-        AllocCounter::reset();
-        inc_alloc(20, 2000);
-        inc_dealloc(5, 500);
-        assert_eq!(AllocCounter::net_count(), 15);
-        assert_eq!(AllocCounter::net_bytes(), 1500);
+        let s2 = AllocStats {
+            alloc_count: 10,
+            alloc_bytes: 1000,
+            dealloc_count: 4,
+            dealloc_bytes: 400,
+        };
+        assert_eq!(format!("{s2}"), "alloc=10/1000, dealloc=4/400, net=6/600");
     }
 }

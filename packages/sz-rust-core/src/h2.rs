@@ -698,12 +698,15 @@ mod tests {
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let connect_result =
-            tokio::time::timeout(std::time::Duration::from_secs(1), TcpStream::connect(addr)).await;
-        assert!(
-            connect_result.is_ok(),
-            "serve_h2_with_graceful_shutdown 应绑定端口"
-        );
+        // 必须检查 connect 结果本身（而非仅 timeout 是否超时）
+        // 变异体 serve_h2_with_graceful_shutdown -> Ok(()) 不绑定端口，
+        // connect 立即返回 Err（连接被拒绝），expect 会 panic → 变异体被捕获
+        let stream =
+            tokio::time::timeout(std::time::Duration::from_secs(1), TcpStream::connect(addr))
+                .await
+                .expect("connect 超时")
+                .expect("serve_h2_with_graceful_shutdown 应绑定端口并接受连接");
+        drop(stream);
         handle.abort();
         // 显式 drop 临时文件（Drop 也会自动清理，此处显式表达意图）
         drop(cert_file);

@@ -292,4 +292,30 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
         assert!(running, "启动后 is_running 应为 true");
     }
+
+    // 捕获 stop() -> Ok(()) 变异体（missed.txt 第 83 行）
+    // 真实 stop() 取走 shutdown_tx 使 is_running 变 false；
+    // 变异体 stop() -> Ok(()) 不取走 shutdown_tx，is_running 仍为 true → 断言失败
+    #[tokio::test]
+    async fn test_websocket_stop_makes_not_running() {
+        let runtime = WebSocketRuntime::new(WebSocketRuntimeConfig::new("127.0.0.1:0"));
+        let token = CancellationToken::new();
+        let handle = runtime.start(token.clone());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // start 后 is_running 应为 true（shutdown_tx 已设置）
+        assert!(runtime.is_running().await, "启动后 is_running 应为 true");
+
+        // stop 后 is_running 应为 false（shutdown_tx 被取走）
+        let stop_result = runtime.stop().await;
+        assert!(stop_result.is_ok(), "stop 应返回 Ok");
+        assert!(
+            !runtime.is_running().await,
+            "stop 后 is_running 应为 false（捕获 stop()->Ok(()) 变异体）"
+        );
+
+        // 清理 handle
+        token.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+    }
 }

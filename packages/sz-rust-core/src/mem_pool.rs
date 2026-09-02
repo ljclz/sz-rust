@@ -467,6 +467,112 @@ mod tests {
             );
         }
     }
+
+    // ===== 第二轮变异测试补强：多组值严格断言 =====
+
+    // 捕获 capacity() -> 0/1 变异体：8 组 CAP 值（含 256、65536 等非 0/1 值）
+    #[test]
+    fn test_stack_pool_capacity_strict() {
+        assert_eq!(StackPool::<256>::capacity(), 256);
+        assert_eq!(StackPool::<1024>::capacity(), 1024);
+        assert_eq!(StackPool::<2048>::capacity(), 2048);
+        assert_eq!(StackPool::<4096>::capacity(), 4096);
+        assert_eq!(StackPool::<8192>::capacity(), 8192);
+        assert_eq!(StackPool::<16384>::capacity(), 16384);
+        assert_eq!(StackPool::<32768>::capacity(), 32768);
+        assert_eq!(StackPool::<65536>::capacity(), 65536);
+    }
+
+    // 捕获 remaining() -> 0/1 及 `-`→`+`/`/` 变异体
+    // 多组使用量使常量替换与算术变异失败
+    #[test]
+    fn test_stack_pool_remaining_strict() {
+        let pool = StackPool::<256>::new();
+        // 初始 remaining = 256 - 0 = 256
+        assert_eq!(pool.remaining(), 256);
+        // 分配 5 字节 → 256 - 5 = 251
+        unsafe {
+            pool.alloc_str("hello");
+        }
+        assert_eq!(pool.remaining(), 251);
+        // 再分配 10 字节 → 256 - 15 = 241
+        unsafe {
+            pool.alloc_bytes(&[1u8; 10]);
+        }
+        assert_eq!(pool.remaining(), 241);
+        // reset → 256 - 0 = 256
+        pool.reset();
+        assert_eq!(pool.remaining(), 256);
+    }
+
+    // 捕获 reset() -> () 变异体：reset 后 used_bytes 必须为 0、remaining 必须为 CAP
+    #[test]
+    fn test_stack_pool_reset_strict() {
+        let pool = StackPool::<512>::new();
+        unsafe {
+            pool.alloc_str("abcdefghij"); // 10 字节
+            pool.alloc_bytes(&[0u8; 20]);
+        }
+        assert_eq!(pool.used_bytes(), 30);
+        pool.reset();
+        assert_eq!(pool.used_bytes(), 0, "reset 后 used_bytes 必须为 0");
+        assert_eq!(pool.remaining(), 512, "reset 后 remaining 必须为 CAP");
+        // reset 后可重新分配（验证 reset 真正清零而非 no-op）
+        unsafe {
+            pool.alloc_str("xyz");
+        }
+        assert_eq!(pool.used_bytes(), 3);
+    }
+
+    // 捕获 used_bytes() -> 0/1 变异体：多组分配量
+    #[test]
+    fn test_stack_pool_used_bytes_strict() {
+        let pool = StackPool::<1024>::new();
+        assert_eq!(pool.used_bytes(), 0);
+        unsafe {
+            pool.alloc_str("ab"); // 2
+        }
+        assert_eq!(pool.used_bytes(), 2);
+        unsafe {
+            pool.alloc_bytes(&[1u8; 8]); // 8
+        }
+        assert_eq!(pool.used_bytes(), 10);
+        unsafe {
+            pool.alloc_str("hello world"); // 11
+        }
+        assert_eq!(pool.used_bytes(), 21);
+    }
+
+    // 捕获 Debug::fmt -> Ok(Default::default()) 变异体：精确格式比较
+    #[test]
+    fn test_stack_pool_debug_strict() {
+        let pool = StackPool::<1024>::new();
+        assert_eq!(format!("{:?}", pool), "StackPool<1024> used=0/1024");
+        unsafe {
+            pool.alloc_str("hello"); // 5
+        }
+        assert_eq!(format!("{:?}", pool), "StackPool<1024> used=5/1024");
+    }
+
+    // 捕获 create_pool 每个 match arm 删除变异体：验证返回池的 capacity 与请求一致
+    // 通过 Debug 格式中的 <CAP> 确认每个 arm 返回正确容量的 StackPool
+    #[test]
+    fn test_create_pool_each_arm_capacity_strict() {
+        for cap in [1024, 2048, 4096, 8192, 16384, 32768, 65536] {
+            let config = MemPoolConfig {
+                pool_type: MemPoolType::Stack,
+                capacity: cap,
+            };
+            let pool = create_pool(&config).expect("Stack pool should be created");
+            let debug = format!("{:?}", pool);
+            // 精确验证 Debug 输出包含 "StackPool<cap> used=0/cap"
+            assert_eq!(
+                debug,
+                format!("StackPool<{cap}> used=0/{cap}"),
+                "capacity={cap} 的池应返回 StackPool<{cap}>"
+            );
+        }
+    }
 }
 
 // 捕获 BumpaloPool reset/used_bytes/Debug 变异体（missed.txt 第 56-59 行）

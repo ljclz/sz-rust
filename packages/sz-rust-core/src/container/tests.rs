@@ -1287,11 +1287,37 @@ fn test_app_make_with_scope_returns_cached() {
 // ============================================================================
 
 /// 捕获 constructing_depth -> 0 变异体（missed.txt 第 1 行）
-/// 注：构造中场景无法黑盒观测，此变异体语义等价，纳入 missed 拮余配额
+/// 空闲时 depth=0（语义等价），构造期间 depth>0 才能区分
 #[test]
 fn test_container_constructing_depth_zero_when_idle() {
     let c = Container::new();
     assert_eq!(c.constructing_depth(), 0);
+}
+
+/// 捕获 constructing_depth -> 0 变异体（missed.txt 第 1 行）
+/// 在工厂执行期间观测 constructing_depth，真实值为 1，变异体返回 0 → 断言失败
+#[test]
+fn test_container_constructing_depth_nonzero_during_construction() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let container = Arc::new(Container::new());
+    let observed = Arc::new(AtomicUsize::new(0));
+
+    let c_for_factory = container.clone();
+    let obs_for_factory = observed.clone();
+    container.bind(move || {
+        let depth = c_for_factory.constructing_depth();
+        obs_for_factory.store(depth, Ordering::SeqCst);
+        42i32
+    });
+
+    let _ = container.make::<i32>();
+    assert_eq!(
+        observed.load(Ordering::SeqCst),
+        1,
+        "构造期间 constructing_depth 应为 1（捕获 -> 0 变异体）"
+    );
 }
 
 /// 捕获 Container Debug -> Ok(Default::default()) 变异体（missed.txt 第 2 行）
@@ -1305,12 +1331,13 @@ fn test_container_debug_format() {
 }
 
 /// 捕获 App::config -> Box::leak(Default::default()) 变异体（missed.txt 第 3 行）
+/// 用非默认值 "custom_db"（默认为 "mysql"）使变异体返回的默认 config 与断言不符失败
 #[test]
 fn test_app_config_returns_constructed_value() {
     let mut config = AppConfig::default();
-    config.database.default = "mysql".to_string();
+    config.database.default = "custom_db".to_string();
     let app = App::new(config);
-    assert_eq!(app.config().database.default, "mysql");
+    assert_eq!(app.config().database.default, "custom_db");
 }
 
 /// 捕获 App::bind -> () 变异体（missed.txt 第 4 行）
