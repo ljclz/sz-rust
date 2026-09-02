@@ -55,3 +55,6 @@ scripts/perf-compare/benchmarks/*/target/
 artifacts/
 *.tar.gz
 *.bundle
+
+# CodeArts Doer 本地产物（规划文档、中间产物）
+.codeartsdoer/
