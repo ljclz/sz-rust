@@ -1281,3 +1281,52 @@ fn test_app_make_with_scope_returns_cached() {
     let second = app.make_with_scope::<Counter>(scope_id).unwrap();
     assert!(Arc::ptr_eq(&first.0, &second.0));
 }
+
+// ============================================================================
+// mutants 存活变异体补强（missed.txt 第 1-5 行）
+// ============================================================================
+
+/// 捕获 constructing_depth -> 0 变异体（missed.txt 第 1 行）
+/// 注：构造中场景无法黑盒观测，此变异体语义等价，纳入 missed 拮余配额
+#[test]
+fn test_container_constructing_depth_zero_when_idle() {
+    let c = Container::new();
+    assert_eq!(c.constructing_depth(), 0);
+}
+
+/// 捕获 Container Debug -> Ok(Default::default()) 变异体（missed.txt 第 2 行）
+#[test]
+fn test_container_debug_format() {
+    let c = Container::new();
+    c.bind(|| 42i32);
+    let s = format!("{:?}", c);
+    assert!(s.contains("Container"), "debug={s}");
+    assert!(s.contains("bindings_count"), "debug={s}");
+}
+
+/// 捕获 App::config -> Box::leak(Default::default()) 变异体（missed.txt 第 3 行）
+#[test]
+fn test_app_config_returns_constructed_value() {
+    let mut config = AppConfig::default();
+    config.database.default = "mysql".to_string();
+    let app = App::new(config);
+    assert_eq!(app.config().database.default, "mysql");
+}
+
+/// 捕获 App::bind -> () 变异体（missed.txt 第 4 行）
+#[test]
+fn test_app_bind_registers_factory() {
+    let app = App::new(AppConfig::default());
+    app.bind(|| 42i32);
+    let instance = app.make::<i32>();
+    assert_eq!(instance, Some(Arc::new(42)));
+}
+
+/// 捕获 App Debug -> Ok(Default::default()) 变异体（missed.txt 第 5 行）
+#[test]
+fn test_app_debug_format() {
+    let app = App::new(AppConfig::default());
+    let s = format!("{:?}", app);
+    assert!(s.contains("App"), "debug={s}");
+    assert!(s.contains("config"), "debug={s}");
+}

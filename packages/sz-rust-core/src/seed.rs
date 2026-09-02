@@ -132,8 +132,10 @@ impl Default for SeedRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orm::DbError;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use sz_orm_core::QueryRows;
 
     /// 测试用的计数填充器
     struct CounterSeeder {
@@ -177,5 +179,78 @@ mod tests {
     fn test_seed_runner_default() {
         let runner = SeedRunner::default();
         assert!(runner.is_empty());
+    }
+
+    /// 测试用 Mock 连接：所有操作返回 Ok，用于验证 SeedRunner::execute 调用 seeder
+    struct MockConnection {
+        execute_count: AtomicUsize,
+    }
+
+    impl MockConnection {
+        fn new() -> Self {
+            Self {
+                execute_count: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Connection for MockConnection {
+        fn execute<'a>(
+            &'a mut self,
+            _sql: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, DbError>> + Send + 'a>> {
+            self.execute_count.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move { Ok(0) })
+        }
+        fn query<'a>(
+            &'a mut self,
+            _sql: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<QueryRows, DbError>> + Send + 'a>> {
+            Box::pin(async move { Ok(Vec::new()) })
+        }
+        fn begin_transaction<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
+        }
+        fn commit<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
+        }
+        fn rollback<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
+        }
+        fn is_connected(&self) -> bool {
+            true
+        }
+        fn ping<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+            Box::pin(async move { true })
+        }
+        fn close<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    // 捕获 execute -> Ok(()) 变异体：若 execute 不调用 seeder，counter 仍为 0
+    #[tokio::test]
+    async fn test_execute_calls_all_seeders() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut runner = SeedRunner::new();
+        runner.register(Box::new(CounterSeeder {
+            name: "A".to_string(),
+            counter: counter.clone(),
+        }));
+        runner.register(Box::new(CounterSeeder {
+            name: "B".to_string(),
+            counter: counter.clone(),
+        }));
+        let mut conn: Box<dyn Connection> = Box::new(MockConnection::new());
+        runner.execute(&mut conn).await.unwrap();
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 }

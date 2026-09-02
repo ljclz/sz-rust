@@ -144,6 +144,23 @@ impl WorkerConfig {
         }
         config
     }
+
+    /// 测试辅助构造器：跳过 clamp，仅 `#[cfg(test)]` 可用
+    ///
+    /// 直接赋值三个字段，用于 `validate()` 越界场景测试
+    /// （`with_*` 方法会 clamp，无法构造越界值）。
+    #[cfg(test)]
+    pub(crate) fn new_unchecked(
+        worker_num: usize,
+        reactor_num: usize,
+        task_worker_num: usize,
+    ) -> Self {
+        Self {
+            worker_num,
+            reactor_num,
+            task_worker_num,
+        }
+    }
 }
 
 impl Default for WorkerConfig {
@@ -300,5 +317,43 @@ mod tests {
         assert_eq!(config.reactor_num(), 2);
         assert_eq!(config.task_worker_num(), 8);
         assert!(config.validate());
+    }
+
+    // 捕获 validate -> true 与 5 个 && -> || 变异体（missed.txt 第 86-91 行）
+    // 通过 new_unchecked 跳过 clamp 构造越界字段
+    #[test]
+    fn test_validate_false_when_worker_num_below_min() {
+        let cfg = WorkerConfig::new_unchecked(0, 4, 4);
+        assert!(!cfg.validate());
+    }
+
+    #[test]
+    fn test_validate_false_when_worker_num_above_max() {
+        let cfg = WorkerConfig::new_unchecked(usize::MAX, 4, 4);
+        assert!(!cfg.validate());
+    }
+
+    #[test]
+    fn test_validate_false_when_reactor_num_below_min() {
+        let cfg = WorkerConfig::new_unchecked(4, 0, 4);
+        assert!(!cfg.validate());
+    }
+
+    #[test]
+    fn test_validate_false_when_reactor_num_above_max() {
+        let cfg = WorkerConfig::new_unchecked(4, usize::MAX, 4);
+        assert!(!cfg.validate());
+    }
+
+    #[test]
+    fn test_validate_false_when_task_worker_below_min() {
+        let cfg = WorkerConfig::new_unchecked(4, 4, 0);
+        assert!(!cfg.validate());
+    }
+
+    #[test]
+    fn test_validate_false_when_task_worker_above_max() {
+        let cfg = WorkerConfig::new_unchecked(4, 4, usize::MAX);
+        assert!(!cfg.validate());
     }
 }

@@ -337,10 +337,25 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    /// 确保 rustls CryptoProvider 已安装。
+    ///
+    /// `--all-features` 同时启用 `aws-lc-rs`（经 rumqttc 默认）和 `ring`（workspace 配置），
+    /// rustls 0.23 无法自动选择，需显式安装一个。
+    /// 使用 `std::sync::Once` 保证只安装一次（`install_default` 仅首次成功）。
+    /// 优先 `ring`（workspace 始终启用），回退 `aws_lc_rs`。
+    fn ensure_crypto_provider() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            // workspace Cargo.toml 始终为 tokio-rustls 启用 ring feature，故 ring 模块可用
+            let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+        });
+    }
+
     /// 生成自签名证书和私钥（PEM 格式），用于测试
     ///
     /// 返回 `(cert_pem_bytes, key_pem_bytes)`。
     fn generate_self_signed_cert() -> (Vec<u8>, Vec<u8>) {
+        ensure_crypto_provider();
         // rcgen 0.13 API
         let params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
         let key_pair = rcgen::KeyPair::generate().unwrap();
@@ -635,5 +650,72 @@ mod tests {
             "expected HTTP response, got: {}",
             response_str.lines().next().unwrap_or("")
         );
+    }
+
+    // ====================================================================
+    // mutants 存活变异体补强（missed.txt 第 7-9 行）
+    // ====================================================================
+
+    /// 捕获 TlsListener Debug -> Ok(Default::default()) 变异体（missed.txt 第 7 行）
+    #[tokio::test]
+    async fn test_tls_listener_debug_format() {
+        let (cert, key) = generate_self_signed_cert();
+        let cert_path = write_temp_pem("debug_fmt_cert.pem", &cert);
+        let key_path = write_temp_pem("debug_fmt_key.pem", &key);
+        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
+        let (tcp, _addr) = crate::server::build_tcp_listener("127.0.0.1:0")
+            .await
+            .unwrap();
+        let listener = TlsListener::from_config(tcp, config);
+        let s = format!("{:?}", listener);
+        assert!(s.contains("TlsListener"), "debug={s}");
+    }
+
+    /// 捕获 serve_h2_with_graceful_shutdown -> Ok(()) 变异体（missed.txt 第 8 行）
+    /// 变异立即返回未绑定端口，TcpStream::connect 失败
+    #[tokio::test]
+    async fn test_serve_h2_graceful_shutdown_binds_port() {
+        use tokio::net::TcpStream;
+
+        let (cert, key) = generate_self_signed_cert();
+        // 用 NamedTempFile：Drop 自动清理（风险 3：禁止残留文件）
+        let cert_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(cert_file.path(), &cert).unwrap();
+        let key_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(key_file.path(), &key).unwrap();
+
+        // 获取一个可用端口（probe bind 后立即 drop，竞争窗口极小）
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = probe.local_addr().unwrap();
+        drop(probe);
+        let addr_str = addr.to_string();
+
+        let router = Router::new();
+        let cert_p = cert_file.path().to_path_buf();
+        let key_p = key_file.path().to_path_buf();
+        let handle = tokio::spawn(async move {
+            let _ = serve_h2_with_graceful_shutdown(router, &addr_str, cert_p, key_p).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let connect_result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), TcpStream::connect(addr)).await;
+        assert!(
+            connect_result.is_ok(),
+            "serve_h2_with_graceful_shutdown 应绑定端口"
+        );
+        handle.abort();
+        // 显式 drop 临时文件（Drop 也会自动清理，此处显式表达意图）
+        drop(cert_file);
+        drop(key_file);
+    }
+
+    /// 捕获 shutdown_signal -> () 变异体（missed.txt 第 9 行）
+    /// 变异立即完成，timeout 返回 Ok；真实行为 pending，timeout 返回 Err
+    #[tokio::test]
+    async fn test_shutdown_signal_does_not_complete_without_signal() {
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(100), shutdown_signal()).await;
+        assert!(result.is_err(), "无信号时 shutdown_signal 不应完成");
     }
 }

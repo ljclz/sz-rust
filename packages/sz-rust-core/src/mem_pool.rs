@@ -49,7 +49,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// 表达"引用在 reset 前有效"这一不变量（`reset` 是共享借用 `&self`）。
 /// 若保持 safe fn，Safe Rust 调用方可在不知情时触发 UB（reset 后使用引用）。
 /// 因此 `alloc_str`/`alloc_bytes` 为 **unsafe fn**：调用方必须显式承担契约。
-pub trait MemPool: Send + Sync {
+pub trait MemPool: Send + Sync + std::fmt::Debug {
     /// 在池内分配字符串切片（零拷贝，返回池内引用）
     ///
     /// 如果池容量不足，回退返回输入切片本身（零分配）。
@@ -437,5 +437,53 @@ mod tests {
         let config = MemPoolConfig::default();
         assert_eq!(config.pool_type, MemPoolType::Stack);
         assert_eq!(config.capacity, 4096);
+    }
+
+    // 捕获 StackPool Debug -> Ok(Default::default()) 变异体（missed.txt 第 55 行）
+    #[test]
+    fn test_stack_pool_debug_format() {
+        let pool = StackPool::<256>::new();
+        unsafe {
+            pool.alloc_str("hello");
+        }
+        let s = format!("{:?}", pool);
+        assert!(s.contains("StackPool<256>"), "debug={s}");
+        assert!(s.contains("used=5"), "debug={s}");
+    }
+
+    // 捕获 create_pool -> None/Some(Default) 与 7 个 delete match arm 变异体（missed.txt 第 60-68 行）
+    #[test]
+    fn test_create_pool_capacity_matches_each_arm() {
+        for c in [1024, 2048, 4096, 8192, 16384, 32768, 65536] {
+            let config = MemPoolConfig {
+                pool_type: MemPoolType::Stack,
+                capacity: c,
+            };
+            let pool = create_pool(&config).expect("capacity");
+            let s = format!("{:?}", pool);
+            assert!(
+                s.contains(&format!("StackPool<{c}>")),
+                "capacity={c} debug={s}"
+            );
+        }
+    }
+}
+
+// 捕获 BumpaloPool reset/used_bytes/Debug 变异体（missed.txt 第 56-59 行）
+#[cfg(all(test, feature = "bumpalo-pool"))]
+mod bumpalo_tests {
+    use super::*;
+
+    #[test]
+    fn test_bumpalo_pool_lifecycle() {
+        let pool = BumpaloPool::new();
+        unsafe {
+            pool.alloc_str("abc");
+        }
+        assert!(pool.used_bytes() > 0);
+        let s = format!("{:?}", pool);
+        assert!(s.contains("BumpaloPool"), "debug={s}");
+        pool.reset();
+        assert_eq!(pool.used_bytes(), 0);
     }
 }

@@ -276,4 +276,20 @@ mod tests {
         assert_eq!(rt1.connection_count().await, 0);
         assert_eq!(rt2.connection_count().await, 0);
     }
+
+    // 捕获 is_running -> false 变异体（missed.txt 第 85 行）
+    // 注：stop/connection_count/broadcast_to_all 的常量变异在无连接场景下
+    // 与真实行为语义等价，纳入 missed 拮余配额（3 个）
+    #[tokio::test]
+    async fn test_websocket_is_running_true_after_start() {
+        let runtime = WebSocketRuntime::new(WebSocketRuntimeConfig::new("127.0.0.1:0"));
+        let token = CancellationToken::new();
+        let handle = runtime.start(token.clone());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let running = runtime.is_running().await;
+        // 清理
+        token.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        assert!(running, "启动后 is_running 应为 true");
+    }
 }

@@ -607,4 +607,14 @@ mod tests {
         let (_, json) = fetch_json(resp).await;
         assert_eq!(json["code"], -1);
     }
+
+    // 捕获 fallback_router -> Default::default() 变异体
+    #[tokio::test]
+    async fn test_fallback_router_returns_404_for_arbitrary_path() {
+        let router = fallback_router();
+        let resp = send_get(router, "/any/path").await;
+        let (status, json) = fetch_json(resp).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(json["msg"], "Not Found");
+    }
 }

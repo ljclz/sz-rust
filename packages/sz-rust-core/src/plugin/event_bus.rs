@@ -195,4 +195,40 @@ mod tests {
         assert!(id > 0);
         assert_eq!(*handler.count.lock(), 1);
     }
+
+    #[tokio::test]
+    async fn test_publish_id_increments_monotonically() {
+        let bus = InMemoryEventBus::new();
+        let event1 = PluginEvent {
+            id: 0,
+            tenant_id: 1,
+            event_type: "a".to_string(),
+            source_plugin: "t".to_string(),
+            payload: serde_json::json!({}),
+        };
+        let event2 = PluginEvent {
+            id: 0,
+            tenant_id: 1,
+            event_type: "b".to_string(),
+            source_plugin: "t".to_string(),
+            payload: serde_json::json!({}),
+        };
+        let id1 = bus.publish(&event1).await.unwrap();
+        let id2 = bus.publish(&event2).await.unwrap();
+        assert_eq!(id2, id1 + 1);
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_id_increments_monotonically() {
+        let bus = InMemoryEventBus::new();
+        let h1: Arc<dyn EventHandler> = Arc::new(CountHandler {
+            count: parking_lot::Mutex::new(0),
+        });
+        let h2: Arc<dyn EventHandler> = Arc::new(CountHandler {
+            count: parking_lot::Mutex::new(0),
+        });
+        let sub1 = bus.subscribe("type1", h1).await.unwrap();
+        let sub2 = bus.subscribe("type2", h2).await.unwrap();
+        assert_eq!(sub2, sub1 + 1);
+    }
 }

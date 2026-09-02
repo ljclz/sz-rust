@@ -383,4 +383,19 @@ mod tests {
         let fired = scheduler.try_fire_due(chrono::Utc::now());
         assert_eq!(fired, 0, "无任务时不应触发任何项");
     }
+
+    // 捕获 scheduler -> Box::leak(Box::new(Default::default())) 变异体（missed.txt 第 81 行）
+    // 变异返回空 scheduler，断言已注册任务存在会失败
+    #[test]
+    fn test_scheduler_returns_internal_reference() {
+        let runtime = SchedulerRuntime::new(SchedulerRuntimeConfig::default());
+        runtime
+            .schedule(ScheduledTask::new("task-x", "测试", "0 * * * *"))
+            .unwrap();
+        let tasks = runtime.scheduler().list_tasks();
+        assert!(
+            tasks.iter().any(|t| t.id == "task-x"),
+            "scheduler() 应返回内部引用，含已注册任务"
+        );
+    }
 }

@@ -535,4 +535,32 @@ mod tests {
         // 动态库加载应失败（文件不是有效的 ELF/Mach-O/PE）
         assert!(result.is_err());
     }
+
+    // 捕获 registry -> Arc::new(...) 系列变异体（missed.txt 第 107-116 行）
+    // 变异使 registry 含非空条目，read().len() != 0 断言失败
+    #[tokio::test]
+    #[cfg(feature = "hot-reload")]
+    async fn test_registry_empty_for_new_loader() {
+        let loader = HotAddonLoader::new();
+        let reg = loader.registry();
+        let read = reg.read();
+        assert_eq!(read.len(), 0);
+    }
+
+    // 捕获 scan_dir 中 delete ! 变异体（missed.txt 第 102-103 行）
+    // 变异使 is_file 判定反转，子目录被误处理
+    #[tokio::test]
+    #[cfg(feature = "hot-reload")]
+    async fn test_scan_dir_skips_subdirectories() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 创建子目录（非文件）
+        std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+        // 创建非库文件
+        std::fs::write(tmp.path().join("readme.txt"), "hello").unwrap();
+        std::fs::write(tmp.path().join("manifest.json"), "{}").unwrap();
+        let mut loader = HotAddonLoader::new();
+        let result = loader.scan_dir(tmp.path()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
 }

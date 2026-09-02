@@ -424,4 +424,13 @@ mod tests {
         assert_ne!(io_rt.blocking_threads(), cpu_rt.blocking_threads());
         assert_ne!(balanced_rt.blocking_threads(), cpu_rt.blocking_threads());
     }
+
+    // 捕获 for_balanced -> Default::default() 变异体
+    // 注：Default::default() 调用 new()，与 for_balanced 等价，此变异体语义等价，
+    // 但显式断言 worker_threads == num_cpus::get() 以守护行为契约
+    #[test]
+    fn test_for_balanced_uses_num_cpus() {
+        let r = SzRuntime::for_balanced();
+        assert_eq!(r.worker_threads(), num_cpus::get());
+    }
 }

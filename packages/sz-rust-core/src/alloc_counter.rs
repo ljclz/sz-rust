@@ -288,6 +288,11 @@ macro_rules! register_alloc_counter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // 全局锁：串行化所有触碰全局 AtomicUsize 计数器的测试，避免并行 reset() 互相干扰。
+    // 不引入 serial_test crate，用 std::sync::Mutex 即可实现。
+    static GLOBAL_COUNTER_LOCK: Mutex<()> = Mutex::new(());
 
     // 测试辅助：手动递增计数器，模拟全局分配器行为
     // （lib 测试中无法注册 #[global_allocator]，需在 bin crate 中注册）
@@ -304,6 +309,8 @@ mod tests {
     // 全局计数器测试合并为单个串行测试，避免并行执行互相干扰
     #[test]
     fn test_alloc_counter_measure_and_stats() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+
         // --- measure 基本逻辑 ---
         AllocCounter::reset();
         let (result, count) = AllocCounter::measure(|| {
@@ -401,5 +408,38 @@ mod tests {
         assert!(s.contains("alloc=5/500"));
         assert!(s.contains("dealloc=2/200"));
         assert!(s.contains("net=3/300"));
+    }
+
+    // 全局计数器测试：每个测试开头 reset() 后立即操作+断言，缩小并行干扰窗口
+    #[test]
+    fn test_alloc_counter_all_getters_reflect_real_values() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+        AllocCounter::reset();
+        inc_alloc(5, 100);
+        inc_dealloc(3, 60);
+        assert_eq!(AllocCounter::count(), 5);
+        assert_eq!(AllocCounter::dealloc_count(), 3);
+        assert_eq!(AllocCounter::alloc_bytes(), 100);
+        assert_eq!(AllocCounter::dealloc_bytes(), 60);
+    }
+
+    #[test]
+    fn test_alloc_counter_net_count_subtraction_semantics() {
+        let _lock = GLOBAL_COUNTER_LOCK.lock().unwrap();
+
+        // 第一组：alloc=10/dealloc=4 → net_count=6, net_bytes=600
+        AllocCounter::reset();
+        inc_alloc(10, 1000);
+        inc_dealloc(4, 400);
+        assert_eq!(AllocCounter::net_count(), 6);
+        assert_eq!(AllocCounter::net_bytes(), 600);
+
+        // 第二组：alloc=20/dealloc=5 → net_count=15, net_bytes=1500
+        // 双组数据使 `-`→`+`（25/2500）与 `-`→`/`（2/4）变异均失败
+        AllocCounter::reset();
+        inc_alloc(20, 2000);
+        inc_dealloc(5, 500);
+        assert_eq!(AllocCounter::net_count(), 15);
+        assert_eq!(AllocCounter::net_bytes(), 1500);
     }
 }

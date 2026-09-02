@@ -203,4 +203,19 @@ mod tests {
         );
         assert!(!json.contains("secret_hash"), "敏感值不应出现在 JSON 中");
     }
+
+    #[test]
+    fn test_sys_user_table_name() {
+        assert_eq!(SysUser::table_name(), "sys_users");
+    }
+
+    #[test]
+    fn test_sys_permission_table_name() {
+        assert_eq!(SysPermission::table_name(), "sys_permissions");
+    }
+
+    #[test]
+    fn test_sys_event_table_name() {
+        assert_eq!(SysEvent::table_name(), "sys_events");
+    }
 }
