@@ -316,14 +316,7 @@ impl HotAddonLoader {
             })?;
 
         // 4. 检查依赖
-        for dep in &init_result.dependencies {
-            if !self.registry.read().contains_key(dep) {
-                return Err(HotReloadError::MissingDependency(
-                    init_result.name.clone(),
-                    dep.clone(),
-                ));
-            }
-        }
+        self.check_dependencies(&init_result)?;
 
         // 5. 构建清单
         let manifest = HotAddonManifest {
@@ -346,6 +339,22 @@ impl HotAddonLoader {
         Ok(manifest)
     }
 
+    /// 检查插件依赖是否已全部加载
+    ///
+    /// 依赖缺失时返回 `MissingDependency` 错误。抽成独立方法便于直接测试依赖判定逻辑，
+    /// 无需构造真实 `.so` 插件即可覆盖 `contains_key` 的 `!` 分支。
+    fn check_dependencies(&self, init_result: &AddonInitResult) -> Result<(), HotReloadError> {
+        for dep in &init_result.dependencies {
+            if !self.registry.read().contains_key(dep) {
+                return Err(HotReloadError::MissingDependency(
+                    init_result.name.clone(),
+                    dep.clone(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// 卸载指定插件
     ///
     /// ⚠️ **设计限制**：当前实现仅从注册表移除，不实际卸载动态库。
@@ -365,6 +374,39 @@ impl HotAddonLoader {
     #[allow(dead_code)]
     pub(crate) fn registry(&self) -> Arc<RwLock<HashMap<String, LoadedAddon>>> {
         self.registry.clone()
+    }
+}
+
+/// 测试辅助：直接操作 registry，无需真实 `.so` 文件
+#[cfg(test)]
+impl HotAddonLoader {
+    /// 插入一个模拟的已加载插件
+    ///
+    /// 使用平台特定 `Library::this()` 获取当前进程句柄作为占位 `Library`，
+    /// 使 `LoadedAddon._library` 持有有效句柄，从而可在不编译 cdylib 插件的前提下
+    /// 验证 `loaded_addons` / `get_manifest` / `registry` / `check_dependencies` 的非空行为。
+    pub(crate) fn insert_test_addon(&self, name: &str) {
+        // 平台特定的当前进程句柄：unix 下 this() 直接返回，windows 下返回 Result。
+        // 两者均为 safe API，通过 From<os::platform::Library> for Library 转为跨平台 Library。
+        #[cfg(unix)]
+        let library: Library = libloading::os::unix::Library::this().into();
+        #[cfg(windows)]
+        let library: Library = libloading::os::windows::Library::this()
+            .expect("获取当前进程句柄失败")
+            .into();
+        let manifest = HotAddonManifest {
+            name: name.to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            file_path: PathBuf::from(format!("/test/{name}.so")),
+            dependencies: vec![],
+            loaded_at: chrono::Utc::now(),
+        };
+        let loaded = LoadedAddon {
+            manifest,
+            _library: Arc::new(library),
+        };
+        self.registry.write().insert(name.to_string(), loaded);
     }
 }
 
@@ -562,5 +604,103 @@ mod tests {
         let result = loader.scan_dir(tmp.path()).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    // ===== 第三轮变异测试补强：捕获 6 个存活变异体 =====
+
+    // 捕获 loaded_addons → vec![] 变异体（原行 209）
+    // 变异使 loaded_addons 永远返回空 vec，非空断言失败
+    #[test]
+    fn test_loaded_addons_nonempty_after_insert() {
+        let loader = HotAddonLoader::new();
+        loader.insert_test_addon("operate");
+        let addons = loader.loaded_addons();
+        assert_eq!(addons.len(), 1);
+        assert!(addons.contains(&"operate".to_string()));
+    }
+
+    // 捕获 get_manifest → None 变异体（原行 214）
+    // 变异使 get_manifest 永远返回 None，is_some() 断言失败
+    #[test]
+    fn test_get_manifest_some_after_insert() {
+        let loader = HotAddonLoader::new();
+        loader.insert_test_addon("crm");
+        let manifest = loader.get_manifest("crm");
+        assert!(manifest.is_some());
+        let m = manifest.unwrap();
+        assert_eq!(m.name, "crm");
+        assert_eq!(m.version, "1.0.0");
+    }
+
+    // 捕获 registry → Arc::new(RwLock::new(HashMap::new())) 系列变异体（原行 367）
+    // 变异使 registry 永远返回空 HashMap，len() != 1 断言失败
+    #[test]
+    fn test_registry_nonempty_after_insert() {
+        let loader = HotAddonLoader::new();
+        loader.insert_test_addon("auth");
+        let reg = loader.registry();
+        let read = reg.read();
+        assert_eq!(read.len(), 1);
+        assert!(read.contains_key("auth"));
+    }
+
+    // 捕获 scan_dir 中 delete ! 变异体（原行 253：if !path.is_file() { continue; }）
+    // 变异后 if path.is_file() { continue; } → 跳过文件、处理目录
+    // 本测试放入 .so 文件 + 子目录：原代码处理 .so（结果非空），变异后跳过 .so（结果空）
+    #[tokio::test]
+    async fn test_scan_dir_processes_so_skips_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        // 子目录应被 is_file 判定跳过
+        tokio::fs::create_dir(tmp.path().join("subdir"))
+            .await
+            .unwrap();
+        // .so 文件（假库，加载失败但会出现在结果中）
+        let so_path = tmp.path().join("libfake.so");
+        tokio::fs::write(&so_path, "not a real library")
+            .await
+            .unwrap();
+
+        let mut loader = HotAddonLoader::new();
+        let result = loader.scan_dir(tmp.path()).await;
+        assert!(result.is_ok());
+        let entries = result.unwrap();
+        // 原代码：.so 被发现并尝试加载（失败）→ 1 条目；子目录被跳过
+        // 变异后：.so 被跳过、子目录非库也被跳过 → 0 条目
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "libfake");
+        assert!(entries[0].1.is_err());
+
+        // 清理临时文件（遵守"测试写入文件结束后删除"约束）
+        tokio::fs::remove_dir_all(tmp.path()).await.unwrap();
+    }
+
+    // 捕获 check_dependencies 中 delete ! 变异体（原行 320：if !contains_key(dep) { return Err })
+    // 变异后 if contains_key(dep) { return Err } → 依赖已加载时返回错误
+    // 本测试：依赖已加载，原代码返回 Ok，变异后返回 Err
+    #[test]
+    fn test_check_dependencies_loaded_dep_ok() {
+        let loader = HotAddonLoader::new();
+        loader.insert_test_addon("auth");
+        let init_result = AddonInitResult {
+            name: "operate".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            dependencies: vec!["auth".to_string()],
+        };
+        assert!(loader.check_dependencies(&init_result).is_ok());
+    }
+
+    // 同一变异体的对偶场景：依赖未加载
+    // 原代码返回 Err，变异后返回 Ok
+    #[test]
+    fn test_check_dependencies_missing_dep_err() {
+        let loader = HotAddonLoader::new();
+        let init_result = AddonInitResult {
+            name: "operate".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            dependencies: vec!["missing_dep".to_string()],
+        };
+        assert!(loader.check_dependencies(&init_result).is_err());
     }
 }
