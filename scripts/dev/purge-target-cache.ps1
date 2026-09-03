@@ -1,14 +1,16 @@
 # Purge stale Cargo build cache periodically.
-# Invoked weekly by scheduled task "sz-rust-target-gc"; can also be run manually:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev\purge-target-cache.ps1 [-Days 21]
+# Invoked daily by scheduled task "sz-rust-target-gc" (nightly); can also be run manually:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev\purge-target-cache.ps1 [-Days 7]
 # Why: Cargo never garbage-collects target/. Dependency updates, toolchain upgrades
 # and tool switches (check/clippy/llvm-cov/tarpaulin) invalidate whole layers of
 # artifacts that stay on disk forever, so the cache only grows. Periodic purge is
 # the fix; cost is a slower first build afterwards.
+# HARD RULE: no cache may live on C:. All caches are on F: (cargo-target /
+# cargo-target-ra / cargo-home / rustup-home); workspace target is the fallback.
 param(
-    [int]$Days = 21,
+    [int]$Days = 7,
     [string[]]$Dirs = @(),
-    [string]$LogPath = "$env:LOCALAPPDATA\sz-rust\target-gc.log"
+    [string]$LogPath = "F:\cargo-logs\target-gc.log"
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -16,7 +18,7 @@ $ErrorActionPreference = "SilentlyContinue"
 # Default dirs: CLI cache, rust-analyzer cache, workspace fallback (derived from script location)
 if ($Dirs.Count -eq 0) {
     $wsTarget = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path + "\target"
-    $Dirs = @("C:\sz-rust-target", "C:\sz-rust-target-ra", $wsTarget)
+    $Dirs = @("F:\cargo-target", "F:\cargo-target-ra", $wsTarget)
 }
 
 function Get-DirSize([string]$p) {

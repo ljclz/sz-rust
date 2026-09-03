@@ -9,5 +9,5 @@
   "trae.skills.autoDiscovery": true,
   "trae.agent.defaultModel": "claude-3.7-sonnet",
   "trae.agent.temperature": 0.1,
-  "rust-analyzer.cargo.targetDir": "C:\\sz-rust-target-ra"
+  "rust-analyzer.cargo.targetDir": "F:\\cargo-target-ra"
 }

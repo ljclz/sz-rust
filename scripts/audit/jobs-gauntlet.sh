@@ -6,7 +6,7 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-C:/sz-rust-target}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-F:/cargo-target}"
 FAIL=0
 
 echo "▶ 1/8 单元测试（facade lib）"
