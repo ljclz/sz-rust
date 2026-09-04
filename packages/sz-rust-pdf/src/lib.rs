@@ -249,15 +249,18 @@ where
             let bytes =
                 csv_export::export_csv_to_bytes(&req.headers, &req.rows).unwrap_or_default();
             let mut resp = Response::new(Body::from(bytes));
+            // 静态字面量与受控 filename，解析失败时回退安全默认值（铁律 2：禁 unwrap）
             resp.headers_mut().insert(
                 header::CONTENT_TYPE,
-                "text/csv; charset=utf-8".parse().unwrap(),
+                "text/csv; charset=utf-8".parse().unwrap_or_else(|_| {
+                    header::HeaderValue::from_static("application/octet-stream")
+                }),
             );
             resp.headers_mut().insert(
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", req.filename)
                     .parse()
-                    .unwrap(),
+                    .unwrap_or_else(|_| header::HeaderValue::from_static("attachment")),
             );
             resp
         }
