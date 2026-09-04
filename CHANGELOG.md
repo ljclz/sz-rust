@@ -134,6 +134,15 @@
 
 ### Changed
 
+- **HTTP 客户端 TLS 后端迁移：native-tls → rustls**（`90a0779`，AI 评审 P4 补记录）：
+  - reqwest 配置 `default-features = false, features = ["json", "multipart", "rustls-tls", "charset", "http2"]`
+  - 根因：reqwest 默认 features 含 default-tls(native-tls) → 引入 openssl-sys → aarch64 交叉编译找不到 OpenSSL
+  - 影响：证书校验链由系统 OpenSSL 切至 rustls（webpki-roots 系统探测行为差异，企业 MITM 代理场景需验证）
+  - 验证：`cargo tree -i native-tls` → "did not match any packages"（2026-09-03）
+- **变异测试排除清单版本化**（AI 评审 P1/P3 采纳）：
+  - 排除清单从 mutants.yml 内联 `--exclude` 迁移至 `.cargo/mutants.toml`（每条含理由+退出条件，pay.rs FIXME(DB-2026-09-03-01)）
+  - mutants job `timeout-minutes` 480 → 360（GitHub 托管 runner 上限，480 会被静默截断）
+  - 新增单变异体 `--timeout 120`（秒），防止单个挂死变异体吃掉整个 job 预算
 - **README.md 版本号对账**：v0.7.0 → v1.2.0，sz300 测试数 171 → 642，铁律数 22 → 23
 - **sz-rust 全部 18 个 crate 发布 1.2.0 到 crates.io**（`596c11f`）：
   - workspace 版本 1.1.0 → 1.2.0，33 个内部依赖版本同步

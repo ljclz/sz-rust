@@ -31,7 +31,8 @@ jobs:
   mutants:
     name: Mutation Testing (sz-rust-core)
     runs-on: ubuntu-latest
-    timeout-minutes: 480
+    # GitHub 托管 runner 单 job 上限 360min，480 会被静默截断（AI 评审 P3 修正）
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -48,10 +49,12 @@ jobs:
         run: cargo install cargo-mutants --locked
 
       # 仅对 sz-rust-core 运行变异测试（-p 指定包，--in-place 避免拷贝整个 workspace）
-      # 排除非核心业务模块（pay/qr_code/schema_cache/cache_warmer/api_version/multi_tenant/migration_history）
-      # 保留核心模块：container/runtime/json/server/error_handler/health/mem_pool/orm/plugin 等
+      # 排除清单已版本化到 .cargo/mutants.toml（每条含理由+退出条件，AI 评审 P1 采纳）：
+      # pay/qr_code/schema_cache/cache_warmer/api_version/multi_tenant/migration_history
       - name: Run cargo mutants
-        run: cargo mutants -p sz-rust-core --in-place --no-shuffle --all-features --exclude '**/pay.rs' --exclude '**/qr_code.rs' --exclude '**/schema_cache.rs' --exclude '**/cache_warmer.rs' --exclude '**/api_version.rs' --exclude '**/multi_tenant.rs' --exclude '**/migration_history.rs'
+        run: >
+          cargo mutants -p sz-rust-core --in-place --no-shuffle --all-features
+          --timeout 120
 
       # 失败时上传突变测试报告（mutants.out/ 目录 + mutants.json 汇总）
       - name: Upload mutants report

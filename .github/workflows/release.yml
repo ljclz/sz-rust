@@ -47,17 +47,16 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: test
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.allow_failure || false }}
+    # AI 评审 P5：发布流水线禁止静默失败通道（continue-on-error 会让缺失
+    # 平台产物的 release 照常绿灯），改由 release job 产物完整性断言兜底
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             archive: tar.gz
-            allow_failure: false
           - target: aarch64-unknown-linux-gnu
             archive: tar.gz
-            allow_failure: false
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
@@ -104,6 +103,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # AI 评审 P5：产物完整性断言 — 缺任一平台产物立即失败，禁止静默降级发布
+      - name: Assert all release artifacts exist
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            test -s "artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz" \
+              || { echo "::error::missing artifact for ${t}"; exit 1; }
+            test -s "artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz.sha256" \
+              || { echo "::error::missing sha256 for ${t}"; exit 1; }
+          done
+          echo "All platform artifacts present"
       - name: Generate CHANGELOG
         id: changelog
         run: |
