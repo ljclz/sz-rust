@@ -14,6 +14,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # phase2 lib 覆盖率待 CI 环境界定（本地 Docker 不可用无法度量 --include-ignored），暂保持 85
   COVERAGE_THRESHOLD: 85
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -188,6 +189,10 @@ jobs:
             --cobertura --output-path cobertura-sz300.xml \
             --fail-under-lines ${COVERAGE_THRESHOLD} \
             -- --include-ignored --test-threads=1
+      - name: Run sz300 bin coverage
+        run: |
+          cargo llvm-cov -p sz-rust-sz300 --bin sz300-server \
+            --summary-only -- --include-ignored --test-threads=1
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
