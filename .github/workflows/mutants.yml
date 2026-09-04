@@ -56,6 +56,19 @@ jobs:
           cargo mutants -p sz-rust-core --in-place --no-shuffle --all-features
           --timeout 120
 
+      # --in-place 直接改写工作区源码：job 结束（无论成败）必须恢复洁净，
+      # 防 job 被 kill/超时后变异源码残留污染后续步骤与缓存（2026-09-04 复审修正）
+      - name: Assert workspace clean (mutants left no residue)
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::workspace dirty after cargo mutants — 变异源码残留:"
+            git status --porcelain | head -20
+            git checkout -- . 2>/dev/null || true
+            exit 1
+          fi
+          echo "Workspace clean"
+
       # 失败时上传突变测试报告（mutants.out/ 目录 + mutants.json 汇总）
       - name: Upload mutants report
         if: failure()

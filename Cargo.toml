@@ -121,7 +121,9 @@ notify = "6"
 
 
 # HTTP 客户端
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls", "charset", "http2"] }
+# rustls-tls-native-roots：读系统根证书库（SChannel/陕证等），内网 MITM 代理/企业自签 CA
+# 场景必需；纯 rustls-tls 用 webpki-roots 内置根证书会握手失败（2026-09-04 复审修正）
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls-native-roots", "charset", "http2"] }
 
 # 校验
 validator = { version = "0.20", features = ["derive"] }

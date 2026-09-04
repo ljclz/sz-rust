@@ -104,16 +104,29 @@ jobs:
         with:
           path: artifacts
       # AI 评审 P5：产物完整性断言 — 缺任一平台产物立即失败，禁止静默降级发布
+      # 2026-09-04 复审增强：① sha256sum -c 实际校验内容完整性（非仅文件存在）
+      # ② 检测意外多出的 artifact 目录（防 upload 侧名单漂移）
       - name: Assert all release artifacts exist
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            test -s "artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz" \
-              || { echo "::error::missing artifact for ${t}"; exit 1; }
-            test -s "artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz.sha256" \
-              || { echo "::error::missing sha256 for ${t}"; exit 1; }
+          EXPECTED="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
+          for t in $EXPECTED; do
+            f="artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz"
+            test -s "$f" || { echo "::error::missing artifact for ${t}"; exit 1; }
+            test -s "${f}.sha256" || { echo "::error::missing sha256 for ${t}"; exit 1; }
+            (cd "$(dirname "$f")" && sha256sum -c "$(basename "${f}.sha256")") \
+              || { echo "::error::sha256 mismatch for ${t}"; exit 1; }
           done
-          echo "All platform artifacts present"
+          # artifact 目录数 = 平台数（download-artifact 每平台一目录），
+          # 多出来的目录说明 build 矩阵与断言名单漂移，必须显式同步
+          dir_count=$(find artifacts -mindepth 1 -maxdepth 1 -type d | wc -l)
+          expected_count=$(echo $EXPECTED | wc -w)
+          if [ "$dir_count" -ne "$expected_count" ]; then
+            echo "::error::artifact dir count ${dir_count} != expected ${expected_count} — build matrix 与断言名单不同步"
+            ls -la artifacts/
+            exit 1
+          fi
+          echo "All platform artifacts present and checksums verified"
       - name: Generate CHANGELOG
         id: changelog
         run: |

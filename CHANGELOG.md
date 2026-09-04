@@ -139,10 +139,15 @@
   - 根因：reqwest 默认 features 含 default-tls(native-tls) → 引入 openssl-sys → aarch64 交叉编译找不到 OpenSSL
   - 影响：证书校验链由系统 OpenSSL 切至 rustls（webpki-roots 系统探测行为差异，企业 MITM 代理场景需验证）
   - 验证：`cargo tree -i native-tls` → "did not match any packages"（2026-09-03）
-- **变异测试排除清单版本化**（AI 评审 P1/P3 采纳）：
+- **HTTP 客户端证书源修正：webpki-roots → 系统根证书库**（`rustls-tls` → `rustls-tls-native-roots`，2026-09-04 复审修正）：
+  - 原风险：rustls-tls 默认用 webpki-roots 内置根证书且不读系统证书库，内网 MITM 代理/企业自签 CA 部署场景 HTTPS 握手直接失败（兼容性灾难）
+  - 修正后 reqwest 依赖块含 `rustls-native-certs`（Linux 读 /etc/ssl/certs，Windows 读系统证书库），Docker 运行时镜像已有 ca-certificates
+  - 验证：Cargo.lock 中 reqwest/hyper-rustls 依赖均含 rustls-native-certs；native-tls / openssl-sys 保持 ABSENT（aarch64 修复不回归）
+- **变异测试排除清单版本化**（AI 评审 P1/P3 采纳 + 2026-09-04 复审增强）：
   - 排除清单从 mutants.yml 内联 `--exclude` 迁移至 `.cargo/mutants.toml`（每条含理由+退出条件，pay.rs FIXME(DB-2026-09-03-01)）
   - mutants job `timeout-minutes` 480 → 360（GitHub 托管 runner 上限，480 会被静默截断）
   - 新增单变异体 `--timeout 120`（秒），防止单个挂死变异体吃掉整个 job 预算
+  - 新增 `if: always()` 源码洁净度断言：`--in-place` 改写的变异源码在 job 结束（含失败/超时）后必须恢复洁净，`git status --porcelain` 非空即报错并 checkout 还原（防 job 被 kill 后变异源码残留污染缓存与后续步骤）
 - **README.md 版本号对账**：v0.7.0 → v1.2.0，sz300 测试数 171 → 642，铁律数 22 → 23
 - **sz-rust 全部 18 个 crate 发布 1.2.0 到 crates.io**（`596c11f`）：
   - workspace 版本 1.1.0 → 1.2.0，33 个内部依赖版本同步
