@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! gRPC Facade — sz-orm-grpc 的统一访问入口
 //!
 //! ## 设计目标

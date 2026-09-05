@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 热重载 M2 方案：进程重启 + 状态迁移
 //!
 //! 避免使用 dlopen（unsafe），改为：

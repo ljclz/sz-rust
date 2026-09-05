@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! RateLimit 中间件 — 限流（复用 sz-orm-limit）
 //!
 //! sz-rust 自研中间件，PHP 端无限流实现（PHP `app/middleware.php` 仅含

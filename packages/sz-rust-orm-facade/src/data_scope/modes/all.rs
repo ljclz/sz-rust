@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! ALL 模式 — 全部数据（不追加任何条件）
 
 use super::ModeEvaluator;

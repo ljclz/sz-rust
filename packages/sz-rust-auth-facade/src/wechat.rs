@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Wechat 模块 — 微信 SDK 抽象层（对齐 PHP `EasyWeChat`）
 //!
 //! 提供统一的微信 SDK 抽象，支持公众号 / 小程序 / 开放平台 / 企业微信，

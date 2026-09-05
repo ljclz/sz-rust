@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P3-FACADE 系列：P3 四簇 facade 集成测试
 //!
 //! 验证 sz-rust-orm-ext-facade / sz-rust-router-facade /

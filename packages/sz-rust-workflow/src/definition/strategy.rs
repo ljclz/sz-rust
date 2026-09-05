@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use serde::{Deserialize, Serialize};
 
 /// 候选人解析策略，对齐 design 2.2.2.6。

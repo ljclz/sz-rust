@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Session 模块 — 对齐 PHP `think\facade\Session`
 //!
 //! 本模块实现会话管理，对齐 PHP `think-session` 包的核心 API。

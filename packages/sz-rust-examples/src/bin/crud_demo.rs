@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 完整 CRUD 示例 — User 模型 + UserController 控制器
 //!
 //! 演示 sz-rust-core 控制器 trait（SzController / BaseController）的完整使用，

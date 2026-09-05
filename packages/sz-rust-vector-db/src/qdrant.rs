@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Qdrant HTTP API 适配器
 //!
 //! 实现 [`VectorStore`] trait，通过 Qdrant REST API（默认端口 6333）进行向量存储与检索。

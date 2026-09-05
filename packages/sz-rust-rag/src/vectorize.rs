@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 语料向量化编排器与断点续跑日志。
 
 use crate::chunking::SemanticChunker;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件骨架元数据与产物结构定义
 //!
 //! 对应 design.md 第 2.3.2 节，定义模板元数据规范与生成产物数据结构。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 关联关系一致性测试（PHP 对比）
 //!
 //! 本文件验证 sz-rust 关联关系模块与 PHP `think\Model` 的行为一致性，覆盖：

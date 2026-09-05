@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust AI Facade
 //!
 //! AI 应用开发 facade，提供 LLM / Embedding / RAG / Agent 四大模块的统一抽象。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 #![forbid(unsafe_code)]
 #![allow(missing_docs)]
 #![doc = "SZ-Rust 工作流引擎 — 状态机/审批流/插件节点编排"]

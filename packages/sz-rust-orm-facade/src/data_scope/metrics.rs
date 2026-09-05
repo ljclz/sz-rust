@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Data Scope 指标采集 — DataScopeMetrics
 //!
 //! 使用 tracing 日志记录指标（对齐 observability 模块的轻量级方案）。

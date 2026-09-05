@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! GraphQL 支持 — 基于 async-graphql + axum 提供 GraphQL HTTP 端点
 //!
 //! ## 架构说明

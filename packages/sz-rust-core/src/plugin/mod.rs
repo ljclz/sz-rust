@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件数据互通机制 — 共享 Schema、事件总线、跨插件查询。
 //!
 //! 对应 design.md §1.1.3 P0-4，提供：

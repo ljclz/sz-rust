@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 #![cfg(feature = "qdrant-integration")]
 
 //! Qdrant 端到端集成测试

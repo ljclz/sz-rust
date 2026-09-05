@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 控制器模块 — SzController trait
 //!
 //! 对齐 PHP `app\SzController`（abstract class extends BaseController）。

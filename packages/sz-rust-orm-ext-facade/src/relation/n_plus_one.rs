@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! N+1 问题检测 — SQL 计数 + 模板分组 + 告警生成
 //!
 //! 本模块提供 N+1 问题检测能力，通过 SQL 查询计数

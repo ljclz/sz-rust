@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Fuzz 测试套件 — 针对输入边界、恶意输入、随机数据的鲁棒性测试
 //!
 //! 使用自定义 xorshift64 伪随机数生成器（`common::fuzz::Rng`），不依赖外部 fuzz 库

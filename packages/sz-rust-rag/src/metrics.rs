@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Prometheus 指标注册与记录。
 
 use prometheus::{Gauge, Histogram, IntCounter, Registry};

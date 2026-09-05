@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 公共测试工具模块
 //!
 //! 提供 mock HTTP server、mock 时钟和 mock Provider，

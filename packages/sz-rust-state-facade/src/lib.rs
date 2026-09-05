@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust State Facade
 //!
 //! 提取自 `sz-rust-core` 的应用状态与基础服务模块，提供会话、Cookie、环境、

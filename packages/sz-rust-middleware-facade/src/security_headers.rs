@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 安全响应头中间件 — 为所有 HTTP 响应注入 6 类安全响应头
 //!
 //! 对齐 spec §5.1.1（9 条业务规则）+ §6.1（SecurityHeadersConfig）。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 模型模块 — BaseModel trait + Append 字段系统
 //!
 //! 对齐 PHP `think\Model` + `app\common\model\szoa\BaseModel`，委托 SZ-ORM `Model`。

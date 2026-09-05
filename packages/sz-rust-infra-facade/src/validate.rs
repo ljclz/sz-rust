@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 验证器模块 — 对齐 PHP `think\Validate`
 //!
 //! 本模块实现验证器框架，对齐 PHP `think\Validate` 类的

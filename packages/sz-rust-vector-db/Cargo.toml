@@ -10,7 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 autobenches = false
 keywords = ["vector", "database", "qdrant", "embedding", "similarity"]
-categories = ["science::artificial-intelligence", "database"]
+categories = ["web-programming", "web-programming::http-server"]
 
 [dependencies]
 tokio = { workspace = true }

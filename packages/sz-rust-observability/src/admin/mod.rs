@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 管理监控数据采集（Admin Monitor API）
 //!
 //! 提供系统信息、数据库连接池、Redis 状态的采集能力，

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Cookie 模块 — 对齐 PHP `think\Cookie`
 //!
 //! 本模块实现 Cookie 管理，对齐 PHP `think\Cookie` 的核心 API。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! ai-facade 性能基准测试 — 8 类压测场景
 //!
 //! 对应 spec 5.2.1（8 类压测场景）+ tasks.md T2.1-T2.9

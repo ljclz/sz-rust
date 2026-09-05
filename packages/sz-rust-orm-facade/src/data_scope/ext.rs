@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! DataScopeExt — 查询构建器扩展 trait
 //!
 //! 为 sz-orm 查询构建器提供 `data_scope()` 链式方法，

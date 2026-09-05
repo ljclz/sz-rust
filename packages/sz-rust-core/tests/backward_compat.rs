@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 向后兼容路径测试（P9-COMPAT 系列）
 //!
 //! 本文件刻意使用已废弃的 `Query`（sz-orm 3.5.0）验证旧路径仍可编译转发，

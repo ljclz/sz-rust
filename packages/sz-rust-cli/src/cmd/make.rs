@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `make:*` 代码生成命令 — 对齐 PHP `think\console\command\make\*`
 //!
 //! ## PHP 对齐

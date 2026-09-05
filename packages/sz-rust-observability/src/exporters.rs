@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 直接导出器 — Jaeger / Zipkin
 //!
 //! 提供 Jaeger Collector HTTP API 与 Zipkin v2 API 的直接 span 导出能力，

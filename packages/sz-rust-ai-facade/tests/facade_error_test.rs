@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Facade 错误路径单元测试
 //!
 //! 此测试文件在独立 crate 中运行，Ai 全局未初始化，

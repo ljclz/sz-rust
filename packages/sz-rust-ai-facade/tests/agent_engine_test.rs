@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Agent engine 补充测试：with_model / max_tokens / timeout 终止路径
 
 mod common;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 安全审计日志中间件 — 记录所有请求的安全审计事件
 //!
 //! 对齐 spec §5.3.1（7 条业务规则）+ §6.3（AuditLogConfig）。

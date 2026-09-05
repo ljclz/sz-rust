@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `BelongsToMany` 关联 — PHP 命名约定 + SQL 片段构造器
 //!
 //! 本模块对齐 PHP `think\Model::belongsToMany()` 行为，提供：

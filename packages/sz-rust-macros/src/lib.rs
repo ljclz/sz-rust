@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Macros — 过程宏包
 //!
 //! 提供 3 个过程宏：

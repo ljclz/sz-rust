@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P2-6 横向对比 benchmark：纯 axum 对照服务器
 //!
 //! 实现与 bench_sz_rust 相同的端点，用于对比 sz-rust 框架开销。

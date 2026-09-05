@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! D3: 路由解析 fuzz target — 任意字节输入 → parse_path 不应 panic（fuzz 无崩溃）
 //!
 //! 运行：

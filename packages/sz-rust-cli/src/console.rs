@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Console 模块 — 自定义命令注册与分发
 //!
 //! 对齐 PHP ThinkPHP 6 `think\console\Console` 与 `think\console\Command` 基类。

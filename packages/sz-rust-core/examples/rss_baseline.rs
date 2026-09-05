@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 启动内存 RSS 基线测量（铁律 R9）
 //!
 //! ## 运行方式

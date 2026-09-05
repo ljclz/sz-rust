@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-facade-tests — 跨 Facade 集成测试（P9-FACADE 系列）
 //!
 //! 本 crate 不包含业务代码，仅承载集成测试，验证 7 个 facade crate 之间的协作：

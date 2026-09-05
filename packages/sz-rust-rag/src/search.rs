@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 行业 RAG 检索器：多源融合 + token 截断 + 警告注入 + 引用溯源。
 
 use crate::audit::RagAuditLogger;

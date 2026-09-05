@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Fuzz 测试共享工具 — 自定义 xorshift64 伪随机数生成器
 //!
 //! 供 tests/fuzz.rs 使用，提供不依赖外部 fuzz 库（cargo-fuzz / libfuzzer-sys / afl.rs）

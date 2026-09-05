@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P9-FACADE-01：cache + state 联动集成测试
 //!
 //! 验证 `sz-rust-cache-facade` 与 `sz-rust-state-facade`

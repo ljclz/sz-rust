@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 迁移管理工具 — 生成迁移脚本 + 执行迁移。
 
 use crate::tool::{McpTool, ToolError};

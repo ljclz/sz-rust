@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 共享 Schema 模型定义 — sys_users / sys_permissions / sys_events。
 //!
 //! 所有模型含 `tenant_id` 字段实现多租户隔离。

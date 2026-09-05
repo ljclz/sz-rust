@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 文件上传模块 — 对齐 PHP `think\File` + `think\file\UploadedFile`
 //!
 //! 本模块实现文件上传机制，对齐 PHP `think\File` 类

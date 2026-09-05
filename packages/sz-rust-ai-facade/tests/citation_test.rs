@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Citation 结构体单元测试
 
 use sz_rust_ai_facade::rag::citation::Citation;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 字段定义解析器
 //!
 //! 对应 design.md 第 1.1.3.7 节，解析 `"name:Type,age:i32"` 格式的字段定义，

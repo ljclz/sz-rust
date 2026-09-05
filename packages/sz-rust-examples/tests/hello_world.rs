@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Hello World 端点集成测试
 //!
 //! 使用 `tower::ServiceExt::oneshot` 直接向 router 发送请求，验证：

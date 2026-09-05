@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! API 版本管理 — URL/Header/Query 多策略
 //!
 //! ## 设计目标

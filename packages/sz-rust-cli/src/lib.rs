@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust CLI — 命令行工具
 //!
 //! 替代 PHP `think` 命令，借鉴 Laravel Artisan 风格。

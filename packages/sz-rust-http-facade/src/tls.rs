@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! TLS 配置 + HTTP/2 服务
 //!
 //! 提供 `TlsConfig` 结构体和 `serve_http2` 函数，支持：

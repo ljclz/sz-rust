@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 12.4：纯向量 vs 混合检索召回率对比测试
 //! 验证混合检索召回率 >= 纯向量检索
 

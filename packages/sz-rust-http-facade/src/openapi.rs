@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OpenAPI 3.0 文档自动生成
 //!
 //! 基于 utoipa 提供 OpenAPI spec 构建和 Swagger UI 集成。

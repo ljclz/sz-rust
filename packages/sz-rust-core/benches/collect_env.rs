@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 // P1-6: Bench 环境元数据采集工具
 // 运行: cargo bench --package sz-rust-core --bench collect_env
 

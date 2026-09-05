@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 数据范围上下文 — 从 guard `UserContext` 转换而来的轻量级上下文
 //!
 //! orm-facade 不依赖 mvc-facade，因此定义独立上下文结构体。

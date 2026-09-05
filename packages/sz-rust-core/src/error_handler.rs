@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 错误处理 — 404/500 标准化 JSON 响应
 //!
 //! 对齐 PHP 异常处理：所有错误响应统一返回 `{code:0, msg, data:{}}` JSON 结构。

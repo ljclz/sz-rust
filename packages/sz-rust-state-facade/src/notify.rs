@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Notify 模块 — 通知抽象层（对齐 PHP `think\facade\Notify`）
 //!
 //! 提供通知发送的统一抽象，支持多渠道（Slack、短信、邮件等）扩展。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `route:list` 命令 — 对齐 PHP `think route:list`
 //!
 //! ## PHP 对齐

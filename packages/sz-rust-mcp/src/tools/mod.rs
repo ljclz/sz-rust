@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! MCP tools — CRUD/测试/部署/插件管理工具。
 //!
 //! 对应 design.md §1.1.3 P1-4，新增 8+ 个 MCP 工具。

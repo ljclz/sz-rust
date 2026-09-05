@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SSO 认证中心
 //!
 //! 对齐 spec.md FR-5 ~ FR-7，design.md §3。

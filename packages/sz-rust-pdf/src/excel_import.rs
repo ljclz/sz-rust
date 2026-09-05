@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Excel 导入模块 — 对齐 PHP `PhpOffice\PhpSpreadsheet\IOFactory` + `Reader` + `Worksheet`
 //!
 //! ## PHP 对齐

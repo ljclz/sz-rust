@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Pay Facade
 //!
 //! 提取自 `sz-rust-core` 的支付聚合抽象层模块，提供统一的支付抽象，

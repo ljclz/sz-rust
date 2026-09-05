@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CUSTOM 模式 — 自定义条件（通过 CustomConditionGenerator 生成）
 
 use super::ModeEvaluator;

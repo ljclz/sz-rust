@@ -19,12 +19,8 @@ members = [
     "packages/sz-rust-examples",
     "packages/sz-rust-examples/addon-hot-reload-example",
     "packages/sz-rust-addons-loader",
-    "packages/sz-rust-addons-crm",
-    "packages/sz-rust-addons-ecommerce",
-    "packages/sz-rust-addons-cms",
     "packages/sz-rust-cli",
     "packages/sz-rust-observability",
-    "packages/sz-rust-sz300",
 
     "packages/sz-rust-ai-facade",
     "packages/sz-rust-capability",
@@ -34,10 +30,6 @@ members = [
     "packages/sz-rust-tracing",
     "packages/sz-rust-pdf",
     "packages/sz-rust-workflow",
-    "packages/sz-rust-addons-operate",
-    "packages/sz-rust-addons-erp",
-    "packages/sz-rust-addons-forum",
-    "packages/sz-rust-addons-im",
     "packages/sz-rust-wasm",
 
     "packages/sz-rust-vector-db",
@@ -49,7 +41,7 @@ version = "1.2.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
-license = "MIT"
+license = "Apache-2.0"
 description = "对标 ThinkPHP 8 的 Rust Web 框架，基于 axum 0.8 + SZ-ORM"
 repository = "https://github.com/ljclz/sz-rust"
 homepage = "https://github.com/ljclz/sz-rust"
@@ -219,18 +211,11 @@ sz-rust-observability = { version = "1.2.0", path = "packages/sz-rust-observabil
 sz-rust-cli = { version = "1.2.0", path = "packages/sz-rust-cli" }
 sz-rust-ai-facade = { version = "1.2.0", path = "packages/sz-rust-ai-facade" }
 sz-rust-capability = { version = "1.2.0", path = "packages/sz-rust-capability" }
-sz-rust-addons-cms = { version = "1.2.0", path = "packages/sz-rust-addons-cms" }
-sz-rust-addons-crm = { version = "1.2.0", path = "packages/sz-rust-addons-crm" }
-sz-rust-addons-ecommerce = { version = "1.2.0", path = "packages/sz-rust-addons-ecommerce" }
 sz-rust-rag = { version = "1.2.0", path = "packages/sz-rust-rag" }
 sz-rust-frontend-codegen = { version = "1.2.0", path = "packages/sz-rust-frontend-codegen" }
 sz-rust-tracing = { version = "1.2.0", path = "packages/sz-rust-tracing" }
 sz-rust-pdf = { version = "1.2.0", path = "packages/sz-rust-pdf" }
 sz-rust-workflow = { version = "1.2.0", path = "packages/sz-rust-workflow" }
-sz-rust-addons-operate = { version = "1.2.0", path = "packages/sz-rust-addons-operate" }
-sz-rust-addons-erp = { version = "1.2.0", path = "packages/sz-rust-addons-erp" }
-sz-rust-addons-forum = { version = "1.2.0", path = "packages/sz-rust-addons-forum" }
-sz-rust-addons-im = { version = "1.2.0", path = "packages/sz-rust-addons-im" }
 sz-rust-wasm = { version = "1.2.0", path = "packages/sz-rust-wasm" }
 sz-rust-vector-db = { version = "1.2.0", path = "packages/sz-rust-vector-db" }
 

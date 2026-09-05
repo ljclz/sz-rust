@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-middleware-facade — 中间件层（P3 解耦）
 //!
 //! 从 sz-rust-core 提取的 Tower 中间件簇（对齐 PHP ThinkPHP 中间件体系）：

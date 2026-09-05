@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件卸载联动/敏感字段脱敏
 
 pub mod plugin_unload_watcher;

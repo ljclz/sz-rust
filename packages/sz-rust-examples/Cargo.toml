@@ -29,9 +29,7 @@ http-body-util = { workspace = true }
 http = { workspace = true }
 sz-rust-capability = { workspace = true }
 sz-rust-addons-loader = { workspace = true }
-sz-rust-addons-cms = { workspace = true }
-sz-rust-addons-crm = { workspace = true }
-sz-rust-addons-ecommerce = { workspace = true }
+
 
 [lib]
 name = "sz_rust_examples"

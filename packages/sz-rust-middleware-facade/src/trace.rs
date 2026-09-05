@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Trace 中间件 — 请求追踪 span（复用 sz-orm-tracing）
 //!
 //! sz-rust 自研中间件，对齐 PHP `think\middleware\SessionInit` 的「请求初始化」语义。

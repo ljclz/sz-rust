@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Infrastructure Facade
 //!
 //! 提取自 `sz-rust-core` 的基础设施模块，提供配置、验证、静态文件、上传、调试页五大能力。

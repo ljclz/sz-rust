@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 配置系统 — YAML 加载 + 环境变量覆盖 + 默认值
 //!
 //! 对齐 PHP `config/app.php` / `config/database.php` 等。

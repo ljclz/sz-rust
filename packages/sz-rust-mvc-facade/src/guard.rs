@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Guard 守卫模块 — 鉴权决策（借鉴 NestJS Guard + Spring Security）
 //!
 //! sz-rust 自研模块，PHP 端无直接对应物。PHP 端鉴权分散在各应用的 Controller 基类

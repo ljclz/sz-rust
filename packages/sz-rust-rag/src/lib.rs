@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 #![forbid(unsafe_code)]
 //! sz-rust-rag — 行业 RAG 知识库（企业版）。
 //!

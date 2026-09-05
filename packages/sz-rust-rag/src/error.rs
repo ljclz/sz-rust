@@ -1,4 +1,7 @@
-﻿//! RagError 统一错误类型。
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
+//! RagError 统一错误类型。
 
 use sz_rust_ai_facade::common::AiError;
 use sz_rust_capability::CapError;

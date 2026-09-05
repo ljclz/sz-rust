@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 内存池模块 — P3 性能优化
 //!
 //! 提供区域分配器（bump allocator）用于热点路径零堆分配。

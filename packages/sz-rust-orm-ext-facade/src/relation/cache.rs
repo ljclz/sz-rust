@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 关联缓存 — 对齐 PHP `withCache()` / `Cache::clear($tag)` 行为
 //!
 //! 本模块 re-export sz-orm-core `l2_cache` 模块的类型，

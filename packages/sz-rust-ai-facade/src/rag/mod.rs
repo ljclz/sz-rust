@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! RAG 检索增强生成：向量检索 + 上下文组装 + 引用溯源 + 重排序 + 混合检索
 
 pub mod bm25;

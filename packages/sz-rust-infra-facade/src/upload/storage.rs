@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 存储对接模块 — 对齐 PHP `storage\Driver` + `storage\engine\*`
 //!
 //! 本模块实现 5 种存储驱动（本地/阿里云/腾讯云/七牛/S3），

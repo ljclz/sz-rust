@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 静态文件服务 — `tower-http::services::ServeDir` 封装 + 自定义文件处理器
 //!
 //! 提供静态文件服务，用于托管前端 SPA、图片、CSS、JS 等静态资源。

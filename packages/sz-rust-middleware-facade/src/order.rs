@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 中间件顺序定义 — 对齐 PHP `app/middleware.php`
 //!
 //! PHP 端 `app/middleware.php` 全局中间件顺序：

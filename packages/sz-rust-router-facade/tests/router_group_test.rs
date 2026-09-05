@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 21.2：路由分组 group/nest 链式调用测试
 
 use axum::body::Body;

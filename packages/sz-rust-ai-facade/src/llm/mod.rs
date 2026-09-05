@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! LLM 统一抽象：LlmProvider trait + OpenAI/Claude/Gemini Provider + 路由 + 故障切换
 
 pub mod failover;

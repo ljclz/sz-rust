@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use sz_rust_cli::safety_validator::SafetyValidator;
 use sz_rust_cli::template_engine::TemplateEngine;
 

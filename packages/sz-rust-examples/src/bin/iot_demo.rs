@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! IoT 示例 — 设备数据上报 + 事件流 + 限流（4.3 竞争力深化：完整示例项目）
 //!
 //! 演示 sz-rust 框架的多 facade 协作：

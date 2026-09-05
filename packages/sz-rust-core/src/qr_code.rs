@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 二维码生成模块 — 对齐 PHP `endroid/qr-code`
 //!
 //! 提供二维码生成功能，支持 PNG/SVG 输出和原始矩阵获取。

@@ -2,7 +2,30 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-08-19
+> **最后更新**：2026-09-05
+
+---
+
+## P0-3 开源版/企业版物理分离（2026-09-05）
+
+> **状态**：代码分离与验证完成，crates.io 上已有 1.2.0 版本，企业版编译验证可执行
+
+### 已完成
+
+- 组1-3：盘点基线、企业版仓库初始化（git filter-repo 39 commits）、开源仓库瘦身（37→29 members）
+- 组4：依赖路径转换（26 开源核心 version="1.2"，8 企业版间 path 依赖）
+- 组5：许可证标注（Apache-2.0 + LicenseRef-SZ-Commercial，688 文件添加 SPDX 头）
+- 组6：合规检查脚本（check_isolation.py、check_license_compliance.py、check_no_crate_level_allow_dead_code.py）
+- 组7：CI/CD 配置分离（publish-oss.yml workflow_dispatch + 企业版 ci.yml/publish.yml）
+- 组8.1/8.3/8.4：开源版编译通过、5135 lib 测试通过 0 失败、workspace 配置验证通过
+- git filter-repo 历史清理：开源仓库 git log 无企业版 crate 记录
+
+### 待完成
+
+- 组8.2：企业版编译验证（crates.io 已有 1.2.0，可执行）
+- 组9：sz-pay 兼容性验证
+- 组10：发布验证（crates.io + Cloudsmith）
+- 组11：sz300 生产部署不中断保障（8300 端口当前未监听）
 
 ---
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 视图渲染器 — 对齐 PHP `think\View`
 //!
 //! ## PHP 对齐说明

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件 RESTful 资源路由注入
 //!
 //! 借鉴 Rails 资源路由 + ThinkPHP 6 多应用机制。

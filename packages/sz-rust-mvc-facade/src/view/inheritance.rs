@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 模板继承 — 对齐 PHP `think\Template` 的继承（extend）机制
 //!
 //! 实现对齐 PHP `Template::parseExtend()` 和 `parseBlock()`

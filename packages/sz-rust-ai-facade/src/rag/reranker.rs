@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! RAG 重排序：Reranker trait + NoopReranker + CrossEncoderReranker
 //!
 //! 任务组 11：AIM-6 RAG 重排序

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 系统信息采集器（sysinfo backend）
 //!
 //! 基于 `sysinfo` crate 采集服务器运行时系统信息，

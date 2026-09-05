@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CORS 中间件 — 跨域请求支持
 //!
 //! 对齐 PHP `app\CrossDomain`：

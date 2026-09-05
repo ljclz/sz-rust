@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 测试工具 — 异步执行 cargo test，解析结果。
 
 use crate::tool::{McpTool, ToolError};

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! PoolScaler — 连接池动态扩容（P3 L3 调优）
 //!
 //! 监控连接池 acquire_timeout 命中率，高时扩容 max_connections，

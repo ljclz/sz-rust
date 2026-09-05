@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Mail 模块 — 对齐 PHP `think\facade\Mail`
 //!
 //! 本模块实现邮件抽象层，对齐 PHP `think\facade\Mail` 的核心 API。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 单元测试：类型映射、敏感字段、UI 适配器、路由映射、过滤器、路径守卫、配置、错误、报告
 
 use sz_rust_frontend_codegen::generators::route::{PageType, RoutePageMapper};

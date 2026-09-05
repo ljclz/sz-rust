@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 辅助函数模块 — 对齐 PHP `moneyToArray` / `data_path` / `date('YmdHis')`
 //!
 //! ## PHP 对齐

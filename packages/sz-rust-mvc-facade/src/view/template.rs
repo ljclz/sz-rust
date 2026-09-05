@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Cx 标签库控制流标签 — 对齐 PHP `think\template\taglib\Cx`
 //!
 //! 实现对齐 PHP Cx 标签库的控制流标签解析与渲染。

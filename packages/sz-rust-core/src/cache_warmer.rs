@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 缓存预热机制（Cache Warmer）
 //!
 //! 部署时或应用启动时预热缓存，避免冷启动高延迟。对齐 PHP `think console`

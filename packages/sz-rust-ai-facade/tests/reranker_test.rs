@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 11.4：重排序前后顺序变化测试
 //! 验证 Reranker trait 实现的重排序效果
 

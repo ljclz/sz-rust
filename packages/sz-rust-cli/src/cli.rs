@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CLI 命令定义 — 基于 clap derive
 //!
 //! 对齐 PHP ThinkPHP 6 `think` 命令体系，借鉴 Laravel Artisan 风格。

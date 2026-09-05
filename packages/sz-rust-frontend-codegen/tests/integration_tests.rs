@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 集成测试：模型解析、模板渲染、组件生成、覆盖策略
 
 use std::path::PathBuf;

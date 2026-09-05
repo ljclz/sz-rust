@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Addon 热加载探索 — 运行时动态加载插件（`libloading` 后端）
 //!
 //! ## ⚠️ 探索性实现说明

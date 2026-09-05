@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use crate::agent::memory::ShortTermMemory;
 use crate::agent::termination::TerminationPolicy;
 use crate::agent::tool::ToolRegistry;

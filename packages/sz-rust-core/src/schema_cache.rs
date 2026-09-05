@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Schema 缓存模块 — 数据表字段元数据缓存（对齐 PHP `think\db\Fetch::getFields`）
 //!
 //! 本模块提供数据表字段元数据（schema）的缓存能力，对齐 PHP ThinkPHP

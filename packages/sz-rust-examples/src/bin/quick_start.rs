@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Hello World 端点验证
 //!
 //! 启动 axum HTTP 服务，提供 `GET /` 端点返回标准 JSON 响应：

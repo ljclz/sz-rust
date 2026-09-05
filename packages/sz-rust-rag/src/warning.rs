@@ -1,4 +1,7 @@
-﻿//! RagWarningCode 警告码。
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
+//! RagWarningCode 警告码。
 
 /// RAG 警告码。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

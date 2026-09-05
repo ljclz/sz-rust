@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Env 模块 — 对齐 PHP `think\facade\Env`
 //!
 //! 本模块实现环境变量管理，对齐 PHP `think\facade\Env` 的核心 API。

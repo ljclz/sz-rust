@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! T1.5 RAG 全链路引用溯源端到端测试
 
 mod common;

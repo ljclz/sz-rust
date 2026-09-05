@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 数据库连接池采集器
 //!
 //! 提供连接池实时状态的采集能力，供 `GET /api/admin/db/pool` 端点使用。

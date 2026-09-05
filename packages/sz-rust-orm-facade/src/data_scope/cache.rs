@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 部门树缓存 — DeptTreeCache
 //!
 //! 使用 DashMap 分片锁实现高并发读，TTL 过期自动刷新。

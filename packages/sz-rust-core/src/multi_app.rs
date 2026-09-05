@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 多应用调度器模块 — MultiAppDispatcher
 //!
 //! 对齐 PHP `auto_multi_app=true` + `app_map` + `domain_bind`。

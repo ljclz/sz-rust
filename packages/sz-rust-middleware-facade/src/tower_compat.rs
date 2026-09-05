@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Tower 生态兼容验证 — tower-http Layer 可插入 sz-rust 中间件链
 //!
 //! 本模块验证 sz-rust 的 [`MiddlewareBuilder`] 与 tower 生态的兼容性，

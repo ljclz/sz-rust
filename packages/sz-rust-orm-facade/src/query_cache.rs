@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! QueryCache — L2 查询缓存（P3 L3 调优）
 //!
 //! SQL 查询结果缓存层，命中返回缓存（≤ 100ns），未命中穿透到 DB。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OAuth2 回调中间件模块 — 需启用 `axum` feature
 //!
 //! 提供 [`OAuth2StateStore`] trait、[`OAuth2CallbackConfig`] 和 axum 中间件，

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 中间件模块 — CORS/Auth/Log/RateLimit/Trace + 链构建器 + Handler=Middleware 统一设计
 //!
 //! 基于 tower::Layer，对齐 PHP 中间件行为。

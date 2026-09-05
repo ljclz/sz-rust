@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 数据范围规则定义 — `DataScopeMode` 枚举与 `DataScopeRule` 结构体
 
 use serde::{Deserialize, Serialize};

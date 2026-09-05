@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Redis 存储后端集成测试
 //!
 //! 需要真实 Redis（通过 SSH 隧道连接服务器 Redis）。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 安全中间件指标聚合 — 统一暴露 4 个安全中间件的运行时指标
 //!
 //! 对齐 design §2.2.2 横切接口。

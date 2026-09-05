@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust CLI 二进制入口
 //!
 //! 对齐 PHP `think` 命令入口脚本 `think`：

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 工具白名单鉴权 — 从 config/mcp.toml 读取白名单，拒绝未授权工具调用。
 
 use crate::tool::ToolError;

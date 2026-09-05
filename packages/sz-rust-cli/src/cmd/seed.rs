@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `db:seed` 命令 — 数据填充（对齐 PHP `think db:seed`）
 //!
 //! ## PHP 对齐

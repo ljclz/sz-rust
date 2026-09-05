@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P2-6 横向对比 benchmark：sz-rust 框架服务器
 //!
 //! 使用 sz-rust 的路由 + 中间件 + JSON 响应，对比框架开销。

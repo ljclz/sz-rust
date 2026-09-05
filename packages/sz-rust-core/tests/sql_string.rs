@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 编译时 SQL 检查宏集成测试
 //!
 //! 验证 `sz_rust_core::sql_string!` 宏的重导出可用性。

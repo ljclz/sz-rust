@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-mcp — SZ-Rust 框架能力 MCP server（4.3 竞争力深化：MCP 工具集成）
 //!
 //! 将 sz-rust 框架能力封装为 [Model Context Protocol](https://modelcontextprotocol.io)

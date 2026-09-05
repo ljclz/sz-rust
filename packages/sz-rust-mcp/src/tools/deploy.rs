@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 部署工具 — 通过 Node.js ssh2 包执行远程部署。
 
 use crate::tool::{McpTool, ToolError};

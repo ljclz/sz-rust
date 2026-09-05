@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 错误消息国际化 — 对齐 PHP `think\Lang` 和 `think\Validate::parseErrorMsg`
 //!
 //! 本模块实现错误消息的国际化翻译机制，对齐 PHP

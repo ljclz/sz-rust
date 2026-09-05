@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OpenAPI 文档 — 对齐 Swagger / OpenAPI 3.0.3
 //!
 //! 提供编程式 OpenAPI 规范构建器，支持生成 JSON/YAML 规范文件并提供

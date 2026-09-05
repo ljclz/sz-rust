@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P3 Soak Test — 性能优化点稳定性验证
 //!
 //! 覆盖 P3 5 类优化点的长时间稳定性测试：

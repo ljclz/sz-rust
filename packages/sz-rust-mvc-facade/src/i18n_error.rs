@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 错误消息本地化桥接（4.3 竞争力深化：错误消息支持中文 i18n）
 //!
 //! 将 [`sz_rust_http_facade::BaseException`] 的 `message_key` 通过

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Redis 存储后端 — RedisRefreshTokenStore + RedisTokenBlacklist
 //!
 //! 对齐 spec.md FR-1 ~ FR-6，design.md §2.1 ~ §2.6。

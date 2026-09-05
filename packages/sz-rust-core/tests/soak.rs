@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Soak Test 测试入口（Web 框架场景）
 //!
 //! 长时间中等压力持续运行路由解析 + JSON 序列化，检测内存泄漏、

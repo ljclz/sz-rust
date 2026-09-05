@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 请求模块 — postData/getData/file/upload
 //!
 //! 对齐 PHP `$this->request->post()` / `$this->request->get()` / `$this->request->param()`。

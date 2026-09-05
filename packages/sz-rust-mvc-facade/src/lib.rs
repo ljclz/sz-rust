@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-mvc-facade — MVC 层（P3 解耦）
 //!
 //! 从 sz-rust-core 提取的控制器 / 视图 / 守卫抽象（对齐 PHP ThinkPHP MVC 体系）：

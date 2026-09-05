@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 验证场景 — 对齐 PHP `think\Validate` 的场景机制
 //!
 //! 本模块实现 PHP `think\Validate` 的场景（scene）机制，

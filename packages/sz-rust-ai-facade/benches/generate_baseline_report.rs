@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! T2.10 基线报告生成器
 //!
 //! 读取 criterion --save-baseline 输出 JSON，生成 markdown 报告

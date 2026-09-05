@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P9-FACADE-02：orm + pay + http 集成测试
 //!
 //! 验证 `sz-rust-orm-facade`（参数化查询 / SQL 宏）、

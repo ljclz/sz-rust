@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust HTTP Facade
 //!
 //! 提取自 `sz-rust-core` 的 HTTP 基础模块，提供响应、错误、请求三大基础能力。

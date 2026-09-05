@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! i18n 国际化模块 — 对齐 PHP `think\facade\Lang`
 //!
 //! 本模块实现多语言支持，对齐 PHP `think\facade\Lang` 的核心 API。

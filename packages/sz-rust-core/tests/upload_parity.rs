@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 文件上传一致性测试（PHP 对比）
 //!
 //! 本文件验证 sz-rust 文件上传模块与 PHP `think\File` / `think\file\UploadedFile`

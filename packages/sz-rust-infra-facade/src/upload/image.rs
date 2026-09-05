@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 图像处理模块 — 对齐 PHP `Grafika\Gd\Editor` + `Grafika\Gd\Image` + `Grafika\Color` + `Grafika\Position`
 //!
 //! 本模块实现图像处理功能，对齐 PHP `kosinix/grafika` 库

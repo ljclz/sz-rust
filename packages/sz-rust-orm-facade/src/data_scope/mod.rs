@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 数据范围控制 Data Scope — 应用层行级数据过滤
 //!
 //! 对齐 FSSADMIN `DataScopeTrait`，在查询时自动注入数据范围过滤器。

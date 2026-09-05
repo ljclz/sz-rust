@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-mcp 入口 — stdio transport 循环
 //!
 //! 逐行读取 stdin 的 JSON-RPC 请求，将响应写入 stdout（MCP 标准 transport）。

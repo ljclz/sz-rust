@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 宏模块 — `compact!` / `#[controller]` / `#[model]` 重导出
 //!
 //! H-6 修复：从 `sz-rust-macros`（proc-macro crate）重导出三个过程宏，

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! RAG 混合检索：向量检索 + BM25 关键词检索 + RRF 融合
 //!
 //! 任务组 12.2：HybridRetriever 实现

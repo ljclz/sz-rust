@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! T3.11 Data Scope 端到端集成测试 — 13 场景
 //!
 //! 对应 spec 5.3.1（12 条业务规则）+ 5.3.3（6 类异常场景）

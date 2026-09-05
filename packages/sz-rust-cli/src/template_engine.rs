@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Tera 模板引擎封装
 //!
 //! 对应 design.md 第 2.2.2.2 节，封装 Tera 引擎提供模板加载、渲染、校验能力。

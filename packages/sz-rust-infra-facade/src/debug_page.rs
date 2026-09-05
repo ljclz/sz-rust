@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Whoops-style HTML 调试页面 — 对齐 PHP `whoops` 异常展示
 //!
 //! ## PHP 对齐

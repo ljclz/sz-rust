@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 请求作用域中间件 — DI Scoped 生命周期集成
 //!
 //! P1-ARCH-DI-02 修复：将 DI 容器的 Scoped 生命周期集成到请求生命周期。

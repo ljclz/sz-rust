@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OTLP exporter — 导出 traces/metrics 到 OpenTelemetry Collector
 //!
 //! 启用方式：在 sz300 的 Cargo.toml 中启用 `otlp` feature

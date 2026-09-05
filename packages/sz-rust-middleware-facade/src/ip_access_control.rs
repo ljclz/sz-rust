@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! IP 访问控制中间件 — 基于 IP 白名单/黑名单的访问控制
 //!
 //! 对齐 spec §5.2.1（11 条业务规则）+ §6.2（IpAccessControlConfig）。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 博客示例 — 文章 CRUD + 缓存 + 事件驱动（4.3 竞争力深化：完整示例项目）
 //!
 //! 演示 sz-rust 框架的多 facade 协作：

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! HTTP Java 服务客户端 — 对齐 PHP `http_java_post` 全局函数
 //!
 //! ## PHP 对齐

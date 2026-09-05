@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
+#![cfg(feature = "openai")]
 //! OpenAiProvider 单元测试
 //!
 //! - 构造器/name/supported_models/token_count 不依赖网络

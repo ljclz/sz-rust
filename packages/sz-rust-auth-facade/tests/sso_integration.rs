@@ -1,4 +1,7 @@
-﻿//! SSO 集成测试 — 完整登录→校验→刷新→撤销流程
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
+//! SSO 集成测试 — 完整登录→校验→刷新→撤销流程
 //!
 //! 对齐 spec.md AC-1 ~ AC-18 验收标准。
 use std::sync::Arc;

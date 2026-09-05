@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! find_with_related API 接入 — JOIN / 子查询 / eager_sql 三种模式
 //!
 //! 本模块 re-export sz-orm-core `find_with_related` 模块的

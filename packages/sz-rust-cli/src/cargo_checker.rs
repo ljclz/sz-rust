@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! cargo check 编译验证模块
 //!
 //! 对应 design.md 第 2.2.2.4 节，异步执行 `cargo check` 验证生成的插件骨架。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Agent 编排引擎：工具选择循环 + 短期/长期记忆 + 多步推理
 
 pub mod engine;

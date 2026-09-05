@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 可靠任务队列（Reliable Job Queue）
 //!
 //! `tokio::spawn` 只解决并发，不解决可靠性：进程重启丢任务、失败无人重试、

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! App 容器 — DB/Cache/Log 单例 + DI 服务容器
 //!
 //! 对齐 PHP `app()` 容器，持有全局配置、单例和服务绑定。

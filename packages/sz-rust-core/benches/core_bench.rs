@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust 核心性能基准测试
 //!
 //! 使用 criterion 0.5 进行性能测量。

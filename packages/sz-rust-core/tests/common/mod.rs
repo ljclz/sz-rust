@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 共享测试工具入口
 //!
 //! 供 tests/soak.rs 与 tests/fuzz.rs 使用：

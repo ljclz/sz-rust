@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OAuth2 模块 — 对齐 Laravel Socialite
 //!
 //! 提供 OAuth2 客户端抽象，对齐 Laravel Socialite `ProviderInterface` 的核心 API。

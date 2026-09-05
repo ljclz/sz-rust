@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SafetyValidator — 对生成代码执行铁律检查
 //!
 //! 检查项（对应 .trae/rules/project_rules.md 22 条铁律的子集）：

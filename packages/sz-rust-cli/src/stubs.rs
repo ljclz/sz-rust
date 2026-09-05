@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 代码生成模板 — 对齐 PHP `think\console\command\make\stubs\*.stub`
 //!
 //! ## PHP 对齐

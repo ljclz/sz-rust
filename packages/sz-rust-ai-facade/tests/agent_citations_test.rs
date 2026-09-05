@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 10.3：Agent citations 端到端测试
 //! 验证 Agent 注入 RagPipeline 后，AgentResult.citations 非空且内容正确
 

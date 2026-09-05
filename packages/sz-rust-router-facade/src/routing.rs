@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 三层路由机制 — 属性宏 / 配置式 / 约定式
 //!
 //! 对齐 PHP `think-route` + `config/route.php` + `auto_multi_app`，提供三种渐进式路由注册方式。

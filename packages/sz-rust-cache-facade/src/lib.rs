@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Cache facade — 对齐 PHP `think\facade\Cache`
 //!
 //! 缓存 facade 模块。

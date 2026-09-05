@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 请求体大小限制中间件 — 拒绝超过限制的请求体
 //!
 //! 对齐 spec §5.4.1（7 条业务规则）+ §6.4（BodySizeLimitConfig）。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! WASM 边缘计算运行时 — 基于 wasmi 提供 WASM 模块加载与执行
 //!
 //! 使用 wasmi（Parity Technologies 纯 Rust WASM 解释器）作为运行时。

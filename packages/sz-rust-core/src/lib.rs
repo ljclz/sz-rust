@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Core — 主框架包
 //!
 //! 对标 ThinkPHP 8 的 Rust Web 框架核心，基于 axum 0.8 + SZ-ORM。

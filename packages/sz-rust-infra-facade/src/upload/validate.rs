@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 文件上传校验模块 — 对齐 PHP `think\Validate` 文件校验规则 + `app\common\library\storage\Driver::validate`
 //!
 //! 本模块实现文件类型/大小校验机制，对齐 PHP：

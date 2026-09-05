@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! PoolWarmer — 连接池预热（P3 L3 调优）
 //!
 //! 启动时并发建立 N 个连接放入连接池，消除首次请求冷启动延迟。

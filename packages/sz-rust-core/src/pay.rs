@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Pay 模块 — 支付聚合抽象层（对齐 PHP `yansongda/pay`）
 //!
 //! 提供统一的支付抽象，支持多平台（支付宝、微信支付等）扩展。

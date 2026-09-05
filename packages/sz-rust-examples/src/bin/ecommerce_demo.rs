@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 电商示例 — 商品/订单/支付 + OpenAPI 自动生成（4.3 竞争力深化：完整示例项目）
 //!
 //! 演示 sz-rust 框架的多 facade 协作：

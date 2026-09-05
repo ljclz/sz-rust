@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! BM25 全文检索索引
 //!
 //! 任务组 12.1：实现内存 BM25 索引，支持增量更新

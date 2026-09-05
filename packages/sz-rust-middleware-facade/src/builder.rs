@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 中间件链构建器 — 统一管理 `MiddlewareChain` + 5 个 `Option<Config>`
 //!
 //! 提供 `MiddlewareBuilder` 用于：

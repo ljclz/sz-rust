@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CLI 错误类型
 //!
 //! 对齐 PHP `think\console\Command` 的错误处理模式：

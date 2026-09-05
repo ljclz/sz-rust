@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 错误体系 — BaseException + 错误码映射
 //!
 //! 对齐 PHP `app\common\exception\BaseException`。

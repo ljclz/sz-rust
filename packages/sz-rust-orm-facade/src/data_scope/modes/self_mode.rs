@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SELF 模式 — 仅本人创建的数据（`WHERE creator_id = ?`）
 
 use super::ModeEvaluator;

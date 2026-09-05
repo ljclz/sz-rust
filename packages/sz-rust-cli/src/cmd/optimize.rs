@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `optimize:route` / `optimize:config` / `optimize:schema` / `route:clear` 命令
 //!
 //! 对齐 PHP `think optimize:route` / `think optimize:config` / `think optimize:schema` / `think route:clear`。

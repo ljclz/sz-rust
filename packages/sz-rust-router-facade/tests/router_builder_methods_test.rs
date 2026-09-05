@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 13.2：RouterBuilder patch/head/options 路由分发测试
 
 use axum::body::Body;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use std::path::Path;
 use sz_rust_rag::rule::{FileRuleStore, RuleStore};
 use sz_rust_rag::template::{FileTemplateStore, TemplateStore};

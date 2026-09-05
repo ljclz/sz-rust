@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 钩子系统接入 — 16 事件 HookDispatcher
 //!
 //! 对齐 PHP `topthink/think-orm: ^2.0.52` 的 Model 钩子机制，并基于 sz-orm-core 扩展。

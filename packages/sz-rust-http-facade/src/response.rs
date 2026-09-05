@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 响应模块 — renderJson/renderSuccess/renderError + ApiResponse
 //!
 //! 对齐 PHP `SzController::renderJson` / `renderSuccess` / `renderError`。

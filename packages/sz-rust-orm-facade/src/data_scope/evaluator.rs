@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! DataScopeEvaluator — 数据范围评估器
 //!
 //! 根据 DataScopeRule.mode 分发到对应 ModeEvaluator，

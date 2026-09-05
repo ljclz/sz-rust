@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use crate::llm::provider::ChatMessage;
 use async_trait::async_trait;
 use parking_lot::RwLock;

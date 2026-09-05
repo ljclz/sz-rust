@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! # SZ-Rust Addons Loader — 插件加载器
 //!
 //! 对标 PHP `zzstudio/think-addons` 的 Rust 实现，提供插件发现/清单解析/注册/路由解析能力。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SSO 性能基准测试
 //!
 //! 对齐 spec.md NFR-1（本地验签 p99 < 1μs）、NFR-2（轮换 p99 < 50μs）。

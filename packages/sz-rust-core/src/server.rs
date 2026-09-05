@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! HTTP 服务器模块 — axum::serve 启动器
 //!
 //! 对齐 PHP `think\swoole` / `think-worker` 启动入口，封装 axum::serve。

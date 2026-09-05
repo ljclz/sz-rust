@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Examples — 示例库
 //!
 //! 提供 Hello World 端点的 router 构建函数，便于集成测试。

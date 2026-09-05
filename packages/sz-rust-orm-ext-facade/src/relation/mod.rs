@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 关联关系模块 — HasMany/BelongsTo/HasOne/BelongsToMany/Morph
 //!
 //! 对齐 PHP `think\Model` 的关联关系机制，基于 sz-orm-core `Relation` 枚举实现。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! gRPC 支持（tonic + prost）
 //!
 //! 提供 gRPC 服务构建和鉴权拦截器。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件市场 CLI 子命令组
 //!
 //! 提供 `sz-rust plugin search/install/publish/uninstall/update/list/login` 七个子命令。

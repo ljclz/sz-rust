@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 健康检查端点 — `/health`
 //!
 //! 提供轻量级健康检查端点，用于容器编排（K8s liveness/readiness）和负载均衡探测。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust-router-facade — 路由层（P3 解耦）
 //!
 //! 从 sz-rust-core 提取的三层路由机制（对齐 PHP ThinkPHP 路由体系）：

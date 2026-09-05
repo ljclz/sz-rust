@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Tera 自定义过滤器
 
 use tera::{Result as TeraResult, Tera, Value};

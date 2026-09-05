@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Reconcile 逻辑 — 根据 Sz300App CRD 创建/更新 Deployment + Service
 
 use crate::crd::Sz300App;

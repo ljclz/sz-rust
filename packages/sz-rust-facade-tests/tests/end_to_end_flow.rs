@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P9-FACADE-04：端到端业务流集成测试
 //!
 //! 模拟完整业务链路：微信回调验证 → JWT 鉴权 → 会话 → 下单 → 缓存 →

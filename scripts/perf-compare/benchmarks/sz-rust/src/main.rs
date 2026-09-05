@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use axum::{extract::{Path, State}, response::Json, routing::get, Router};
 use redis::aio::MultiplexedConnection;
 use serde_json::json;

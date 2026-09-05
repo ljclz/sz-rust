@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! simd-json 安全封装层
 //!
 //! 在 x86_64 平台使用 `simd_json::from_str` 加速 JSON 反序列化（2-3x），

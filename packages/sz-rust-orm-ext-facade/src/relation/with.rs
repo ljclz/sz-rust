@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 关联预加载（with）— 批量 IN 查询 SQL 片段构造器 + 数据处理纯函数
 //!
 //! 本模块对齐 PHP `think\Model::with()` + `eagerlyResultSet()`

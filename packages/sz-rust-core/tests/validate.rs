@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 运行时 SQL 校验集成测试
 //!
 //! 验证 `sz_rust_core` 重导出的 `sz-orm-sql-validator` API 可用性，

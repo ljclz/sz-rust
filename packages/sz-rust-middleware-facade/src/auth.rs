@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! @REVIEW_REQUIRED（铁律 R12）：人类必须审查此文件
 //!
 //! 审查要点：

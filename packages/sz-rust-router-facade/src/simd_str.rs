@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SIMD 字符串加速模块 — P3 性能优化
 //!
 //! 提供 SSE2/AVX2 加速的字符串操作，用于热点路径优化：

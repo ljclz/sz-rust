@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! WebSocket 原生路由 — 基于 axum WebSocketUpgrade
 //!
 //! 将 WebSocket 处理集成到主 HTTP 路由中，无需独立端口。

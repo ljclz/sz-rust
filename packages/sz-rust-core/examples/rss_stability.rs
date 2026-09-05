@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! RSS 稳定性测量（内存泄漏检测）
 //!
 //! 与 `rss_baseline.rs` 配套：基线测启动内存，本示例测**内存是否随操作增长**。

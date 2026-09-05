@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 路由模块 — 路由构建（基于 axum::Router）
 //!
 //! 对齐 PHP `with_route=true` + `auto_multi_app=true` + `app/controller/action` 路径解析。

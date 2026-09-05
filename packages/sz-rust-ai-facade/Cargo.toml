@@ -10,7 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 autobenches = false
 keywords = ["ai", "llm", "rag", "agent", "thinkphp"]
-categories = ["science::artificial-intelligence"]
+categories = ["web-programming", "web-programming::http-server"]
 
 [dependencies]
 tokio = { workspace = true }

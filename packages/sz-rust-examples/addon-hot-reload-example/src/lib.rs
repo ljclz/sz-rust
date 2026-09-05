@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! sz-rust 热加载 Addon 示例模板
 //!
 //! 本 crate 演示如何编写一个可被 `HotAddonLoader` 动态加载的 Addon 插件。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 5 种数据范围模式评估器
 //!
 //! 每种模式将 `DataScopeRule` + `DataScopeContext` 转换为 `Vec<WhereCondition>`。

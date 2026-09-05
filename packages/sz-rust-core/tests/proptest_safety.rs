@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 属性测试套件 — 基于 proptest 的结构化 Fuzz 测试
 //!
 //! 与 `fuzz.rs`（基于 xorshift64 PRNG）互补，本文件使用 `proptest` crate 提供：

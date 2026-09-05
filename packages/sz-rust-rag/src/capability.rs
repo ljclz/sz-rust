@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Capability 适配：将 RAG 检索注册为 Skill。
 
 use crate::search::{IndustryRagSearcher, RagSearchRequest};

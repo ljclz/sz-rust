@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SLO 燃烧率监控
 //!
 //! 基于 Google SRE Workbook 第 5 章的多窗口多燃烧率告警策略：

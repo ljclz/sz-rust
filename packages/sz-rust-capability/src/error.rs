@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 /// Capability Registry 错误类型。
 ///
 /// 6 个变体覆盖所有业务错误场景，标注 `#[non_exhaustive]` 允许未来新增变体不破坏外部 match。

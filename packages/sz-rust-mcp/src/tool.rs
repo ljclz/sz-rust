@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! McpTool trait 抽象 — 统一 MCP 工具接口。
 //!
 //! 对应 design.md §2.2.2 接口 13。

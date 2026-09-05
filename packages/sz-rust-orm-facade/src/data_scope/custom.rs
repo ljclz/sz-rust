@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 自定义条件生成器注册表 — CustomGeneratorRegistry
 
 use crate::data_scope::context::DataScopeContext;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Soak Test 共享监控工具（Web 框架场景）
 //!
 //! 提供 Soak Test 期间的关键指标采集、快照记录、退化检测能力。

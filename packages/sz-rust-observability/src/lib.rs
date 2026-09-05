@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust 可观测性模块
 //!
 //! 提供 Prometheus 指标注册、SLO 燃烧率监控等能力，

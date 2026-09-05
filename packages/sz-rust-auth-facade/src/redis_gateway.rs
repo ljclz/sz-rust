@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Redis Gateway 集群广播 — 基于 Redis pub/sub 实现跨节点 WebSocket 消息广播
 //!
 //! ## 架构说明

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! # sz-rust-pdf — Excel/PDF 导出导入包
 //!
 //! 本包实现 Excel/PDF 处理功能，对齐 PHP 项目实际使用的

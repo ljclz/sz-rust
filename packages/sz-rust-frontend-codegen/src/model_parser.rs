@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! ORM 模型解析器：解析 Rust 源码中的 ORM 模型定义，提取字段元数据用于前端代码生成。
 
 use std::path::{Path, PathBuf};

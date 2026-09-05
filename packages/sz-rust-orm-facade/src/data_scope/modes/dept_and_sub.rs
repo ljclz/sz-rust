@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! DEPT_AND_SUB 模式 — 本部门及子部门（`WHERE dept_id IN (...)`）
 
 use super::ModeEvaluator;

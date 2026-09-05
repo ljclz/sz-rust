@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Security 配置段 — 聚合 4 个安全中间件配置
 //!
 //! 对齐 spec §6.1-6.4 + design §2.2.2。

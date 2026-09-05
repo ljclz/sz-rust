@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
+#![cfg(all(feature = "claude", feature = "gemini"))]
 //! Claude/Gemini Provider 响应解析 fixture 测试
 //!
 //! 使用模拟的 API 响应 JSON 测试 parse_completion 方法，

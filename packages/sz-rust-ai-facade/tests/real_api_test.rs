@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 真实 API 联调测试（需网络 + API Key，默认 ignored）
 //!
 //! 运行方式：

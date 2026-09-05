@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Mock Provider — 4 个测试用 LLM Provider 实现
 //!
 //! - `StubProvider`：返回固定响应

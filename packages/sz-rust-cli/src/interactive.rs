@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 交互式命令行补全
 //!
 //! 对应 design.md 第 2.2.2.3 节，使用 dialoguer 提供 TTY 环境下的交互式输入。

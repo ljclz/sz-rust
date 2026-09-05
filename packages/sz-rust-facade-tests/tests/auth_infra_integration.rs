@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P9-FACADE-03：auth + infra + orm(jwt) 集成测试
 //!
 //! 验证 `sz-rust-auth-facade`（微信签名验证 / 网关）、

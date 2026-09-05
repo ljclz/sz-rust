@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use crate::common::{AiError, AuditHttpClient};
 use crate::llm::provider::{
     ChatCompletion, ChatMessage, ChatRequest, Choice, ContentPart, FinishReason, ImageDetail,

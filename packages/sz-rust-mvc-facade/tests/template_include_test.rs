@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 任务组 14.4：模板 include 综合测试
 //! 覆盖：单层 include + 嵌套 include + 循环包含检测 + 路径越狱防护
 

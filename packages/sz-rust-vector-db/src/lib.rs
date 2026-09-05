@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Vector DB
 //!
 //! 专业向量数据库适配器，实现 [`sz_rust_ai_facade::embedding::VectorStore`] trait。

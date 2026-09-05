@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CSV 导出模块 — 对齐 PHP `export_excel` / `exportCsv` / `fputcsv`
 //!
 //! ## PHP 对齐

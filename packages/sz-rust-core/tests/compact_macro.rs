@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! compact! 宏集成测试 — PHP `compact()` 一致性验证（R5 硬约束）
 //!
 //! 对齐 PHP `compact()` 函数行为：

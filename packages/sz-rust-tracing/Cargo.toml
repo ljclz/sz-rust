@@ -1,6 +1,6 @@
 [package]
 name = "sz-rust-tracing"
-version.workspace = true
+version = "1.2.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

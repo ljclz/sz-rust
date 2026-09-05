@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 迁移历史表（Migration History Table）
 //!
 //! 持久化记录已执行的迁移版本，避免重复执行。对齐 PHP `think migrate` 的

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件管理工具 — 安装/卸载插件。
 
 use crate::tool::{McpTool, ToolError};

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CircuitBreaker 中间件 — 熔断器（P1-5 本仓独立实现）
 //!
 //! 提供 Closed→Open→HalfOpen→Closed 三态熔断保护：

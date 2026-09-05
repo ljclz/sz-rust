@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 插件加载模块 — 重导出 `sz-rust-addons-loader`
 //!
 //! H-6 修复：从 `sz-rust-addons-loader` 包重导出插件加载器全套 API，

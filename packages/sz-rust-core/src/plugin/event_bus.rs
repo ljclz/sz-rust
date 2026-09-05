@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 事件总线 trait + EventHandler trait 抽象。
 //!
 //! 对应 design.md §2.2.2 接口 7-8。

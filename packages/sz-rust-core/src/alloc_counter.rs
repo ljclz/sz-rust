@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Alloc 计数 GlobalAlloc wrapper — P3 性能度量工具
 //!
 //! 提供 `AllocCounter<A>` 包装全局分配器，统计 alloc/dealloc 次数，

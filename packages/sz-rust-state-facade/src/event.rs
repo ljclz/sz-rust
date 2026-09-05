@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 事件系统（对齐 PHP `think\Event`）
 //!
 //! 对齐 PHP `think\Event`（272 行）+ `think\facade\Event` + `event()` 助手函数。

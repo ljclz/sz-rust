@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OAuth2 Token 存储模块 — 需启用 `redis-store` feature
 //!
 //! 提供 [`OAuth2TokenStore`] trait 和 [`RedisOAuth2TokenStore`] 实现，

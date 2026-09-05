@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Gateway 模块 — GatewayWorker Gateway API 抽象（对齐 PHP `GatewayWorker\Gateway`）
 //!
 //! 提供 WebSocket 客户端管理、群组广播、消息推送等能力。

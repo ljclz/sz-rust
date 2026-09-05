@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! P3 性能优化基准测试框架
 //!
 //! 5 类 benchmark，覆盖 P3 六大优化方向：

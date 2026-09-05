@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Redis 状态采集器
 //!
 //! 提供 Redis 服务器实时状态采集能力，供 `GET /api/admin/redis/info` 端点使用。

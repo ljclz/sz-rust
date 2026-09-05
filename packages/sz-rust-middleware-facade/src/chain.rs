@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 中间件链构建器 — 基于 `tower::ServiceBuilder`
 //!
 //! 对齐 PHP 中间件组合方式（`app/middleware.php` 返回数组顺序即执行顺序），

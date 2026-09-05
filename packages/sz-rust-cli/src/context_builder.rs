@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 模板上下文构建器
 //!
 //! 对应 design.md 第 2.2.2.5 节，从 CLI 参数构建 Tera 渲染上下文。

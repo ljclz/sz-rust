@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! # SZ-Rust Tracing — 链路追踪
 //!
 //! 提供分布式链路追踪的 Span/Tracer 抽象，支持 W3C TraceContext 传播，

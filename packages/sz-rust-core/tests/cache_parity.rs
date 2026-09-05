@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 缓存一致性测试（PHP 对比） — 集成测试
 //!
 //! 本文件验证 sz-rust 缓存模块与 PHP `think\facade\Cache` / `think\cache\Driver`

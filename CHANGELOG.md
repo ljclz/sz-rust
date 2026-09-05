@@ -5,6 +5,41 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-05
+
+### Changed
+
+- **P0-3 开源版/企业版物理分离**：
+  - 开源仓库从 37 members 缩减为 29 members（8 个企业版 crate 迁移至 `sz-rust-enterprise` 仓库）
+  - 许可证从 MIT 变更为 **Apache-2.0**（新增 `LICENSE-APACHE`，删除旧 `LICENSE`）
+  - 8 个企业版 crate（sz-rust-sz300 + 7 addons）迁移至 `E:\www\rust\sz-rust-enterprise`（保留 git 历史，39 commits）
+  - 企业版仓库 license = `LicenseRef-SZ-Commercial`（商业许可，禁止转售与再分发）
+  - 企业版 crate 对开源核心依赖从 path 改为 `version = "1.2"`（从 crates.io 拉取）
+  - 企业版 crate 间依赖保持 path 依赖（workspace 内部）
+  - 所有 .rs 文件添加 SPDX 许可证头（开源版 Apache-2.0，企业版 Commercial）
+  - git filter-repo 清理开源仓库历史，彻底移除企业版 crate 路径
+
+### Added
+
+- **合规检查脚本**：
+  - `scripts/check_isolation.py` — 仓库隔离检查（oss/enterprise）
+  - `scripts/add_license_header.py` — 批量添加源文件许可证头
+  - `scripts/convert_deps_path_to_version.py` — 依赖路径转换工具
+  - `scripts/check_no_crate_level_allow_dead_code.py` — crate 级 dead_code 检查
+  - `scripts/check_license_compliance.py` 扩展 `--mode` 和 `--expected-license` 参数
+
+- **CI/CD 配置**：
+  - `publish-oss.yml` 触发器改为 `workflow_dispatch`，发布列表扩展至 30 crate，前置合规检查
+  - `ci.yml` 新增隔离检查、许可证合规、dead_code 检查 job
+  - `ci.yml` db-integration job 改为 `if: false`（sz-rust-sz300 迁移至企业版）
+  - `ci.yml` coverage job 改为 `continue-on-error: true`（暂不阻塞）
+  - 企业版仓库 `.github/workflows/ci.yml` 和 `publish.yml` 创建
+
+### Removed
+
+- 从开源仓库移除 8 个企业版 crate：sz-rust-sz300、sz-rust-addons-{crm,ecommerce,cms,operate,erp,forum,im}
+- 旧 `LICENSE`（MIT 文本）
+
 ## [Unreleased] - 2026-09-02
 
 ### Added

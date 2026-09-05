@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 连接池配置调优（L2 方案：sqlx 配置调优，不修改 sz-orm 上游）
 //!
 //! 提供 `SqlxPoolConfig` 便捷配置结构体，支持：

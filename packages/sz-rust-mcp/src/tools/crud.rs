@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CRUD 操作工具 — Create/Read/Update/Delete。
 
 use crate::tool::{McpTool, ToolError};

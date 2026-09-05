@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! `scheduler:*` 命令 — 接入 sz-orm-scheduler，支持配置文件加载
 //!
 //! ## 命令列表

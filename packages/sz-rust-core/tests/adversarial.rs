@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 对抗性边界测试 — 针对 DML 序列、超大输入、并发碰撞、编码渗透
 //!
 //! 测试目标：验证 sz-rust-core 的核心模块在对抗性条件下的**行为正确性**和**鲁棒性**。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 版本化存储泛型 + 文件实现。
 
 use crate::error::{RagError, RagResult};

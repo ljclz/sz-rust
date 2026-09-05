@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 内置验证规则 — 对齐 PHP `think\Validate` 类的内置规则方法
 //!
 //! 本模块实现 PHP `think\Validate` 类中除 `require`/`must`/`is`/`regex` 外的

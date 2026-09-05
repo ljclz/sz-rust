@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Facade 统一入口：全局单例 + 便捷 API。
 
 use crate::audit::RagAuditLogger;

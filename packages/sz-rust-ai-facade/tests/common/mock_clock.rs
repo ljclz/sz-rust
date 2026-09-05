@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Mock 时钟 — 确定性时间控制
 //!
 //! 替代裸 `tokio::time::sleep`（spec 5.1.1.8），通过 `advance` 推进时间。

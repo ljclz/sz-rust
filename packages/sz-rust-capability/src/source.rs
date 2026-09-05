@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 /// 能力来源类型，用于来源过滤和分组统计。
 ///
 /// - `Skill`：AI 内置能力（如 LLM 对话、代码搜索、文件操作）

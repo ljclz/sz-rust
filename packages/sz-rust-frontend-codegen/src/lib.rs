@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust 前端代码生成器 — 根据 ORM 模型自动生成 Vue/React 组件、路由、权限、API 客户端
 //!
 //! ## 功能概述

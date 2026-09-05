@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! OpenAiEmbedding 单元测试（不依赖真实网络）
 
 use sz_rust_ai_facade::common::audit::{AuditHttpClient, RateLimitConfig};

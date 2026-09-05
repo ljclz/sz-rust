@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! CSRF 防护中间件 — 双提交 Cookie 模式
 //!
 //! 2026-07-25 新增（修复 P0 安全审计项）。

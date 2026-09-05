@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! SZ-Rust Auth Facade
 //!
 //! 提取自 `sz-rust-core` 的认证与网关模块，提供微信、OAuth2、Gateway 三大能力。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 输入合法性校验器
 //!
 //! 对应 design.md 第 2.2.2.6 节，校验用户输入的插件名、表名、字段定义等。

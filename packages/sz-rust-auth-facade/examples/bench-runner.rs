@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Redis 存储后端压测执行器
 //!
 //! 编译：`cargo build --example bench-runner --features redis-store`

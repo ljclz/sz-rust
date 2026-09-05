@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! 多租户支持 — 在 Model 层自动注入 tenant_id 过滤
 //!
 //! ## 设计目标

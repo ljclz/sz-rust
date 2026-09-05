@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! HTTP/2 + TLS 支持 — 基于 `tokio-rustls` + `rustls-pki-types` PEM 解析
 //!
 //! 对齐 PHP `think-swoole` 启用 SSL 后的行为，提供 HTTP/2 over TLS 启动器。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use regex::Regex;
 
 use crate::error::{WorkflowError, WorkflowErrorCode, WorkflowResult};

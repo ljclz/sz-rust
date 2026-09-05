@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 use sz_rust_infra_facade::config::{ConfigError, LogConfig};
 
 #[test]

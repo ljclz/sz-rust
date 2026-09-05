@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Server-Sent Events (SSE) 支持
 //!
 //! 基于 axum 0.8 的 `axum::response::sse` 模块，提供轻量级服务器推送能力。

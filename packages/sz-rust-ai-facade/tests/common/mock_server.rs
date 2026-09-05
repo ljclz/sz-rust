@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! Mock HTTP Server — 本地 127.0.0.1 随机端口 axum server
 //!
 //! 按预设 `VecDeque<MockResponse>` 序列返回响应，供集成测试使用。

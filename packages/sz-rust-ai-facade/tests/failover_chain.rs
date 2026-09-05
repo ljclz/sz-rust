@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+//
 //! T1.4 多 Provider 链式故障切换端到端测试
 
 mod common;
