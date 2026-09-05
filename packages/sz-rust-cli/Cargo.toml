@@ -1,0 +1,49 @@
+[package]
+name = "sz-rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 命令行工具：项目脚手架、数据库迁移、调度器管理"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+# 命令行框架
+clap.workspace = true
+# 序列化
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+# 时间
+chrono.workspace = true
+# 错误
+thiserror.workspace = true
+# 异步运行时（migrate 在线模式需要）
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# SZ-ORM SQLx 驱动（在线迁移执行所需）
+sz-orm-sqlx.workspace = true
+# SZ-Rust 核心（调度器封装，含 ORM facade）
+sz-rust-core.workspace = true
+# 模板引擎（P1-T3 插件模板库）
+tera.workspace = true
+# 交互式命令行输入（P1-T3 插件模板库）
+dialoguer.workspace = true
+# 前端代码生成（P4-T1 CLI make:frontend 子命令）
+sz-rust-frontend-codegen = { workspace = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lib]
+name = "sz_rust_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sz-rust"
+path = "src/main.rs"

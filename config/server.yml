@@ -1,0 +1,10 @@
+# 服务器配置 — 对齐 PHP think-swoole config/swoole.php
+#
+# HTTP 监听地址与端口。默认监听 0.0.0.0:8080（对所有网卡开放）。
+# 可通过环境变量 SZ_SERVER__HOST / SZ_SERVER__PORT 覆盖。
+
+# 监听地址（默认 0.0.0.0，对所有网卡开放）
+host: "0.0.0.0"
+
+# 监听端口（默认 8080）
+port: 8080

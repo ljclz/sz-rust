@@ -1,0 +1,12 @@
+{
+  "sz-rust-core": 25.43,
+  "sz-rust-orm-facade": 0.25,
+  "sz-rust-http-facade": 0.26,
+  "sz-rust-cache-facade": 0.28,
+  "sz-rust-state-facade": 0.24,
+  "sz-rust-infra-facade": 0.34,
+  "sz-rust-auth-facade": 0.2,
+  "sz-rust-pay-facade": 0.2,
+  "sz-rust-cli": 0.41,
+  "__TOTAL__": 27.61
+}

@@ -1,0 +1,99 @@
+# cargo-deny 配置 — 依赖许可证与安全审计
+#
+# 对齐 sz-orm/deny.toml 结构，确保依赖链安全合规
+
+[graph]
+all-features = true
+
+[advisories]
+# 已知安全漏洞 advisory 检查
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# 忽略的 advisory（需注明理由）
+ignore = [
+    # === rustls-webpki 0.101.7 / 0.102.8 系列漏洞（同步自 sz-orm）===
+    # 来源: rumqttc 0.25 / elasticsearch 8.5.0-alpha.1 → reqwest 0.11 → rustls 0.21 → rustls-webpki 0.101.7/0.102.8
+    # 影响: CRL 验证在默认编译中不参与；上游 rustls-webpki 0.103 为不兼容大版本
+    # 跟踪: 待 rumqttc / elasticsearch 升级至依赖 rustls-webpki 0.103+ 后自动移除
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8/0.101.7 传递依赖，上游 0.103 为不兼容大版本；CRL 验证默认不参与" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8/0.101.7 URI name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8/0.101.7 wildcard name constraints 漏洞；上游 0.103 为不兼容大版本" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },
+    # RUSTSEC-2024-0437: sz-orm 路径依赖传递引入的 Cargo.lock 残留条目
+    { id = "RUSTSEC-2024-0437", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    # tokio-tar 0.3.1 PAX 扩展头解析漏洞（RUSTSEC-2025-0111 / CVE-2025-62518）
+    # 来源: testcontainers v0.23.3 dev-dependency → tokio-tar（仅测试用，不在生产编译产物中）
+    # 影响: tokio-tar 已 archived/unmaintained，无补丁版本；仅 dev-dependency 引入，不影响生产安全
+    # 跟踪: 待 testcontainers 迁移至 astral-tokio-tar 后自动移除
+    { id = "RUSTSEC-2025-0111", reason = "tokio-tar 通过 testcontainers dev-dependency 引入（仅测试用）；tokio-tar 已 archived 无补丁版本；待 testcontainers 迁移至 astral-tokio-tar 后移除" },
+]
+# 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
+unmaintained = "none"
+# 已被 yanked 的 crate 视为告警
+yanked = "warn"
+
+[licenses]
+# 许可证白名单
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "0BSD",
+    "Unlicense",
+    "NCSA",
+    "CDLA-Permissive-2.0",
+    # MPL-2.0 是 copyleft 但文件级弱 copyleft，允许
+    "MPL-2.0",
+]
+# 置信度阈值（文件扫描置信度）
+confidence-threshold = 0.8
+
+[licenses.private]
+# 忽略私有 crate（path 依赖）
+ignore = true
+ignore-sources = []
+
+# webpki-roots 使用 CDLA-Permissive-2.0（OSI 批准），
+# cargo-deny 新版本要求 expression 字段 + license-files hash，
+# 但 webpki-roots 的 CDLA-Permissive-2.0 已在 allow 列表中，
+# 此处仅跳过其文件扫描（许可证本身已是白名单许可，无风险）。
+[[licenses.clarify]]
+name = "webpki-roots"
+version = "*"
+expression = "CDLA-Permissive-2.0"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
+[bans]
+# 重复依赖仅警告（对齐 sz-orm，避免 CI 因传递依赖冲突过度阻塞）
+multiple-versions = "warn"
+# 通配符依赖仅警告
+wildcards = "warn"
+# 允许的通配符路径
+allow-wildcard-paths = false
+# 高亮重复依赖
+highlight = "all"
+
+# 禁止的 crate（已知问题或不安全）
+# 注：openssl 暂时不禁止，因 reqwest 默认引入 native-tls → openssl
+# 后续优化：让 reqwest 使用 rustls-tls feature 后可重新启用 openssl 禁令
+deny = []
+
+# 跳过重复版本检查的 crate（传递依赖无法控制）
+skip = [
+    { name = "zip", version = "2.4.2" },
+]
+
+[sources]
+# 允许的 crate 源
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+# 禁止未知源
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,0 +1,91 @@
+[package]
+name = "sz-rust-auth-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Auth facade for sz-rust framework — WeChat, OAuth2, Gateway"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["wechat", "oauth", "gateway", "websocket", "thinkphp"]
+categories = ["web-programming"]
+
+[dependencies]
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+sha1 = { workspace = true }
+thiserror = { workspace = true }
+# Redis pub/sub 集群广播（可选，通过 redis-gateway feature 启用）
+redis = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+# SsoJwtCodec 依赖（HS256 签名，复用 RustCrypto audited crate）
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+subtle = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+rand = { workspace = true }
+
+# axum 集成（可选，feature = "axum"）
+axum = { workspace = true, optional = true }
+
+# 远程校验（可选，feature = "remote-validate"）
+reqwest = { workspace = true, optional = true }
+
+# tokio（redis-store feature 需要 timeout）
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
+redis = { workspace = true }
+futures = { workspace = true }
+sysinfo = "0.32"
+reqwest = { workspace = true, features = ["json", "cookies"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+proptest = { workspace = true }
+
+[features]
+# Redis Gateway 集群广播支持（Redis pub/sub 跨节点广播 WebSocket 消息）
+redis-gateway = ["dep:redis", "dep:futures"]
+# axum 集成（SsoCenter HTTP 端点）
+axum = ["dep:axum"]
+# 远程校验
+remote-validate = ["dep:reqwest"]
+# Redis 存储后端（RedisRefreshTokenStore + RedisTokenBlacklist）
+redis-store = ["dep:redis", "dep:tokio"]
+# Redis 集群支持（隐含 redis-store）
+redis-cluster = ["redis-store", "redis/cluster"]
+# Device Code 流程支持（需要 tokio time 用于异步轮询）
+device-code = ["dep:tokio"]
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "sso_bench"
+harness = false
+
+[[example]]
+name = "bench-runner"
+required-features = ["redis-store"]
+
+[package.metadata.cargo-udeps.ignore]
+development = ["futures", "redis", "reqwest", "sysinfo", "tracing-subscriber"]

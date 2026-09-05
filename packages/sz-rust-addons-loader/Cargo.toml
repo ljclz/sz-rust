@@ -1,0 +1,40 @@
+[package]
+name = "sz-rust-addons-loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust addons 加载器：动态加载插件模块，对齐 ThinkPHP addons 机制"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+regex.workspace = true
+tracing.workspace = true
+sz-rust-capability = { workspace = true }
+# 热重载（optional，仅 hot-reload feature 启用时）
+notify = { workspace = true, optional = true }
+# 生产依赖 tokio（registry 扫描 addons 目录用 tokio::fs，铁律 4 禁 std::fs）
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "fs"] }
+
+[features]
+default = []
+# 热重载（M2 方案：进程重启 + 状态迁移，避免 dlopen unsafe）
+hot-reload = ["dep:notify"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+async-trait = { workspace = true }
+
+[lib]
+name = "sz_rust_addons_loader"
+path = "src/lib.rs"

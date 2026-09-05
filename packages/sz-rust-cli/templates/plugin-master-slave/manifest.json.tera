@@ -1,0 +1,27 @@
+{
+  "name": "{{ plugin_name }}",
+  "version": "0.1.0",
+  "sz_rust_version": "{{ template_version }}",
+  "template_type": "{{ template_type }}",
+  "template_version": "{{ template_version }}",
+  "generated_at": "{{ generated_at }}",
+  "capabilities": ["crud", "master-slave", "cascade"],
+  "master_table": "{{ master_table }}",
+  "slave_table": "{{ slave_table }}",
+  "foreign_key": "{{ foreign_key }}",
+  "routes": [
+    {"method": "GET", "path": "/{{ master_table }}", "handler": "{{ master_class_name }}Controller::index"},
+    {"method": "GET", "path": "/{{ master_table }}/create", "handler": "{{ master_class_name }}Controller::create"},
+    {"method": "POST", "path": "/{{ master_table }}", "handler": "{{ master_class_name }}Controller::save"},
+    {"method": "GET", "path": "/{{ master_table }}/{id}", "handler": "{{ master_class_name }}Controller::read"},
+    {"method": "GET", "path": "/{{ master_table }}/{id}/edit", "handler": "{{ master_class_name }}Controller::edit"},
+    {"method": "PUT", "path": "/{{ master_table }}/{id}", "handler": "{{ master_class_name }}Controller::update"},
+    {"method": "DELETE", "path": "/{{ master_table }}/{id}", "handler": "{{ master_class_name }}Controller::delete"},
+    {"method": "GET", "path": "/{{ master_table }}/{id}/{{ slave_table }}", "handler": "{{ slave_class_name }}Controller::index"},
+    {"method": "POST", "path": "/{{ master_table }}/{id}/{{ slave_table }}", "handler": "{{ slave_class_name }}Controller::save"},
+    {"method": "GET", "path": "/{{ master_table }}/{id}/{{ slave_table }}/{slave_id}", "handler": "{{ slave_class_name }}Controller::read"},
+    {"method": "PUT", "path": "/{{ master_table }}/{id}/{{ slave_table }}/{slave_id}", "handler": "{{ slave_class_name }}Controller::update"},
+    {"method": "DELETE", "path": "/{{ master_table }}/{id}/{{ slave_table }}/{slave_id}", "handler": "{{ slave_class_name }}Controller::delete"}
+  ],
+  "migrations": ["migrations/{{ master_table }}_{{ slave_table }}.sql"]
+}

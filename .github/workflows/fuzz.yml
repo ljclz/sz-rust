@@ -1,0 +1,66 @@
+# SZ-Rust Fuzz Testing — 模糊测试
+#
+# 调度策略：
+#   - 每周六 00:00 UTC（北京时间 08:00）自动运行完整 fuzz
+#   - 每次 push/PR 运行快速 fuzz（1000 次迭代）
+#   - 支持手动触发（workflow_dispatch），可自定义迭代次数
+
+name: Fuzz Test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 0 * * 6'  # 每周六 00:00 UTC
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Fuzz 迭代次数（如 1000, 10000, 100000）'
+        required: false
+        default: '10000'
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Determine fuzz iterations
+        id: iter
+        run: |
+          if [ -n "${{ github.event.inputs.iterations }}" ]; then
+            echo "value=${{ github.event.inputs.iterations }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=1000" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Fuzz Tests
+        env:
+          FUZZ_ITERATIONS: ${{ steps.iter.outputs.value }}
+        run: |
+          cargo test -p sz-rust-core --test fuzz -- --nocapture --test-threads=1
+
+      - name: Fuzz test summary
+        if: always()
+        run: |
+          echo "## Fuzz Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Iterations**: ${{ steps.iter.outputs.value }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target**: sz-rust-core (7 fuzz cases)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Coverage**: parse_path / HandlerRef / route_config / ApiResponse / ErrorCode / AppConfig / Validate" >> $GITHUB_STEP_SUMMARY

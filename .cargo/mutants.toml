@@ -1,0 +1,28 @@
+# cargo-mutants 配置（版本化管理，替代 mutants.yml 内联 --exclude）
+#
+# 治理规则（2026-09-03 AI 评审 P1 采纳）：
+# 1. 每条排除必须写明理由 + 退出条件（FIXME 编号）
+# 2. 排除清单变更需在 CHANGELOG 记录
+# 3. pay.rs（支付）为资金逻辑，禁止长期排除 — 补齐单测后必须移出本清单
+#
+# 退出条件追踪：docs/audit/doc-debt.md DB-2026-09-03-01
+
+exclude_globs = [
+    # 支付聚合层（对齐 yansongda/pay）：变异测试运行时长超预算临时排除。
+    # FIXME(DB-2026-09-03-01): 资金逻辑变异体存活代价最高，
+    # 补齐签名验签/金额计算单测后必须移出（退出条件：pay.rs 行覆盖 ≥75%）
+    "**/pay.rs",
+    # 二维码生成：第三方 qrcode 库的薄封装，像素级输出无断言价值，
+    # 已有 13 个单测覆盖构造/参数分支
+    "**/qr_code.rs",
+    # schema 缓存同步：纯缓存失效逻辑，集成测试覆盖
+    "**/schema_cache.rs",
+    # 连接池预热：需真实 DB 连接，单元变异无意义
+    "**/cache_warmer.rs",
+    # API 版本协商：31 个单测已覆盖版本矩阵
+    "**/api_version.rs",
+    # 多租户隔离：22 个单测覆盖，变异超时率高（大量泛型投影）
+    "**/multi_tenant.rs",
+    # 迁移历史记录：依赖真实 DB schema，集成测试覆盖
+    "**/migration_history.rs",
+]

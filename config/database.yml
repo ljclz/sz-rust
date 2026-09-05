@@ -1,0 +1,83 @@
+# 数据库配置 — 对齐 PHP config/database.php
+# 5 个连接：mysql(shop) / njszjt / ljclz / food / oceanbase
+# 安全策略：hostname/password/hostport 全部通过环境变量注入，YAML 仅保留非敏感默认值
+#
+# 环境变量覆盖格式（见 config.rs apply_env_overrides）：
+#   SZ_DB_{CONN}_HOSTNAME  → 覆盖主机名
+#   SZ_DB_{CONN}_HOSTPORT  → 覆盖端口
+#   SZ_DB_{CONN}_PASSWORD  → 覆盖密码
+
+default: mysql
+auto_timestamp: true
+datetime_format: "Y-m-d H:i:s"
+
+connections:
+  mysql:
+    type: mysql
+    hostname: "localhost"  # 通过环境变量 SZ_DB_MYSQL_HOSTNAME 注入实际地址
+    database: "shop"
+    username: "shop"
+    password: ""  # 通过环境变量 SZ_DB_MYSQL_PASSWORD 注入
+    hostport: 3306  # 通过环境变量 SZ_DB_MYSQL_HOSTPORT 注入（默认 MySQL 端口；sz300 服务不读此文件，直接读 SZ300_DB_PORT 环境变量，默认 3306）
+    charset: "utf8mb4"
+    prefix: "sz_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  njszjt:
+    type: mysql
+    hostname: "localhost"  # 通过环境变量 SZ_DB_NJSZJT_HOSTNAME 注入实际地址
+    database: "njszjt"
+    username: "njszjt"
+    password: ""  # 通过环境变量 SZ_DB_NJSZJT_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8mb4"
+    prefix: "soci_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  ljclz:
+    type: mysql
+    hostname: "localhost"  # 通过环境变量 SZ_DB_LJCLZ_HOSTNAME 注入实际地址
+    database: "ljclz"
+    username: "ljclz"
+    password: ""  # 通过环境变量 SZ_DB_LJCLZ_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8"
+    prefix: "ims_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  food:
+    type: mysql
+    hostname: "localhost"  # 通过环境变量 SZ_DB_FOOD_HOSTNAME 注入实际地址
+    database: "food"
+    username: "food"
+    password: ""  # 通过环境变量 SZ_DB_FOOD_PASSWORD 注入
+    hostport: 8802
+    charset: "utf8"
+    prefix: "sz_food_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true
+
+  oceanbase:
+    type: mysql
+    hostname: "localhost"  # 通过环境变量 SZ_DB_OCEANBASE_HOSTNAME 注入实际地址
+    database: "shop"
+    username: "shop@root"
+    password: ""  # 通过环境变量 SZ_DB_OCEANBASE_PASSWORD 注入
+    hostport: 2881
+    charset: "utf8mb4"
+    prefix: "sz_"
+    deploy: 0
+    rw_separate: false
+    fields_strict: true
+    break_reconnect: true

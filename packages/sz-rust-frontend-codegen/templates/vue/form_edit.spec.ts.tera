@@ -1,0 +1,9 @@
+import { mount } from '@vue/test-utils'
+import Edit from '../Edit.vue'
+
+describe('{{ module_name }} Edit', () => {
+  it('renders', () => {
+    const wrapper = mount(Edit)
+    expect(wrapper.exists()).toBe(true)
+  })
+})

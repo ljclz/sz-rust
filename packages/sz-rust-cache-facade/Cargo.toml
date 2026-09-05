@@ -1,0 +1,35 @@
+[package]
+name = "sz-rust-cache-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Cache facade for sz-rust framework — CacheDriver trait, Memory/Redis/Memcached/MultiLevel drivers"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["cache", "redis", "memcached", "thinkphp"]
+categories = ["caching"]
+
+[dependencies]
+# Cache trait + MemoryCache backend from sz-orm
+sz-rust-orm-facade = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+md-5 = { workspace = true }
+hex = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"]

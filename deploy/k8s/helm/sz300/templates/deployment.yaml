@@ -1,0 +1,123 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+    version: {{ .Values.image.tag }}
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: sz300-server
+  template:
+    metadata:
+      labels:
+        app: sz300-server
+        version: {{ .Values.image.tag }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8300"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: sz300-server
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http-metrics
+          containerPort: 8300
+          protocol: TCP
+        env:
+        - name: SZ300_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: jwt-secret
+        - name: SZ300_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: db-password
+        - name: SZ300_DB_HOST
+          value: "mysql-service"
+        - name: RUST_LOG
+          value: {{ .Values.rustLog | quote }}
+        securityContext:
+          allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+          readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+          privileged: false
+          capabilities:
+            drop:
+              - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-metrics
+          initialDelaySeconds: {{ .Values.probe.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probe.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probe.liveness.timeoutSeconds }}
+          failureThreshold: {{ .Values.probe.liveness.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http-metrics
+          initialDelaySeconds: {{ .Values.probe.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probe.readiness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probe.readiness.timeoutSeconds }}
+          failureThreshold: {{ .Values.probe.readiness.failureThreshold }}
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: http-metrics
+          periodSeconds: {{ .Values.probe.startup.periodSeconds }}
+          failureThreshold: {{ .Values.probe.startup.failureThreshold }}
+        resources:
+          requests:
+            memory: {{ .Values.resources.requests.memory | quote }}
+            cpu: {{ .Values.resources.requests.cpu | quote }}
+          limits:
+            memory: {{ .Values.resources.limits.memory | quote }}
+            cpu: {{ .Values.resources.limits.cpu | quote }}
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /var/log/sz300
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      {{- if .Values.logs.enabled }}
+      - name: logs
+        persistentVolumeClaim:
+          claimName: sz300-logs
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sz300-service
+  labels:
+    app: sz300-server
+spec:
+  selector:
+    app: sz300-server
+  ports:
+  - name: http
+    port: {{ .Values.service.port }}
+    targetPort: http-metrics
+    protocol: TCP
+  type: {{ .Values.service.type }}
