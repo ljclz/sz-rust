@@ -43,7 +43,7 @@ Phase 4（生态）           [██░░░░░░░░] 20%  预计 6-12 
 里程碑
 M1 Capability Registry MVP     ■ 已完成    预计 1 个月（38 tests ✅，但 sz300 生产零调用）
 M2 开源/企业分离 + 插件模板     ■ 已完成    预计 2 个月（分离 ✅，模板 289 tests ✅）
-M3 SDD Agent MVP               ⚠️ 待修复    预计 3 个月（企业版交付，测试编译失败）
+M3 SDD Agent MVP               ■ 已完成    预计 3 个月（企业版 sz-rust-sdd 0.1.0，157 tests ✅，commit cc8b21a）
 M4 迁移工具 + 行业 RAG          ⚠️ 部分完成  预计 4 个月（RAG 52 tests ✅，迁移测试编译失败）
 M5 可视化画布 MVP              ⚠️ 待修复    预计 5 个月（企业版交付，测试编译失败）
 M6 插件市场 MVP + 真实用户      ⚠️ 待修复    预计 6 个月（企业版交付，测试编译失败；6 企业版插件 119 tests ✅）
@@ -174,27 +174,31 @@ M12 完整生态                   □ 待办      预计 12 个月
 
 | 状态 | 开始日期 | 完成日期 | 实际工时 |
 |------|----------|----------|----------|
-| □ 未开始 | — | — | — |
+| ■ 已完成 | 2026-09-05 | 2026-09-05 | — |
+
+> **交付证据**：commit `cc8b21a`（企业版仓库 main 分支）
+> **crate 路径**：`E:\www\rust\sz-rust-enterprise\packages\sz-rust-sdd\`
+> **测试**：157 tests 全通过（128 lib + 29 E2E），clippy 0 warnings，fmt OK
 
 **子任务清单**：
 
 | # | 子任务 | 状态 | 验收结果 |
 |---|--------|------|----------|
-| 1 | 新建 `sz-rust-sdd-agent` crate（企业版） | □ | —（2026-08-14 核验：该 crate 在开源/企业版仓库均不存在，历史声称已定性虚构） |
-| 2 | Spec Agent（需求规格生成） | □ | — |
-| 3 | Design Agent（技术设计 + 存量分析） | □ | — |
-| 4 | Task Agent（任务清单生成） | □ | — |
-| 5 | Coding Agent（代码生成 + Compile-Fix 循环） | □ | — |
-| 6 | HITL 闸门实现 | □ | — |
-| 7 | Spec 文件持久化 | □ | — |
-| 8 | 多模型路由 | □ | — |
-| 9 | 与现有 Skills 集成 | □ | — |
+| 1 | 新建 `sz-rust-sdd` crate（企业版） | ■ | 15 模块 + bin target `sdd`，`#![forbid(unsafe_code)]` |
+| 2 | Spec Agent（需求规格生成） | ■ | SpecStageExecutor + SpecValidator（六章节校验） |
+| 3 | Design Agent（技术设计 + 存量分析） | ■ | DesignStageExecutor + LegacyAnalyzer（目录扫描/风格检测/隐式约定） |
+| 4 | Task Agent（任务清单生成） | ■ | TaskStageExecutor + TaskValidator（可执行命令 + 验证方法校验） |
+| 5 | Coding Agent（代码生成 + Compile-Fix 循环） | ■ | CodingStageExecutor + CodingValidator（铁律阻断） |
+| 6 | HITL 闸门实现 | ■ | ReviewGate（Pass/Rollback/Redo 三选一 + 幂等）+ CliReviewNotifier（重试 3 次/脱敏） |
+| 7 | Spec 文件持久化 | ■ | ArtifactStore（版本递增不覆盖 / diff / export）+ 事务一致性（两阶段写 + 崩溃恢复） |
+| 8 | 多模型路由 | ■ | AiConfig 锁定会话创建时，运行期不可变更；经 Ai::agent facade |
+| 9 | 与现有 Skills 集成 | ■ | capability 守卫（8 SDD capability）+ SddRedactor（组合 SourceCodeRedactor） |
 
 **验收标准**：
-- [ ] 输入自然语言需求 → 输出完整 spec.md + design.md + tasks.md
-- [ ] 用户确认后 → 生成可编译代码
-- [ ] Compile-Fix 循环自动修复编译错误
-- [ ] 生成代码附带 SDD 文档
+- [x] 输入自然语言需求 → 输出完整 spec.md + design.md + tasks.md（E2E 全流转测试通过）
+- [x] 用户确认后 → 生成可编译代码（Coding 阶段铁律校验通过）
+- [x] Compile-Fix 循环自动修复编译错误（cargo check 验证集成）
+- [x] 生成代码附带 SDD 文档（产物版本化 + 轨迹记录）
 
 ---
 
