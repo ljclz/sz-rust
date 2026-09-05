@@ -5613,9 +5613,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-auth"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c853893eb5c991dbcc2f32e5ae28c30c07eb449745d6d5fb0e71d73d2dc77e7"
+checksum = "b61e07f7242c1c5d23310b690b6d94aeaa65596c2e370162fc2b3dc76477e262"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5633,9 +5633,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6e16c59928074bb03e86d01ef407c39486a31e05eec8502c9b9f15f693019a8"
+checksum = "9ee52a0a73ee596868196d6814986b310ed8557d94b8c53d0b607f1b891e0fe0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5657,9 +5657,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-graphql"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3dc2f989d9e100e222afee12b87c633d9bc6f18b36b6d54f73e98909994f5e"
+checksum = "48a7081a1363ced7702e6eaf9a966cdc77e2a5033ea4a4b7fa0e20870a21e6c6"
 dependencies = [
  "serde",
  "serde_json",
@@ -5668,9 +5668,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-grpc"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0af5695b26d905b65e8ae0f1ddcba4cc8e130ac0de952efe1db586c8fa89bb"
+checksum = "d468d2a8bba18cb106823c4af664ba72b4426e9c725253bd3e9c79464c4b0209"
 dependencies = [
  "parking_lot",
  "serde",
@@ -5680,9 +5680,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-limit"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a61f7bd56913a64b162430938cfd0e5824ce5a062203b8d22a0daf55460737f5"
+checksum = "0ae9d920c201520b466ef9554476d7e2db8dd7f208d3021ce6865d61ae26fc65"
 dependencies = [
  "serde",
  "serde_json",
@@ -5690,9 +5690,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-logger"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e820fb3f690044dd775a976f65027754d25b6d5259a2bbc8a041fef666f1d463"
+checksum = "d0119fe4077c75b87f5fa5ab3fef8c97285e3db5e626c8438215b16a7c6ad1dd"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -5702,9 +5702,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-macros"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a545b31641487b63c8dcfa32a9940613e88e90411be5c1f20a86526a747501f"
+checksum = "4c8d4c0d0046d5bb53b5cd50f543b664e3a85e513753afbb2655d4a6f803b722"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5713,9 +5713,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mqtt"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ffb118b86a809bfdd6c385f96f08833c386d7b63404dbd86ba264c3e0b1dc37"
+checksum = "c719b67cd2d6bfdcf890a997585eef16838e1266f4d158d49bd39dc38b858379"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -5727,18 +5727,18 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-query-builder"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb0be283140c92d34a8d002b455c6a6ce4cc298e73409d303768d1e06a14d71a"
+checksum = "68467b7fae6d481f6c5bef9fa87722bf9d79dc7d65218eb4ed07cf72ba5be106"
 dependencies = [
  "sz-orm-core",
 ]
 
 [[package]]
 name = "sz-orm-queue"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00af971f1fc792e894e5cb18e0c8a4a478f756c50fe90901ab7a5cff48a39665"
+checksum = "56880681ceaba3ee57c83dffdd2605b69bbd987f33065d0c3ed6779b9b697174"
 dependencies = [
  "async-trait",
  "futures",
@@ -5750,9 +5750,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-scheduler"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b7ac5ab1d14a2dd0476479da757c8baf6f931f39dcc93eda93670ddea7471"
+checksum = "3813b3af114acbe51da5416ccb56f48ced5d4cf8dee7d8c9bb50e72ce6c94c2c"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5764,9 +5764,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sql-validator"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9f79c1360589d513dca4b0e5c137fd06705632c0ab74079ce3c4ad8d2204bdf"
+checksum = "cdd5d112bf9e8f6479db58f59c4022495a6c24e1f85e3526980537edac500b1a"
 dependencies = [
  "regex",
  "thiserror 2.0.20",
@@ -5774,9 +5774,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01d2f38f298166780d21d1f8d27005bd72bd7060d228072b0c82fb9d5bcc110e"
+checksum = "fd12bc0bf7cd1b65a7186f25ec4f3aba667028e98fb31faa097abb47f3c0f661"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -5790,9 +5790,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-storage"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e949e5f66928e948f125f9b923d341c071f677f89b8d9da9a4f6075fdf8a577"
+checksum = "9c744023435219b711d62eebf20de1067c7d4441f3397302945b01e797b274ea"
 dependencies = [
  "async-trait",
  "serde",
@@ -5803,9 +5803,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "113e52302fd9602222b9ded78632eea838d1d840cfa7775d0176ba4dcf0dfe3d"
+checksum = "223eda9406c47cdf60e5f65de3659d095728cf6f9557476ddf5a027d181e8cc6"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -5815,9 +5815,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-websocket"
-version = "5.0.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a14e10b19600a2d4adea54915a5f45482cef8bcd042958cb282492b5f65fced"
+checksum = "ec621857ffe701565cbf9f30b4228b7437cc788b04047a134e0c814d2389929e"
 dependencies = [
  "async-trait",
  "flate2",
