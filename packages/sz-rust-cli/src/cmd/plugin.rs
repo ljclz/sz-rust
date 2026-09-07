@@ -6,8 +6,13 @@
 //! 提供 `sz-rust plugin search/install/publish/uninstall/update/list/login` 七个子命令。
 
 use clap::{Args, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
+use tabled::{Table, Tabled};
 
 use crate::error::CliError;
+
+/// 默认市场 URL
+const DEFAULT_MARKET_URL: &str = "http://localhost:8080";
 
 /// 插件命令组
 #[derive(Subcommand, Debug)]
@@ -94,6 +99,9 @@ pub struct LoginArgs {
     /// 直接提供 token
     #[arg(long)]
     pub token: Option<String>,
+    /// 市场服务 URL
+    #[arg(long)]
+    pub url: Option<String>,
 }
 
 /// 执行插件命令
@@ -109,52 +117,206 @@ pub async fn execute(cmd: &PluginCommand) -> Result<i32, CliError> {
     }
 }
 
-async fn execute_search(args: &SearchArgs) -> Result<i32, CliError> {
-    println!("搜索插件: {}", args.keyword);
-    if !args.tags.is_empty() {
-        println!("标签过滤: {}", args.tags.join(", "));
+/// 解析标识符（name@version → (name, version)）
+fn parse_identifier(id: &str) -> (&str, &str) {
+    if let Some((name, version)) = id.split_once('@') {
+        (name, version)
+    } else {
+        (id, "latest")
     }
-    println!("（需要连接市场服务）");
+}
+
+/// 创建市场客户端（从凭证文件或默认 URL）
+async fn create_client() -> Result<sz_rust_marketplace::client::MarketplaceClient, CliError> {
+    match sz_rust_marketplace::client::MarketplaceClient::from_credentials().await {
+        Ok(client) => Ok(client),
+        Err(_) => Ok(sz_rust_marketplace::client::MarketplaceClient::new(
+            DEFAULT_MARKET_URL,
+            None,
+        )),
+    }
+}
+
+/// 搜索结果表格行
+#[derive(Tabled)]
+struct PluginRow {
+    name: String,
+    title: String,
+    author: String,
+    tags: String,
+    price: String,
+}
+
+async fn execute_search(args: &SearchArgs) -> Result<i32, CliError> {
+    let client = create_client().await?;
+
+    let tag = args.tags.first().map(|s| s.as_str());
+    let offset = ((args.page - 1) * args.page_size) as i64;
+
+    let response = client
+        .search(&args.keyword, tag, args.page_size as i64, offset)
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    if response.plugins.is_empty() {
+        println!("未找到匹配插件");
+        return Ok(0);
+    }
+
+    let rows: Vec<PluginRow> = response
+        .plugins
+        .iter()
+        .map(|p| PluginRow {
+            name: p.name.clone(),
+            title: p.title.clone(),
+            author: p.author.clone(),
+            tags: p.tags.join(", "),
+            price: if p.price == 0.0 {
+                "免费".to_string()
+            } else {
+                format!("¥{:.2}", p.price)
+            },
+        })
+        .collect();
+
+    let table = Table::new(rows);
+    println!("{table}");
+    println!("\n共 {} 个插件", response.total);
+
     Ok(0)
 }
 
 async fn execute_install(args: &InstallArgs) -> Result<i32, CliError> {
-    println!("安装插件: {}", args.identifier);
-    println!("（需要连接市场服务）");
+    let (name, version) = parse_identifier(&args.identifier);
+    let client = create_client().await?;
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner} [{elapsed}] {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    pb.set_message(format!("下载 {name}@{version}..."));
+
+    let archive = client
+        .install(name, version)
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    pb.finish_with_message(format!("已下载 {name}@{version} ({} bytes)", archive.len()));
+    println!("插件 {name}@{version} 安装成功");
+
     Ok(0)
 }
 
 async fn execute_publish(args: &PublishArgs) -> Result<i32, CliError> {
-    println!("发布插件: {}", args.path);
-    println!("（需要连接市场服务）");
+    let client = create_client().await?;
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner} [{elapsed}] {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    pb.set_message("发布中...".to_string());
+
+    client
+        .publish(&args.path)
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    pb.finish_with_message("发布请求已提交");
+    println!("插件已发布，等待审核");
+
     Ok(0)
 }
 
 async fn execute_uninstall(args: &UninstallArgs) -> Result<i32, CliError> {
-    println!("卸载插件: {}", args.identifier);
+    let (name, _) = parse_identifier(&args.identifier);
+    let client = create_client().await?;
 
-    println!("（需要企业版功能支持）");
+    client
+        .uninstall(name)
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    println!("插件 {name} 已卸载");
     Ok(0)
 }
 
 async fn execute_update(args: &UpdateArgs) -> Result<i32, CliError> {
-    println!("更新插件: {}", args.identifier);
-    println!("（需要连接市场服务）");
+    let (name, _) = parse_identifier(&args.identifier);
+    let client = create_client().await?;
+
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(
+        ProgressStyle::with_template("{spinner} [{elapsed}] {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    pb.set_message(format!("更新 {name}..."));
+
+    let archive = client
+        .update(name)
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    pb.finish_with_message(format!("已更新 {name} ({} bytes)", archive.len()));
+    println!("插件 {name} 更新成功");
+
     Ok(0)
 }
 
 async fn execute_list() -> Result<i32, CliError> {
-    println!("（需要企业版功能支持）");
+    let client = create_client().await?;
+
+    let entries = client
+        .list()
+        .await
+        .map_err(|e| CliError::Marketplace(e.to_string()))?;
+
+    if entries.is_empty() {
+        println!("未安装任何插件");
+        return Ok(0);
+    }
+
+    #[derive(Tabled)]
+    struct InstalledRow {
+        name: String,
+        version: String,
+        sha256: String,
+        installed_at: String,
+    }
+
+    let rows: Vec<InstalledRow> = entries
+        .iter()
+        .map(|e| InstalledRow {
+            name: e.name.clone(),
+            version: e.version.clone(),
+            sha256: e.sha256.chars().take(16).collect(),
+            installed_at: e.installed_at.format("%Y-%m-%d %H:%M").to_string(),
+        })
+        .collect();
+
+    let table = Table::new(rows);
+    println!("{table}");
+    println!("\n共 {} 个已安装插件", entries.len());
+
     Ok(0)
 }
 
 async fn execute_login(args: &LoginArgs) -> Result<i32, CliError> {
-    if let Some(_token) = &args.token {
-        println!("登录成功");
+    let url = args.url.as_deref().unwrap_or(DEFAULT_MARKET_URL);
+
+    if let Some(token) = &args.token {
+        let client = sz_rust_marketplace::client::MarketplaceClient::new(url, None);
+        client
+            .save_token(token)
+            .await
+            .map_err(|e| CliError::Marketplace(e.to_string()))?;
+        println!("登录成功（token 已保存）");
+        Ok(0)
     } else {
         println!("请提供 --token 参数");
+        Ok(1)
     }
-    Ok(0)
 }
 
 #[cfg(test)]
@@ -171,6 +333,7 @@ mod tests {
     async fn test_execute_login_with_token() {
         let args = LoginArgs {
             token: Some("test".into()),
+            url: Some("http://localhost:9999".into()),
         };
         let result = execute_login(&args).await;
         assert!(result.is_ok());
@@ -178,135 +341,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_login_without_token() {
-        let args = LoginArgs { token: None };
+        let args = LoginArgs {
+            token: None,
+            url: None,
+        };
         let result = execute_login(&args).await;
         assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
     }
 
-    #[tokio::test]
-    async fn test_execute_search_no_tags() {
-        let args = SearchArgs {
-            keyword: "orm".into(),
-            tags: vec![],
-            source: None,
-            sort: "relevance".into(),
-            page: 1,
-            page_size: 20,
+    #[test]
+    fn test_parse_identifier_with_version() {
+        let (name, version) = parse_identifier("orm@1.0.0");
+        assert_eq!(name, "orm");
+        assert_eq!(version, "1.0.0");
+    }
+
+    #[test]
+    fn test_parse_identifier_without_version() {
+        let (name, version) = parse_identifier("orm");
+        assert_eq!(name, "orm");
+        assert_eq!(version, "latest");
+    }
+
+    #[test]
+    fn test_plugin_row_tabled() {
+        let row = PluginRow {
+            name: "crm".to_string(),
+            title: "CRM".to_string(),
+            author: "alice".to_string(),
+            tags: "business".to_string(),
+            price: "免费".to_string(),
         };
-        let result = execute_search(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_search_with_tags() {
-        let args = SearchArgs {
-            keyword: "orm".into(),
-            tags: vec!["db".into(), "sql".into()],
-            source: Some("official".into()),
-            sort: "stars".into(),
-            page: 2,
-            page_size: 10,
-        };
-        let result = execute_search(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_install() {
-        let args = InstallArgs {
-            identifier: "orm@1.0".into(),
-        };
-        let result = execute_install(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_publish() {
-        let args = PublishArgs {
-            path: "/tmp/plugin.tar.gz".into(),
-            sign: "/tmp/key.pem".into(),
-            changelog: Some("v1.0 release".into()),
-        };
-        let result = execute_publish(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_uninstall() {
-        let args = UninstallArgs {
-            identifier: "orm".into(),
-        };
-        let result = execute_uninstall(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_update() {
-        let args = UpdateArgs {
-            identifier: "orm".into(),
-            version: Some("2.0".into()),
-        };
-        let result = execute_update(&args).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_search() {
-        let cmd = PluginCommand::Search(SearchArgs {
-            keyword: "k".into(),
-            tags: vec![],
-            source: None,
-            sort: "relevance".into(),
-            page: 1,
-            page_size: 20,
-        });
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_install() {
-        let cmd = PluginCommand::Install(InstallArgs {
-            identifier: "x".into(),
-        });
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_publish() {
-        let cmd = PluginCommand::Publish(PublishArgs {
-            path: "p".into(),
-            sign: "s".into(),
-            changelog: None,
-        });
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_uninstall() {
-        let cmd = PluginCommand::Uninstall(UninstallArgs {
-            identifier: "x".into(),
-        });
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_update() {
-        let cmd = PluginCommand::Update(UpdateArgs {
-            identifier: "x".into(),
-            version: None,
-        });
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_list() {
-        let cmd = PluginCommand::List;
-        assert!(execute(&cmd).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_execute_dispatch_login() {
-        let cmd = PluginCommand::Login(LoginArgs { token: None });
-        assert!(execute(&cmd).await.is_ok());
+        let table = Table::new(vec![row]);
+        let s = table.to_string();
+        assert!(s.contains("crm"));
+        assert!(s.contains("CRM"));
     }
 }

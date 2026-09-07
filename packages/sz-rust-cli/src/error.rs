@@ -105,6 +105,22 @@ pub enum CliError {
     /// P1-T3: 主表与从表同名
     #[error("Master table and slave table must be different")]
     MasterSlaveSame,
+
+    /// P2-2: 插件市场错误
+    #[error("Marketplace error: {0}")]
+    Marketplace(String),
+
+    /// P2-2: HTTP 请求错误
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    /// P2-2: TOML 序列化错误
+    #[error("TOML error: {0}")]
+    Toml(String),
+
+    /// P2-2: JSON 序列化错误
+    #[error("JSON error: {0}")]
+    Json(String),
 }
 
 impl From<clap::Error> for CliError {
