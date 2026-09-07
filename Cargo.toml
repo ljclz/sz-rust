@@ -34,6 +34,7 @@ members = [
 
     "packages/sz-rust-vector-db",
 
+    "packages/sz-rust-marketplace",
 ]
 
 [workspace.package]
@@ -218,6 +219,7 @@ sz-rust-pdf = { version = "1.2.0", path = "packages/sz-rust-pdf" }
 sz-rust-workflow = { version = "1.2.0", path = "packages/sz-rust-workflow" }
 sz-rust-wasm = { version = "1.2.0", path = "packages/sz-rust-wasm" }
 sz-rust-vector-db = { version = "1.2.0", path = "packages/sz-rust-vector-db" }
+sz-rust-marketplace = { version = "1.2.0", path = "packages/sz-rust-marketplace" }
 
 
 # Ed25519 签名（P3-T2 插件市场）
