@@ -188,6 +188,7 @@ sz-orm-config = "6.2.0"
 sz-orm-macros = "6.2.0"
 sz-orm-sql-validator = "6.2.0"
 sz-orm-sqlx = "6.2.0"
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
 sz-orm-query-builder = "6.2.0"
 sz-orm-graphql = "6.2.0"
 sz-orm-grpc = "6.2.0"

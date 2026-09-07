@@ -20,6 +20,9 @@ sz-rust-addons-loader = { workspace = true }
 sz-rust-capability = { workspace = true }
 sz-rust-core = { workspace = true }
 
+# 数据库
+sqlx = { workspace = true }
+
 # 异步运行时
 tokio = { workspace = true }
 # 序列化
