@@ -1,0 +1,52 @@
+[package]
+name = "sz-rust-visual"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 可视化画布 — Tauri 2.x 桌面应用，SDD 编排 + Capability + RAG + 预览"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "sz_rust_visual"
+
+[dependencies]
+# SZ-Rust 内部依赖
+sz-rust-capability = { workspace = true }
+sz-rust-rag = { workspace = true }
+
+# 异步运行时
+tokio = { workspace = true }
+async-trait = { workspace = true }
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+# �) 错误与工具
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+# Web 框架（预览服务静态文件）
+axum = { workspace = true }
+tower-http = { workspace = true }
+# MIME 类型推断
+mime_guess = { workspace = true }
+# Tauri 桌面应用框架
+tauri = { workspace = true, features = ["unstable"] }
+tauri-build = { workspace = true }
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[features]
+default = []
+# 企业版 SDD Agent 适配
+enterprise = []
+
+[lints.rust]
+unsafe_code = "forbid"
