@@ -9,6 +9,26 @@
 
 ### Added
 
+- **P2-3 画布 crate 骨架 + SddFacade trait**（2026-09-07）：
+  - 新建 `packages/sz-rust-visual/`，Tauri 2.x 桌面应用
+  - `error.rs`：VisualError 9 变体 + Serialize + error_code() 稳定错误码
+  - `sdd_facade.rs`：SddFacade trait（6 异步方法）+ MockSddFacade 开源版实现
+  - `models.rs`：PhaseEvent/SddSession/SddPhase/SddStatus/ReviewDecision/...
+  - 敏感字段 `#[serde(skip_serializing)]`
+
+- **P2-3 Tauri Command + Event Bridge + Preview**（2026-09-07）：
+  - `commands.rs`：10 个 `#[tauri::command]` 函数（sdd/cap/rag/preview）
+  - `event_bridge.rs`：SddEventBridge + tracing 日志转发 + 状态变更推送
+  - `preview.rs`：PreviewService::start/stop（axum 静态文件服务 + 随机端口）
+  - `lib.rs`：Tauri Builder 初始化 + run() 入口 + 10 个 command 注册
+
+- **P2-3 Tauri Builder + CI/CD**（2026-09-07）：
+  - `tauri.conf.json`：窗口 1280×800 + CSP 策略 + bundle 配置
+  - `build.rs`：tauri_build::build()
+  - `.github/workflows/visual-build.yml`：三端构建矩阵（Windows/macOS/Linux）
+  - `README.md`：Command/Event 清单 + 构建说明 + SddFacade trait 文档
+  - 全量测试：`cargo test -p sz-rust-visual` → 21 passed; 0 failed
+
 - **P2-2 插件市场 crate 骨架**（2026-09-07）：
   - 新建 `packages/sz-rust-marketplace/`，`#![forbid(unsafe_code)]`
   - `error.rs`：MarketplaceError 14 变体 + thiserror

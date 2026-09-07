@@ -3,10 +3,11 @@
 //
 //! 可视化画布错误枚举
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// 可视化画布错误
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Clone, Serialize, Deserialize, Error)]
 pub enum VisualError {
     /// SDD Agent 错误
     #[error("SDD error: {0}")]

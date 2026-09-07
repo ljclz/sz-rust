@@ -14,6 +14,10 @@ categories.workspace = true
 [lib]
 name = "sz_rust_visual"
 
+[[bin]]
+name = "sz-rust-visual"
+path = "src/main.rs"
+
 [dependencies]
 # SZ-Rust 内部依赖
 sz-rust-capability = { workspace = true }
