@@ -195,19 +195,19 @@ impl axum_extra::headers::Header for BearerToken {
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/plugins/search", get(search_plugins))
-        .route("/api/v1/plugins/:name", get(get_plugin))
+        .route("/api/v1/plugins/{name}", get(get_plugin))
         .route(
-            "/api/v1/plugins/:name/:version/download",
+            "/api/v1/plugins/{name}/{version}/download",
             get(download_plugin),
         )
         .route("/api/v1/plugins/publish", post(publish_plugin))
         .route("/api/v1/admin/reviews/pending", get(pending_reviews))
         .route(
-            "/api/v1/admin/reviews/:version_id/approve",
+            "/api/v1/admin/reviews/{version_id}/approve",
             post(approve_review),
         )
         .route(
-            "/api/v1/admin/reviews/:version_id/reject",
+            "/api/v1/admin/reviews/{version_id}/reject",
             post(reject_review),
         )
         .route("/api/v1/auth/login", post(login))
@@ -300,15 +300,57 @@ async fn download_plugin(
 async fn publish_plugin(
     State(state): State<AppState>,
     TypedHeader(token): TypedHeader<BearerToken>,
-) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    mut multipart: axum::extract::Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let claims = state.jwt.verify(&token.0).map_err(map_error)?;
 
-    tracing::info!(
-        developer_id = claims.sub,
-        "发布请求已接收（multipart 解析待 P2-2 任务组10 CLI 接线后完善）"
-    );
+    let mut manifest_json: Option<String> = None;
+    let mut archive_bytes: Option<bytes::Bytes> = None;
 
-    Ok(StatusCode::ACCEPTED)
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        map_error(MarketplaceError::InvalidManifest(format!(
+            "multipart 解析失败: {e}"
+        )))
+    })? {
+        let name = field.name().unwrap_or("").to_string();
+        let data = field.bytes().await.map_err(|e| {
+            map_error(MarketplaceError::InvalidManifest(format!(
+                "读取字段失败: {e}"
+            )))
+        })?;
+        match name.as_str() {
+            "manifest" => {
+                manifest_json = Some(String::from_utf8_lossy(&data).to_string());
+            }
+            "archive" => {
+                archive_bytes = Some(data);
+            }
+            _ => {}
+        }
+    }
+
+    let manifest_json = manifest_json.ok_or_else(|| {
+        map_error(MarketplaceError::InvalidManifest(
+            "缺少 manifest 字段".to_string(),
+        ))
+    })?;
+    let archive = archive_bytes.ok_or_else(|| {
+        map_error(MarketplaceError::InvalidManifest(
+            "缺少 archive 字段".to_string(),
+        ))
+    })?;
+
+    let manifest = crate::manifest::parse_manifest_json(&manifest_json).map_err(map_error)?;
+
+    let req = crate::service::PublishRequest {
+        manifest,
+        archive,
+        developer_id: claims.sub,
+    };
+
+    let version_id = state.service.publish(req).await.map_err(map_error)?;
+
+    Ok(Json(serde_json::json!({ "version_id": version_id })))
 }
 
 /// GET /api/v1/admin/reviews/pending — 需鉴权 + 审核员

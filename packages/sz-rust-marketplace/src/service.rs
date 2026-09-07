@@ -285,8 +285,10 @@ impl MarketplaceService {
             });
         }
 
-        let latest_version = self.versions.find_latest_by_plugin(0).await?;
-        let current_version = latest_version
+        let current_version = self
+            .versions
+            .find_by_id(req.version_id)
+            .await?
             .ok_or_else(|| MarketplaceError::InternalError("版本不存在".to_string()))?;
 
         if current_version.review_status != "pending" {

@@ -8297,6 +8297,7 @@ dependencies = [
  "bytes",
  "chrono",
  "ed25519-dalek",
+ "http-body-util",
  "jsonschema",
  "jsonwebtoken",
  "mockito",
