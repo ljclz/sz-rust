@@ -12,6 +12,9 @@
 - **API 客户端生成**：根据 OpenAPI spec 生成请求函数与 TypeScript 类型定义
 - **自定义模板**：Tera 模板引擎，支持自定义模板覆盖内置模板
 - **CLI 集成**：`sz-rust make:frontend` 子命令
+- **确定性生成**：相同输入产出字节级相同输出（文件列表按 path 字典序排序，模板上下文变量通过 Tera BTreeMap 有序注入）
+- **路径穿越防护**：所有写入路径经 `PathGuard::validate` 校验，拒绝绝对路径、`..` 组件和 null 字节，越界写入记入 `failed` 并输出 `tracing::warn!` 安全审计日志
+- **配置快照脱敏**：`GenerationReport.config` 字段存储生成配置快照，标注 `#[serde(skip_serializing)]` 排除 `model_dir`/`output_dir` 等敏感绝对路径
 
 ## 安装与依赖
 
@@ -195,4 +198,35 @@ force = false
 cargo test -p sz-rust-frontend-codegen
 ```
 
-71 个测试（52 单元 + 19 集成）全部通过。
+162 个测试（52 单元 + 23 集成 + 87 覆盖率）全部通过。
+
+## 确定性保证
+
+相同 `GenerationConfig` 连续两次调用 `CodegenService::generate` 产出的文件内容字节级相同：
+
+- 文件列表按 `path` 字典序排序（`service.rs` 中 `sort_by`）
+- 模板上下文变量通过 Tera `Context`（内部 BTreeMap）有序注入
+- 路由分组和 API 模块分组使用 `BTreeMap` 保证键有序
+
+验证测试：`test_deterministic_generation`
+
+## 路径穿越防护
+
+`FileWriter::write_batch` 对每个文件路径调用 `PathGuard::validate`：
+
+- 拒绝绝对路径（如 `/etc/passwd`）
+- 拒绝含 `..` 组件的路径（如 `../../etc/passwd`）
+- 拒绝含 null 字节的路径
+- 校验失败记入 `WriteResult.failed` 并输出 `tracing::warn!` 审计日志
+
+验证测试：`test_path_traversal_rejected`
+
+## 配置快照与脱敏
+
+`GenerationReport.config: Option<GenerationConfig>` 存储生成时的配置快照，标注 `#[serde(skip_serializing)]`：
+
+- Rust 结构体可直接访问 `report.config` 查看生成参数
+- 序列化为 JSON 时整个 config 字段被跳过，不含 `model_dir`/`output_dir` 等绝对路径
+- CLI 输出（`format_cli`）包含配置摘要（框架、UI 库、模型列表），输出目录显示"已脱敏"
+
+验证测试：`test_report_config_snapshot`

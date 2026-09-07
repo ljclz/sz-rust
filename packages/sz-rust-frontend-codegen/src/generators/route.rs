@@ -99,6 +99,7 @@ impl<'a> RouteGenerator<'a> {
             source_model: "router".to_string(),
             source_template: tmpl.to_string(),
             is_overwritten: false,
+            content,
         })
     }
 }

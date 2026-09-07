@@ -7,6 +7,30 @@
 
 ## [Unreleased] - 2026-09-05
 
+### Added
+
+- **P2-1 前端生成确定性补强**（2026-09-07）：
+  - `service.rs` 文件列表按 path 字典序排序，保证写入顺序稳定
+  - `GeneratedFile` 新增 `content` 字段（`#[serde(skip_serializing)]`），修复文件内容未传递至 FileWriter 的缺陷
+  - 新增 `test_deterministic_generation` 集成测试：相同配置连续两次生成，文件内容字节级相同
+  - 验证：`cargo test -p sz-rust-frontend-codegen --test integration_tests test_deterministic` 通过
+
+- **P2-1 路径穿越防护加固**（2026-09-07）：
+  - `file_writer.rs` 的 `PathGuard::validate` 改为以 `output_dir` 为基准校验，越界文件记入 `failed` 向量并输出 `tracing::warn!` 安全审计日志
+  - 新增 `test_path_traversal_rejected` 集成测试：构造 `../../etc/passwd` 路径，验证被拒绝且文件未创建
+  - 验证：`cargo test -p sz-rust-frontend-codegen --test integration_tests test_path_traversal` 通过
+
+- **P2-1 生成报告完整性**（2026-09-07）：
+  - `GenerationReport` 新增 `config: Option<GenerationConfig>` 字段（`#[serde(skip_serializing)]` 脱敏）
+  - `format_cli` 输出配置摘要（框架、UI 库、模型列表，输出目录显示"已脱敏"）
+  - 新增 `test_report_config_snapshot` 集成测试：断言 config 快照字段正确且 JSON 不含绝对路径
+  - 验证：`cargo test -p sz-rust-frontend-codegen --test integration_tests test_report_config_snapshot` 通过
+
+- **P2-1 生产接线验证**（2026-09-07）：
+  - 新增 `test_e2e_cli_produces_vue_project` 端到端测试：验证 `CodegenService::generate` 产出 `src/views/user/{Index,Show,Create,Edit}.vue` 且内容非空
+  - 验证：`cargo test -p sz-rust-frontend-codegen --test integration_tests test_e2e` 通过
+  - 全量测试：`cargo test -p sz-rust-frontend-codegen` → 162 passed; 0 failed（52 单元 + 23 集成 + 87 覆盖率）
+
 ### Changed
 
 - **P0-3 开源版/企业版物理分离**：
@@ -34,6 +58,15 @@
   - `ci.yml` db-integration job 改为 `if: false`（sz-rust-sz300 迁移至企业版）
   - `ci.yml` coverage job 改为 `continue-on-error: true`（暂不阻塞）
   - 企业版仓库 `.github/workflows/ci.yml` 和 `publish.yml` 创建
+
+- **sz300 覆盖率提升 phase2**（2026-09-06，更新 2026-09-07）：
+  - 新增 `tests/cov_supplement_test.rs`（40 个覆盖率补充测试，不依赖 Docker）
+  - 修复 Docker 测试基础设施：MySQL 容器等待条件、建表 SQL 注释跳过 bug、随机端口映射、连接重试、JWT+CSRF 认证
+  - 覆盖率：84.27%（--lib）→ 84.91%（含集成测试，服务器实测，排除 main.rs）
+  - 未覆盖路径清单：`docs/audit/sz300-cov-phase2-uncovered.md`
+  - 交付记录：`docs/audit/2026-09-06-sz300-cov-phase2-delivery.md`
+  - CI 阈值保持 85
+  - 注：phase1 基线 85.85% 含 Docker 测试，phase2 84.91% 为服务器实测（含修复后的 Docker 基础设施）；未达 90% 目标，差距 5.09%
 
 ### Removed
 

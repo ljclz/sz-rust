@@ -167,6 +167,7 @@ impl<'a> ApiClientGenerator<'a> {
                 source_model: module.clone(),
                 source_template: "api/module.ts.tera".to_string(),
                 is_overwritten: false,
+                content: api_content,
             });
 
             let types_content = self.engine.render("types/module.ts.tera", &context)?;
@@ -176,6 +177,7 @@ impl<'a> ApiClientGenerator<'a> {
                 source_model: module.clone(),
                 source_template: "types/module.ts.tera".to_string(),
                 is_overwritten: false,
+                content: types_content,
             });
         }
 
@@ -188,6 +190,7 @@ impl<'a> ApiClientGenerator<'a> {
                 source_model: "request".to_string(),
                 source_template: "utils/request.ts.tera".to_string(),
                 is_overwritten: false,
+                content,
             });
         }
 

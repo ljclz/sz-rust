@@ -54,6 +54,7 @@ impl<'a> ReactComponentGenerator<'a> {
                 source_model: model.name.clone(),
                 source_template: tmpl.to_string(),
                 is_overwritten: false,
+                content,
             });
         }
 

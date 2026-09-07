@@ -69,6 +69,7 @@ impl<'a> PermissionGenerator<'a> {
                 source_model: "permission".to_string(),
                 source_template: tmpl.to_string(),
                 is_overwritten: false,
+                content,
             });
         }
         Ok(files)

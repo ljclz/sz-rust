@@ -395,6 +395,7 @@ fn test_report_format_cli_with_generated_files() {
         source_model: "User".to_string(),
         source_template: "vue/list.vue.tera".to_string(),
         is_overwritten: false,
+        content: String::new(),
     });
     report.generated_files.push(GeneratedFile {
         path: PathBuf::from("src/views/user/Show.vue"),
@@ -402,6 +403,7 @@ fn test_report_format_cli_with_generated_files() {
         source_model: "User".to_string(),
         source_template: "vue/show.vue.tera".to_string(),
         is_overwritten: true,
+        content: String::new(),
     });
     let output = report.format_cli();
     assert!(output.contains("✓ 生成文件"));
@@ -1148,10 +1150,17 @@ async fn test_file_writer_batch_with_failure() {
     let files = vec![(PathBuf::from("../malicious.txt"), "content".to_string())];
 
     let result = FileWriter::write_batch(files, &output_dir, OverrideStrategy::Skip).await;
-    match result {
-        Err(err) => assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_PATH_TRAVERSAL"),
-        Ok(_) => panic!("expected error but got Ok"),
-    }
+    let wr = result.expect("write_batch 应返回 Ok，越界文件记入 failed");
+    assert_eq!(wr.failed.len(), 1, "路径穿越文件应记入 failed");
+    assert!(
+        wr.failed[0].0.to_string_lossy().contains(".."),
+        "被拒绝的路径应含 .."
+    );
+    assert!(
+        wr.failed[0].1.contains("路径穿越") || wr.failed[0].1.contains("PATH_TRAVERSAL"),
+        "失败消息应含路径穿越描述: {}",
+        wr.failed[0].1
+    );
 }
 
 #[tokio::test]

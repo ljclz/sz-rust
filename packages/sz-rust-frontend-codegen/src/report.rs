@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::GenerationConfig;
+
 /// 生成报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationReport {
@@ -26,6 +28,9 @@ pub struct GenerationReport {
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// 完成时间
     pub finished_at: chrono::DateTime<chrono::Utc>,
+    /// 生成配置快照（含敏感绝对路径，序列化时脱敏跳过）
+    #[serde(skip_serializing)]
+    pub config: Option<GenerationConfig>,
 }
 
 /// 已生成文件
@@ -41,6 +46,9 @@ pub struct GeneratedFile {
     pub source_template: String,
     /// 是否覆盖了已存在文件
     pub is_overwritten: bool,
+    /// 文件内容（序列化时跳过，避免报告过大）
+    #[serde(skip_serializing)]
+    pub content: String,
 }
 
 /// 跳过文件
@@ -89,6 +97,7 @@ impl GenerationReport {
             duration_ms: 0,
             started_at: now,
             finished_at: now,
+            config: None,
         }
     }
 
@@ -100,6 +109,13 @@ impl GenerationReport {
             "开始: {}  完成: {}  耗时: {}ms\n\n",
             self.started_at, self.finished_at, self.duration_ms
         ));
+
+        if let Some(cfg) = &self.config {
+            out.push_str(&format!(
+                "配置: 框架={:?} UI={:?} 模型={:?} 输出目录=（已脱敏）\n\n",
+                cfg.framework, cfg.ui_library, cfg.models
+            ));
+        }
 
         if !self.generated_files.is_empty() {
             out.push_str("✓ 生成文件:\n");

@@ -48,7 +48,16 @@ impl FileWriter {
         let mut failed = Vec::new();
 
         for (rel_path, content) in files {
-            PathGuard::validate(&rel_path, Path::new("."))?;
+            if let Err(e) = PathGuard::validate(&rel_path, output_dir) {
+                tracing::warn!(
+                    code = e.error_code(),
+                    path = %rel_path.display(),
+                    output_dir = %output_dir.display(),
+                    "路径穿越防护：拒绝越界写入"
+                );
+                failed.push((rel_path, e.to_string()));
+                continue;
+            }
             let full_path = output_dir.join(&rel_path);
             let exists = tokio::fs::try_exists(&full_path).await.unwrap_or(false);
 
@@ -68,6 +77,7 @@ impl FileWriter {
                     source_model: String::new(),
                     source_template: String::new(),
                     is_overwritten: exists,
+                    content,
                 }),
                 Err(e) => failed.push((rel_path, e.to_string())),
             }

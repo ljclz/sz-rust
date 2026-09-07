@@ -28,6 +28,7 @@ toml = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+tracing = { workspace = true }
 # 模板引擎
 tera = { workspace = true }
 # AST 解析

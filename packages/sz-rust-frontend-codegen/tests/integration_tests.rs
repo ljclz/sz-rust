@@ -516,6 +516,266 @@ async fn test_codegen_service_model_dir_not_found() {
     assert!(result.is_err());
 }
 
+// ── 端到端生产接线测试 ──
+
+#[tokio::test]
+async fn test_e2e_cli_produces_vue_project() {
+    let model_temp = tempfile::tempdir().unwrap();
+    let model_file = model_temp.path().join("user.rs");
+    tokio::fs::write(
+        &model_file,
+        r#"
+#[derive(Model)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    pub email: Option<String>,
+    pub created_at: DateTime,
+}
+"#,
+    )
+    .await
+    .unwrap();
+
+    let out_temp = tempfile::tempdir().unwrap();
+    let output_dir = out_temp.path().to_path_buf();
+
+    let config = GenerationConfig {
+        models: vec!["User".to_string()],
+        model_dir: model_temp.path().to_path_buf(),
+        framework: Framework::Vue,
+        ui_library: UiLibrary::ElementPlus,
+        output_dir: output_dir.clone(),
+        template_dir: None,
+        override_strategy: OverrideStrategy::Overwrite,
+        with_tests: false,
+        with_interceptors: false,
+        lazy_load: true,
+        force: true,
+    };
+
+    let service = CodegenService::new();
+    let report = service.generate(config).await.unwrap();
+    assert!(
+        report.failures.is_empty(),
+        "生成不应有失败: {:?}",
+        report.failures
+    );
+    assert!(!report.generated_files.is_empty(), "应生成至少一个文件");
+
+    let expected_files = [
+        "src/views/user/Index.vue",
+        "src/views/user/Show.vue",
+        "src/views/user/Create.vue",
+        "src/views/user/Edit.vue",
+    ];
+
+    for expected in &expected_files {
+        let full_path = output_dir.join(expected);
+        assert!(
+            full_path.exists(),
+            "预期文件未生成: {}",
+            full_path.display()
+        );
+        let content = tokio::fs::read_to_string(&full_path)
+            .await
+            .unwrap_or_default();
+        assert!(
+            !content.trim().is_empty(),
+            "文件内容不应为空: {}",
+            full_path.display()
+        );
+    }
+
+    let index_content = tokio::fs::read_to_string(output_dir.join("src/views/user/Index.vue"))
+        .await
+        .unwrap();
+    assert!(
+        index_content.contains("el-table") || index_content.contains("<template"),
+        "Index.vue 应含 Vue 模板内容"
+    );
+}
+
+// ── 报告完整性测试 ──
+
+#[tokio::test]
+async fn test_report_config_snapshot() {
+    let model_temp = tempfile::tempdir().unwrap();
+    let model_file = model_temp.path().join("user.rs");
+    tokio::fs::write(
+        &model_file,
+        r#"
+#[derive(Model)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+}
+"#,
+    )
+    .await
+    .unwrap();
+
+    let out_temp = tempfile::tempdir().unwrap();
+    let output_dir = out_temp.path().to_path_buf();
+
+    let config = GenerationConfig {
+        models: vec!["User".to_string()],
+        model_dir: model_temp.path().to_path_buf(),
+        framework: Framework::React,
+        ui_library: UiLibrary::AntDesignVue,
+        output_dir: output_dir.clone(),
+        template_dir: None,
+        override_strategy: OverrideStrategy::Overwrite,
+        with_tests: true,
+        with_interceptors: true,
+        lazy_load: false,
+        force: true,
+    };
+
+    let service = CodegenService::new();
+    let report = service.generate(config.clone()).await.unwrap();
+
+    let snap = report.config.as_ref().expect("config 快照应存在");
+    assert_eq!(snap.models, config.models);
+    assert_eq!(snap.framework, config.framework);
+    assert_eq!(snap.ui_library, config.ui_library);
+    assert_eq!(snap.with_tests, config.with_tests);
+
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(
+        !json.contains(output_dir.to_str().unwrap()),
+        "序列化 JSON 不应含 output_dir 绝对路径（脱敏）"
+    );
+    assert!(
+        !json.contains("model_dir"),
+        "序列化 JSON 不应含 model_dir 字段（config 已 skip_serializing）"
+    );
+}
+
+// ── 路径穿越防护测试 ──
+
+#[tokio::test]
+async fn test_path_traversal_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let output_dir = temp.path().join("output");
+    tokio::fs::create_dir_all(&output_dir).await.unwrap();
+
+    let malicious_files = vec![
+        (PathBuf::from("../../etc/passwd"), "malicious".to_string()),
+        (PathBuf::from("../../../tmp/evil.txt"), "evil".to_string()),
+    ];
+
+    let result =
+        FileWriter::write_batch(malicious_files, &output_dir, OverrideStrategy::Overwrite).await;
+    assert!(result.is_ok(), "write_batch 应返回 Ok，越界文件记入 failed");
+    let write_result = result.unwrap();
+    assert_eq!(write_result.failed.len(), 2, "两个路径穿越文件均应被拒绝");
+
+    for (path, _msg) in &write_result.failed {
+        assert!(
+            path.to_string_lossy().contains(".."),
+            "被拒绝的路径应含 ..: {:?}",
+            path
+        );
+    }
+
+    let passwd_path = temp.path().join("etc/passwd");
+    assert!(
+        !passwd_path.exists(),
+        "越界文件不应被创建: {:?}",
+        passwd_path
+    );
+
+    let evil_path = std::path::Path::new("/tmp/evil.txt");
+    let _ = evil_path;
+}
+
+// ── 确定性生成测试 ──
+
+#[tokio::test]
+async fn test_deterministic_generation() {
+    let model_temp = tempfile::tempdir().unwrap();
+    let model_file = model_temp.path().join("user.rs");
+    tokio::fs::write(
+        &model_file,
+        r#"
+#[derive(Model)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    pub email: Option<String>,
+    pub created_at: DateTime,
+}
+"#,
+    )
+    .await
+    .unwrap();
+
+    let out1 = tempfile::tempdir().unwrap();
+    let out2 = tempfile::tempdir().unwrap();
+
+    let make_config = |output_dir: PathBuf| GenerationConfig {
+        models: vec!["User".to_string()],
+        model_dir: model_temp.path().to_path_buf(),
+        framework: Framework::Vue,
+        ui_library: UiLibrary::ElementPlus,
+        output_dir,
+        template_dir: None,
+        override_strategy: OverrideStrategy::Overwrite,
+        with_tests: false,
+        with_interceptors: false,
+        lazy_load: true,
+        force: true,
+    };
+
+    let service = CodegenService::new();
+    let report1 = service
+        .generate(make_config(out1.path().to_path_buf()))
+        .await
+        .unwrap();
+    let report2 = service
+        .generate(make_config(out2.path().to_path_buf()))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report1.generated_files.len(),
+        report2.generated_files.len(),
+        "两次生成的文件数量应相同"
+    );
+
+    for (f1, f2) in report1
+        .generated_files
+        .iter()
+        .zip(report2.generated_files.iter())
+    {
+        assert_eq!(f1.path, f2.path, "文件路径应相同（确定性排序）");
+        assert_eq!(
+            f1.size_bytes, f2.size_bytes,
+            "文件大小应相同（确定性生成）: {:?}",
+            f1.path
+        );
+
+        let abs1 = out1.path().join(&f1.path);
+        let abs2 = out2.path().join(&f2.path);
+        let content1 = tokio::fs::read(&abs1).await.unwrap();
+        let content2 = tokio::fs::read(&abs2).await.unwrap();
+        assert_eq!(
+            content1, content2,
+            "文件内容应字节级相同（确定性生成）: {:?}",
+            f1.path
+        );
+    }
+
+    let paths1: Vec<_> = report1.generated_files.iter().map(|f| &f.path).collect();
+    let mut paths1_sorted = paths1.clone();
+    paths1_sorted.sort();
+    assert_eq!(
+        paths1, paths1_sorted,
+        "generated_files 应按 path 字典序排序"
+    );
+}
+
 // ── 辅助函数 ──
 
 fn create_test_model() -> ModelMetadata {

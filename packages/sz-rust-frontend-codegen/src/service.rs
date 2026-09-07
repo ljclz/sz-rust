@@ -74,7 +74,7 @@ impl CodegenService {
             match gen_result {
                 Ok(files) => {
                     for f in files {
-                        all_files.push((f.path.clone(), String::new()));
+                        all_files.push((f.path.clone(), f.content.clone()));
                         report.generated_files.push(f);
                     }
                 }
@@ -88,6 +88,9 @@ impl CodegenService {
                 }
             }
         }
+
+        all_files.sort_by(|a, b| a.0.cmp(&b.0));
+        report.generated_files.sort_by(|a, b| a.path.cmp(&b.path));
 
         let write_result =
             FileWriter::write_batch(all_files, &config.output_dir, config.override_strategy)
@@ -105,6 +108,7 @@ impl CodegenService {
 
         report.finished_at = chrono::Utc::now();
         report.duration_ms = (report.finished_at - report.started_at).num_milliseconds() as u64;
+        report.config = Some(config);
         Ok(report)
     }
 }
