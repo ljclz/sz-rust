@@ -9,6 +9,47 @@
 
 ### Added
 
+- **P2-2 插件市场 crate 骨架**（2026-09-07）：
+  - 新建 `packages/sz-rust-marketplace/`，`#![forbid(unsafe_code)]`
+  - `error.rs`：MarketplaceError 14 变体 + thiserror
+  - `manifest.rs`：MarketplaceManifest + serde flatten + JSON/TOML/PHP 三格式解析
+  - 依赖：ed25519-dalek + semver + jsonschema + sha2 + base64
+
+- **P2-2 Ed25519 签名 + 对象存储**（2026-09-07）：
+  - `signature.rs`：SignatureService Ed25519 签名/校验 + SHA256 + pubkey fingerprint
+  - `storage.rs`：ObjectStore async_trait + LocalObjectStore (tokio::fs)
+
+- **P2-2 数据访问层**（2026-09-07）：
+  - `repository.rs`：5 实体 + 5 Repository CRUD（sqlx，显式列投影，参数化绑定）
+  - 5 迁移脚本：developers / plugins / plugin_versions / review_records / install_records
+
+- **P2-2 核心服务编排**（2026-09-07）：
+  - `service.rs`：MarketplaceService publish/search/install/review
+  - `lockfile.rs`：LockfileManager read/write/update/remove (JSON)
+  - publish: SemVer 严格递增 + ObjectStore 上传 + SHA256 校验
+  - install: 下载 + SHA256 + Ed25519 签名验证 + 锁文件更新
+  - review: 审核员角色校验 + 自审禁止 + append-only 审核记录
+
+- **P2-2 Web 平台**（2026-09-07）：
+  - `web.rs`：axum 路由 10 端点 + JWT 鉴权 + OpenAPI 3.0 文档
+  - JWT: JwtConfig + JwtClaims + BearerToken typed header
+  - 管理类 API 需 Bearer token，公开 API 不需要
+  - 依赖：jsonwebtoken 10 + axum-extra 0.10 + tower-http
+
+- **P2-2 CLI 接线**（2026-09-07）：
+  - `client.rs`：MarketplaceClient 7 异步方法 (reqwest)
+  - token 持久化到 `~/.sz-rust/credentials.toml` (TOML)
+  - `plugin.rs`：7 个占位替换为 MarketplaceClient 调用
+  - tabled 表格输出 + indicatif 进度条
+  - 依赖：sz-rust-marketplace + tabled + indicatif
+
+- **P2-2 生产接线验证**（2026-09-07）：
+  - `docker-compose.yml`：三服务编排（marketplace-web + postgres-14 + minio）
+  - `Dockerfile`：多阶段构建（distroless 基础镜像）
+  - `tests/e2e_flow.sh`：端到端闭环测试脚本
+  - `README.md`：部署说明 + API 端点清单 + CLI 用法
+  - 全量测试：`cargo test -p sz-rust-marketplace` → 34 passed; 0 failed
+
 - **P2-1 前端生成确定性补强**（2026-09-07）：
   - `service.rs` 文件列表按 path 字典序排序，保证写入顺序稳定
   - `GeneratedFile` 新增 `content` 字段（`#[serde(skip_serializing)]`），修复文件内容未传递至 FileWriter 的缺陷
