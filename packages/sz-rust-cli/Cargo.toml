@@ -49,6 +49,7 @@ async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+mockito = "1"
 
 [lib]
 name = "sz_rust_cli"
