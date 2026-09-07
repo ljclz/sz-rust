@@ -84,6 +84,10 @@ simd-json = "0.13"
 # OpenAPI 文档生成
 utoipa = "5"
 utoipa-swagger-ui = "8"
+# JWT 鉴权
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+# axum 扩展提取器
+axum-extra = { version = "0.10", features = ["typed-header"] }
 # gRPC 支持
 tonic = "0.12"
 prost = "0.13"

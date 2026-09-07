@@ -199,6 +199,11 @@ impl MarketplaceService {
             .await
     }
 
+    /// 下载插件归档
+    pub async fn download_archive(&self, archive_key: &str) -> MarketplaceResult<Bytes> {
+        self.store.download(archive_key, None).await
+    }
+
     /// 安装插件
     ///
     /// 下载归档 → 验证 SHA256 + 签名 → 更新锁文件

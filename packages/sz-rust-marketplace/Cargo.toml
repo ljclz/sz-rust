@@ -47,12 +47,18 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 # Web 框架
 axum = { workspace = true }
+axum-extra = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
 # OpenAPI 文档
 utoipa = { workspace = true }
+# JWT 鉴权
+jsonwebtoken = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile = { workspace = true }
+mockito = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

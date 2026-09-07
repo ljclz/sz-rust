@@ -208,6 +208,35 @@ impl VersionRepository {
         Ok(row)
     }
 
+    pub async fn find_by_id(&self, version_id: i64) -> MarketplaceResult<Option<PluginVersion>> {
+        let row = sqlx::query_as::<_, PluginVersion>(
+            r#"SELECT id, plugin_id, version, archive_key, sha256, signature, review_status, changelog, created_at
+            FROM plugin_versions WHERE id = $1"#,
+        )
+        .bind(version_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| MarketplaceError::InternalError(format!("Version find_by_id: {e}")))?;
+        Ok(row)
+    }
+
+    pub async fn find_pending(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> MarketplaceResult<Vec<PluginVersion>> {
+        let rows = sqlx::query_as::<_, PluginVersion>(
+            r#"SELECT id, plugin_id, version, archive_key, sha256, signature, review_status, changelog, created_at
+            FROM plugin_versions WHERE review_status = 'pending' ORDER BY created_at LIMIT $1 OFFSET $2"#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| MarketplaceError::InternalError(format!("Version find_pending: {e}")))?;
+        Ok(rows)
+    }
+
     pub async fn update_review_status(
         &self,
         version_id: i64,
