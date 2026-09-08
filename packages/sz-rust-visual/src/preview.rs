@@ -5,12 +5,20 @@
 //!
 //! 扫描产物目录 → 启动临时 HTTP 服务 → WebView 窗口打开预览。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tower_http::services::ServeDir;
 
 use crate::error::{VisualError, VisualResult};
 use crate::models::DeviceType;
+
+/// 全局预览服务 shutdown 句柄表（url → 触发器）
+fn shutdown_handles() -> &'static Mutex<HashMap<String, Arc<tokio::sync::Notify>>> {
+    static HANDLES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// 预览服务
 pub struct PreviewService;
@@ -44,20 +52,44 @@ impl PreviewService {
             .await
             .map_err(|e| VisualError::IoError(format!("绑定端口失败: {e}")))?;
 
+        let url = format!("http://127.0.0.1:{port}");
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        shutdown_handles()
+            .lock()
+            .map_err(|_| VisualError::InternalError("预览句柄表锁中毒".into()))?
+            .insert(url.clone(), Arc::clone(&shutdown));
+
         tracing::info!("预览服务启动: feature={feature}, port={port}, viewport={width}x{height}");
 
+        let shutdown_for_task = Arc::clone(&shutdown);
         tokio::spawn(async move {
-            let _ = axum::serve(listener, app).await;
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    shutdown_for_task.notified().await;
+                })
+                .await;
         });
 
-        Ok(format!("http://127.0.0.1:{port}"))
+        Ok(url)
     }
 
-    /// 停止预览
-    ///
-    /// 前端关闭 WebView 窗口即可，HTTP 服务随 task 结束自动释放。
-    pub async fn stop(_url: &str) -> VisualResult<()> {
-        Ok(())
+    /// 停止预览（真实关闭 HTTP 服务并释放端口）
+    pub async fn stop(url: &str) -> VisualResult<()> {
+        let handle = shutdown_handles()
+            .lock()
+            .map_err(|_| VisualError::InternalError("预览句柄表锁中毒".into()))?
+            .remove(url);
+
+        match handle {
+            Some(notify) => {
+                notify.notify_waiters();
+                tracing::info!("预览服务已停止: {url}");
+                Ok(())
+            }
+            None => Err(VisualError::ArtifactNotFound(format!(
+                "预览服务不存在: {url}"
+            ))),
+        }
     }
 }
 
@@ -105,8 +137,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_preview_stop() {
+    async fn test_preview_stop_nonexistent_url() {
         let result = PreviewService::stop("http://127.0.0.1:9999").await;
-        assert!(result.is_ok());
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_preview_start_then_stop_releases_port() {
+        // 准备临时产物目录（测试后清理）
+        let temp = std::env::temp_dir().join("sz-visual-preview-test");
+        tokio::fs::create_dir_all(&temp).await.unwrap();
+        tokio::fs::write(temp.join("index.html"), "<html>ok</html>")
+            .await
+            .unwrap();
+
+        // start 需要在 artifacts/{feature} 下查找，切到临时工作目录模拟
+        let cwd = std::env::current_dir().unwrap();
+        let artifacts_root = cwd.join("artifacts");
+        let feature_dir = artifacts_root.join("test-feature-xyz");
+        tokio::fs::create_dir_all(&feature_dir).await.unwrap();
+        tokio::fs::write(feature_dir.join("index.html"), "<html>ok</html>")
+            .await
+            .unwrap();
+
+        let url = PreviewService::start("test-feature-xyz", DeviceType::Desktop)
+            .await
+            .unwrap();
+
+        // 验证 HTTP 服务可访问
+        let probe = tokio::net::TcpStream::connect(url.trim_start_matches("http://"))
+            .await
+            .unwrap();
+        drop(probe);
+
+        // stop 后端口应已释放
+        PreviewService::stop(&url).await.unwrap();
+
+        // 清理临时产物目录
+        tokio::fs::remove_dir_all(&artifacts_root).await.unwrap();
+        tokio::fs::remove_dir_all(&temp).await.unwrap();
     }
 }

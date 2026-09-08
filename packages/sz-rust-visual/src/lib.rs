@@ -16,14 +16,22 @@ pub mod sdd_facade;
 
 use std::sync::Arc;
 
+use sz_rust_capability::CapabilityRegistry;
+
 use crate::sdd_facade::MockSddFacade;
 
 /// 启动 Tauri 应用
 pub fn run() -> error::VisualResult<()> {
     let sdd_facade: Arc<dyn sdd_facade::SddFacade> = Arc::new(MockSddFacade::new());
 
+    let registry = Arc::new(CapabilityRegistry::new());
+    let registered = sz_rust_capability::builtin::register_mcp_tools(&registry)
+        .map_err(|e| error::VisualError::CapError(e.to_string()))?;
+    tracing::info!("画布注册内置 MCP 能力: {registered:?}");
+
     tauri::Builder::default()
         .manage(sdd_facade)
+        .manage(registry)
         .invoke_handler(tauri::generate_handler![
             commands::sdd_start,
             commands::sdd_submit_review,
