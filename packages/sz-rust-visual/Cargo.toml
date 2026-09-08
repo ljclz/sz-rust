@@ -47,6 +47,9 @@ tauri-build = { workspace = true }
 [build-dependencies]
 tauri-build = { workspace = true }
 
+[dev-dependencies]
+reqwest = { workspace = true }
+
 [features]
 default = []
 # 企业版 SDD Agent 适配
