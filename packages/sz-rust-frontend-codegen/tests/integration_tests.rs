@@ -685,9 +685,6 @@ async fn test_path_traversal_rejected() {
         "越界文件不应被创建: {:?}",
         passwd_path
     );
-
-    let evil_path = std::path::Path::new("/tmp/evil.txt");
-    let _ = evil_path;
 }
 
 // ── 确定性生成测试 ──

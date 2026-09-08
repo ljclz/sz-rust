@@ -143,8 +143,7 @@ async fn e2e_sdd_read_artifact() {
         .read_artifact(&session.session_id, SddPhase::Spec)
         .await
         .expect("read_artifact 应成功");
-    // MockSddFacade 返回空字符串（开源版无真实产物）
-    assert!(artifact.is_empty() || !artifact.is_empty());
+    assert!(artifact.is_empty(), "MockSddFacade 应返回空字符串");
 }
 
 #[tokio::test]
@@ -386,7 +385,6 @@ async fn e2e_complete_four_phase_orchestration() {
             .read_artifact(&session_id, *phase)
             .await
             .expect("读取产物应成功");
-        // MockSddFacade 返回空字符串（开源版无真实产物）
-        let _ = artifact;
+        assert!(artifact.is_empty(), "MockSddFacade 应返回空字符串");
     }
 }
