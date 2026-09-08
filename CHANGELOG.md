@@ -5,6 +5,55 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-08
+
+### Added
+
+- **P2-3 端到端全流程集成测试**（2026-09-08，`ca19a2f`）：
+  - `tests/e2e_flow.rs`：12 个 e2e 测试覆盖 SDD 编排全流程
+  - SDD: start → submit_review (Confirm/Modify/Supplement) → status → cancel → read_artifact → subscribe_events
+  - 预览: start/stop HTTP 可访问性 (reqwest 真实请求) + 三种设备 viewport + ARTIFACT_NOT_FOUND
+  - Capability: mcp.url_decode 真实调用 + 列表非空验证
+  - 模型: PhaseEvent 序列化 + SddSession trace_id 脱敏
+  - 验证：`cargo test -p sz-rust-visual` → 38 passed (26 unit + 12 e2e); 0 clippy warnings
+
+- **P2-3 Vue 3 前端应用**（2026-09-08，`5abefb5`）：
+  - 完整组件树：Workbench → Canvas → 7 面板（Requirement/Spec/Design/TaskBoard/Log/Preview/Plugin）
+  - 3 个 Pinia store：sdd.ts / capability.ts / plugin.ts
+  - Tauri API 封装：invoke/listen 类型安全包装
+  - i18n：中英文资源文件
+  - 验证：`npm run build` → 66 modules, 148KB JS
+
+- **P2-2 CLI plugin 行为集成测试**（2026-09-08，`226fce3`）：
+  - `tests/plugin_behavior.rs`：9 个 mockito 端到端测试
+  - 覆盖：search（有结果/空/服务器错误）、install（成功/404）、uninstall、update、login（有/无 token）
+  - 验证：`cargo test -p sz-rust-cli` → 363 passed (344 unit + 9 plugin_behavior + 10 template)
+
+- **P2-2 Marketplace Web 端点测试**（2026-09-08，`d9caa4e`）：
+  - `tests/web_tests.rs`：10 个 HTTP 端点测试（health/openapi/login/publish/pending/approve/search/get_plugin/auth_flow/non_reviewer）
+  - `tests/client_tests.rs`：9 个 mockito 客户端测试（search/search_tag/search_error/install/install_404/uninstall/list/update/login）
+  - 验证：`cargo test -p sz-rust-marketplace` → 53 passed (34 unit + 9 client + 10 web)
+
+- **P2-3 用户手册**（2026-09-08）：
+  - `docs/user/visual-canvas-guide.md`：画布使用流程、HITL 审查说明、预览功能、Capability 管理、故障排除
+
+### Fixed
+
+- **P2-3 cap_list/cap_call/rag_search 真实接线**（2026-09-08，`3e10147`）：
+  - `commands.rs`：cap_list 接线 CapabilityRegistry::list_info()，cap_call 接线 registry.call()，rag_search 接线 IndustryRag::instance()
+  - `preview.rs`：preview_stop 实现真实优雅关闭（tokio::sync::Notify + axum graceful_shutdown）
+  - `lib.rs`：CapabilityRegistry 注册内置 MCP 工具
+  - 验证：`cargo test -p sz-rust-visual --lib` → 26 passed; 0 failed
+
+- **P2-2 service.review() bug 修复**（2026-09-08，`d9caa4e`）：
+  - `service.rs`：review() 方法从硬编码 `find_latest_by_plugin(0)` 修复为 `find_by_id(req.version_id)`
+
+- **P2-2 publish_plugin 多部分解析实现**（2026-09-08，`d9caa4e`）：
+  - `web.rs`：publish_plugin 从占位替换为 multipart 解析（manifest + archive）
+
+- **P2-2 axum 0.8 路由语法修复**（2026-09-08，`d9caa4e`）：
+  - `web.rs`：路由参数语法从 `:name` 修复为 `{name}`（axum 0.8 breaking change）
+
 ## [Unreleased] - 2026-09-05
 
 ### Added

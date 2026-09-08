@@ -7,15 +7,24 @@
 ```
 sz-rust-visual/
 ├── src/
-│   ├── lib.rs          # Tauri Builder + run() 入口
+│   ├── lib.rs          # Tauri Builder + run() 入口 + CapabilityRegistry 注册
 │   ├── main.rs         # binary 入口
 │   ├── error.rs        # VisualError 9 变体 + Serialize + error_code()
 │   ├── sdd_facade.rs   # SddFacade trait (6 异步方法) + MockSddFacade
 │   ├── models.rs       # PhaseEvent/SddSession/SddPhase/SddStatus/...
-│   ├── commands.rs     # 10 个 #[tauri::command] 函数
+│   ├── commands.rs     # 10 个 #[tauri::command] 函数（真实接线）
 │   ├── event_bridge.rs # SddEventBridge + tracing 日志转发
-│   └── preview.rs      # PreviewService (axum 静态文件服务)
-├── frontend/           # Vue 3 前端（待实现）
+│   └── preview.rs      # PreviewService (axum 静态文件服务 + 优雅关闭)
+├── frontend/           # Vue 3 前端（已实现）
+│   ├── src/
+│   │   ├── api/tauri.ts           # Tauri invoke/listen 封装
+│   │   ├── stores/                # Pinia stores (sdd/capability/plugin)
+│   │   ├── components/            # Workbench + Canvas + 7 面板
+│   │   └── i18n/                  # 中英文 i18n 资源
+│   ├── package.json              # Vue 3 + Vite 4 + Pinia + Tauri API
+│   └── vite.config.ts            # Vite 构建配置
+├── tests/
+│   └── e2e_flow.rs     # 端到端全流程集成测试（12 个测试）
 ├── tauri.conf.json     # Tauri 配置（窗口/CSP/bundle）
 ├── build.rs            # tauri_build::build()
 └── icons/              # 应用图标
@@ -87,7 +96,7 @@ cargo tauri build --target x86_64-unknown-linux-gnu
 
 `.github/workflows/visual-build.yml` 三端矩阵构建，产物上传 GitHub Releases。
 
-## 前端开发（待实现）
+## 前端开发
 
 ```bash
 cd packages/sz-rust-visual/frontend
@@ -98,12 +107,42 @@ npm run build  # 生产构建
 
 组件树：Workbench → Canvas → {RequirementPanel, SpecPanel, DesignPanel, TaskBoard, LogPanel, PreviewPanel, PluginPanel}
 
+### Pinia Stores
+
+| Store | 职责 |
+|-------|------|
+| `sdd.ts` | SDD 编排状态管理（start/submitReview/cancel/status/readArtifact） |
+| `capability.ts` | Capability 列表与调用（capList/capCall/ragSearch） |
+| `plugin.ts` | 插件市场交互（search/install/uninstall/update/login） |
+
 ## 测试
 
 ```bash
+# 全量测试
 cargo test -p sz-rust-visual
-# 21 passed; 0 failed
+# 38 passed; 0 failed (26 unit + 12 e2e)
+
+# 仅端到端测试
+cargo test -p sz-rust-visual --test e2e_flow
+# 12 passed; 0 failed
 ```
+
+### 端到端测试覆盖
+
+| 测试 | 验证内容 |
+|------|---------|
+| `e2e_sdd_full_flow_start_review_complete` | SDD 启动 → 四阶段 HITL 审查 → 状态查询 |
+| `e2e_sdd_review_with_modify_decision` | Modify/Supplement 审查决定 |
+| `e2e_sdd_cancel_session` | 取消编排 |
+| `e2e_sdd_read_artifact` | 读取产物 |
+| `e2e_sdd_subscribe_events` | 事件订阅 |
+| `e2e_preview_start_http_accessible_stop_releases` | 预览 HTTP 服务可访问 + stop 释放端口 |
+| `e2e_preview_device_viewport_variants` | Desktop/Tablet/Mobile 三种设备 |
+| `e2e_preview_artifact_not_found` | 产物不存在时返回 ARTIFACT_NOT_FOUND |
+| `e2e_capability_list_and_call` | Capability 列表 + mcp.url_decode 真实调用 |
+| `e2e_phase_event_serialization` | PhaseEvent 序列化/反序列化 |
+| `e2e_sdd_session_trace_id_skip_serializing` | trace_id 脱敏验证 |
+| `e2e_complete_four_phase_orchestration` | 完整四阶段编排模拟 |
 
 ## 设计约束
 
