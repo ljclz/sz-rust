@@ -2,7 +2,7 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-09-09
+> **最后更新**：2026-09-10
 
 ---
 
@@ -437,6 +437,7 @@ Trace → BodySizeLimit → IpAccessControl → SecurityHeaders → Cors → Log
 | 2026-09-09 | 生产接线验证完成：sz300 (8300) + marketplace (8080) 运行中，15 模块已接线 | AI Agent |
 | 2026-09-09 | P2 生态件部署验证：marketplace 7 API 端点全部验证通过 | AI Agent |
 | 2026-09-09 | 文档同步：implementation-progress.md 更新 Phase 1-4 进度 + M1-M7 里程碑状态 | AI Agent |
+| 2026-09-10 | 数据权限扩展功能交付：P0 基礎层（89 tests）+ P1 核心层（44 tests）+ P2 接入层（810 tests total）；HotReloadManager + ConfigLoader + 13 管理 API 端点；clippy 0 warnings；CI 门禁通过 | AI Agent |
 | 2026-09-09 | workspace 全量 lib 测试基线：5185 passed, 0 failed, 2 ignored；clippy 0 warnings；fmt 0 差异 | AI Agent |
 
 ---
@@ -448,7 +449,7 @@ Trace → BodySizeLimit → IpAccessControl → SecurityHeaders → Cors → Log
 1. **M12 完整生态**（最后里程碑）
    - 多租户 SaaS 支持
    - 配套 Admin 前端模板
-   - 数据权限（行级/字段级）
+   - ~~数据权限（行级/字段级）~~ ✅ 已完成（2026-09-10，基础层 + 扩展层）
    - 开发者社区建设
 
 2. **Cloudsmith 企业版发布**（P0-3 组10.2，用户暂缓）
@@ -459,6 +460,49 @@ Trace → BodySizeLimit → IpAccessControl → SecurityHeaders → Cors → Log
 - [ ] 是否启动 M12 完整生态里程碑？
 - [ ] Cloudsmith 企业版发布何时配置？
 - [ ] 是否需要新的功能需求？
+
+---
+
+## 2026-09-10 更新：数据权限扩展功能 — 动态策略热更新 + 配置文件加载 + 管理后台 API
+
+> **状态**：✅ 全部完成（P0 基础层 + P1 核心层 + P2 接入层 + CI 门禁 + 文档同步）
+> **SDD 规格文档**：`.codeartsdoer/specs/data_permission_ext/`（spec.md 533行 + design.md 1060行 + tasks.md 325行）
+
+### 交付清单
+
+| 层级 | 模块 | 文件 | 测试 | 状态 |
+|------|------|------|------|------|
+| **基础层** | 行级数据权限 | `data_scope/rule.rs` / `registry.rs` / `modes/` | 94 tests | ✅ |
+| **基础层** | 字段级数据权限 | `data_scope/field_scope/` | 含于上方 | ✅ |
+| **基础层** | 数据权限中间件 | `middleware-facade/data_scope.rs` | 4 e2e | ✅ |
+| **P0 基礎** | ext 子模块 | `data_scope/ext/{generation,notifier,audit,path_guard}.rs` | 含于 89 | ✅ |
+| **P0 基礎** | Registry 扩展 | `rule.rs` / `registry.rs` / `field_scope/policy.rs` / `custom.rs` | 含于 89 | ✅ |
+| **P0 基礎** | Error 13 变体 | `error.rs` | 含于 89 | ✅ |
+| **P0 基礎** | Metrics 扩展 | `metrics.rs` | 含于 89 | ✅ |
+| **P1 核心** | HotReloadManager | `ext/hot_reload.rs` | 含于 44 | ✅ |
+| **P1 核心** | ConfigLoader | `ext/config_loader.rs` | 含于 44 | ✅ |
+| **P2 接入** | 管理 API 13 端点 | `data_perm_admin/{router,handlers,guard,error_response}.rs` | 25 api | ✅ |
+| **P2 接入** | E2E 测试 | `tests/data_perm_ext_e2e.rs` / `tests/data_perm_admin_api.rs` | 18 + 25 | ✅ |
+
+### 验证汇总
+
+| 验证项 | 结果 |
+|--------|------|
+| `cargo test -p sz-rust-orm-facade` | 230 passed（184 lib + 46 e2e） |
+| `cargo test -p sz-rust-middleware-facade` | 580 passed（551 lib + 25 api + 4 e2e） |
+| `cargo clippy` | 0 warnings |
+| CI 门禁（std::fs / dead_code / unsafe） | 全部通过 |
+| 向后兼容回归 | 0 regressions |
+
+### 关键设计决策
+
+1. **世代号（PolicyGeneration）**：`AtomicU64` SeqCst 单调递增，每次策略变更自增，用于缓存失效判断
+2. **变更通知（ChangeNotifier）**：`tokio::sync::broadcast` channel，热更新时广播 ChangeEvent
+3. **并发安全**：`CustomGeneratorRegistry` 从 `HashMap + Mutex` 改为 `DashMap`，消除 `register_mut` 旧接口
+4. **配置加载安全**：`PathGuard` 白名单校验防路径穿越，文件大小上限防 OOM，部分失败策略（合法条目正常注册）
+5. **管理 API 鉴权**：`admin_guard_middleware` 从 request extensions 提取管理员标识，非管理员返回 403
+6. **错误映射**：`ApiErrorResponse` 将 `DataScopeError` 13 变体映射到 HTTP 状态码（400/403/404/409/500）
+7. **中间件不阻断**：安全降级策略 — 无 UserContext 时注入默认值，不返回 401
 
 ---
 

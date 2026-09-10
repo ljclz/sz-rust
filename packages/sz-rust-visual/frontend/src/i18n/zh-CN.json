@@ -1,62 +1,62 @@
 {
-  "app": {
-    "title": "SZ-Rust 画布",
-    "menu": {
-      "file": "文件",
-      "edit": "编辑",
-      "view": "视图",
-      "help": "帮助"
-    }
-  },
-  "panel": {
-    "requirement": "需求描述",
-    "spec": "规格文档",
-    "design": "设计文档",
-    "tasks": "任务看板",
-    "log": "实时日志",
-    "preview": "应用预览",
-    "plugin": "插件管理"
-  },
-  "sdd": {
-    "start": "启动编排",
-    "cancel": "取消编排",
-    "approve": "通过",
-    "reject": "驳回",
-    "comment": "审查意见",
-    "phase": {
-      "requirement": "需求阶段",
-      "spec": "规格阶段",
-      "design": "设计阶段",
-      "task": "任务阶段"
+    "app": {
+        "title": "SZ-Rust 画布",
+        "menu": {
+            "file": "文件",
+            "edit": "编辑",
+            "view": "视图",
+            "help": "帮助"
+        }
     },
-    "status": {
-      "idle": "空闲",
-      "running": "运行中",
-      "awaiting_review": "待审查",
-      "completed": "已完成",
-      "cancelled": "已取消",
-      "failed": "失败"
+    "panel": {
+        "requirement": "需求描述",
+        "spec": "规格文档",
+        "design": "设计文档",
+        "tasks": "任务看板",
+        "log": "实时日志",
+        "preview": "应用预览",
+        "plugin": "插件管理"
+    },
+    "sdd": {
+        "start": "启动编排",
+        "cancel": "取消编排",
+        "approve": "通过",
+        "reject": "驳回",
+        "comment": "审查意见",
+        "phase": {
+            "requirement": "需求阶段",
+            "spec": "规格阶段",
+            "design": "设计阶段",
+            "task": "任务阶段"
+        },
+        "status": {
+            "idle": "空闲",
+            "running": "运行中",
+            "awaiting_review": "待审查",
+            "completed": "已完成",
+            "cancelled": "已取消",
+            "failed": "失败"
+        }
+    },
+    "capability": {
+        "title": "能力列表",
+        "call": "调用",
+        "args": "参数",
+        "result": "结果"
+    },
+    "plugin": {
+        "enable": "启用",
+        "disable": "禁用",
+        "configure": "配置",
+        "version": "版本"
+    },
+    "preview": {
+        "start": "启动预览",
+        "stop": "停止预览",
+        "device": {
+            "desktop": "桌面",
+            "tablet": "平板",
+            "mobile": "手机"
+        }
     }
-  },
-  "capability": {
-    "title": "能力列表",
-    "call": "调用",
-    "args": "参数",
-    "result": "结果"
-  },
-  "plugin": {
-    "enable": "启用",
-    "disable": "禁用",
-    "configure": "配置",
-    "version": "版本"
-  },
-  "preview": {
-    "start": "启动预览",
-    "stop": "停止预览",
-    "device": {
-      "desktop": "桌面",
-      "tablet": "平板",
-      "mobile": "手机"
-    }
-  }
 }

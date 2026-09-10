@@ -34,13 +34,30 @@ impl ModeEvaluator for DeptAndSubMode {
         let field = rule.dept_field.as_deref().ok_or_else(|| {
             DataScopeError::InvalidRule("DEPT_AND_SUB mode requires dept_field".into())
         })?;
-        let dept_ids = self.dept_cache.get_with_sub(ctx.dept_id).await?;
-        let values: Vec<Value> = dept_ids.into_iter().map(Value::I64).collect();
-        Ok(vec![WhereCondition::new(
-            field,
-            WhereOp::In,
-            Value::Array(values),
-        )])
+        match self.dept_cache.get_with_sub(ctx.dept_id).await {
+            Ok(dept_ids) => {
+                let values: Vec<Value> = dept_ids.into_iter().map(Value::I64).collect();
+                Ok(vec![WhereCondition::new(
+                    field,
+                    WhereOp::In,
+                    Value::Array(values),
+                )])
+            }
+            Err(DataScopeError::DeptTreeUnavailable(reason)) => {
+                tracing::warn!(
+                    target: "data_scope",
+                    dept_id = ctx.dept_id,
+                    reason = %reason,
+                    "DeptAndSub degraded to Dept mode"
+                );
+                Ok(vec![WhereCondition::new(
+                    field,
+                    WhereOp::Eq,
+                    Value::I64(ctx.dept_id),
+                )])
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -60,6 +77,17 @@ mod tests {
                 6 => Ok(vec![8]),
                 _ => Ok(vec![]),
             }
+        }
+    }
+
+    struct UnavailableProvider;
+
+    #[async_trait]
+    impl DeptTreeProvider for UnavailableProvider {
+        async fn sub_depts(&self, _dept_id: i64) -> Result<Vec<i64>, DataScopeError> {
+            Err(DataScopeError::DeptTreeUnavailable(
+                "provider offline".into(),
+            ))
         }
     }
 
@@ -88,5 +116,24 @@ mod tests {
         let rule = DataScopeRule::new("order", crate::data_scope::rule::DataScopeMode::DeptAndSub);
         let err = mode.evaluate(&ctx, &rule).await.unwrap_err();
         assert_eq!(err.error_code(), "DATA_SCOPE_INVALID_RULE");
+    }
+
+    #[tokio::test]
+    async fn test_dept_and_sub_degrade_to_dept() {
+        let cache = Arc::new(DeptTreeCache::new(
+            Arc::new(UnavailableProvider),
+            std::time::Duration::from_secs(300),
+        ));
+        let mode = DeptAndSubMode::new(cache);
+        let ctx = DataScopeContext::new(1, 5, false);
+        let rule = DataScopeRule::new("order", crate::data_scope::rule::DataScopeMode::DeptAndSub)
+            .with_dept_field("dept_id");
+        let conditions = mode.evaluate(&ctx, &rule).await.unwrap();
+        assert_eq!(conditions.len(), 1, "degraded to Dept mode: 1 Eq condition");
+        assert_eq!(conditions[0].op, WhereOp::Eq, "should use Eq not In");
+        match &conditions[0].value {
+            Value::I64(v) => assert_eq!(*v, 5, "should match dept_id"),
+            other => panic!("expected I64, got {other:?}"),
+        }
     }
 }

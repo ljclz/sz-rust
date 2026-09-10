@@ -20,11 +20,14 @@ pub mod custom;
 pub mod error;
 pub mod evaluator;
 pub mod ext;
+pub mod field_scope;
 pub mod metrics;
 pub mod modes;
+pub mod registry;
 pub mod rule;
 
 pub use context::DataScopeContext;
 pub use error::DataScopeError;
 pub use evaluator::{DataScopeEvaluator, DefaultDataScopeEvaluator};
+pub use registry::DataScopeRuleRegistry;
 pub use rule::{DataScopeMode, DataScopeRule};

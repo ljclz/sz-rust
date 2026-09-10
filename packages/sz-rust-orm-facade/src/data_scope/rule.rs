@@ -4,6 +4,9 @@
 //! 数据范围规则定义 — `DataScopeMode` 枚举与 `DataScopeRule` 结构体
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static RULE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 数据范围模式（5 种）
 ///
@@ -47,32 +50,37 @@ impl std::fmt::Display for DataScopeMode {
 ///
 /// 每条规则绑定一张表，声明该表的数据范围模式和字段映射。
 /// 规则按 `priority` 降序排列，首个匹配的规则生效。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataScopeRule {
-    /// 数据范围模式
     pub mode: DataScopeMode,
-    /// 部门字段名（DEPT / DEPT_AND_SUB 模式必填，如 `"dept_id"`）
     pub dept_field: Option<String>,
-    /// 创建者字段名（SELF 模式必填，如 `"creator_id"`）
     pub creator_field: Option<String>,
-    /// 自定义条件生成器名称（CUSTOM 模式必填）
     pub custom_generator: Option<String>,
-    /// 目标表名（如 `"order"`）
     pub target_table: String,
-    /// 优先级（数值越大优先级越高，同表多规则时取最高优先级）
     pub priority: u32,
+    pub rule_id: String,
+    pub enabled: bool,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl DataScopeRule {
     /// 创建一条新规则
     pub fn new(target_table: impl Into<String>, mode: DataScopeMode) -> Self {
+        let table = target_table.into();
+        let seq = RULE_SEQ.fetch_add(1, Ordering::SeqCst);
+        let rule_id = format!("rule_{}_{}_{}", table, mode.as_str(), seq);
         Self {
             mode,
             dept_field: None,
             creator_field: None,
             custom_generator: None,
-            target_table: target_table.into(),
+            target_table: table,
             priority: 0,
+            rule_id,
+            enabled: true,
+            created_at: None,
+            updated_at: None,
         }
     }
 
@@ -97,6 +105,16 @@ impl DataScopeRule {
     /// 设置优先级
     pub fn with_priority(mut self, priority: u32) -> Self {
         self.priority = priority;
+        self
+    }
+
+    pub fn with_rule_id(mut self, rule_id: impl Into<String>) -> Self {
+        self.rule_id = rule_id.into();
+        self
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
         self
     }
 }
@@ -140,5 +158,36 @@ mod tests {
         assert_eq!(format!("{}", DataScopeMode::DeptAndSub), "dept_and_sub");
         assert_eq!(format!("{}", DataScopeMode::Self_), "self");
         assert_eq!(format!("{}", DataScopeMode::Custom), "custom");
+    }
+
+    #[test]
+    fn test_rule_default_fields() {
+        let rule = DataScopeRule::new("order", DataScopeMode::Dept);
+        assert!(rule.enabled, "new rule should be enabled by default");
+        assert!(!rule.rule_id.is_empty(), "rule_id should be auto-generated");
+        assert!(rule.created_at.is_none());
+        assert!(rule.updated_at.is_none());
+    }
+
+    #[test]
+    fn test_rule_serialize_roundtrip() {
+        let rule = DataScopeRule::new("order", DataScopeMode::Dept)
+            .with_dept_field("dept_id")
+            .with_priority(10)
+            .with_enabled(true);
+        let json = serde_json::to_string(&rule).unwrap();
+        let deserialized: DataScopeRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.target_table, rule.target_table);
+        assert_eq!(deserialized.mode, rule.mode);
+        assert_eq!(deserialized.priority, rule.priority);
+        assert_eq!(deserialized.rule_id, rule.rule_id);
+        assert_eq!(deserialized.enabled, rule.enabled);
+    }
+
+    #[test]
+    fn test_rule_id_uniqueness() {
+        let r1 = DataScopeRule::new("order", DataScopeMode::Dept);
+        let r2 = DataScopeRule::new("order", DataScopeMode::Dept);
+        assert_ne!(r1.rule_id, r2.rule_id, "rule_ids should be unique");
     }
 }

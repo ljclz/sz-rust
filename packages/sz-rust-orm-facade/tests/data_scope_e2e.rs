@@ -72,6 +72,17 @@ impl DeptTreeProvider for CircularDeptProvider {
     }
 }
 
+struct UnavailableDeptProvider;
+
+#[async_trait]
+impl DeptTreeProvider for UnavailableDeptProvider {
+    async fn sub_depts(&self, _dept_id: i64) -> Result<Vec<i64>, DataScopeError> {
+        Err(DataScopeError::DeptTreeUnavailable(
+            "provider offline".into(),
+        ))
+    }
+}
+
 // ============================================================================
 // Mock CustomConditionGenerator — WHERE region = 'CN'
 // ============================================================================
@@ -137,7 +148,7 @@ fn make_default_evaluator() -> DefaultDataScopeEvaluator {
 }
 
 fn make_evaluator_with_custom() -> DefaultDataScopeEvaluator {
-    let mut registry = CustomGeneratorRegistry::new();
+    let registry = CustomGeneratorRegistry::new();
     registry.register(Arc::new(RegionGenerator));
     registry.register(Arc::new(EmptyGenerator));
     make_evaluator(
@@ -332,4 +343,24 @@ async fn it_data_scope_guard_compat() {
 
     let bypassed = evaluator.evaluate(&super_ctx, &rule).await.unwrap();
     assert!(bypassed.is_empty());
+}
+
+#[tokio::test]
+async fn it_data_scope_dept_and_sub_degrade_to_dept() {
+    let cache = Arc::new(DeptTreeCache::new(
+        Arc::new(UnavailableDeptProvider),
+        Duration::from_secs(300),
+    ));
+    let evaluator = make_evaluator(cache, Arc::new(CustomGeneratorRegistry::new()));
+
+    let ctx = DataScopeContext::new(10, 5, false);
+    let rule = DataScopeRule::new("order", DataScopeMode::DeptAndSub).with_dept_field("dept_id");
+
+    let conditions = evaluator.evaluate(&ctx, &rule).await.unwrap();
+    assert_eq!(conditions.len(), 1, "degraded to Dept: 1 Eq condition");
+    assert_eq!(conditions[0].op, WhereOp::Eq, "should use Eq not In");
+    match &conditions[0].value {
+        Value::I64(v) => assert_eq!(*v, 5, "should match dept_id"),
+        other => panic!("expected I64, got {other:?}"),
+    }
 }

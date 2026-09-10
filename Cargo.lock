@@ -8318,6 +8318,7 @@ dependencies = [
  "tower 0.5.3",
  "tower-http 0.7.0",
  "tracing",
+ "tracing-subscriber",
  "utoipa",
  "uuid",
 ]
@@ -8433,11 +8434,13 @@ name = "sz-rust-orm-facade"
 version = "1.2.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "dashmap",
  "parking_lot",
  "rand 0.8.7",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sz-orm-auth",
  "sz-orm-core",
  "sz-orm-graphql",
@@ -8583,6 +8586,7 @@ dependencies = [
  "axum 0.8.9",
  "chrono",
  "mime_guess",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sz-rust-capability",

@@ -6,10 +6,10 @@ import zhCN from "./i18n/zh-CN.json";
 import enUS from "./i18n/en-US.json";
 
 const i18n = createI18n({
-  legacy: false,
-  locale: "zh-CN",
-  fallbackLocale: "en-US",
-  messages: { "zh-CN": zhCN, "en-US": enUS },
+    legacy: false,
+    locale: "zh-CN",
+    fallbackLocale: "en-US",
+    messages: { "zh-CN": zhCN, "en-US": enUS },
 });
 
 const app = createApp(App);

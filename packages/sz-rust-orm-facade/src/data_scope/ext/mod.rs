@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
-//! DataScopeExt — 查询构建器扩展 trait
+//! DataScopeExt — 查询构建器扩展 trait 与扩展子模块
 //!
-//! 为 sz-orm 查询构建器提供 `data_scope()` 链式方法，
-//! 自动注入数据范围 WHERE 条件。
+//! 为 sz-orm 查询构建器提供 `data_scope()` 链式方法，自动注入数据范围 WHERE 条件。
+//! 子模块：generation（世代号）、notifier（变更通知）、audit（审计日志）、path_guard（路径白名单）。
+
+pub mod audit;
+pub mod config_loader;
+pub mod generation;
+pub mod hot_reload;
+pub mod notifier;
+pub mod path_guard;
+
+pub use config_loader::{ConfigFile, ConfigLoader, LoadError, LoadReport};
+pub use hot_reload::{HotReloadManager, PolicyChangeResult, RuleChangeResult};
 
 use crate::data_scope::context::DataScopeContext;
 use crate::data_scope::error::DataScopeError;

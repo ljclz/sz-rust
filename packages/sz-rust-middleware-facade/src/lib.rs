@@ -34,6 +34,8 @@ pub mod chain;
 pub mod circuit_breaker;
 pub mod cors;
 pub mod csrf;
+pub mod data_perm_admin;
+pub mod data_scope;
 pub mod handler_as_middleware;
 pub mod ip_access_control;
 pub mod jwt_blacklist;

@@ -5,6 +5,19 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-10
+
+### Added
+
+- **数据权限扩展功能 — 动态策略热更新 + 配置文件加载 + 管理后台 API**（2026-09-10）：
+  - **动态策略热更新**：`HotReloadManager` 提供规则/策略 CRUD（create/update/delete），支持世代号（PolicyGeneration）单调递增、变更通知广播（ChangeNotifier broadcast）、审计日志（AuditLogger trait）、并发原子性（DashMap 单键原子）
+  - **配置文件加载**：`ConfigLoader` 支持 YAML/JSON 双格式异步加载（tokio::fs），部分失败策略（合法条目正常注册，非法条目进加载报告），路径穿越防护（PathGuard 白名单校验），文件大小上限检查，加载失败不清空现有策略
+  - **管理后台 API**：13 个 RESTful 端点（`/api/data-perm/rules`、`/api/data-perm/policies`、`/api/data-perm/load`、`/api/data-perm/reload`、`/api/data-perm/generation`），管理员鉴权中间件（admin_guard_middleware），统一错误响应（ApiErrorResponse → HTTP 状态码映射），敏感字段脱敏
+  - **字段级数据权限**（基础层）：`FieldVisibility`（Visible/Hidden/ReadOnly 三态）、`FieldScopePolicy`、`FieldScopePolicyRegistry`、`FieldScopeEvaluator`（多角色并集：Visible > ReadOnly > Hidden）、`FieldFilter`（序列化层裁剪）
+  - **行级数据权限扩展**：`DataScopeRuleRegistry`（按表+优先级匹配）、DeptAndSub 降级为 Dept 模式（DeptTreeUnavailable 时安全降级）、`DataScopeMetrics` 字段级指标扩展
+  - **数据权限中间件**：`DataScopeMiddleware` 从 request extensions 提取 `DataScopeUserContext`，转换为 `DataScopeContext` 注入，安全降级（无 UserContext 时注入默认值）
+  - 验证：orm-facade 230 passed（184 lib + 46 e2e）；middleware-facade 580 passed（551 lib + 25 api + 4 e2e）；clippy 0 warnings；CI 门禁（std::fs/dead_code/unsafe）全部通过
+
 ## [Unreleased] - 2026-09-08
 
 ### Added
