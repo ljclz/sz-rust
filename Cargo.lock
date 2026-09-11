@@ -8225,11 +8225,13 @@ dependencies = [
 name = "sz-rust-examples"
 version = "1.2.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.9",
  "http",
  "http-body-util",
  "serde",
  "serde_json",
+ "sz-rust-addons-admin",
  "sz-rust-addons-loader",
  "sz-rust-capability",
  "sz-rust-core",
