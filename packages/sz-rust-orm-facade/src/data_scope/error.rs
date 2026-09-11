@@ -61,6 +61,48 @@ pub enum DataScopeError {
 
     #[error("rate limited, retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
+
+    #[error("tenant id required")]
+    TenantIdRequired,
+
+    #[error("tenant mismatch: header={header_tenant}, user={user_tenant}")]
+    TenantMismatch {
+        header_tenant: i64,
+        user_tenant: i64,
+    },
+
+    #[error("tenant not found: {0}")]
+    TenantNotFound(i64),
+
+    #[error("tenant suspended: {0}")]
+    TenantSuspended(i64),
+
+    #[error("tenant disabled: {0}")]
+    TenantDisabled(i64),
+
+    #[error("tenant resolve error: {0}")]
+    TenantResolveError(String),
+
+    #[error("tenant context required")]
+    TenantContextRequired,
+
+    #[error("invalid tenant id: {0}")]
+    InvalidTenantId(i64),
+
+    #[error("tenant config reload failed: {0}")]
+    TenantConfigReloadFailed(String),
+
+    #[error("platform admin required")]
+    PlatformAdminRequired,
+
+    #[error("tenant name duplicate: {0}")]
+    TenantNameDuplicate(String),
+
+    #[error("invalid status transition: {from} -> {to}")]
+    InvalidStatusTransition { from: String, to: String },
+
+    #[error("tenant not disabled: {0}")]
+    TenantNotDisabled(i64),
 }
 
 impl DataScopeError {
@@ -84,6 +126,19 @@ impl DataScopeError {
             Self::AuthRequired => "AUTH_REQUIRED",
             Self::RequestBodyInvalid(_) => "REQUEST_BODY_INVALID",
             Self::RateLimited { .. } => "RATE_LIMITED",
+            Self::TenantIdRequired => "TENANT_ID_REQUIRED",
+            Self::TenantMismatch { .. } => "TENANT_MISMATCH",
+            Self::TenantNotFound(_) => "TENANT_NOT_FOUND",
+            Self::TenantSuspended(_) => "TENANT_SUSPENDED",
+            Self::TenantDisabled(_) => "TENANT_DISABLED",
+            Self::TenantResolveError(_) => "TENANT_RESOLVE_ERROR",
+            Self::TenantContextRequired => "TENANT_CONTEXT_REQUIRED",
+            Self::InvalidTenantId(_) => "INVALID_TENANT_ID",
+            Self::TenantConfigReloadFailed(_) => "TENANT_CONFIG_RELOAD_FAILED",
+            Self::PlatformAdminRequired => "PLATFORM_ADMIN_REQUIRED",
+            Self::TenantNameDuplicate(_) => "TENANT_NAME_DUPLICATE",
+            Self::InvalidStatusTransition { .. } => "INVALID_STATUS_TRANSITION",
+            Self::TenantNotDisabled(_) => "TENANT_NOT_DISABLED",
         }
     }
 }
@@ -174,6 +229,70 @@ mod tests {
             }
             .error_code(),
             "RATE_LIMITED"
+        );
+    }
+
+    #[test]
+    fn test_tenant_error_codes() {
+        assert_eq!(
+            DataScopeError::TenantIdRequired.error_code(),
+            "TENANT_ID_REQUIRED"
+        );
+        assert_eq!(
+            DataScopeError::TenantMismatch {
+                header_tenant: 1,
+                user_tenant: 2
+            }
+            .error_code(),
+            "TENANT_MISMATCH"
+        );
+        assert_eq!(
+            DataScopeError::TenantNotFound(1).error_code(),
+            "TENANT_NOT_FOUND"
+        );
+        assert_eq!(
+            DataScopeError::TenantSuspended(1).error_code(),
+            "TENANT_SUSPENDED"
+        );
+        assert_eq!(
+            DataScopeError::TenantDisabled(1).error_code(),
+            "TENANT_DISABLED"
+        );
+        assert_eq!(
+            DataScopeError::TenantResolveError("x".into()).error_code(),
+            "TENANT_RESOLVE_ERROR"
+        );
+        assert_eq!(
+            DataScopeError::TenantContextRequired.error_code(),
+            "TENANT_CONTEXT_REQUIRED"
+        );
+        assert_eq!(
+            DataScopeError::InvalidTenantId(0).error_code(),
+            "INVALID_TENANT_ID"
+        );
+        assert_eq!(
+            DataScopeError::TenantConfigReloadFailed("x".into()).error_code(),
+            "TENANT_CONFIG_RELOAD_FAILED"
+        );
+        assert_eq!(
+            DataScopeError::PlatformAdminRequired.error_code(),
+            "PLATFORM_ADMIN_REQUIRED"
+        );
+        assert_eq!(
+            DataScopeError::TenantNameDuplicate("x".into()).error_code(),
+            "TENANT_NAME_DUPLICATE"
+        );
+        assert_eq!(
+            DataScopeError::InvalidStatusTransition {
+                from: "disabled".into(),
+                to: "active".into()
+            }
+            .error_code(),
+            "INVALID_STATUS_TRANSITION"
+        );
+        assert_eq!(
+            DataScopeError::TenantNotDisabled(1).error_code(),
+            "TENANT_NOT_DISABLED"
         );
     }
 }

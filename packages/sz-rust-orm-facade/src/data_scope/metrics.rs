@@ -22,6 +22,10 @@ pub struct DataScopeMetrics {
     policy_total: AtomicU64,
     reload_total: AtomicU64,
     reload_failed_total: AtomicU64,
+    tenant_request_total: AtomicU64,
+    tenant_isolation_bypass_total: AtomicU64,
+    tenant_resolve_failed_total: AtomicU64,
+    tenant_active_count: AtomicU64,
 }
 
 impl DataScopeMetrics {
@@ -40,6 +44,10 @@ impl DataScopeMetrics {
             policy_total: AtomicU64::new(0),
             reload_total: AtomicU64::new(0),
             reload_failed_total: AtomicU64::new(0),
+            tenant_request_total: AtomicU64::new(0),
+            tenant_isolation_bypass_total: AtomicU64::new(0),
+            tenant_resolve_failed_total: AtomicU64::new(0),
+            tenant_active_count: AtomicU64::new(0),
         }
     }
 
@@ -173,6 +181,43 @@ impl DataScopeMetrics {
     pub fn reload_failed_total(&self) -> u64 {
         self.reload_failed_total.load(Ordering::Relaxed)
     }
+
+    pub fn record_tenant_request(&self) {
+        self.tenant_request_total.fetch_add(1, Ordering::Relaxed);
+        tracing::debug!(target: "data_scope_metrics", "tenant_request");
+    }
+
+    pub fn tenant_request_total(&self) -> u64 {
+        self.tenant_request_total.load(Ordering::Relaxed)
+    }
+
+    pub fn record_tenant_isolation_bypass(&self) {
+        self.tenant_isolation_bypass_total
+            .fetch_add(1, Ordering::Relaxed);
+        tracing::debug!(target: "data_scope_metrics", "tenant_isolation_bypass");
+    }
+
+    pub fn tenant_isolation_bypass_total(&self) -> u64 {
+        self.tenant_isolation_bypass_total.load(Ordering::Relaxed)
+    }
+
+    pub fn record_tenant_resolve_failed(&self) {
+        self.tenant_resolve_failed_total
+            .fetch_add(1, Ordering::Relaxed);
+        tracing::debug!(target: "data_scope_metrics", "tenant_resolve_failed");
+    }
+
+    pub fn tenant_resolve_failed_total(&self) -> u64 {
+        self.tenant_resolve_failed_total.load(Ordering::Relaxed)
+    }
+
+    pub fn set_tenant_active_count(&self, n: u64) {
+        self.tenant_active_count.store(n, Ordering::Relaxed);
+    }
+
+    pub fn tenant_active_count(&self) -> u64 {
+        self.tenant_active_count.load(Ordering::Relaxed)
+    }
 }
 
 impl Default for DataScopeMetrics {
@@ -247,5 +292,25 @@ mod tests {
         // set 覆盖
         metrics.set_rule_total(100);
         assert_eq!(metrics.rule_total(), 100);
+    }
+
+    #[test]
+    fn test_tenant_metrics_set_and_get() {
+        let metrics = DataScopeMetrics::new();
+        assert_eq!(metrics.tenant_request_total(), 0);
+        assert_eq!(metrics.tenant_isolation_bypass_total(), 0);
+        assert_eq!(metrics.tenant_resolve_failed_total(), 0);
+        assert_eq!(metrics.tenant_active_count(), 0);
+
+        metrics.record_tenant_request();
+        metrics.record_tenant_request();
+        metrics.record_tenant_isolation_bypass();
+        metrics.record_tenant_resolve_failed();
+        metrics.set_tenant_active_count(5);
+
+        assert_eq!(metrics.tenant_request_total(), 2);
+        assert_eq!(metrics.tenant_isolation_bypass_total(), 1);
+        assert_eq!(metrics.tenant_resolve_failed_total(), 1);
+        assert_eq!(metrics.tenant_active_count(), 5);
     }
 }

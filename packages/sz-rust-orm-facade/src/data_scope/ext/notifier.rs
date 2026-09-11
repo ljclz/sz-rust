@@ -47,6 +47,26 @@ pub enum ChangeEvent {
         target_table: String,
         timestamp: chrono::DateTime<chrono::Utc>,
     },
+    TenantScopedTableChanged {
+        generation: u64,
+        table_name: String,
+        action: &'static str,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+    TenantConfigChanged {
+        generation: u64,
+        tenant_id: i64,
+        config_key: String,
+        is_global: bool,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
+    TenantStatusChanged {
+        generation: u64,
+        tenant_id: i64,
+        from: String,
+        to: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 /// 配置变更通知器
@@ -117,5 +137,40 @@ mod tests {
         assert!(json.contains("PolicyUpdated"));
         assert!(json.contains("employee"));
         assert!(json.contains("hr"));
+    }
+
+    #[test]
+    fn test_tenant_change_event_serialize() {
+        let event1 = ChangeEvent::TenantScopedTableChanged {
+            generation: 1,
+            table_name: "orders".into(),
+            action: "registered",
+            timestamp: Utc::now(),
+        };
+        let json1 = serde_json::to_string(&event1).unwrap();
+        assert!(json1.contains("TenantScopedTableChanged"));
+        assert!(json1.contains("orders"));
+
+        let event2 = ChangeEvent::TenantConfigChanged {
+            generation: 2,
+            tenant_id: 1,
+            config_key: "theme".into(),
+            is_global: false,
+            timestamp: Utc::now(),
+        };
+        let json2 = serde_json::to_string(&event2).unwrap();
+        assert!(json2.contains("TenantConfigChanged"));
+        assert!(json2.contains("theme"));
+
+        let event3 = ChangeEvent::TenantStatusChanged {
+            generation: 3,
+            tenant_id: 1,
+            from: "active".into(),
+            to: "suspended".into(),
+            timestamp: Utc::now(),
+        };
+        let json3 = serde_json::to_string(&event3).unwrap();
+        assert!(json3.contains("TenantStatusChanged"));
+        assert!(json3.contains("suspended"));
     }
 }

@@ -53,3 +53,10 @@ p2-addons = ["graphql", "grpc"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "tenant_isolation"
+harness = false

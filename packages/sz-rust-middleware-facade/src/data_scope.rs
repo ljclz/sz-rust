@@ -23,6 +23,7 @@ pub struct DataScopeUserContext {
     pub user_id: i64,
     pub dept_id: i64,
     pub is_super: bool,
+    pub is_platform_admin: bool,
     pub roles: Vec<String>,
 }
 
@@ -32,6 +33,7 @@ impl DataScopeUserContext {
             user_id,
             dept_id: 0,
             is_super: false,
+            is_platform_admin: false,
             roles: Vec::new(),
         }
     }
@@ -43,6 +45,11 @@ impl DataScopeUserContext {
 
     pub fn with_super(mut self, is_super: bool) -> Self {
         self.is_super = is_super;
+        self
+    }
+
+    pub fn with_platform_admin(mut self, is_platform_admin: bool) -> Self {
+        self.is_platform_admin = is_platform_admin;
         self
     }
 
@@ -148,5 +155,17 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_user_context_default_platform_admin_false() {
+        let ctx = DataScopeUserContext::new(42);
+        assert!(!ctx.is_platform_admin);
+    }
+
+    #[test]
+    fn test_with_platform_admin() {
+        let ctx = DataScopeUserContext::new(1).with_platform_admin(true);
+        assert!(ctx.is_platform_admin);
     }
 }

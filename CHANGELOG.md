@@ -9,6 +9,17 @@
 
 ### Added
 
+- **多租户 SaaS 支持功能**（2026-09-10）：
+  - **租户上下文解析**：`TenantContext`（tenant_id + is_platform_admin + resolve_source）、`TenantResolver`（JWT → Header → Path 优先级解析）、`TenantResolveStrategy` trait + Header/Jwt/Path 三策略实现、`TenantRequest` trait（抽象 HTTP 请求，orm-facade 无 axum 依赖）
+  - **tenant_id 自动注入与行级数据隔离**：`TenantScopeExt` trait（以 `DataScopeExt` 为 supertrait，复用 `with_data_scope_conditions` 机制）、平台管理员 bypass、tenant_id ≤ 0 拒绝、全局表不附加条件、`TenantWriteHook`（before_insert 从 metadata 提取 tenant_id 填充到 HookContext）
+  - **租户管理 API**：13 个 RESTful 端点（`/api/tenants` CRUD + 状态流转 + `/api/tenant-configs` + `/api/global-configs` + `/api/tenant-scoped-tables`）、`tenant_resolve_middleware`（解析 + 注入 TenantContext + mismatch 检测）、`tenant_status_middleware`（active/suspended/disabled 状态校验）、`platform_admin_guard_middleware`（is_super && is_platform_admin 双重校验）、`tenant_config_guard_middleware`（全局配置需平台管理员/租户配置需租户管理员）
+  - **租户级别配置隔离**：`TenantConfigRegistry`（(tenant_id, config_key) 命名空间 + 全局继承 + 内存缓存 + invalidate_cache）、`TenantConfigLoader`（YAML/JSON + tokio::fs + PathGuard）、`TenantHotReloadManager`（租户CRUD + 状态流转 + 隔离表CRUD + 配置CRUD + 世代号 + 广播 + 审计 + 指标）
+  - **租户状态机**：`TenantStatus`（Active ↔ Suspended → Disabled 终态）、`TenantRecordRegistry`（DashMap + AtomicI64 自增ID + 名称唯一性 + 软删除仅Disabled）
+  - **性能基准**：`benches/tenant_isolation.rs`（criterion），条件注入 ~183ns（spec 4.1.2 ≤ 100,000ns）、配置读取 ~168ns（spec 4.1.4 ≤ 20,000,000ns）、租户创建 ~933ns（spec 4.1.3 ≤ 50,000,000ns）
+  - **CI 门禁**：`scripts/audit/multi_tenant_gate.ps1`（std::fs / dead_code / unsafe / API 签名不变检查，7 项全部通过）
+  - **ADR**：ADR-039（request extensions 注入 TenantContext 决策）、ADR-040（TenantScopeExt 以 DataScopeExt 为 supertrait 决策）
+  - 验证：orm-facade 319 passed（253 lib + 20 e2e + 46 data_scope e2e）；middleware-facade 675 passed（593 lib + 22 admin_api + 12 config_api + 19 middleware_e2e + 25 data_perm + 4 data_scope_e2e）；clippy 0 warnings；CI 门禁 7/7 通过
+
 - **数据权限扩展功能 — 动态策略热更新 + 配置文件加载 + 管理后台 API**（2026-09-10）：
   - **动态策略热更新**：`HotReloadManager` 提供规则/策略 CRUD（create/update/delete），支持世代号（PolicyGeneration）单调递增、变更通知广播（ChangeNotifier broadcast）、审计日志（AuditLogger trait）、并发原子性（DashMap 单键原子）
   - **配置文件加载**：`ConfigLoader` 支持 YAML/JSON 双格式异步加载（tokio::fs），部分失败策略（合法条目正常注册，非法条目进加载报告），路径穿越防护（PathGuard 白名单校验），文件大小上限检查，加载失败不清空现有策略

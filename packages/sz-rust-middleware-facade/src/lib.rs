@@ -48,6 +48,8 @@ pub mod security_headers;
 pub mod security_metrics;
 pub mod security_section;
 pub mod sso_middleware;
+pub mod tenant;
+pub mod tenant_admin;
 pub mod tower_compat;
 pub mod trace;
 

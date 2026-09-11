@@ -44,6 +44,35 @@ impl ApiErrorResponse {
             DataScopeError::RateLimited { retry_after_secs } => serde_json::json!({
                 "retry_after_secs": retry_after_secs,
             }),
+            DataScopeError::TenantMismatch {
+                header_tenant,
+                user_tenant,
+            } => serde_json::json!({
+                "header_tenant": header_tenant,
+                "user_tenant": user_tenant,
+            }),
+            DataScopeError::InvalidStatusTransition { from, to } => serde_json::json!({
+                "from": from,
+                "to": to,
+            }),
+            DataScopeError::TenantNotFound(tenant_id) => serde_json::json!({
+                "tenant_id": tenant_id,
+            }),
+            DataScopeError::TenantSuspended(tenant_id) => serde_json::json!({
+                "tenant_id": tenant_id,
+            }),
+            DataScopeError::TenantDisabled(tenant_id) => serde_json::json!({
+                "tenant_id": tenant_id,
+            }),
+            DataScopeError::InvalidTenantId(tenant_id) => serde_json::json!({
+                "tenant_id": tenant_id,
+            }),
+            DataScopeError::TenantNotDisabled(tenant_id) => serde_json::json!({
+                "tenant_id": tenant_id,
+            }),
+            DataScopeError::TenantNameDuplicate(name) => serde_json::json!({
+                "name": name,
+            }),
             _ => serde_json::Value::Null,
         };
         Self {
@@ -66,6 +95,20 @@ impl ApiErrorResponse {
             }
             "GENERATION_CONFLICT" => StatusCode::CONFLICT,
             "CONFIG_FILE_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
+            "TENANT_ID_REQUIRED"
+            | "INVALID_TENANT_ID"
+            | "TENANT_CONTEXT_REQUIRED"
+            | "INVALID_STATUS_TRANSITION"
+            | "TENANT_NOT_DISABLED" => StatusCode::BAD_REQUEST,
+            "TENANT_MISMATCH"
+            | "TENANT_NOT_FOUND"
+            | "TENANT_SUSPENDED"
+            | "TENANT_DISABLED"
+            | "PLATFORM_ADMIN_REQUIRED" => StatusCode::FORBIDDEN,
+            "TENANT_NAME_DUPLICATE" => StatusCode::CONFLICT,
+            "TENANT_RESOLVE_ERROR" | "TENANT_CONFIG_RELOAD_FAILED" => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -210,5 +253,61 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["code"], "RULE_NOT_FOUND");
         assert_eq!(json["generation"], 5);
+    }
+
+    #[test]
+    fn test_tenant_status_mapping() {
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_ID_REQUIRED"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("INVALID_TENANT_ID"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_CONTEXT_REQUIRED"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("INVALID_STATUS_TRANSITION"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_NOT_DISABLED"),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_MISMATCH"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_NOT_FOUND"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_SUSPENDED"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_DISABLED"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("PLATFORM_ADMIN_REQUIRED"),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_NAME_DUPLICATE"),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_RESOLVE_ERROR"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            ApiErrorResponse::status_for_code("TENANT_CONFIG_RELOAD_FAILED"),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

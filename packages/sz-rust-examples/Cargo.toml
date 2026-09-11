@@ -13,6 +13,8 @@ categories.workspace = true
 
 [dependencies]
 sz-rust-core = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -63,3 +65,7 @@ path = "src/bin/bench_sz_rust.rs"
 [[bin]]
 name = "bench_axum_native"
 path = "src/bin/bench_axum_native.rs"
+
+[[bin]]
+name = "multi_tenant_demo"
+path = "src/bin/multi_tenant_demo.rs"
