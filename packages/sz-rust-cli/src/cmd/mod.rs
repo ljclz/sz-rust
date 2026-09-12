@@ -14,7 +14,10 @@
 //! | `scheduler` | sz-orm-scheduler 接入 | 调度器命令 |
 //! | `seed` | `think\db\Seed` | 数据填充命令 |
 //! | `optimize` | `think\console\command\optimize\*` | 配置/路由缓存优化命令 |
+//! | `plugin` | 插件市场 | 插件搜索/安装/发布/卸载/更新/列表/登录 |
+//! | `admin` | Admin 后台管理插件 | 迁移/路由列表/Capability列表/初始化 |
 
+pub mod admin;
 pub mod cache;
 pub mod make;
 pub mod migrate;

@@ -8138,6 +8138,7 @@ name = "sz-rust-cli"
 version = "1.2.0"
 dependencies = [
  "async-trait",
+ "bcrypt",
  "chrono",
  "clap",
  "dialoguer",
@@ -8148,6 +8149,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sz-orm-sqlx",
+ "sz-rust-addons-admin",
  "sz-rust-core",
  "sz-rust-frontend-codegen",
  "sz-rust-marketplace",

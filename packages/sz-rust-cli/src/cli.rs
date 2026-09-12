@@ -187,6 +187,14 @@ pub enum Command {
         #[command(subcommand)]
         plugin_command: cmd::plugin::PluginCommand,
     },
+
+    /// Admin 后台管理插件命令组（admin migrate/list-routes/list-capabilities/init）
+    #[command(name = "admin")]
+    Admin {
+        /// admin 子命令
+        #[command(subcommand)]
+        admin_command: cmd::admin::AdminCommand,
+    },
 }
 
 impl Cli {
@@ -253,6 +261,7 @@ impl Cli {
             }
             Some(Command::RouteClear) => cmd::optimize::execute_route_clear().await.map(|_| 0),
             Some(Command::Plugin { plugin_command }) => cmd::plugin::execute(plugin_command).await,
+            Some(Command::Admin { admin_command }) => cmd::admin::execute(admin_command).await,
         }
     }
 }

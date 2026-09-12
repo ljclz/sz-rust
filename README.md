@@ -42,6 +42,7 @@
 - **K8s Operator**：（⚠️ 已移除：`sz-rust-k8s-operator` 孤儿 crate，无消费者，22 测试保留在 git 历史，详见 ADR-0021）
 - **AI 能力栈生产接线（v1.2.0 audit_remediation_v2）**：sz300 Cargo.toml 启用 `tiktoken`/`reranker`/`hybrid`/`local-model` 4 feature；main.rs 构造 `RagPipeline` + `with_reranker` + `with_hybrid_retriever` 注入 `Ai::init_default`；`Ai::agent` 内部接入 `with_rag_pipeline`（citations）；`FileLongTermMemoryStore` + `ToolRegistry` 通过 `SZ300_AGENT_ENABLED=1` 驱动；`LocalEmbedding` 真实加载通过 `SZ300_LOCAL_EMBEDDING_MODEL` 驱动；7 端到端测试验证接线（非幻影交付）。（✅ 生产已接入）
 - **AI 能力栈生产接线（v1.2.0 audit_remediation_v3）**：5 项高风险幻影交付修复——`LlmChatCapability` 注册到 CapabilityRegistry（`ai.llm_chat`）；`POST /api/v1/ai/embed` 端点接线 `Ai::embed`；`POST /api/v1/ai/stream` SSE 端点接线 `Ai::stream_chat`；`McpToolBridge` 注入 6 个 MCP 工具（parse_path/build_select_query/openapi_spec/redaction_check/url_decode/sql_validate）到 Agent ToolRegistry；`AiMetrics` 12 项指标接入 Prometheus；5 端到端测试验证接线。（✅ 生产已接入）
+- **Admin 后台管理插件（v1.2.0 新增）**：`sz-rust-addons-admin` 提供 7 大模块（用户/角色/权限/菜单/配置/操作日志/仪表盘）21 个 REST API 端点 + 17 个 `admin.*` Capability。`AdminAddonPlugin` 通过 `plugin.router()` 合并路由 + `plugin.capability_hook()` 注册 Capability 实现生产接线。内置 `permission_guard_middleware`（路由→权限项映射，超级管理员 bypass）、bcrypt 密码脱敏、配置租户继承（tenant_id=0 全局 + 租户覆盖）、操作日志异步写入。（✅ 生产已接入：sz-rust-examples 演示接线 + 9 端到端验证测试）
 
 ---
 
@@ -164,6 +165,7 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-addons-ecommerce/ # 电商插件
     ├── sz-rust-addons-cms/       # CMS 插件（文章/分类/标签）
     ├── sz-rust-addons-crm/       # CRM 插件（客户/线索/商机）
+    ├── sz-rust-addons-admin/     # Admin 后台管理插件（用户/角色/权限/菜单/配置/日志/仪表盘）
     ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率）
 
     └── sz-rust-sz300/            # SZ300 业务应用（端到端集成示例）

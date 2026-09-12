@@ -5,9 +5,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased] - 2026-09-10
+## [Unreleased] - 2026-09-11
 
 ### Added
+
+- **Admin 后台管理插件 `sz-rust-addons-admin`**（2026-09-11，`c96196e` + `4e20047`）：
+  - **7 大模块 21 REST API 端点**：用户管理（CRUD + 重置密码 + 分配角色）、角色管理（CRUD + 分配权限）、权限管理（树形结构 + CRUD）、菜单管理（树形结构 + CRUD + 循环引用检测 + 子菜单删除保护）、系统配置（CRUD + 类型校验 string/number/boolean/json + 租户继承 tenant_id=0 全局配置）、操作日志（异步写入 + 列表查询 + 时间范围校验）、仪表盘（6 项统计指标 + 系统状态）
+  - **17 个 `admin.*` Capability**：admin.user_list/user_create/user_update/user_delete/user_reset_password、admin.role_list/role_create/role_update/role_delete/role_assign_permissions、admin.permission_tree/permission_create/permission_update/permission_delete、admin.menu_tree/menu_create/menu_update/menu_delete、admin.config_list/config_upsert、admin.log_list、admin.dashboard_stats — 全部调用真实 Service，非占位返回
+  - **权限守卫中间件**：`permission_guard_middleware`（21 路由→权限项映射），超级管理员跳过校验
+  - **密码安全**：bcrypt cost=10，`#[serde(skip_serializing)]` 脱敏
+  - **配置继承**：`tenant_id=0` 全局配置 + 租户配置覆盖
+  - **生产接线**：`AdminAddonPlugin` → `plugin.router()` 合并到主路由 → `plugin.capability_hook()` 注册 Capability；`sz-rust-examples` 演示接线模式（`admin_demo.rs`）+ 9 个端到端验证测试（`admin_wiring.rs`）
+  - 验证：`cargo test -p sz-rust-addons-admin` → 56 lib + 11 integration passed; `cargo test -p sz-rust-examples --tests` → 9 admin_wiring + 6 hello_world passed; clippy 0 warnings
 
 - **多租户 SaaS 支持功能**（2026-09-10）：
   - **租户上下文解析**：`TenantContext`（tenant_id + is_platform_admin + resolve_source）、`TenantResolver`（JWT → Header → Path 优先级解析）、`TenantResolveStrategy` trait + Header/Jwt/Path 三策略实现、`TenantRequest` trait（抽象 HTTP 请求，orm-facade 无 axum 依赖）

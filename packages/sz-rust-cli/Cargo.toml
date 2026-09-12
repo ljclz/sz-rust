@@ -46,6 +46,10 @@ indicatif.workspace = true
 reqwest.workspace = true
 # 异步 trait
 async-trait.workspace = true
+# Admin 插件（admin migrate/init 命令）
+sz-rust-addons-admin = { workspace = true }
+# 密码哈希（admin init 命令）
+bcrypt = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true
