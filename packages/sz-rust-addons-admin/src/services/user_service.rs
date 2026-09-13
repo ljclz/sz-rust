@@ -11,7 +11,8 @@ use sz_rust_orm_facade::{Pool, Value};
 use crate::error::AdminError;
 use crate::models::user::{UserModel, UserStatus};
 
-#[derive(Debug, Clone, Deserialize)]
+// password 为明文入参：derive(Debug) 会使 {:?} 日志泄露明文，改为手工脱敏实现
+#[derive(Clone, Deserialize)]
 pub struct CreateUserRequest {
     pub username: String,
     #[serde(skip_serializing)]
@@ -20,12 +21,33 @@ pub struct CreateUserRequest {
     pub phone: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl std::fmt::Debug for CreateUserRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateUserRequest")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize)]
 pub struct UpdateUserRequest {
     #[serde(skip_serializing)]
     pub password: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
+}
+
+impl std::fmt::Debug for UpdateUserRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateUserRequest")
+            .field("password", &"[REDACTED]")
+            .field("email", &self.email)
+            .field("phone", &self.phone)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
