@@ -101,12 +101,25 @@ fn make_super_admin_request(method: &str, uri: &str) -> http::Request<axum::body
         .unwrap()
 }
 
-#[test]
-fn test_plugin_creation() {
+#[tokio::test]
+async fn test_plugin_creation() {
     let pool = make_mock_pool();
     let plugin = AdminAddonPlugin::new(pool, vec!["admin".to_string()]);
     let router = plugin.router();
-    let _ = router;
+
+    // 未注入用户上下文的请求应被 permission guard 拒绝（AUTH_REQUIRED → 401），
+    // 证明守卫已挂载且路由可达，而非仅构造成功
+    let response = router
+        .oneshot(
+            http::Request::builder()
+                .method("GET")
+                .uri("/api/admin/dashboard")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[test]
@@ -144,11 +157,70 @@ fn test_unregister_all_capabilities() {
     assert_eq!(registry.len(), 0);
 }
 
-#[test]
-fn test_router_built_with_21_endpoints() {
+#[tokio::test]
+async fn test_router_built_with_21_endpoints() {
     let pool = make_mock_pool();
     let plugin = AdminAddonPlugin::new(pool, vec!["super_admin".to_string()]);
-    let _router = plugin.router();
+    let router = plugin.router();
+
+    // 21 个（方法, 路径）端点 = 15 条唯一路径（与 src/router.rs 一致）
+    let endpoints: Vec<(&str, &str)> = vec![
+        ("GET", "/api/admin/users"),
+        ("POST", "/api/admin/users"),
+        ("PUT", "/api/admin/users/u1"),
+        ("DELETE", "/api/admin/users/u1"),
+        ("PUT", "/api/admin/users/u1/status"),
+        ("PUT", "/api/admin/users/u1/roles"),
+        ("GET", "/api/admin/roles"),
+        ("POST", "/api/admin/roles"),
+        ("PUT", "/api/admin/roles/r1"),
+        ("DELETE", "/api/admin/roles/r1"),
+        ("PUT", "/api/admin/roles/r1/permissions"),
+        ("GET", "/api/admin/permissions/tree"),
+        ("GET", "/api/admin/menus/tree"),
+        ("POST", "/api/admin/menus"),
+        ("PUT", "/api/admin/menus/m1"),
+        ("DELETE", "/api/admin/menus/m1"),
+        ("GET", "/api/admin/configs"),
+        ("PUT", "/api/admin/configs/cfg1"),
+        ("DELETE", "/api/admin/configs/cfg1"),
+        ("GET", "/api/admin/operation-logs"),
+        ("GET", "/api/admin/dashboard"),
+    ];
+    assert_eq!(endpoints.len(), 21, "应注册 21 个端点");
+
+    // super_admin 直通守卫后到达 axum 路由层：已注册路径对未注册方法返回 405，
+    // 未注册路径返回 404 —— 以 PATCH 探测证明路径真实挂载，不触达 handler
+    //（免受 mock 池业务语义干扰），去重后 15 条路径
+    let paths = [
+        "/api/admin/users",
+        "/api/admin/users/u1",
+        "/api/admin/users/u1/status",
+        "/api/admin/users/u1/roles",
+        "/api/admin/roles",
+        "/api/admin/roles/r1",
+        "/api/admin/roles/r1/permissions",
+        "/api/admin/permissions/tree",
+        "/api/admin/menus/tree",
+        "/api/admin/menus",
+        "/api/admin/menus/m1",
+        "/api/admin/configs",
+        "/api/admin/configs/cfg1",
+        "/api/admin/operation-logs",
+        "/api/admin/dashboard",
+    ];
+    for path in paths {
+        let response = router
+            .clone()
+            .oneshot(make_super_admin_request("PATCH", path))
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "端点路径未注册: {path}"
+        );
+    }
 }
 
 #[tokio::test]

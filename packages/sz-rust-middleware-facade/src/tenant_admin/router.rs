@@ -102,10 +102,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_build_router_succeeds() {
+    #[tokio::test]
+    async fn test_build_router_succeeds() {
         let state = make_state();
         let router = build_tenant_admin_router(state);
-        let _ = router;
+
+        // 注入平台管理员上下文通过 platform_admin_guard 后：
+        // 已注册路径 + 未注册方法 → 405；未注册路径 → 404。
+        // 以 PATCH 探测证明 /api/tenants 路由真实挂载（不触达 handler，免注册表状态干扰）
+        use crate::data_scope::DataScopeUserContext;
+        use tower::ServiceExt;
+        let mut request = axum::http::Request::builder()
+            .method("PATCH")
+            .uri("/api/tenants")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(
+            DataScopeUserContext::new(1)
+                .with_super(true)
+                .with_platform_admin(true),
+        );
+        let response = router.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::METHOD_NOT_ALLOWED
+        );
     }
 }

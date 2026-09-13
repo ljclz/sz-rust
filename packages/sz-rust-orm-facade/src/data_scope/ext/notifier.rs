@@ -118,11 +118,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_broadcast_no_subscriber_silent() {
+    #[test]
+    fn test_broadcast_no_subscriber_silent() {
         let notifier = ChangeNotifier::new(16);
-        // 无订阅者，广播不应 panic
+        // 无订阅者广播：SendError 静默忽略，不得 panic
         notifier.broadcast(make_event());
+        // broadcast 无历史回放：广播后才订阅的接收者不应收到先前事件
+        let mut rx = notifier.subscribe();
+        assert!(rx.try_recv().is_err(), "无订阅者时的广播不应残留可接收事件");
     }
 
     #[test]
