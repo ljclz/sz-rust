@@ -260,48 +260,11 @@ jobs:
           done
           echo "代码行号检查完成"
 
-  # 门禁 12：DB 集成测试（P1-TEST-02）
-  # 注：sz-rust-sz300 已迁移至企业版仓库，此 job 在开源版 CI 中跳过
-  db-integration:
-    name: DB Integration Tests (moved to enterprise)
-    runs-on: ubuntu-latest
-    if: false
-    services:
-      mysql:
-        image: mysql:9.6
-        env:
-          MYSQL_ROOT_PASSWORD: test123
-          MYSQL_DATABASE: sz_orm_test
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -ptest123"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_PASSWORD: test123
-          POSTGRES_DB: sz_orm_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run DB integration tests (ignored)
-        run: cargo test --package sz-rust-sz300 --test db_integration_test -- --ignored --test-threads=1
+  # 门禁 12：DB 集成测试（P1-TEST-02）—— 已移除
+  # sz-rust-sz300 业务包已迁移至企业版仓库（1614e84），db_integration_test 随迁；
+  # 完整 job 定义（含 MySQL/Postgres services）见 git 历史
 
   # 门禁 14：行覆盖率 ≥ 85%（规则 10）
-  # 注：sz-rust-sz300 已迁移至企业版仓库，覆盖率门禁在企业版 CI 中运行
   coverage:
     name: Coverage (>= 85%)
     runs-on: ubuntu-latest
@@ -363,9 +326,7 @@ jobs:
             --exclude sz-orm-macros --exclude sz-rust-macros \
             --cobertura --output-path cobertura.xml \
             --fail-under-lines ${{ steps.cov-stage.outputs.threshold }}
-      - name: Run sz300 DB integration coverage
-        run: |
-          cargo llvm-cov -p sz-rust-sz300 --cobertura --output-path cobertura-sz300-db.xml -- --ignored --test-threads=1
+      # 注：sz300 DB 集成覆盖率已随业务包迁移企业版仓库（1614e84），此处仅合并 workspace 报告
       - name: Merge coverage reports
         run: |
           node scripts/audit/cobertura-merger.js \
