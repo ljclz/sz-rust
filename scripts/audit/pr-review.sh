@@ -51,6 +51,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# sz300 存在性守卫：1614e84 开源/企业版物理分离后 sz-rust-sz300 移出 workspace members，
+# 其测试职责移交企业版仓库流程；守卫生效时相关门禁降级为仅测存量包并记 low（不阻塞）
+if grep -q 'sz-rust-sz300' Cargo.toml 2>/dev/null; then SZ300_IN_WS=1; else SZ300_IN_WS=0; fi
+
 # Provider 配置（环境变量覆盖，默认 CSDN；提前解析供 --ai-parallel 后台预启动使用）
 AI_API_KEY="${AI_API_KEY:-${CSDN_API_KEY:-}}"
 AI_BASE_URL="${AI_BASE_URL:-https://ai.csdn.net/api/model/v1}"
@@ -240,7 +244,13 @@ run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
 
 # ---- 环节 5: 单元测试 ----
 transition "test" "cargo test（facade lib + sz300）"
-TEST_OUT=$(cargo test -p sz-rust-orm-facade -p sz-rust-sz300 -j 2 2>&1)
+if [ "$SZ300_IN_WS" -eq 1 ]; then
+  TEST_PKGS="-p sz-rust-orm-facade -p sz-rust-sz300"
+else
+  note_issue "low" "workspace" "gate-skipped" "sz-rust-sz300 不在 workspace members（1614e84 开源/企业版分离），sz300 单元测试移交企业版仓库流程，本次仅测 facade"
+  TEST_PKGS="-p sz-rust-orm-facade"
+fi
+TEST_OUT=$(cargo test $TEST_PKGS -j 2 2>&1)
 TEST_RC=$?
 if [ $TEST_RC -ne 0 ]; then
   # 提取失败摘要（test result: FAILED / error）
@@ -253,11 +263,16 @@ if [ "$SKIP_INTEGRATION" -eq 1 ]; then
   echo "⚠️ 跳过集成测试（--skip-integration）"
 else
   transition "integration" "真实集成测试（jobs_integration，需 MySQL）"
+  if [ "$SZ300_IN_WS" -eq 0 ]; then
+    note_issue "low" "workspace" "gate-skipped" "sz-rust-sz300 不在 workspace members（1614e84 开源/企业版分离），jobs_integration_test 移交企业版仓库流程"
+    echo "⚠️ 跳过集成测试（sz-rust-sz300 不在 workspace）"
+  else
   INTEG_OUT=$(cargo test -p sz-rust-sz300 --test jobs_integration_test -j 2 -- --ignored 2>&1)
   INTEG_RC=$?
   if [ $INTEG_RC -ne 0 ]; then
     INTEG_FAIL=$(echo "$INTEG_OUT" | grep -E "test result: FAILED|panicked|error\[" | head -3 | tr '\n' ' ')
     note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
+  fi
   fi
 fi
 
@@ -272,7 +287,11 @@ if [ "$DEEP" -eq 1 ]; then
   fi
 
   transition "deep" "变更行覆盖率（llvm-cov，jobs.rs ≥75% 行）"
-  COV_OUT=$(cargo llvm-cov -p sz-rust-orm-facade --lib --no-report -j 2 2>&1 && cargo llvm-cov -p sz-rust-sz300 --test jobs_integration_test --no-report -j 2 -- --ignored 2>&1 && cargo llvm-cov report 2>&1)
+  if [ "$SZ300_IN_WS" -eq 1 ]; then
+    COV_OUT=$(cargo llvm-cov -p sz-rust-orm-facade --lib --no-report -j 2 2>&1 && cargo llvm-cov -p sz-rust-sz300 --test jobs_integration_test --no-report -j 2 -- --ignored 2>&1 && cargo llvm-cov report 2>&1)
+  else
+    COV_OUT=$(cargo llvm-cov -p sz-rust-orm-facade --lib --no-report -j 2 2>&1 && cargo llvm-cov report 2>&1)
+  fi
   COV_RC=$?
   if [ $COV_RC -ne 0 ]; then
     note_issue "high" "deep" "coverage" "覆盖率检查失败（需 cargo-llvm-cov；jobs.rs 阈值 75%）"

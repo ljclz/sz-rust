@@ -91,10 +91,12 @@ scanning → compile → static → security → test → integration(可跳过)
 | 6 | 安全 | `sensitive-field-audit.js`（密钥/脱敏） | EXPOSED → **critical** |
 | 7 | 一致性 | `feature-consistency.js` | 失败 → high |
 | 8-10 | 一致性 | `doc-code-consistency.js` / `adr-code-consistency.js` / `assertion-value-check.js` | 失败 → low（不阻塞） |
-| 11 | 测试 | `cargo test -p sz-rust-orm-facade -p sz-rust-sz300` | test-failure → **critical** |
-| 12 | 集成 | `jobs_integration_test --ignored`（需 MySQL，`--skip-integration` 跳过） | integration-failure → high |
+| 11 | 测试 | `cargo test -p sz-rust-orm-facade -p sz-rust-sz300`（sz300 存在性守卫¹） | test-failure → **critical** |
+| 12 | 集成 | `jobs_integration_test --ignored`（需 MySQL，`--skip-integration` 跳过，sz300 守卫¹） | integration-failure → high |
 | 13-14 | 深验证（`--deep`） | `cargo-mutants` 变异杀率 + `cargo-llvm-cov`（jobs.rs ≥75%） | → high |
 | 15 | AI（`--ai`） | OpenAI 兼容端点评审 diff + 问题清单 | 失败 → medium |
+
+> **¹ sz300 存在性守卫**（2026-09-13）：`1614e84` 开源/企业版物理分离后 `sz-rust-sz300` 移出 workspace members，脚本以 `grep Cargo.toml` 探测——包不在 workspace 时门禁 11 降级为仅测 `-p sz-rust-orm-facade`、门禁 12 跳过集成、门禁 14 覆盖率跳过 sz300 部分，均记 `gate-skipped`（low，不阻塞）并在报告中如实标注；sz300 测试职责移交企业版仓库流程。
 
 ## 六、AI 评审环节
 
