@@ -14,6 +14,7 @@ use crate::models::user::{UserModel, UserStatus};
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateUserRequest {
     pub username: String,
+    #[serde(skip_serializing)]
     pub password: String,
     pub email: Option<String>,
     pub phone: Option<String>,
@@ -21,6 +22,7 @@ pub struct CreateUserRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UpdateUserRequest {
+    #[serde(skip_serializing)]
     pub password: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,

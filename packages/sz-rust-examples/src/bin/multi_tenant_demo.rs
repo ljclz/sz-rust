@@ -72,7 +72,8 @@ fn build_app() -> Router {
         audit,
     ));
 
-    let path_guard = PathGuard::new(vec![std::env::current_dir().unwrap(), std::env::temp_dir()]);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let path_guard = PathGuard::new(vec![cwd, std::env::temp_dir()]);
     let config_loader = Arc::new(TenantConfigLoader::new(
         manager.clone(),
         path_guard,
@@ -112,12 +113,12 @@ fn build_app() -> Router {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt::init();
 
     let app = build_app();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("多租户 SaaS 示例服务启动: http://localhost:3000");
     tracing::info!("端点:");
     tracing::info!("  GET  /health                    — 健康检查");
@@ -127,5 +128,5 @@ async fn main() {
     tracing::info!("  POST /api/tenant-scoped-tables  — 注册隔离表");
     tracing::info!("  GET  /api/orders                — 业务查询（自动租户隔离）");
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await
 }

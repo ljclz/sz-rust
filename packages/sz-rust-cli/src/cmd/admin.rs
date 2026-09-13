@@ -220,7 +220,10 @@ async fn execute_init(args: &InitArgs) -> Result<i32, CliError> {
         return Ok(0);
     }
 
-    let url = args.url.as_ref().unwrap();
+    let url = args
+        .url
+        .as_deref()
+        .ok_or_else(|| CliError::Clap("admin init 在线模式必须提供 --url".to_string()))?;
     println!("=== Admin 插件初始化 ===\n");
     println!("连接数据库...");
     let mut conn = create_pg_connection(url).await?;
