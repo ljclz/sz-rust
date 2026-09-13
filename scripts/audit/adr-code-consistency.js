@@ -51,8 +51,16 @@ const KNOWN_EXTERNAL_CRATES = [
     'sz-rust-migration',
 ];
 
+// 已移除 crate（ADR 决策记录中对其的引用属历史决策事实，报 WARN 不阻塞）：
+// sz-rust-k8s-operator（ADR-038 决策移除，2026-08-21 决策、2026-09-14 完成目录物理删除）
+const REMOVED_CRATES = ['sz-rust-k8s-operator'];
+
 function isExternalRef(ref) {
     return KNOWN_EXTERNAL_CRATES.some((c) => ref.includes(`packages/${c}/`) || ref === `packages/${c}`);
+}
+
+function isRemovedCrateRef(ref) {
+    return REMOVED_CRATES.some((c) => ref.includes(`packages/${c}/`) || ref === `packages/${c}`);
 }
 
 // 提取 ADR 中引用的 packages/ 路径（相关代码段 + 正文）
@@ -89,6 +97,11 @@ function main() {
             // 已知企业版交付（跨仓库错位）→ WARN
             if (isExternalRef(cleanRef)) {
                 warnings.push(`${rel}:${first.line} 引用企业版交付 crate（需核验企业版仓库）: ${cleanRef}`);
+                continue;
+            }
+            // 已移除 crate 的决策记录引用 → WARN（历史决策事实，非漂移）
+            if (isRemovedCrateRef(cleanRef)) {
+                warnings.push(`${rel}:${first.line} 引用已移除 crate（ADR 决策记录，见 git 历史）: ${cleanRef}`);
                 continue;
             }
             if (cleanRef.endsWith('.rs') || cleanRef.endsWith('/')) {

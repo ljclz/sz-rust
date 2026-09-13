@@ -50,11 +50,13 @@ const KNOWN_FICTIONAL_CRATES = new Set([
     'sz-rust-migration',
 ]);
 
-// 已移除的 crate（2026-08-15 移除：非框架核心、零测试、零依赖方）
+// 已移除的 crate（2026-08-15 移除：非框架核心、零测试、零依赖方；
+// sz-rust-k8s-operator：ADR-038 决策移除孤儿 crate，2026-09-14 完成目录物理删除）
 // 历史文档/审计报告中的引用降级为 WARN，不阻塞 CI。
 const REMOVED_CRATES = new Set([
     'sz-rust-operator',
     'sz-rust-wasm',
+    'sz-rust-k8s-operator',
 ]);
 
 // 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件
