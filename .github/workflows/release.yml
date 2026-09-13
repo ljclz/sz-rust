@@ -6,7 +6,7 @@
 #   2. 构建 release 二进制（多平台：linux amd64 / arm64）
 #   3. 生成 CHANGELOG（基于 commit 历史）
 #   4. 创建 GitHub Release，上传二进制 + SHA256 校验和
-#   5. 构建并推送 Docker 镜像到 GHCR（GitHub Container Registry）
+#   5. Docker 镜像（sz300-server 业务镜像已迁移企业版仓库，job 保留但已禁用）
 
 name: Release
 
@@ -75,20 +75,20 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p sz-rust-sz300
+        run: cargo build --release --target ${{ matrix.target }} -p sz-rust-cli
       - name: Package binary
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          ARCHIVE="sz300-server-${VERSION}-${{ matrix.target }}.tar.gz"
-          tar -czf "$ARCHIVE" -C target/${{ matrix.target }}/release sz300-server
+          ARCHIVE="sz-rust-cli-${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -czf "$ARCHIVE" -C target/${{ matrix.target }}/release sz-rust
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sz300-server-${{ matrix.target }}
+          name: sz-rust-cli-${{ matrix.target }}
           path: |
-            sz300-server-*.tar.gz
-            sz300-server-*.sha256
+            sz-rust-cli-*.tar.gz
+            sz-rust-cli-*.sha256
 
   # ========== Job 3: 创建 GitHub Release ==========
   release:
@@ -111,7 +111,7 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           EXPECTED="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
           for t in $EXPECTED; do
-            f="artifacts/sz300-server-${t}/sz300-server-${VERSION}-${t}.tar.gz"
+            f="artifacts/sz-rust-cli-${t}/sz-rust-cli-${VERSION}-${t}.tar.gz"
             test -s "$f" || { echo "::error::missing artifact for ${t}"; exit 1; }
             test -s "${f}.sha256" || { echo "::error::missing sha256 for ${t}"; exit 1; }
             (cd "$(dirname "$f")" && sha256sum -c "$(basename "${f}.sha256")") \
@@ -149,28 +149,31 @@ jobs:
             ${{ steps.changelog.outputs.changelog }}
 
             ### Artifacts
-            - `sz300-server-*-x86_64-unknown-linux-gnu.tar.gz` — Linux x86_64 二进制
-            - `sz300-server-*-aarch64-unknown-linux-gnu.tar.gz` — Linux ARM64 二进制
+            - `sz-rust-cli-*-x86_64-unknown-linux-gnu.tar.gz` — Linux x86_64 CLI 二进制
+            - `sz-rust-cli-*-aarch64-unknown-linux-gnu.tar.gz` — Linux ARM64 CLI 二进制
             - `*.sha256` — SHA256 校验和
 
             ### Install
             ```bash
             VERSION=${{ github.ref_name }}
-            wget https://github.com/ljclz/sz-rust/releases/download/$VERSION/sz300-server-$VERSION-x86_64-unknown-linux-gnu.tar.gz
-            tar -xzf sz300-server-$VERSION-x86_64-unknown-linux-gnu.tar.gz
-            ./sz300-server
+            wget https://github.com/ljclz/sz-rust/releases/download/$VERSION/sz-rust-cli-$VERSION-x86_64-unknown-linux-gnu.tar.gz
+            tar -xzf sz-rust-cli-$VERSION-x86_64-unknown-linux-gnu.tar.gz
+            ./sz-rust --help
             ```
           files: |
-            artifacts/*/sz300-server-*.tar.gz
-            artifacts/*/sz300-server-*.sha256
+            artifacts/*/sz-rust-cli-*.tar.gz
+            artifacts/*/sz-rust-cli-*.sha256
           draft: false
           prerelease: false
 
   # ========== Job 4: 构建并推送 Docker 镜像 ==========
+  # 注：Dockerfile 构建的是 sz300-server 业务镜像，sz-rust-sz300 已迁移至企业版仓库，
+  #     此 job 在开源版 Release 中跳过（同 ci.yml db-integration）；镜像构建移交企业版流水线
   docker:
-    name: Push Docker image to GHCR
+    name: Push Docker image to GHCR (moved to enterprise)
     needs: test
     runs-on: ubuntu-latest
+    if: false
     steps:
       - uses: actions/checkout@v4
       - name: Extract version from tag

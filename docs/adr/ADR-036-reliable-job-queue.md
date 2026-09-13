@@ -2,7 +2,7 @@
 
 - **状态**: Accepted
 - **日期**: 2026-08-15
-- **相关代码**: `packages/sz-rust-orm-facade/src/jobs.rs`, `packages/sz-rust-sz300/src/main.rs`
+- **相关代码**: `packages/sz-rust-orm-facade/src/jobs.rs`（业务侧消费方原为 sz300 `order.expire_check` 定时任务，该业务包已移交企业版仓库，开源版消费方接线示例见 `sz-rust-examples`）
 
 ## 背景
 

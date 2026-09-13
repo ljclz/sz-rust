@@ -57,15 +57,35 @@ const REMOVED_CRATES = new Set([
     'sz-rust-wasm',
 ]);
 
+// 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件
+// addons-{cms,crm,ecommerce,erp,forum,im,operate}；sz-rust-sz300 业务包经 1614e84 移出开源版，
+// ci.yml 对应 job 已 if:false 并注明「已迁移至企业版仓库」）。
+// 开源版文档/历史报告中的引用降级为 WARN（不阻塞）；可执行配置（.github/workflows）仍须显式修复。
+const ENTERPRISE_DELIVERED_CRATES = new Set([
+    'sz-rust-sz300',
+    'sz-rust-addons-cms',
+    'sz-rust-addons-crm',
+    'sz-rust-addons-ecommerce',
+    'sz-rust-addons-erp',
+    'sz-rust-addons-forum',
+    'sz-rust-addons-im',
+    'sz-rust-addons-operate',
+]);
+
 // 非 crate 名：企业版仓库名 + .trae/skills/ 下的 Skill 目录名（文档常引用 Skill 名，非交付声称）
 // + 已核验的部署目录/cron 标记（sz-rust-soak：soak-toolkit 工作目录名，见 scripts/soak-self-hosted/）
+// + 企业版产品/文档名（sz-rust-sdd：企业版 SDD 产品版本名，见 implementation-progress M3 条目）
 const NON_CRATE_NAMES = new Set([
     'sz-rust-enterprise',
     'sz-rust-soak',
+    'sz-rust-skills',
+    'sz-rust-engineering-practices',
+    'sz-rust-sdd',
     ...lsDir(path.join(ROOT, '.trae', 'skills')),
 ]);
 
-// 文档整体标注企业版交付 → 该文档内"不存在"声称降级为 WARN
+// 文档整体含企业版字样 → 已知企业版交付清单内 crate 降级 WARN（见上）；
+// 对不在任何豁免清单的不存在 crate 仍为 ERROR（fail-closed，防新增幻影绕过）
 const EXTERNAL_REPO_MARKERS = /企业版|enterprise|商业版/i;
 
 const IGNORE_BEGIN = '<!-- doc-code-consistency: ignore-begin -->';
@@ -192,8 +212,12 @@ function main() {
                     warnings.push(`${rel}:${firstRef.line} 引用 ${name}（已移除 crate，历史文档引用）`);
                 } else if (KNOWN_FICTIONAL_CRATES.has(name) && fictionalAnnotated) {
                     warnings.push(`${rel}:${firstRef.line} 引用 ${name}（已定性虚构，当前为审计回退标注引用）`);
-                } else if (KNOWN_FICTIONAL_CRATES.has(name) || docExternal) {
+                } else if (KNOWN_FICTIONAL_CRATES.has(name)) {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（已定性虚构交付：crate 在开源/企业版仓库均不存在，禁止作为有效声称）`);
+                } else if (ENTERPRISE_DELIVERED_CRATES.has(name)) {
+                    warnings.push(`${rel}:${firstRef.line} 引用 ${name}（企业版交付/已移出开源版，历史或跨版引用）`);
+                } else if (docExternal) {
+                    errors.push(`${rel}:${firstRef.line} 声称 ${name}（幻影交付：packages/${name} 不存在——文档含企业版字样但 crate 不在已核验企业版交付清单，请核实或更新清单）`);
                 } else {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（幻影交付：packages/${name} 不存在且未标注所属仓库）`);
                 }

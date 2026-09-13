@@ -51,7 +51,7 @@ jobs:
           retention-days: 14
 
   coverage-p1:
-    name: Coverage P1 (sz300/ai/auth/observability)
+    name: Coverage P1 (ai/auth/observability)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +66,6 @@ jobs:
       - name: Run coverage P1
         run: |
           cargo llvm-cov \
-            -p sz-rust-sz300 \
             -p sz-rust-ai-facade --features all-providers \
             -p sz-rust-auth-facade \
             -p sz-rust-observability \
@@ -127,9 +126,6 @@ jobs:
       - name: Run coverage P3
         run: |
           cargo llvm-cov \
-            -p sz-rust-addons-crm \
-            -p sz-rust-addons-ecommerce \
-            -p sz-rust-addons-cms \
             -p sz-rust-addons-loader \
             -p sz-rust-cli \
             -p sz-rust-mcp \
@@ -148,10 +144,12 @@ jobs:
           retention-days: 14
 
   # ── CI-006：sz300 DB 集成覆盖率（含 --ignored + --fail-under 85）──
+  # 注：sz-rust-sz300 已迁移至企业版仓库，此 job 在开源版 CI 中跳过（同 ci.yml db-integration）
 
   coverage-sz300:
-    name: Coverage sz300 (incl. DB integration)
+    name: Coverage sz300 (moved to enterprise)
     runs-on: ubuntu-latest
+    if: false
     services:
       mysql:
         image: mysql:9.6
