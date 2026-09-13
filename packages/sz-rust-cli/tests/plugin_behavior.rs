@@ -10,6 +10,12 @@ use sz_rust_cli::cmd::plugin::{
     execute, InstallArgs, LoginArgs, PluginCommand, SearchArgs, UninstallArgs, UpdateArgs,
 };
 
+/// EnvGuard 修改的是进程级环境变量（HOME/USERPROFILE），并行测试互踩会使
+/// credentials 解析到错误目录（llvm-cov 插桩下曾实发：test_cli_search_with_results
+/// 断言失败）。测试间无共享状态可并行，仅环境变量是全局的——统一串行化，
+/// 持锁贯穿 setup → execute → Drop 全程。
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// 测试辅助：设置临时 HOME 并写入 credentials.toml 指向 mock server
 struct EnvGuard {
     orig_home: Option<String>,
@@ -68,6 +74,7 @@ impl Drop for EnvGuard {
 
 #[tokio::test]
 async fn test_cli_search_with_results() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/search")
         .match_query(mockito::Matcher::Any)
@@ -96,6 +103,7 @@ async fn test_cli_search_with_results() {
 
 #[tokio::test]
 async fn test_cli_search_empty_results() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/search")
         .match_query(mockito::Matcher::Any)
@@ -122,6 +130,7 @@ async fn test_cli_search_empty_results() {
 
 #[tokio::test]
 async fn test_cli_search_server_error() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/search")
         .match_query(mockito::Matcher::Any)
@@ -146,6 +155,7 @@ async fn test_cli_search_server_error() {
 
 #[tokio::test]
 async fn test_cli_install_success() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/crm/1.0.0/download")
         .with_status(200)
@@ -165,6 +175,7 @@ async fn test_cli_install_success() {
 
 #[tokio::test]
 async fn test_cli_install_not_found() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/ghost/latest/download")
         .with_status(404)
@@ -183,6 +194,7 @@ async fn test_cli_install_not_found() {
 
 #[tokio::test]
 async fn test_cli_uninstall_no_lockfile() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mock = mockito::Server::new_async().await;
     let (_temp, _guard) = EnvGuard::setup_with_credentials(&mock.url()).await;
 
@@ -196,6 +208,7 @@ async fn test_cli_uninstall_no_lockfile() {
 
 #[tokio::test]
 async fn test_cli_update_success() {
+    let _env_serial = ENV_LOCK.lock().await;
     let mut mock = mockito::Server::new_async().await;
     mock.mock("GET", "/api/v1/plugins/crm/latest/download")
         .with_status(200)
@@ -216,6 +229,7 @@ async fn test_cli_update_success() {
 
 #[tokio::test]
 async fn test_cli_login_with_token_flag() {
+    let _env_serial = ENV_LOCK.lock().await;
     let temp = tempfile::tempdir().unwrap();
     let orig_home = std::env::var("HOME").ok();
     let orig_userprofile = std::env::var("USERPROFILE").ok();
@@ -248,6 +262,7 @@ async fn test_cli_login_with_token_flag() {
 
 #[tokio::test]
 async fn test_cli_login_without_token_returns_1() {
+    let _env_serial = ENV_LOCK.lock().await;
     let args = LoginArgs {
         token: None,
         url: None,
