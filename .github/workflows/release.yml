@@ -6,7 +6,7 @@
 #   2. 构建 release 二进制（多平台：linux amd64 / arm64）
 #   3. 生成 CHANGELOG（基于 commit 历史）
 #   4. 创建 GitHub Release，上传二进制 + SHA256 校验和
-#   5. Docker 镜像（sz300-server 业务镜像已迁移企业版仓库，job 保留但已禁用）
+#   5. Docker 镜像构建已随 sz300-server 业务包移交企业版流水线（job 已移除，见 git 历史）
 
 name: Release
 
@@ -23,6 +23,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ========== Job 0: 平台矩阵单一来源 ==========
+  # build 矩阵与 release 产物断言名单均派生自此 outputs，新增平台只改 TARGETS 一处，防名单漂移
+  targets:
+    name: Resolve release targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      space: ${{ steps.set.outputs.space }}
+    steps:
+      - id: set
+        run: |
+          TARGETS="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
+          echo "space=$TARGETS" >> "$GITHUB_OUTPUT"
+          json=$(printf '%s\n' $TARGETS | python3 -c 'import sys, json; print(json.dumps(sys.stdin.read().split()))')
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+
   # ========== Job 1: 测试 ==========
   test:
     name: Test (release gate)
@@ -45,18 +61,14 @@ jobs:
   # ========== Job 2: 构建多平台二进制 ==========
   build:
     name: Build ${{ matrix.target }}
-    needs: test
+    needs: [targets, test]
     runs-on: ubuntu-latest
     # AI 评审 P5：发布流水线禁止静默失败通道（continue-on-error 会让缺失
     # 平台产物的 release 照常绿灯），改由 release job 产物完整性断言兜底
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            archive: tar.gz
-          - target: aarch64-unknown-linux-gnu
-            archive: tar.gz
+        target: ${{ fromJSON(needs.targets.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
@@ -93,7 +105,7 @@ jobs:
   # ========== Job 3: 创建 GitHub Release ==========
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [targets, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,7 +121,8 @@ jobs:
       - name: Assert all release artifacts exist
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          EXPECTED="x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu"
+          # 平台名单派生自 targets job（与 build matrix 同源，防名单漂移）
+          EXPECTED="${{ needs.targets.outputs.space }}"
           for t in $EXPECTED; do
             f="artifacts/sz-rust-cli-${t}/sz-rust-cli-${VERSION}-${t}.tar.gz"
             test -s "$f" || { echo "::error::missing artifact for ${t}"; exit 1; }
@@ -166,36 +179,6 @@ jobs:
           draft: false
           prerelease: false
 
-  # ========== Job 4: 构建并推送 Docker 镜像 ==========
-  # 注：Dockerfile 构建的是 sz300-server 业务镜像，sz-rust-sz300 已迁移至企业版仓库，
-  #     此 job 在开源版 Release 中跳过（同 ci.yml db-integration）；镜像构建移交企业版流水线
-  docker:
-    name: Push Docker image to GHCR (moved to enterprise)
-    needs: test
-    runs-on: ubuntu-latest
-    if: false
-    steps:
-      - uses: actions/checkout@v4
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push (multi-arch)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/sz300-server:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/sz300-server:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  # Job 4（Docker 镜像）已移除：Dockerfile 构建的是 sz300-server 业务镜像，
+  # sz-rust-sz300 已迁移至企业版仓库（1614e84），镜像构建移交企业版流水线；
+  # 完整 job 定义见 git 历史

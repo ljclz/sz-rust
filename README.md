@@ -137,6 +137,8 @@ cargo run -p sz-rust-examples --bin crud_demo
 
 ## 项目结构
 
+> 🔒 标注的模块在企业版仓库交付，不在本仓库 workspace 内
+
 ```
 sz-rust/                          # workspace 根目录
 ├── Cargo.toml                    # workspace 配置（axum 0.8 / SZ-ORM 全家桶）
@@ -162,13 +164,13 @@ sz-rust/                          # workspace 根目录
     ├── sz-rust-vector-db/        # 向量数据库适配器（Qdrant HTTP，feature gate `qdrant`）<!-- 来源: P1 任务组4 -->
     ├── sz-rust-mcp/              # MCP 协议（stdio JSON-RPC）
     ├── sz-rust-addons-loader/    # 插件加载器
-    ├── sz-rust-addons-ecommerce/ # 电商插件（企业版仓库交付）
-    ├── sz-rust-addons-cms/       # CMS 插件（文章/分类/标签，企业版仓库交付）
-    ├── sz-rust-addons-crm/       # CRM 插件（客户/线索/商机，企业版仓库交付）
+    ├── sz-rust-addons-ecommerce/ # 电商插件 🔒
+    ├── sz-rust-addons-cms/       # CMS 插件（文章/分类/标签）🔒
+    ├── sz-rust-addons-crm/       # CRM 插件（客户/线索/商机）🔒
     ├── sz-rust-addons-admin/     # Admin 后台管理插件（用户/角色/权限/菜单/配置/日志/仪表盘）
     ├── sz-rust-observability/    # 可观测性模块（MetricsRegistry + SLO 燃烧率）
 
-    └── sz-rust-sz300/            # SZ300 业务应用（已移交企业版仓库）
+    └── sz-rust-sz300/            # SZ300 业务应用 🔒（已移交企业版仓库）
 ```
 
 ---

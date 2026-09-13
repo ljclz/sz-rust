@@ -133,6 +133,8 @@ cargo run -p sz-rust-examples --bin crud_demo
 
 ## Project Structure
 
+> Modules marked 🔒 are delivered in the enterprise repository, not part of this workspace.
+
 ```
 sz-rust/                          # workspace root
 ├── Cargo.toml                    # workspace config (axum 0.8 / SZ-ORM全家桶)
@@ -156,12 +158,12 @@ sz-rust/                          # workspace root
     ├── sz-rust-mvc-facade/       # MVC facade
     ├── sz-rust-mcp/              # MCP protocol (stdio JSON-RPC)
     ├── sz-rust-addons-loader/    # plugin loader
-    ├── sz-rust-addons-ecommerce/ # e-commerce plugin (delivered in enterprise repo)
-    ├── sz-rust-addons-cms/       # CMS plugin (articles/categories/tags, delivered in enterprise repo)
-    ├── sz-rust-addons-crm/       # CRM plugin (contacts/leads/deals, delivered in enterprise repo)
+    ├── sz-rust-addons-ecommerce/ # e-commerce plugin 🔒
+    ├── sz-rust-addons-cms/       # CMS plugin (articles/categories/tags) 🔒
+    ├── sz-rust-addons-crm/       # CRM plugin (contacts/leads/deals) 🔒
     ├── sz-rust-observability/    # observability (MetricsRegistry + SLO burn rate)
 
-    └── sz-rust-sz300/            # SZ300 business app (moved to enterprise repo)
+    └── sz-rust-sz300/            # SZ300 business app 🔒 (moved to enterprise repo)
 ```
 
 ---
