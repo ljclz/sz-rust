@@ -195,6 +195,18 @@ pub enum Command {
         #[command(subcommand)]
         admin_command: cmd::admin::AdminCommand,
     },
+
+    /// 启动 HTTP 服务（对齐 PHP php think run）
+    #[command(name = "serve")]
+    Serve {
+        /// 启用 admin 插件（加载 /api/admin/* 路由 + Capability 注册）
+        #[arg(long)]
+        with_admin: bool,
+
+        /// 监听地址（默认 0.0.0.0:8080）
+        #[arg(long, default_value = "0.0.0.0:8080")]
+        addr: String,
+    },
 }
 
 impl Cli {
@@ -263,6 +275,9 @@ impl Cli {
             Some(Command::RouteClear) => cmd::optimize::execute_route_clear().await.map(|_| 0),
             Some(Command::Plugin { plugin_command }) => cmd::plugin::execute(plugin_command).await,
             Some(Command::Admin { admin_command }) => cmd::admin::execute(admin_command).await,
+            Some(Command::Serve { with_admin, addr }) => {
+                cmd::serve::execute(*with_admin, addr).await
+            }
         }
     }
 }

@@ -16,6 +16,7 @@
 //! | `optimize` | `think\console\command\optimize\*` | 配置/路由缓存优化命令 |
 //! | `plugin` | 插件市场 | 插件搜索/安装/发布/卸载/更新/列表/登录 |
 //! | `admin` | Admin 后台管理插件 | 迁移/路由列表/Capability列表/初始化 |
+//! | `serve` | think run | 启动 HTTP 服务（可选加载 admin 插件） |
 
 pub mod admin;
 pub mod cache;
@@ -26,6 +27,7 @@ pub mod plugin;
 pub mod route;
 pub mod scheduler;
 pub mod seed;
+pub mod serve;
 
 /// 测试辅助模块 — 提供跨模块共享的全局互斥锁
 ///

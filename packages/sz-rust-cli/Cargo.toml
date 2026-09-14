@@ -50,14 +50,31 @@ indicatif.workspace = true
 reqwest.workspace = true
 # 异步 trait
 async-trait.workspace = true
-# Admin 插件（admin migrate/init 命令）
+# Admin 插件（admin migrate/init 命令 + serve --with-admin 接线）
 sz-rust-addons-admin = { workspace = true }
+# 插件加载器（CapabilityHook trait）
+sz-rust-addons-loader = { workspace = true }
+# Capability 注册表（serve --with-admin 注册 admin.* 能力）
+sz-rust-capability = { workspace = true }
+# ORM facade（serve --with-admin 创建 Pool）
+sz-rust-orm-facade = { workspace = true }
+# HTTP 路由（serve 命令构建 Router）
+axum.workspace = true
+# 日志（serve 命令输出启动信息）
+tracing.workspace = true
 # 密码哈希（admin init 命令）
 bcrypt = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true
 mockito = "1"
+tower = { workspace = true }
+http = "1"
+http-body-util = "0.1"
+sz-rust-orm-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
+sz-rust-addons-loader = { workspace = true }
+async-trait.workspace = true
 
 [lib]
 name = "sz_rust_cli"

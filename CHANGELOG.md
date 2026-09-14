@@ -7,6 +7,15 @@
 
 ## [Unreleased] - 2026-09-14
 
+### Added
+
+- **sz-rust-cli `serve` 子命令**：新增 `sz-rust serve [--with-admin] [--addr 0.0.0.0:8080]` 命令，对齐 PHP `php think run`。`--with-admin` 标志启用 admin 插件接线（加载 `/api/admin/*` 21 个端点 + 注册 17 个 `admin.*` Capability），不带标志时行为与基础服务启动一致（向后兼容）。核心函数 `build_router_with_admin(pool, roles) -> (Router, usize)` 为纯函数，可被测试独立调用
+- **CLI 接线验证测试**：新增 `packages/sz-rust-cli/tests/admin_serve_wiring.rs`（4 个用例：参数解析 2 + Router 构建 1 + 根路由隔离 1），全部使用 mock 连接池无外部数据库依赖
+
+### Changed
+
+- **admin_demo.rs 从注释演示改造为可运行接线示例**：使用 mock 连接池完成实例化→路由合并→Capability 注册完整流程后打印加载结果退出（不监听端口），`cargo run -p sz-rust-examples --bin admin_demo` 输出 "Admin Demo 接线完成 — 17 个 Capability 已注册"
+
 ### Security
 
 - **Admin 请求 DTO password 双层脱敏**：`CreateUserRequest`/`UpdateUserRequest` 的 `password` 字段补 `#[serde(skip_serializing)]` 并将 `derive(Debug)` 改为手工实现（`{:?}` 输出 `[REDACTED]`）——`skip_serializing` 不覆盖 Debug 日志路径（AI 评审采纳项，d1b0061 + d14f9eb）

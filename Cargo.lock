@@ -8435,10 +8435,13 @@ name = "sz-rust-cli"
 version = "1.2.0"
 dependencies = [
  "async-trait",
+ "axum 0.8.9",
  "bcrypt",
  "chrono",
  "clap",
  "dialoguer",
+ "http",
+ "http-body-util",
  "indicatif",
  "mockito",
  "reqwest 0.12.28",
@@ -8449,15 +8452,21 @@ dependencies = [
  "sz-orm-oracle",
  "sz-orm-sqlx",
  "sz-rust-addons-admin",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
  "sz-rust-core",
  "sz-rust-frontend-codegen",
  "sz-rust-marketplace",
+ "sz-rust-middleware-facade",
+ "sz-rust-orm-facade",
  "tabled",
  "tempfile",
  "tera",
  "thiserror 2.0.20",
  "tokio",
  "toml 0.8.23",
+ "tower 0.5.3",
+ "tracing",
 ]
 
 [[package]]
