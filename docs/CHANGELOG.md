@@ -4,6 +4,72 @@
 
 ---
 
+## [v1.2.0] — 2026-09-14 — 生产化增强 + 安全加固 + 生态扩展
+
+### 概要
+
+v1.1.0 至 v1.2.0 期间共 193 个 commit，涵盖：serve 命令生产化增强（7 大特性）、Admin 后台管理插件、多租户 SaaS 支持、Marketplace 插件市场、Frontend Codegen 可视化前端、AI 能力补齐、开源/企业版物理分离、覆盖率达标 85%+、幻影交付清零、安全审计修复（白帽+黑帽）、变异测试 3 轮补强、CI 门禁强化、可靠任务队列、多后端迁移支持。
+
+### 新增
+
+- **serve 命令生产化增强**（`packages/sz-rust-cli/src/cmd/serve.rs`）：多 worker runtime、优雅关闭超时、健康检查接线、访问日志中间件、TLS/HTTPS 支持、配置热重载、信号处理、Windows CLI 子命令（commit `ec65d31`）
+- **Admin 后台管理插件**（`packages/sz-rust-addons-admin/`）：7 模块 21 端点 + 17 Capability + CLI 接线（`admin migrate/list-routes/list-capabilities/init`）（commit `c96196e`, `f6b0e7e`）
+- **多租户 SaaS 支持**（`packages/sz-rust-core/src/multi_tenant.rs`）：tenant_id 自动注入 + 行级隔离 + 租户管理 API + 配置隔离（commit `2b149b6`）
+- **数据权限扩展**（`packages/sz-rust-auth-facade/src/data_permission.rs`）：动态策略热更新 + 配置文件加载 + 管理后台 API（commit `69568fa`）
+- **Marketplace 插件市场**（`packages/sz-rust-marketplace/`）：crate 骨架 + 数据访问层 + Web 平台（axum + JWT + OpenAPI）+ CLI 接线 + Docker Compose + e2e 测试（commit `bcca87e` ~ `a9d2cd6`）
+- **Frontend Codegen 可视化前端**（`packages/sz-rust-frontend-codegen/`）：Vue 3 前端应用 + Pinia store + Tauri API 集成 + 12 个 e2e 测试（commit `5abefb5`, `ca19a2f`）
+- **AI 能力补齐**：RagPipeline + Agent + LongTermMemory + LocalEmbedding + tiktoken + LlmChatCapability + Ai::embed/stream_chat + McpToolBridge + AiMetrics（commit `3c9047d`, `85a709f`, `8d2d1e9`）
+- **可靠任务队列 JobQueue**（`packages/sz-rust-orm-facade/src/job_queue.rs`）：持久化 Job 表 + 状态机 + 原子领取（SKIP LOCKED）+ 退避重试 + 幂等 + 死信（commit `df67fc3`）
+- **多后端数据库迁移**：admin migrate/init 全 5 后端（PostgreSQL/MySQL/SQLite/Oracle/MSSQL）（commit `4a63a5a`）
+- **性能压测基线**（`packages/sz-rust-core/benches/`）：sz300 生产压测报告 + ab 压测基线（commit `ed44087`）
+- **PR 审查 Skill**（`.trae/skills/sz-rust-pr-review/`）：状态机 + 5 环节 + 严重度模型 + AI 评审多 Provider 支持（commit `6a2dc58`, `9100a09`）
+- **变异测试 3 轮补强**：hot_reload 6 个 missed 捕获，最终 missed=4（commit `b29aac8`）
+
+### 变更
+
+- **开源/企业版物理分离**：37→29 crate + Apache-2.0 许可证 + crates.io 发布 v1.2.0（commit `1614e84`, `b0fda63`）
+- **sz-orm 依赖升级**：4.7.0 → 5.0.0 → 6.2.0（commit `69b6826`, `5f52aea`）
+- **覆盖率达标 85%+**：11 crate 从基线提升至目标，workspace 总覆盖率 91.44%（commit `9a41345`, `f0375a0`）
+- **幻影交付清零**：多轮审查清理虚构 crate、占位测试、未接线功能（commit `776fdf0`, `8767c09`, `a6928b9`）
+- **铁律门禁上线**：51 处生产裸 unwrap → 0；生产 std::fs → tokio::fs 全链 async 化（commit `b9b22d9`, `78de034`）
+- **CI 门禁强化**：覆盖率 CI 集成、cargo-deny 修复、cargo-machete 清理 49 个未使用依赖、Windows 兼容性、Miri、udeps（commit `776e423`, `7260ef9`, `d1ed1a2`）
+- **Docker 镜像构建验证**：Dockerfile Rust 1.82→1.98 + ARM64 OpenSSL 交叉编译 + 监控栈端口绑定 127.0.0.1（commit `2bff51c`, `4542eef`）
+- **连接池调优**：DB_POOL_* 环境变量 + 预热 + 动态扩缩容 + /metrics 池指标（commit `e23af8a`）
+
+### 安全修复
+
+- **白帽审计 H-1/H-2/M-1/M-2/M-4 修复**：中高危漏洞修复（commit `98ec48e`, `1573ef9`）
+- **黑帽审计 A6 越权端点修复**：5 个越权遗漏端点（commit `2e45dc1`）
+- **白帽审计 L-1/L-2/L-3 低危修复**（commit `747bf31`）
+- **AiProviderConfig api_key 脱敏**（铁律 7）（commit `f4fda55`）
+- **SQL 注入修复**：admin.rs format! 拼接 → 参数化查询（P0 安全修复）
+- **明文密码输出修复**：admin.rs 移除密码打印（P0 安全修复）
+- **连接串泄露修复**：marketplace/main.rs 日志不再打印含密码 URL（P0 安全修复）
+- **硬编码凭据警告**：DATABASE_URL 和 JWT_SECRET 默认值添加警告日志（P1 安全修复）
+- **reqwest 无超时修复**：3 处 Client::new() → Client::builder().timeout(30s)（P1 安全修复）
+- **请求 DTO 手工 Debug 脱敏**（commit `d14f9eb`）
+- **redis_tls 环境变量竞态修复**（commit `6863cf5`）
+- **MemPool 区域分配器 API 收紧为 unsafe fn**（ADR-037）（commit `c6e6ff6`）
+
+### 测试
+
+- workspace 总测试数 2,633 → 4,800+（含 e2e/集成/单元）
+- 变异测试 missed=4（3 轮补强）
+- 4 个无断言测试补行为断言（铁律 10/23）
+- plugin 命令行为集成测试 9 个（mockito 端到端）
+- Admin 插件端到端验证测试 9 个
+- services 层补测 17 测试（覆盖率 39.89%→44.75%）
+
+### 文档
+
+- 生产就绪与真实能力对比报告（基于 35 crate 实际验证）
+- 项目成熟度评估报告（2026-09-04）
+- ADR-037 MemPool unsafe API、ADR-038 k8s-operator 孤儿 crate 物理删除
+- 覆盖率基线报告（91.44%）
+- 审查报告归档（多轮，全绿）
+
+---
+
 ## [v1.1.0] — 2026-08-10 — Admin Monitor API
 
 ### 概要

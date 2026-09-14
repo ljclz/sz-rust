@@ -18,15 +18,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        tracing::warn!("DATABASE_URL 未设置，使用开发默认值 — 生产环境必须设置此环境变量");
         "postgres://szrust:szrust@127.0.0.1:5432/szrust_marketplace".to_string()
     });
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "sz-rust-marketplace-dev-secret".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        tracing::warn!("JWT_SECRET 未设置，使用开发默认值 — 生产环境必须设置此环境变量");
+        "sz-rust-marketplace-dev-secret".to_string()
+    });
     let store_root = std::env::var("OBJECT_STORE_ROOT")
         .unwrap_or_else(|_| "/www/rust/marketplace-store".to_string());
     let listen_addr = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
 
-    tracing::info!("连接数据库: {database_url}");
+    tracing::info!("正在连接数据库...");
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(10)
         .connect(&database_url)

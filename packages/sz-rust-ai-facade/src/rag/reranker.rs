@@ -148,13 +148,19 @@ pub struct CrossEncoderReranker {
 }
 
 #[cfg(feature = "reranker")]
+use std::time::Duration;
+
+#[cfg(feature = "reranker")]
 impl CrossEncoderReranker {
     pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
             api_key: api_key.into(),
             model: "rerank-english-v3.0".to_string(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
         }
     }
 

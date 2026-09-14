@@ -8,6 +8,7 @@
 
 use clap::{Args, Subcommand};
 use sz_rust_core::orm::Connection;
+use sz_rust_orm_facade::Value;
 use tabled::{Table, Tabled};
 
 use crate::error::CliError;
@@ -273,31 +274,29 @@ async fn execute_init(args: &InitArgs) -> Result<i32, CliError> {
     println!("创建超级管理员账户...");
     let hashed = bcrypt::hash(&args.password, 10)
         .map_err(|e| CliError::Migration(format!("密码哈希失败: {e}")))?;
-    let sql = format!(
+    conn.execute_with_params(
         "INSERT INTO users (username, password, status, tenant_id) \
-         VALUES ('{}', '{}', 'active', 0) \
+         VALUES (?, ?, 'active', 0) \
          ON CONFLICT (username, tenant_id) DO NOTHING",
-        args.username, hashed
-    );
-    conn.execute(&sql)
-        .await
-        .map_err(|e| CliError::Migration(format!("创建管理员账户失败: {e}")))?;
+        &[Value::String(args.username.clone()), Value::String(hashed)],
+    )
+    .await
+    .map_err(|e| CliError::Migration(format!("创建管理员账户失败: {e}")))?;
 
-    let sql = format!(
+    conn.execute_with_params(
         "INSERT INTO user_roles (user_id, role_id, tenant_id) \
          SELECT u.id, r.id, 0 FROM users u, roles r \
-         WHERE u.username = '{}' AND u.tenant_id = 0 \
+         WHERE u.username = ? AND u.tenant_id = 0 \
          AND r.code = 'super_admin' AND r.tenant_id = 0 \
          ON CONFLICT (user_id, role_id, tenant_id) DO NOTHING",
-        args.username
-    );
-    conn.execute(&sql)
-        .await
-        .map_err(|e| CliError::Migration(format!("分配管理员角色失败: {e}")))?;
+        &[Value::String(args.username.clone())],
+    )
+    .await
+    .map_err(|e| CliError::Migration(format!("分配管理员角色失败: {e}")))?;
     println!("  账户 {} 已创建并分配 super_admin 角色", args.username);
 
     println!("\n初始化完成！");
-    println!("  超级管理员: {} (密码: {})", args.username, args.password);
+    println!("  超级管理员: {}", args.username);
     println!("  请及时修改默认密码！");
     Ok(0)
 }

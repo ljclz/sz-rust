@@ -7,6 +7,7 @@
 //! token 持久化到 `~/.sz-rust/credentials.toml`。
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +65,10 @@ impl MarketplaceClient {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             token,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -206,7 +210,10 @@ impl MarketplaceClient {
         is_reviewer: bool,
     ) -> MarketplaceResult<String> {
         let url = format!("{base_url}/api/v1/auth/login");
-        let http = reqwest::Client::new();
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_default();
 
         let req = LoginRequest {
             developer_id,
