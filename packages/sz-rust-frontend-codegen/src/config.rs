@@ -141,3 +141,264 @@ pub fn merge_config(file_config: GenerationConfig, cli_args: GenerationConfig) -
         force: cli_args.force || file_config.force,
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_framework_default_is_vue() {
+        assert_eq!(Framework::default(), Framework::Vue);
+    }
+
+    #[test]
+    fn test_framework_serde() {
+        let json = "\"react\"";
+        let fw: Framework = serde_json::from_str(json).unwrap();
+        assert_eq!(fw, Framework::React);
+        assert_eq!(serde_json::to_string(&Framework::Vue).unwrap(), "\"vue\"");
+        assert_eq!(
+            serde_json::to_string(&Framework::React).unwrap(),
+            "\"react\""
+        );
+    }
+
+    #[test]
+    fn test_ui_library_default_is_element_plus() {
+        assert_eq!(UiLibrary::default(), UiLibrary::ElementPlus);
+    }
+
+    #[test]
+    fn test_ui_library_serde() {
+        let json = "\"ant_design_vue\"";
+        let lib: UiLibrary = serde_json::from_str(json).unwrap();
+        assert_eq!(lib, UiLibrary::AntDesignVue);
+        assert_eq!(
+            serde_json::to_string(&UiLibrary::ElementPlus).unwrap(),
+            "\"element_plus\""
+        );
+    }
+
+    #[test]
+    fn test_override_strategy_default_is_skip() {
+        assert_eq!(OverrideStrategy::default(), OverrideStrategy::Skip);
+    }
+
+    #[test]
+    fn test_override_strategy_serde() {
+        let json = "\"overwrite\"";
+        let s: OverrideStrategy = serde_json::from_str(json).unwrap();
+        assert_eq!(s, OverrideStrategy::Overwrite);
+        let json = "\"merge\"";
+        let s: OverrideStrategy = serde_json::from_str(json).unwrap();
+        assert_eq!(s, OverrideStrategy::Merge);
+    }
+
+    #[test]
+    fn test_generation_config_default() {
+        let config = GenerationConfig::default();
+        assert!(config.models.is_empty());
+        assert_eq!(config.model_dir, PathBuf::from("src/model/"));
+        assert_eq!(config.framework, Framework::Vue);
+        assert_eq!(config.ui_library, UiLibrary::ElementPlus);
+        assert_eq!(config.output_dir, PathBuf::from("./frontend/"));
+        assert!(config.template_dir.is_none());
+        assert_eq!(config.override_strategy, OverrideStrategy::Skip);
+        assert!(!config.with_tests);
+        assert!(!config.with_interceptors);
+        assert!(config.lazy_load);
+        assert!(!config.force);
+    }
+
+    #[test]
+    fn test_merge_config_cli_models_override() {
+        let file_config = GenerationConfig {
+            models: vec!["User".to_string()],
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig {
+            models: vec!["Product".to_string()],
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.models, vec!["Product".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_config_file_models_when_cli_empty() {
+        let file_config = GenerationConfig {
+            models: vec!["User".to_string()],
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.models, vec!["User".to_string()]);
+    }
+
+    #[test]
+    fn test_merge_config_cli_framework_override() {
+        let file_config = GenerationConfig {
+            framework: Framework::Vue,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig {
+            framework: Framework::React,
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.framework, Framework::React);
+    }
+
+    #[test]
+    fn test_merge_config_file_framework_when_cli_default() {
+        let file_config = GenerationConfig {
+            framework: Framework::React,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.framework, Framework::React);
+    }
+
+    #[test]
+    fn test_merge_config_template_dir_cli_or_file() {
+        let file_config = GenerationConfig {
+            template_dir: Some(PathBuf::from("/file/templates")),
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig {
+            template_dir: Some(PathBuf::from("/cli/templates")),
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.template_dir, Some(PathBuf::from("/cli/templates")));
+
+        let file_config = GenerationConfig {
+            template_dir: Some(PathBuf::from("/file/templates")),
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert_eq!(merged.template_dir, Some(PathBuf::from("/file/templates")));
+    }
+
+    #[test]
+    fn test_merge_config_with_tests_or_logic() {
+        let file_config = GenerationConfig {
+            with_tests: true,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert!(merged.with_tests);
+
+        let file_config = GenerationConfig::default();
+        let cli_args = GenerationConfig {
+            with_tests: true,
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert!(merged.with_tests);
+
+        let file_config = GenerationConfig::default();
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert!(!merged.with_tests);
+    }
+
+    #[test]
+    fn test_merge_config_lazy_load_and_logic() {
+        let file_config = GenerationConfig {
+            lazy_load: false,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig {
+            lazy_load: true,
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert!(!merged.lazy_load);
+
+        let file_config = GenerationConfig {
+            lazy_load: true,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig {
+            lazy_load: true,
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert!(merged.lazy_load);
+    }
+
+    #[test]
+    fn test_merge_config_force_or_logic() {
+        let file_config = GenerationConfig {
+            force: true,
+            ..Default::default()
+        };
+        let cli_args = GenerationConfig::default();
+        let merged = merge_config(file_config, cli_args);
+        assert!(merged.force);
+
+        let file_config = GenerationConfig::default();
+        let cli_args = GenerationConfig {
+            force: true,
+            ..Default::default()
+        };
+        let merged = merge_config(file_config, cli_args);
+        assert!(merged.force);
+    }
+
+    #[tokio::test]
+    async fn test_load_config_file_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".codegen.toml");
+        let toml_content = r#"
+models = ["User", "Product"]
+model_dir = "src/models/"
+framework = "react"
+ui_library = "ant_design_vue"
+output_dir = "./dist/"
+override_strategy = "overwrite"
+with_tests = true
+with_interceptors = true
+lazy_load = false
+force = true
+"#;
+        tokio::fs::write(&config_path, toml_content).await.unwrap();
+        let config = load_config_file(&config_path).await.unwrap();
+        assert_eq!(config.models, vec!["User", "Product"]);
+        assert_eq!(config.model_dir, PathBuf::from("src/models/"));
+        assert_eq!(config.framework, Framework::React);
+        assert_eq!(config.ui_library, UiLibrary::AntDesignVue);
+        assert_eq!(config.output_dir, PathBuf::from("./dist/"));
+        assert_eq!(config.override_strategy, OverrideStrategy::Overwrite);
+        assert!(config.with_tests);
+        assert!(config.with_interceptors);
+        assert!(!config.lazy_load);
+        assert!(config.force);
+    }
+
+    #[tokio::test]
+    async fn test_load_config_file_not_found() {
+        let result = load_config_file(Path::new("/nonexistent/.codegen.toml")).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, FrontendCodegenError::ConfigParseError(_)));
+        assert!(err.to_string().contains("读取配置文件失败"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_file_invalid_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".codegen.toml");
+        tokio::fs::write(&config_path, "invalid toml [[[")
+            .await
+            .unwrap();
+        let result = load_config_file(&config_path).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, FrontendCodegenError::ConfigParseError(_)));
+        assert!(err.to_string().contains("解析配置文件失败"));
+    }
+}

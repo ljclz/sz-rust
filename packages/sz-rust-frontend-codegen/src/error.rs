@@ -108,3 +108,155 @@ impl From<tera::Error> for FrontendCodegenError {
         Self::TemplateRenderError(err.to_string())
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_code_model_dir_not_found() {
+        let err = FrontendCodegenError::ModelDirNotFound("/path".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_MODEL_DIR_NOT_FOUND");
+    }
+
+    #[test]
+    fn test_error_code_model_parse_error() {
+        let err = FrontendCodegenError::ModelParseError("syntax".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_MODEL_PARSE_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_missing_model() {
+        let err = FrontendCodegenError::MissingModel;
+        assert_eq!(err.error_code(), "FE_CODEGEN_MODEL_MISSING");
+    }
+
+    #[test]
+    fn test_error_code_template_dir_not_found() {
+        let err = FrontendCodegenError::TemplateDirNotFound("/path".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_DIR_NOT_FOUND");
+    }
+
+    #[test]
+    fn test_error_code_template_missing() {
+        let err = FrontendCodegenError::TemplateMissing("list.html".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_MISSING");
+    }
+
+    #[test]
+    fn test_error_code_template_syntax_error() {
+        let err = FrontendCodegenError::TemplateSyntaxError("{% bad".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_SYNTAX_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_template_render_error() {
+        let err = FrontendCodegenError::TemplateRenderError("fail".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_RENDER_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_template_path_traversal() {
+        let err = FrontendCodegenError::TemplatePathTraversal("../etc".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_PATH_TRAVERSAL");
+    }
+
+    #[test]
+    fn test_error_code_template_inheritance_cycle() {
+        let err = FrontendCodegenError::TemplateInheritanceCycle("a->b->a".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_INHERITANCE_CYCLE");
+    }
+
+    #[test]
+    fn test_error_code_unknown_filter() {
+        let err = FrontendCodegenError::UnknownFilter("badfilter".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_FILTER_UNKNOWN");
+    }
+
+    #[test]
+    fn test_error_code_unsupported_ui_library() {
+        let err = FrontendCodegenError::UnsupportedUiLibrary("Bootstrap".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_UI_LIBRARY_UNSUPPORTED");
+    }
+
+    #[test]
+    fn test_error_code_framework_conflict() {
+        let err = FrontendCodegenError::FrameworkConflict("vue+react".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_FRAMEWORK_CONFLICT");
+    }
+
+    #[test]
+    fn test_error_code_file_write_error() {
+        let err = FrontendCodegenError::FileWriteError("/out/file".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_FILE_WRITE_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_output_dir_not_empty() {
+        let err = FrontendCodegenError::OutputDirNotEmpty("/out".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_OUTPUT_DIR_NOT_EMPTY");
+    }
+
+    #[test]
+    fn test_error_code_config_parse_error() {
+        let err = FrontendCodegenError::ConfigParseError("bad toml".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_CONFIG_PARSE_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_io_error() {
+        let err = FrontendCodegenError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert_eq!(err.error_code(), "FE_CODEGEN_IO_ERROR");
+    }
+
+    #[test]
+    fn test_error_code_generic() {
+        let err = FrontendCodegenError::Generic("something".to_string());
+        assert_eq!(err.error_code(), "FE_CODEGEN_GENERIC");
+    }
+
+    #[test]
+    fn test_display_model_dir_not_found() {
+        let err = FrontendCodegenError::ModelDirNotFound("/models".to_string());
+        assert_eq!(err.to_string(), "模型目录不存在: /models");
+    }
+
+    #[test]
+    fn test_display_missing_model() {
+        let err = FrontendCodegenError::MissingModel;
+        assert!(err.to_string().contains("未指定任何模型"));
+    }
+
+    #[test]
+    fn test_display_template_path_traversal() {
+        let err = FrontendCodegenError::TemplatePathTraversal("../etc/passwd".to_string());
+        assert!(err.to_string().contains("路径穿越攻击"));
+        assert!(err.to_string().contains("../etc/passwd"));
+    }
+
+    #[test]
+    fn test_display_output_dir_not_empty() {
+        let err = FrontendCodegenError::OutputDirNotEmpty("/out".to_string());
+        assert!(err.to_string().contains("输出目录非空"));
+        assert!(err.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err: FrontendCodegenError = io_err.into();
+        assert!(matches!(err, FrontendCodegenError::Io(_)));
+        assert_eq!(err.error_code(), "FE_CODEGEN_IO_ERROR");
+    }
+
+    #[test]
+    fn test_from_tera_error() {
+        let tera_err = tera::Error::msg("template broken");
+        let err: FrontendCodegenError = tera_err.into();
+        assert!(matches!(err, FrontendCodegenError::TemplateRenderError(_)));
+        assert_eq!(err.error_code(), "FE_CODEGEN_TEMPLATE_RENDER_ERROR");
+        assert!(err.to_string().contains("template broken"));
+    }
+}

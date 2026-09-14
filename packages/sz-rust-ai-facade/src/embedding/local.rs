@@ -131,3 +131,136 @@ impl EmbeddingProvider for LocalEmbedding {
         &["local"]
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn new_pseudo_creates_instance() {
+        let emb = LocalEmbedding::new_pseudo(384);
+        assert_eq!(emb.dimensions(), 384);
+        assert_eq!(emb.model_path(), "");
+        assert!(!emb.is_model_loaded());
+    }
+
+    #[test]
+    fn new_file_not_found_returns_error() {
+        let result = LocalEmbedding::new("/nonexistent/path/model.onnx");
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert_eq!(err.error_code(), "AI_LOCAL_MODEL_LOAD_FAILED");
+    }
+
+    #[test]
+    fn with_dimensions_changes_dim() {
+        let emb = LocalEmbedding::new_pseudo(384).with_dimensions(768);
+        assert_eq!(emb.dimensions(), 768);
+    }
+
+    #[test]
+    fn model_path_returns_path() {
+        let emb = LocalEmbedding::new_pseudo(128);
+        assert_eq!(emb.model_path(), "");
+    }
+
+    #[test]
+    fn load_model_empty_path_fails() {
+        let mut emb = LocalEmbedding::new_pseudo(384);
+        let result = emb.load_model();
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap().error_code(),
+            "AI_LOCAL_MODEL_LOAD_FAILED"
+        );
+    }
+
+    #[test]
+    fn load_model_with_tempfile_succeeds() {
+        let mut temp = tempfile::NamedTempFile::new().unwrap();
+        temp.write_all(b"fake model data").unwrap();
+        let path = temp.path().to_str().unwrap().to_string();
+        let mut emb = LocalEmbedding::new(&path).unwrap();
+        assert!(!emb.is_model_loaded());
+        emb.load_model().unwrap();
+        assert!(emb.is_model_loaded());
+    }
+
+    #[tokio::test]
+    async fn embed_generates_vectors_with_byte_normalization() {
+        let emb = LocalEmbedding::new_pseudo(4);
+        let req = EmbeddingRequest::new("local", vec!["hello".to_string()]);
+        let result = emb.embed(req).await.unwrap();
+        assert_eq!(result.dimensions, 4);
+        assert_eq!(result.embeddings.len(), 1);
+        assert_eq!(result.embeddings[0].len(), 4);
+        let expected_h = 104.0f32 / 255.0;
+        assert!((result.embeddings[0][0] - expected_h).abs() < 1e-6);
+        let expected_e = 101.0f32 / 255.0;
+        assert!((result.embeddings[0][1] - expected_e).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn embed_multiple_texts() {
+        let emb = LocalEmbedding::new_pseudo(8);
+        let req = EmbeddingRequest::new("local", vec!["ab".to_string(), "cd".to_string()]);
+        let result = emb.embed(req).await.unwrap();
+        assert_eq!(result.embeddings.len(), 2);
+        assert_eq!(result.embeddings[0].len(), 8);
+        assert_eq!(result.embeddings[1].len(), 8);
+    }
+
+    #[tokio::test]
+    async fn embed_text_longer_than_dimensions_truncates() {
+        let emb = LocalEmbedding::new_pseudo(2);
+        let req = EmbeddingRequest::new("local", vec!["abcdef".to_string()]);
+        let result = emb.embed(req).await.unwrap();
+        assert_eq!(result.embeddings[0].len(), 2);
+        let expected_a = 97.0f32 / 255.0;
+        let expected_b = 98.0f32 / 255.0;
+        assert!((result.embeddings[0][0] - expected_a).abs() < 1e-6);
+        assert!((result.embeddings[0][1] - expected_b).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn embed_empty_text() {
+        let emb = LocalEmbedding::new_pseudo(4);
+        let req = EmbeddingRequest::new("local", vec!["".to_string()]);
+        let result = emb.embed(req).await.unwrap();
+        assert_eq!(result.embeddings.len(), 1);
+        assert_eq!(result.embeddings[0].len(), 4);
+        for val in &result.embeddings[0] {
+            assert!((val - 0.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn name_pseudo() {
+        let emb = LocalEmbedding::new_pseudo(384);
+        assert_eq!(emb.name(), "local-embedding-pseudo");
+    }
+
+    #[test]
+    fn name_with_model_path_not_loaded() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let path = temp.path().to_str().unwrap().to_string();
+        let emb = LocalEmbedding::new(&path).unwrap();
+        assert_eq!(emb.name(), "local-embedding");
+    }
+
+    #[test]
+    fn name_with_model_loaded() {
+        let mut temp = tempfile::NamedTempFile::new().unwrap();
+        temp.write_all(b"fake model").unwrap();
+        let path = temp.path().to_str().unwrap().to_string();
+        let mut emb = LocalEmbedding::new(&path).unwrap();
+        emb.load_model().unwrap();
+        assert_eq!(emb.name(), "local-embedding-loaded");
+    }
+
+    #[test]
+    fn supported_models_returns_local() {
+        let emb = LocalEmbedding::new_pseudo(384);
+        assert_eq!(emb.supported_models(), &["local"]);
+    }
+}

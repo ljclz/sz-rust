@@ -247,3 +247,294 @@ impl Agent {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::provider::{
+        ChatCompletion, Choice, FinishReason, LlmProvider, StreamDelta, ToolCall, Usage,
+    };
+    use async_trait::async_trait;
+    use futures::stream::BoxStream;
+
+    struct MockLlmProvider {
+        response: String,
+        tool_calls: Option<Vec<ToolCall>>,
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockLlmProvider {
+        fn name(&self) -> &str {
+            "mock-llm"
+        }
+        async fn chat_completion(&self, req: ChatRequest) -> Result<ChatCompletion, AiError> {
+            let message = ChatMessage {
+                role: Role::Assistant,
+                content: self.response.clone().into(),
+                tool_call_id: None,
+                tool_calls: self.tool_calls.clone(),
+            };
+            Ok(ChatCompletion {
+                id: "mock-id".into(),
+                model: req.model,
+                choices: vec![Choice {
+                    index: 0,
+                    message,
+                    finish_reason: Some(FinishReason::Stop),
+                }],
+                usage: Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                },
+            })
+        }
+        async fn stream_completion(
+            &self,
+            _req: ChatRequest,
+        ) -> Result<BoxStream<'static, Result<StreamDelta, AiError>>, AiError> {
+            Err(AiError::Internal("not implemented".into()))
+        }
+        async fn token_count(&self, _messages: &[ChatMessage]) -> Result<u32, AiError> {
+            Ok(0)
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["mock"]
+        }
+    }
+
+    fn make_agent(response: &str) -> Agent {
+        let llm = Arc::new(MockLlmProvider {
+            response: response.into(),
+            tool_calls: None,
+        });
+        let tools = Arc::new(ToolRegistry::new());
+        Agent::new(llm, tools)
+    }
+
+    #[test]
+    fn agent_task_new() {
+        let task = AgentTask::new("do something");
+        assert_eq!(task.instruction, "do something");
+        assert!(task.context.is_empty());
+    }
+
+    #[test]
+    fn agent_options_new_defaults() {
+        let opts = AgentOptions::new("tenant-1");
+        assert_eq!(opts.max_steps, Some(25));
+        assert_eq!(opts.max_tokens, None);
+        assert_eq!(opts.timeout, None);
+        assert!(opts.allow_tools.is_empty());
+        assert_eq!(opts.tenant_id, "tenant-1");
+    }
+
+    #[tokio::test]
+    async fn agent_run_natural_termination() {
+        let agent = make_agent("final answer");
+        let task = AgentTask::new("answer the question");
+        let opts = AgentOptions::new("tenant-1");
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.final_answer, "final answer");
+        assert_eq!(result.trace.terminated_by, TerminateReason::Natural);
+        assert!(result.citations.is_empty());
+        assert!(result.trace.steps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn agent_run_max_steps_termination() {
+        let llm = Arc::new(MockLlmProvider {
+            response: "thinking".into(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call-1".into(),
+                name: "some_tool".into(),
+                arguments: "{}".into(),
+            }]),
+        });
+        let tools = Arc::new(ToolRegistry::new());
+        let agent = Agent::new(llm, tools);
+        let task = AgentTask::new("do something");
+        let opts = AgentOptions {
+            max_steps: Some(1),
+            max_tokens: None,
+            timeout: None,
+            allow_tools: vec![],
+            tenant_id: "tenant-1".to_string(),
+        };
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.trace.terminated_by, TerminateReason::MaxSteps);
+        assert!(!result.trace.steps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn agent_run_unauthorized_tool_recorded() {
+        let llm = Arc::new(MockLlmProvider {
+            response: "thinking".into(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call-1".into(),
+                name: "unauthorized_tool".into(),
+                arguments: "{}".into(),
+            }]),
+        });
+        let tools = Arc::new(ToolRegistry::new());
+        let agent = Agent::new(llm, tools);
+        let task = AgentTask::new("do something");
+        let opts = AgentOptions {
+            max_steps: Some(1),
+            max_tokens: None,
+            timeout: None,
+            allow_tools: vec![],
+            tenant_id: "tenant-1".to_string(),
+        };
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.trace.terminated_by, TerminateReason::MaxSteps);
+        assert_eq!(result.trace.steps.len(), 1);
+        assert!(result.trace.steps[0].tool_call.is_some());
+        assert!(result.trace.steps[0]
+            .observation
+            .contains("not in allow_tools"));
+    }
+
+    #[tokio::test]
+    async fn agent_run_with_context_messages() {
+        let agent = make_agent("answer with context");
+
+        let mut task = AgentTask::new("question");
+        task.context.push(ChatMessage {
+            role: Role::User,
+            content: "additional context".into(),
+            tool_call_id: None,
+            tool_calls: None,
+        });
+        let opts = AgentOptions::new("tenant");
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.final_answer, "answer with context");
+    }
+
+    #[tokio::test]
+    async fn agent_with_model() {
+        let llm = Arc::new(MockLlmProvider {
+            response: "answer".into(),
+            tool_calls: None,
+        });
+        let tools = Arc::new(ToolRegistry::new());
+        let agent = Agent::new(llm, tools).with_model("claude-3");
+        let task = AgentTask::new("question");
+        let opts = AgentOptions::new("tenant");
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.final_answer, "answer");
+    }
+
+    #[tokio::test]
+    async fn agent_run_max_tokens_termination() {
+        let llm = Arc::new(MockLlmProvider {
+            response: "thinking".into(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call-1".into(),
+                name: "some_tool".into(),
+                arguments: "{}".into(),
+            }]),
+        });
+        let tools = Arc::new(ToolRegistry::new());
+        let agent = Agent::new(llm, tools);
+        let task = AgentTask::new("do something");
+        let opts = AgentOptions {
+            max_steps: Some(100),
+            max_tokens: Some(10),
+            timeout: None,
+            allow_tools: vec![],
+            tenant_id: "tenant-1".to_string(),
+        };
+        let result = agent.run(task, opts).await.unwrap();
+        // mock LLM 每次返回 total_tokens=15，第一次就超过 max_tokens=10
+        assert_eq!(result.trace.terminated_by, TerminateReason::MaxTokens);
+    }
+
+    #[tokio::test]
+    async fn agent_run_authorized_tool_executes_successfully() {
+        use crate::agent::tool::Tool;
+        struct EchoTool;
+        #[async_trait]
+        impl Tool for EchoTool {
+            fn name(&self) -> &str {
+                "echo"
+            }
+            fn schema(&self) -> serde_json::Value {
+                serde_json::json!({"type": "object"})
+            }
+            async fn call(&self, args: &serde_json::Value) -> Result<serde_json::Value, AiError> {
+                Ok(args.clone())
+            }
+        }
+
+        let llm = Arc::new(MockLlmProvider {
+            response: "using tool".into(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call-1".into(),
+                name: "echo".into(),
+                arguments: r#"{"msg":"hello"}"#.into(),
+            }]),
+        });
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool));
+        let tools = Arc::new(registry);
+        let agent = Agent::new(llm, tools);
+        let task = AgentTask::new("echo something");
+        let opts = AgentOptions {
+            max_steps: Some(1),
+            max_tokens: None,
+            timeout: None,
+            allow_tools: vec!["echo".to_string()],
+            tenant_id: "tenant-1".to_string(),
+        };
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.trace.terminated_by, TerminateReason::MaxSteps);
+        assert_eq!(result.trace.steps.len(), 1);
+        assert!(result.trace.steps[0].tool_result.is_some());
+        assert!(result.trace.steps[0]
+            .observation
+            .contains("executed successfully"));
+    }
+
+    #[tokio::test]
+    async fn agent_run_authorized_tool_fails_gracefully() {
+        use crate::agent::tool::Tool;
+        struct FailTool;
+        #[async_trait]
+        impl Tool for FailTool {
+            fn name(&self) -> &str {
+                "fail"
+            }
+            fn schema(&self) -> serde_json::Value {
+                serde_json::json!({"type": "object"})
+            }
+            async fn call(&self, _args: &serde_json::Value) -> Result<serde_json::Value, AiError> {
+                Err(AiError::ToolExecution("always fails".into()))
+            }
+        }
+
+        let llm = Arc::new(MockLlmProvider {
+            response: "using failing tool".into(),
+            tool_calls: Some(vec![ToolCall {
+                id: "call-1".into(),
+                name: "fail".into(),
+                arguments: "{}".into(),
+            }]),
+        });
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(FailTool));
+        let tools = Arc::new(registry);
+        let agent = Agent::new(llm, tools);
+        let task = AgentTask::new("use failing tool");
+        let opts = AgentOptions {
+            max_steps: Some(1),
+            max_tokens: None,
+            timeout: None,
+            allow_tools: vec!["fail".to_string()],
+            tenant_id: "tenant-1".to_string(),
+        };
+        let result = agent.run(task, opts).await.unwrap();
+        assert_eq!(result.trace.terminated_by, TerminateReason::MaxSteps);
+        assert_eq!(result.trace.steps.len(), 1);
+        assert!(result.trace.steps[0].observation.contains("failed"));
+    }
+}

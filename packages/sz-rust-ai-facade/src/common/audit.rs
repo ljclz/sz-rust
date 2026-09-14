@@ -146,3 +146,124 @@ impl AuditHttpClient {
         Ok(resp)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limit_config_default() {
+        let config = RateLimitConfig::default();
+        assert_eq!(config.rps, 10);
+        assert_eq!(config.burst, 20);
+    }
+
+    #[test]
+    fn token_bucket_acquire_within_burst() {
+        let mut bucket = TokenBucket::new(10, 5);
+        for _ in 0..5 {
+            assert!(bucket.try_acquire().is_none(), "should allow within burst");
+        }
+    }
+
+    #[test]
+    fn token_bucket_rate_limit_when_exhausted() {
+        let mut bucket = TokenBucket::new(10, 1);
+        assert!(
+            bucket.try_acquire().is_none(),
+            "first acquire should succeed"
+        );
+        let result = bucket.try_acquire();
+        assert!(result.is_some(), "should be rate limited");
+        assert!(result.unwrap() > 0, "retry_after_ms should be positive");
+    }
+
+    #[test]
+    fn token_bucket_update_config_reduces_capacity() {
+        let mut bucket = TokenBucket::new(1, 100);
+        // tokens = 100 initially
+        bucket.update_config(1, 5);
+        // tokens truncated to min(100, 5) = 5
+        for _ in 0..5 {
+            assert!(
+                bucket.try_acquire().is_none(),
+                "should allow within new capacity"
+            );
+        }
+        assert!(
+            bucket.try_acquire().is_some(),
+            "should be rate limited after exhausting new capacity"
+        );
+    }
+
+    #[test]
+    fn audit_http_client_new() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig::default());
+        assert_eq!(audit.rate_limit_config().rps, 10);
+        assert_eq!(audit.rate_limit_config().burst, 20);
+    }
+
+    #[test]
+    fn audit_http_client_client_ref_accessible() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig::default());
+        let _ref = audit.client();
+    }
+
+    #[test]
+    fn update_rate_limit_changes_config() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig::default());
+        audit.update_rate_limit(RateLimitConfig {
+            rps: 50,
+            burst: 100,
+        });
+        let config = audit.rate_limit_config();
+        assert_eq!(config.rps, 50);
+        assert_eq!(config.burst, 100);
+    }
+
+    #[test]
+    fn check_rate_limit_allows_within_burst() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig { rps: 10, burst: 5 });
+        for _ in 0..5 {
+            assert!(audit.check_rate_limit("provider-a").is_ok());
+        }
+    }
+
+    #[test]
+    fn check_rate_limit_denies_when_exhausted() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig { rps: 1, burst: 1 });
+        assert!(audit.check_rate_limit("provider-b").is_ok());
+        let err = audit.check_rate_limit("provider-b").unwrap_err();
+        assert_eq!(err.error_code(), "AI_RATE_LIMITED");
+    }
+
+    #[test]
+    fn check_rate_limit_independent_per_provider() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig { rps: 1, burst: 1 });
+        assert!(audit.check_rate_limit("provider-a").is_ok());
+        assert!(audit.check_rate_limit("provider-a").is_err());
+        assert!(audit.check_rate_limit("provider-b").is_ok());
+    }
+
+    #[test]
+    fn update_rate_limit_affects_existing_buckets() {
+        let client = reqwest::Client::new();
+        let audit = AuditHttpClient::new(client, RateLimitConfig { rps: 1, burst: 100 });
+        // 消耗 50 个令牌
+        for _ in 0..50 {
+            assert!(audit.check_rate_limit("provider-a").is_ok());
+        }
+        // 更新为更小的 capacity
+        audit.update_rate_limit(RateLimitConfig { rps: 1, burst: 2 });
+        // tokens 被截断到 min(~50, 2) = 2
+        assert!(audit.check_rate_limit("provider-a").is_ok());
+        assert!(audit.check_rate_limit("provider-a").is_ok());
+        // 第 3 次应被限流
+        assert!(audit.check_rate_limit("provider-a").is_err());
+    }
+}

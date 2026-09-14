@@ -243,3 +243,339 @@ impl RagPipeline {
         })
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embedding::{EmbeddingProvider, EmbeddingRequest, EmbeddingResult, VectorRecord};
+    use crate::llm::provider::{
+        ChatCompletion, Choice, FinishReason, LlmProvider, StreamDelta, Usage,
+    };
+    use async_trait::async_trait;
+    use futures::stream::BoxStream;
+
+    struct MockEmbedding {
+        dim: usize,
+        empty: bool,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for MockEmbedding {
+        fn name(&self) -> &str {
+            "mock-embedding"
+        }
+        async fn embed(&self, req: EmbeddingRequest) -> Result<EmbeddingResult, AiError> {
+            if self.empty {
+                return Ok(EmbeddingResult {
+                    model: req.model,
+                    embeddings: vec![],
+                    dimensions: self.dim,
+                    usage_tokens: 0,
+                });
+            }
+            Ok(EmbeddingResult {
+                model: req.model,
+                embeddings: vec![vec![0.1; self.dim]],
+                dimensions: self.dim,
+                usage_tokens: 1,
+            })
+        }
+        fn dimensions(&self) -> usize {
+            self.dim
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["mock"]
+        }
+    }
+
+    struct MockVectorStore {
+        hits: Vec<VectorHit>,
+    }
+
+    #[async_trait]
+    impl VectorStore for MockVectorStore {
+        async fn upsert(&self, _records: &[VectorRecord]) -> Result<(), AiError> {
+            Ok(())
+        }
+        async fn query(
+            &self,
+            _vec: &[f32],
+            topk: usize,
+            _metric: SimilarityMetric,
+            _tenant: &str,
+        ) -> Result<Vec<VectorHit>, AiError> {
+            Ok(self.hits.iter().take(topk).cloned().collect())
+        }
+        async fn delete(&self, _ids: &[&str], _tenant: &str) -> Result<(), AiError> {
+            Ok(())
+        }
+    }
+
+    struct MockLlmProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockLlmProvider {
+        fn name(&self) -> &str {
+            "mock-llm"
+        }
+        async fn chat_completion(&self, req: ChatRequest) -> Result<ChatCompletion, AiError> {
+            Ok(ChatCompletion {
+                id: "mock-id".into(),
+                model: req.model,
+                choices: vec![Choice {
+                    index: 0,
+                    message: ChatMessage {
+                        role: Role::Assistant,
+                        content: self.response.clone().into(),
+                        tool_call_id: None,
+                        tool_calls: None,
+                    },
+                    finish_reason: Some(FinishReason::Stop),
+                }],
+                usage: Usage {
+                    prompt_tokens: 10,
+                    completion_tokens: 5,
+                    total_tokens: 15,
+                },
+            })
+        }
+        async fn stream_completion(
+            &self,
+            _req: ChatRequest,
+        ) -> Result<BoxStream<'static, Result<StreamDelta, AiError>>, AiError> {
+            Err(AiError::Internal("not implemented".into()))
+        }
+        async fn token_count(&self, _messages: &[ChatMessage]) -> Result<u32, AiError> {
+            Ok(0)
+        }
+        fn supported_models(&self) -> &[&str] {
+            &["mock"]
+        }
+    }
+
+    struct MockHybridRetriever {
+        hits: Vec<VectorHit>,
+    }
+
+    #[async_trait]
+    impl HybridRetrieverTrait for MockHybridRetriever {
+        async fn retrieve(
+            &self,
+            _query: &str,
+            topk: usize,
+            _tenant: &str,
+        ) -> Result<Vec<VectorHit>, AiError> {
+            Ok(self.hits.iter().take(topk).cloned().collect())
+        }
+    }
+
+    fn make_hit(id: &str, score: f32, text: &str) -> VectorHit {
+        VectorHit {
+            id: id.into(),
+            score,
+            metadata: serde_json::json!({}),
+            text: text.into(),
+        }
+    }
+
+    fn make_pipeline() -> RagPipeline {
+        RagPipeline::new(
+            Arc::new(MockEmbedding {
+                dim: 3,
+                empty: false,
+            }),
+            Arc::new(MockVectorStore { hits: vec![] }),
+            Arc::new(MockLlmProvider {
+                response: "mock answer".into(),
+            }),
+        )
+    }
+
+    #[test]
+    fn rag_request_new_defaults() {
+        let req = RagRequest::new("hello", "tenant-1");
+        assert_eq!(req.query, "hello");
+        assert_eq!(req.topk, 10);
+        assert_eq!(req.token_budget, 4096);
+        assert_eq!(req.tenant_id, "tenant-1");
+    }
+
+    #[test]
+    fn warning_code_serde_snake_case() {
+        let json = serde_json::to_string(&WarningCode::ContextTruncated).unwrap();
+        assert_eq!(json, "\"context_truncated\"");
+        let json = serde_json::to_string(&WarningCode::LowRecallScore).unwrap();
+        assert_eq!(json, "\"low_recall_score\"");
+        let json = serde_json::to_string(&WarningCode::RerankerSkipped).unwrap();
+        assert_eq!(json, "\"reranker_skipped\"");
+    }
+
+    #[tokio::test]
+    async fn assemble_within_budget() {
+        let pipeline = make_pipeline();
+        let hits = vec![make_hit("a", 0.9, "doc a"), make_hit("b", 0.8, "doc b")];
+        let context = pipeline.assemble(&hits, 4096).await.unwrap();
+        assert!(context.contains("doc a"));
+        assert!(context.contains("doc b"));
+        assert!(context.contains("[1]"));
+        assert!(context.contains("[2]"));
+    }
+
+    #[tokio::test]
+    async fn assemble_truncates_at_budget() {
+        let pipeline = make_pipeline();
+        let hits = vec![make_hit("a", 0.9, "very long document text")];
+        let context = pipeline.assemble(&hits, 1).await.unwrap();
+        assert!(
+            context.is_empty(),
+            "budget=1 means 4 chars, first chunk exceeds"
+        );
+    }
+
+    #[tokio::test]
+    async fn assemble_empty_hits() {
+        let pipeline = make_pipeline();
+        let context = pipeline.assemble(&[], 4096).await.unwrap();
+        assert!(context.is_empty());
+    }
+
+    #[tokio::test]
+    async fn assemble_partial_truncation() {
+        let pipeline = make_pipeline();
+        let hits = vec![
+            make_hit("a", 0.9, "short"),
+            make_hit("b", 0.8, "also short"),
+            make_hit("c", 0.7, "this one is very long and will exceed the budget"),
+        ];
+        // budget=10 -> 40 chars, 前两个 chunk 应该能放入，第三个被截断
+        let context = pipeline.assemble(&hits, 10).await.unwrap();
+        assert!(context.contains("short"));
+        assert!(!context.contains("this one is very long"));
+    }
+
+    #[tokio::test]
+    async fn retrieve_via_vector_store() {
+        let hits = vec![make_hit("a", 0.9, "doc a")];
+        let pipeline = RagPipeline::new(
+            Arc::new(MockEmbedding {
+                dim: 3,
+                empty: false,
+            }),
+            Arc::new(MockVectorStore { hits }),
+            Arc::new(MockLlmProvider {
+                response: "answer".into(),
+            }),
+        );
+        let result = pipeline.retrieve("query", 5).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "a");
+    }
+
+    #[tokio::test]
+    async fn retrieve_via_hybrid_retriever() {
+        let hits = vec![make_hit("hybrid-1", 0.85, "hybrid doc")];
+        let pipeline =
+            make_pipeline().with_hybrid_retriever(Arc::new(MockHybridRetriever { hits }));
+        let result = pipeline.retrieve("query", 5).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "hybrid-1");
+    }
+
+    #[tokio::test]
+    async fn retrieve_embedding_returns_no_vectors_errors() {
+        let pipeline = RagPipeline::new(
+            Arc::new(MockEmbedding {
+                dim: 3,
+                empty: true,
+            }),
+            Arc::new(MockVectorStore { hits: vec![] }),
+            Arc::new(MockLlmProvider {
+                response: "answer".into(),
+            }),
+        );
+        let result = pipeline.retrieve("query", 5).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "AI_INTERNAL");
+    }
+
+    #[tokio::test]
+    async fn generate_produces_result_with_citations() {
+        let pipeline = make_pipeline();
+        let hits = vec![make_hit("a", 0.9, "doc a")];
+        let result = pipeline.generate(&hits, "context", "query").await.unwrap();
+        assert_eq!(result.content, "mock answer");
+        assert_eq!(result.citations.len(), 1);
+        assert_eq!(result.citations[0].doc_id, "a");
+        assert_eq!(result.citations[0].offset, 0);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn generate_empty_hits() {
+        let pipeline = make_pipeline();
+        let result = pipeline.generate(&[], "context", "query").await.unwrap();
+        assert_eq!(result.content, "mock answer");
+        assert!(result.citations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rag_full_pipeline() {
+        let hits = vec![make_hit("a", 0.9, "doc a")];
+        let pipeline = RagPipeline::new(
+            Arc::new(MockEmbedding {
+                dim: 3,
+                empty: false,
+            }),
+            Arc::new(MockVectorStore { hits }),
+            Arc::new(MockLlmProvider {
+                response: "final answer".into(),
+            }),
+        );
+        let req = RagRequest::new("query", "tenant");
+        let result = pipeline.rag(req).await.unwrap();
+        assert_eq!(result.content, "final answer");
+        assert_eq!(result.citations.len(), 1);
+        assert_eq!(result.citations[0].doc_id, "a");
+    }
+
+    #[tokio::test]
+    async fn rag_with_reranker_skipped_warning() {
+        // NoopReranker 在 candidates 为空时返回空，触发 RerankerSkipped
+        let pipeline = make_pipeline(); // 默认 NoopReranker
+        let req = RagRequest::new("query", "tenant");
+        // MockVectorStore 返回空 hits，reranker 返回空 -> RerankerSkipped
+        let result = pipeline.rag(req).await.unwrap();
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| matches!(w, WarningCode::RerankerSkipped)));
+    }
+
+    #[tokio::test]
+    async fn retrieve_with_rerank() {
+        let hits = vec![make_hit("a", 0.9, "doc a"), make_hit("b", 0.8, "doc b")];
+        let pipeline = RagPipeline::new(
+            Arc::new(MockEmbedding {
+                dim: 3,
+                empty: false,
+            }),
+            Arc::new(MockVectorStore { hits }),
+            Arc::new(MockLlmProvider {
+                response: "answer".into(),
+            }),
+        );
+        let result = pipeline.retrieve_with_rerank("query", 2).await.unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn rag_pipeline_builder_methods() {
+        let pipeline = make_pipeline()
+            .with_embedding_model("custom-embed")
+            .with_llm_model("custom-llm")
+            .with_metric(SimilarityMetric::Dot);
+        // builder 方法返回 Self，验证链式调用不 panic
+        let _pipeline2 = pipeline.with_reranker(Arc::new(NoopReranker::new()));
+    }
+}

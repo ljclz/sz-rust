@@ -195,3 +195,96 @@ impl AiMetrics {
         *self.llm_request_count.lock()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_singleton_is_consistent() {
+        let m1 = AiMetrics::global();
+        let m2 = AiMetrics::global();
+        assert!(std::ptr::eq(m1, m2));
+    }
+
+    #[test]
+    fn record_llm_request_increments_count() {
+        let metrics = AiMetrics::global();
+        let before = metrics.llm_request_count();
+        metrics.record_llm_request("openai", "gpt-4", "success");
+        let after = metrics.llm_request_count();
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn record_llm_tokens_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_llm_tokens("openai", "gpt-4", "prompt", 100);
+        metrics.record_llm_tokens("openai", "gpt-4", "completion", 50);
+    }
+
+    #[test]
+    fn record_llm_request_duration_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_llm_request_duration(1.5);
+        metrics.record_llm_request_duration(0.01);
+    }
+
+    #[test]
+    fn record_rag_recall_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_rag_recall(0.05);
+        metrics.record_rag_recall(0.2);
+    }
+
+    #[test]
+    fn record_agent_step_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_agent_step("agent-1", "natural");
+        metrics.record_agent_step("agent-2", "max_steps");
+    }
+
+    #[test]
+    fn record_embedding_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_embedding("openai", "text-embedding-3-small");
+        metrics.record_embedding("local", "local");
+    }
+
+    #[test]
+    fn record_cache_hit_does_not_panic() {
+        let metrics = AiMetrics::global();
+        metrics.record_cache_hit("semantic");
+        metrics.record_cache_hit("exact");
+    }
+
+    #[test]
+    fn multiple_record_calls_accumulate() {
+        let metrics = AiMetrics::global();
+        let before = metrics.llm_request_count();
+        metrics.record_llm_request("openai", "gpt-4", "success");
+        metrics.record_llm_request("claude", "claude-3", "success");
+        metrics.record_llm_request("openai", "gpt-4", "error");
+        let after = metrics.llm_request_count();
+        assert_eq!(after, before + 3);
+    }
+
+    #[test]
+    fn register_with_metrics_registry() {
+        let metrics = AiMetrics::global();
+        let registry = sz_rust_observability::MetricsRegistry::new();
+        metrics.register(&registry);
+        // register 是幂等的，再次调用不应 panic
+        metrics.register(&registry);
+        // 注册后 record 方法应正常工作（handles 已设置）
+        let before = metrics.llm_request_count();
+        metrics.record_llm_request("openai", "gpt-4", "success");
+        metrics.record_llm_tokens("openai", "gpt-4", "prompt", 50);
+        metrics.record_llm_request_duration(0.5);
+        metrics.record_rag_recall(0.1);
+        metrics.record_agent_step("agent-1", "natural");
+        metrics.record_embedding("openai", "text-embedding-3-small");
+        metrics.record_cache_hit("semantic");
+        let after = metrics.llm_request_count();
+        assert_eq!(after, before + 1);
+    }
+}
