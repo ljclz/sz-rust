@@ -5,6 +5,35 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-14
+
+### Security
+
+- **Admin 请求 DTO password 双层脱敏**：`CreateUserRequest`/`UpdateUserRequest` 的 `password` 字段补 `#[serde(skip_serializing)]` 并将 `derive(Debug)` 改为手工实现（`{:?}` 输出 `[REDACTED]`）——`skip_serializing` 不覆盖 Debug 日志路径（AI 评审采纳项，d1b0061 + d14f9eb）
+- **gitignore 敏感文件防护**：仓库根曾存 SSH 私钥（无扩展名，`*.key` 规则保护不到）与硬编码服务器凭据的验证脚本，补规则防误提交（14b254a）
+
+### Fixed
+
+- **审查门禁代码修复**（2026-09-13 全量审查阻断项，d1b0061）：
+  - `admin init` 裸 unwrap（铁律 2）改 `ok_or_else(CliError::Clap)`，`--url` 缺失返回参数校验错误而非 panic
+  - `multi_tenant_demo` 3 处裸 unwrap 改 `std::io::Result` 错误传播
+- **plugin_behavior 测试环境变量竞态**（14b0b25）：EnvGuard 修改进程级 HOME/USERPROFILE 与并行测试互踩（llvm-cov 插桩时序触发暴露），文件级 tokio Mutex 串行化 9 测试
+- **nul 保留名文件**：仓库根 Windows 保留名垃圾文件曾致 cargo-mutants 源码复制 os error 87，已清理
+
+### Changed
+
+- **审查门禁体系适配开源/企业版分离**（1614e84 后的结构性漂移收口，ae27e57 + a6928b9 + d6a1f8c + 9e75467）：
+  - `pr-review.sh` 新增 sz300 存在性守卫（包不在 workspace 时门禁降级 + gate-skipped 记录）
+  - doc-code-consistency 新增 `ENTERPRISE_DELIVERED_CRATES` 类别（129 处幻影 ERROR→WARN）；CI workflows 幻影包引用实修（coverage/release/ci）
+  - release.yml 发布目标 sz300-server → sz-rust-cli（bin `sz-rust`），新增 targets job 单一来源防名单漂移；删除全部 `if: false` 禁用 job
+- **k8s-operator 孤儿 crate 物理删除**（ADR-038 执行收口，5d02d22；22 测试保留 git 历史）
+- **覆盖率基线更正**（2026-09-14 llvm-cov）：workspace 行覆盖 **91.44%**（旧值 8.7% 系 sz300 lib 窄口径）；addons-admin services 补测 17 测试（39.89%→44.75%，8618a77 后续 a6928b9 系列见基线报告）
+- **pay.rs 变异测试排除解除**：真实逻辑 pay-facade/src/pay.rs 覆盖 95.98% ≥ 75% 退出条件，`cargo mutants -p sz-rust-pay-facade` 60 变异体杀率 100%（0 存活）
+
+### Removed
+
+- `sz-rust-k8s-operator`：孤儿 crate（无消费者、无生产入口、无 CI 集成），按 ADR-038 移除
+
 ## [Unreleased] - 2026-09-13
 
 ### Added
