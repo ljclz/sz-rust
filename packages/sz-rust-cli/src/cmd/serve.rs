@@ -14,8 +14,12 @@
 //!
 //! # 加载 admin 插件
 //! sz-rust serve --with-admin --addr 0.0.0.0:8080
+//!
+//! # 生产级配置
+//! sz-rust serve --with-admin --workers 4 --grace-timeout 30 --health --access-log
 //! ```
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -27,6 +31,63 @@ use sz_rust_core::container::App;
 use sz_rust_orm_facade::{Connection, ConnectionFactory, DbError, Pool, PoolConfig};
 
 use crate::error::CliError;
+
+mod access_log;
+mod runtime;
+mod signal;
+mod watcher;
+
+pub use runtime::{build_runtime, resolve_workers, validate_workers};
+
+/// serve 命令参数集合
+///
+/// 由 clap `Command::Serve` 变体字段映射构造，用于解耦 CLI 解析与业务逻辑。
+#[derive(Debug, Clone)]
+pub struct ServeArgs {
+    /// 启用 admin 插件（加载 /api/admin/* 路由 + Capability 注册）
+    pub with_admin: bool,
+    /// 监听地址（默认 0.0.0.0:8080）
+    pub addr: String,
+    /// 启用配置热重载（监听 config/ 目录文件变更）
+    pub watch_config: bool,
+    /// worker 线程数（None 时用配置文件值或 CPU 核心数）
+    pub workers: Option<u16>,
+    /// 优雅关闭超时秒数（None 时用配置文件值或默认 30）
+    pub grace_timeout: Option<u16>,
+    /// TLS 证书文件路径
+    pub tls_cert: Option<PathBuf>,
+    /// TLS 私钥文件路径
+    pub tls_key: Option<PathBuf>,
+    /// 启用访问日志中间件
+    pub access_log: bool,
+    /// 启用健康检查端点（默认 true）
+    pub health: bool,
+}
+
+impl ServeArgs {
+    /// 校验参数合法性
+    pub fn validate(&self) -> Result<(), CliError> {
+        if let Some(w) = self.workers {
+            if w == 0 {
+                return Err(CliError::Generic("worker 数量必须 >= 1".to_string()));
+            }
+            if w > 1024 {
+                return Err(CliError::Generic("worker 数量超过上限 1024".to_string()));
+            }
+        }
+        if let Some(t) = self.grace_timeout {
+            if t > 300 {
+                return Err(CliError::Generic("优雅关闭超时超过上限 300 秒".to_string()));
+            }
+        }
+        if self.tls_cert.is_some() != self.tls_key.is_some() {
+            return Err(CliError::Generic(
+                "--tls-cert 和 --tls-key 必须同时提供或同时缺失".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// AnyPool 连接工厂包装器
 ///
@@ -117,21 +178,81 @@ fn acquire_admin_roles() -> Vec<String> {
         })
 }
 
-/// 执行 serve 命令
-pub async fn execute(with_admin: bool, addr: &str) -> Result<i32, CliError> {
+/// 执行 serve 命令（同步入口）
+///
+/// 构建指定 worker 数的 multi-thread runtime，在 runtime 上 block_on 执行 async 逻辑。
+/// 调用方应在 `spawn_blocking` 线程上调用此函数，避免 runtime 嵌套。
+pub fn execute(args: ServeArgs) -> Result<i32, CliError> {
+    args.validate()?;
+
     let config_dir = std::env::var("SZ_RUST_CONFIG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("config"));
-    let config = AppConfig::load_from_dir(&config_dir)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("加载配置失败（使用默认配置）: {e}");
-            AppConfig::default()
-        });
+
+    let config = {
+        let tmp_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| CliError::Generic(format!("临时 runtime 构建失败: {e}")))?;
+        tmp_rt.block_on(async {
+            AppConfig::load_from_dir(&config_dir)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("加载配置失败（使用默认配置）: {e}");
+                    AppConfig::default()
+                })
+        })
+    };
+
+    let workers = resolve_workers(args.workers, config.server.workers);
+    tracing::info!("使用 {workers} 个 worker 线程");
+
+    let runtime = build_runtime(workers)?;
+    runtime.block_on(execute_async(args, config, config_dir))
+}
+
+/// serve 命令的 async 内部逻辑
+async fn execute_async(
+    args: ServeArgs,
+    config: AppConfig,
+    config_dir: std::path::PathBuf,
+) -> Result<i32, CliError> {
+    if args.watch_config {
+        let (reload_tx, reload_rx) = tokio::sync::mpsc::channel::<std::path::PathBuf>(16);
+        match watcher::ConfigWatcher::start(&config_dir, reload_tx) {
+            Ok(_) => {
+                tracing::info!("配置热重载已启用，监听目录: {}", config_dir.display());
+                watcher::spawn_reload_coordinator(reload_rx, config_dir.clone());
+            }
+            Err(e) => {
+                tracing::warn!("配置热重载启动失败，降级为不启用: {e}");
+            }
+        }
+    }
+
+    let (reload_signal_tx, mut reload_signal_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (loglevel_tx, mut loglevel_rx) = tokio::sync::mpsc::channel::<()>(1);
+    signal::install_runtime_signals(reload_signal_tx, loglevel_tx);
+    let signal_config_dir = config_dir.clone();
+    tokio::spawn(async move {
+        while reload_signal_rx.recv().await.is_some() {
+            match watcher::reload_config(&signal_config_dir).await {
+                Ok(_) => tracing::info!("信号触发配置重载成功（数据库/路由变更需重启生效）"),
+                Err(e) => tracing::error!("信号触发配置重载失败，保留旧配置: {e}"),
+            }
+        }
+    });
+    tokio::spawn(async move {
+        let mut current_level = tracing::Level::INFO;
+        while loglevel_rx.recv().await.is_some() {
+            current_level = signal::log_level_cycle(current_level);
+            tracing::info!("日志级别切换为 {current_level}");
+        }
+    });
 
     let _app = App::init(config.clone());
 
-    let router = if with_admin {
+    let router = if args.with_admin {
         let pool = acquire_pool(&config).await?;
         let admin_roles = acquire_admin_roles();
         let (router, cap_count) = build_router_with_admin(pool, admin_roles);
@@ -141,9 +262,51 @@ pub async fn execute(with_admin: bool, addr: &str) -> Result<i32, CliError> {
         Router::new().route("/", axum::routing::get(|| async { "SZ-Rust" }))
     };
 
-    tracing::info!("HTTP 服务启动于 {addr}");
-    sz_rust_core::server::serve_with_graceful_shutdown(router, addr)
-        .await
-        .map_err(CliError::from)?;
+    let router = if args.health {
+        tracing::info!(
+            "健康检查端点已启用：GET /health/ (liveness) + GET /health/ready (readiness)"
+        );
+        router.merge(sz_rust_core::health::default_health_router())
+    } else {
+        router
+    };
+
+    let router = if args.access_log {
+        tracing::info!("访问日志中间件已启用");
+        router.layer(axum::middleware::from_fn(access_log::access_log_handler))
+    } else {
+        router
+    };
+
+    let grace_timeout = args.grace_timeout.unwrap_or(config.server.grace_timeout);
+    let timeout = std::time::Duration::from_secs(grace_timeout as u64);
+
+    if let (Some(cert), Some(key)) = (&args.tls_cert, &args.tls_key) {
+        tracing::info!(
+            "HTTPS 服务启动于 {}（TLS 证书: {}，优雅关闭超时 {}s）",
+            args.addr,
+            cert.display(),
+            grace_timeout
+        );
+        let serve_tls =
+            sz_rust_core::h2::serve_h2_with_graceful_shutdown(router, &args.addr, cert, key);
+        match tokio::time::timeout(timeout, serve_tls).await {
+            Ok(result) => {
+                result.map_err(|e| CliError::Generic(format!("TLS 服务错误: {e}")))?;
+            }
+            Err(_) => {
+                tracing::warn!("TLS 优雅关闭超时，强制中断剩余连接");
+            }
+        }
+    } else {
+        tracing::info!(
+            "HTTP 服务启动于 {}（优雅关闭超时 {}s）",
+            args.addr,
+            grace_timeout
+        );
+        sz_rust_core::server::serve_with_graceful_shutdown_timeout(router, &args.addr, timeout)
+            .await
+            .map_err(CliError::from)?;
+    }
     Ok(0)
 }

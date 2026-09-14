@@ -206,7 +206,53 @@ pub enum Command {
         /// 监听地址（默认 0.0.0.0:8080）
         #[arg(long, default_value = "0.0.0.0:8080")]
         addr: String,
+
+        /// 启用配置热重载（监听 config/ 目录文件变更）
+        #[arg(long)]
+        watch_config: bool,
+
+        /// worker 线程数（默认 CPU 核心数，上限 1024）
+        #[arg(long)]
+        workers: Option<u16>,
+
+        /// 优雅关闭超时秒数（默认 30，上限 300）
+        #[arg(long)]
+        grace_timeout: Option<u16>,
+
+        /// TLS 证书文件路径
+        #[arg(long)]
+        tls_cert: Option<std::path::PathBuf>,
+
+        /// TLS 私钥文件路径
+        #[arg(long)]
+        tls_key: Option<std::path::PathBuf>,
+
+        /// 启用访问日志中间件
+        #[arg(long)]
+        access_log: bool,
+
+        /// 启用健康检查端点（默认启用）
+        #[arg(long, default_value_t = true)]
+        health: bool,
+
+        /// 禁用健康检查端点
+        #[arg(long, conflicts_with = "health")]
+        no_health: bool,
     },
+
+    /// 触发运行中的 serve 进程重载配置（Windows 替代 SIGUSR1/SIGHUP）
+    ///
+    /// Unix 平台建议使用 `kill -USR1 <pid>` 或 `kill -HUP <pid>`。
+    /// 首版仅输出提示信息，完整实现需后续版本支持。
+    #[command(name = "serve:reload")]
+    ServeReload,
+
+    /// 触发运行中的 serve 进程切换日志级别（Windows 替代 SIGUSR2）
+    ///
+    /// Unix 平台建议使用 `kill -USR2 <pid>`。
+    /// 首版仅输出提示信息，完整实现需后续版本支持。
+    #[command(name = "serve:log-level")]
+    ServeLogLevel,
 }
 
 impl Cli {
@@ -275,8 +321,40 @@ impl Cli {
             Some(Command::RouteClear) => cmd::optimize::execute_route_clear().await.map(|_| 0),
             Some(Command::Plugin { plugin_command }) => cmd::plugin::execute(plugin_command).await,
             Some(Command::Admin { admin_command }) => cmd::admin::execute(admin_command).await,
-            Some(Command::Serve { with_admin, addr }) => {
-                cmd::serve::execute(*with_admin, addr).await
+            Some(Command::Serve {
+                with_admin,
+                addr,
+                watch_config,
+                workers,
+                grace_timeout,
+                tls_cert,
+                tls_key,
+                access_log,
+                health,
+                no_health,
+            }) => {
+                let args = cmd::serve::ServeArgs {
+                    with_admin: *with_admin,
+                    addr: addr.clone(),
+                    watch_config: *watch_config,
+                    workers: *workers,
+                    grace_timeout: *grace_timeout,
+                    tls_cert: tls_cert.clone(),
+                    tls_key: tls_key.clone(),
+                    access_log: *access_log,
+                    health: *health && !*no_health,
+                };
+                tokio::task::spawn_blocking(move || cmd::serve::execute(args))
+                    .await
+                    .map_err(|e| CliError::Generic(format!("serve 任务执行失败: {e}")))?
+            }
+            Some(Command::ServeReload) => {
+                println!("Windows 信号替代方案暂未实现，请使用 --watch-config 或重启服务");
+                Ok(0)
+            }
+            Some(Command::ServeLogLevel) => {
+                println!("Windows 信号替代方案暂未实现，请使用 --watch-config 或重启服务");
+                Ok(0)
             }
         }
     }

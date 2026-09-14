@@ -66,6 +66,32 @@ pub async fn serve_with_graceful_shutdown(router: Router, addr: &str) -> std::io
     Ok(())
 }
 
+/// 启动 HTTP 服务器（带优雅关闭 + 超时强制中断）
+///
+/// 在 `timeout` 时间内等待优雅关闭，超时后强制中断剩余连接。
+///
+/// ## 参数
+///
+/// - `router`：axum::Router
+/// - `addr`：监听地址
+/// - `timeout`：优雅关闭超时时间
+pub async fn serve_with_graceful_shutdown_timeout(
+    router: Router,
+    addr: &str,
+    timeout: std::time::Duration,
+) -> std::io::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal());
+
+    match tokio::time::timeout(timeout, serve).await {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::warn!("优雅关闭超时，强制中断剩余连接");
+            Ok(())
+        }
+    }
+}
+
 /// 启动 HTTP 服务器（使用已有 TcpListener，测试友好）
 ///
 /// 适用于测试场景：测试代码可以 `listener.local_addr()` 获取实际端口，
@@ -249,6 +275,41 @@ mod tests {
         let host = addr.to_string();
         let body = http_get_body(&host, "/").await;
         assert!(body.contains("graceful ok"));
+    }
+
+    #[tokio::test]
+    async fn test_serve_with_graceful_shutdown_timeout_responds_to_request() {
+        let addr = {
+            let (_, addr) = build_tcp_listener("127.0.0.1:0").await.unwrap();
+            addr
+        };
+        let addr_str = addr.to_string();
+
+        let router = Router::new().route("/", axum::routing::get(|| async { "timeout ok" }));
+        tokio::spawn(async move {
+            let timeout = std::time::Duration::from_secs(30);
+            let _ = serve_with_graceful_shutdown_timeout(router, &addr_str, timeout).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let host = addr.to_string();
+        let body = http_get_body(&host, "/").await;
+        assert!(body.contains("timeout ok"));
+    }
+
+    #[tokio::test]
+    async fn test_serve_with_graceful_shutdown_timeout_zero_duration() {
+        let addr = {
+            let (_, addr) = build_tcp_listener("127.0.0.1:0").await.unwrap();
+            addr
+        };
+        let addr_str = addr.to_string();
+
+        let router = Router::new().route("/", axum::routing::get(|| async { "zero" }));
+        let result =
+            serve_with_graceful_shutdown_timeout(router, &addr_str, std::time::Duration::ZERO)
+                .await;
+        assert!(result.is_ok(), "timeout=0 应立即返回 Ok");
     }
 
     #[tokio::test]

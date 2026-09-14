@@ -64,6 +64,9 @@ axum.workspace = true
 tracing.workspace = true
 # 密码哈希（admin init 命令）
 bcrypt = "0.15"
+# 配置热重载（serve --watch-config）
+notify = { workspace = true }
+
 
 [dev-dependencies]
 tempfile.workspace = true

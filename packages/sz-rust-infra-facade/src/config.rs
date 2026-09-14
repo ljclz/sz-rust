@@ -333,6 +333,12 @@ pub struct ServerSection {
     /// 监听端口（默认 `8080`）
     #[serde(default = "default_server_port")]
     pub port: u16,
+    /// worker 线程数（默认 CPU 逻辑核心数，上限 1024）
+    #[serde(default = "default_server_workers")]
+    pub workers: u16,
+    /// 优雅关闭超时秒数（默认 30，上限 300）
+    #[serde(default = "default_server_grace_timeout")]
+    pub grace_timeout: u16,
 }
 
 impl Default for ServerSection {
@@ -340,6 +346,8 @@ impl Default for ServerSection {
         Self {
             host: default_server_host(),
             port: default_server_port(),
+            workers: default_server_workers(),
+            grace_timeout: default_server_grace_timeout(),
         }
     }
 }
@@ -350,6 +358,16 @@ fn default_server_host() -> String {
 
 fn default_server_port() -> u16 {
     8080
+}
+
+fn default_server_workers() -> u16 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u16)
+        .unwrap_or(4)
+}
+
+fn default_server_grace_timeout() -> u16 {
+    30
 }
 
 fn default_mysql() -> String {

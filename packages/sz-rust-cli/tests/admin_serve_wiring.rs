@@ -116,7 +116,9 @@ fn make_super_admin_request(method: &str, uri: &str) -> http::Request<axum::body
 fn test_parse_serve_with_admin() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--with-admin", "--addr", "127.0.0.1:0"]);
     match cli.command {
-        Some(CliCommand::Serve { with_admin, addr }) => {
+        Some(CliCommand::Serve {
+            with_admin, addr, ..
+        }) => {
             assert!(with_admin);
             assert_eq!(addr, "127.0.0.1:0");
         }
@@ -129,7 +131,9 @@ fn test_parse_serve_with_admin() {
 fn test_parse_serve_defaults() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
     match cli.command {
-        Some(CliCommand::Serve { with_admin, addr }) => {
+        Some(CliCommand::Serve {
+            with_admin, addr, ..
+        }) => {
             assert!(!with_admin);
             assert_eq!(addr, "0.0.0.0:8080");
         }
