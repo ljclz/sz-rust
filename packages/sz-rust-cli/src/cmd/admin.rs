@@ -6,10 +6,8 @@
 //! 提供数据库迁移、路由/Capability 查看、初始化等命令，
 //! 对接 `sz-rust-addons-admin` 插件。
 
-use std::sync::Arc;
-
 use clap::{Args, Subcommand};
-use sz_rust_core::orm::{Connection, ConnectionFactory};
+use sz_rust_core::orm::Connection;
 use tabled::{Table, Tabled};
 
 use crate::error::CliError;
@@ -44,6 +42,9 @@ pub struct MigrateArgs {
 /// `admin init` 命令参数
 #[derive(Args, Debug)]
 pub struct InitArgs {
+    /// 数据库类型（默认 postgres）
+    #[arg(long, default_value = "postgres")]
+    db_type: String,
     /// 数据库连接 URL（省略时为离线模式）
     #[arg(long)]
     url: Option<String>,
@@ -130,17 +131,17 @@ pub async fn execute(cmd: &AdminCommand) -> Result<i32, CliError> {
     }
 }
 
-async fn create_pg_connection(url: &str) -> Result<Box<dyn Connection>, CliError> {
-    use sz_orm_sqlx::{PgPoolHandle, SqlxPgConnectionFactory};
-    let pool = PgPoolHandle::connect(url)
+async fn create_connection(url: &str, db_type: &str) -> Result<Box<dyn Connection>, CliError> {
+    use sz_orm_sqlx::any_driver::AnyPool;
+
+    let pool = AnyPool::connect(url)
         .await
-        .map_err(|e| CliError::Migration(format!("PostgreSQL 连接失败: {e}")))?;
-    let factory = SqlxPgConnectionFactory::new(Arc::new(pool));
-    let conn = factory
+        .map_err(|e| CliError::Migration(format!("{db_type} 连接失败: {e}")))?;
+    let conn = pool
         .create()
         .await
         .map_err(|e| CliError::Migration(format!("获取连接失败: {e}")))?;
-    Ok(conn)
+    Ok(Box::new(conn))
 }
 
 async fn execute_migrate(args: &MigrateArgs) -> Result<i32, CliError> {
@@ -152,7 +153,7 @@ async fn execute_migrate(args: &MigrateArgs) -> Result<i32, CliError> {
 
     if let Some(url) = &args.url {
         println!("\n连接数据库 {} ...", args.db_type);
-        let mut conn = create_pg_connection(url).await?;
+        let mut conn = create_connection(url, &args.db_type).await?;
 
         let sql_statements: Vec<&str> = MIGRATION_SQL
             .lines()
@@ -226,7 +227,7 @@ async fn execute_init(args: &InitArgs) -> Result<i32, CliError> {
         .ok_or_else(|| CliError::Clap("admin init 在线模式必须提供 --url".to_string()))?;
     println!("=== Admin 插件初始化 ===\n");
     println!("连接数据库...");
-    let mut conn = create_pg_connection(url).await?;
+    let mut conn = create_connection(url, &args.db_type).await?;
 
     println!("创建内置角色...");
     for (code, name, desc) in [
@@ -415,6 +416,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_init_offline() {
         let args = InitArgs {
+            db_type: "postgres".to_string(),
             url: None,
             username: "admin".to_string(),
             password: "admin123".to_string(),

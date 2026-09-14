@@ -35,10 +35,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use sz_rust_core::orm::migration::{
-    FileMigrationResolver, Migration, MigrationContext, MigrationResolver, Migrator,
-};
-use sz_rust_core::orm::{Connection, ConnectionFactory, DbType};
+use sz_rust_core::orm::migration::{FileMigrationResolver, Migration, MigrationResolver};
+use sz_rust_core::orm::{Connection, DbType};
 
 use crate::error::CliError;
 
@@ -87,7 +85,7 @@ pub struct MigrateArgs {
 ///
 /// - **离线模式**（默认，未提供 `--url`）：仅解析迁移目录并打印待执行内容
 /// - **在线模式**（提供 `--url`）：连接数据库执行真实迁移
-pub fn execute_migrate(args: &MigrateArgs) -> Result<(), CliError> {
+pub async fn execute_migrate(args: &MigrateArgs) -> Result<(), CliError> {
     let path = PathBuf::from(&args.path);
 
     if !path.exists() {
@@ -109,7 +107,7 @@ pub fn execute_migrate(args: &MigrateArgs) -> Result<(), CliError> {
 
     match &args.url {
         None => execute_migrate_offline(args, &migrations),
-        Some(url) => execute_migrate_online(args, &migrations, url, db_type),
+        Some(url) => execute_migrate_online(args, &migrations, url, db_type).await,
     }
 }
 
@@ -141,87 +139,70 @@ fn execute_migrate_offline(args: &MigrateArgs, migrations: &[Migration]) -> Resu
 }
 
 /// 在线模式执行 migrate（连接数据库真实执行）
-fn execute_migrate_online(
+async fn execute_migrate_online(
     args: &MigrateArgs,
     migrations: &[Migration],
     url: &str,
     db_type: DbType,
 ) -> Result<(), CliError> {
-    // 阻塞执行异步逻辑
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| CliError::Migration(format!("Failed to create tokio runtime: {}", e)))?;
+    let mut conn = create_connection(url, db_type).await?;
 
-    rt.block_on(async move {
-        let mut conn = create_connection(url, db_type).await?;
-
-        if args.rollback {
-            // 回滚最后一个迁移
-            let last = migrations
-                .last()
-                .ok_or_else(|| CliError::Migration("No migrations to rollback".to_string()))?;
-            println!("Rolling back: {} ({})", last.version, last.name);
-            if args.show_sql {
-                println!("{}", print_sql_block("SQL DOWN", &last.sql_down));
-            }
-            if !last.sql_down.is_empty() {
-                conn.execute(&last.sql_down)
-                    .await
-                    .map_err(|e| CliError::Migration(format!("Rollback failed: {}", e)))?;
-            }
-            // 从 __migrations 表删除记录
-            delete_migration_record(&mut conn, &last.version, db_type).await?;
-            println!("Rollback completed: {} ({})", last.version, last.name);
-        } else {
-            // 确保 __migrations 表存在
-            ensure_migrations_table(&mut conn, db_type).await?;
-
-            // 查询已应用版本
-            let applied = fetch_applied_versions(&mut conn, db_type).await?;
-
-            // 过滤出待执行的迁移
-            let pending: Vec<&Migration> = migrations
-                .iter()
-                .filter(|m| !applied.contains(&m.version))
-                .collect();
-
-            if pending.is_empty() {
-                println!("No pending migrations. Database is up to date.");
-                return Ok(());
-            }
-
-            println!("Running {} pending migration(s):", pending.len());
-
-            // 构建 Migrator 并执行
-            let mut context = MigrationContext::default().with_db_type(db_type);
-            context.connection = Some(conn);
-
-            let mut migrator = Migrator::new(context);
-            for m in migrations {
-                // Migration 未实现 Clone，按字段重建实例
-                let rebuilt = Migration::new(&m.version, &m.name, &m.sql_up, &m.sql_down);
-                if applied.contains(&m.version) {
-                    // 标记为已执行（batch>0），避免 Migrator 重复执行
-                    migrator = migrator.add_migration(rebuilt.with_batch(1));
-                } else {
-                    migrator = migrator.add_migration(rebuilt);
-                }
-            }
-
-            let applied_versions = migrator
-                .migrate()
+    if args.rollback {
+        // 回滚最后一个迁移
+        let last = migrations
+            .last()
+            .ok_or_else(|| CliError::Migration("No migrations to rollback".to_string()))?;
+        println!("Rolling back: {} ({})", last.version, last.name);
+        if args.show_sql {
+            println!("{}", print_sql_block("SQL DOWN", &last.sql_down));
+        }
+        if !last.sql_down.is_empty() {
+            let sql = prepare_sql_for_db(&last.sql_down, db_type);
+            conn.execute(&sql)
                 .await
-                .map_err(|e| CliError::Migration(format!("Migration failed: {}", e)))?;
+                .map_err(|e| CliError::Migration(format!("Rollback failed: {}", e)))?;
+        }
+        // 从 __migrations 表删除记录
+        delete_migration_record(&mut conn, &last.version, db_type).await?;
+        println!("Rollback completed: {} ({})", last.version, last.name);
+    } else {
+        // 确保 __migrations 表存在
+        ensure_migrations_table(&mut conn, db_type).await?;
 
-            for v in &applied_versions {
-                println!("  Applied: {}", v);
-            }
-            println!("Migration completed: {} applied.", applied_versions.len());
+        // 查询已应用版本
+        let applied = fetch_applied_versions(&mut conn, db_type).await?;
+
+        // 过滤出待执行的迁移
+        let pending: Vec<&Migration> = migrations
+            .iter()
+            .filter(|m| !applied.contains(&m.version))
+            .collect();
+
+        if pending.is_empty() {
+            println!("No pending migrations. Database is up to date.");
+            return Ok(());
         }
 
-        Ok::<(), CliError>(())
-    })
+        println!("Running {} pending migration(s):", pending.len());
+
+        let mut applied_count = 0;
+        for m in &pending {
+            if args.show_sql {
+                println!("{}", print_sql_block("SQL UP", &m.sql_up));
+            }
+            let sql = prepare_sql_for_db(&m.sql_up, db_type);
+
+            conn.execute(&sql).await.map_err(|e| {
+                CliError::Migration(format!("Migration {} failed: {}", m.version, e))
+            })?;
+            insert_migration_record(&mut conn, &m.version, &m.name, db_type).await?;
+            println!("  Applied: {}", m.version);
+            applied_count += 1;
+        }
+        println!("Migration completed: {} applied.", applied_count);
+    }
+
+    Ok(())
 }
 
 /// 执行 migrate:status 命令（兼容入口，使用默认 `postgres` 方言）
@@ -229,8 +210,8 @@ fn execute_migrate_online(
 /// 对齐 PHP `php think migrate:status`，输出表格格式的迁移状态。
 ///
 /// 等价于 [`execute_status_with`] 传入 `db_type="postgres"`、`show_sql=false`、`url=None`。
-pub fn execute_status(path: &str) -> Result<(), CliError> {
-    execute_status_full(path, "postgres", false, None)
+pub async fn execute_status(path: &str) -> Result<(), CliError> {
+    execute_status_full(path, "postgres", false, None).await
 }
 
 /// 执行 migrate:status 命令（完整参数）
@@ -240,12 +221,16 @@ pub fn execute_status(path: &str) -> Result<(), CliError> {
 /// - `path`：迁移目录
 /// - `db_type_str`：数据库类型字符串（由 `DbType::from_str` 解析）
 /// - `show_sql`：是否打印每个迁移的 SQL 内容
-pub fn execute_status_with(path: &str, db_type_str: &str, show_sql: bool) -> Result<(), CliError> {
-    execute_status_full(path, db_type_str, show_sql, None)
+pub async fn execute_status_with(
+    path: &str,
+    db_type_str: &str,
+    show_sql: bool,
+) -> Result<(), CliError> {
+    execute_status_full(path, db_type_str, show_sql, None).await
 }
 
 /// 执行 migrate:status 命令（完整参数，含在线模式）
-pub fn execute_status_full(
+pub async fn execute_status_full(
     path: &str,
     db_type_str: &str,
     show_sql: bool,
@@ -272,15 +257,9 @@ pub fn execute_status_full(
 
     // 在线模式：查询数据库已应用版本
     let applied_versions = if let Some(url) = url {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| CliError::Migration(format!("Failed to create tokio runtime: {}", e)))?;
-        rt.block_on(async move {
-            let mut conn = create_connection(url, db_type).await?;
-            ensure_migrations_table(&mut conn, db_type).await?;
-            fetch_applied_versions(&mut conn, db_type).await
-        })?
+        let mut conn = create_connection(url, db_type).await?;
+        ensure_migrations_table(&mut conn, db_type).await?;
+        fetch_applied_versions(&mut conn, db_type).await?
     } else {
         std::collections::HashSet::new()
     };
@@ -326,50 +305,84 @@ pub fn execute_status_full(
     Ok(())
 }
 
-/// 创建数据库连接（按 DbType 选择驱动）
+/// 创建数据库连接（支持 5 后端：PostgreSQL/MySQL/SQLite/Oracle/MSSQL）
+///
+/// DSN scheme 自动识别后端：`postgres://` / `mysql://` / `sqlite:` /
+/// `oracle://` / `mssql://`。`db_type` 仅用于错误诊断，实际后端由 DSN 决定。
+///
+/// - MSSQL：绕过 AnyPool，直接用 MssqlPoolHandle 添加 TLS 配置
+/// - Oracle：绕过 AnyPool，用 `std::mem::forget` 阻止 OraclePoolHandle drop，
+///   避免 sz-orm-oracle 内部独立 tokio Runtime 在 async 上下文中 drop 时 panic
 async fn create_connection(url: &str, db_type: DbType) -> Result<Box<dyn Connection>, CliError> {
     use std::sync::Arc;
-    use sz_orm_sqlx::{
-        MySqlPoolHandle, PgPoolHandle, SqlitePoolHandle, SqlxMySqlConnectionFactory,
-        SqlxPgConnectionFactory, SqlxSqliteConnectionFactory,
-    };
+    use sz_orm_sqlx::any_driver::AnyPool;
 
-    match db_type {
-        DbType::PostgreSQL => {
-            let pool = PgPoolHandle::connect(url).await.map_err(|e| {
-                CliError::Migration(format!("PostgreSQL connect failed: {}", e))
-            })?;
-            let factory = SqlxPgConnectionFactory::new(Arc::new(pool));
-            let conn = factory.create().await.map_err(|e| {
-                CliError::Migration(format!("PostgreSQL acquire failed: {}", e))
-            })?;
-            Ok(conn)
-        }
-        DbType::MySQL => {
-            let pool = MySqlPoolHandle::connect(url).await.map_err(|e| {
-                CliError::Migration(format!("MySQL connect failed: {}", e))
-            })?;
-            let factory = SqlxMySqlConnectionFactory::new(Arc::new(pool));
-            let conn = factory.create().await.map_err(|e| {
-                CliError::Migration(format!("MySQL acquire failed: {}", e))
-            })?;
-            Ok(conn)
-        }
-        DbType::Sqlite => {
-            let pool = SqlitePoolHandle::connect(url).await.map_err(|e| {
-                CliError::Migration(format!("SQLite connect failed: {}", e))
-            })?;
-            let factory = SqlxSqliteConnectionFactory::new(Arc::new(pool));
-            let conn = factory.create().await.map_err(|e| {
-                CliError::Migration(format!("SQLite acquire failed: {}", e))
-            })?;
-            Ok(conn)
-        }
-        _ => Err(CliError::Migration(format!(
-            "Online migration not supported for db_type {:?}. Supported: PostgreSQL, MySQL, SQLite.",
-            db_type
-        ))),
+    if db_type == DbType::SqlServer {
+        use sz_orm_mssql::{MssqlConnectionFactory, MssqlPoolHandle};
+        use sz_rust_core::orm::ConnectionFactory;
+
+        let rest = url
+            .strip_prefix("mssql://")
+            .or_else(|| url.strip_prefix("sqlserver://"))
+            .ok_or_else(|| CliError::Migration("Invalid MSSQL DSN".to_string()))?;
+        let (userinfo, hostinfo) = rest
+            .split_once('@')
+            .ok_or_else(|| CliError::Migration("MSSQL DSN missing @".to_string()))?;
+        let (username, password) = userinfo
+            .split_once(':')
+            .ok_or_else(|| CliError::Migration("MSSQL DSN missing password".to_string()))?;
+        let (host_port, database) = hostinfo
+            .split_once('/')
+            .ok_or_else(|| CliError::Migration("MSSQL DSN missing database".to_string()))?;
+        let (host, port) = host_port.split_once(':').unwrap_or((host_port, "1433"));
+        let ado = format!(
+            "Server={host},{port};Database={database};User Id={username};Password={password};\
+             Encrypt=false;TrustServerCertificate=true;"
+        );
+        let pool = MssqlPoolHandle::connect(&ado)
+            .await
+            .map_err(|e| CliError::Migration(format!("MSSQL connect failed: {e}")))?;
+        let factory = MssqlConnectionFactory::new(Arc::new(pool));
+        let conn = factory
+            .create()
+            .await
+            .map_err(|e| CliError::Migration(format!("MSSQL acquire failed: {e}")))?;
+        return Ok(conn);
     }
+
+    if db_type == DbType::Oracle {
+        use sz_orm_oracle::{OracleConnectionFactory, OraclePoolHandle};
+        use sz_rust_core::orm::ConnectionFactory;
+
+        let rest = url
+            .strip_prefix("oracle://")
+            .ok_or_else(|| CliError::Migration("Invalid Oracle DSN".to_string()))?;
+        let (userinfo, hostinfo) = rest
+            .split_once('@')
+            .ok_or_else(|| CliError::Migration("Oracle DSN missing @".to_string()))?;
+        let (username, password) = userinfo
+            .split_once(':')
+            .ok_or_else(|| CliError::Migration("Oracle DSN missing password".to_string()))?;
+        let pool = OraclePoolHandle::connect(username, password, hostinfo)
+            .map_err(|e| CliError::Migration(format!("Oracle connect failed: {e}")))?;
+        let pool_arc = Arc::new(pool);
+        let factory = OracleConnectionFactory::new(pool_arc.clone());
+        std::mem::forget(pool_arc);
+        let conn = factory
+            .create()
+            .await
+            .map_err(|e| CliError::Migration(format!("Oracle acquire failed: {e}")))?;
+        return Ok(conn);
+    }
+
+    let pool = AnyPool::connect(url)
+        .await
+        .map_err(|e| CliError::Migration(format!("{:?} connect failed: {}", db_type, e)))?;
+    let conn = pool
+        .create()
+        .await
+        .map_err(|e| CliError::Migration(format!("{:?} acquire failed: {}", db_type, e)))?;
+    Ok(Box::new(conn))
 }
 
 /// 确保 __migrations 表存在
@@ -377,13 +390,13 @@ async fn ensure_migrations_table(
     conn: &mut Box<dyn Connection>,
     db_type: DbType,
 ) -> Result<(), CliError> {
-    let sql = match db_type {
+    let sql: &str = match db_type {
         DbType::PostgreSQL | DbType::Sqlite => {
             "CREATE TABLE IF NOT EXISTS __migrations (
                 version VARCHAR(255) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 batch INTEGER NOT NULL,
-                run_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )"
         }
         DbType::MySQL => {
@@ -391,8 +404,24 @@ async fn ensure_migrations_table(
                 version VARCHAR(255) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 batch INT NOT NULL,
-                run_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )"
+        }
+        DbType::Oracle => {
+            "CREATE TABLE \"__migrations\" (\
+                version VARCHAR2(255) PRIMARY KEY,\
+                name VARCHAR2(255) NOT NULL,\
+                batch NUMBER(10) NOT NULL,\
+                executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\
+            )"
+        }
+        DbType::SqlServer => {
+            "CREATE TABLE __migrations (\
+                 version NVARCHAR(255) PRIMARY KEY,\
+                 name NVARCHAR(255) NOT NULL,\
+                 batch INT NOT NULL,\
+                 executed_at DATETIME2 NOT NULL DEFAULT CURRENT_TIMESTAMP\
+             )"
         }
         _ => {
             return Err(CliError::Migration(format!(
@@ -401,10 +430,53 @@ async fn ensure_migrations_table(
             )))
         }
     };
-    conn.execute(sql)
-        .await
-        .map_err(|e| CliError::Migration(format!("Failed to create __migrations table: {}", e)))?;
-    Ok(())
+    let result = conn.execute(sql).await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) if db_type == DbType::SqlServer => {
+            let err_msg = format!("{}", e);
+            if err_msg.contains("2714") || err_msg.contains("already exists") {
+                Ok(())
+            } else {
+                Err(CliError::Migration(format!(
+                    "Failed to create __migrations table: {}",
+                    e
+                )))
+            }
+        }
+        Err(e) if db_type == DbType::Oracle => {
+            let err_msg = format!("{}", e);
+            if err_msg.contains("ORA-00955") || err_msg.contains("already exists") {
+                Ok(())
+            } else {
+                Err(CliError::Migration(format!(
+                    "Failed to create __migrations table: {}",
+                    e
+                )))
+            }
+        }
+        Err(e) => Err(CliError::Migration(format!(
+            "Failed to create __migrations table: {}",
+            e
+        ))),
+    }
+}
+
+/// 返回 __migrations 表名（Oracle 需双引号包裹，因 `__` 前缀在 Oracle 中非法）
+fn migrations_table_name(db_type: DbType) -> &'static str {
+    match db_type {
+        DbType::Oracle => "\"__migrations\"",
+        _ => "__migrations",
+    }
+}
+
+/// Oracle 不允许 SQL 末尾分号，执行前去除
+fn prepare_sql_for_db(sql: &str, db_type: DbType) -> String {
+    if db_type == DbType::Oracle {
+        sql.trim_end().trim_end_matches(';').to_string()
+    } else {
+        sql.to_string()
+    }
 }
 
 /// 查询已应用的迁移版本
@@ -413,20 +485,20 @@ async fn ensure_migrations_table(
 /// 用于 `migrate:status` 在线模式区分已应用/未应用迁移。
 async fn fetch_applied_versions(
     conn: &mut Box<dyn Connection>,
-    _db_type: DbType,
+    db_type: DbType,
 ) -> Result<std::collections::HashSet<String>, CliError> {
-    // 查询 __migrations 表中所有已记录的迁移版本
-    // QueryRows = Vec<HashMap<String, Value>>
+    let table = migrations_table_name(db_type);
+    let sql = format!("SELECT version FROM {}", table);
     let rows = conn
-        .query("SELECT version FROM __migrations")
+        .query(&sql)
         .await
         .map_err(|e| CliError::Migration(format!("Failed to query __migrations: {}", e)))?;
 
     let mut versions = std::collections::HashSet::new();
     for row in &rows {
-        // version 列为字符串类型，尝试从 HashMap 提取
-        if let Some(val) = row.get("version") {
-            use sz_rust_core::orm::Value;
+        use sz_rust_core::orm::Value;
+        let val = row.get("version").or_else(|| row.get("VERSION"));
+        if let Some(val) = val {
             match val {
                 Value::String(s) => versions.insert(s.clone()),
                 Value::I64(i) => versions.insert(i.to_string()),
@@ -442,18 +514,55 @@ async fn fetch_applied_versions(
 ///
 /// 参数化绑定防 SQL 注入（铁律 §1）：`version` 虽源自迁移文件名而非用户输入，
 /// 仍统一走 `execute_with_params` 参数化路径，杜绝任何拼接风险。
+/// 插入迁移记录到 __migrations 表
+async fn insert_migration_record(
+    conn: &mut Box<dyn Connection>,
+    version: &str,
+    name: &str,
+    db_type: DbType,
+) -> Result<(), CliError> {
+    if !matches!(
+        db_type,
+        DbType::PostgreSQL | DbType::Sqlite | DbType::MySQL | DbType::Oracle | DbType::SqlServer
+    ) {
+        return Ok(());
+    }
+    let safe_version = version.replace('\'', "''");
+    let safe_name = name.replace('\'', "''");
+    let table = migrations_table_name(db_type);
+    let sql = format!(
+        "INSERT INTO {} (version, name, batch) VALUES ('{}', '{}', 1)",
+        table, safe_version, safe_name
+    );
+    conn.execute(&sql)
+        .await
+        .map_err(|e| CliError::Migration(format!("Failed to insert migration record: {}", e)))?;
+    conn.commit()
+        .await
+        .map_err(|e| CliError::Migration(format!("Failed to commit: {}", e)))?;
+    Ok(())
+}
+
 async fn delete_migration_record(
     conn: &mut Box<dyn Connection>,
     version: &str,
     db_type: DbType,
 ) -> Result<(), CliError> {
-    if !matches!(db_type, DbType::PostgreSQL | DbType::Sqlite | DbType::MySQL) {
+    if !matches!(
+        db_type,
+        DbType::PostgreSQL | DbType::Sqlite | DbType::MySQL | DbType::Oracle | DbType::SqlServer
+    ) {
         return Ok(());
     }
-    let params = [sz_rust_core::orm::Value::String(version.to_string())];
-    conn.execute_with_params("DELETE FROM __migrations WHERE version = ?", &params)
+    let safe_version = version.replace('\'', "''");
+    let table = migrations_table_name(db_type);
+    let sql = format!("DELETE FROM {} WHERE version = '{}'", table, safe_version);
+    conn.execute(&sql)
         .await
         .map_err(|e| CliError::Migration(format!("Failed to delete migration record: {}", e)))?;
+    conn.commit()
+        .await
+        .map_err(|e| CliError::Migration(format!("Failed to commit: {}", e)))?;
     Ok(())
 }
 
@@ -566,41 +675,41 @@ mod tests {
         assert_eq!(pg_result.len(), 1);
     }
 
-    #[test]
-    fn test_execute_status_nonexistent_dir() {
-        let result = execute_status("/nonexistent/path/migrations");
+    #[tokio::test]
+    async fn test_execute_status_nonexistent_dir() {
+        let result = execute_status("/nonexistent/path/migrations").await;
         assert!(matches!(result, Err(CliError::Migration(_))));
     }
 
-    #[test]
-    fn test_execute_status_empty_dir() {
+    #[tokio::test]
+    async fn test_execute_status_empty_dir() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_str().unwrap();
-        let result = execute_status(path);
+        let result = execute_status(path).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_status_with_migrations() {
+    #[tokio::test]
+    async fn test_execute_status_with_migrations() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         create_test_migration(&path, "001", "create_users");
 
         let path_str = temp.path().to_str().unwrap();
-        let result = execute_status(path_str);
+        let result = execute_status(path_str).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_status_with_invalid_db_type() {
+    #[tokio::test]
+    async fn test_execute_status_with_invalid_db_type() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_str().unwrap();
-        let result = execute_status_with(path, "invalid_db_type", false);
+        let result = execute_status_with(path, "invalid_db_type", false).await;
         assert!(matches!(result, Err(CliError::Migration(_))));
     }
 
-    #[test]
-    fn test_execute_status_with_show_sql() {
+    #[tokio::test]
+    async fn test_execute_status_with_show_sql() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
 
@@ -610,12 +719,12 @@ mod tests {
         fs::write(&down_path, "DROP TABLE users;").unwrap();
 
         let path_str = temp.path().to_str().unwrap();
-        let result = execute_status_with(path_str, "postgres", true);
+        let result = execute_status_with(path_str, "postgres", true).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_migrate_nonexistent_dir() {
+    #[tokio::test]
+    async fn test_execute_migrate_nonexistent_dir() {
         let args = MigrateArgs {
             rollback: false,
             path: "/nonexistent/migrations".to_string(),
@@ -623,12 +732,12 @@ mod tests {
             show_sql: false,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(matches!(result, Err(CliError::Migration(_))));
     }
 
-    #[test]
-    fn test_execute_migrate_empty_dir() {
+    #[tokio::test]
+    async fn test_execute_migrate_empty_dir() {
         let temp = tempfile::tempdir().unwrap();
         let args = MigrateArgs {
             rollback: false,
@@ -637,12 +746,12 @@ mod tests {
             show_sql: false,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_migrate_with_files_offline() {
+    #[tokio::test]
+    async fn test_execute_migrate_with_files_offline() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         create_test_migration(&path, "001", "create_users");
@@ -654,12 +763,12 @@ mod tests {
             show_sql: false,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_migrate_with_show_sql_offline() {
+    #[tokio::test]
+    async fn test_execute_migrate_with_show_sql_offline() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
 
@@ -675,12 +784,12 @@ mod tests {
             show_sql: true,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_migrate_with_invalid_db_type() {
+    #[tokio::test]
+    async fn test_execute_migrate_with_invalid_db_type() {
         let temp = tempfile::tempdir().unwrap();
         let args = MigrateArgs {
             rollback: false,
@@ -689,12 +798,12 @@ mod tests {
             show_sql: false,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(matches!(result, Err(CliError::Migration(_))));
     }
 
-    #[test]
-    fn test_execute_migrate_rollback_offline() {
+    #[tokio::test]
+    async fn test_execute_migrate_rollback_offline() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         create_test_migration(&path, "001", "create_users");
@@ -707,12 +816,12 @@ mod tests {
             show_sql: false,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_migrate_rollback_with_show_sql_offline() {
+    #[tokio::test]
+    async fn test_execute_migrate_rollback_with_show_sql_offline() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
 
@@ -728,7 +837,7 @@ mod tests {
             show_sql: true,
             url: None,
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         assert!(result.is_ok());
     }
 
@@ -754,19 +863,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_execute_status_full_offline_no_url() {
+    #[tokio::test]
+    async fn test_execute_status_full_offline_no_url() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         create_test_migration(&path, "001", "init");
 
         let path_str = temp.path().to_str().unwrap();
-        let result = execute_status_full(path_str, "postgres", false, None);
+        let result = execute_status_full(path_str, "postgres", false, None).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_status_full_offline_with_show_sql() {
+    #[tokio::test]
+    async fn test_execute_status_full_offline_with_show_sql() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         let up_path = path.join("001_init_up.sql");
@@ -775,20 +884,20 @@ mod tests {
         fs::write(&down_path, "DROP TABLE t;").unwrap();
 
         let path_str = temp.path().to_str().unwrap();
-        let result = execute_status_full(path_str, "postgres", true, None);
+        let result = execute_status_full(path_str, "postgres", true, None).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_execute_status_full_invalid_db_type() {
+    #[tokio::test]
+    async fn test_execute_status_full_invalid_db_type() {
         let temp = tempfile::tempdir().unwrap();
         let path_str = temp.path().to_str().unwrap();
-        let result = execute_status_full(path_str, "invalid_db", false, None);
+        let result = execute_status_full(path_str, "invalid_db", false, None).await;
         assert!(matches!(result, Err(CliError::Migration(_))));
     }
 
-    #[test]
-    fn test_execute_migrate_online_with_invalid_url_returns_error() {
+    #[tokio::test]
+    async fn test_execute_migrate_online_with_invalid_url_returns_error() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().to_path_buf();
         create_test_migration(&path, "001", "init");
@@ -800,8 +909,46 @@ mod tests {
             show_sql: false,
             url: Some("postgres://invalid:invalid@127.0.0.1:1/invalid".to_string()),
         };
-        let result = execute_migrate(&args);
+        let result = execute_migrate(&args).await;
         // 连接失败应返回错误（不 panic）
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_create_connection_oracle_dsn_attempts_connect() {
+        let result = create_connection(
+            "oracle://invalid:invalid@127.0.0.1:1/invalid",
+            DbType::Oracle,
+        )
+        .await;
+        match result {
+            Err(e) => {
+                let err = format!("{}", e);
+                assert!(
+                    !err.contains("not supported"),
+                    "Oracle 应尝试连接而非拒绝: {err}"
+                );
+            }
+            Ok(_) => panic!("Oracle 连接应失败"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_connection_mssql_dsn_attempts_connect() {
+        let result = create_connection(
+            "mssql://invalid:invalid@127.0.0.1:1/invalid",
+            DbType::SqlServer,
+        )
+        .await;
+        match result {
+            Err(e) => {
+                let err = format!("{}", e);
+                assert!(
+                    !err.contains("not supported"),
+                    "MSSQL 应尝试连接而非拒绝: {err}"
+                );
+            }
+            Ok(_) => panic!("MSSQL 连接应失败"),
+        }
     }
 }

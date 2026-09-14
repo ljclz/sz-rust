@@ -26,8 +26,12 @@ chrono.workspace = true
 thiserror.workspace = true
 # 异步运行时（migrate 在线模式需要）
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-# SZ-ORM SQLx 驱动（在线迁移执行所需）
-sz-orm-sqlx.workspace = true
+# SZ-ORM SQLx 驱动（在线迁移执行所需，启用 Oracle/MSSQL 多后端）
+sz-orm-sqlx = { workspace = true, features = ["oracle", "mssql"] }
+# SZ-ORM MSSQL 驱动（MSSQL TLS 配置需要直接访问 MssqlPoolHandle）
+sz-orm-mssql = "6.0"
+# SZ-ORM Oracle 驱动（绕过 AnyPool 避免 Runtime drop panic）
+sz-orm-oracle = "6.0"
 # SZ-Rust 核心（调度器封装，含 ORM facade）
 sz-rust-core.workspace = true
 # 模板引擎（P1-T3 插件模板库）

@@ -179,8 +179,8 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，从 crates.io 6.2.0 拉取）
-sz-orm-core = "6.2.0"
+# 内部依赖（SZ-ORM 全家桶，从 crates.io 拉取）
+sz-orm-core = "6.9.0"
 sz-orm-auth = "6.2.0"
 sz-orm-storage = "6.2.0"
 sz-orm-queue = "6.2.0"
@@ -190,10 +190,10 @@ sz-orm-scheduler = "6.2.0"
 sz-orm-tracing = "6.2.0"
 sz-orm-logger = "6.2.0"
 sz-orm-limit = "6.2.0"
-sz-orm-config = "6.2.0"
+sz-orm-config = "6.9.0"
 sz-orm-macros = "6.2.0"
 sz-orm-sql-validator = "6.2.0"
-sz-orm-sqlx = "6.2.0"
+sz-orm-sqlx = "6.9.0"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
 sz-orm-query-builder = "6.2.0"
 sz-orm-graphql = "6.2.0"

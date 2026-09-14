@@ -5,6 +5,30 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-13
+
+### Added
+
+- **CLI 多后端数据库连接支持（Oracle/MSSQL）**（2026-09-12～13）：
+  - `sz-rust-cli` 启用 `sz-orm-sqlx` 的 `oracle`/`mssql` feature，支持全部 5 种后端（PostgreSQL/MySQL/SQLite/Oracle/MSSQL）
+  - `migrate` 命令 `create_connection` 委托 `sz_orm_sqlx::any_driver::AnyPool`，DSN scheme 自动识别后端，消除硬编码 3 分支 match
+  - `ensure_migrations_table` 方言感知 DDL：Oracle 用 `"__migrations"` 双引号包裹（`__` 前缀在 Oracle 中非法）+ 捕获 ORA-00955；MSSQL 直接 `CREATE TABLE` + 捕获错误码 2714
+  - `delete_migration_record` 白名单扩展为 5 后端（PostgreSQL/SQLite/MySQL/Oracle/SqlServer）
+  - `admin migrate`/`admin init` 命令泛化为多后端连接，`InitArgs` 新增 `--db-type` 参数
+  - Oracle 修复：绕过 `AnyPool` 直接用 `OraclePoolHandle` + `std::mem::forget` 阻止 `OracleBlockingPool` 的 tokio Runtime 在 async 上下文中 drop panic
+  - Oracle SQL 兼容：`prepare_sql_for_db` 去除末尾分号（Oracle 不允许 `;` 结尾）；`fetch_applied_versions` 同时检查 `version`/`VERSION` 列名（Oracle 默认大写）；`insert/delete_migration_record` 后调用 `conn.commit()`（Oracle 不自动提交 DML）
+  - 验证：`cargo test -p sz-rust-cli` → 377 passed (358 lib + 19 integration); `cargo clippy` 0 warnings; `cargo build` sz-orm-oracle v6.0.0 + sz-orm-mssql v6.0.0 编译通过
+
+### Changed
+
+- **sz-orm-core/sz-orm-sqlx 升级到 v6.9.0**（2026-09-12）：
+  - `sz-orm-core` 6.2.0 → 6.9.0、`sz-orm-sqlx` 6.2.0 → 6.9.0、`sz-orm-config` 6.2.0 → 6.9.0（其余 sz-orm-* 包仍 6.2.0，crates.io 最新）
+  - `execute_migrate_online` 绕过 `Migrator::migrate()` 内部 `build_create_migrations_table_sql()`（v6.9.0 仍用 `CREATE TABLE IF NOT EXISTS`，MSSQL 不支持），改为直接执行迁移 SQL + `insert_migration_record` 记录
+  - `insert_migration_record`/`delete_migration_record` 改用 `conn.execute()` + 单引号转义（`execute_with_params` 在 `Box<dyn Connection>` 上未实现）
+  - 清理未使用的 `Migrator`/`MigrationContext` 导入
+  - 验证：`cargo test -p sz-rust-cli` → 377 passed (358 lib + 19 integration); `cargo clippy` 0 warnings
+  - 服务器验证（2026-09-13）：PostgreSQL ✅、MySQL ✅、SQLite ✅、MSSQL ✅、Oracle ✅ — 5 种后端 migrate + migrate:status 全部成功
+
 ## [Unreleased] - 2026-09-11
 
 ### Added

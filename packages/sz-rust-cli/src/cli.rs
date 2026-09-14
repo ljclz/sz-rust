@@ -217,13 +217,14 @@ impl Cli {
             Some(Command::Make { make_command }) => {
                 cmd::make::execute(make_command).await.map(|_| 0)
             }
-            Some(Command::Migrate { args }) => cmd::migrate::execute_migrate(args).map(|_| 0),
+            Some(Command::Migrate { args }) => cmd::migrate::execute_migrate(args).await.map(|_| 0),
             Some(Command::MigrateStatus {
                 path,
                 db_type,
                 show_sql,
                 url,
             }) => cmd::migrate::execute_status_full(path, db_type, *show_sql, url.as_deref())
+                .await
                 .map(|_| 0),
             Some(Command::RouteList { format }) => {
                 cmd::route::execute_route_list(format).map(|_| 0)
