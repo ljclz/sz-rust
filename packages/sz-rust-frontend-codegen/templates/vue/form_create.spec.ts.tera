@@ -1,0 +1,9 @@
+import { mount } from '@vue/test-utils'
+import Create from '../Create.vue'
+
+describe('{{ module_name }} Create', () => {
+  it('renders', () => {
+    const wrapper = mount(Create)
+    expect(wrapper.exists()).toBe(true)
+  })
+})

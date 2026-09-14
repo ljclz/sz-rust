@@ -1,0 +1,7 @@
+# Cargo 构建配置
+# 文档：https://doc.rust-lang.org/cargo/reference/config.html
+
+[build]
+# 覆盖率插桩（cargo-llvm-cov 使用）
+# 仅在覆盖率测量时生效，正常构建不受影响
+# rustflags = ["-C", "instrument-coverage"]

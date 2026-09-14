@@ -1,0 +1,15 @@
+# 日志配置 — 对齐 PHP think-logger
+default: file
+
+channels:
+  file:
+    type: file
+    path: "runtime/logs"
+    level: "info"
+    max_files: 30
+    format: "%{time} [%{level}] %{message}"
+
+  console:
+    type: console
+    level: "debug"
+    format: "%{time} [%{level}] %{message}"

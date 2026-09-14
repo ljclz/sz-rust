@@ -1,0 +1,87 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+
+      # P1-6 基准覆盖门禁：校验 11 类基准存在（v0.3.3 扩展，超出 7 类最低要求）
+      # 基准类别：route_matching / handler_ref_parse / route_config / json_serialization
+      #           capitalize_first / json_dto / middleware_chain / di_container
+      #           framework_vs_native / rate_limiting / circuit_breaker
+      - name: Verify benchmark coverage (>= 11 categories)
+        run: |
+          set -euo pipefail
+          LISTING=$(cargo bench --package sz-rust-core --bench core_bench -- --list 2>&1)
+          echo "$LISTING"
+          REQUIRED=(
+            "route_matching"
+            "handler_ref_parse"
+            "route_config"
+            "json_serialization"
+            "capitalize_first"
+            "json_dto"
+            "middleware_chain"
+            "di_container"
+            "framework_vs_native"
+            "rate_limiting"
+            "circuit_breaker"
+          )
+          MISSING=0
+          for NAME in "${REQUIRED[@]}"; do
+            if echo "$LISTING" | grep -q "$NAME"; then
+              echo "✅ $NAME present"
+            else
+              echo "❌ $NAME MISSING"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::Missing $MISSING benchmark groups (required >= 11 categories)"
+            exit 1
+          fi
+          echo "✅ All 11 benchmark groups present (exceeds 7-category minimum)"
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --package sz-rust-core --bench core_bench -- \
+            --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+            ${{ github.event_name == 'pull_request' && '--baseline v0.3.3' || '--save-baseline v0.3.3' }}
+
+      - name: Upload criterion results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-results-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Save benchmark results to branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages-bench
+          git add -f target/criterion/
+          git commit -m "Update benchmark results for ${{ github.sha }}"
+          git push origin gh-pages-bench --force

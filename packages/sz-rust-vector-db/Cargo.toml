@@ -1,0 +1,41 @@
+[package]
+name = "sz-rust-vector-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Vector database adapters for sz-rust — Qdrant HTTP adapter implementing VectorStore trait"
+repository.workspace = true
+homepage.workspace = true
+autobenches = false
+keywords = ["vector", "database", "qdrant", "embedding", "similarity"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
+
+# 复用 sz-rust-ai-facade 的 VectorStore trait + AiError
+sz-rust-ai-facade = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+testcontainers = "0.23"
+
+[features]
+default = []
+# Qdrant HTTP 适配器
+qdrant = []
+# testcontainers 集成测试（需 Docker）
+qdrant-integration = ["qdrant"]
+
+[lints]
+workspace = true

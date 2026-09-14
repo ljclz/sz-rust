@@ -1,0 +1,291 @@
+# sz300-server Kubernetes 部署清单（v2 - 不可变部署）
+# 改进点（v1 -> v2）：
+# 1. 镜像 tag 从 latest 改为不可变 v0.2.0（防止镜像漂移）
+# 2. 新增 HPA：CPU>70% 扩容，3-10 副本
+# 3. 新增 PDB：保证至少 2 个副本可用
+# 4. 新增 NetworkPolicy：限制 egress 仅访问 DB/MQ，ingress 仅同 namespace
+# 5. 新增 securityContext：runAsNonRoot + readOnlyRootFilesystem + drop ALL capabilities
+# 6. 新增 topologySpreadConstraints：跨可用区打散
+# 7. 新增 ServiceAccount：最小权限
+# 8. 新增 PVC：日志/临时数据持久化
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sz300-server
+  namespace: default
+  labels:
+    app: sz300-server
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+    version: v0.2.0
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: sz300-server
+  template:
+    metadata:
+      labels:
+        app: sz300-server
+        version: v0.2.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8300"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: sz300-server
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: sz300-server
+      containers:
+      - name: sz300-server
+        # 不可变 tag（v1 为 latest，存在镜像漂移风险）
+        image: sz300-server:v0.2.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http-metrics
+          containerPort: 8300
+          protocol: TCP
+        env:
+        - name: SZ300_JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: jwt-secret
+        - name: SZ300_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sz300-secrets
+              key: db-password
+        - name: SZ300_DB_HOST
+          value: "mysql-service"
+        - name: RUST_LOG
+          value: "warn,sz_rust_sz300=info"
+        # 安全上下文：禁止提权 + 只读根文件系统 + drop ALL capabilities
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          privileged: false
+          capabilities:
+            drop:
+              - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http-metrics
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: http-metrics
+          periodSeconds: 5
+          failureThreshold: 30
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /var/log/sz300
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        persistentVolumeClaim:
+          claimName: sz300-logs
+      - name: config
+        configMap:
+          name: sz300-server-config
+          items:
+          - key: app.yaml
+            path: app.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sz300-service
+  labels:
+    app: sz300-server
+spec:
+  selector:
+    app: sz300-server
+  ports:
+  - name: http
+    port: 80
+    targetPort: http-metrics
+    protocol: TCP
+  type: ClusterIP
+---
+# Secret 必须通过 kubectl create secret 手动创建，不要在 YAML 中硬编码
+# 创建命令：
+#   kubectl create secret generic sz300-secrets \
+#     --from-literal=jwt-secret=<your-jwt-secret> \
+#     --from-literal=db-password=<your-db-password>
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sz300-secrets
+  labels:
+    app: sz300-server
+type: Opaque
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sz300-logs
+  labels:
+    app: sz300-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+# HPA：基于 CPU/内存 使用率自动扩缩容
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sz300-server
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+---
+# PDB：保证滚动更新/节点维护时至少 2 个副本可用
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: sz300-server
+---
+# NetworkPolicy：限制 ingress/egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sz300-server
+  labels:
+    app: sz300-server
+spec:
+  podSelector:
+    matchLabels:
+      app: sz300-server
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # 仅允许同 namespace 内任何 Pod 访问 8300 端口
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: default
+    ports:
+    - protocol: TCP
+      port: 8300
+  egress:
+  # DNS 解析
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # MySQL
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mysql
+    ports:
+    - protocol: TCP
+      port: 3306
+  # 允许出站到 monitoring 命名空间（Prometheus 抓取）
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090

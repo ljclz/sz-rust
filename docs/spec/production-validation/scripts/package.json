@@ -1,0 +1,12 @@
+{
+    "name": "sz-rust-production-validation",
+    "version": "1.0.0",
+    "description": "P0-1 服务器真实数据全链路验证脚本",
+    "type": "module",
+    "scripts": {
+        "validate": "node orchestrator.js --config ../validation-config.json"
+    },
+    "dependencies": {
+        "ssh2": "^1.17.0"
+    }
+}

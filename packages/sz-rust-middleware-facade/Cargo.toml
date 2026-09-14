@@ -1,0 +1,50 @@
+[package]
+name = "sz-rust-middleware-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "中间件层 facade（P3）— auth/sanctum/jwt_blacklist 等 14 个 Tower 中间件 + log 模块"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["middleware", "auth", "jwt", "sanctum", "thinkphp"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[dependencies]
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+# sz-rust 生态（P2/P3 facade，无环依赖方向）
+sz-rust-orm-facade = { workspace = true }
+sz-rust-cache-facade = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+sz-rust-infra-facade = { workspace = true }
+sz-rust-auth-facade = { workspace = true }
+sz-orm-limit = { workspace = true }
+sz-orm-tracing = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+http-body-util = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+ipnet = { workspace = true }
+
+# 远程校验（可选，feature = "remote-validate"）
+reqwest = { workspace = true, optional = true }
+
+[features]
+# 远程 Token 校验
+remote-validate = ["dep:reqwest"]
+
+[lints]
+workspace = true

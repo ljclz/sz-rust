@@ -1,0 +1,24 @@
+{# 权限组合式函数模板 #}
+import { computed } from 'vue'
+import { useUserStore } from '@/stores/user'
+
+export function usePermission() {
+  const userStore = useUserStore()
+
+  const permissions = computed<string[]>(() => userStore.permissions || [])
+  const roles = computed<string[]>(() => userStore.roles || [])
+
+  const hasPermission = (perm: string): boolean => {
+    return permissions.value.includes(perm)
+  }
+
+  const hasRole = (role: string): boolean => {
+    return roles.value.includes(role)
+  }
+
+  const hasAnyPermission = (perms: string[]): boolean => {
+    return perms.some(p => permissions.value.includes(p))
+  }
+
+  return { permissions, roles, hasPermission, hasRole, hasAnyPermission }
+}

@@ -1,0 +1,70 @@
+{
+    "szRustVersion": "0.6.7",
+    "szOrmVersion": "2.3.0",
+    "server": {
+        "host": "122.51.216.76",
+        "port": 22,
+        "username": "root",
+        "privateKeyPath": "E:\\vue\\test\\鲜视达\\rust\\sz-rust\\deploy_key",
+        "remoteDir": "/www/wwwroot/default"
+    },
+    "mysql": {
+        "host": "127.0.0.1",
+        "port": 8802,
+        "databases": [
+            {
+                "name": "test",
+                "user": "test",
+                "password": "2sJ8BcTdSxWNN4fp"
+            },
+            {
+                "name": "shop",
+                "user": "shop",
+                "password": "JkbC2jsaWAYDe2Gz"
+            },
+            {
+                "name": "njszjt",
+                "user": "njszjt",
+                "password": "2jKjfFK3XCjmKEPy"
+            }
+        ]
+    },
+    "postgresql": {
+        "host": "127.0.0.1",
+        "port": 5432,
+        "database": "lewuli",
+        "user": "lewuli",
+        "password": "JkbC2jsaWAYDe2Gz"
+    },
+    "redis": {
+        "host": "127.0.0.1",
+        "port": 6379,
+        "password": ""
+    },
+    "mqtt": {
+        "host": "iot.鲜视达.cn",
+        "port": 8883,
+        "protocol": "mqtts",
+        "caFile": ""
+    },
+    "applications": [
+        {
+            "name": "sz-pay-server",
+            "port": 8788,
+            "localPath": "E:\\vue\\test\\sz-pay\\server\\sz-rust",
+            "localBinaryPath": "E:\\vue\\test\\sz-pay\\server\\sz-rust\\target\\x86_64-unknown-linux-musl\\release\\sz-pay-server",
+            "remoteBinaryName": "sz-pay-server",
+            "remoteDir": "/opt/sz-pay",
+            "healthEndpoint": "/health"
+        },
+        {
+            "name": "sz-rust-sz300",
+            "port": 8300,
+            "localPath": "E:\\vue\\test\\鲜视达\\rust\\sz-rust\\packages\\sz-rust-sz300",
+            "localBinaryPath": "E:\\vue\\test\\鲜视达\\rust\\sz-rust\\packages\\sz-rust-sz300\\target\\x86_64-unknown-linux-musl\\release\\sz-rust-sz300",
+            "remoteBinaryName": "sz-rust-sz300",
+            "remoteDir": "/opt/sz-rust-sz300",
+            "healthEndpoint": "/health"
+        }
+    ]
+}

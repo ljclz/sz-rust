@@ -1,0 +1,13 @@
+# SZ-Rust Clippy 配置
+#
+# 设置项目特定的 lint 阈值，CI 通过 `cargo clippy -- -D warnings` 验证。
+# 仅配置阈值，不修改 lint 级别（级别由代码内 #[allow]/#[warn]/#[deny] 注解控制）。
+
+# 函数参数数量阈值（默认 7，超过触发 too_many_arguments）
+too-many-arguments-threshold = 7
+
+# 类型复杂度阈值（默认 250）
+type-complexity-threshold = 250
+
+# 枚举变体大小差异阈值（默认 200）
+enum-variant-size-threshold = 200
