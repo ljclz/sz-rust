@@ -66,8 +66,13 @@ fn test_validate_production_tls_rejects_accept_invalid() {
     ));
 }
 
+/// SZ300_REDIS_* 为进程级环境变量，none/some 两测试语义相反且并行执行
+/// 会互踩（同 plugin_behavior 竞态类），持锁串行化
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn test_tls_config_from_env_returns_none_when_no_ca_cert() {
+    let _env_serial = ENV_LOCK.lock().unwrap();
     std::env::remove_var("SZ300_REDIS_CA_CERT_PATH");
     let config = TlsConfig::from_env();
     assert!(config.is_none());
@@ -75,6 +80,7 @@ fn test_tls_config_from_env_returns_none_when_no_ca_cert() {
 
 #[test]
 fn test_tls_config_from_env_returns_some_when_ca_cert_set() {
+    let _env_serial = ENV_LOCK.lock().unwrap();
     std::env::set_var("SZ300_REDIS_CA_CERT_PATH", "/tmp/ca.pem");
     std::env::set_var("SZ300_REDIS_SNI", "redis.example.com");
     let config = TlsConfig::from_env();
