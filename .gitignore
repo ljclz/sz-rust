@@ -13,6 +13,15 @@ secrets.json
 credentials.json
 deploy_key
 deploy_key.pub
+# SSH 私钥（服务器验证用，曾以无扩展名形式存于仓库根，禁止提交）
+ssh_key
+ssh_key.pub
+# Oracle 服务器验证脚本（硬编码服务器 IP/凭据，仅本地使用）
+install_oracle_client.js
+test_oracle_*.js
+tmp_*.js
+# Windows 保留名误创建文件
+nul
 
 # IDE
 .idea/
