@@ -527,16 +527,21 @@ async fn insert_migration_record(
     ) {
         return Ok(());
     }
-    let safe_version = version.replace('\'', "''");
-    let safe_name = name.replace('\'', "''");
+    use sz_rust_core::orm::Value;
     let table = migrations_table_name(db_type);
     let sql = format!(
-        "INSERT INTO {} (version, name, batch) VALUES ('{}', '{}', 1)",
-        table, safe_version, safe_name
+        "INSERT INTO {} (version, name, batch) VALUES (?, ?, 1)",
+        table
     );
-    conn.execute(&sql)
-        .await
-        .map_err(|e| CliError::Migration(format!("Failed to insert migration record: {}", e)))?;
+    conn.execute_with_params(
+        &sql,
+        &[
+            Value::String(version.to_string()),
+            Value::String(name.to_string()),
+        ],
+    )
+    .await
+    .map_err(|e| CliError::Migration(format!("Failed to insert migration record: {}", e)))?;
     conn.commit()
         .await
         .map_err(|e| CliError::Migration(format!("Failed to commit: {}", e)))?;
@@ -554,10 +559,10 @@ async fn delete_migration_record(
     ) {
         return Ok(());
     }
-    let safe_version = version.replace('\'', "''");
+    use sz_rust_core::orm::Value;
     let table = migrations_table_name(db_type);
-    let sql = format!("DELETE FROM {} WHERE version = '{}'", table, safe_version);
-    conn.execute(&sql)
+    let sql = format!("DELETE FROM {} WHERE version = ?", table);
+    conn.execute_with_params(&sql, &[Value::String(version.to_string())])
         .await
         .map_err(|e| CliError::Migration(format!("Failed to delete migration record: {}", e)))?;
     conn.commit()

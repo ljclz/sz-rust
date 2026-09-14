@@ -5,6 +5,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use sz_rust_marketplace::repository::{
     DeveloperRepository, PluginRepository, ReviewRepository, VersionRepository,
@@ -32,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("正在连接数据库...");
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(10)
+        .acquire_timeout(Duration::from_secs(30))
         .connect(&database_url)
         .await?;
 

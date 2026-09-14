@@ -125,17 +125,19 @@ pub async fn build_tcp_listener(addr: &str) -> std::io::Result<(TcpListener, Soc
 /// 监听 Ctrl+C / SIGTERM，返回后触发 axum 的 graceful shutdown。
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if tokio::signal::ctrl_c().await.is_err() {
+            tracing::error!("failed to install Ctrl+C handler");
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => tracing::error!("failed to install signal handler"),
+        }
     };
 
     #[cfg(not(unix))]

@@ -15,6 +15,7 @@ struct AiInstance {
     router: Arc<ModelRouter>,
     embedding: Option<Arc<dyn EmbeddingProvider>>,
     #[allow(dead_code)]
+    // 预留：RAG pipeline 通过 rag 字段独立持有，vector_store 供未来直接检索 API 使用
     vector_store: Option<Arc<dyn VectorStore>>,
     rag: Option<Arc<RagPipeline>>,
     tools: Option<Arc<ToolRegistry>>,

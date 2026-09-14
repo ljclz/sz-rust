@@ -320,6 +320,7 @@ impl MarketplaceService {
 /// 安装记录仓库代理（复用同一连接池）
 struct InstallRepositoryProxy {
     #[allow(dead_code)]
+    // 持有 Arc 保持连接池生命周期，字段值通过 InstallRepositoryProxy::new 间接使用
     plugins: Arc<PluginRepository>,
 }
 
