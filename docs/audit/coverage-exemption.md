@@ -6,7 +6,7 @@
 
 | crate_name | reason | approver | approval_date | expiry_date |
 |------------|--------|----------|---------------|-------------|
-| _(空清单 — 当前无豁免)_ | | | | |
+| sz-rust-examples | 示例/演示代码（quick_start、multi_tenant_demo 等可运行样例），行覆盖 2.05% 无补测价值；基线数据见 docs/audit/2026-09-14-覆盖率基线与行动项执行报告.md | 用户（会话内批准执行规划） | 2026-09-14 | 2026-12-14 |
 
 ## 审批流程
 
