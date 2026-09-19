@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased] — 2026-09-19 — 框架能力接线
+## [Unreleased] — 2026-09-20 — 框架能力接线 + 覆盖率提升
 
 ### 新增
 
@@ -13,11 +13,18 @@
 - **data_scope_demo 示例**（`packages/sz-rust-examples/src/bin/data_scope_demo.rs`）：data_scope_middleware 生产接线示例，演示完整链路（commit `4a3cdcb`）
 - **multi_tenant_demo 增强**（`packages/sz-rust-examples/src/bin/multi_tenant_demo.rs`）：追加 core 层 tenant_middleware，形成三层互补链（commit `4a3cdcb`）
 
+### 测试覆盖
+
+- **sz-rust-capability**: 37 → 58 测试（+21），覆盖 facade 全部公开方法 + CapabilityInfo 序列化/校验（commit `18fcc03`）
+- **sz-rust-marketplace**: 53 → 80 测试（+27），覆盖 error 全部 Display 变体 + storage 边界 + lockfile 边界（commit `18fcc03`）
+
 ### 防幻影交付验证
 
 - `grep -rn "tenant_middleware" packages/sz-rust-cli/src/` — serve.rs:121 非测试调用方 ✅
 - `grep -rn "data_scope_middleware" packages/sz-rust-cli/src/` — serve.rs:141 非测试调用方 ✅
 - `cargo test -p sz-rust-cli` — 436 tests passed, 0 failed ✅
+- `cargo test -p sz-rust-capability` — 58 tests passed, 0 failed ✅
+- `cargo test -p sz-rust-marketplace` — 80 tests passed, 0 failed ✅
 
 ---
 
