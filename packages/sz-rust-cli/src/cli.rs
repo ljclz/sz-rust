@@ -203,6 +203,14 @@ pub enum Command {
         #[arg(long)]
         with_admin: bool,
 
+        /// 启用 tenant_middleware（从 X-Tenant-Id Header 提取租户 ID）
+        #[arg(long)]
+        with_tenant: bool,
+
+        /// 启用 data_scope_middleware（注入数据权限上下文）
+        #[arg(long)]
+        with_data_scope: bool,
+
         /// 监听地址（默认 0.0.0.0:8080）
         #[arg(long, default_value = "0.0.0.0:8080")]
         addr: String,
@@ -323,6 +331,8 @@ impl Cli {
             Some(Command::Admin { admin_command }) => cmd::admin::execute(admin_command).await,
             Some(Command::Serve {
                 with_admin,
+                with_tenant,
+                with_data_scope,
                 addr,
                 watch_config,
                 workers,
@@ -335,6 +345,8 @@ impl Cli {
             }) => {
                 let args = cmd::serve::ServeArgs {
                     with_admin: *with_admin,
+                    with_tenant: *with_tenant,
+                    with_data_scope: *with_data_scope,
                     addr: addr.clone(),
                     watch_config: *watch_config,
                     workers: *workers,

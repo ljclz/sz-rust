@@ -58,6 +58,8 @@ sz-rust-addons-loader = { workspace = true }
 sz-rust-capability = { workspace = true }
 # ORM facade（serve --with-admin 创建 Pool）
 sz-rust-orm-facade = { workspace = true }
+# 中间件 facade（serve --with-data-scope 数据权限中间件）
+sz-rust-middleware-facade = { workspace = true }
 # HTTP 路由（serve 命令构建 Router）
 axum.workspace = true
 # 日志（serve 命令输出启动信息）
@@ -75,7 +77,7 @@ tower = { workspace = true }
 http = "1"
 http-body-util = "0.1"
 sz-rust-orm-facade = { workspace = true }
-sz-rust-middleware-facade = { workspace = true }
+
 sz-rust-addons-loader = { workspace = true }
 async-trait.workspace = true
 

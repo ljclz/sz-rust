@@ -55,6 +55,8 @@ fn test_parse_serve_no_tls_default() {
 fn test_validate_tls_cert_without_key_rejected() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: None,
@@ -72,6 +74,8 @@ fn test_validate_tls_cert_without_key_rejected() {
 fn test_validate_tls_cert_and_key_ok() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: None,
@@ -89,6 +93,8 @@ fn test_validate_tls_cert_and_key_ok() {
 fn test_validate_no_tls_ok() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: None,
@@ -106,6 +112,8 @@ fn test_validate_no_tls_ok() {
 fn test_validate_workers_zero_rejected() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: Some(0),
@@ -123,6 +131,8 @@ fn test_validate_workers_zero_rejected() {
 fn test_validate_workers_over_limit_rejected() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: Some(1025),
@@ -140,6 +150,8 @@ fn test_validate_workers_over_limit_rejected() {
 fn test_validate_grace_timeout_over_limit_rejected() {
     let args = ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: None,

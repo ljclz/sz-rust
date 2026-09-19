@@ -46,6 +46,10 @@ pub use runtime::{build_runtime, resolve_workers, validate_workers};
 pub struct ServeArgs {
     /// 启用 admin 插件（加载 /api/admin/* 路由 + Capability 注册）
     pub with_admin: bool,
+    /// 启用 tenant_middleware（从 X-Tenant-Id Header 提取租户 ID 并设置 TenantContext）
+    pub with_tenant: bool,
+    /// 启用 data_scope_middleware（从请求 extensions 提取 DataScopeUserContext 并注入 DataScopeContext）
+    pub with_data_scope: bool,
     /// 监听地址（默认 0.0.0.0:8080）
     pub addr: String,
     /// 启用配置热重载（监听 config/ 目录文件变更）
@@ -104,6 +108,40 @@ impl ConnectionFactory for AnyPoolConnectionFactory {
             .await
             .map_err(|e| DbError::ConnectionError(format!("AnyPool create failed: {e}")))?;
         Ok(Box::new(conn))
+    }
+}
+
+/// 构建 tenant_middleware 路由层
+///
+/// 纯函数：不启动服务、不打印日志、不 panic。
+/// `with_tenant` 为 true 时叠加 `tenant_middleware`（从 X-Tenant-Id Header 提取租户 ID）。
+pub fn build_router_with_tenant(router: Router, with_tenant: bool) -> Router {
+    if with_tenant {
+        router.layer(axum::middleware::from_fn(
+            sz_rust_core::multi_tenant::tenant_middleware,
+        ))
+    } else {
+        router
+    }
+}
+
+/// 构建 data_scope_middleware 路由层
+///
+/// 纯函数：不启动服务、不打印日志、不 panic。
+/// `with_data_scope` 为 true 时叠加 `data_scope_middleware`（注入数据权限上下文）。
+pub fn build_router_with_data_scope(router: Router, with_data_scope: bool) -> Router {
+    if with_data_scope {
+        let state = sz_rust_middleware_facade::data_scope::DataScopeMiddlewareState {
+            field_scope_registry: Arc::new(
+                sz_rust_orm_facade::data_scope::field_scope::registry::FieldScopePolicyRegistry::new(),
+            ),
+        };
+        router.layer(axum::middleware::from_fn_with_state(
+            state,
+            sz_rust_middleware_facade::data_scope::data_scope_middleware,
+        ))
+    } else {
+        router
     }
 }
 
@@ -270,6 +308,16 @@ async fn execute_async(
     } else {
         router
     };
+
+    let router = build_router_with_tenant(router, args.with_tenant);
+    if args.with_tenant {
+        tracing::info!("tenant_middleware 已启用（X-Tenant-Id Header 提取）");
+    }
+
+    let router = build_router_with_data_scope(router, args.with_data_scope);
+    if args.with_data_scope {
+        tracing::info!("data_scope_middleware 已启用（数据权限上下文注入）");
+    }
 
     let router = if args.access_log {
         tracing::info!("访问日志中间件已启用");

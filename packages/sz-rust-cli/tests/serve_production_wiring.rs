@@ -19,6 +19,8 @@ fn test_serve_production_defaults() {
     match cli.command {
         Some(CliCommand::Serve {
             with_admin,
+            with_tenant,
+            with_data_scope,
             addr,
             watch_config,
             workers,
@@ -30,6 +32,8 @@ fn test_serve_production_defaults() {
             no_health,
         }) => {
             assert!(!with_admin, "默认不加载 admin");
+            assert!(!with_tenant, "默认不启用 tenant_middleware");
+            assert!(!with_data_scope, "默认不启用 data_scope_middleware");
             assert_eq!(addr, "0.0.0.0:8080", "默认地址");
             assert!(!watch_config, "默认不启用配置热重载");
             assert!(workers.is_none(), "默认 workers 为 None");
@@ -185,6 +189,8 @@ fn test_parse_serve_log_level() {
 fn test_serve_args_validate_ok() {
     let args = sz_rust_cli::cmd::serve::ServeArgs {
         with_admin: true,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: true,
         workers: Some(4),
@@ -202,6 +208,8 @@ fn test_serve_args_validate_ok() {
 fn test_serve_args_validate_workers_zero() {
     let args = sz_rust_cli::cmd::serve::ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: Some(0),
@@ -219,6 +227,8 @@ fn test_serve_args_validate_workers_zero() {
 fn test_serve_args_validate_tls_pair() {
     let args = sz_rust_cli::cmd::serve::ServeArgs {
         with_admin: false,
+        with_tenant: false,
+        with_data_scope: false,
         addr: "0.0.0.0:8080".to_string(),
         watch_config: false,
         workers: None,
