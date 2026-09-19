@@ -7,8 +7,9 @@
 //! 1. 启动时构造 TenantHotReloadManager + TenantConfigLoader
 //! 2. 挂载 build_tenant_admin_router 到主 Router
 //! 3. 挂载 tenant_resolve_middleware + tenant_status_middleware 到中间件链
-//! 4. 业务 handler 使用 TenantContext 实现数据隔离
-//! 5. 平台管理员跨租户查询验证绕过
+//! 4. 追加 core 层 tenant_middleware（X-Tenant-Id Header 提取 → TenantContext thread-local）
+//! 5. 业务 handler 使用 TenantContext 实现数据隔离
+//! 6. 平台管理员跨租户查询验证绕过
 
 use std::sync::Arc;
 
@@ -103,6 +104,9 @@ fn build_app() -> Router {
 
     let business_router = Router::new()
         .route("/api/orders", get(business_handler))
+        .layer(axum::middleware::from_fn(
+            sz_rust_core::multi_tenant::tenant_middleware,
+        ))
         .layer(from_fn_with_state(status_state, tenant_status_middleware))
         .layer(from_fn_with_state(resolve_state, tenant_resolve_middleware));
 
