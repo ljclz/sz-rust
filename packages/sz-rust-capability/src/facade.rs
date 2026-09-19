@@ -194,91 +194,101 @@ mod tests {
     }
 
     #[test]
-    fn test_is_initialized() {
+    fn test_is_initialized_after_init() {
         Cap::init().ok();
         assert!(Cap::is_initialized());
     }
 
     #[test]
-    fn test_unregister() {
+    fn test_unregister_returns_removed_cap() {
         Cap::init().ok();
         let cap = Arc::new(TestCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
         let removed = Cap::unregister("test_cap").unwrap();
         assert!(removed.is_some());
+        assert_eq!(removed.unwrap().name(), "test_cap");
         assert!(Cap::get("test_cap").unwrap().is_none());
         let again = Cap::unregister("test_cap").unwrap();
         assert!(again.is_none());
     }
 
     #[test]
-    fn test_find_by_tags() {
+    fn test_find_by_tags_returns_matching_names() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
-        let results = Cap::find_by_tags(&["plugin"], None).unwrap();
-        assert!(!results.is_empty());
-        let filtered = Cap::find_by_tags(&["plugin"], Some(CapabilitySource::Plugin)).unwrap();
-        assert!(!filtered.is_empty());
-        let none = Cap::find_by_tags(&["nonexistent_tag"], None).unwrap();
+        let results = Cap::find_by_tags(&["plugin"], Some(CapabilitySource::Plugin)).unwrap();
+        let names: Vec<&str> = results.iter().map(|c| c.name()).collect();
+        assert!(names.contains(&"plugin_cap"));
+        let none = Cap::find_by_tags(&["zzz_no_such_tag_zzz"], None).unwrap();
         assert!(none.is_empty());
     }
 
     #[test]
-    fn test_search() {
+    fn test_search_returns_matching_names() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
-        let results = Cap::search("plugin").unwrap();
-        assert!(!results.is_empty());
+        let results = Cap::search("plugin_cap").unwrap();
+        let names: Vec<&str> = results.iter().map(|c| c.name()).collect();
+        assert!(names.contains(&"plugin_cap"));
         let empty = Cap::search("zzz_no_match_zzz").unwrap();
         assert!(empty.is_empty());
     }
 
     #[test]
-    fn test_list_all() {
+    fn test_list_all_contains_registered_cap() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
         let all = Cap::list_all().unwrap();
-        assert!(!all.is_empty());
+        let names: Vec<&str> = all.iter().map(|c| c.name()).collect();
+        assert!(names.contains(&"plugin_cap"));
     }
 
     #[test]
-    fn test_list_by_source() {
+    fn test_list_by_source_filters_correctly() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
         let plugins = Cap::list_by_source(CapabilitySource::Plugin).unwrap();
-        assert!(!plugins.is_empty());
+        let names: Vec<&str> = plugins.iter().map(|c| c.name()).collect();
+        assert!(names.contains(&"plugin_cap"));
         let services = Cap::list_by_source(CapabilitySource::Service).unwrap();
-        assert!(services.is_empty());
+        let service_names: Vec<&str> = services.iter().map(|c| c.name()).collect();
+        assert!(!service_names.contains(&"plugin_cap"));
     }
 
     #[test]
-    fn test_is_empty_and_len() {
+    fn test_is_empty_and_len_consistent() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
-        assert!(!Cap::is_empty().unwrap());
-        assert!(Cap::len().unwrap() >= 1);
+        let len = Cap::len().unwrap();
+        let is_empty = Cap::is_empty().unwrap();
+        assert!(len >= 1);
+        assert!(!is_empty);
+        assert_eq!(is_empty, len == 0);
     }
 
     #[test]
-    fn test_metrics() {
+    fn test_metrics_reports_registered_count() {
         Cap::init().ok();
-        let _metrics = Cap::metrics().unwrap();
+        let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
+        Cap::register(cap).ok();
+        let metrics = Cap::metrics().unwrap();
+        assert!(metrics.total >= 1);
     }
 
     #[test]
-    fn test_set_permission_checker() {
+    fn test_set_permission_checker_succeeds() {
         Cap::init().ok();
         let checker = Arc::new(crate::permission::AllowAll) as Arc<dyn PermissionChecker>;
         assert!(Cap::set_permission_checker(checker).is_ok());
     }
 
     #[tokio::test]
-    async fn test_call_with_tenant() {
+    async fn test_call_with_tenant_returns_expected_value() {
         Cap::init().ok();
         let cap = Arc::new(PluginCapability) as Arc<dyn Capability>;
         Cap::register(cap).ok();
@@ -298,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_nonexistent() {
+    fn test_get_nonexistent_returns_none() {
         Cap::init().ok();
         assert!(Cap::get("zzz_nonexistent_zzz").unwrap().is_none());
     }
