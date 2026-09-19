@@ -4,6 +4,23 @@
 
 ---
 
+## [Unreleased] — 2026-09-19 — 框架能力接线
+
+### 新增
+
+- **serve --with-tenant 开关**（`packages/sz-rust-cli/src/cmd/serve.rs`）：CLI serve 命令新增 `--with-tenant` 参数，启用 `tenant_middleware`（从 X-Tenant-Id Header 提取租户 ID 并设置 TenantContext）。纯函数 `build_router_with_tenant`，默认 false 向后兼容。4 个端到端测试验证（commit `477c49b`）
+- **serve --with-data-scope 开关**（`packages/sz-rust-cli/src/cmd/serve.rs`）：CLI serve 命令新增 `--with-data-scope` 参数，启用 `data_scope_middleware`（从请求 extensions 提取 DataScopeUserContext 并注入 DataScopeContext）。纯函数 `build_router_with_data_scope`，默认 false 向后兼容。4 个端到端测试验证（commit `477c49b`）
+- **data_scope_demo 示例**（`packages/sz-rust-examples/src/bin/data_scope_demo.rs`）：data_scope_middleware 生产接线示例，演示完整链路（commit `4a3cdcb`）
+- **multi_tenant_demo 增强**（`packages/sz-rust-examples/src/bin/multi_tenant_demo.rs`）：追加 core 层 tenant_middleware，形成三层互补链（commit `4a3cdcb`）
+
+### 防幻影交付验证
+
+- `grep -rn "tenant_middleware" packages/sz-rust-cli/src/` — serve.rs:121 非测试调用方 ✅
+- `grep -rn "data_scope_middleware" packages/sz-rust-cli/src/` — serve.rs:141 非测试调用方 ✅
+- `cargo test -p sz-rust-cli` — 436 tests passed, 0 failed ✅
+
+---
+
 ## [v1.2.0] — 2026-09-14 — 生产化增强 + 安全加固 + 生态扩展
 
 ### 概要
