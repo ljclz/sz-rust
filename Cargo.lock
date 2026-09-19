@@ -8059,9 +8059,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "7.3.0"
+version = "7.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b580d5caa65189541321f1ddeab21a2ec87f063405d6fa6a321f898ff3d81cc"
+checksum = "de3a132eccc08cb46fa1c50cd6354389995fda86b4b485293e8f384cb8227960"
 dependencies = [
  "async-trait",
  "bytes",
@@ -8235,15 +8235,17 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "7.3.0"
+version = "7.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd3b34c31fa55b8de0cab95c33e64ce6d765444a445de74b9cfbb442622776d0"
+checksum = "4dd4e4cd9643a3366ec0adec6265ec0db9a9a92f00419f29432638eb653228f8"
 dependencies = [
  "async-stream",
  "async-trait",
  "futures",
  "parking_lot",
  "rust_decimal",
+ "serde",
+ "serde_json",
  "sqlx",
  "sz-orm-core",
  "sz-orm-mssql",
@@ -8266,9 +8268,9 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "7.3.0"
+version = "7.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9025645c8fe3f6ef878400853fe6ff0ba057e46d751fd91684e79e7fc4b588ff"
+checksum = "0671f6cf7368212750077f6a5202e57b2b0ae9f0c23cf7d6ce18a55c166c4bda"
 dependencies = [
  "chrono",
  "parking_lot",
