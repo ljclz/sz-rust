@@ -30,7 +30,7 @@
 - **视图模板**：对齐 PHP 模板引擎，支持 layout 布局与模板渲染。（✅ 生产已接入：`view.rs:18` 调用 `View::with_default_engine()`）
 - **HTTP/2 + TLS**：基于 rustls + tokio-rustls，对齐 think-swoole SSL。（ℹ️ 有意设计：sz300 用裸 `axum::serve`，TLS 由 nginx/k8s ingress 终止；激活条件=需进程内 TLS/HTTP2）
 - **CLI 命令行工具**：`sz-rust-cli` 提供 make / migrate / route / cache / scheduler 等命令。
-- **serve 生产化（v1.3.0 新增）**：`sz-rust serve` 支持 9 个生产级参数：`--with-admin`（加载 admin 插件）、`--addr`（监听地址）、`--workers`（worker 线程数）、`--grace-timeout`（优雅关闭超时）、`--health`/`--no-health`（健康检查端点 `/health/` + `/health/ready`）、`--access-log`（访问日志中间件）、`--tls-cert`/`--tls-key`（TLS/HTTPS）、`--watch-config`（配置热重载）。Unix 信号 SIGUSR1/SIGHUP 触发配置重载、SIGUSR2 切换日志级别；Windows 用 `serve:reload` / `serve:log-level` 子命令替代。
+- **serve 生产化（v1.2.0 新增）**：`sz-rust serve` 支持 9 个生产级参数：`--with-admin`（加载 admin 插件）、`--addr`（监听地址）、`--workers`（worker 线程数）、`--grace-timeout`（优雅关闭超时）、`--health`/`--no-health`（健康检查端点 `/health/` + `/health/ready`）、`--access-log`（访问日志中间件）、`--tls-cert`/`--tls-key`（TLS/HTTPS）、`--watch-config`（配置热重载）。Unix 信号 SIGUSR1/SIGHUP 触发配置重载、SIGUSR2 切换日志级别；Windows 用 `serve:reload` / `serve:log-level` 子命令替代。
 - **插件系统**：`sz-rust-addons-loader` 实现 `addons/` 插件加载与路由挂载。（ℹ️ 有意设计：core 编译期依赖并 re-export；hot-reload feature 门控，sz300 默认 `default = []` 关闭；激活条件=开发环境热加载需求，生产应启动时加载）
 - **基于 SZ-ORM**：L4 金融级 ORM（Data Mapper + Repository 模式），编译时 SQL 校验（`sql_string!` / `query!` 宏）。
 - **可观测性（v0.2.0 新增）**：`sz-rust-observability` 包提供 `MetricsRegistry` + Counter/Gauge/Histogram 三种指标类型，SLO 多窗口燃烧率告警（1h/5m + 6h/30m 双窗口对，对齐 Google SRE Workbook 第 5 章）。（✅ 生产已接入：`main.rs:125` MetricsRegistry + `main.rs:168` SLO 监控器，`health.rs:37/39` 记录燃烧率）
