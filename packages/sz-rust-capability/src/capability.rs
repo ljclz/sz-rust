@@ -101,3 +101,102 @@ impl CapabilityInfo {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use serde_json::json;
+
+    struct TestCap;
+
+    #[async_trait]
+    impl Capability for TestCap {
+        fn name(&self) -> &'static str {
+            "test.cap"
+        }
+        fn description(&self) -> &'static str {
+            "测试能力"
+        }
+        fn schema(&self) -> serde_json::Value {
+            json!({"type": "object"})
+        }
+        fn tags(&self) -> &[&'static str] {
+            &["test", "demo"]
+        }
+        fn source(&self) -> CapabilitySource {
+            CapabilitySource::Skill
+        }
+        async fn call(&self, args: serde_json::Value) -> CapResult<serde_json::Value> {
+            Ok(args)
+        }
+    }
+
+    struct CustomVersionCap;
+
+    #[async_trait]
+    impl Capability for CustomVersionCap {
+        fn name(&self) -> &'static str {
+            "custom.version"
+        }
+        fn description(&self) -> &'static str {
+            "自定义版本能力"
+        }
+        fn schema(&self) -> serde_json::Value {
+            json!({})
+        }
+        fn tags(&self) -> &[&'static str] {
+            &[]
+        }
+        fn source(&self) -> CapabilitySource {
+            CapabilitySource::Plugin
+        }
+        fn version(&self) -> &'static str {
+            "2.0.0"
+        }
+        fn requires_confirmation(&self) -> bool {
+            true
+        }
+        async fn call(&self, _: serde_json::Value) -> CapResult<serde_json::Value> {
+            Ok(json!({}))
+        }
+    }
+
+    #[test]
+    fn test_capability_info_from_trait_defaults() {
+        let cap = TestCap;
+        let info = CapabilityInfo::from_trait(&cap);
+        assert_eq!(info.name, "test.cap");
+        assert_eq!(info.description, "测试能力");
+        assert_eq!(info.tags, vec!["test", "demo"]);
+        assert_eq!(info.source, CapabilitySource::Skill);
+        assert_eq!(info.version, "1.0.0");
+        assert!(!info.requires_confirmation);
+    }
+
+    #[test]
+    fn test_capability_info_from_trait_custom() {
+        let cap = CustomVersionCap;
+        let info = CapabilityInfo::from_trait(&cap);
+        assert_eq!(info.name, "custom.version");
+        assert_eq!(info.version, "2.0.0");
+        assert!(info.requires_confirmation);
+        assert_eq!(info.source, CapabilitySource::Plugin);
+        assert!(info.tags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_capability_default_validate_args() {
+        let cap = TestCap;
+        let result = cap.validate_args(&json!({"key": "value"})).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_capability_info_serialize() {
+        let cap = TestCap;
+        let info = CapabilityInfo::from_trait(&cap);
+        let json = serde_json::to_string(&info).expect("序列化失败");
+        assert!(json.contains("test.cap"));
+        assert!(json.contains("测试能力"));
+    }
+}

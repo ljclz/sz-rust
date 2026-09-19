@@ -95,4 +95,70 @@ mod tests {
         let result = store.download("test/file.txt", None).await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_local_store_range_unsupported() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        store
+            .upload("f.txt", Bytes::from(b"data".to_vec()))
+            .await
+            .unwrap();
+        let result = store.download("f.txt", Some((0, 2))).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_local_store_upload_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        let checksum = store.upload("empty.txt", Bytes::new()).await.unwrap();
+        assert_eq!(checksum.len(), 64);
+        let downloaded = store.download("empty.txt", None).await.unwrap();
+        assert!(downloaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_local_store_overwrite() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        store
+            .upload("f.txt", Bytes::from(b"v1".to_vec()))
+            .await
+            .unwrap();
+        store
+            .upload("f.txt", Bytes::from(b"v2".to_vec()))
+            .await
+            .unwrap();
+        let downloaded = store.download("f.txt", None).await.unwrap();
+        assert_eq!(downloaded, Bytes::from(b"v2".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_local_store_delete_nonexistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        let result = store.delete("no_such_file.txt").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_local_store_download_nonexistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        let result = store.download("no_such_file.txt", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_local_store_nested_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = LocalObjectStore::new(temp.path().to_path_buf());
+        store
+            .upload("a/b/c/deep.txt", Bytes::from(b"deep".to_vec()))
+            .await
+            .unwrap();
+        let downloaded = store.download("a/b/c/deep.txt", None).await.unwrap();
+        assert_eq!(downloaded, Bytes::from(b"deep".to_vec()));
+    }
 }

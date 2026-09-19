@@ -182,4 +182,96 @@ mod tests {
         let lockfile = LockfileManager::read(&path).await.unwrap();
         assert!(lockfile.plugins.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_lockfile_update_new_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugins.lock");
+        let entry = LockfileEntry {
+            name: "new_plugin".to_string(),
+            version: "0.1.0".to_string(),
+            sha256: "hash".to_string(),
+            signature: "sig".to_string(),
+            installed_at: Utc::now(),
+        };
+        LockfileManager::update(&path, entry).await.unwrap();
+        let lockfile = LockfileManager::read(&path).await.unwrap();
+        assert_eq!(lockfile.plugins.len(), 1);
+        assert_eq!(lockfile.plugins[0].name, "new_plugin");
+    }
+
+    #[tokio::test]
+    async fn test_lockfile_remove_nonexistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugins.lock");
+        LockfileManager::update(
+            &path,
+            LockfileEntry {
+                name: "crm".to_string(),
+                version: "1.0.0".to_string(),
+                sha256: "hash".to_string(),
+                signature: "sig".to_string(),
+                installed_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        LockfileManager::remove(&path, "nonexistent").await.unwrap();
+        let lockfile = LockfileManager::read(&path).await.unwrap();
+        assert_eq!(lockfile.plugins.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_lockfile_multiple_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("plugins.lock");
+        for name in &["plugin_a", "plugin_b", "plugin_c"] {
+            LockfileManager::update(
+                &path,
+                LockfileEntry {
+                    name: name.to_string(),
+                    version: "1.0.0".to_string(),
+                    sha256: "hash".to_string(),
+                    signature: "sig".to_string(),
+                    installed_at: Utc::now(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let lockfile = LockfileManager::read(&path).await.unwrap();
+        assert_eq!(lockfile.plugins.len(), 3);
+        LockfileManager::remove(&path, "plugin_b").await.unwrap();
+        let lockfile = LockfileManager::read(&path).await.unwrap();
+        assert_eq!(lockfile.plugins.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_lockfile_write_creates_nested_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("nested").join("dir").join("plugins.lock");
+        let lockfile = Lockfile::default();
+        LockfileManager::write(&path, &lockfile).await.unwrap();
+        let read = LockfileManager::read(&path).await.unwrap();
+        assert!(read.plugins.is_empty());
+    }
+
+    #[test]
+    fn test_lockfile_default_path() {
+        let path = LockfileManager::default_path();
+        assert!(path.is_ok());
+        let p = path.unwrap();
+        assert!(p.to_string_lossy().contains("plugins.lock"));
+    }
+
+    #[tokio::test]
+    async fn test_lockfile_empty_write_read() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("empty.lock");
+        let lockfile = Lockfile::default();
+        LockfileManager::write(&path, &lockfile).await.unwrap();
+        let read = LockfileManager::read(&path).await.unwrap();
+        assert_eq!(read.version, 0);
+        assert!(read.plugins.is_empty());
+    }
 }
