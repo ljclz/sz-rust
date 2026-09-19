@@ -5,6 +5,7 @@
 //!
 //! 运行方式：
 //! ```bash
+//! DEEPSEEK_API_KEY=xxx CSDN_API_KEY=xxx KUAISHOU_API_KEY=xxx \
 //! cargo test -p sz-rust-ai-facade --features all-providers --test real_api_test -- --ignored
 //! ```
 
@@ -39,15 +40,19 @@ fn make_chat_request(model: &str, prompt: &str) -> ChatRequest {
     )
 }
 
+fn require_env(key: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| panic!("{key} 环境变量未设置"))
+}
+
 #[tokio::test]
-#[ignore = "需真实 DeepSeek API Key + 网络"]
+#[ignore = "需 DEEPSEEK_API_KEY 环境变量 + 网络"]
 async fn deepseek_chat_completion() {
-    let api_key = "sk-697c8a668c084acaa8e8630bdf7d6140";
+    let api_key = require_env("DEEPSEEK_API_KEY");
     let base_url = "https://api.deepseek.com";
     let model = "deepseek-chat";
 
     let provider =
-        OpenAiProvider::new(api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
+        OpenAiProvider::new(&api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
 
     let req = make_chat_request(model, "说一个字：好");
     let result = provider.chat_completion(req).await;
@@ -70,14 +75,14 @@ async fn deepseek_chat_completion() {
 }
 
 #[tokio::test]
-#[ignore = "需真实 DeepSeek API Key + 网络"]
+#[ignore = "需 DEEPSEEK_API_KEY 环境变量 + 网络"]
 async fn deepseek_stream_completion() {
-    let api_key = "sk-697c8a668c084acaa8e8630bdf7d6140";
+    let api_key = require_env("DEEPSEEK_API_KEY");
     let base_url = "https://api.deepseek.com";
     let model = "deepseek-chat";
 
     let provider =
-        OpenAiProvider::new(api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
+        OpenAiProvider::new(&api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
 
     let req = make_chat_request(model, "从 1 数到 5");
     let stream = provider
@@ -101,12 +106,12 @@ async fn deepseek_stream_completion() {
 }
 
 #[tokio::test]
-#[ignore = "需真实 DeepSeek API Key + 网络"]
+#[ignore = "需 DEEPSEEK_API_KEY 环境变量 + 网络"]
 async fn deepseek_token_count() {
-    let api_key = "sk-697c8a668c084acaa8e8630bdf7d6140";
+    let api_key = require_env("DEEPSEEK_API_KEY");
     let base_url = "https://api.deepseek.com";
 
-    let provider = OpenAiProvider::new(api_key, base_url, make_http());
+    let provider = OpenAiProvider::new(&api_key, base_url, make_http());
 
     let messages = vec![ChatMessage {
         role: Role::User,
@@ -119,14 +124,14 @@ async fn deepseek_token_count() {
 }
 
 #[tokio::test]
-#[ignore = "需真实 CSDN API Key + 网络"]
+#[ignore = "需 CSDN_API_KEY 环境变量 + 网络"]
 async fn csdn_chat_completion() {
-    let api_key = "sk-rpxbjmotzxvdcqyrinndqzogxqnkhydbyhmlmbwmytnhq";
+    let api_key = require_env("CSDN_API_KEY");
     let base_url = "https://llm.csdn.net";
     let model = "deepseek-chat";
 
     let provider =
-        OpenAiProvider::new(api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
+        OpenAiProvider::new(&api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
 
     let req = make_chat_request(model, "说一个字：好");
     let result = provider.chat_completion(req).await;
@@ -146,14 +151,14 @@ async fn csdn_chat_completion() {
 }
 
 #[tokio::test]
-#[ignore = "需真实快手 API Key + 网络"]
+#[ignore = "需 KUAISHOU_API_KEY 环境变量 + 网络"]
 async fn kuaishou_chat_completion() {
-    let api_key = "fPJokxwUdNUEOeHSfGS0XRA3H0dUpt3yI0baHDodXZg";
+    let api_key = require_env("KUAISHOU_API_KEY");
     let base_url = "https://api.klingai.com";
     let model = "KAT-Coder-Pro-V2.5";
 
     let provider =
-        OpenAiProvider::new(api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
+        OpenAiProvider::new(&api_key, base_url, make_http()).with_timeout(Duration::from_secs(30));
 
     let req = make_chat_request(model, "说一个字：好");
     let result = provider.chat_completion(req).await;

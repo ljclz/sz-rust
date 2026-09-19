@@ -235,28 +235,39 @@ async fn execute_init(args: &InitArgs) -> Result<i32, CliError> {
         ("super_admin", "超级管理员", "拥有所有权限，不可删除"),
         ("tenant_admin", "租户管理员", "租户内管理权限，不可删除"),
     ] {
-        let sql = format!(
-            "INSERT INTO roles (name, code, description, is_builtin, tenant_id) \
-             VALUES ('{name}', '{code}', '{desc}', TRUE, 0) \
-             ON CONFLICT (code, tenant_id) DO NOTHING"
-        );
-        conn.execute(&sql)
-            .await
-            .map_err(|e| CliError::Migration(format!("创建角色 {code} 失败: {e}")))?;
+        let sql = "INSERT INTO roles (name, code, description, is_builtin, tenant_id) \
+              VALUES (?, ?, ?, TRUE, 0) \
+              ON CONFLICT (code, tenant_id) DO NOTHING";
+        conn.execute_with_params(
+            sql,
+            &[
+                Value::String(name.to_string()),
+                Value::String(code.to_string()),
+                Value::String(desc.to_string()),
+            ],
+        )
+        .await
+        .map_err(|e| CliError::Migration(format!("创建角色 {code} 失败: {e}")))?;
         println!("  角色 {} ({}) 已创建", code, name);
     }
 
     println!("创建内置权限项...");
     for (cap_name, cap_desc, _tags) in CAPABILITIES {
         let module = cap_name.split('.').nth(1).unwrap_or("admin");
-        let sql = format!(
-            "INSERT INTO permissions (code, name, module, description, tenant_id) \
-             VALUES ('{cap_name}', '{cap_desc}', '{module}', '{cap_desc}', 0) \
-             ON CONFLICT (code, tenant_id) DO NOTHING"
-        );
-        conn.execute(&sql)
-            .await
-            .map_err(|e| CliError::Migration(format!("创建权限 {cap_name} 失败: {e}")))?;
+        let sql = "INSERT INTO permissions (code, name, module, description, tenant_id) \
+              VALUES (?, ?, ?, ?, 0) \
+              ON CONFLICT (code, tenant_id) DO NOTHING";
+        conn.execute_with_params(
+            sql,
+            &[
+                Value::String(cap_name.to_string()),
+                Value::String(cap_desc.to_string()),
+                Value::String(module.to_string()),
+                Value::String(cap_desc.to_string()),
+            ],
+        )
+        .await
+        .map_err(|e| CliError::Migration(format!("创建权限 {cap_name} 失败: {e}")))?;
     }
     println!("  {} 个权限项已创建", CAPABILITIES.len());
 
