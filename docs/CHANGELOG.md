@@ -17,10 +17,15 @@
 
 - **sz-orm 依赖升级**：6.2.0 → 7.3.0 → 7.6.0，17 个 `sz-orm-*` workspace 依赖全量对齐 7.6.0（crates.io 68 包已发布；commit `e0c5cbe`, `908ce3b`, `07a080d`）
 
-### 测试覆盖
+### 测试覆盖（cargo llvm-cov 真实测量，2026-09-21）
 
-- **sz-rust-capability**: 37 → 58 测试（+21），覆盖 facade 全部公开方法 + CapabilityInfo 序列化/校验（commit `18fcc03`）
-- **sz-rust-marketplace**: 53 → 80 测试（+27），覆盖 error 全部 Display 变体 + storage 边界 + lockfile 边界（commit `18fcc03`）
+- **sz-rust-capability**: 37 → 58 测试（+21），行覆盖率 **91.45%** ✅ 达标 90%（commit `18fcc03`, `d416e93`）
+- **sz-rust-marketplace**: 53 → 80 测试（+27），行覆盖率 **47.23%** ❌ 未达标（commit `18fcc03`）
+  - 未覆盖根因：`repository.rs` 0%、`service.rs` 0%（均需 PgPool 集成测试，本地无 Docker）
+  - 已覆盖模块：error 100%、storage 97.92%、lockfile 95.96%、signature 98.72%
+- **sz-rust-cli**: 436 测试，行覆盖率 **83.51%** ❌ 未达标（含 --tests 集成测试）
+  - 未覆盖根因：`cmd/serve.rs` 24.50%（execute_async 主体需启动服务器）、`cmd/admin.rs` 54.65%、`cmd/migrate.rs` 66.62%（需 DB）
+- **幻影测试修复**（commit `d416e93`）：消除 facade.rs 7 个弱断言（test_metrics 零断言→断言 total>=1，test_list_all 近恒真→断言包含 plugin_cap 等）
 
 ### 防幻影交付验证
 
@@ -29,6 +34,9 @@
 - `cargo test -p sz-rust-cli` — 436 tests passed, 0 failed ✅
 - `cargo test -p sz-rust-capability` — 58 tests passed, 0 failed ✅
 - `cargo test -p sz-rust-marketplace` — 80 tests passed, 0 failed ✅
+- `cargo llvm-cov -p sz-rust-capability --lib` — 91.45% 行覆盖 ✅
+- `cargo llvm-cov -p sz-rust-marketplace --lib` — 47.23% 行覆盖 ❌
+- `cargo llvm-cov -p sz-rust-cli --tests` — 83.51% 行覆盖 ❌
 
 ---
 
