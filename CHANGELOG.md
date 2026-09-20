@@ -5,6 +5,21 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-20（审计链修正）
+
+### Fixed
+
+- **doc-code-consistency 门禁误报修复**：仓库目录名 `sz-rust-oss`（github.com/ljclz/sz-rust 历史快照仓库，2026-09-20 实查 26 members 含 `sz-rust-sz300`）被误判为 crate 声称 → `NON_CRATE_NAMES` 补录（与 `sz-rust-enterprise` 同类），消除 3 处 ERROR，门禁复验 EXIT=0
+- **审计报告勘误**：`docs/audit/2026-09-20-报告准确性核验.md` 二次复核修正 8 处（测试函数实测值 7,134→7,122 与原报告零差异、oss members 27→26、07a080d 距今 ~10→8 commit 等，逐项附验证命令）
+- **README**：版本号 v1.2.0→v1.2.2（tag 锚定）+ 新增 sz300 企业版口径说明段；`sz-rust-oss`「企业版历史分支」措辞修正为「独立历史快照仓库」
+- **implementation-progress**：P4-T2 工作流引擎验证行补证据链（136 测试 + 28 错误码实数复核）
+
+## [Unreleased] - 2026-09-19（sz-orm 7.6.0 全量升级）
+
+### Changed
+
+- **sz-orm 全家桶升级 6.x → 7.6.0**（三步合入，均 2026-09-19）：`e0c5cbe` 6.x→7.3.0 + 五维审计问题修复 → `908ce3b` 升级修正（core/config/sqlx/tracing 升 7.6.0，其余保持 7.3.0）→ `07a080d` **全包统一 7.6.0**（crates.io 68 包已发布，来源：07a080d 提交说明）。当前 workspace 依赖锚定 `sz-orm-* = "7.6.0"`（根 Cargo.toml `[workspace.dependencies]`，2026-09-20 复核实查）。
+
 ## [Unreleased] - 2026-09-14
 
 ### Added

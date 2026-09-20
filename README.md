@@ -4,7 +4,7 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v1.2.0**（2026-08-21）— crates.io 18 crate 发布 + sz-orm 5.0.0 全量升级 + CI 22 jobs 实跑通过 + AI 能力栈（3 Provider + Agent + RAG）
+**当前版本：v1.2.2**（git tag `v1.2.2`，2026-09-02；HEAD 在其后 87 个 commit）— 基于 crates.io 发布的 v1.2.0（18 crate）+ sz-orm 全量升级 + AI 能力栈（3 Provider + Agent + RAG）。当前 HEAD 后续变更见 [CHANGELOG [Unreleased]](docs/CHANGELOG.md)。
 
 > **v1.1.0 → v1.2.0 变更摘要**：见 [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
@@ -13,6 +13,8 @@
 ## 核心特性
 
 以下特性均来自 `sz-rust-core` 实际源码，模块结构见 `packages/sz-rust-core/src/lib.rs`。
+
+> 🔒 **企业版口径说明**：下方多处 `✅ 生产已接入：sz300 router.rs / main.rs / merchant.rs ...` 中的 `sz300` 指 **sz-rust-sz300 业务应用**（菜市场智能秤 SaaS 后端）。该应用在开源/企业版物理分离（commit `1614e84`）后已移入 **企业版仓库**（`E:/www/rust/sz-rust-enterprise/packages/sz-rust-sz300`），**不在本开源 workspace 内**。此处引用仅作"该框架能力已由真实业务验证"的证据，不代表开源仓库自带 sz300 应用；其现行代码在企业版仓库 `E:/www/rust/sz-rust-enterprise`（`packages/sz-rust-sz300`）；`sz-rust-oss`（github.com/ljclz/sz-rust，HEAD 2026-08-07 v0.6.1）为含 sz300 的**独立历史快照仓库**（分离前源码），并非企业版的分支。
 
 - **HTTP 服务器 + 路由**：基于 axum 0.8 + tower 0.5 + hyper 1.x，支持三层路由机制（属性宏 / 配置式 / 约定式）。
 - **控制器层**：`SzController` → `BaseController` → `AddonsBaseController` 三层 trait 继承链，对齐 PHP `app\SzController` / `app\BaseController` / `addons\BaseController`。提供 `renderJson` / `renderSuccess` / `renderError` / `postData` / `getData` 等方法。

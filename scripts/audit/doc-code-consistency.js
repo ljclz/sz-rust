@@ -74,11 +74,14 @@ const ENTERPRISE_DELIVERED_CRATES = new Set([
     'sz-rust-addons-operate',
 ]);
 
-// 非 crate 名：企业版仓库名 + .trae/skills/ 下的 Skill 目录名（文档常引用 Skill 名，非交付声称）
+// 非 crate 名：仓库目录名 + .trae/skills/ 下的 Skill 目录名（文档常引用 Skill 名，非交付声称）
 // + 已核验的部署目录/cron 标记（sz-rust-soak：soak-toolkit 工作目录名，见 scripts/soak-self-hosted/）
 // + 企业版产品/文档名（sz-rust-sdd：企业版 SDD 产品版本名，见 implementation-progress M3 条目）
 const NON_CRATE_NAMES = new Set([
+    // 仓库目录名（2026-09-20 复核实查：sz-rust-oss 位于 E:/vue/test/鲜视达/rust/，
+    // Cargo.toml members=26 含 sz-rust-sz300；README 与审计报告以「仓库路径」引用而非 crate 声称）
     'sz-rust-enterprise',
+    'sz-rust-oss',
     'sz-rust-soak',
     'sz-rust-skills',
     'sz-rust-engineering-practices',

@@ -357,7 +357,7 @@ M12 完整生态                   □ 待办      预计 12 个月
 |------|----------|----------|----------|
 | ■ 已完成 | 2026-08-12 | 2026-08-12 | — |
 
-**验证**：sz-rust-workflow crate 已实现，28 错误码，FlowDefinition/StateMachineEngine/ApprovalFlowEngine
+**验证**：sz-rust-workflow crate 已实现（创建 ecc7adb → 深接线 40e91b6 → 随 1614e84 分离迁移开源版），28 错误码（2026-09-20 复核 `src/error.rs`：`WF_001`～`WF_051` 共 28 变体），136 测试（`git grep -E '#\[test\]|#\[tokio::test\]' HEAD -- packages/sz-rust-workflow`），FlowDefinition（definition/models.rs）/StateMachineEngine（engine/state_machine.rs）/ApprovalFlowEngine（engine/approval.rs）
 
 ### P4-T3：开发者社区
 

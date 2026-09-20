@@ -13,6 +13,10 @@
 - **data_scope_demo 示例**（`packages/sz-rust-examples/src/bin/data_scope_demo.rs`）：data_scope_middleware 生产接线示例，演示完整链路（commit `4a3cdcb`）
 - **multi_tenant_demo 增强**（`packages/sz-rust-examples/src/bin/multi_tenant_demo.rs`）：追加 core 层 tenant_middleware，形成三层互补链（commit `4a3cdcb`）
 
+### 变更
+
+- **sz-orm 依赖升级**：6.2.0 → 7.3.0 → 7.6.0，17 个 `sz-orm-*` workspace 依赖全量对齐 7.6.0（crates.io 68 包已发布；commit `e0c5cbe`, `908ce3b`, `07a080d`）
+
 ### 测试覆盖
 
 - **sz-rust-capability**: 37 → 58 测试（+21），覆盖 facade 全部公开方法 + CapabilityInfo 序列化/校验（commit `18fcc03`）
