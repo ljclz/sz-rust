@@ -376,4 +376,160 @@ mod tests {
         let path = lockfile_path();
         assert!(path.to_string_lossy().contains("plugins.lock"));
     }
+
+    #[tokio::test]
+    async fn test_search_success_with_mock() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/v1/plugins/search")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"plugins":[{"name":"crm","title":"CRM","author":"alice","description":null,"tags":[],"price":0.0}],"total":1}"#)
+            .create_async()
+            .await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let result = client.search("crm", None, 10, 0).await;
+        assert!(result.is_ok());
+        let resp = result.unwrap();
+        assert_eq!(resp.plugins.len(), 1);
+        assert_eq!(resp.plugins[0].name, "crm");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_search_error_status_with_mock() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/plugins/search")
+            .match_query(mockito::Matcher::Any)
+            .with_status(500)
+            .with_body("internal error")
+            .create_async()
+            .await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let result = client.search("test", None, 10, 0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_install_success_with_mock() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/v1/plugins/crm/1.0.0/download")
+            .with_status(200)
+            .with_body(b"archive bytes")
+            .create_async()
+            .await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let result = client.install("crm", "1.0.0").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), b"archive bytes");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_install_error_status_with_mock() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/plugins/crm/1.0.0/download")
+            .with_status(404)
+            .with_body("not found")
+            .create_async()
+            .await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let result = client.install("crm", "1.0.0").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_update_calls_install_latest() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/api/v1/plugins/crm/latest/download")
+            .with_status(200)
+            .with_body(b"latest bytes")
+            .create_async()
+            .await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let result = client.update("crm").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), b"latest bytes");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_login_success_with_mock() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("USERPROFILE", temp.path());
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/api/v1/auth/login")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"token":"jwt-token-123"}"#)
+            .create_async()
+            .await;
+        let result = MarketplaceClient::login(&server.url(), 1, "alice", true).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "jwt-token-123");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_login_error_status_with_mock() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("POST", "/api/v1/auth/login")
+            .with_status(401)
+            .with_body("invalid credentials")
+            .create_async()
+            .await;
+        let result = MarketplaceClient::login(&server.url(), 1, "bad", false).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_publish_without_token_returns_error() {
+        let mut server = mockito::Server::new_async().await;
+        let client = MarketplaceClient::new(&server.url(), None);
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let result = client.publish(temp.path().to_str().unwrap()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_uninstall_no_lockfile_succeeds() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("USERPROFILE", temp.path());
+        let client = MarketplaceClient::new("http://localhost:8080", None);
+        let result = client.uninstall("nonexistent").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_no_lockfile_returns_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("USERPROFILE", temp.path());
+        let client = MarketplaceClient::new("http://localhost:8080", None);
+        let result = client.list().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_save_token_writes_file() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("USERPROFILE", temp.path());
+        let client = MarketplaceClient::new("http://localhost:8080", None);
+        let result = client.save_token("new-token").await;
+        assert!(result.is_ok());
+        let creds_path = credentials_path();
+        let content = tokio::fs::read_to_string(&creds_path).await.unwrap();
+        assert!(content.contains("new-token"));
+    }
 }

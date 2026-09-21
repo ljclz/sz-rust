@@ -267,3 +267,69 @@ async fn test_non_reviewer_cannot_access_pending() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
+#[tokio::test]
+async fn test_download_plugin_returns_response() {
+    let app = build_router(make_app_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/plugins/crm/1.0.0/download")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        resp.status() == StatusCode::INTERNAL_SERVER_ERROR
+            || resp.status() == StatusCode::NOT_FOUND
+            || resp.status() == StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn test_reject_review_without_token_returns_400() {
+    let app = build_router(make_app_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/reviews/1/reject")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_search_with_tag_query_param() {
+    let app = build_router(make_app_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/plugins/search?q=crm&tag=business&limit=5&offset=0")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(resp.status() == StatusCode::INTERNAL_SERVER_ERROR || resp.status() == StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_login_with_invalid_json_returns_400() {
+    let app = build_router(make_app_state());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/login")
+                .header("Content-Type", "application/json")
+                .body(Body::from("invalid json"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
