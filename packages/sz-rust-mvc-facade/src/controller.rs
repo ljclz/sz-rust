@@ -55,8 +55,12 @@ use sz_rust_infra_facade::validate::Validate;
 // - `SZ_JWT_SECRET`：签名密钥（PHP 实际使用 `id` 字段作为 HMAC 密钥，而非 `sign`）
 // - `SZ_JWT_ISSUER`：签发人（对应 PHP `issuer`，如 `https://mall.ljclz.shop`）
 //
-// 注：sz-orm-auth 的 JwtClaims 暂不包含 `aud` 字段，因此 audience 验证由
-// 业务层在解码后自行实现（PHP `PermittedFor` 约束等价）。
+// 注：sz-orm-auth 的 JwtClaims 暂不包含 `aud` 字段，框架层**无法**实现 audience
+// 校验（OCR 审查 2026-09-20 发现：此前 `SZ_JWT_AUDIENCE` 被加载进配置但 verify
+// 从不消费，构成"配置假安全感"——设置该变量的部署会误以为 aud 校验已生效）。
+// 已移除该 no-op 配置；在 sz-orm-auth JwtClaims 增加 `aud` 字段前，
+// **本框架不存在任何 audience 校验**，跨域令牌约束需业务层自行实现
+// （PHP `PermittedFor` 约束等价）。
 
 /// JWT 配置（运行时从环境变量读取）
 ///
@@ -73,10 +77,6 @@ struct JwtConfig {
     secret: String,
     /// 签发人（对应 PHP `$_config['issuer']`）
     issuer: String,
-    /// 接收人（对应 PHP `$_config['permitted_for']`）— P1-SEC-10 新增
-    ///
-    /// 为空时跳过 aud 验证（向后兼容旧 token）；非空时要求 token 的 `aud` 字段匹配。
-    audience: String,
 }
 
 impl std::fmt::Debug for JwtConfig {
@@ -84,7 +84,6 @@ impl std::fmt::Debug for JwtConfig {
         f.debug_struct("JwtConfig")
             .field("secret", &"[REDACTED]")
             .field("issuer", &self.issuer)
-            .field("audience", &self.audience)
             .finish()
     }
 }
@@ -106,8 +105,8 @@ static JWT_CONFIG: Lazy<Option<JwtConfig>> = Lazy::new(|| {
     Some(JwtConfig {
         secret,
         issuer: std::env::var("SZ_JWT_ISSUER").unwrap_or_default(),
-        // P1-SEC-10：从环境变量读取 audience，未设置时为空（跳过 aud 验证）
-        audience: std::env::var("SZ_JWT_AUDIENCE").unwrap_or_default(),
+        // 注意：不存在 SZ_JWT_AUDIENCE 配置——sz-orm-auth JwtClaims 无 `aud` 字段，
+        // 框架层无法校验 audience（见模块头注释；OCR 审查 2026-09-20 移除 no-op 配置）
     })
 });
 
@@ -142,11 +141,14 @@ pub fn validate_jwt_config() {
 fn strip_bearer_prefix(header: &str) -> &str {
     let trimmed = header.trim();
     // 大小写不敏感匹配 "bearer"
-    if trimmed.len() >= 6 {
-        let prefix = &trimmed[..6];
+    // 字节切片用 get() 防御多字节字符边界（OCR 审查 2026-09-20：&trimmed[..6]
+    // 在 byte 6 落于多字节字符内部时 panic，而本函数接受任意 &str）
+    if let Some(prefix) = trimmed.get(..6) {
         if prefix.eq_ignore_ascii_case("bearer") {
-            // 跳过 "bearer" 后可能存在的空格
-            return trimmed[6..].trim_start();
+            // 跳过 "bearer" 后可能存在的空格（get(6..) 与 get(..6) 同源，必为 Some）
+            if let Some(rest) = trimmed.get(6..) {
+                return rest.trim_start();
+            }
         }
     }
     trimmed
@@ -1808,6 +1810,16 @@ mod tests {
     }
 
     #[test]
+    fn test_strip_bearer_prefix_multibyte_no_panic() {
+        // OCR 审查 2026-09-20 回归：byte 6 落于多字节字符内部时不得 panic。
+        // "aa北北" 共 8 字节（a=1,a=1,北=3,北=3），byte 6 是第二个"北"的中间字节——
+        // 旧实现 `&trimmed[..6]` 在此直接 panic；修复后 get(..6)=None 走原样返回分支。
+        let input = "aa北北xyz";
+        assert_eq!(strip_bearer_prefix(input), input);
+        assert_eq!(strip_bearer_prefix("  aa北北xyz  "), "aa北北xyz");
+    }
+
+    #[test]
     fn test_strip_bearer_prefix_empty() {
         assert_eq!(strip_bearer_prefix(""), "");
     }
@@ -1828,8 +1840,7 @@ mod tests {
     fn test_get_token_valid_jwt_returns_user_info() {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
-            issuer: String::new(), // 不验证 iss,
-            audience: String::new(),
+            issuer: String::new(), // 不验证 iss
         };
 
         // 签发一个有效 token
@@ -1857,7 +1868,6 @@ mod tests {
         let config = JwtConfig {
             secret: "correct-secret".to_string(),
             issuer: String::new(),
-            audience: String::new(),
         };
 
         // 用错误密钥签发 token
@@ -1881,7 +1891,6 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
-            audience: String::new(),
         };
 
         let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
@@ -1905,7 +1914,6 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
-            audience: String::new(),
         };
 
         let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
@@ -1929,7 +1937,6 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: "https://expected-issuer.com".to_string(),
-            audience: String::new(),
         };
 
         let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
@@ -1955,7 +1962,6 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: "https://mall.ljclz.shop".to_string(),
-            audience: String::new(),
         };
 
         let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
@@ -1992,7 +1998,6 @@ mod tests {
         let config = JwtConfig {
             secret: "test-secret".to_string(),
             issuer: String::new(),
-            audience: String::new(),
         };
 
         let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
@@ -2204,7 +2209,6 @@ mod tests {
         let config = JwtConfig {
             secret: String::new(), // 空密钥
             issuer: String::new(),
-            audience: String::new(),
         };
 
         // 即使传入看似有效的 token，空密钥下也必须拒绝验证（返回 None）
@@ -2247,34 +2251,10 @@ mod tests {
     // ========================================================================
     // P1-SEC-10：JWT Audience (aud) 验证
     // ========================================================================
-    // 注：aud 字段验证依赖 sz-orm-auth JwtClaims.aud 字段（v1.2.2+）。
-    // 当前 JwtClaims 尚未暴露 aud setter，audience 验证逻辑待 sz-orm-auth 升级后恢复。
-
-    /// P1-SEC-10 回归测试：未配置 audience 时，跳过 aud 验证（向后兼容）
-    #[test]
-    fn test_p1_sec_10_skips_audience_check_when_not_configured() {
-        let config = JwtConfig {
-            secret: "test-secret".to_string(),
-            issuer: String::new(),
-            audience: String::new(),
-        };
-
-        let encoder = sz_rust_orm_facade::jwt::JwtEncoder::new(&config.secret);
-        let exp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-            + 3600;
-        let claims = sz_rust_orm_facade::jwt::JwtClaims::new("user123", exp).with_user_id(42);
-        let token = encoder.encode(&claims).unwrap();
-
-        let result = verify_token_with_config(Some(&token), &config);
-        assert!(result.is_ok());
-        assert!(
-            result.unwrap().is_some(),
-            "未配置 audience 时应跳过 aud 验证"
-        );
-    }
+    // 注（2026-09-21，OCR 审查发现）：sz-orm-auth JwtClaims 无 `aud` 字段，框架层
+    // **不存在** audience 校验；此前 `SZ_JWT_AUDIENCE` 被加载进配置但 verify 从不
+    // 消费（no-op 假安全感），已移除该配置。aud 校验待 sz-orm-auth JwtClaims
+    // 增加 `aud` 字段后恢复（doc-debt DB-2026-09-21-01）。
 
     // ========================================================================
     // P1-SEC-12：JwtConfig Debug 实现不泄漏 secret
@@ -2289,7 +2269,6 @@ mod tests {
         let config = JwtConfig {
             secret: "super-secret-key-12345".to_string(),
             issuer: "https://example.com".to_string(),
-            audience: String::new(),
         };
 
         let debug_output = format!("{:?}", config);

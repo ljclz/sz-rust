@@ -5,6 +5,14 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-21
+
+### Fixed
+
+- **JWT audience 配置假安全感修复**（OCR 冒烟发现，docs/audit/2026-09-20-opencodereview-冒烟报告.md 遗留 #1）：`SZ_JWT_AUDIENCE` 此前被加载进 `JwtConfig` 但 `verify_token_with_config` 从不消费——设置了该变量的部署会误以为 aud 校验已生效。因 sz-orm-auth `JwtClaims`（7.6.0）无 `aud` 字段、框架层无法校验，本次移除该 no-op 配置并如实标注（`JwtConfig` 删字段 + Debug 实现同步 + 模块头/struct/加载处注释改为"本框架不存在任何 audience 校验"）；删除依赖该字段的 `test_p1_sec_10_skips_audience_check_when_not_configured`（其前提已不存在）。真校验待上游补字段——登记 doc-debt DB-2026-09-21-01（2026-10-21 限）
+- **strip_bearer_prefix 多字节 panic 修复**（OCR 冒烟发现，遗留 #2）：`&trimmed[..6]` 字节切片在 byte 6 落于多字节字符内部时 panic（本函数接受任意 `&str`，调用方不保证 ASCII）。改为 `trimmed.get(..6)`（不匹配时原样返回，行为向后兼容），新增回归测试 `test_strip_bearer_prefix_multibyte_no_panic`（`"aa北北xyz"` 用例，byte 6 为第二个"北"中间字节）
+- 验证：`cargo test -p sz-rust-mvc-facade` → **412 lib + 12 integration + 8 doctest 全部通过**（0 failed）
+
 ## [Unreleased] - 2026-09-20（审计链修正）
 
 ### Fixed

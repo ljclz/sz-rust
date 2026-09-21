@@ -50,7 +50,7 @@
 
 ## 四、遗留
 
-1. **两个现行缺陷待用户裁定**：aud 假配置（#1）/ bearer 切片 panic（#2）——修复涉及安全语义选择，未擅动。
+1. ~~两个现行缺陷待用户裁定~~ → **2026-09-21 用户裁定修复，当日完成**：aud 假配置（诚实化方案——移除 no-op 配置 + 注释如实标注，真校验登记 doc-debt DB-2026-09-21-01 待 sz-orm-auth 上游补 aud 字段）/ bearer 切片 panic（`get(..6)` 防御性修复 + 多字节回归测试）。验证：mvc-facade 412+12+8 全绿；详见 CHANGELOG [Unreleased]-2026-09-21。冒烟发现的另 5 条（#4/6/7/8/9）仍未逐项裁定
 2. standalone 端到端（OCR 自有模型）未测——需 key：交互式 `ocr config provider` 后在真实仓库 `ocr review --from 98ec48e~1 --to 98ec48e` 可复跑本冒烟。
 3. 自定义规则补强（unwrap/std::fs/资源上限/密钥强度四类）待验证 OCR 规则自定义格式。
 4. 冒烟仓库 `F:/tmp-ocr-smoke` 保留备查，确认后可删。
