@@ -20,11 +20,12 @@
 ### 测试覆盖（cargo llvm-cov 真实测量，2026-09-22）
 
 - **sz-rust-capability**: 37 → 58 测试（+21），行覆盖率 **91.45%** ✅ 达标 90%（commit `18fcc03`, `d416e93`）
-- **sz-rust-marketplace**: 53 → 96 测试（+43），行覆盖率 **77.41%** ❌ 未达标（commit `18fcc03`, `d65ea3f`, `0a6d7eb`）
+- **sz-rust-marketplace**: 53 → 130 测试（+77），lib 行覆盖率 **91.51%** ✅ 达标 90%（commit `18fcc03`, `d65ea3f`, `0a6d7eb`, `868f55f`, `153cd6e`）
   - repository.rs 0% → 95.55%（7 个 PG 集成测试，SSH 隧道第二台服务器 PostgreSQL 18）
-  - service.rs 0% → 67.14%（9 个 PG 集成测试，MockObjectStore + 真实 PG 18）
-  - 已覆盖模块：error 100%、storage 97.92%、lockfile 95.96%、signature 98.72%、repository 95.55%
-  - 未覆盖根因：client.rs 68.90%、web.rs 63.26%（需更多 HTTP 测试）、main.rs 0%（bin）
+  - service.rs 0% → 92.02%（12 个 PG 集成测试，MockObjectStore + 真实 PG 18）
+  - web.rs 65.55% → 88.94%（17 个 PG 集成测试，覆盖 publish/download/review/login/search 全 handler）
+  - client.rs 86.10%（11 个 mockito 异步方法测试）
+  - 已覆盖模块：error 100%、signature 98.72%、storage 97.92%、lockfile 95.96%、repository 95.55%、service 92.02%、web 88.94%、manifest 89.11%、client 86.10%
 - **sz-rust-cli**: 436 测试，行覆盖率 **83.51%** ❌ 未达标（含 --tests 集成测试）
   - 未覆盖根因：`cmd/serve.rs` 24.50%（execute_async 主体需启动服务器）、`cmd/admin.rs` 54.65%、`cmd/migrate.rs` 66.62%（需 DB）
 - **幻影测试修复**（commit `d416e93`）：消除 facade.rs 7 个弱断言（test_metrics 零断言→断言 total>=1，test_list_all 近恒真→断言包含 plugin_cap 等）
@@ -35,9 +36,9 @@
 - `grep -rn "data_scope_middleware" packages/sz-rust-cli/src/` — serve.rs:141 非测试调用方 ✅
 - `cargo test -p sz-rust-cli` — 436 tests passed, 0 failed ✅
 - `cargo test -p sz-rust-capability` — 58 tests passed, 0 failed ✅
-- `cargo test -p sz-rust-marketplace` — 80 unit + 16 integration = 96 tests passed, 0 failed ✅
+- `cargo test -p sz-rust-marketplace` — 80 unit + 50 integration = 130 tests passed, 0 failed ✅
 - `cargo llvm-cov -p sz-rust-capability --lib` — 91.45% 行覆盖 ✅
-- `cargo llvm-cov -p sz-rust-marketplace --tests -- --include-ignored` — 77.41% 行覆盖 ❌
+- `cargo llvm-cov -p sz-rust-marketplace --tests -- --include-ignored` — 91.51% lib 行覆盖（排除 main.rs bin） ✅
 - `cargo llvm-cov -p sz-rust-cli --tests` — 83.51% 行覆盖 ❌
 
 ---
