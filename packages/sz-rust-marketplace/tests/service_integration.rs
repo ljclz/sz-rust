@@ -19,17 +19,34 @@ use sz_rust_marketplace::service::{
 };
 use sz_rust_marketplace::storage::ObjectStore;
 
-struct MockObjectStore;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+struct MockObjectStore {
+    store: Mutex<HashMap<String, Bytes>>,
+}
+
+impl MockObjectStore {
+    fn new() -> Self {
+        Self {
+            store: Mutex::new(HashMap::new()),
+        }
+    }
+}
 
 #[async_trait]
 impl ObjectStore for MockObjectStore {
-    async fn upload(&self, _key: &str, data: Bytes) -> MarketplaceResult<String> {
-        Ok(sz_rust_marketplace::signature::SignatureService::sha256_checksum(&data))
+    async fn upload(&self, key: &str, data: Bytes) -> MarketplaceResult<String> {
+        let checksum = sz_rust_marketplace::signature::SignatureService::sha256_checksum(&data);
+        self.store.lock().unwrap().insert(key.to_string(), data);
+        Ok(checksum)
     }
-    async fn download(&self, _key: &str, _range: Option<(u64, u64)>) -> MarketplaceResult<Bytes> {
-        Ok(Bytes::new())
+    async fn download(&self, key: &str, _range: Option<(u64, u64)>) -> MarketplaceResult<Bytes> {
+        let store = self.store.lock().unwrap();
+        Ok(store.get(key).cloned().unwrap_or_default())
     }
-    async fn delete(&self, _key: &str) -> MarketplaceResult<()> {
+    async fn delete(&self, key: &str) -> MarketplaceResult<()> {
+        self.store.lock().unwrap().remove(key);
         Ok(())
     }
 }
@@ -122,7 +139,7 @@ fn make_service(pool: &sqlx::PgPool) -> MarketplaceService {
         VersionRepository::new(pool.clone()),
         ReviewRepository::new(pool.clone()),
         DeveloperRepository::new(pool.clone()),
-        Arc::new(MockObjectStore),
+        Arc::new(MockObjectStore::new()),
     )
 }
 
@@ -378,12 +395,108 @@ async fn test_service_review_non_pending_version() {
 
 #[tokio::test]
 #[ignore]
-async fn test_service_download_archive() {
+async fn test_service_install_approved_plugin() {
     let pool = setup_pool().await;
     let service = make_service(&pool);
-    let result = service.download_archive("nonexistent_key").await;
-    assert!(result.is_ok());
-    assert!(result.unwrap().is_empty());
+    let dev_id = create_developer(&pool, "inst_dev1", false).await;
+    let reviewer_id = create_developer(&pool, "inst_reviewer1", true).await;
+
+    let archive_data = Bytes::from(b"install test archive".to_vec());
+    let version_id = service
+        .publish(PublishRequest {
+            manifest: make_manifest("install_plugin", "1.0.0"),
+            archive: archive_data.clone(),
+            developer_id: dev_id,
+        })
+        .await
+        .unwrap();
+
+    service
+        .review(ReviewRequest {
+            version_id,
+            reviewer_id,
+            developer_id: dev_id,
+            decision: ReviewDecision::Approve,
+            comment: Some("approved for install".to_string()),
+        })
+        .await
+        .unwrap();
+
+    let temp = tempfile::tempdir().unwrap();
+    let lockfile_path = temp.path().join("plugins.lock");
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
+    let public_key = signing_key.verifying_key();
+    let result = service
+        .install(sz_rust_marketplace::service::InstallRequest {
+            plugin_name: "install_plugin".to_string(),
+            version: "1.0.0".to_string(),
+            installer_id: dev_id,
+            public_key,
+            lockfile_path,
+        })
+        .await;
+    assert!(result.is_ok(), "install 失败: {:?}", result.err());
+
+    cleanup(&pool).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_service_install_nonexistent_plugin() {
+    let pool = setup_pool().await;
+    let service = make_service(&pool);
+    let temp = tempfile::tempdir().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
+    let result = service
+        .install(sz_rust_marketplace::service::InstallRequest {
+            plugin_name: "nonexistent_plugin".to_string(),
+            version: "1.0.0".to_string(),
+            installer_id: 1,
+            public_key: signing_key.verifying_key(),
+            lockfile_path: temp.path().join("plugins.lock"),
+        })
+        .await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MarketplaceError::InternalError(_) => {}
+        other => panic!("期望 InternalError，得到 {other:?}"),
+    }
+
+    cleanup(&pool).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_service_install_not_approved_version() {
+    let pool = setup_pool().await;
+    let service = make_service(&pool);
+    let dev_id = create_developer(&pool, "inst_dev2", false).await;
+
+    let version_id = service
+        .publish(PublishRequest {
+            manifest: make_manifest("pending_install_plugin", "1.0.0"),
+            archive: Bytes::from(b"archive".to_vec()),
+            developer_id: dev_id,
+        })
+        .await
+        .unwrap();
+
+    let temp = tempfile::tempdir().unwrap();
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&[0u8; 32]);
+    let result = service
+        .install(sz_rust_marketplace::service::InstallRequest {
+            plugin_name: "pending_install_plugin".to_string(),
+            version: "1.0.0".to_string(),
+            installer_id: dev_id,
+            public_key: signing_key.verifying_key(),
+            lockfile_path: temp.path().join("plugins.lock"),
+        })
+        .await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        MarketplaceError::VersionNotApproved(_) => {}
+        other => panic!("期望 VersionNotApproved，得到 {other:?}"),
+    }
 
     cleanup(&pool).await;
 }
