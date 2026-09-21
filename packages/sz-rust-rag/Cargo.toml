@@ -1,0 +1,39 @@
+[package]
+name = "sz-rust-rag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "行业 RAG 知识库 — 为 SDD Agent 提供生鲜零售行业知识检索能力"
+
+[lib]
+name = "sz_rust_rag"
+
+[dependencies]
+sz-rust-ai-facade = { workspace = true }
+sz-rust-capability = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+arc-swap = { workspace = true }
+regex = { workspace = true }
+async-trait = { workspace = true }
+prometheus = "0.13"
+notify = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }
+mockall = "0.13"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[package.metadata.cargo-udeps.ignore]
+development = ["mockall"]

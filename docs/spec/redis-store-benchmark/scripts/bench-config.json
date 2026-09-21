@@ -1,0 +1,112 @@
+{
+  "redisUrl": "redis://127.0.0.1:16379",
+  "keyPrefix": "sso:bench",
+  "concurrencyLevels": [
+    10,
+    100,
+    500,
+    1000
+  ],
+  "totalRequests": 100000,
+  "soakDurationSecs": 600,
+  "soakConcurrency": 200,
+  "mixedRatio": "3:2:2:1:1:1",
+  "server": {
+    "host": "122.51.216.76",
+    "port": 22,
+    "username": "root",
+    "privateKeyPath": "deploy_key"
+  },
+  "commandTimeout": 2,
+  "connectionTimeout": 3,
+  "perfRedLines": [
+    {
+      "id": "PERF-1",
+      "operation": "increment_version",
+      "concurrency": 100,
+      "qpsMin": 8000,
+      "p99MaxMs": 5,
+      "errorRateMax": 0.0001
+    },
+    {
+      "id": "PERF-2",
+      "operation": "increment_version",
+      "concurrency": 500,
+      "qpsMin": 20000,
+      "p99MaxMs": 15,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-3",
+      "operation": "increment_version",
+      "concurrency": 1000,
+      "qpsMin": 30000,
+      "p99MaxMs": 30,
+      "errorRateMax": 0.001
+    },
+    {
+      "id": "PERF-4",
+      "operation": "get_version",
+      "concurrency": 1000,
+      "qpsMin": 40000,
+      "p99MaxMs": 10,
+      "errorRateMax": 0.0001
+    },
+    {
+      "id": "PERF-5",
+      "operation": "is_revoked",
+      "concurrency": 1000,
+      "qpsMin": 40000,
+      "p99MaxMs": 10,
+      "errorRateMax": 0.0001
+    },
+    {
+      "id": "PERF-6",
+      "operation": "revoke",
+      "concurrency": 500,
+      "qpsMin": 15000,
+      "p99MaxMs": 15,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-7",
+      "operation": "register_session",
+      "concurrency": 500,
+      "qpsMin": 10000,
+      "p99MaxMs": 20,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-8",
+      "operation": "get_session",
+      "concurrency": 1000,
+      "qpsMin": 20000,
+      "p99MaxMs": 15,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-9",
+      "operation": "get_sessions",
+      "concurrency": 500,
+      "qpsMin": 5000,
+      "p99MaxMs": 30,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-10",
+      "operation": "revoke_session",
+      "concurrency": 500,
+      "qpsMin": 8000,
+      "p99MaxMs": 20,
+      "errorRateMax": 0.0005
+    },
+    {
+      "id": "PERF-11",
+      "operation": "update_last_active",
+      "concurrency": 500,
+      "qpsMin": 8000,
+      "p99MaxMs": 20,
+      "errorRateMax": 0.0005
+    }
+  ]
+}

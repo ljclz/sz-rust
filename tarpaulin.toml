@@ -1,0 +1,15 @@
+# Tarpaulin 覆盖率测量配置
+# 文档：https://github.com/xd009642/tarpaulin
+# 用法：cargo tarpaulin --config tarpaulin.toml -p <crate> --lib
+
+[settings]
+timeout = "600s"
+exclude-files = ["target/*", "tests/*", "benches/*", "examples/*"]
+run-types = ["Lib", "Bin"]
+override-cfg = true
+
+# 排除 proc-macro crate（无法测量覆盖率）
+exclude = [
+    "sz-orm-macros",
+    "sz-rust-macros",
+]

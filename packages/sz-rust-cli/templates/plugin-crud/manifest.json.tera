@@ -1,0 +1,19 @@
+{
+  "name": "{{ plugin_name }}",
+  "version": "0.1.0",
+  "sz_rust_version": "{{ template_version }}",
+  "template_type": "{{ template_type }}",
+  "template_version": "{{ template_version }}",
+  "generated_at": "{{ generated_at }}",
+  "capabilities": ["crud"],
+  "routes": [
+    {"method": "GET", "path": "/{{ table_name }}", "handler": "{{ class_name }}Controller::index"},
+    {"method": "GET", "path": "/{{ table_name }}/create", "handler": "{{ class_name }}Controller::create"},
+    {"method": "POST", "path": "/{{ table_name }}", "handler": "{{ class_name }}Controller::save"},
+    {"method": "GET", "path": "/{{ table_name }}/{id}", "handler": "{{ class_name }}Controller::read"},
+    {"method": "GET", "path": "/{{ table_name }}/{id}/edit", "handler": "{{ class_name }}Controller::edit"},
+    {"method": "PUT", "path": "/{{ table_name }}/{id}", "handler": "{{ class_name }}Controller::update"},
+    {"method": "DELETE", "path": "/{{ table_name }}/{id}", "handler": "{{ class_name }}Controller::delete"}
+  ],
+  "migrations": ["migrations/{{ table_name }}.sql"]
+}

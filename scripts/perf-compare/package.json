@@ -1,0 +1,16 @@
+{
+    "name": "sz-rust-perf-compare",
+    "version": "1.0.0",
+    "description": "v0.7 远程压测编排 — ssh2 连接 + 36 组合遍历 + wrk 解析",
+    "type": "module",
+    "scripts": {
+        "bench": "node bench-orchestrator.js",
+        "precheck": "node bench-precheck.js",
+        "smoke": "node smoke-test.js",
+        "report": "node report-merger.js",
+        "monitor": "node resource-monitor.js"
+    },
+    "dependencies": {
+        "ssh2": "^1.17.0"
+    }
+}

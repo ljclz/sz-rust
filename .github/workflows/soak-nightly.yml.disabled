@@ -1,0 +1,46 @@
+name: Soak Nightly (6h)
+
+on:
+  schedule:
+    - cron: '0 18 * * *'  # UTC 18:00 = Beijing 02:00
+  workflow_dispatch:
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  SOAK_DURATION: 6h
+
+jobs:
+  soak-6h:
+    name: Soak 6h Steady State
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: soak-nightly-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run soak 6h
+        run: |
+          cargo test --package sz-rust-core --test soak soak_web_framework_steady_state -- --ignored --nocapture
+
+      - name: Upload soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-report-${{ github.run_id }}
+          path: target/soak-report.csv
+          retention-days: 30

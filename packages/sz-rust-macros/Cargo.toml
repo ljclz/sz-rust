@@ -1,0 +1,37 @@
+[package]
+name = "sz-rust-macros"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 过程宏：派生宏和属性宏，用于控制器路由注册和依赖注入"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+serde_json.workspace = true
+
+[lib]
+proc-macro = true
+name = "sz_rust_macros"
+path = "src/lib.rs"
+
+# NOTE: sz-rust-core / sz-orm-core are NOT dev-dependencies here.
+# The #[controller] / #[model] macros expand to absolute paths
+# (::sz_rust_core::... / ::sz_orm_core::...), so integration tests that
+# exercise the generated code would create a circular dependency with
+# sz-rust-core (which depends on this crate). Macro behaviour is instead
+# verified indirectly through sz-rust-core's own test suite.
+
+[package.metadata.cargo-machete]
+ignored = ["proc-macro2"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["serde_json"]

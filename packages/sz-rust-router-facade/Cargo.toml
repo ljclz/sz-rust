@@ -1,0 +1,31 @@
+[package]
+name = "sz-rust-router-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "路由层 facade（P3）— router/routing/websocket_route/openapi 三层路由机制"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["router", "routing", "openapi", "thinkphp"]
+categories = ["web-programming", "web-programming::http-server"]
+
+[dependencies]
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde_yaml = { workspace = true }
+tower = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+http-body-util = { workspace = true }
+
+
+
+# P3: simd_str.rs 需要 unsafe SIMD intrinsics（SSE2/AVX2），
+# 覆盖 workspace 的 unsafe_code = "forbid" 为 allow。
+# simd_str.rs 通过 #![allow(unsafe_code)] 控制，其他模块不受影响。
+[lints.rust]
+unsafe_code = "allow"

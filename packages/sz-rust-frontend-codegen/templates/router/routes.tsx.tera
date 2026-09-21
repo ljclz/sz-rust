@@ -1,0 +1,13 @@
+{# React Router v6 路由模板 #}
+import React from 'react'
+import { Routes, Route } from 'react-router-dom'
+
+export default function AppRoutes() {
+  return (
+    <Routes>
+      {% for route in routes %}
+      <Route path="{{ route.path }}" element={{ "React.lazy(() => import('@/pages/" ~ route.component ~ "'))" }} />
+      {% endfor %}
+    </Routes>
+  )
+}

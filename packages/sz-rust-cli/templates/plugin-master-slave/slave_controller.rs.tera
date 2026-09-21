@@ -1,0 +1,37 @@
+{% extends "plugin-crud/controller.rs.tera" %}
+
+{% block model_import %}{{ slave_class_name }}{% endblock %}
+
+{% block service_import %}{{ slave_class_name }}Service{% endblock %}
+
+{% block route_prefix %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block controller_name %}{{ slave_class_name }}Controller{% endblock %}
+
+{% block controller_impl %}{{ slave_class_name }}Controller{% endblock %}
+
+{% block route_index %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block route_create %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block route_save %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block model_save %}{{ slave_class_name }}{% endblock %}
+
+{% block model_save_ret %}{{ slave_class_name }}{% endblock %}
+
+{% block route_read %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block model_read %}{{ slave_class_name }}{% endblock %}
+
+{% block route_edit %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block route_update %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block model_update %}{{ slave_class_name }}{% endblock %}
+
+{% block model_update_ret %}{{ slave_class_name }}{% endblock %}
+
+{% block route_delete %}{{ master_table }}/{id}/{{ slave_table }}{% endblock %}
+
+{% block model_index %}{{ slave_class_name }}{% endblock %}

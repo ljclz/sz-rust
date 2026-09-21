@@ -1,0 +1,32 @@
+[package]
+name = "sz-rust-tracing"
+version = "1.2.1"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust Tracing Extension - Distributed tracing with W3C TraceContext"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["docs/**"]
+
+[features]
+default = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+axum.workspace = true
+sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+
+[lib]
+name = "sz_rust_tracing"
+path = "src/lib.rs"

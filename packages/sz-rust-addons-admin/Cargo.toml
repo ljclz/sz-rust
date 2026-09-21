@@ -1,0 +1,38 @@
+[package]
+name = "sz-rust-addons-admin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust Admin 后台管理插件：用户/角色/权限/菜单/配置/日志/仪表盘"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sz-rust-core = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
+sz-rust-capability = { workspace = true }
+sz-rust-addons-loader = { workspace = true }
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+bcrypt = "0.15"
+sysinfo.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true }
+http = "1"
+http-body-util = "0.1"
+
+[lib]
+name = "sz_rust_addons_admin"
+path = "src/lib.rs"

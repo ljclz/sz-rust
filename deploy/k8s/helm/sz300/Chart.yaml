@@ -1,0 +1,13 @@
+apiVersion: v2
+name: sz300
+description: sz-rust-sz300 Helm chart — 鲜视达 SZ-300 后端服务
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - sz-rust
+  - sz300
+  - thinkphp
+  - rust
+maintainers:
+  - name: sz-rust team

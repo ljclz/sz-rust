@@ -1,0 +1,19 @@
+{# 路由守卫模板 #}
+import { router } from './index'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
+
+router.beforeEach((to, _from, next) => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    next('{{ login_path }}')
+    return
+  }
+  const permission = to.meta.permission as string | undefined
+  if (permission && !hasPermission(permission)) {
+    next('{{ forbidden_path }}')
+    return
+  }
+  next()
+})
