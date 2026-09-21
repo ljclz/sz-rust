@@ -13,6 +13,7 @@
 - **审计报告勘误**：`docs/audit/2026-09-20-报告准确性核验.md` 二次复核修正 8 处（测试函数实测值 7,134→7,122 与原报告零差异、oss members 27→26、07a080d 距今 ~10→8 commit 等，逐项附验证命令）
 - **README**：版本号 v1.2.0→v1.2.2（tag 锚定）+ 新增 sz300 企业版口径说明段；`sz-rust-oss`「企业版历史分支」措辞修正为「独立历史快照仓库」
 - **implementation-progress**：P4-T2 工作流引擎验证行补证据链（136 测试 + 28 错误码实数复核）
+- **OpenCodeReview 接入冒烟**（docs/audit/2026-09-20-opencodereview-冒烟报告.md）：委托模式管道 4/4 验证（**Rust 一等支持实证**：.rs 全入选 + Rust 原生规则组）；漏洞态回放标定——种子缺陷漏抓 2/2（规则无资源耗尽/密钥强度类别，官方低召回实证）、子代理 9 发现抽验 4/4 属实 **0 误报**、**顺手抓到 2 个现行缺陷**（SZ_JWT_AUDIENCE 配置 no-op / strip_bearer_prefix 字节切片 panic，待裁定）；`--ocr` 实验性开关入 runbook + 双 SKILL，企业版代码禁送外部端点
 
 ## [Unreleased] - 2026-09-19（sz-orm 7.6.0 全量升级）
 

@@ -15,8 +15,23 @@
 | `/sz-rust-review --ai` | 全量审查 + AI 评审 |
 | `/sz-rust-review fast` | 门禁 1-3（fmt/check/clippy） |
 | `/sz-rust-review --range main...HEAD` | 审查分支相对 main 的全部改动 |
+| `/sz-rust-review --ocr` | 追加 OpenCodeReview 委托评审（实验性第二意见，不阻塞） |
 
 Skill 会按状态机（scanning→static→security→ai→done）执行本指南下述命令，红牌即停输出《阻断报告》，全绿输出《审查报告》。
+
+### `--ocr`：OpenCodeReview 委托模式（实验性，2026-09-20 冒烟通过）
+
+前提：`npm install -g @alibaba-group/open-code-review`（v1.12.7 验证）；未安装时如实记录 `ocr-missing`（low），不静默。
+
+委托模式流程（推理由宿主 Agent 执行，**无需 API Key**）：
+
+1. `ocr delegate preview` — OCR 做文件选择（Rust 文件已实证入选；tests/ 与 .md 自动排除）
+2. `ocr delegate rule <files>` — 获取 Rust 原生规则组（`system / **/*.rs`）
+3. 宿主 Agent 按规则组评审选中文件，产出 findings（含 file:line 证据）
+4. findings 全部记 **low**、标注「OCR 委托评审（仅供参考）」，**不参与阻塞判定**，逐条裁定后并入报告——沿用 AI 意见处理策略
+
+> **数据边界**：本地 CLI，但 standalone 模式（`ocr review`）会把代码发送到其配置的模型端点；委托模式代码只进入宿主 Agent 上下文。**企业版仓库代码禁送外部端点**，本开关仅用于开源仓库/公开代码审查。
+> 已知边界（冒烟实证）：规则组无「资源耗尽/无上限读取」「密钥强度」类别，此类缺陷依赖既有机械门禁兜底。冒烟报告：`docs/audit/2026-09-20-opencodereview-冒烟报告.md`。
 
 ---
 

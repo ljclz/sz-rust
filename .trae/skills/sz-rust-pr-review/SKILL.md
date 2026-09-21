@@ -37,6 +37,7 @@ bash scripts/audit/pr-review.sh --range HEAD~1..HEAD --ai
 - `--deep`：追加深验证（变异测试 + 变更行覆盖率，耗时 10+ 分钟，需 cargo-mutants / cargo-llvm-cov）
 - `--skip-integration`：跳过真实集成测试环节（本机无 MySQL 时使用，如实记录跳过）
 - `--report <path>`：报告输出路径（默认 `docs/audit/<date>-pr-review-<branch>.md`）
+- `--ocr`：（实验性）OpenCodeReview 委托评审第二意见——`ocr delegate preview/rule` 做文件选择与规则路由，宿主 Agent 按规则评审；findings 记 low、不阻塞、逐条裁定。前提 `npm i -g @alibaba-group/open-code-review`；数据边界与企业版禁令见 `docs/audit/2026-09-20-opencodereview-冒烟报告.md`
 
 ## 状态机
 
