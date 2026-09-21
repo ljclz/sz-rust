@@ -56,9 +56,10 @@
    - #4 轮转零间隔 panic → from_env 告警回退默认 + new() 钳制（`rotation_interval` 恒非零）
    - #6 轮转双锁窗口 → do_rotation 单锁域原子化
    - #7 get_token 文档假承诺 → 如实化（格式错误一律 Ok(None)）
+   - #5 `%+X` 解码 0x01 → 十六进制白名单修复（`is_ascii_hexdigit` 先行判定 + 回归测试，2026-09-21）
    - #9 双 JWT 配置体系 → 裁定不重构，结构文档如实标注双体系关系与接线方式
    - #8 字符串错误类型 → 裁定不采纳（公共 API breaking change，LOW 收益不成比例，留待 facade 大版本演进）
-   - 验证：mvc-facade **414 lib + 12 + 8 全绿**，fmt/clippy 0 error
+   - 验证：mvc-facade **414 lib + 12 + 8 全绿**，http-facade **168 全绿**，fmt/clippy 0 error。**至此 9 条发现全部闭环（4 修复 + 1 文档修正 + 2 裁定不采纳 + 1 上游 doc-debt + 1 历史已修）**
 2. standalone 端到端（OCR 自有模型）未测——需 key：交互式 `ocr config provider` 后在真实仓库 `ocr review --from 98ec48e~1 --to 98ec48e` 可复跑本冒烟。
 3. 自定义规则补强（unwrap/std::fs/资源上限/密钥强度四类）待验证 OCR 规则自定义格式。
 4. 冒烟仓库 `F:/tmp-ocr-smoke` 保留备查，确认后可删。

@@ -17,8 +17,9 @@
 - **get_token 文档失实修正**（发现 #7）：原文档承诺"格式错误返回 Err"与实现不符（非法格式一律 `Ok(None)`，有回归测试），如实标注
 - **KeyRotation 双体系关系文档化**（发现 #9 裁定：不重构，文档如实标注）：`get_token`/`verify_token_with_config` 只消费 `JWT_CONFIG`，KeyRotation 为独立可选体系（面向需要轮换的部署自行接线），二者密钥空间不相交
 - **字符串错误类型裁定不采纳**（发现 #8）：`fetch_post_data -> Result<Value, String>` 等属项目既有 API 设计（facade 边界简洁错误传递），改 typed error = 公共 API breaking change，LOW 级收益不成比例；留待 facade API 大版本演进时统一处理
+- **url_decode 十六进制白名单修复**（OCR 冒烟发现 #5）：`u8::from_str_radix` 接受前导 `+`，`"%+1"` 旧实现解码为 0x01 控制字节而非按非法序列保留原样。改为 `is_ascii_hexdigit` 白名单先行判定，非法序列保留原样（对齐 PHP `urldecode` 语义）；新增回归测试 `test_url_decode_plus_sign_not_hex`（`"100%+1"` 旧实现必失败）
 - 新增回归测试：`test_key_rotation_zero_interval_clamped_to_default`、`test_key_rotation_old_token_verifiable_after_rotation`（轮换后旧密钥 token 在 grace period 内可验证）
-- 验证：`cargo test -p sz-rust-mvc-facade` → **414 lib + 12 integration + 8 doctest 全部通过**；fmt/clippy 0 error
+- 验证：`cargo test -p sz-rust-mvc-facade` → **414 lib + 12 integration + 8 doctest 全部通过**；`cargo test -p sz-rust-http-facade` → **168 全部通过**；fmt/clippy 0 error
 
 ## [Unreleased] - 2026-09-20（审计链修正）
 

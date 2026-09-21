@@ -267,8 +267,18 @@ pub fn url_decode(s: &str) -> String {
                 let h1 = chars.next();
                 let h2 = chars.next();
                 if let (Some(a), Some(b)) = (h1, h2) {
-                    if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
-                        bytes.push(byte);
+                    // 十六进制字符白名单（OCR 审查 2026-09-20 发现 #5）：不用
+                    // from_str_radix 判定——它接受前导 '+'，"%+1" 会被解码为
+                    // 0x01 控制字节而非按非法序列保留原样
+                    if a.is_ascii_hexdigit() && b.is_ascii_hexdigit() {
+                        if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
+                            bytes.push(byte);
+                        } else {
+                            // 不可达（白名单已保证合法十六进制），保留原样兜底
+                            bytes.push(b'%');
+                            push_char_utf8(&mut bytes, a);
+                            push_char_utf8(&mut bytes, b);
+                        }
                     } else {
                         // 非法十六进制：保留原样
                         bytes.push(b'%');
@@ -381,6 +391,16 @@ mod tests {
         assert_eq!(url_decode("hello%20world"), "hello world");
         assert_eq!(url_decode("a%40b"), "a@b");
         assert_eq!(url_decode("a+b"), "a b");
+    }
+
+    #[test]
+    fn test_url_decode_plus_sign_not_hex() {
+        // OCR 审查 2026-09-20 回归（发现 #5）：u8::from_str_radix 接受前导 '+'，
+        // "%+1" 旧实现解码为 0x01 控制字节；修复后按非法十六进制保留原样
+        assert_eq!(url_decode("100%+1"), "100%+1");
+        assert_eq!(url_decode("%+1%2B"), "%+1+");
+        // 对照：合法十六进制不受影响
+        assert_eq!(url_decode("%2B"), "+");
     }
 
     #[test]
