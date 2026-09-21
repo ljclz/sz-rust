@@ -656,7 +656,9 @@ pub trait AddonsBaseController: BaseController {
     /// - `Ok(Some(UserInfo))`：JWT 验证成功，返回用户信息
     /// - `Ok(None)`：无 token、token 为空、签名密钥未配置或验证失败
     ///   （调用方根据 route_uri 决定是否抛错，对齐 PHP `if (!$token)` 分支）
-    /// - `Err(String)`：JWT 解析过程中出现异常（如格式错误）
+    /// - `Err(String)`：仅内部实现异常时出现；token 格式错误/签名失败一律返回
+    ///   `Ok(None)`（OCR 审查 2026-09-20：原文档"格式错误返回 Err"与实现不符，
+    ///   非法格式路径有回归测试 `test_addons_get_token_invalid_format_returns_none`）
     fn get_token(&self, authorization: Option<&str>) -> Result<Option<UserInfo>, String> {
         // 委托给 verify_token_with_config，使用全局 JWT_CONFIG
         // 抽取独立函数便于单元测试注入不同配置（避免 once_cell 一次性初始化限制）
@@ -680,6 +682,12 @@ use std::time::Duration;
 ///
 /// 支持多密钥并存验证：当前密钥签发/验证，旧密钥在 grace period 内仍可验证。
 /// 轮换任务定期生成新密钥，旧密钥移入 previous 列表，超期后删除。
+///
+/// 与全局 `JWT_CONFIG`（`SZ_JWT_SECRET`）的关系（OCR 审查 2026-09-20 裁定）：
+/// **两套独立密钥体系**——`get_token`/`verify_token_with_config` 只消费
+/// `JWT_CONFIG`，从不读本管理器；本管理器面向需要密钥轮换的部署自行接线
+/// （`Arc::new(KeyRotation::from_env())` + `spawn_rotation_task`）。
+/// 二者密钥空间不相交，同时启用是合法配置。
 pub struct KeyRotation {
     /// 当前签名密钥
     current: RwLock<String>,
@@ -723,7 +731,8 @@ impl KeyRotation {
     /// 从环境变量创建密钥轮换管理器
     ///
     /// - `SZ300_JWT_SECRET`（必填）：当前密钥
-    /// - `SZ300_JWT_ROTATION_INTERVAL`：轮换间隔秒数（默认 86400 = 24h）
+    /// - `SZ300_JWT_ROTATION_INTERVAL`：轮换间隔秒数（默认 86400 = 24h；**零值非法**，
+    ///   会使 [`tokio::time::interval`] panic，解析为 0 时回退默认并告警）
     /// - `SZ300_JWT_GRACE_PERIOD`：宽限期秒数（默认 3600 = 1h）
     pub fn from_env() -> Result<Self, KeyRotationError> {
         let current =
@@ -737,6 +746,14 @@ impl KeyRotation {
             .and_then(|s| s.parse().ok())
             .map(Duration::from_secs)
             .unwrap_or(Duration::from_secs(86400));
+        // 零值防御（OCR 审查 2026-09-20）：tokio::time::interval 对零周期 panic，
+        // 且 panic 发生在 spawn 的任务内会静默杀死轮换（绕过下方 tracing::error）
+        let rotation_interval = if rotation_interval.is_zero() {
+            tracing::warn!("SZ300_JWT_ROTATION_INTERVAL=0 非法，回退默认 86400s");
+            Duration::from_secs(86400)
+        } else {
+            rotation_interval
+        };
 
         let grace_period = std::env::var("SZ300_JWT_GRACE_PERIOD")
             .ok()
@@ -754,12 +771,21 @@ impl KeyRotation {
     }
 
     /// 直接构造（用于测试或显式配置）
+    ///
+    /// 零 `rotation_interval` 会被钳制为默认 86400s（OCR 审查 2026-09-20：
+    /// 零周期会使 [`tokio::time::interval`] panic，保证本类型 `rotation_interval`
+    /// 恒非零）。`grace_period = 0` 合法，语义为"无宽限期"。
     pub fn new(
         current: String,
         rotation_interval: Duration,
         grace_period: Duration,
         max_previous: usize,
     ) -> Self {
+        let rotation_interval = if rotation_interval.is_zero() {
+            Duration::from_secs(86400)
+        } else {
+            rotation_interval
+        };
         Self {
             current: RwLock::new(current),
             previous: RwLock::new(Vec::new()),
@@ -844,24 +870,25 @@ impl KeyRotation {
         let now = std::time::Instant::now();
         let expires_at = now + grace_period;
 
-        // 旧 current 移入 previous，新密钥成为 current
+        // 旧 current 移入 previous，新密钥成为 current。
+        // 单锁域原子完成两处更新（OCR 审查 2026-09-20）：此前分两个锁域，current
+        // 已切换而旧密钥尚未入 previous 的窗口内，并发 verify 会把轮换前一刻签发的
+        // token 误判 InvalidToken（grace period 失效）。本处是唯一同时持双锁的位置，
+        // verify 均单锁顺序获取，无锁序死锁风险
         let old_current = {
             let mut current = self.current.write();
+            let mut previous = self.previous.write();
             let old = current.clone();
             *current = new_key.clone();
-            old
-        };
-
-        {
-            let mut previous = self.previous.write();
-            previous.push((old_current.clone(), expires_at));
+            previous.push((old.clone(), expires_at));
             // 超出 max_previous 的旧密钥删除
             while previous.len() > max_previous {
                 previous.remove(0);
             }
             // 删除已过期的旧密钥
             previous.retain(|(_, exp)| now < *exp);
-        }
+            old
+        };
 
         let old_fp = Self::fingerprint(&old_current);
         let new_fp = Self::fingerprint(&new_key);
@@ -2255,6 +2282,56 @@ mod tests {
     // **不存在** audience 校验；此前 `SZ_JWT_AUDIENCE` 被加载进配置但 verify 从不
     // 消费（no-op 假安全感），已移除该配置。aud 校验待 sz-orm-auth JwtClaims
     // 增加 `aud` 字段后恢复（doc-debt DB-2026-09-21-01）。
+
+    // ========================================================================
+    // OCR 冒烟回归（2026-09-20 发现，2026-09-21 修复）：KeyRotation
+    // ========================================================================
+
+    /// 零轮换间隔必须在构造时钳制为默认 86400s——tokio::time::interval 对零
+    /// 周期 panic，且 panic 发生在 spawn 的任务内会静默杀死轮换任务
+    ///（绕过 tracing::error）
+    #[test]
+    fn test_key_rotation_zero_interval_clamped_to_default() {
+        let kr = KeyRotation::new(
+            "test-secret-32-bytes-aaaaaaaaaaaaaa".to_string(),
+            Duration::ZERO,
+            Duration::from_secs(3600),
+            3,
+        );
+        assert_eq!(
+            kr.rotation_interval,
+            Duration::from_secs(86400),
+            "零轮换间隔应钳制为默认 86400s"
+        );
+    }
+
+    /// 轮换后旧密钥签发的 token 在 grace period 内仍可验证。do_rotation 以单锁域
+    /// 原子完成 current 切换与 previous 入列；并发窗口本身无法在单测中确定性
+    /// 复现，此处验证结果行为
+    #[tokio::test]
+    async fn test_key_rotation_old_token_verifiable_after_rotation() {
+        let kr = KeyRotation::new(
+            "old-secret-32-bytes-aaaaaaaaaaaaaaa".to_string(),
+            Duration::from_secs(86400),
+            Duration::from_secs(3600),
+            3,
+        );
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_rust_orm_facade::jwt::JwtClaims::new("user1", exp).with_user_id(1);
+        let old_token = kr.sign_token(&claims).unwrap();
+
+        kr.do_rotation(Duration::from_secs(3600), 3).await.unwrap();
+
+        let verified = kr.verify_token(&old_token);
+        assert!(
+            verified.is_ok(),
+            "轮换后旧密钥 token 应在 grace period 内可验证: {verified:?}"
+        );
+    }
 
     // ========================================================================
     // P1-SEC-12：JwtConfig Debug 实现不泄漏 secret

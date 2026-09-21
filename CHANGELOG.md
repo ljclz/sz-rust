@@ -12,6 +12,13 @@
 - **JWT audience 配置假安全感修复**（OCR 冒烟发现，docs/audit/2026-09-20-opencodereview-冒烟报告.md 遗留 #1）：`SZ_JWT_AUDIENCE` 此前被加载进 `JwtConfig` 但 `verify_token_with_config` 从不消费——设置了该变量的部署会误以为 aud 校验已生效。因 sz-orm-auth `JwtClaims`（7.6.0）无 `aud` 字段、框架层无法校验，本次移除该 no-op 配置并如实标注（`JwtConfig` 删字段 + Debug 实现同步 + 模块头/struct/加载处注释改为"本框架不存在任何 audience 校验"）；删除依赖该字段的 `test_p1_sec_10_skips_audience_check_when_not_configured`（其前提已不存在）。真校验待上游补字段——登记 doc-debt DB-2026-09-21-01（2026-10-21 限）
 - **strip_bearer_prefix 多字节 panic 修复**（OCR 冒烟发现，遗留 #2）：`&trimmed[..6]` 字节切片在 byte 6 落于多字节字符内部时 panic（本函数接受任意 `&str`，调用方不保证 ASCII）。改为 `trimmed.get(..6)`（不匹配时原样返回，行为向后兼容），新增回归测试 `test_strip_bearer_prefix_multibyte_no_panic`（`"aa北北xyz"` 用例，byte 6 为第二个"北"中间字节）
 - 验证：`cargo test -p sz-rust-mvc-facade` → **412 lib + 12 integration + 8 doctest 全部通过**（0 failed）
+- **KeyRotation 零间隔 panic 修复**（OCR 冒烟发现 #4）：`SZ300_JWT_ROTATION_INTERVAL=0` 会构造零周期 `Duration`，`tokio::time::interval` 对零周期 panic 且发生在 spawn 的任务内会静默杀死轮换（绕过 tracing::error）。`from_env` 解析为 0 时回退默认 86400s 并 tracing::warn；`new()` 同步钳制，保证 `rotation_interval` 恒非零（`grace_period=0` 合法，语义"无宽限期"）
+- **do_rotation 轮换窗口修复**（发现 #6）：current 切换与旧密钥入 previous 此前分两个锁域，窗口内并发 verify 会把轮换前一刻签发的 token 误判 InvalidToken（grace period 失效）。合并为单锁域原子完成（本处为唯一双锁位置，verify 均单锁顺序获取，无锁序死锁）
+- **get_token 文档失实修正**（发现 #7）：原文档承诺"格式错误返回 Err"与实现不符（非法格式一律 `Ok(None)`，有回归测试），如实标注
+- **KeyRotation 双体系关系文档化**（发现 #9 裁定：不重构，文档如实标注）：`get_token`/`verify_token_with_config` 只消费 `JWT_CONFIG`，KeyRotation 为独立可选体系（面向需要轮换的部署自行接线），二者密钥空间不相交
+- **字符串错误类型裁定不采纳**（发现 #8）：`fetch_post_data -> Result<Value, String>` 等属项目既有 API 设计（facade 边界简洁错误传递），改 typed error = 公共 API breaking change，LOW 级收益不成比例；留待 facade API 大版本演进时统一处理
+- 新增回归测试：`test_key_rotation_zero_interval_clamped_to_default`、`test_key_rotation_old_token_verifiable_after_rotation`（轮换后旧密钥 token 在 grace period 内可验证）
+- 验证：`cargo test -p sz-rust-mvc-facade` → **414 lib + 12 integration + 8 doctest 全部通过**；fmt/clippy 0 error
 
 ## [Unreleased] - 2026-09-20（审计链修正）
 
