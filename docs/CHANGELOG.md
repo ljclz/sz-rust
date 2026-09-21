@@ -21,8 +21,8 @@
 
 - **sz-rust-capability**: 37 → 58 测试（+21），行覆盖率 **91.45%** ✅ 达标 90%（commit `18fcc03`, `d416e93`）
 - **sz-rust-marketplace**: 53 → 96 测试（+43），行覆盖率 **77.41%** ❌ 未达标（commit `18fcc03`, `d65ea3f`, `0a6d7eb`）
-  - repository.rs 0% → 95.55%（7 个 PG 集成测试，SSH 隧道第二台服务器）
-  - service.rs 0% → 67.14%（9 个 PG 集成测试，MockObjectStore + 真实 PG）
+  - repository.rs 0% → 95.55%（7 个 PG 集成测试，SSH 隧道第二台服务器 PostgreSQL 18）
+  - service.rs 0% → 67.14%（9 个 PG 集成测试，MockObjectStore + 真实 PG 18）
   - 已覆盖模块：error 100%、storage 97.92%、lockfile 95.96%、signature 98.72%、repository 95.55%
   - 未覆盖根因：client.rs 68.90%、web.rs 63.26%（需更多 HTTP 测试）、main.rs 0%（bin）
 - **sz-rust-cli**: 436 测试，行覆盖率 **83.51%** ❌ 未达标（含 --tests 集成测试）
