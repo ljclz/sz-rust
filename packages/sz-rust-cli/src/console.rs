@@ -352,4 +352,26 @@ mod tests {
         let commands = console.list();
         assert_eq!(commands.len(), 2, "应有两个注册命令");
     }
+
+    #[test]
+    fn test_print_list_output_empty() {
+        let console = Console::new();
+        console.print_list();
+    }
+
+    #[test]
+    fn test_print_list_output_with_commands() {
+        let mut console = Console::new();
+        console
+            .register(Box::new(HelloCommand))
+            .register(Box::new(EchoCommand));
+        console.print_list();
+    }
+
+    #[tokio::test]
+    async fn test_run_single_arg_falls_through() {
+        let console = Console::new();
+        let result = console.run(vec!["sz-rust".to_string()]).await;
+        assert!(result.is_ok());
+    }
 }

@@ -434,4 +434,46 @@ mod tests {
         let result = execute(&AdminCommand::Init(args)).await;
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_execute_migrate_offline_no_show_sql() {
+        let args = MigrateArgs {
+            db_type: "postgres".to_string(),
+            url: None,
+            show_sql: false,
+        };
+        let result = execute(&AdminCommand::Migrate(args)).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_route_row_tabled() {
+        let row = RouteRow {
+            method: "GET",
+            path: "/api/admin/users",
+            description: "用户列表",
+        };
+        let table = Table::new(vec![row]);
+        let s = table.to_string();
+        assert!(s.contains("GET"));
+        assert!(s.contains("/api/admin/users"));
+    }
+
+    #[test]
+    fn test_capability_row_tabled() {
+        let row = CapabilityRow {
+            name: "admin.user_list",
+            description: "用户列表查询",
+            tags: "user,query",
+        };
+        let table = Table::new(vec![row]);
+        let s = table.to_string();
+        assert!(s.contains("admin.user_list"));
+    }
+
+    #[test]
+    fn test_migration_sql_not_empty() {
+        assert!(!MIGRATION_SQL.is_empty());
+        assert!(MIGRATION_SQL.contains("CREATE TABLE"));
+    }
 }

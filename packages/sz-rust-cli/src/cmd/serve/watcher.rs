@@ -118,4 +118,63 @@ mod tests {
         let result = ConfigWatcher::start(Path::new("/nonexistent_path_xyz"), tx);
         assert!(result.is_err(), "不存在的目录应启动失败");
     }
+
+    #[tokio::test]
+    async fn test_spawn_reload_coordinator_valid_config() {
+        let temp_dir = tempfile::tempdir().expect("创建临时目录失败");
+        let config_path = temp_dir.path().join("server.yml");
+        let mut file = std::fs::File::create(&config_path).expect("创建配置文件失败");
+        writeln!(file, "host: 0.0.0.0\nport: 9090").unwrap();
+        drop(file);
+
+        let (tx, rx) = mpsc::channel::<PathBuf>(16);
+        let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
+        tx.send(config_path).await.unwrap();
+        drop(tx);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_spawn_reload_coordinator_invalid_config() {
+        let temp_dir = tempfile::tempdir().expect("创建临时目录失败");
+        let config_path = temp_dir.path().join("server.yml");
+        let mut file = std::fs::File::create(&config_path).expect("创建配置文件失败");
+        writeln!(file, "host: 0.0.0.0\nport: 9091").unwrap();
+        drop(file);
+
+        let (tx, rx) = mpsc::channel::<PathBuf>(16);
+        let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
+        tx.send(config_path).await.unwrap();
+        drop(tx);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_spawn_reload_coordinator_channel_closed() {
+        let temp_dir = tempfile::tempdir().expect("创建临时目录失败");
+        let (tx, rx) = mpsc::channel::<PathBuf>(16);
+        let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
+        drop(tx);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+    }
+
+    #[tokio::test]
+    async fn test_config_watcher_file_change_event() {
+        let temp_dir = tempfile::tempdir().expect("创建临时目录失败");
+        let config_path = temp_dir.path().join("server.yml");
+        let mut file = std::fs::File::create(&config_path).expect("创建配置文件失败");
+        writeln!(file, "host: 0.0.0.0\nport: 9090").unwrap();
+        drop(file);
+
+        let (tx, mut rx) = mpsc::channel::<PathBuf>(16);
+        let _watcher = ConfigWatcher::start(temp_dir.path(), tx).expect("watcher 启动失败");
+
+        let config_path2 = temp_dir.path().join("server.yml");
+        let mut file2 = std::fs::File::create(&config_path2).expect("创建配置文件失败");
+        writeln!(file2, "host: 0.0.0.0\nport: 9091").unwrap();
+        drop(file2);
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
+        assert!(result.is_ok(), "应在超时前收到文件变更事件");
+    }
 }

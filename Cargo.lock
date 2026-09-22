@@ -8451,6 +8451,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sqlx",
  "sz-orm-mssql",
  "sz-orm-oracle",
  "sz-orm-sqlx",

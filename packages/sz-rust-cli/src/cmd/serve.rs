@@ -358,3 +358,194 @@ async fn execute_async(
     }
     Ok(0)
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_args() -> ServeArgs {
+        ServeArgs {
+            with_admin: false,
+            with_tenant: false,
+            with_data_scope: false,
+            addr: "0.0.0.0:8080".to_string(),
+            watch_config: false,
+            workers: None,
+            grace_timeout: None,
+            tls_cert: None,
+            tls_key: None,
+            access_log: false,
+            health: true,
+        }
+    }
+
+    #[test]
+    fn test_validate_ok() {
+        assert!(default_args().validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_workers_zero() {
+        let mut args = default_args();
+        args.workers = Some(0);
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_workers_too_many() {
+        let mut args = default_args();
+        args.workers = Some(1025);
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_workers_max_ok() {
+        let mut args = default_args();
+        args.workers = Some(1024);
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_grace_timeout_too_large() {
+        let mut args = default_args();
+        args.grace_timeout = Some(301);
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_grace_timeout_max_ok() {
+        let mut args = default_args();
+        args.grace_timeout = Some(300);
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_tls_cert_only() {
+        let mut args = default_args();
+        args.tls_cert = Some(PathBuf::from("/tmp/cert.pem"));
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_tls_key_only() {
+        let mut args = default_args();
+        args.tls_key = Some(PathBuf::from("/tmp/key.pem"));
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_tls_both_ok() {
+        let mut args = default_args();
+        args.tls_cert = Some(PathBuf::from("/tmp/cert.pem"));
+        args.tls_key = Some(PathBuf::from("/tmp/key.pem"));
+        assert!(args.validate().is_ok());
+    }
+
+    #[test]
+    fn test_build_router_with_tenant_disabled() {
+        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
+        let _result = build_router_with_tenant(router, false);
+    }
+
+    #[test]
+    fn test_build_router_with_tenant_enabled() {
+        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
+        let _result = build_router_with_tenant(router, true);
+    }
+
+    #[test]
+    fn test_build_router_with_data_scope_disabled() {
+        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
+        let _result = build_router_with_data_scope(router, false);
+    }
+
+    #[test]
+    fn test_build_router_with_data_scope_enabled() {
+        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
+        let _result = build_router_with_data_scope(router, true);
+    }
+
+    fn make_conn(
+        r#type: &str,
+        hostname: &str,
+        port: u16,
+        database: &str,
+        username: &str,
+        password: &str,
+    ) -> sz_rust_core::config::DatabaseConnection {
+        sz_rust_core::config::DatabaseConnection {
+            r#type: r#type.to_string(),
+            hostname: hostname.to_string(),
+            database: database.to_string(),
+            username: username.to_string(),
+            password: password.to_string(),
+            hostport: port,
+            charset: "utf8mb4".to_string(),
+            prefix: String::new(),
+            deploy: 0,
+            rw_separate: false,
+            fields_strict: true,
+            break_reconnect: true,
+        }
+    }
+
+    #[test]
+    fn test_build_db_url_mysql() {
+        let conn = make_conn("mysql", "localhost", 3306, "testdb", "root", "pass");
+        let url = build_db_url(&conn);
+        assert_eq!(url, "mysql://root:pass@localhost:3306/testdb");
+    }
+
+    #[test]
+    fn test_build_db_url_postgres() {
+        let conn = make_conn("postgres", "localhost", 5432, "testdb", "user", "pass");
+        let url = build_db_url(&conn);
+        assert_eq!(url, "postgres://user:pass@localhost:5432/testdb");
+    }
+
+    #[test]
+    fn test_build_db_url_pgsql_alias() {
+        let conn = make_conn("pgsql", "localhost", 5432, "testdb", "user", "pass");
+        let url = build_db_url(&conn);
+        assert_eq!(url, "postgres://user:pass@localhost:5432/testdb");
+    }
+
+    #[test]
+    fn test_build_db_url_sqlite() {
+        let conn = make_conn("sqlite", "localhost", 0, "test.db", "", "");
+        let url = build_db_url(&conn);
+        assert_eq!(url, "sqlite://:@localhost:0/test.db");
+    }
+
+    #[test]
+    fn test_build_db_url_unknown_driver() {
+        let conn = make_conn("custom_driver", "host", 1234, "db", "u", "p");
+        let url = build_db_url(&conn);
+        assert_eq!(url, "custom_driver://u:p@host:1234/db");
+    }
+
+    #[test]
+    fn test_acquire_admin_roles_default() {
+        let _lock = super::super::test_support::acquire_global_lock();
+        std::env::remove_var("SZ_RUST_ADMIN_ROLES");
+        let roles = acquire_admin_roles();
+        assert_eq!(roles, vec!["super_admin".to_string()]);
+    }
+
+    #[test]
+    fn test_acquire_admin_roles_from_env() {
+        let _lock = super::super::test_support::acquire_global_lock();
+        std::env::set_var("SZ_RUST_ADMIN_ROLES", "admin,super_admin,guest");
+        let roles = acquire_admin_roles();
+        assert_eq!(roles, vec!["admin", "super_admin", "guest"]);
+        std::env::remove_var("SZ_RUST_ADMIN_ROLES");
+    }
+
+    #[test]
+    fn test_acquire_admin_roles_single() {
+        let _lock = super::super::test_support::acquire_global_lock();
+        std::env::set_var("SZ_RUST_ADMIN_ROLES", "only_one");
+        let roles = acquire_admin_roles();
+        assert_eq!(roles, vec!["only_one".to_string()]);
+        std::env::remove_var("SZ_RUST_ADMIN_ROLES");
+    }
+}

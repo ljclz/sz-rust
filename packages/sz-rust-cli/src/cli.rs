@@ -726,12 +726,65 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_plugin_list() {
+    async fn test_execute_plugin_login_without_token() {
         let cli = Cli {
             command: Some(Command::Plugin {
-                plugin_command: cmd::plugin::PluginCommand::List,
+                plugin_command: cmd::plugin::PluginCommand::Login(cmd::plugin::LoginArgs {
+                    token: None,
+                    url: None,
+                }),
             }),
         };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 1);
+    }
+
+    #[tokio::test]
+
+    async fn test_execute_serve_reload() {
+        let cli = Cli {
+            command: Some(Command::ServeReload),
+        };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_serve_log_level() {
+        let cli = Cli {
+            command: Some(Command::ServeLogLevel),
+        };
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_admin_via_parse_list_routes() {
+        let cli = Cli::parse_from(["sz-rust", "admin", "list-routes"]);
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_admin_via_parse_list_capabilities() {
+        let cli = Cli::parse_from(["sz-rust", "admin", "list-capabilities"]);
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_admin_via_parse_migrate_offline() {
+        let cli = Cli::parse_from(["sz-rust", "admin", "migrate", "--show-sql"]);
+        let result = cli.execute().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_admin_via_parse_init_offline() {
+        let cli = Cli::parse_from(["sz-rust", "admin", "init"]);
         let result = cli.execute().await;
         assert!(result.is_ok());
     }

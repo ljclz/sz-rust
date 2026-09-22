@@ -154,4 +154,55 @@ mod tests {
         assert!(failures.is_empty());
         assert!(!file.exists());
     }
+
+    #[tokio::test]
+    async fn test_check_simple_project_success() {
+        let temp = tempfile::tempdir().expect("tempdir failed");
+        tokio::fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"test_proj\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::create_dir_all(temp.path().join("src"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            temp.path().join("src/main.rs"),
+            "fn main() { println!(\"hello\"); }\n",
+        )
+        .await
+        .unwrap();
+
+        let result = CargoChecker::check(temp.path()).await;
+        assert!(result.is_ok(), "cargo check 应成功: {:?}", result.err());
+        let check_result = result.unwrap();
+        assert!(check_result.success, "简单项目应编译成功");
+    }
+
+    #[tokio::test]
+    async fn test_check_project_with_compile_error() {
+        let temp = tempfile::tempdir().expect("tempdir failed");
+        tokio::fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"test_err\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::create_dir_all(temp.path().join("src"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            temp.path().join("src/main.rs"),
+            "fn main() { let x: i32 = \"not a number\"; }\n",
+        )
+        .await
+        .unwrap();
+
+        let result = CargoChecker::check(temp.path()).await;
+        assert!(result.is_ok(), "cargo check 应返回结果: {:?}", result.err());
+        let check_result = result.unwrap();
+        assert!(!check_result.success, "有编译错误时 success 应为 false");
+        assert!(!check_result.errors.is_empty(), "应捕获编译错误");
+    }
 }

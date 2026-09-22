@@ -278,4 +278,31 @@ mod tests {
         let result = InputValidator::validate_foreign_key("", &fields);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_validate_plugin_name_too_long() {
+        let name = "a".repeat(65);
+        let result = InputValidator::validate_plugin_name(&name);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exceeds 64"));
+    }
+
+    #[test]
+    fn test_validate_plugin_name_max_length_ok() {
+        let name = "a".repeat(64);
+        let result = InputValidator::validate_plugin_name(&name);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_plugin_name_with_dollar() {
+        let result = InputValidator::validate_plugin_name("bad$name");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_fields_with_dollar() {
+        let result = InputValidator::validate_fields("id:i32:pk$");
+        assert!(result.is_err());
+    }
 }

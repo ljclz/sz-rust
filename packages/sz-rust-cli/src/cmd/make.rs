@@ -1697,4 +1697,400 @@ mod tests {
         let model_path = temp_dir.path().join("app/model/Post.rs");
         assert!(model_path.exists());
     }
+
+    // ---------- make:plugin 测试 ----------
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_crud() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-crud".to_string(),
+            name: "test_plugin".to_string(),
+            table: Some("test_table".to_string()),
+            fields: Some("id:i32:pk,name:String".to_string()),
+            force: false,
+            output: Some(
+                temp_dir
+                    .path()
+                    .join("myplugin")
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        // 生成后 cargo check 因无 Cargo.toml 失败，回滚
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "无 Cargo.toml 应失败");
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("Cargo.toml") || err.contains("CompileFailed"),
+            "应含编译失败: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_workflow() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-workflow".to_string(),
+            name: "wf_plugin".to_string(),
+            table: None,
+            fields: Some("id:i32:pk,title:String".to_string()),
+            force: false,
+            output: Some(
+                temp_dir
+                    .path()
+                    .join("wfplugin")
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "无 Cargo.toml 应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_report() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-report".to_string(),
+            name: "rpt_plugin".to_string(),
+            table: None,
+            fields: Some("id:i32:pk,data:String".to_string()),
+            force: false,
+            output: Some(
+                temp_dir
+                    .path()
+                    .join("rptplugin")
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "无 Cargo.toml 应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_dir_exists_no_force() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_dir = temp_dir.path().join("existing_plugin");
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-crud".to_string(),
+            name: "existing".to_string(),
+            table: None,
+            fields: Some("id:i32:pk".to_string()),
+            force: false,
+            output: Some(output_dir.to_string_lossy().to_string()),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(matches!(result, Err(CliError::DirExists(_))));
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_force_overwrite() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_dir = temp_dir.path().join("force_plugin");
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-crud".to_string(),
+            name: "forced".to_string(),
+            table: None,
+            fields: Some("id:i32:pk".to_string()),
+            force: true,
+            output: Some(output_dir.to_string_lossy().to_string()),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "无 Cargo.toml 应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_invalid_name() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "plugin-crud".to_string(),
+            name: "InvalidName".to_string(),
+            table: None,
+            fields: None,
+            force: false,
+            output: Some(temp_dir.path().join("bad").to_string_lossy().to_string()),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "大写插件名应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_plugin_invalid_template() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = crate::context_builder::PluginCommandArgs {
+            template: "nonexistent".to_string(),
+            name: "test_plug".to_string(),
+            table: None,
+            fields: None,
+            force: false,
+            output: Some(temp_dir.path().join("bad").to_string_lossy().to_string()),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute_make_plugin(args).await;
+        assert!(result.is_err(), "不存在的模板应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_dispatch_plugin() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+
+        let cmd = MakeCommand::Plugin {
+            template: "plugin-crud".to_string(),
+            name: "dispatched".to_string(),
+            table: None,
+            fields: Some("id:i32:pk".to_string()),
+            force: false,
+            output: Some(temp_dir.path().join("disp").to_string_lossy().to_string()),
+            master: None,
+            slave: None,
+            master_fields: None,
+            slave_fields: None,
+            foreign_key: None,
+        };
+        let result = execute(&cmd).await;
+        assert!(result.is_err(), "无 Cargo.toml 应失败");
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_invalid_framework() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let result = execute_make_frontend(
+            &["User".to_string()],
+            "src/model/",
+            "invalid_framework",
+            "element_plus",
+            "./frontend/",
+            None,
+            "skip",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("不支持的前端框架"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_invalid_ui() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let result = execute_make_frontend(
+            &["User".to_string()],
+            "src/model/",
+            "vue",
+            "invalid_ui",
+            "./frontend/",
+            None,
+            "skip",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("不支持的 UI 库"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_invalid_override_strategy() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let result = execute_make_frontend(
+            &["User".to_string()],
+            "src/model/",
+            "vue",
+            "element_plus",
+            "./frontend/",
+            None,
+            "invalid_strategy",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("不支持的覆盖策略"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_vue_element_plus() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let model_dir = temp_dir.path().join("src/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("User.rs"),
+            "#[derive(Model)]\npub struct User { pub id: i32, pub name: String }",
+        )
+        .unwrap();
+        let output = temp_dir
+            .path()
+            .join("frontend")
+            .to_string_lossy()
+            .to_string();
+        let result = execute_make_frontend(
+            &["User".to_string()],
+            &model_dir.to_string_lossy(),
+            "vue",
+            "element_plus",
+            &output,
+            None,
+            "skip",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_ok(), "vue+element_plus 应成功: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_react_ant_design() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let model_dir = temp_dir.path().join("src/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("Product.rs"),
+            "#[derive(Model)]\npub struct Product { pub id: i32, pub name: String }",
+        )
+        .unwrap();
+        let output = temp_dir
+            .path()
+            .join("frontend")
+            .to_string_lossy()
+            .to_string();
+        let result = execute_make_frontend(
+            &["Product".to_string()],
+            &model_dir.to_string_lossy(),
+            "react",
+            "ant_design_vue",
+            &output,
+            None,
+            "overwrite",
+            true,
+            true,
+            false,
+            true,
+        )
+        .await;
+        assert!(result.is_ok(), "react+ant_design_vue 应成功: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_element_plus_hyphen() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let model_dir = temp_dir.path().join("src/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("Order.rs"),
+            "#[derive(Model)]\npub struct Order { pub id: i32 }",
+        )
+        .unwrap();
+        let output = temp_dir
+            .path()
+            .join("frontend")
+            .to_string_lossy()
+            .to_string();
+        let result = execute_make_frontend(
+            &["Order".to_string()],
+            &model_dir.to_string_lossy(),
+            "vue",
+            "element-plus",
+            &output,
+            None,
+            "merge",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(result.is_ok(), "element-plus (hyphen) 应成功: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_execute_make_frontend_ant_design_hyphen() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _guard = CwdGuard::switch(temp_dir.path()).unwrap();
+        let model_dir = temp_dir.path().join("src/model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("Item.rs"),
+            "#[derive(Model)]\npub struct Item { pub id: i32 }",
+        )
+        .unwrap();
+        let output = temp_dir
+            .path()
+            .join("frontend")
+            .to_string_lossy()
+            .to_string();
+        let result = execute_make_frontend(
+            &["Item".to_string()],
+            &model_dir.to_string_lossy(),
+            "vue",
+            "ant-design-vue",
+            &output,
+            None,
+            "skip",
+            false,
+            false,
+            true,
+            false,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "ant-design-vue (hyphen) 应成功: {:?}",
+            result
+        );
+    }
 }

@@ -77,6 +77,7 @@ tower = { workspace = true }
 http = "1"
 http-body-util = "0.1"
 sz-rust-orm-facade = { workspace = true }
+sqlx = { workspace = true }
 
 sz-rust-addons-loader = { workspace = true }
 async-trait.workspace = true

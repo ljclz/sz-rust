@@ -956,4 +956,65 @@ mod tests {
             Ok(_) => panic!("MSSQL 连接应失败"),
         }
     }
+
+    #[test]
+    fn test_migrations_table_name_postgres() {
+        assert_eq!(migrations_table_name(DbType::PostgreSQL), "__migrations");
+    }
+
+    #[test]
+    fn test_migrations_table_name_mysql() {
+        assert_eq!(migrations_table_name(DbType::MySQL), "__migrations");
+    }
+
+    #[test]
+    fn test_migrations_table_name_sqlite() {
+        assert_eq!(migrations_table_name(DbType::Sqlite), "__migrations");
+    }
+
+    #[test]
+    fn test_migrations_table_name_oracle() {
+        assert_eq!(migrations_table_name(DbType::Oracle), "\"__migrations\"");
+    }
+
+    #[test]
+    fn test_migrations_table_name_mssql() {
+        assert_eq!(migrations_table_name(DbType::SqlServer), "__migrations");
+    }
+
+    #[test]
+    fn test_prepare_sql_for_db_postgres() {
+        let sql = "CREATE TABLE users (id INT);";
+        assert_eq!(prepare_sql_for_db(sql, DbType::PostgreSQL), sql);
+    }
+
+    #[test]
+    fn test_prepare_sql_for_db_oracle_strips_semicolon() {
+        let sql = "CREATE TABLE users (id INT);";
+        assert_eq!(
+            prepare_sql_for_db(sql, DbType::Oracle),
+            "CREATE TABLE users (id INT)"
+        );
+    }
+
+    #[test]
+    fn test_prepare_sql_for_db_oracle_no_semicolon() {
+        let sql = "CREATE TABLE users (id INT)";
+        assert_eq!(prepare_sql_for_db(sql, DbType::Oracle), sql);
+    }
+
+    #[test]
+    fn test_prepare_sql_for_db_oracle_trailing_whitespace() {
+        let sql = "CREATE TABLE users (id INT);  \n";
+        assert_eq!(
+            prepare_sql_for_db(sql, DbType::Oracle),
+            "CREATE TABLE users (id INT)"
+        );
+    }
+
+    #[test]
+    fn test_prepare_sql_for_db_mysql_no_change() {
+        let sql = "CREATE TABLE users (id INT);";
+        assert_eq!(prepare_sql_for_db(sql, DbType::MySQL), sql);
+    }
 }

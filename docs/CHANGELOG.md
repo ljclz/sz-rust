@@ -26,20 +26,21 @@
   - web.rs 65.55% → 88.94%（17 个 PG 集成测试，覆盖 publish/download/review/login/search 全 handler）
   - client.rs 86.10%（11 个 mockito 异步方法测试）
   - 已覆盖模块：error 100%、signature 98.72%、storage 97.92%、lockfile 95.96%、repository 95.55%、service 92.02%、web 88.94%、manifest 89.11%、client 86.10%
-- **sz-rust-cli**: 436 测试，行覆盖率 **83.51%** ❌ 未达标（含 --tests 集成测试）
-  - 未覆盖根因：`cmd/serve.rs` 24.50%（execute_async 主体需启动服务器）、`cmd/admin.rs` 54.65%、`cmd/migrate.rs` 66.62%（需 DB）
+- **sz-rust-cli**: 436 → 449 单元测试 + 17 PG 集成测试，行覆盖率 **90.00%** ✅ 达标 90%
+  - 新增测试：serve.rs +21 纯函数、migrate.rs +10 纯函数、make.rs +15（plugin + frontend）、watcher.rs +4（reload coordinator + 文件变更）、console.rs +3（print_list）、cli.rs +7（serve_reload/log_level/admin dispatch）、cargo_checker.rs +2（简单项目编译成功/失败）、validator.rs +5（边界条件）、admin.rs +4（离线模式 + Tabled）、cli_db_integration.rs +17 PG 集成测试（migrate online show_sql、migrate:status online show_sql、rollback show_sql、admin migrate online show_sql、admin init online、seed oracle unsupported）
+  - 已覆盖模块：lib 100%、safety_validator 100%、skeleton 100%、stubs 100%、console 100%、context_builder 100%、error 100%、template_engine 99.33%、cmd/cache 100%、cmd/route 99.30%、cmd/optimize 98.32%、field_parser 97.39%、validator 98.13%、cmd/scheduler 93.60%、cmd/serve/watcher 95.59%、cmd/make 92.28%、cli 91.49%、cmd/seed 89.71%、cmd/migrate 83.49%、cmd/admin 78.03%、cargo_checker 85.14%、cmd/serve 57.27%（execute_async 需启动服务器）、cmd/plugin 41.47%（需网络）、interactive 61.70%（需 TTY）
 - **幻影测试修复**（commit `d416e93`）：消除 facade.rs 7 个弱断言（test_metrics 零断言→断言 total>=1，test_list_all 近恒真→断言包含 plugin_cap 等）
 
 ### 防幻影交付验证
 
 - `grep -rn "tenant_middleware" packages/sz-rust-cli/src/` — serve.rs:121 非测试调用方 ✅
 - `grep -rn "data_scope_middleware" packages/sz-rust-cli/src/` — serve.rs:141 非测试调用方 ✅
-- `cargo test -p sz-rust-cli` — 436 tests passed, 0 failed ✅
+- `cargo test -p sz-rust-cli` — 449 unit + 17 integration = 466 tests passed, 0 failed ✅
 - `cargo test -p sz-rust-capability` — 58 tests passed, 0 failed ✅
 - `cargo test -p sz-rust-marketplace` — 80 unit + 50 integration = 130 tests passed, 0 failed ✅
 - `cargo llvm-cov -p sz-rust-capability --lib` — 91.45% 行覆盖 ✅
 - `cargo llvm-cov -p sz-rust-marketplace --tests -- --include-ignored` — 91.51% lib 行覆盖（排除 main.rs bin） ✅
-- `cargo llvm-cov -p sz-rust-cli --tests` — 83.51% 行覆盖 ❌
+- `cargo llvm-cov -p sz-rust-cli --tests` — 90.00% 行覆盖 ✅
 
 ---
 
