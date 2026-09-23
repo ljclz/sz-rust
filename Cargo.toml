@@ -41,6 +41,8 @@ members = [
     "packages/sz-rust-facade",
 
     "packages/sz-rust-config-center",
+
+    "packages/sz-rust-service-registry",
 ]
 
 [workspace.package]
@@ -235,6 +237,7 @@ sz-rust-visual = { version = "1.2.0", path = "packages/sz-rust-visual" }
 sz-rust-addons-admin = { version = "1.2.0", path = "packages/sz-rust-addons-admin" }
 sz-rust-facade = { version = "1.2.0", path = "packages/sz-rust-facade" }
 sz-rust-config-center = { version = "1.2.0", path = "packages/sz-rust-config-center" }
+sz-rust-service-registry = { version = "1.2.0", path = "packages/sz-rust-service-registry" }
 
 
 # Ed25519 签名（P3-T2 插件市场）
