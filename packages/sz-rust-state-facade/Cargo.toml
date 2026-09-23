@@ -19,11 +19,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+notify = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 futures = { workspace = true }
 criterion = { workspace = true }
+tower = { workspace = true }
 
 [[bench]]
 name = "event_bench"

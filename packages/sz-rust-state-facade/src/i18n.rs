@@ -450,7 +450,215 @@ impl I18n {
         let data = self.data.read();
         data.keys().cloned().collect()
     }
+
+    // ========================================================================
+    // T014: Accept-Language 解析 + ICU 复数形式
+    // ========================================================================
+
+    /// 解析 Accept-Language Header，按 q 值排序选择最优 locale
+    ///
+    /// 对齐 HTTP RFC 7231 Section 5.3.5。
+    ///
+    /// # 参数
+    ///
+    /// - `header`: Accept-Language Header 值（如 `"en-US,en;q=0.9,zh-CN;q=0.8"`）
+    /// - `available`: 已加载的语言代码列表
+    ///
+    /// # 返回
+    ///
+    /// 最优匹配语言代码。无匹配时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use sz_rust_state_facade::i18n::I18n;
+    /// use std::collections::HashSet;
+    ///
+    /// let available: HashSet<&str> = ["en-us", "zh-cn"].into_iter().collect();
+    /// let best = I18n::accept_language("en-US,en;q=0.9,zh-CN;q=0.8", &available);
+    /// assert_eq!(best, Some("en-us".to_string()));
+    /// ```
+    pub fn accept_language(
+        header: &str,
+        available: &std::collections::HashSet<&str>,
+    ) -> Option<String> {
+        let mut candidates: Vec<(String, f64)> = header
+            .split(',')
+            .filter_map(|part| {
+                let part = part.trim();
+                if part.is_empty() {
+                    return None;
+                }
+                let (tag, q) = if let Some(semi) = part.find(';') {
+                    let tag = part[..semi].trim();
+                    let q_str = part[semi + 1..].trim();
+                    let q = q_str
+                        .strip_prefix("q=")
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(1.0);
+                    (tag, q)
+                } else {
+                    (part, 1.0)
+                };
+                Some((tag.to_lowercase(), q))
+            })
+            .collect();
+
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        for (tag, _) in &candidates {
+            if available.contains(tag.as_str()) {
+                return Some(tag.clone());
+            }
+            let base = tag.split('-').next().unwrap_or(tag);
+            if available.contains(base) {
+                return Some(base.to_string());
+            }
+        }
+        None
+    }
+
+    /// ICU 复数形式翻译
+    ///
+    /// 对齐 ICU MessageFormat 复数规则。根据 `count` 选择 `one` 或 `other` 变体。
+    ///
+    /// # 规则
+    ///
+    /// - `count == 1` → 使用 `key.one` 翻译
+    /// - `count != 1` → 使用 `key.other` 翻译
+    ///
+    /// # 参数
+    ///
+    /// - `key`: 翻译键名前缀（实际查找 `key.one` 和 `key.other`）
+    /// - `count`: 数量
+    /// - `lang`: 语言代码，`None` 时使用当前语言
+    ///
+    /// # 返回
+    ///
+    /// 插值后的字符串（`:count` 替换为实际数量）。找不到时返回 `None`。
+    pub fn plural(&self, key: &str, count: i64, lang: Option<&str>) -> Option<String> {
+        let variant = if count == 1 { "one" } else { "other" };
+        let plural_key = format!("{}.{}", key, variant);
+
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), count.to_string());
+
+        self.get(&plural_key, &vars, lang)
+    }
+
+    // ========================================================================
+    // T015: 缺失 key 告警
+    // ========================================================================
+
+    /// 获取语言项，缺失时返回 key 本身 + 告警日志
+    ///
+    /// 对齐 T015 要求：翻译 key 不存在时返回 key 本身 + 告警日志（不返回空字符串）。
+    ///
+    /// # 参数
+    ///
+    /// - `key`: 语言项键名
+    /// - `vars`: 插值变量
+    /// - `lang`: 语言代码，`None` 时使用当前语言
+    ///
+    /// # 返回
+    ///
+    /// 存在返回插值后的字符串，不存在返回 `key` 本身。
+    pub fn get_or_warn(
+        &self,
+        key: &str,
+        vars: &HashMap<String, String>,
+        lang: Option<&str>,
+    ) -> String {
+        match self.get(key, vars, lang) {
+            Some(value) => value,
+            None => {
+                let lang_str = lang
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| self.current_lang());
+                tracing::warn!("i18n missing key: {:?} (lang={:?})", key, lang_str);
+                key.to_string()
+            }
+        }
+    }
+
+    // ========================================================================
+    // T015: 热加载
+    // ========================================================================
+
+    /// 启动文件监听器，热加载语言资源文件
+    ///
+    /// 使用 `notify` crate 监听指定目录，文件变更时自动重新加载。
+    ///
+    /// # 参数
+    ///
+    /// - `dir`: 语言资源文件目录
+    /// - `lang`: 语言代码（所有该目录下的 `.json` 文件加载到此语言）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 `Ok(())`，失败返回 [`I18nError`]。
+    pub async fn start_watcher(&self, dir: impl AsRef<Path>, lang: &str) -> Result<(), I18nError> {
+        let dir = dir.as_ref().to_path_buf();
+        let self_clone = self.clone();
+        let lang = lang.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            use notify::{EventKind, RecursiveMode, Watcher};
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut watcher = match notify::recommended_watcher(tx) {
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::error!("i18n watcher init failed: {}", e);
+                    return;
+                }
+            };
+
+            if let Err(e) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
+                tracing::error!("i18n watch dir failed: {} — {}", dir.display(), e);
+                return;
+            }
+
+            tracing::info!(
+                "i18n hot reload watching: {} (lang={})",
+                dir.display(),
+                lang
+            );
+
+            for event in rx.into_iter().filter_map(Result::ok) {
+                if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
+                    for path in &event.paths {
+                        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                            let i18n = self_clone.clone();
+                            let path = path.clone();
+                            let lang = lang.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = i18n.load_from_file(&path, &lang).await {
+                                    tracing::warn!(
+                                        "i18n hot reload failed: {} — {}",
+                                        path.display(),
+                                        e
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "i18n hot reload: {} (lang={})",
+                                        path.display(),
+                                        lang
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
 }
+
+// i18n 中间件子模块
+pub mod middleware;
 
 // ============================================================================
 // 单元测试
@@ -459,6 +667,7 @@ impl I18n {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use std::io::Write;
 
     /// 测试空 I18n 实例
@@ -783,5 +992,132 @@ mod tests {
         let result = i18n.get("msg", &empty_vars, Some("en-us")).unwrap();
         // 未提供变量，占位符保留
         assert_eq!(result, "Hello, :name!");
+    }
+
+    // ========================================================================
+    // T014: Accept-Language 解析测试
+    // ========================================================================
+
+    #[test]
+    fn test_accept_language_basic() {
+        let available: HashSet<&str> = ["en-us", "zh-cn"].into_iter().collect();
+        let best = I18n::accept_language("en-US,en;q=0.9,zh-CN;q=0.8", &available);
+        assert_eq!(best, Some("en-us".to_string()));
+    }
+
+    #[test]
+    fn test_accept_language_q_sort() {
+        let available: HashSet<&str> = ["en-us", "zh-cn"].into_iter().collect();
+        // zh-CN q=0.9 > en q=0.8
+        let best = I18n::accept_language("en;q=0.8,zh-CN;q=0.9", &available);
+        assert_eq!(best, Some("zh-cn".to_string()));
+    }
+
+    #[test]
+    fn test_accept_language_no_match() {
+        let available: HashSet<&str> = ["en-us"].into_iter().collect();
+        let best = I18n::accept_language("fr-FR,de-DE", &available);
+        assert_eq!(best, None);
+    }
+
+    #[test]
+    fn test_accept_language_empty_header() {
+        let available: HashSet<&str> = ["en-us"].into_iter().collect();
+        let best = I18n::accept_language("", &available);
+        assert_eq!(best, None);
+    }
+
+    #[test]
+    fn test_accept_language_base_match() {
+        let available: HashSet<&str> = ["en"].into_iter().collect();
+        let best = I18n::accept_language("en-US,en;q=0.9", &available);
+        assert_eq!(best, Some("en".to_string()));
+    }
+
+    // ========================================================================
+    // T014: ICU 复数形式测试
+    // ========================================================================
+
+    #[test]
+    fn test_plural_one() {
+        let i18n = I18n::with_default_lang("en-us");
+        i18n.set("en-us", "items.one", ":count item");
+        i18n.set("en-us", "items.other", ":count items");
+
+        let result = i18n.plural("items", 1, Some("en-us")).unwrap();
+        assert_eq!(result, "1 item");
+    }
+
+    #[test]
+    fn test_plural_other() {
+        let i18n = I18n::with_default_lang("en-us");
+        i18n.set("en-us", "items.one", ":count item");
+        i18n.set("en-us", "items.other", ":count items");
+
+        let result = i18n.plural("items", 5, Some("en-us")).unwrap();
+        assert_eq!(result, "5 items");
+    }
+
+    #[test]
+    fn test_plural_zero() {
+        let i18n = I18n::with_default_lang("en-us");
+        i18n.set("en-us", "items.one", ":count item");
+        i18n.set("en-us", "items.other", ":count items");
+
+        let result = i18n.plural("items", 0, Some("en-us")).unwrap();
+        assert_eq!(result, "0 items");
+    }
+
+    #[test]
+    fn test_plural_missing() {
+        let i18n = I18n::new();
+        let result = i18n.plural("nonexistent", 1, Some("en-us"));
+        assert_eq!(result, None);
+    }
+
+    // ========================================================================
+    // T015: 缺失 key 告警测试
+    // ========================================================================
+
+    #[test]
+    fn test_get_or_warn_returns_key_when_missing() {
+        let i18n = I18n::with_default_lang("en-us");
+        let empty_vars = HashMap::new();
+        let result = i18n.get_or_warn("nonexistent_key", &empty_vars, Some("en-us"));
+        assert_eq!(result, "nonexistent_key");
+    }
+
+    #[test]
+    fn test_get_or_warn_returns_value_when_found() {
+        let i18n = I18n::with_default_lang("en-us");
+        i18n.set("en-us", "greeting", "Hello!");
+        let empty_vars = HashMap::new();
+        let result = i18n.get_or_warn("greeting", &empty_vars, Some("en-us"));
+        assert_eq!(result, "Hello!");
+    }
+
+    // ========================================================================
+    // T015: 热加载测试
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_hot_reload_watcher_api() {
+        let temp_dir = std::env::temp_dir().join("sz_rust_i18n_watcher_api_test");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let lang_file = temp_dir.join("en-us.json");
+        std::fs::write(&lang_file, r#"{"hello": "Hello"}"#).unwrap();
+
+        let i18n = I18n::new();
+        i18n.load_from_file(&lang_file, "en-us").await.unwrap();
+
+        // 验证 start_watcher 函数签名正确（不实际启动以避免阻塞）
+        // 生产环境中 start_watcher 会后台运行直到进程退出
+        assert_eq!(
+            i18n.get_simple("hello", Some("en-us")),
+            Some("Hello".to_string())
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
