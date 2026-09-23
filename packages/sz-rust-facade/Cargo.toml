@@ -1,0 +1,43 @@
+[package]
+name = "sz-rust-facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Unified Facade crate — eight static facades (Cache/Db/Event/Queue/Log/Config/Request/Response) with OnceCell delegation"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["facade", "thinkphp", "static", "singleton"]
+categories = ["web-programming"]
+
+[features]
+test-utils = ["arc-swap"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+hyper = { workspace = true }
+http-body-util = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+arc-swap = { workspace = true, optional = true }
+sz-rust-cache-facade = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+sz-rust-state-facade = { workspace = true }
+sz-rust-middleware-facade = { workspace = true }
+sz-rust-infra-facade = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "facade_bench"
+harness = false
+
+[lints]
+workspace = true

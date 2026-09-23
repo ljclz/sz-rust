@@ -8632,6 +8632,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-facade"
+version = "1.2.0"
+dependencies = [
+ "arc-swap",
+ "axum 0.8.9",
+ "criterion",
+ "http-body-util",
+ "hyper",
+ "serde",
+ "serde_json",
+ "sz-rust-cache-facade",
+ "sz-rust-http-facade",
+ "sz-rust-infra-facade",
+ "sz-rust-middleware-facade",
+ "sz-rust-orm-facade",
+ "sz-rust-state-facade",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "sz-rust-facade-tests"
 version = "1.2.0"
 dependencies = [
