@@ -33,6 +33,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod debug_collector;
 pub mod debug_page;
 pub mod static_files;
 pub mod upload;

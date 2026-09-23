@@ -789,6 +789,124 @@ fn render_db_query_html(query: &DbQuery, index: usize, editor: Editor) -> String
 }
 
 // ============================================================================
+// 瀑布图渲染 + 敏感字段脱敏 + 环境门控（T032）
+// ============================================================================
+
+/// 敏感字段名列表（匹配任一即脱敏）
+const SENSITIVE_FIELD_NAMES: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "authorization",
+    "credit_card",
+    "ssn",
+];
+
+/// 脱敏占位符
+pub const REDACTED: &str = "[REDACTED]";
+
+/// 判断字段名是否敏感
+pub fn is_sensitive_field(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    SENSITIVE_FIELD_NAMES.iter().any(|s| lower.contains(s))
+}
+
+/// 脱敏单个字段值
+pub fn redact_value(name: &str, value: &str) -> String {
+    if is_sensitive_field(name) {
+        REDACTED.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// 脱敏 HashMap 中的敏感字段
+pub fn redact_map(map: &HashMap<String, String>) -> HashMap<String, String> {
+    map.iter()
+        .map(|(k, v)| (k.clone(), redact_value(k, v)))
+        .collect()
+}
+
+/// 脱敏 JSON 值中的敏感字段
+pub fn redact_json(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut result = serde_json::Map::new();
+            for (k, v) in map {
+                if is_sensitive_field(k) {
+                    result.insert(k.clone(), serde_json::Value::String(REDACTED.to_string()));
+                } else {
+                    result.insert(k.clone(), redact_json(v));
+                }
+            }
+            serde_json::Value::Object(result)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(redact_json).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// 瀑布图阶段
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WaterfallStage {
+    /// 阶段名
+    pub name: String,
+    /// 开始时间（毫秒，相对于请求开始）
+    pub start_ms: f64,
+    /// 持续时间（毫秒）
+    pub duration_ms: f64,
+    /// 占总耗时百分比
+    pub percentage: f64,
+}
+
+/// 瀑布图渲染
+pub fn render_waterfall(phases: &[crate::debug_collector::PhaseRecord]) -> Vec<WaterfallStage> {
+    let total: f64 = phases.iter().map(|p| p.elapsed_ms).sum();
+    if total <= 0.0 {
+        return vec![];
+    }
+
+    phases
+        .iter()
+        .map(|p| WaterfallStage {
+            name: p.name.clone(),
+            start_ms: p.start_offset_ms,
+            duration_ms: p.elapsed_ms,
+            percentage: (p.elapsed_ms / total * 100.0 * 100.0).round() / 100.0,
+        })
+        .collect()
+}
+
+/// 环境门控检查
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugEnv {
+    /// 开发环境
+    Development,
+    /// 生产环境
+    Production,
+}
+
+/// 检查调试是否允许在当前环境启用
+pub fn check_debug_allowed(env: DebugEnv, debug_enabled: bool) -> (bool, Option<String>) {
+    match (env, debug_enabled) {
+        (DebugEnv::Production, true) => (
+            false,
+            Some("WARNING: debug mode enabled in production — forcing off".to_string()),
+        ),
+        (DebugEnv::Production, false) => (false, None),
+        (DebugEnv::Development, _) => (debug_enabled, None),
+    }
+}
+
+// ============================================================================
 // 测试
 // ============================================================================
 
@@ -1439,5 +1557,116 @@ mod tests {
         // 清理：恢复原始状态
         GLOBAL_DB_QUERY_COLLECTOR.clear();
         GLOBAL_DB_QUERY_COLLECTOR.set_enabled(was_enabled);
+    }
+
+    #[test]
+    fn test_is_sensitive_field() {
+        assert!(is_sensitive_field("password"));
+        assert!(is_sensitive_field("user_password"));
+        assert!(is_sensitive_field("api_key"));
+        assert!(is_sensitive_field("Authorization"));
+        assert!(is_sensitive_field("access_token"));
+        assert!(!is_sensitive_field("username"));
+        assert!(!is_sensitive_field("email"));
+    }
+
+    #[test]
+    fn test_redact_value() {
+        assert_eq!(redact_value("password", "secret123"), REDACTED);
+        assert_eq!(redact_value("username", "admin"), "admin");
+        assert_eq!(redact_value("token", "abc"), REDACTED);
+    }
+
+    #[test]
+    fn test_redact_map() {
+        let mut map = HashMap::new();
+        map.insert("username".to_string(), "admin".to_string());
+        map.insert("password".to_string(), "secret".to_string());
+        let redacted = redact_map(&map);
+        assert_eq!(redacted.get("username").unwrap(), "admin");
+        assert_eq!(redacted.get("password").unwrap(), REDACTED);
+    }
+
+    #[test]
+    fn test_redact_json() {
+        let json = serde_json::json!({
+            "user": "admin",
+            "password": "secret",
+            "data": {
+                "token": "abc",
+                "value": 42
+            }
+        });
+        let redacted = redact_json(&json);
+        assert_eq!(redacted["user"], "admin");
+        assert_eq!(redacted["password"], REDACTED);
+        assert_eq!(redacted["data"]["token"], REDACTED);
+        assert_eq!(redacted["data"]["value"], 42);
+    }
+
+    #[test]
+    fn test_redact_json_array() {
+        let json = serde_json::json!([
+            {"password": "a"},
+            {"password": "b"}
+        ]);
+        let redacted = redact_json(&json);
+        assert_eq!(redacted[0]["password"], REDACTED);
+        assert_eq!(redacted[1]["password"], REDACTED);
+    }
+
+    #[test]
+    fn test_render_waterfall() {
+        use crate::debug_collector::PhaseRecord;
+        let phases = vec![
+            PhaseRecord {
+                name: "mw".into(),
+                elapsed_ms: 10.0,
+                start_offset_ms: 0.0,
+            },
+            PhaseRecord {
+                name: "ctrl".into(),
+                elapsed_ms: 30.0,
+                start_offset_ms: 10.0,
+            },
+            PhaseRecord {
+                name: "view".into(),
+                elapsed_ms: 10.0,
+                start_offset_ms: 40.0,
+            },
+        ];
+        let waterfall = render_waterfall(&phases);
+        assert_eq!(waterfall.len(), 3);
+        assert_eq!(waterfall[0].name, "mw");
+        assert_eq!(waterfall[1].percentage, 60.0, "30/50 = 60%");
+        assert_eq!(waterfall[0].percentage, 20.0);
+        assert_eq!(waterfall[2].percentage, 20.0);
+    }
+
+    #[test]
+    fn test_render_waterfall_empty() {
+        let waterfall = render_waterfall(&[]);
+        assert!(waterfall.is_empty());
+    }
+
+    #[test]
+    fn test_check_debug_allowed_development() {
+        let (allowed, warning) = check_debug_allowed(DebugEnv::Development, true);
+        assert!(allowed);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_check_debug_allowed_production_off() {
+        let (allowed, warning) = check_debug_allowed(DebugEnv::Production, false);
+        assert!(!allowed);
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_check_debug_allowed_production_on() {
+        let (allowed, warning) = check_debug_allowed(DebugEnv::Production, true);
+        assert!(!allowed, "production should force debug off");
+        assert!(warning.is_some(), "should warn about production debug");
     }
 }
