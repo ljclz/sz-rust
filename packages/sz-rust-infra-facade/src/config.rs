@@ -59,7 +59,13 @@ pub enum ConfigError {
     DataScopeConfigInvalid(String),
 }
 
-/// 顶层应用配置（含 6 个 section + AI section）
+/// 顶层应用配置（含 6 个 section + AI section + v1.3.0 新增 5 个 section）
+///
+/// ## 向后兼容性（T066）
+///
+/// v1.3.0 新增的 5 个 section（`config_center` / `service_registry` /
+/// `distributed_tx` / `api_gateway` / `ops_api`）全部使用 `#[serde(default)]`，
+/// v1.2.0 的配置文件（不含这些 section）在 v1.3.0 可正常加载，新 section 取默认值。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     /// 应用配置段
@@ -86,6 +92,21 @@ pub struct AppConfig {
     /// Data Scope 配置段（可选，不配置时数据范围控制不可用）
     #[serde(default)]
     pub data_scope: DataScopeSection,
+    /// 配置中心段（v1.3.0 新增，T066 向后兼容）
+    #[serde(default)]
+    pub config_center: ConfigCenterSection,
+    /// 服务注册段（v1.3.0 新增，T066 向后兼容）
+    #[serde(default)]
+    pub service_registry: ServiceRegistrySection,
+    /// 分布式事务段（v1.3.0 新增，T066 向后兼容）
+    #[serde(default)]
+    pub distributed_tx: DistributedTxSection,
+    /// API 网关段（v1.3.0 新增，T066 向后兼容）
+    #[serde(default)]
+    pub api_gateway: ApiGatewaySection,
+    /// 运维 API 段（v1.3.0 新增，T066 向后兼容）
+    #[serde(default)]
+    pub ops_api: OpsApiSection,
 }
 
 /// 应用配置段 — 对齐 PHP `config/app.php`
@@ -494,6 +515,24 @@ impl AppConfig {
             ai: load_optional_section(&dir.join("ai.yml")).await?,
             data_scope: load_section(&dir.join("data_scope.yml"), DataScopeSection::default())
                 .await?,
+            config_center: load_section(
+                &dir.join("config_center.yml"),
+                ConfigCenterSection::default(),
+            )
+            .await?,
+            service_registry: load_section(
+                &dir.join("service_registry.yml"),
+                ServiceRegistrySection::default(),
+            )
+            .await?,
+            distributed_tx: load_section(
+                &dir.join("distributed_tx.yml"),
+                DistributedTxSection::default(),
+            )
+            .await?,
+            api_gateway: load_section(&dir.join("api_gateway.yml"), ApiGatewaySection::default())
+                .await?,
+            ops_api: load_section(&dir.join("ops_api.yml"), OpsApiSection::default()).await?,
         };
 
         // 应用环境变量覆盖
@@ -1683,6 +1722,275 @@ impl DataScopeSection {
         Ok(rules)
     }
 }
+
+// ============================================================================
+// T066: v1.3.0 新增配置 section — 向后兼容（全部 #[serde(default)]）
+// ============================================================================
+
+/// 配置中心段（v1.3.0 新增）
+///
+/// 对接 Nacos/Apollo/etcd 等配置中心。v1.2.0 配置不含此段时取默认值（disabled）。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ConfigCenterSection {
+    /// 是否启用配置中心
+    #[serde(default)]
+    pub enabled: bool,
+    /// 配置中心端点列表（如 `["http://nacos:8848"]`）
+    #[serde(default)]
+    pub endpoints: Vec<String>,
+    /// 命名空间
+    #[serde(default = "default_cc_namespace")]
+    pub namespace: String,
+    /// 拉取超时（毫秒）
+    #[serde(default = "default_cc_timeout_ms")]
+    pub timeout_ms: u64,
+    /// 失败重试次数
+    #[serde(default = "default_cc_retry_count")]
+    pub retry_count: u32,
+}
+
+fn default_cc_namespace() -> String {
+    "public".to_string()
+}
+
+fn default_cc_timeout_ms() -> u64 {
+    5_000
+}
+
+fn default_cc_retry_count() -> u32 {
+    3
+}
+
+impl Default for ConfigCenterSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoints: Vec::new(),
+            namespace: default_cc_namespace(),
+            timeout_ms: default_cc_timeout_ms(),
+            retry_count: default_cc_retry_count(),
+        }
+    }
+}
+
+/// 服务注册段（v1.3.0 新增）
+///
+/// 对接 Nacos/Consul/etcd 服务注册发现。v1.2.0 配置不含此段时取默认值（disabled）。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ServiceRegistrySection {
+    /// 是否启用服务注册
+    #[serde(default)]
+    pub enabled: bool,
+    /// 后端类型（nacos / consul / etcd）
+    #[serde(default = "default_sr_backend")]
+    pub backend: String,
+    /// 注册中心端点
+    #[serde(default)]
+    pub endpoint: String,
+    /// 命名空间
+    #[serde(default = "default_sr_namespace")]
+    pub namespace: String,
+    /// 心跳间隔（秒）
+    #[serde(default = "default_sr_heartbeat_secs")]
+    pub heartbeat_interval_secs: u64,
+}
+
+fn default_sr_backend() -> String {
+    "nacos".to_string()
+}
+
+fn default_sr_namespace() -> String {
+    "public".to_string()
+}
+
+fn default_sr_heartbeat_secs() -> u64 {
+    10
+}
+
+impl Default for ServiceRegistrySection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            backend: default_sr_backend(),
+            endpoint: String::new(),
+            namespace: default_sr_namespace(),
+            heartbeat_interval_secs: default_sr_heartbeat_secs(),
+        }
+    }
+}
+
+/// 分布式事务段（v1.3.0 新增）
+///
+/// 对接 Seata/XID 等分布式事务协调器。v1.2.0 配置不含此段时取默认值（disabled）。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct DistributedTxSection {
+    /// 是否启用分布式事务
+    #[serde(default)]
+    pub enabled: bool,
+    /// 后端类型（seata / xid）
+    #[serde(default = "default_dt_backend")]
+    pub backend: String,
+    /// 事务协调器端点
+    #[serde(default)]
+    pub endpoint: String,
+    /// 事务超时（毫秒）
+    #[serde(default = "default_dt_timeout_ms")]
+    pub timeout_ms: u64,
+    /// 重试次数
+    #[serde(default = "default_dt_retry_count")]
+    pub retry_count: u32,
+    /// 事务日志路径
+    #[serde(default = "default_dt_log_path")]
+    pub log_path: String,
+}
+
+fn default_dt_backend() -> String {
+    "seata".to_string()
+}
+
+fn default_dt_timeout_ms() -> u64 {
+    60_000
+}
+
+fn default_dt_retry_count() -> u32 {
+    3
+}
+
+fn default_dt_log_path() -> String {
+    "logs/dtx".to_string()
+}
+
+impl Default for DistributedTxSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            backend: default_dt_backend(),
+            endpoint: String::new(),
+            timeout_ms: default_dt_timeout_ms(),
+            retry_count: default_dt_retry_count(),
+            log_path: default_dt_log_path(),
+        }
+    }
+}
+
+/// API 网关段（v1.3.0 新增）
+///
+/// 网关路由 / 限流 / CORS。v1.2.0 配置不含此段时取默认值（disabled）。
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ApiGatewaySection {
+    /// 是否启用网关
+    #[serde(default)]
+    pub enabled: bool,
+    /// 路由规则列表
+    #[serde(default)]
+    pub routes: Vec<GatewayRoute>,
+    /// 全局限流 RPS（0=不限）
+    #[serde(default)]
+    pub rate_limit_rps: u32,
+    /// 是否启用 CORS
+    #[serde(default)]
+    pub cors_enabled: bool,
+    /// CORS 允许的源（如 `["*"]`）
+    #[serde(default = "default_ag_cors_origins")]
+    pub cors_allowed_origins: Vec<String>,
+}
+
+/// 单条网关路由规则
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+pub struct GatewayRoute {
+    /// 路由 ID
+    #[serde(default)]
+    pub id: String,
+    /// 匹配路径前缀
+    #[serde(default)]
+    pub path_prefix: String,
+    /// 目标上游地址
+    #[serde(default)]
+    pub upstream: String,
+    /// 权重（0-100）
+    #[serde(default)]
+    pub weight: u32,
+}
+
+fn default_ag_cors_origins() -> Vec<String> {
+    vec!["*".to_string()]
+}
+
+impl Default for ApiGatewaySection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            routes: Vec::new(),
+            rate_limit_rps: 0,
+            cors_enabled: false,
+            cors_allowed_origins: default_ag_cors_origins(),
+        }
+    }
+}
+
+/// 运维 API 段（v1.3.0 新增）
+///
+/// 健康检查 / Metrics / 在线诊断等运维端点。v1.2.0 配置不含此段时取默认值。
+#[derive(Clone, Deserialize, PartialEq)]
+pub struct OpsApiSection {
+    /// 是否启用运维 API
+    #[serde(default = "default_ops_enabled")]
+    pub enabled: bool,
+    /// 运维 API 路径前缀
+    #[serde(default = "default_ops_path")]
+    pub path: String,
+    /// 鉴权 token（铁律 7：序列化跳过 + Debug 脱敏）
+    #[serde(default, skip_serializing)]
+    pub auth_token: String,
+    /// 是否启用 metrics 端点
+    #[serde(default = "default_ops_metrics_enabled")]
+    pub metrics_enabled: bool,
+    /// 是否启用健康检查端点
+    #[serde(default = "default_ops_health_enabled")]
+    pub health_check_enabled: bool,
+}
+
+fn default_ops_enabled() -> bool {
+    true
+}
+
+fn default_ops_path() -> String {
+    "/ops".to_string()
+}
+
+fn default_ops_metrics_enabled() -> bool {
+    true
+}
+
+fn default_ops_health_enabled() -> bool {
+    true
+}
+
+/// Debug 脱敏：不输出 auth_token
+impl std::fmt::Debug for OpsApiSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpsApiSection")
+            .field("enabled", &self.enabled)
+            .field("path", &self.path)
+            .field("auth_token", &"***")
+            .field("metrics_enabled", &self.metrics_enabled)
+            .field("health_check_enabled", &self.health_check_enabled)
+            .finish()
+    }
+}
+
+impl Default for OpsApiSection {
+    fn default() -> Self {
+        Self {
+            enabled: default_ops_enabled(),
+            path: default_ops_path(),
+            auth_token: String::new(),
+            metrics_enabled: default_ops_metrics_enabled(),
+            health_check_enabled: default_ops_health_enabled(),
+        }
+    }
+}
+
 // ============================================================================
 // T019: 配置中心集成 + 降级重连
 // ============================================================================

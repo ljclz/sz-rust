@@ -239,3 +239,24 @@ pub use crate::orm::{
 pub fn validate_sql_runtime(sql: &str) -> Result<(), String> {
     validate_sql(sql).map_err(|e| e.to_string())
 }
+// ============================================================================
+// T065: 可选 crate 重导出（feature gate，不启用对应 feature 时不编译）
+// ============================================================================
+
+#[cfg(feature = "facade")]
+pub use sz_rust_facade as facade;
+
+#[cfg(feature = "config-center")]
+pub use sz_rust_config_center as config_center;
+
+#[cfg(feature = "service-registry")]
+pub use sz_rust_service_registry as service_registry;
+
+#[cfg(feature = "distributed-tx")]
+pub use sz_rust_distributed_tx as distributed_tx;
+
+#[cfg(feature = "api-gateway")]
+pub use sz_rust_api_gateway as api_gateway;
+
+#[cfg(feature = "ops-api")]
+pub use sz_rust_ops_api as ops_api;

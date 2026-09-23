@@ -5,6 +5,50 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.3.0] - 2026-09-23
+
+### Added — 新增 8 crate
+
+- **sz-rust-facade**：Facade 统一门面（P3）
+- **sz-rust-config-center**：配置中心（Consul/Nacos + 灰度发布 + 版本回滚 + AES-GCM 加密）（P5）
+- **sz-rust-service-registry**：服务注册发现（Consul/Nacos/K8s + 5 种 LB + 降级缓存 + 故障注入测试）（P6）
+- **sz-rust-distributed-tx**：分布式事务（Saga/TCC + 补偿重试 + 状态持久化）（P7）
+- **sz-rust-api-gateway**：API 网关（路由引擎 + 转发器 + 鉴权/限流/熔断 + HTTP/gRPC 协议转换）（P8）
+- **sz-rust-testkit**：测试工具链（TestCase + HttpClient + ModelFactory + Fixture + Mock）（P14）
+- **sz-rust-codegen-loop**：AIGC 代码生成闭环（需求解析 + AI 生成 + 安全扫描 + 编译验证 + 闭环迭代）（P13）
+- **sz-rust-ops-api**：运维 API（admin guard + 灰度发布 + 日志级别切换/配置重载/缓存清理）（P16）
+
+### Added — 存量扩展
+
+- **事件系统生产化**（P1）：异步分发 + 优先级 + 循环检测 + panic 兜底 + Event 静态门面
+- **队列 Redis 后端**（P2）：Redis LIST + ZSET 后端 + at-least-once 语义
+- **i18n 增强**（P4）：多语言 + 命名空间 + 热重载
+- **调试工具栏增强**（P9）：DebugCollector + 瀑布图 + 脱敏 + 环境门控
+- **代码生成器扩展**（P10）：make:openapi + --force + 生成后校验
+- **Agent 编排增强**（P11）：MultiStepOrchestrator + 子 Agent 委托 + HITL + 错误恢复 + 状态持久化
+- **多模型路由策略**（P12）：RoutingStrategy 枚举 + 能力标签 + 降级链 + 成本计算 + LB + 路由追踪
+- **JWT audience 校验入口**（P15 T048）：JwtAudienceValidator + 待上游标注
+- **sz300_compat 适配层**（P15 T049）：auth/log/trace 中间件签名对齐
+- **连接池调优建议 API**（P15 T050）：recommend_pool_size + tuning_advice
+- **内存泄漏告警**（P15 T051）：MemoryGuard + MemoryStatus
+- **panic 兜底中间件**（P15 T051）：catch_unwind + 500 响应 + 服务继续运行
+- **健康检查增强**（P16 T052）：ConfigCenterHealthCheck + ServiceRegistryHealthCheck
+- **日志级别动态切换**（P16 T053）：LogLevelManager + SIGUSR2 机制
+- **灰度发布**（P16 T055）：GrayReleaseManager + ByIp/ByTenant/ByPercentage + FNV-1a 哈希
+- **结构化错误响应**（P17 T056）：StructuredErrorResponse + ErrorCodeRegistry
+- **CI 门禁错误码冲突检测**（P17 T057）：scripts/audit/error_code_conflict.js
+- **sz-rust-core 重导出**（P18 T065）：feature gate 可选重导出 6 个新 crate
+- **配置向后兼容**（P18 T066）：新配置 section 全部 #[serde(default)]
+
+### Added — 文档
+
+- **迁移指南**：`docs/migration/v1.2.0-to-v1.3.0.md`
+
+### Changed
+
+- 全 workspace 编译通过，clippy 无警告
+- v1.2.0 pub API 保持不变，新增 API 仅追加不修改
+
 ## [Unreleased] - 2026-09-22（性能优化 SDD 执行）
 
 ### Added

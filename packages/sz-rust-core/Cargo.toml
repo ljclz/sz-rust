@@ -96,6 +96,13 @@ sz-orm-grpc = { workspace = true, optional = true }
 libloading = { version = "0.8", optional = true }
 # P3: bumpalo 区域分配器（可选，bumpalo-pool feature）
 bumpalo = { version = "3", optional = true }
+# T065: 可选重导出 crate（feature gate，不启用对应 feature 时不编译）
+sz-rust-facade = { workspace = true, optional = true }
+sz-rust-config-center = { workspace = true, optional = true }
+sz-rust-service-registry = { workspace = true, optional = true }
+sz-rust-distributed-tx = { workspace = true, optional = true }
+sz-rust-api-gateway = { workspace = true, optional = true }
+sz-rust-ops-api = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -130,6 +137,13 @@ alloc-backtrace = ["dep:backtrace"]
 mem-pool = []
 # P3: bumpalo 内存池后端（需 mem-pool + bumpalo 依赖）
 bumpalo-pool = ["dep:bumpalo", "mem-pool"]
+# T065: 可选重导出 feature gate（不启用时不编译对应 crate）
+facade = ["dep:sz-rust-facade"]
+config-center = ["dep:sz-rust-config-center"]
+service-registry = ["dep:sz-rust-service-registry"]
+distributed-tx = ["dep:sz-rust-distributed-tx"]
+api-gateway = ["dep:sz-rust-api-gateway"]
+ops-api = ["dep:sz-rust-ops-api"]
 
 [lib]
 name = "sz_rust_core"
