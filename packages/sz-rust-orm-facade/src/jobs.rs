@@ -42,7 +42,7 @@ use thiserror::Error;
 pub const JOBS_TABLE: &str = "sz_jobs";
 
 /// 建表 SQL（幂等，MySQL 方言；sz300 主数据源为 MySQL）
-const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS sz_jobs (
+pub(super) const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS sz_jobs (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   kind VARCHAR(64) NOT NULL,
   payload TEXT NOT NULL,
@@ -58,10 +58,10 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS sz_jobs (
   KEY idx_sz_jobs_status_run_after (status, run_after)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
 
-const STATUS_PENDING: &str = "pending";
-const STATUS_RUNNING: &str = "running";
-const STATUS_SUCCEEDED: &str = "succeeded";
-const STATUS_DEAD: &str = "dead";
+pub(super) const STATUS_PENDING: &str = "pending";
+pub(super) const STATUS_RUNNING: &str = "running";
+pub(super) const STATUS_SUCCEEDED: &str = "succeeded";
+pub(super) const STATUS_DEAD: &str = "dead";
 
 /// 任务状态机
 ///
@@ -145,6 +145,74 @@ pub trait TaskHandler: Send + Sync + 'static {
     async fn handle(&self, payload: &serde_json::Value) -> Result<(), JobError>;
 }
 
+/// 队列后端抽象（T006）
+///
+/// 抽象队列存储操作，支持不同后端（DB/Redis）实现。
+/// `DbQueueBackend` 为默认数据库后端，`RedisQueueBackend` 为 Redis 后端。
+#[async_trait]
+pub trait QueueBackend: Send + Sync + 'static {
+    /// 初始化 schema（DB 后端建表，Redis 后端 no-op）
+    async fn init_schema(&self) -> Result<(), JobQueueError>;
+
+    /// 投递 Job 到队列（`run_after` 为毫秒时间戳，控制延迟执行）
+    async fn push(
+        &self,
+        kind: &str,
+        payload: serde_json::Value,
+        dedupe_key: Option<&str>,
+        run_after: i64,
+    ) -> Result<u64, JobQueueError>;
+
+    /// 领取一批待执行 Job（原子抢占，多 worker 安全）
+    async fn pop(&self, config: &JobQueueConfig) -> Result<Vec<Job>, JobQueueError>;
+
+    /// 确认 Job 执行成功
+    async fn ack(&self, job_id: u64) -> Result<(), JobQueueError>;
+
+    /// 标记 Job 执行失败（含退避重试/死信逻辑）
+    async fn fail(
+        &self,
+        job_id: u64,
+        attempts: u32,
+        error: &str,
+        kind: JobErrorKind,
+        config: &JobQueueConfig,
+    ) -> Result<(), JobQueueError>;
+
+    /// 重放死信 Job
+    async fn retry_dead(&self, job_id: u64) -> Result<(), JobQueueError>;
+
+    /// 队列健康快照
+    async fn snapshot(&self) -> Result<QueueSnapshot, JobQueueError>;
+
+    /// 回收超时租约的 running 任务
+    async fn reclaim_stale(&self, config: &JobQueueConfig) -> Result<(), JobQueueError>;
+}
+
+/// DB 后端实现
+pub mod backend_db;
+
+/// Redis 后端实现
+pub mod backend_redis;
+
+/// 优先级 Worker
+pub mod worker;
+
+/// Queue 静态门面
+pub mod queue_facade;
+
+/// 重导出 DbQueueBackend
+pub use backend_db::DbQueueBackend;
+
+/// 重导出 RedisQueueBackend
+pub use backend_redis::RedisQueueBackend;
+
+/// 重导出 PriorityQueueWorker
+pub use worker::PriorityQueueWorker;
+
+/// 重导出 Queue 门面
+pub use queue_facade::Queue;
+
 /// 队列操作错误
 #[derive(Debug, Error)]
 pub enum JobQueueError {
@@ -160,6 +228,9 @@ pub enum JobQueueError {
     /// 序列化错误
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    /// 后端存储错误（Redis 等）
+    #[error("backend error: {0}")]
+    Backend(String),
 }
 
 /// worker 配置
@@ -240,15 +311,24 @@ pub struct QueueSnapshot {
 ///
 /// 基于 sz-orm `Pool` 实现，不绑定具体数据库后端（MySQL/PostgreSQL 均可，
 /// 领取用单条 UPDATE 原子抢占，不依赖 `FOR UPDATE SKIP LOCKED` 方言）。
+/// 通过 `QueueBackend` trait 支持可插拔后端（DB/Redis）。
 #[derive(Clone)]
 pub struct JobQueue {
+    backend: Arc<dyn QueueBackend>,
     pool: Arc<Pool>,
 }
 
 impl JobQueue {
-    /// 创建任务队列
+    /// 创建任务队列（默认使用 DB 后端）
     pub fn new(pool: Arc<Pool>) -> Self {
-        Self { pool }
+        let backend: Arc<dyn QueueBackend> =
+            Arc::new(backend_db::DbQueueBackend::new(pool.clone()));
+        Self { backend, pool }
+    }
+
+    /// 使用自定义后端创建任务队列
+    pub fn with_backend(backend: Arc<dyn QueueBackend>, pool: Arc<Pool>) -> Self {
+        Self { backend, pool }
     }
 
     /// 底层连接池引用（观测/测试用）
@@ -258,9 +338,7 @@ impl JobQueue {
 
     /// 幂等建表（可安全重复调用）
     pub async fn init_schema(&self) -> Result<(), JobQueueError> {
-        let mut conn = self.pool.acquire().await?;
-        conn.execute(SCHEMA_SQL).await?;
-        Ok(())
+        self.backend.init_schema().await
     }
 
     /// 入队任务（立即执行）。`dedupe_key` 同 kind 下重复时返回已存在任务 ID，不重复入队。
@@ -270,7 +348,7 @@ impl JobQueue {
         payload: serde_json::Value,
         dedupe_key: Option<&str>,
     ) -> Result<u64, JobQueueError> {
-        self.enqueue_at(kind, payload, dedupe_key, now_ms()).await
+        self.backend.push(kind, payload, dedupe_key, now_ms()).await
     }
 
     /// 入队延迟任务（`delay` 后执行）——退避/定时不靠 worker sleep，靠 `run_after`
@@ -281,98 +359,24 @@ impl JobQueue {
         dedupe_key: Option<&str>,
         delay: Duration,
     ) -> Result<u64, JobQueueError> {
-        self.enqueue_at(
-            kind,
-            payload,
-            dedupe_key,
-            now_ms() + delay.as_millis() as i64,
-        )
-        .await
-    }
-
-    /// 入队核心：INSERT + 唯一约束幂等（重复返回已有 ID）
-    async fn enqueue_at(
-        &self,
-        kind: &str,
-        payload: serde_json::Value,
-        dedupe_key: Option<&str>,
-        run_after: i64,
-    ) -> Result<u64, JobQueueError> {
-        let payload_str = serde_json::to_string(&payload)?;
-        let now = now_ms();
-        let mut conn = self.pool.acquire().await?;
-        conn.execute_with_params(
-            "INSERT INTO sz_jobs (kind, payload, status, attempts, run_after, dedupe_key, created_at, updated_at) \
-             VALUES (?, ?, ?, 0, ?, ?, ?, ?) \
-             ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
-            &[
-                Value::String(kind.into()),
-                Value::String(payload_str),
-                Value::String(STATUS_PENDING.into()),
-                Value::I64(run_after),
-                dedupe_key.map_or(Value::Null, |k| Value::String(k.into())),
-                Value::I64(now),
-                Value::I64(now),
-            ],
-        )
-        .await?;
-        let rows = conn
-            .query_with_params("SELECT LAST_INSERT_ID() AS id", &[])
-            .await?;
-        rows.first()
-            .and_then(|r| r.get("id"))
-            .and_then(Value::as_i64)
-            .map(|v| v as u64)
-            .ok_or_else(|| JobQueueError::InvalidRow("LAST_INSERT_ID() 返回空".into()))
+        self.backend
+            .push(
+                kind,
+                payload,
+                dedupe_key,
+                now_ms() + delay.as_millis() as i64,
+            )
+            .await
     }
 
     /// 死信重放：将 dead 任务重新置为 pending（保留 attempts 与错误历史）
     pub async fn retry_dead(&self, job_id: u64) -> Result<(), JobQueueError> {
-        let now = now_ms();
-        let mut conn = self.pool.acquire().await?;
-        conn.execute_with_params(
-            "UPDATE sz_jobs SET status = ?, run_after = ?, locked_until = NULL, updated_at = ? WHERE id = ? AND status = ?",
-            &[
-                Value::String(STATUS_PENDING.into()),
-                Value::I64(now),
-                Value::I64(now),
-                Value::I64(job_id as i64),
-                Value::String(STATUS_DEAD.into()),
-            ],
-        )
-        .await?;
-        Ok(())
+        self.backend.retry_dead(job_id).await
     }
 
     /// 队列健康快照（pending/running/dead/最老等待/累计完成）
     pub async fn queue_snapshot(&self) -> Result<QueueSnapshot, JobQueueError> {
-        let mut conn = self.pool.acquire().await?;
-        let rows = conn
-            .query("SELECT status, COUNT(*) AS cnt FROM sz_jobs GROUP BY status")
-            .await?;
-        let mut snap = QueueSnapshot::default();
-        for row in rows {
-            let status = row.get("status").and_then(Value::as_str).unwrap_or("");
-            let cnt = row.get("cnt").and_then(Value::as_i64).unwrap_or(0).max(0) as u64;
-            match status {
-                STATUS_PENDING => snap.pending = cnt,
-                STATUS_RUNNING => snap.running = cnt,
-                STATUS_SUCCEEDED => snap.succeeded = cnt,
-                STATUS_DEAD => snap.dead = cnt,
-                _ => {}
-            }
-        }
-        let rows = conn
-            .query("SELECT MIN(run_after) AS oldest FROM sz_jobs WHERE status = 'pending'")
-            .await?;
-        if let Some(oldest) = rows
-            .first()
-            .and_then(|r| r.get("oldest"))
-            .and_then(Value::as_i64)
-        {
-            snap.oldest_pending_seconds = ((now_ms() - oldest).max(0) / 1000) as u64;
-        }
-        Ok(snap)
+        self.backend.snapshot().await
     }
 
     /// 启动 worker：轮询领取 → 分发 handler → 成功/退避重试/死信。
@@ -390,12 +394,11 @@ impl JobQueue {
                 tracing::info!(target: "sz_orm::jobs", "job worker shutting down");
                 return Ok(());
             }
-            // 崩溃自愈：租约超时的 running 任务回收重跑
-            if let Err(e) = self.reclaim_stale(&config).await {
+            if let Err(e) = self.backend.reclaim_stale(&config).await {
                 tracing::error!(target: "sz_orm::jobs", "reclaim stale jobs failed: {e}");
                 continue;
             }
-            let jobs = match self.claim_batch(&config).await {
+            let jobs = match self.backend.pop(&config).await {
                 Ok(jobs) => jobs,
                 Err(e) => {
                     tracing::error!(target: "sz_orm::jobs", "claim jobs failed: {e}");
@@ -403,8 +406,7 @@ impl JobQueue {
                 }
             };
             if jobs.is_empty() {
-                // 队列健康观测（每轮无任务时仅 debug）
-                if let Ok(snap) = self.queue_snapshot().await {
+                if let Ok(snap) = self.backend.snapshot().await {
                     tracing::debug!(
                         target: "sz_orm::jobs",
                         "queue snapshot: pending={}, running={}, dead={}, oldest_pending_secs={}",
@@ -435,18 +437,13 @@ impl JobQueue {
                 };
                 match outcome {
                     Ok(()) => {
-                        self.mark_succeeded(job.id).await?;
+                        self.backend.ack(job.id).await?;
                         tracing::debug!(target: "sz_orm::jobs", "job {} (kind={}) succeeded", job.id, job.kind);
                     }
                     Err(e) => {
-                        self.handle_failure(
-                            job.id,
-                            job.attempts,
-                            &e.to_string(),
-                            e.kind(),
-                            &config,
-                        )
-                        .await?;
+                        self.backend
+                            .fail(job.id, job.attempts, &e.to_string(), e.kind(), &config)
+                            .await?;
                         tracing::warn!(
                             target: "sz_orm::jobs",
                             "job {} (kind={}) failed: {} (kind={:?}), attempts={}",
@@ -456,129 +453,6 @@ impl JobQueue {
                 }
             }
         }
-    }
-
-    /// 崩溃自愈：将租约超时的 running 任务回收为 pending（不丢失、不卡死）
-    async fn reclaim_stale(&self, config: &JobQueueConfig) -> Result<(), JobQueueError> {
-        let now = now_ms();
-        let lease_deadline = now - config.lease_seconds as i64 * 1000;
-        let mut conn = self.pool.acquire().await?;
-        conn.execute_with_params(
-            "UPDATE sz_jobs SET status = ?, locked_until = NULL, updated_at = ? \
-             WHERE status = ? AND locked_until < ?",
-            &[
-                Value::String(STATUS_PENDING.into()),
-                Value::I64(now),
-                Value::String(STATUS_RUNNING.into()),
-                Value::I64(lease_deadline),
-            ],
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// 原子领取一批任务（多 worker 安全：SELECT FOR UPDATE SKIP LOCKED + 事务内 UPDATE）
-    ///
-    /// 为什么不用"单条 UPDATE 抢占"：MySQL 默认 REPEATABLE READ 下 InnoDB 的
-    /// UPDATE 锁等待后不重新评估 WHERE（semi-consistent read 仅 READ COMMITTED
-    /// 启用），并发 worker 会更新到另一 worker 已领取的行（实测重复执行 2x）。
-    /// `FOR UPDATE SKIP LOCKED`（MySQL 8.0.1+）在锁定阶段就跳过他人已锁的行，
-    /// 是官方推荐的多 worker 领取方式（同 PostgreSQL 的 SKIP LOCKED 语义）。
-    async fn claim_batch(&self, config: &JobQueueConfig) -> Result<Vec<Job>, JobQueueError> {
-        let now = now_ms();
-        let locked_until = now + config.lease_seconds as i64 * 1000;
-        let mut conn = self.pool.acquire().await?;
-        conn.begin_transaction().await?;
-        // 1. 锁定候选行：SKIP LOCKED 跳过其他 worker 已锁定的行（不等待）
-        let rows = conn
-            .query_with_params(
-                "SELECT id FROM sz_jobs WHERE status = ? AND run_after <= ? \
-                 ORDER BY created_at LIMIT ? FOR UPDATE SKIP LOCKED",
-                &[
-                    Value::String(STATUS_PENDING.into()),
-                    Value::I64(now),
-                    Value::I64(config.batch_size as i64),
-                ],
-            )
-            .await?;
-        let ids: Vec<Value> = rows
-            .iter()
-            .filter_map(|r| r.get("id").and_then(Value::as_i64).map(Value::I64))
-            .collect();
-        // 2. 事务内抢占（行已被本事务锁定，无竞争）；IN 占位符数量由代码生成，值全参数化
-        if !ids.is_empty() {
-            let placeholders = vec!["?"; ids.len()].join(",");
-            let mut params = Vec::with_capacity(ids.len() + 3);
-            params.push(Value::String(STATUS_RUNNING.into()));
-            params.push(Value::I64(locked_until));
-            params.push(Value::I64(now));
-            params.extend(ids);
-            conn.execute_with_params(
-                &format!(
-                    "UPDATE sz_jobs SET status = ?, locked_until = ?, attempts = attempts + 1, updated_at = ? \
-                     WHERE id IN ({placeholders})"
-                ),
-                &params,
-            )
-            .await?;
-        }
-        conn.commit().await?;
-        // 3. 读回本 worker 领取的任务（按 locked_until 精确过滤，不捞其他 worker 的）
-        let rows = conn
-            .query_with_params(
-                "SELECT id, kind, payload, status, attempts, run_after, last_error, dedupe_key, created_at \
-                 FROM sz_jobs WHERE status = ? AND locked_until = ? ORDER BY created_at",
-                &[Value::String(STATUS_RUNNING.into()), Value::I64(locked_until)],
-            )
-            .await?;
-        rows.into_iter().map(row_to_job).collect()
-    }
-
-    /// 标记成功
-    async fn mark_succeeded(&self, job_id: u64) -> Result<(), JobQueueError> {
-        let mut conn = self.pool.acquire().await?;
-        conn.execute_with_params(
-            "UPDATE sz_jobs SET status = ?, locked_until = NULL, updated_at = ? WHERE id = ?",
-            &[
-                Value::String(STATUS_SUCCEEDED.into()),
-                Value::I64(now_ms()),
-                Value::I64(job_id as i64),
-            ],
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// 失败处理：Temporary 且未超限 → 退避重试；否则 → 死信
-    async fn handle_failure(
-        &self,
-        job_id: u64,
-        attempts: u32,
-        error: &str,
-        kind: JobErrorKind,
-        config: &JobQueueConfig,
-    ) -> Result<(), JobQueueError> {
-        let now = now_ms();
-        let (status, run_after) = match kind {
-            JobErrorKind::Temporary if attempts <= config.max_attempts => (
-                STATUS_PENDING,
-                now + backoff_delay_ms(config, attempts) as i64,
-            ),
-            _ => (STATUS_DEAD, now),
-        };
-        let mut conn = self.pool.acquire().await?;
-        conn.execute_with_params(
-            "UPDATE sz_jobs SET status = ?, run_after = ?, locked_until = NULL, last_error = ?, updated_at = ? WHERE id = ?",
-            &[
-                Value::String(status.into()),
-                Value::I64(run_after),
-                Value::String(error.into()),
-                Value::I64(now),
-                Value::I64(job_id as i64),
-            ],
-        )
-        .await?;
-        Ok(())
     }
 }
 
@@ -603,7 +477,7 @@ pub fn now_ms() -> i64 {
 }
 
 /// 行 → Job 转换（显式列投影读取）
-fn row_to_job(row: HashMap<String, Value>) -> Result<Job, JobQueueError> {
+pub(super) fn row_to_job(row: HashMap<String, Value>) -> Result<Job, JobQueueError> {
     let id = row
         .get("id")
         .and_then(Value::as_i64)

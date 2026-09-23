@@ -267,7 +267,8 @@ pub use query_cache::{QueryCache, QueryCacheConfig, QueryCacheError};
 // ============================================================================
 pub mod jobs;
 pub use jobs::{
-    Job, JobError, JobErrorKind, JobQueue, JobQueueConfig, JobQueueError, JobStatus, QueueSnapshot,
+    DbQueueBackend, Job, JobError, JobErrorKind, JobQueue, JobQueueConfig, JobQueueError,
+    JobStatus, PriorityQueueWorker, Queue, QueueBackend, QueueSnapshot, RedisQueueBackend,
     TaskHandler, JOBS_TABLE,
 };
 

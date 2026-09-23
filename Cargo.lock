@@ -8896,6 +8896,7 @@ dependencies = [
  "dashmap",
  "parking_lot",
  "rand 0.8.7",
+ "redis",
  "serde",
  "serde_json",
  "serde_yaml",
