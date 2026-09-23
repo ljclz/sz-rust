@@ -14,14 +14,12 @@ pub mod models;
 pub mod preview;
 pub mod sdd_facade;
 
-use std::sync::Arc;
-
-use sz_rust_capability::CapabilityRegistry;
-
-use crate::sdd_facade::MockSddFacade;
-
 /// 启动 Tauri 应用
+#[cfg(not(coverage))]
 pub fn run() -> error::VisualResult<()> {
+    use crate::sdd_facade::MockSddFacade;
+    use std::sync::Arc;
+    use sz_rust_capability::CapabilityRegistry;
     let sdd_facade: Arc<dyn sdd_facade::SddFacade> = Arc::new(MockSddFacade::new());
 
     let registry = Arc::new(CapabilityRegistry::new());

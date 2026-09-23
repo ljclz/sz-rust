@@ -185,16 +185,22 @@ impl Console {
         self.commands.values().map(|cmd| cmd.signature()).collect()
     }
 
+    /// 生成命令列表文本（print_list 的输出内容，独立成函数以便测试断言）
+    fn format_list(&self) -> String {
+        let mut out = String::from("Available commands:");
+        let mut signatures = self.list();
+        signatures.sort_by(|a, b| a.name.cmp(&b.name));
+        for sig in signatures {
+            out.push_str(&format!("\n  {:<20} {}", sig.name, sig.description));
+        }
+        out
+    }
+
     /// 打印命令列表到标准输出
     ///
     /// 对齐 PHP `think\console\Console::listCommands()`。
     pub fn print_list(&self) {
-        println!("Available commands:");
-        let mut signatures = self.list();
-        signatures.sort_by(|a, b| a.name.cmp(&b.name));
-        for sig in signatures {
-            println!("  {:<20} {}", sig.name, sig.description);
-        }
+        println!("{}", self.format_list());
     }
 }
 
@@ -356,7 +362,12 @@ mod tests {
     #[test]
     fn test_print_list_output_empty() {
         let console = Console::new();
-        console.print_list();
+        let out = console.format_list();
+        assert!(
+            out.starts_with("Available commands:"),
+            "空命令表也应输出表头"
+        );
+        assert_eq!(out.lines().count(), 1, "空命令表不应有命令行");
     }
 
     #[test]
@@ -365,7 +376,16 @@ mod tests {
         console
             .register(Box::new(HelloCommand))
             .register(Box::new(EchoCommand));
-        console.print_list();
+        let out = console.format_list();
+        assert!(out.contains("Available commands:"), "应包含表头");
+        assert!(out.contains("hello"), "应包含 hello 命令");
+        assert!(out.contains("echo"), "应包含 echo 命令");
+        let echo_pos = out.find("echo").expect("echo 应在列表中");
+        let hello_pos = out.find("hello").expect("hello 应在列表中");
+        assert!(
+            echo_pos < hello_pos,
+            "命令应按名称排序（echo 在 hello 之前）"
+        );
     }
 
     #[tokio::test]

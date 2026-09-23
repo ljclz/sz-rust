@@ -492,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_without_token_returns_error() {
-        let mut server = mockito::Server::new_async().await;
+        let server = mockito::Server::new_async().await;
         let client = MarketplaceClient::new(&server.url(), None);
         let temp = tempfile::NamedTempFile::new().unwrap();
         let result = client.publish(temp.path().to_str().unwrap()).await;

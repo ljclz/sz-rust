@@ -472,7 +472,7 @@ async fn test_service_install_not_approved_version() {
     let service = make_service(&pool);
     let dev_id = create_developer(&pool, "inst_dev2", false).await;
 
-    let version_id = service
+    let _version_id = service
         .publish(PublishRequest {
             manifest: make_manifest("pending_install_plugin", "1.0.0"),
             archive: Bytes::from(b"archive".to_vec()),

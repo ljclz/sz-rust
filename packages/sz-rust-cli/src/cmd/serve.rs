@@ -440,28 +440,89 @@ mod tests {
         assert!(args.validate().is_ok());
     }
 
-    #[test]
-    fn test_build_router_with_tenant_disabled() {
-        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
-        let _result = build_router_with_tenant(router, false);
+    #[tokio::test]
+    async fn test_build_router_with_tenant_disabled() {
+        use tower::ServiceExt;
+        let router = build_router_with_tenant(
+            Router::new().route("/", axum::routing::get(|| async { "ok" })),
+            false,
+        );
+        // 关闭开关时不得挂载 tenant_middleware：缺 X-Tenant-Id 头也应直通 200
+        // （若层被误挂载，缺头请求会被拒为 400，见 enabled 对照）
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
     }
 
-    #[test]
-    fn test_build_router_with_tenant_enabled() {
-        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
-        let _result = build_router_with_tenant(router, true);
+    #[tokio::test]
+    async fn test_build_router_with_tenant_enabled() {
+        use tower::ServiceExt;
+        let router = build_router_with_tenant(
+            Router::new().route("/", axum::routing::get(|| async { "ok" })),
+            true,
+        );
+        // 开启后缺 X-Tenant-Id 头应被 tenant_middleware 拒为 400
+        // （对照 tests/serve_tenant_e2e.rs serve_without_tenant_header_returns_400）
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 
-    #[test]
-    fn test_build_router_with_data_scope_disabled() {
-        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
-        let _result = build_router_with_data_scope(router, false);
+    #[tokio::test]
+    async fn test_build_router_with_data_scope_disabled() {
+        use tower::ServiceExt;
+        let router = build_router_with_data_scope(
+            Router::new().route("/", axum::routing::get(|| async { "ok" })),
+            false,
+        );
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
     }
 
-    #[test]
-    fn test_build_router_with_data_scope_enabled() {
-        let router = Router::new().route("/", axum::routing::get(|| async { "ok" }));
-        let _result = build_router_with_data_scope(router, true);
+    #[tokio::test]
+    async fn test_build_router_with_data_scope_enabled() {
+        use tower::ServiceExt;
+        let router = build_router_with_data_scope(
+            Router::new().route("/", axum::routing::get(|| async { "ok" })),
+            true,
+        );
+        // 开启后携带 DataScopeUserContext 的请求应通过中间件直达处理器
+        // （对照 tests/serve_data_scope_e2e.rs serve_with_data_scope_injects_context_from_user_context）
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri("/")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(
+            sz_rust_middleware_facade::data_scope::DataScopeUserContext::new(10).with_dept(5),
+        );
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
     }
 
     fn make_conn(
