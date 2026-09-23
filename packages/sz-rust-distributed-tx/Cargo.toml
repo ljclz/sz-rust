@@ -1,0 +1,28 @@
+[package]
+name = "sz-rust-distributed-tx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Distributed transactions for sz-rust — Saga + TCC orchestration + compensation + state persistence"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["saga", "tcc", "distributed-transaction", "compensation", "thinkphp"]
+categories = ["asynchronous"]
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
