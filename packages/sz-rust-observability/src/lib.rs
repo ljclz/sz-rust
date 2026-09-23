@@ -67,6 +67,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+pub mod log_level;
 pub mod memory_guard;
 pub mod slo;
 
@@ -86,6 +87,7 @@ pub use exporters::{
     JaegerExporter, MemoryTraceHttpTransport, TraceExportError, TraceHttpTransport, TraceLog,
     TraceSpan, ZipkinExporter,
 };
+pub use log_level::{LogLevel, LogLevelManager};
 pub use memory_guard::{MemoryGuard, MemoryGuardConfig, MemoryStatus};
 pub use slo::{SloBurnRate, SloConfig, SloMonitor};
 

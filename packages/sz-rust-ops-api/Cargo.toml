@@ -1,0 +1,27 @@
+[package]
+name = "sz-rust-ops-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Ops API for sz-rust — admin guarded operations API"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["ops", "admin", "api", "thinkphp"]
+categories = ["web-programming"]
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true }
+
+[lints]
+workspace = true

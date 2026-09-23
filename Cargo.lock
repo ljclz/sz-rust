@@ -9041,6 +9041,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-ops-api"
+version = "1.2.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-orm-ext-facade"
 version = "1.2.0"
 dependencies = [

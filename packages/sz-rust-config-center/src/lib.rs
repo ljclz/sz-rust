@@ -16,6 +16,7 @@
 //! | [`gray_matcher`] | 灰度规则匹配引擎 |
 //! | [`version`] | 版本历史与回滚 |
 //! | [`crypto`] | AES-GCM 敏感配置加密 |
+//! | [`health_check`] | 配置中心健康检查（readiness 探针适配） |
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
@@ -25,6 +26,9 @@ pub mod source;
 
 pub use error::ConfigCenterError;
 pub use source::{ConfigChange, ConfigEntry, ConfigSource, GrayRule};
+
+pub mod health_check;
+pub use health_check::{ConfigCenterHealthCheck, HealthCheck as ConfigCenterHealthCheckTrait};
 
 #[cfg(feature = "consul")]
 pub mod consul;

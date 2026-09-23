@@ -11,11 +11,17 @@
 //! - `kubernetes`：K8s Service 降级适配（feature = "kubernetes"）
 //! - `load_balancer`：五种 LB 策略实现
 //! - `local_cache`：注册中心断连降级缓存
+//! - `health_check`：服务注册中心健康检查（readiness 探针适配）
 
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod health_check;
 pub mod registry;
+
+pub use health_check::{
+    HealthCheck as ServiceRegistryHealthCheckTrait, ServiceRegistryHealthCheck,
+};
 
 #[cfg(feature = "consul")]
 pub mod consul;
