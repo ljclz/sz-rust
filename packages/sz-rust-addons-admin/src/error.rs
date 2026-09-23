@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
 use axum::http::StatusCode;
@@ -369,5 +369,197 @@ mod tests {
         let resp = AdminErrorResponse::from_error_with_details(&err, details.clone());
         assert_eq!(resp.code, "CONFIG_TYPE_MISMATCH");
         assert_eq!(resp.details, details);
+    }
+
+    // —— IntoResponse 分支覆盖 ——
+
+    #[test]
+    fn test_admin_error_into_response_status_codes() {
+        use axum::response::IntoResponse;
+        // 覆盖所有 status 分支
+        let cases: Vec<(AdminError, StatusCode)> = vec![
+            (AdminError::UserDuplicate, StatusCode::CONFLICT),
+            (AdminError::RoleCodeDuplicate, StatusCode::CONFLICT),
+            (AdminError::MenuCodeDuplicate, StatusCode::CONFLICT),
+            (AdminError::ConfigKeyDuplicate, StatusCode::CONFLICT),
+            (AdminError::UsernameRequired, StatusCode::BAD_REQUEST),
+            (AdminError::PasswordTooShort, StatusCode::BAD_REQUEST),
+            (AdminError::RoleNameRequired, StatusCode::BAD_REQUEST),
+            (AdminError::PermissionNotFound, StatusCode::BAD_REQUEST),
+            (AdminError::ParentMenuNotFound, StatusCode::BAD_REQUEST),
+            (AdminError::MenuCircularReference, StatusCode::BAD_REQUEST),
+            (AdminError::HasChildMenu, StatusCode::BAD_REQUEST),
+            (AdminError::ConfigTypeMismatch, StatusCode::BAD_REQUEST),
+            (AdminError::InvalidTimeRange, StatusCode::BAD_REQUEST),
+            (AdminError::SuperAdminProtected, StatusCode::FORBIDDEN),
+            (AdminError::CrossTenantDenied, StatusCode::FORBIDDEN),
+            (AdminError::BuiltinRoleProtected, StatusCode::FORBIDDEN),
+            (AdminError::AdminRequired, StatusCode::FORBIDDEN),
+            (AdminError::PermissionDenied, StatusCode::FORBIDDEN),
+            (AdminError::AuthRequired, StatusCode::UNAUTHORIZED),
+            (AdminError::UserNotFound, StatusCode::NOT_FOUND),
+            (AdminError::RoleNotFound, StatusCode::NOT_FOUND),
+            (AdminError::MenuNotFound, StatusCode::NOT_FOUND),
+            (AdminError::ConfigNotFound, StatusCode::NOT_FOUND),
+            (
+                AdminError::Database("db".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                AdminError::Internal("err".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (err, expected_status) in cases {
+            let response = err.into_response();
+            assert_eq!(response.status(), expected_status);
+        }
+    }
+
+    #[test]
+    fn test_admin_error_response_into_response_all_codes() {
+        // 覆盖 AdminErrorResponse::into_response 的所有 status 分支
+        use axum::response::IntoResponse;
+        let cases: Vec<(AdminErrorResponse, StatusCode)> = vec![
+            (
+                AdminErrorResponse::from_error(&AdminError::UserDuplicate),
+                StatusCode::CONFLICT,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::RoleCodeDuplicate),
+                StatusCode::CONFLICT,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::MenuCodeDuplicate),
+                StatusCode::CONFLICT,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::ConfigKeyDuplicate),
+                StatusCode::CONFLICT,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::UsernameRequired),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::PasswordTooShort),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::RoleNameRequired),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::PermissionNotFound),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::ParentMenuNotFound),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::MenuCircularReference),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::HasChildMenu),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::ConfigTypeMismatch),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::InvalidTimeRange),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::SuperAdminProtected),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::CrossTenantDenied),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::BuiltinRoleProtected),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::AdminRequired),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::PermissionDenied),
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::AuthRequired),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::UserNotFound),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::RoleNotFound),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::MenuNotFound),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::ConfigNotFound),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::Database("x".into())),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                AdminErrorResponse::from_error(&AdminError::Internal("x".into())),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (resp, expected_status) in cases {
+            let response = resp.into_response();
+            assert_eq!(response.status(), expected_status);
+        }
+    }
+
+    #[test]
+    fn test_from_db_error_not_found() {
+        let db_err = sz_rust_orm_facade::DbError::NotFound("users".into());
+        let admin_err: AdminError = db_err.into();
+        assert!(matches!(admin_err, AdminError::UserNotFound));
+    }
+
+    #[test]
+    fn test_from_db_error_unique_violation_username() {
+        let db_err = sz_rust_orm_facade::DbError::UniqueViolation("username duplicate".into());
+        let admin_err: AdminError = db_err.into();
+        assert!(matches!(admin_err, AdminError::UserDuplicate));
+    }
+
+    #[test]
+    fn test_from_db_error_unique_violation_code() {
+        let db_err = sz_rust_orm_facade::DbError::UniqueViolation("code conflict".into());
+        let admin_err: AdminError = db_err.into();
+        assert!(matches!(admin_err, AdminError::RoleCodeDuplicate));
+    }
+
+    #[test]
+    fn test_from_db_error_unique_violation_other() {
+        let db_err = sz_rust_orm_facade::DbError::UniqueViolation("other field".into());
+        let admin_err: AdminError = db_err.into();
+        assert!(matches!(admin_err, AdminError::Database(_)));
+    }
+
+    #[test]
+    fn test_from_pool_error() {
+        let pool_err = sz_rust_orm_facade::PoolError::Exhausted;
+        let admin_err: AdminError = pool_err.into();
+        assert!(matches!(admin_err, AdminError::Database(_)));
     }
 }

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 
 use std::sync::Arc;
@@ -807,11 +807,143 @@ impl CapabilityHook for AdminCapabilityHook {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::future::Future;
     use std::pin::Pin;
-    use sz_rust_orm_facade::{Connection, ConnectionFactory, DbError, PoolConfig};
+    use sz_rust_orm_facade::{Connection, ConnectionFactory, DbError, PoolConfig, Value};
 
-    type QueryRows = Vec<std::collections::HashMap<String, sz_rust_orm_facade::Value>>;
+    type QueryRows = Vec<HashMap<String, Value>>;
+
+    fn mock_row(sql: &str) -> QueryRows {
+        let sql = sql.to_ascii_lowercase();
+        if sql.contains("select id from") {
+            if sql.contains("where id =") {
+                let mut row = HashMap::new();
+                row.insert("id".into(), Value::I64(1));
+                return vec![row];
+            }
+            return vec![];
+        }
+        if sql.contains("count(*)") {
+            let mut row = HashMap::new();
+            row.insert("cnt".into(), Value::I64(1));
+            return vec![row];
+        }
+        if sql.contains("from users") {
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("username".into(), Value::String("alice".into()));
+            row.insert("email".into(), Value::String("alice@example.com".into()));
+            row.insert("phone".into(), Value::Null);
+            row.insert("status".into(), Value::String("active".into()));
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            row.insert(
+                "updated_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            row.insert("last_login_at".into(), Value::Null);
+            return vec![row];
+        }
+        if sql.contains("from roles") {
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("name".into(), Value::String("Admin".into()));
+            row.insert("code".into(), Value::String("admin".into()));
+            row.insert("description".into(), Value::Null);
+            row.insert("is_builtin".into(), Value::I64(0));
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            row.insert(
+                "updated_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            return vec![row];
+        }
+        if sql.contains("from menus") {
+            if sql.contains("where parent_id") {
+                return vec![];
+            }
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("name".into(), Value::String("Dashboard".into()));
+            row.insert("code".into(), Value::String("dashboard".into()));
+            row.insert("path".into(), Value::String("/dashboard".into()));
+            row.insert("icon".into(), Value::Null);
+            row.insert("parent_id".into(), Value::I64(0));
+            row.insert("sort".into(), Value::I32(1));
+            row.insert("is_visible".into(), Value::I64(1));
+            row.insert("permission_code".into(), Value::Null);
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            row.insert(
+                "updated_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            return vec![row];
+        }
+        if sql.contains("from configs") {
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("key".into(), Value::String("site_name".into()));
+            row.insert("value".into(), Value::String("My Site".into()));
+            row.insert("value_type".into(), Value::String("string".into()));
+            row.insert("group".into(), Value::Null);
+            row.insert("description".into(), Value::Null);
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            row.insert(
+                "updated_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            return vec![row];
+        }
+        if sql.contains("from permissions") {
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("code".into(), Value::String("admin.user_list".into()));
+            row.insert("name".into(), Value::String("用户列表".into()));
+            row.insert("module".into(), Value::String("admin".into()));
+            row.insert("resource".into(), Value::String("user".into()));
+            row.insert("action".into(), Value::String("list".into()));
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            return vec![row];
+        }
+        if sql.contains("from operation_logs") {
+            let mut row = HashMap::new();
+            row.insert("id".into(), Value::I64(1));
+            row.insert("operator_id".into(), Value::I64(1));
+            row.insert("operator_name".into(), Value::String("admin".into()));
+            row.insert("operation_type".into(), Value::String("create".into()));
+            row.insert("target_type".into(), Value::String("user".into()));
+            row.insert("target_id".into(), Value::I64(1));
+            row.insert("detail".into(), Value::Null);
+            row.insert("ip".into(), Value::Null);
+            row.insert("tenant_id".into(), Value::I64(0));
+            row.insert(
+                "created_at".into(),
+                Value::String("2026-01-01T00:00:00+00:00".into()),
+            );
+            return vec![row];
+        }
+        vec![]
+    }
 
     struct MockConnection;
 
@@ -824,23 +956,25 @@ mod tests {
         }
         fn query<'a>(
             &'a mut self,
-            _sql: &'a str,
+            sql: &'a str,
         ) -> Pin<Box<dyn Future<Output = Result<QueryRows, DbError>> + Send + 'a>> {
-            Box::pin(async { Ok(vec![]) })
+            let rows = mock_row(sql);
+            Box::pin(async move { Ok(rows) })
         }
         fn execute_with_params<'a>(
             &'a mut self,
             _sql: &'a str,
-            _params: &'a [sz_rust_orm_facade::Value],
+            _params: &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<u64, DbError>> + Send + 'a>> {
             Box::pin(async { Ok(1) })
         }
         fn query_with_params<'a>(
             &'a mut self,
-            _sql: &'a str,
-            _params: &'a [sz_rust_orm_facade::Value],
+            sql: &'a str,
+            _params: &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<QueryRows, DbError>> + Send + 'a>> {
-            Box::pin(async { Ok(vec![]) })
+            let rows = mock_row(sql);
+            Box::pin(async move { Ok(rows) })
         }
         fn begin_transaction<'a>(
             &'a mut self,
@@ -998,5 +1132,496 @@ mod tests {
             matches!(err, CapError::ValidationError(_)),
             "应为 ValidationError"
         );
+    }
+
+    // —— 12 个 Capability call 方法覆盖 ——
+
+    #[tokio::test]
+    async fn test_user_create_capability_call_with_params() {
+        let pool = make_mock_pool();
+        let cap = UserCreateCapability::new(pool);
+        let args =
+            serde_json::json!({"tenant_id": 0, "username": "alice", "password": "password123"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "user create should succeed: {result:?}");
+        let value = result.unwrap();
+        assert!(value.get("username").is_some(), "应返回 username 字段");
+    }
+
+    #[tokio::test]
+    async fn test_user_create_capability_missing_password() {
+        let pool = make_mock_pool();
+        let cap = UserCreateCapability::new(pool);
+        let args = serde_json::json!({"username": "alice"});
+        let result = cap.call(args).await;
+        assert!(matches!(result.unwrap_err(), CapError::ValidationError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_user_update_capability_call() {
+        let pool = make_mock_pool();
+        let cap = UserUpdateCapability::new(pool);
+        let args = serde_json::json!({"user_id": 1, "email": "new@example.com"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "user update should succeed: {result:?}");
+        let value = result.unwrap();
+        assert!(value.get("username").is_some(), "应返回 username 字段");
+    }
+
+    #[tokio::test]
+    async fn test_user_update_capability_missing_user_id() {
+        let pool = make_mock_pool();
+        let cap = UserUpdateCapability::new(pool);
+        let args = serde_json::json!({"email": "x@example.com"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_user_delete_capability_call_success() {
+        let pool = make_mock_pool();
+        let cap = UserDeleteCapability::new(pool);
+        let args = serde_json::json!({"user_id": 1});
+        let result = cap.call(args).await.expect("delete should succeed");
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["user_id"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_user_delete_capability_missing_user_id() {
+        let pool = make_mock_pool();
+        let cap = UserDeleteCapability::new(pool);
+        assert!(matches!(
+            cap.call(serde_json::json!({})).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_role_create_capability_call_with_params() {
+        let pool = make_mock_pool();
+        let cap = RoleCreateCapability::new(pool);
+        let args = serde_json::json!({"name": "编辑者", "code": "editor"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "role create should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_role_create_capability_missing_code() {
+        let pool = make_mock_pool();
+        let cap = RoleCreateCapability::new(pool);
+        let args = serde_json::json!({"name": "编辑者"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_role_update_capability_call() {
+        let pool = make_mock_pool();
+        let cap = RoleUpdateCapability::new(pool);
+        let args = serde_json::json!({"role_id": 1, "name": "改名"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "role update should succeed: {result:?}");
+        let value = result.unwrap();
+        assert!(value.get("name").is_some(), "应返回 name 字段");
+    }
+
+    #[tokio::test]
+    async fn test_role_update_capability_missing_role_id() {
+        let pool = make_mock_pool();
+        let cap = RoleUpdateCapability::new(pool);
+        assert!(matches!(
+            cap.call(serde_json::json!({"name": "x"}))
+                .await
+                .unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_role_delete_capability_call() {
+        let pool = make_mock_pool();
+        let cap = RoleDeleteCapability::new(pool);
+        let args = serde_json::json!({"role_id": 1});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "role delete should succeed: {result:?}");
+        let value = result.unwrap();
+        assert_eq!(value["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn test_role_delete_capability_missing_role_id() {
+        let pool = make_mock_pool();
+        let cap = RoleDeleteCapability::new(pool);
+        assert!(matches!(
+            cap.call(serde_json::json!({})).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_menu_tree_capability_call() {
+        let pool = make_mock_pool();
+        let cap = MenuTreeCapability::new(pool);
+        let args = serde_json::json!({"permissions": ["admin:user:list"]});
+        let result = cap.call(args).await.expect("menu tree should succeed");
+        assert!(result.is_array(), "空菜单树应返回数组");
+    }
+
+    #[tokio::test]
+    async fn test_menu_create_capability_call_with_params() {
+        let pool = make_mock_pool();
+        let cap = MenuCreateCapability::new(pool);
+        let args =
+            serde_json::json!({"name": "用户管理", "code": "user_mgr", "path": "/admin/users"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "menu create should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_menu_create_capability_missing_path() {
+        let pool = make_mock_pool();
+        let cap = MenuCreateCapability::new(pool);
+        let args = serde_json::json!({"name": "x", "code": "x"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_menu_update_capability_call() {
+        let pool = make_mock_pool();
+        let cap = MenuUpdateCapability::new(pool);
+        let args = serde_json::json!({"menu_id": 1, "name": "改名"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "menu update should succeed: {result:?}");
+        let value = result.unwrap();
+        assert!(value.get("name").is_some(), "应返回 name 字段");
+    }
+
+    #[tokio::test]
+    async fn test_menu_update_capability_missing_menu_id() {
+        let pool = make_mock_pool();
+        let cap = MenuUpdateCapability::new(pool);
+        assert!(matches!(
+            cap.call(serde_json::json!({"name": "x"}))
+                .await
+                .unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_menu_delete_capability_call_success() {
+        let pool = make_mock_pool();
+        let cap = MenuDeleteCapability::new(pool);
+        let args = serde_json::json!({"menu_id": 1});
+        let result = cap.call(args).await.expect("menu delete should succeed");
+        assert_eq!(result["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn test_menu_delete_capability_missing_menu_id() {
+        let pool = make_mock_pool();
+        let cap = MenuDeleteCapability::new(pool);
+        assert!(matches!(
+            cap.call(serde_json::json!({})).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_config_list_capability_call() {
+        let pool = make_mock_pool();
+        let cap = ConfigListCapability::new(pool);
+        let args = serde_json::json!({"group": "system"});
+        let result = cap.call(args).await.expect("config list should succeed");
+        assert!(result.is_array(), "空配置列表应返回数组");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_capability_call_with_params() {
+        let pool = make_mock_pool();
+        let cap = ConfigUpdateCapability::new(pool);
+        let args =
+            serde_json::json!({"key": "site_name", "value": "MySite", "value_type": "string"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "config update should succeed: {result:?}");
+        let value = result.unwrap();
+        assert!(value.get("key").is_some(), "应返回 key 字段");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_capability_missing_key() {
+        let pool = make_mock_pool();
+        let cap = ConfigUpdateCapability::new(pool);
+        let args = serde_json::json!({"value": "x", "value_type": "string"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_config_update_capability_invalid_value_type() {
+        let pool = make_mock_pool();
+        let cap = ConfigUpdateCapability::new(pool);
+        let args = serde_json::json!({"key": "k", "value": "x", "value_type": "unknown"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_config_update_capability_missing_value() {
+        let pool = make_mock_pool();
+        let cap = ConfigUpdateCapability::new(pool);
+        let args = serde_json::json!({"key": "k", "value_type": "string"});
+        assert!(matches!(
+            cap.call(args).await.unwrap_err(),
+            CapError::ValidationError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_log_list_capability_call() {
+        let pool = make_mock_pool();
+        let cap = LogListCapability::new(pool);
+        let args = serde_json::json!({"operator_id": 1, "operation_type": "create", "page": 1, "size": 10});
+        let result = cap.call(args).await.expect("log list should succeed");
+        assert!(result.get("items").is_some(), "应返回 items");
+    }
+
+    #[tokio::test]
+    async fn test_log_list_capability_with_time_range() {
+        let pool = make_mock_pool();
+        let cap = LogListCapability::new(pool);
+        let args = serde_json::json!({
+            "start_time": "2026-01-01T00:00:00+00:00",
+            "end_time": "2026-12-31T00:00:00+00:00"
+        });
+        let result = cap
+            .call(args)
+            .await
+            .expect("log list with time should succeed");
+        assert!(result.get("total").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_all_capability_names_and_tags_consistent() {
+        let pool = make_mock_pool();
+        let caps: Vec<Arc<dyn Capability>> = vec![
+            Arc::new(UserListCapability::new(pool.clone())),
+            Arc::new(UserCreateCapability::new(pool.clone())),
+            Arc::new(UserUpdateCapability::new(pool.clone())),
+            Arc::new(UserDeleteCapability::new(pool.clone())),
+            Arc::new(RoleListCapability::new(pool.clone())),
+            Arc::new(RoleCreateCapability::new(pool.clone())),
+            Arc::new(RoleUpdateCapability::new(pool.clone())),
+            Arc::new(RoleDeleteCapability::new(pool.clone())),
+            Arc::new(PermissionTreeCapability::new(pool.clone())),
+            Arc::new(MenuTreeCapability::new(pool.clone())),
+            Arc::new(MenuCreateCapability::new(pool.clone())),
+            Arc::new(MenuUpdateCapability::new(pool.clone())),
+            Arc::new(MenuDeleteCapability::new(pool.clone())),
+            Arc::new(ConfigListCapability::new(pool.clone())),
+            Arc::new(ConfigUpdateCapability::new(pool.clone())),
+            Arc::new(LogListCapability::new(pool.clone())),
+            Arc::new(DashboardCapability::new(pool)),
+        ];
+        assert_eq!(caps.len(), 17);
+        for cap in &caps {
+            assert!(cap.name().starts_with("admin."));
+            assert!(!cap.description().is_empty());
+            assert_eq!(cap.tags().len(), 3);
+            assert_eq!(cap.source(), CapabilitySource::Plugin);
+            let schema = cap.schema();
+            assert!(schema.is_object(), "schema 应为对象");
+            assert!(schema.get("type").is_some(), "schema 应有 type 字段");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_list_capability_with_filters() {
+        let pool = make_mock_pool();
+        let cap = UserListCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "username": "alice", "status": "active", "page": 2, "size": 5});
+        let result = cap.call(args).await.expect("filtered list should succeed");
+        assert!(result.get("items").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_user_create_capability_with_email_phone() {
+        let pool = make_mock_pool();
+        let cap = UserCreateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "username": "bob", "password": "pass12345", "email": "bob@test.com", "phone": "12345"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "user create with email/phone should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_user_update_capability_with_all_fields() {
+        let pool = make_mock_pool();
+        let cap = UserUpdateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "user_id": 1, "password": "newpass12", "email": "new@test.com", "phone": "99999"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "user update with all fields should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_user_delete_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = UserDeleteCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "user_id": 2});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "user delete should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_role_list_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = RoleListCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1});
+        let result = cap.call(args).await.expect("role list should succeed");
+        assert!(result.is_array(), "role list should return array");
+    }
+
+    #[tokio::test]
+    async fn test_role_create_capability_with_description() {
+        let pool = make_mock_pool();
+        let cap = RoleCreateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "name": "Editor", "code": "editor", "description": "内容编辑者"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "role create with desc should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_role_update_capability_with_all_fields() {
+        let pool = make_mock_pool();
+        let cap = RoleUpdateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "role_id": 1, "name": "Admin2", "description": "Updated"});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "role update should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_role_delete_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = RoleDeleteCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "role_id": 2});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "role delete should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_permission_tree_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = PermissionTreeCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1});
+        let result = cap
+            .call(args)
+            .await
+            .expect("permission tree should succeed");
+        assert!(result.is_object(), "permission tree should return object");
+        assert!(
+            result.get("modules").is_some(),
+            "permission tree should have modules field"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_menu_tree_capability_with_permissions() {
+        let pool = make_mock_pool();
+        let cap = MenuTreeCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "permissions": ["admin.user_list", "admin.role_list"]});
+        let result = cap.call(args).await.expect("menu tree should succeed");
+        assert!(result.is_array(), "menu tree should return array");
+    }
+
+    #[tokio::test]
+    async fn test_menu_create_capability_with_all_fields() {
+        let pool = make_mock_pool();
+        let cap = MenuCreateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "name": "新菜单", "code": "new_menu", "path": "/new", "icon": "icon-new", "parent_id": 0, "sort": 5, "is_visible": true, "permission_code": "admin.new"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "menu create with all fields should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_menu_update_capability_with_all_fields() {
+        let pool = make_mock_pool();
+        let cap = MenuUpdateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "menu_id": 1, "name": "改名", "path": "/new-path", "icon": "new-icon", "parent_id": 0, "sort": 3, "is_visible": false, "permission_code": "admin.updated"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "menu update with all fields should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_menu_delete_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = MenuDeleteCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "menu_id": 2});
+        let result = cap.call(args).await;
+        assert!(result.is_ok(), "menu delete should succeed: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn test_config_list_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = ConfigListCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "group": "system"});
+        let result = cap.call(args).await.expect("config list should succeed");
+        assert!(result.is_array(), "config list should return array");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = ConfigUpdateCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "key": "site_name", "value": "MySite", "value_type": "string"});
+        let result = cap.call(args).await;
+        assert!(
+            result.is_ok(),
+            "config update with tenant should succeed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_log_list_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = LogListCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1, "operator_id": 1, "operation_type": "create", "target_type": "user", "page": 1, "size": 10});
+        let result = cap.call(args).await.expect("log list should succeed");
+        assert!(result.get("items").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_dashboard_capability_with_tenant() {
+        let pool = make_mock_pool();
+        let cap = DashboardCapability::new(pool);
+        let args = serde_json::json!({"tenant_id": 1});
+        let result = cap.call(args).await.expect("dashboard should succeed");
+        assert!(result.get("user_count").is_some() || result.is_object());
     }
 }
