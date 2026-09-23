@@ -204,10 +204,17 @@ use serde::Serialize;
 use sz_rust_orm_facade::{Cache as InnerCache, CacheError, MemoryCache};
 
 // Memcached 缓存驱动子模块
+pub mod lru_cache;
 mod memcached;
+pub mod metrics;
+pub mod multi_level;
+
+pub use lru_cache::{LRUMemoryCache, LruCacheConfig};
 pub use memcached::{
     MemcachedBackend, MemcachedCacheDriver, MemcachedConfig, MockMemcachedBackend,
 };
+pub use metrics::CacheMetrics;
+pub use multi_level::MultiLevelCache;
 
 // ============================================================================
 // 全局 Cache facade 实例
@@ -830,6 +837,8 @@ pub struct Cache {
     /// singleflight inflight map（按 key 互斥，防止缓存击穿）
     /// Rust 特有扩展：用 `parking_lot::Mutex` 实现真正的互斥，对齐 PHP `remember` 的"锁意图"但用正确方式实现
     inflight: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// 缓存命中率指标（hit/miss 计数）
+    metrics: Arc<CacheMetrics>,
 }
 
 impl Cache {
@@ -840,7 +849,13 @@ impl Cache {
             remember_lock_poll_interval: Duration::from_millis(200),
             remember_lock_timeout: Duration::from_secs(5),
             inflight: Mutex::new(HashMap::new()),
+            metrics: Arc::new(CacheMetrics::new()),
         }
+    }
+
+    /// 返回缓存命中率指标
+    pub fn metrics(&self) -> &CacheMetrics {
+        &self.metrics
     }
 
     /// 注册默认驱动
@@ -897,9 +912,10 @@ impl Cache {
     ) -> Result<(), CacheError> {
         let cache_value = php_serialize(&value)?;
         let bytes = cache_value.to_bytes();
+        let jittered_ttl = apply_ttl_jitter(ttl, 0.2);
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
-        driver.set_raw(key, bytes, ttl)
+        driver.set_raw(key, bytes, jittered_ttl)
     }
 
     /// 读取缓存（对齐 PHP `Cache::get($name, $default = null)`）
@@ -942,10 +958,19 @@ impl Cache {
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
         match driver.get_raw(key)? {
-            None => Ok(None),
+            None => {
+                self.metrics.record_miss();
+                Ok(None)
+            }
             Some(bytes) => {
                 let cache_value = CacheValue::from_bytes(&bytes)?;
-                php_unserialize(&cache_value)
+                let result = php_unserialize(&cache_value);
+                match &result {
+                    Ok(Some(_)) => self.metrics.record_hit(),
+                    Ok(None) => self.metrics.record_miss(),
+                    Err(_) => self.metrics.record_miss(),
+                }
+                result
             }
         }
     }
@@ -2637,6 +2662,20 @@ impl<'a> TagSet<'a> {
     }
 }
 
+pub fn apply_ttl_jitter(ttl: Option<Duration>, jitter_ratio: f64) -> Option<Duration> {
+    let base = ttl?;
+    if jitter_ratio <= 0.0 {
+        return Some(base);
+    }
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let min_mult = 1.0 - jitter_ratio;
+    let max_mult = 1.0 + jitter_ratio;
+    let mult = rng.gen_range(min_mult..max_mult);
+    let jittered_nanos = (base.as_nanos() as f64 * mult) as u64;
+    Some(Duration::from_nanos(jittered_nanos))
+}
+
 // ============================================================================
 // 单元测试
 // ============================================================================
@@ -2646,6 +2685,35 @@ mod tests {
     use crate::*;
     use serde::Deserialize;
     use std::sync::Barrier;
+
+    #[test]
+    fn test_ttl_jitter_range() {
+        let base = Duration::from_secs(100);
+        for _ in 0..1000 {
+            let jittered = apply_ttl_jitter(Some(base), 0.2).unwrap();
+            let min = Duration::from_secs(80);
+            let max = Duration::from_secs(120);
+            assert!(
+                jittered >= min && jittered <= max,
+                "jittered {:?} out of [{:?}, {:?}]",
+                jittered,
+                min,
+                max
+            );
+        }
+    }
+
+    #[test]
+    fn test_ttl_jitter_disabled() {
+        let base = Duration::from_secs(100);
+        let jittered = apply_ttl_jitter(Some(base), 0.0).unwrap();
+        assert_eq!(jittered, base);
+    }
+
+    #[test]
+    fn test_ttl_jitter_none_ttl() {
+        assert_eq!(apply_ttl_jitter(None, 0.2), None);
+    }
 
     /// 创建带默认驱动的测试用 Cache
     fn make_cache() -> Cache {

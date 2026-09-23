@@ -5,6 +5,30 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] - 2026-09-22（性能优化 SDD 执行）
+
+### Added
+
+- **MultiLevelCache 多级缓存包装层**（T006）：`sz-rust-cache-facade::multi_level::MultiLevelCache`，L1 本地 LRU + L2 Redis 级联查询，write-through + invalidate 策略，Redis 不可达时降级为仅本地缓存 + 告警日志。5 个新测试全部通过
+- **连接池压测基准**（T009）：`sz-rust-core/benches/pool_tuning.rs`，覆盖 4 种 pool_size × 4 种 concurrency = 16 个测量点 + 8 个利用率曲线代表点，推荐最优配置 `pool_size = ceil(peak_concurrency / 0.8)` 使利用率落在 60%-80%
+- **门禁脚本**（T014-T016）：`scripts/perf/regression_gate.sh`（性能回归门禁）、`scripts/perf/resource_gate.sh`（资源消耗门禁）、`scripts/perf/compare_baseline.py`（6 维度基线对比报告生成器）
+- **序列化复用审计报告**（T011）：`docs/audit/serialization-reuse-audit-report.md` — 审计结论：无重复序列化问题
+- **preserve_order 评估 ADR**（T012）：`docs/adr/0021-serde-json-preserve-order-evaluation.md` — 决策：保留 preserve_order（486 处 `serde_json::Value` 使用 + utoipa 依赖键顺序）
+- **连接池压测报告**（T009）：`docs/benchmarks/pool-tuning-report.md`
+
+### Fixed
+
+- **clippy unnecessary_map_or 警告修复**：`lru_cache.rs` 中 `map_or(false, ...)` → `is_some_and(...)`（2 处）
+- **fast_small 模块 missing_docs 警告修复**：添加模块级文档注释
+
+### 验证
+
+- `cargo test -p sz-rust-cache-facade --features lru-cache` → **291 lib + 0 failed**（含 29 个 multi_level 测试）
+- `cargo test -p sz-rust-core --lib` → **484 passed + 0 failed**
+- `cargo clippy -p sz-rust-cache-facade --features lru-cache -- -D warnings` → 0 error
+- `cargo fmt --all` → OK
+- 所有门禁脚本语法验证通过（`python -m py_compile` + `bash -n`）
+
 ## [Unreleased] - 2026-09-21
 
 ### Fixed

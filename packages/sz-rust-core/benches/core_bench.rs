@@ -366,14 +366,14 @@ fn bench_middleware_chain(c: &mut Criterion) {
 }
 
 // ============================================================================
-// 基准测试组 5：di_container — DI 容器注册与解析
+// 基准测试组 5：container_lookup — DI 容器注册与解析
 // ============================================================================
 
-fn bench_di_container(c: &mut Criterion) {
+fn bench_container_lookup(c: &mut Criterion) {
     struct TestService;
     struct DepService;
 
-    let mut group = c.benchmark_group("di_container");
+    let mut group = c.benchmark_group("container_lookup");
 
     group.bench_function("bind_and_make_transient", |b| {
         let c = Container::new();
@@ -625,7 +625,7 @@ criterion_group!(
     bench_capitalize_first,
     bench_json_dto,
     bench_middleware_chain,
-    bench_di_container,
+    bench_container_lookup,
     bench_framework_vs_native,
     bench_rate_limiting,
     bench_circuit_breaker,

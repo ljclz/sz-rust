@@ -285,6 +285,53 @@ macro_rules! register_alloc_counter {
 }
 
 // ============================================================================
+// 大对象分配调用栈记录（alloc-backtrace feature）
+// ============================================================================
+
+#[cfg(feature = "alloc-backtrace")]
+#[derive(Debug, Clone)]
+pub struct AllocSite {
+    pub size: usize,
+    pub backtrace: String,
+    pub count: usize,
+}
+
+#[cfg(feature = "alloc-backtrace")]
+pub fn measure_with_backtrace<F, R>(f: F) -> (R, Vec<AllocSite>)
+where
+    F: FnOnce() -> R,
+{
+    use std::collections::HashMap;
+
+    let before = ALLOC_BYTES.load(Ordering::Relaxed);
+    let before_count = ALLOC_COUNT.load(Ordering::Relaxed);
+
+    let result = f();
+
+    let after = ALLOC_BYTES.load(Ordering::Relaxed);
+    let after_count = ALLOC_COUNT.load(Ordering::Relaxed);
+
+    let _delta_bytes = after.saturating_sub(before);
+    let delta_count = after_count.saturating_sub(before_count);
+
+    let sites = if delta_count > 0 {
+        let bt = format!("{}", std::backtrace::Backtrace::capture());
+        let mut map: HashMap<String, AllocSite> = HashMap::new();
+        let site = map.entry(bt.clone()).or_insert(AllocSite {
+            size: _delta_bytes,
+            backtrace: bt,
+            count: 0,
+        });
+        site.count += delta_count;
+        map.into_values().collect()
+    } else {
+        Vec::new()
+    };
+
+    (result, sites)
+}
+
+// ============================================================================
 // 单元测试
 // ============================================================================
 

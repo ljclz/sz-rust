@@ -13,8 +13,11 @@
 //! sz-rust-core 通过 `pub use sz_rust_router_facade::{router, routing, websocket_route, openapi}`
 //! 保留向后兼容路径。
 
+pub mod arc_swap_router;
 pub mod openapi;
 pub mod router;
 pub mod routing;
 pub mod simd_str;
 pub mod websocket_route;
+
+pub use arc_swap_router::{ArcSwapRouterTable, RouteRule, RouterTable};

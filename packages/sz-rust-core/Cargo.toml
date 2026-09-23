@@ -22,6 +22,7 @@ chrono.workspace = true
 sz-orm-logger.workspace = true
 sz-orm-macros.workspace = true
 sz-orm-sql-validator.workspace = true
+backtrace = { version = "0.3", optional = true }
 sz-orm-core.workspace = true
 sz-orm-query-builder.workspace = true
 sz-orm-auth.workspace = true
@@ -124,6 +125,7 @@ p2-addons = ["graphql", "grpc", "hot-reload"]
 simd-json = ["dep:simd-json"]
 # P3: alloc 计数 GlobalAlloc wrapper（仅 test/bench 启用，默认不启用）
 alloc-count = []
+alloc-backtrace = ["dep:backtrace"]
 # P3: 内存池（区域分配器，默认不启用）
 mem-pool = []
 # P3: bumpalo 内存池后端（需 mem-pool + bumpalo 依赖）
@@ -147,6 +149,10 @@ harness = false
 
 [[bench]]
 name = "p3_bench"
+harness = false
+
+[[bench]]
+name = "pool_tuning"
 harness = false
 
 # P3: alloc_counter.rs 需要 unsafe impl GlobalAlloc，
