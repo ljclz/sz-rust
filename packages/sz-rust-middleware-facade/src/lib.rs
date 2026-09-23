@@ -41,6 +41,7 @@ pub mod ip_access_control;
 pub mod jwt_blacklist;
 pub mod log;
 pub mod order;
+pub mod panic_guard;
 pub mod rate_limit;
 pub mod request_scope;
 pub mod sanctum;
@@ -48,10 +49,18 @@ pub mod security_headers;
 pub mod security_metrics;
 pub mod security_section;
 pub mod sso_middleware;
+pub mod sz300_compat;
 pub mod tenant;
 pub mod tenant_admin;
 pub mod tower_compat;
 pub mod trace;
 
+/// Panic 兜底中间件 re-export
+pub use panic_guard::{panic_guard_middleware, PanicGuardConfig};
 /// Security 配置段 re-export（应用层直接 `use sz_rust_middleware_facade::SecuritySection`）
 pub use security_section::{SecurityConfigError, SecuritySection};
+/// sz300 兼容层 re-export（auth/log/trace 适配函数）
+pub use sz300_compat::{
+    auth_middleware_compat, log_middleware_compat, trace_middleware_compat, CompatAuthToken,
+    CompatTraceId,
+};

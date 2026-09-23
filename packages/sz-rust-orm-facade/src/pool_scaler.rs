@@ -68,6 +68,28 @@ impl PoolMetrics {
             self.idle_connections as f64 / self.current_connections as f64
         }
     }
+
+    /// 基于当前指标快照给出连接池调优建议。
+    ///
+    /// 以 `current_connections` 作为并发量调用 [`recommend_pool_size`]。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use sz_rust_orm_facade::pool_scaler::PoolMetrics;
+    ///
+    /// let metrics = PoolMetrics {
+    ///     current_connections: 8,
+    ///     idle_connections: 2,
+    ///     timeout_count: 0,
+    ///     total_acquire: 100,
+    /// };
+    /// let advice = metrics.tuning_advice();
+    /// assert_eq!(advice.recommended_pool_size, 12);
+    /// ```
+    pub fn tuning_advice(&self) -> PoolTuningAdvice {
+        recommend_pool_size(self.current_connections, 0)
+    }
 }
 
 /// 连接池动态扩容器
@@ -150,6 +172,70 @@ impl std::fmt::Debug for PoolScaler {
             "PoolScaler {{ target: {target}, running: {} }}",
             self.running.load(Ordering::Relaxed)
         )
+    }
+}
+
+// ============================================================================
+// T050 连接池自适应调优建议
+// ============================================================================
+
+/// 连接池调优建议
+#[derive(Debug, Clone)]
+pub struct PoolTuningAdvice {
+    /// 推荐的连接池大小
+    pub recommended_pool_size: usize,
+    /// 预期利用率（0.0 ~ 1.0）
+    pub expected_utilization: f64,
+    /// 推荐原因
+    pub reason: String,
+}
+
+/// 连接池默认最大连接数上限
+const DEFAULT_MAX_POOL_CONNECTIONS: usize = 100;
+
+/// 基于并发量与平均查询时长推荐最优连接池大小。
+///
+/// 推荐公式：`pool_size = ceil(concurrent_connections * 1.2) + 2`（含安全余量），
+/// 并限制不超过默认上限 100。预期利用率为
+/// `concurrent_connections / recommended_pool_size`。
+///
+/// # 示例
+///
+/// ```
+/// use sz_rust_orm_facade::pool_scaler::recommend_pool_size;
+///
+/// let advice = recommend_pool_size(10, 5);
+/// assert_eq!(advice.recommended_pool_size, 14);
+/// assert!((advice.expected_utilization - (10.0 / 14.0)).abs() < 1e-9);
+/// assert!(advice.reason.contains("并发量 10"));
+/// ```
+pub fn recommend_pool_size(
+    concurrent_connections: usize,
+    avg_query_duration_ms: u64,
+) -> PoolTuningAdvice {
+    let scaled = (concurrent_connections * 6).div_ceil(5);
+    let raw = scaled + 2;
+    let max = DEFAULT_MAX_POOL_CONNECTIONS;
+    let recommended_pool_size = raw.min(max);
+    let expected_utilization = concurrent_connections as f64 / recommended_pool_size as f64;
+    let duration_part = if avg_query_duration_ms > 0 {
+        format!("，平均查询时长 {avg_query_duration_ms} ms")
+    } else {
+        String::new()
+    };
+    let reason = if raw > max {
+        format!(
+            "并发量 {concurrent_connections}{duration_part} 所需池大小 {raw} 超过上限 {max}，已截断至 {max}"
+        )
+    } else {
+        format!(
+            "基于并发量 {concurrent_connections}{duration_part} 按 ceil(n*1.2)+2 推荐池大小 {recommended_pool_size}，预期利用率 {expected_utilization:.3}"
+        )
+    };
+    PoolTuningAdvice {
+        recommended_pool_size,
+        expected_utilization,
+        reason,
     }
 }
 
@@ -322,5 +408,41 @@ mod tests {
         let s = format!("{scaler:?}");
         assert!(s.contains("PoolScaler"));
         assert!(s.contains("target: 5"));
+    }
+
+    #[test]
+    fn test_recommend_pool_size_basic() {
+        let advice = recommend_pool_size(10, 5);
+        assert_eq!(advice.recommended_pool_size, 14);
+        assert!((advice.expected_utilization - (10.0 / 14.0)).abs() < 1e-9);
+        assert!(advice.reason.contains("并发量 10"));
+        assert!(advice.reason.contains("5 ms"));
+    }
+
+    #[test]
+    fn test_recommend_pool_size_zero_concurrency() {
+        let advice = recommend_pool_size(0, 0);
+        assert_eq!(advice.recommended_pool_size, 2);
+        assert_eq!(advice.expected_utilization, 0.0);
+    }
+
+    #[test]
+    fn test_recommend_pool_size_capped_at_max() {
+        let advice = recommend_pool_size(100, 10);
+        assert_eq!(advice.recommended_pool_size, 100);
+        assert!(advice.reason.contains("截断"));
+    }
+
+    #[test]
+    fn test_tuning_advice_from_metrics() {
+        let metrics = PoolMetrics {
+            current_connections: 8,
+            idle_connections: 2,
+            timeout_count: 0,
+            total_acquire: 100,
+        };
+        let advice = metrics.tuning_advice();
+        assert_eq!(advice.recommended_pool_size, 12);
+        assert!((advice.expected_utilization - (8.0 / 12.0)).abs() < 1e-9);
     }
 }

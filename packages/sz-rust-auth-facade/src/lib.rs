@@ -60,7 +60,13 @@ pub mod redis_store;
 #[cfg(feature = "redis-store")]
 pub mod oauth_store;
 
+/// JWT Audience 校验模块
+///
+/// 提供 [`JwtAudienceValidator`]，根据配置的期望 audience 列表校验 JWT `aud` 字段。
+pub mod jwt;
 /// OAuth2 回调中间件模块
 ///
 /// 提供 [`OAuth2StateStore`] trait 和 axum 回调中间件（需 `axum` feature）。
 pub mod oauth_callback;
+
+pub use jwt::JwtAudienceValidator;

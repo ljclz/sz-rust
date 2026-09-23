@@ -8637,6 +8637,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-codegen-loop"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "regex",
+ "serde",
+ "serde_json",
+ "sz-rust-ai-facade",
+ "sz-rust-cli",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-config-center"
 version = "1.2.0"
 dependencies = [
@@ -8949,6 +8966,7 @@ dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
  "chrono",
+ "futures",
  "http-body-util",
  "ipnet",
  "parking_lot",
@@ -9169,6 +9187,20 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
+name = "sz-rust-testkit"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
  "tracing",
 ]
 
