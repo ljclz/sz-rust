@@ -29,7 +29,9 @@
 //!
 //! Rust 端统一用 `Listener` trait（`handle(¶ms) -> Result<Value>`）+ 闭包包装。
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, RwLock};
 
 use serde_json::Value;
@@ -186,6 +188,8 @@ pub enum EventError {
     EventNotFound(String),
     /// 参数错误
     InvalidParams(String),
+    /// 事件循环检测触发（T003）
+    CycleDetected(String),
 }
 
 impl std::fmt::Display for EventError {
@@ -194,11 +198,69 @@ impl std::fmt::Display for EventError {
             EventError::ListenerError(s) => write!(f, "Event listener error: {}", s),
             EventError::EventNotFound(s) => write!(f, "Event not found: {}", s),
             EventError::InvalidParams(s) => write!(f, "Invalid event params: {}", s),
+            EventError::CycleDetected(s) => write!(f, "Event cycle detected: {}", s),
         }
     }
 }
 
 impl std::error::Error for EventError {}
+
+/// 分发模式（T001）
+///
+/// 控制事件分发时的执行策略：
+/// - `Sync`：同步执行，逐个调用监听器，支持 panic 兜底和循环检测
+/// - `Async`：异步执行，将监听器投递到 tokio 任务池并发执行
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchMode {
+    /// 同步分发：逐个执行监听器，支持 panic 兜底
+    Sync,
+    /// 异步分发：监听器投递到 tokio 任务池并发执行
+    Async,
+}
+
+/// 监听器执行失败记录（T004）
+///
+/// 记录监听器执行失败时的错误信息，区分普通错误和 panic。
+#[derive(Debug, Clone)]
+pub struct ListenerFailure {
+    /// 错误消息
+    pub error: String,
+    /// 是否为 panic 导致的失败
+    pub is_panic: bool,
+}
+
+/// 分发结果（T001）
+///
+/// 包含所有监听器的执行结果和失败记录。
+/// 即使部分监听器失败，分发仍视为成功（结果中包含失败信息）。
+#[derive(Debug, Clone)]
+pub struct DispatchResult {
+    /// 成功执行的监听器返回值
+    pub results: Vec<Value>,
+    /// 失败的监听器记录（含 panic 和普通错误）
+    pub failures: Vec<ListenerFailure>,
+}
+
+impl DispatchResult {
+    /// 是否所有监听器都成功执行（无失败记录）
+    pub fn is_success(&self) -> bool {
+        self.failures.is_empty()
+    }
+}
+
+/// 事件分发深度阈值（T003 循环检测）
+const CYCLE_THRESHOLD: usize = 3;
+
+// 线程本地分发深度计数器（T003 循环检测）
+//
+// 每个线程维护独立的深度计数，检测同一线程上的事件循环。
+// 异步分发中 spawned task 运行在不同线程，各自维护独立计数。
+thread_local! {
+    static DISPATCH_DEPTH: RefCell<usize> = const { RefCell::new(0) };
+}
+
+/// 监听器条目类型别名：(优先级, 监听器)
+type ListenerEntry = (i32, Arc<dyn Listener>);
 
 /// 事件分发器（对齐 PHP `think\Event`）
 ///
@@ -219,8 +281,12 @@ impl std::error::Error for EventError {}
 /// 6. **点号通配**：`trigger('User.login')` 同时触发 `User.login` 和 `User.*` 监听器
 /// 7. **array_unique**：`trigger` 对监听器列表去重（`SORT_REGULAR`）
 pub struct EventDispatcher {
-    /// 监听者映射：event => [listener1, listener2, ...]（对齐 PHP `$listener`）
-    listener: RwLock<HashMap<String, Vec<Arc<dyn Listener>>>>,
+    /// 监听者映射：event => [(priority, listener1), (priority, listener2), ...]
+    ///
+    /// priority 为 i32，高优先级先执行。`listen(first=true)` 使用 i32::MAX，
+    /// `listen(first=false)` 使用 0，`listen_with_priority` 使用自定义值。
+    /// `collect_listeners` 时按 priority 降序稳定排序。
+    listener: RwLock<HashMap<String, Vec<ListenerEntry>>>,
 
     /// 事件别名映射：alias => real_event（对齐 PHP `$bind`）
     bind: RwLock<HashMap<String, String>>,
@@ -267,7 +333,7 @@ impl EventDispatcher {
             let event = bind_map.get(&event).cloned().unwrap_or(event);
 
             let entry = listener_map.entry(event).or_default();
-            entry.extend(listeners);
+            entry.extend(listeners.into_iter().map(|l| (0, l)));
         }
 
         self
@@ -305,11 +371,41 @@ impl EventDispatcher {
         let entry = listener_map.entry(event).or_default();
         if first {
             // 对齐 PHP `array_unshift($this->listener[$event], $listener)`
-            entry.insert(0, listener);
+            entry.insert(0, (i32::MAX, listener));
         } else {
             // 对齐 PHP `$this->listener[$event][] = $listener`
-            entry.push(listener);
+            entry.push((0, listener));
         }
+
+        self
+    }
+
+    /// 注册事件监听器并指定优先级（T002）
+    ///
+    /// 监听器按优先级降序调用（高优先级先执行），同优先级按注册顺序。
+    /// 默认优先级为 0（等价 `listen(event, listener, false)`）。
+    /// `listen(event, listener, true)` 等价 `listen_with_priority(event, listener, i32::MAX)`。
+    ///
+    /// Rust:
+    /// ```ignore
+    /// dispatcher.listen_with_priority("UserLogin", Arc::new(listener), 10);
+    /// ```
+    pub fn listen_with_priority(
+        &self,
+        event: &str,
+        listener: Arc<dyn Listener>,
+        priority: i32,
+    ) -> &Self {
+        let mut listener_map = self.listener.write().expect("锁被毒化");
+        let bind_map = self.bind.read().expect("锁被毒化");
+
+        let event = bind_map
+            .get(event)
+            .cloned()
+            .unwrap_or_else(|| event.to_string());
+
+        let entry = listener_map.entry(event).or_default();
+        entry.push((priority, listener));
 
         self
     }
@@ -437,7 +533,7 @@ impl EventDispatcher {
         let listener_map = self.listener.read().expect("锁被毒化");
 
         // 对齐 PHP `$listeners = $this->listener[$event] ?? []`
-        let mut listeners: Vec<Arc<dyn Listener>> =
+        let mut listeners: Vec<(i32, Arc<dyn Listener>)> =
             listener_map.get(&event).cloned().unwrap_or_default();
 
         // 对齐 PHP 点号通配：`if (strpos($event, '.'))` → 触发 `prefix.*`
@@ -452,10 +548,13 @@ impl EventDispatcher {
 
         drop(listener_map);
 
+        // 按优先级降序稳定排序（同优先级保持注册顺序）
+        listeners.sort_by_key(|(p, _)| std::cmp::Reverse(*p));
+
         // 对齐 PHP `array_unique($listeners, SORT_REGULAR)`
         // Rust 端用 Arc::ptr_eq 指针比较去重（等价 PHP 对象引用去重）
         let mut seen: Vec<Arc<dyn Listener>> = Vec::new();
-        listeners.retain(|l| {
+        listeners.retain(|(_, l)| {
             if seen.iter().any(|s| Arc::ptr_eq(s, l)) {
                 false
             } else {
@@ -464,7 +563,7 @@ impl EventDispatcher {
             }
         });
 
-        listeners
+        listeners.into_iter().map(|(_, l)| l).collect()
     }
 
     /// 触发事件（对齐 PHP `trigger($event, $params = null, bool $once = false)`）
@@ -616,6 +715,169 @@ impl EventDispatcher {
 
         listener_map.get(event).map(|v| v.len()).unwrap_or(0)
     }
+
+    /// 分发事件（T001）
+    ///
+    /// 统一入口，根据 `mode` 选择同步或异步分发策略。
+    /// 内置循环检测（T003）和 panic 兜底（T004）。
+    ///
+    /// **同步模式（Sync）**：逐个调用监听器，panic 被捕获记入 `failures`。
+    /// **异步模式（Async）**：每个监听器投递到 tokio 任务池并发执行，
+    /// 等待全部完成后返回结果。任务 panic 被捕获记入 `failures`。
+    ///
+    /// Rust:
+    /// ```ignore
+    /// # async fn example() {
+    /// let result = dispatcher.dispatch("UserLogin", &json!({"user_id": 123}), DispatchMode::Sync).await.unwrap();
+    /// assert!(result.is_success());
+    /// # }
+    /// ```
+    pub async fn dispatch(
+        &self,
+        event: &str,
+        params: &Value,
+        mode: DispatchMode,
+    ) -> Result<DispatchResult, EventError> {
+        // T003: 循环检测 — 递增线程本地深度
+        let depth = DISPATCH_DEPTH.with(|d| {
+            let mut d = d.borrow_mut();
+            *d += 1;
+            *d
+        });
+
+        let result = if depth > CYCLE_THRESHOLD {
+            eprintln!(
+                "[WARN] Event cycle detected: '{}' dispatch depth {} exceeded threshold {}",
+                event, depth, CYCLE_THRESHOLD
+            );
+            Err(EventError::CycleDetected(format!(
+                "event '{}' dispatch depth {} exceeded threshold {}",
+                event, depth, CYCLE_THRESHOLD
+            )))
+        } else {
+            match mode {
+                DispatchMode::Sync => Ok(self.dispatch_sync_inner(event, params)),
+                DispatchMode::Async => Ok(self.dispatch_async_inner(event, params).await),
+            }
+        };
+
+        // 递减深度
+        DISPATCH_DEPTH.with(|d| {
+            *d.borrow_mut() -= 1;
+        });
+
+        result
+    }
+
+    /// 同步分发事件（T001 + T003 + T004）
+    ///
+    /// 非异步版本的 `dispatch`，供监听器内同步重入调用。
+    /// 内置循环检测和 panic 兜底。
+    pub fn dispatch_sync(&self, event: &str, params: &Value) -> Result<DispatchResult, EventError> {
+        let depth = DISPATCH_DEPTH.with(|d| {
+            let mut d = d.borrow_mut();
+            *d += 1;
+            *d
+        });
+
+        let result = if depth > CYCLE_THRESHOLD {
+            eprintln!(
+                "[WARN] Event cycle detected: '{}' dispatch depth {} exceeded threshold {}",
+                event, depth, CYCLE_THRESHOLD
+            );
+            Err(EventError::CycleDetected(format!(
+                "event '{}' dispatch depth {} exceeded threshold {}",
+                event, depth, CYCLE_THRESHOLD
+            )))
+        } else {
+            Ok(self.dispatch_sync_inner(event, params))
+        };
+
+        DISPATCH_DEPTH.with(|d| {
+            *d.borrow_mut() -= 1;
+        });
+
+        result
+    }
+
+    /// 同步分发内部实现（T004 panic 兜底）
+    ///
+    /// 逐个调用监听器，使用 `catch_unwind` 包裹防止 panic 传播。
+    /// panic 和普通错误都记入 `failures`，不中断后续监听器。
+    fn dispatch_sync_inner(&self, event: &str, params: &Value) -> DispatchResult {
+        let listeners = self.collect_listeners(event);
+        let mut results = Vec::with_capacity(listeners.len());
+        let mut failures = Vec::new();
+
+        for listener in &listeners {
+            // T004: panic 兜底
+            let panic_result =
+                std::panic::catch_unwind(AssertUnwindSafe(|| listener.handle(params)));
+
+            match panic_result {
+                Ok(Ok(value)) => results.push(value),
+                Ok(Err(e)) => failures.push(ListenerFailure {
+                    error: e.to_string(),
+                    is_panic: false,
+                }),
+                Err(panic_payload) => {
+                    let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    eprintln!("[WARN] Event listener panicked: {}", msg);
+                    failures.push(ListenerFailure {
+                        error: msg,
+                        is_panic: true,
+                    });
+                }
+            }
+        }
+
+        DispatchResult { results, failures }
+    }
+
+    /// 异步分发内部实现（T001 + T004）
+    ///
+    /// 每个监听器投递到 tokio 任务池并发执行，等待全部完成。
+    /// 任务 panic（JoinError）被捕获记入 `failures`。
+    async fn dispatch_async_inner(&self, event: &str, params: &Value) -> DispatchResult {
+        let listeners = self.collect_listeners(event);
+        let params_owned = params.clone();
+
+        let handles: Vec<_> = listeners
+            .into_iter()
+            .map(|listener| {
+                let params = params_owned.clone();
+                tokio::spawn(async move { listener.handle(&params) })
+            })
+            .collect();
+
+        let mut results = Vec::with_capacity(handles.len());
+        let mut failures = Vec::new();
+
+        for handle in handles {
+            match handle.await {
+                Ok(Ok(value)) => results.push(value),
+                Ok(Err(e)) => failures.push(ListenerFailure {
+                    error: e.to_string(),
+                    is_panic: false,
+                }),
+                Err(join_err) => {
+                    eprintln!("[WARN] Event listener task panicked: {}", join_err);
+                    failures.push(ListenerFailure {
+                        error: format!("Task panicked: {}", join_err),
+                        is_panic: true,
+                    });
+                }
+            }
+        }
+
+        DispatchResult { results, failures }
+    }
 }
 
 /// 事件 facade（对齐 PHP `think\facade\Event`）
@@ -681,6 +943,25 @@ pub mod facade {
     /// 触发事件（对齐 PHP `Event::trigger(...)`）
     pub fn trigger(event: &str, params: &Value, once: bool) -> Result<Vec<Value>, EventError> {
         dispatcher().trigger(event, params, once)
+    }
+
+    /// 注册事件监听器并指定优先级（T002）
+    pub fn listen_with_priority(event: &str, listener: Arc<dyn Listener>, priority: i32) {
+        dispatcher().listen_with_priority(event, listener, priority);
+    }
+
+    /// 分发事件（T001）
+    pub async fn dispatch(
+        event: &str,
+        params: &Value,
+        mode: DispatchMode,
+    ) -> Result<DispatchResult, EventError> {
+        dispatcher().dispatch(event, params, mode).await
+    }
+
+    /// 同步分发事件（T001 + T003 + T004）
+    pub fn dispatch_sync(event: &str, params: &Value) -> Result<DispatchResult, EventError> {
+        dispatcher().dispatch_sync(event, params)
     }
 
     /// 触发事件（只获取一个有效返回值）（对齐 PHP `Event::until(...)`）
@@ -1853,5 +2134,533 @@ mod tests {
         let results = event_trigger_async("HelperTest", &Value::Null).await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].as_ref().unwrap(), &json!("helper_async"));
+    }
+
+    // ========================================================================
+    // 测试组 54: T001 dispatch — 同步分发模式
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_dispatch_sync_returns_all_results() {
+        let dispatcher = EventDispatcher::new();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!(1)))),
+            false,
+        );
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!(2)))),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results, vec![json!(1), json!(2)]);
+        assert!(result.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_sync_empty_event() {
+        let dispatcher = EventDispatcher::new();
+        let result = dispatcher
+            .dispatch("Nonexistent", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.results.is_empty());
+        assert!(result.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_sync_passes_params() {
+        let dispatcher = EventDispatcher::new();
+        let received = Arc::new(std::sync::Mutex::new(Value::Null));
+        let recv_clone = received.clone();
+
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |params| {
+                *recv_clone.lock().unwrap() = params.clone();
+                Ok(Value::Null)
+            })),
+            false,
+        );
+
+        let params = json!({"user_id": 123});
+        dispatcher
+            .dispatch("Test", &params, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert_eq!(*received.lock().unwrap(), params);
+    }
+
+    // ========================================================================
+    // 测试组 55: T001 dispatch — 异步分发模式
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_dispatch_async_returns_all_results() {
+        let dispatcher = EventDispatcher::new();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!(1)))),
+            false,
+        );
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!(2)))),
+            false,
+        );
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!(3)))),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Async)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results.len(), 3);
+        assert!(result.failures.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_async_empty_event() {
+        let dispatcher = EventDispatcher::new();
+        let result = dispatcher
+            .dispatch("Nonexistent", &Value::Null, DispatchMode::Async)
+            .await
+            .unwrap();
+        assert!(result.results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_async_all_listeners_execute() {
+        let dispatcher = EventDispatcher::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..5 {
+            let c = counter.clone();
+            dispatcher.listen(
+                "Test",
+                Arc::new(ClosureListener::new(move |_| {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    Ok(Value::Null)
+                })),
+                false,
+            );
+        }
+
+        dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Async)
+            .await
+            .unwrap();
+        assert_eq!(counter.load(Ordering::SeqCst), 5);
+    }
+
+    // ========================================================================
+    // 测试组 56: T002 listen_with_priority — 优先级排序
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_priority_higher_executes_first() {
+        let dispatcher = EventDispatcher::new();
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let o1 = order.clone();
+        dispatcher.listen_with_priority(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o1.lock().unwrap().push(1);
+                Ok(Value::Null)
+            })),
+            10,
+        );
+
+        let o2 = order.clone();
+        dispatcher.listen_with_priority(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o2.lock().unwrap().push(2);
+                Ok(Value::Null)
+            })),
+            20,
+        );
+
+        let o3 = order.clone();
+        dispatcher.listen_with_priority(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o3.lock().unwrap().push(3);
+                Ok(Value::Null)
+            })),
+            5,
+        );
+
+        dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        // 优先级 20 > 10 > 5 → 执行顺序 [2, 1, 3]
+        assert_eq!(*order.lock().unwrap(), vec![2, 1, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_priority_same_priority_registration_order() {
+        let dispatcher = EventDispatcher::new();
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        for i in 1..=3 {
+            let o = order.clone();
+            dispatcher.listen_with_priority(
+                "Test",
+                Arc::new(ClosureListener::new(move |_| {
+                    o.lock().unwrap().push(i);
+                    Ok(Value::Null)
+                })),
+                10,
+            );
+        }
+
+        dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        // 同优先级 → 注册顺序 [1, 2, 3]
+        assert_eq!(*order.lock().unwrap(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_priority_mixed_with_listen_first() {
+        let dispatcher = EventDispatcher::new();
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let o1 = order.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o1.lock().unwrap().push(1);
+                Ok(Value::Null)
+            })),
+            false,
+        );
+
+        let o2 = order.clone();
+        dispatcher.listen_with_priority(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o2.lock().unwrap().push(2);
+                Ok(Value::Null)
+            })),
+            5,
+        );
+
+        let o3 = order.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                o3.lock().unwrap().push(3);
+                Ok(Value::Null)
+            })),
+            true,
+        );
+
+        dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        // first=true → i32::MAX > 5 > 0 → [3, 2, 1]
+        assert_eq!(*order.lock().unwrap(), vec![3, 2, 1]);
+    }
+
+    // ========================================================================
+    // 测试组 57: T003 循环检测
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_cycle_detection_normal_dispatch() {
+        // 非循环事件正常分发
+        let dispatcher = Arc::new(EventDispatcher::new());
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!("ok")))),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results, vec![json!("ok")]);
+    }
+
+    #[tokio::test]
+    async fn test_cycle_detection_triggers_on_reentrancy() {
+        // 事件 A 监听器触发事件 A → 循环检测
+        let dispatcher = Arc::new(EventDispatcher::new());
+        let dispatcher_clone = dispatcher.clone();
+        let cycle_detected = Arc::new(AtomicUsize::new(0));
+
+        let cd = cycle_detected.clone();
+        dispatcher.listen(
+            "CycleEvent",
+            Arc::new(ClosureListener::new(move |_| {
+                let d = dispatcher_clone.clone();
+                let cd = cd.clone();
+                // 用同步 dispatch_sync 重入
+                if let Err(EventError::CycleDetected(_)) =
+                    d.dispatch_sync("CycleEvent", &Value::Null)
+                {
+                    cd.fetch_add(1, Ordering::SeqCst);
+                }
+                Ok(Value::Null)
+            })),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("CycleEvent", &Value::Null, DispatchMode::Sync)
+            .await;
+        assert!(result.is_ok());
+        // 循环被检测到
+        assert!(cycle_detected.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_cycle_detection_threshold_not_exceeded() {
+        // 2 层嵌套（深度 2）不应触发循环检测
+        let dispatcher = Arc::new(EventDispatcher::new());
+        let dispatcher_clone = dispatcher.clone();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c1 = counter.clone();
+        dispatcher.listen(
+            "Outer",
+            Arc::new(ClosureListener::new(move |_| {
+                c1.fetch_add(1, Ordering::SeqCst);
+                let d = dispatcher_clone.clone();
+                // 用同步 dispatch_sync 调用内层事件
+                let _ = d.dispatch_sync("Inner", &Value::Null);
+                Ok(Value::Null)
+            })),
+            false,
+        );
+
+        let c2 = counter.clone();
+        dispatcher.listen(
+            "Inner",
+            Arc::new(ClosureListener::new(move |_| {
+                c2.fetch_add(10, Ordering::SeqCst);
+                Ok(Value::Null)
+            })),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Outer", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(counter.load(Ordering::SeqCst), 11); // 1 + 10
+    }
+
+    // ========================================================================
+    // 测试组 58: T004 panic 兜底
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_panic_guard_sync_continues_after_panic() {
+        let dispatcher = EventDispatcher::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c1 = counter.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                c1.fetch_add(1, Ordering::SeqCst);
+                Ok(json!("first"))
+            })),
+            false,
+        );
+
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| panic!("test panic"))),
+            false,
+        );
+
+        let c3 = counter.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                c3.fetch_add(100, Ordering::SeqCst);
+                Ok(json!("third"))
+            })),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        // panic 不中断后续监听器
+        assert_eq!(counter.load(Ordering::SeqCst), 101); // 1 + 100
+        assert_eq!(result.results, vec![json!("first"), json!("third")]);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].is_panic);
+        assert_eq!(result.failures[0].error, "test panic");
+    }
+
+    #[tokio::test]
+    async fn test_panic_guard_async_continues_after_panic() {
+        let dispatcher = EventDispatcher::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let c1 = counter.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                c1.fetch_add(1, Ordering::SeqCst);
+                Ok(json!("first"))
+            })),
+            false,
+        );
+
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| panic!("async panic"))),
+            false,
+        );
+
+        let c3 = counter.clone();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(move |_| {
+                c3.fetch_add(100, Ordering::SeqCst);
+                Ok(json!("third"))
+            })),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Async)
+            .await
+            .unwrap();
+        // panic 不中断后续监听器
+        assert_eq!(counter.load(Ordering::SeqCst), 101);
+        assert_eq!(result.results.len(), 2); // first + third
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].is_panic);
+    }
+
+    #[tokio::test]
+    async fn test_panic_guard_error_not_panic() {
+        let dispatcher = EventDispatcher::new();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| {
+                Err(EventError::ListenerError("normal error".to_string()))
+            })),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(!result.is_success());
+        assert_eq!(result.failures.len(), 1);
+        assert!(!result.failures[0].is_panic);
+        assert_eq!(
+            result.failures[0].error,
+            "Event listener error: normal error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_result_is_success() {
+        let dispatcher = EventDispatcher::new();
+        dispatcher.listen(
+            "Test",
+            Arc::new(ClosureListener::new(|_| Ok(json!("ok")))),
+            false,
+        );
+
+        let result = dispatcher
+            .dispatch("Test", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results, vec![json!("ok")]);
+    }
+
+    // ========================================================================
+    // 测试组 59: facade dispatch + listen_with_priority
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_facade_dispatch_sync() {
+        facade::listen(
+            "FacadeDispatch",
+            Arc::new(ClosureListener::new(|_| Ok(json!("facade_sync")))),
+            false,
+        );
+
+        let result = facade::dispatch("FacadeDispatch", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results, vec![json!("facade_sync")]);
+    }
+
+    #[tokio::test]
+    async fn test_facade_dispatch_async() {
+        facade::listen(
+            "FacadeDispatchAsync",
+            Arc::new(ClosureListener::new(|_| Ok(json!("facade_async")))),
+            false,
+        );
+
+        let result = facade::dispatch("FacadeDispatchAsync", &Value::Null, DispatchMode::Async)
+            .await
+            .unwrap();
+        assert!(result.is_success());
+        assert_eq!(result.results, vec![json!("facade_async")]);
+    }
+
+    #[tokio::test]
+    async fn test_facade_listen_with_priority() {
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let o1 = order.clone();
+        facade::listen_with_priority(
+            "FacadePriority",
+            Arc::new(ClosureListener::new(move |_| {
+                o1.lock().unwrap().push(1);
+                Ok(Value::Null)
+            })),
+            10,
+        );
+
+        let o2 = order.clone();
+        facade::listen_with_priority(
+            "FacadePriority",
+            Arc::new(ClosureListener::new(move |_| {
+                o2.lock().unwrap().push(2);
+                Ok(Value::Null)
+            })),
+            20,
+        );
+
+        facade::dispatch("FacadePriority", &Value::Null, DispatchMode::Sync)
+            .await
+            .unwrap();
+        assert_eq!(*order.lock().unwrap(), vec![2, 1]);
     }
 }

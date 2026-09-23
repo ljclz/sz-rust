@@ -8997,6 +8997,7 @@ version = "1.2.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
+ "criterion",
  "futures",
  "parking_lot",
  "serde",

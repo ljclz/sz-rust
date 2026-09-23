@@ -23,6 +23,11 @@ tokio = { workspace = true, features = ["sync"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 futures = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "event_bench"
+harness = false
 
 [lints]
 workspace = true

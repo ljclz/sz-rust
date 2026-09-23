@@ -39,6 +39,7 @@
 pub mod cookie;
 pub mod env;
 pub mod event;
+pub mod event_facade;
 pub mod i18n;
 pub mod mail;
 pub mod notify;
