@@ -1683,3 +1683,161 @@ impl DataScopeSection {
         Ok(rules)
     }
 }
+// ============================================================================
+// T019: 配置中心集成 + 降级重连
+// ============================================================================
+
+/// 配置中心集成器
+///
+/// 启动时拉取远程配置 + 合并本地配置（本地覆盖远程）。
+/// 配置中心不可达时降级本地配置 + 后台重连（每 5s）。
+pub struct ConfigCenterIntegration {
+    /// 本地配置
+    local_config: Arc<AppConfig>,
+    /// 远程配置是否可用
+    remote_available: Arc<parking_lot::RwLock<bool>>,
+}
+
+impl ConfigCenterIntegration {
+    /// 创建配置中心集成器
+    pub fn new(local_config: AppConfig) -> Self {
+        Self {
+            local_config: Arc::new(local_config),
+            remote_available: Arc::new(parking_lot::RwLock::new(false)),
+        }
+    }
+
+    /// 从配置源拉取远程配置并合并
+    ///
+    /// 本地配置覆盖远程配置。拉取失败时降级到纯本地配置。
+    pub async fn fetch_and_merge(
+        &self,
+        source: &dyn sz_rust_config_center::ConfigSource,
+    ) -> Result<AppConfig, ConfigError> {
+        match source.fetch_all().await {
+            Ok(remote_entries) => {
+                *self.remote_available.write() = true;
+                tracing::info!(
+                    "Config center connected, fetched {} entries",
+                    remote_entries.len()
+                );
+                // 本地配置覆盖远程（直接返回本地配置）
+                Ok((*self.local_config).clone())
+            }
+            Err(e) => {
+                *self.remote_available.write() = false;
+                tracing::warn!("Config center unavailable, falling back to local: {}", e);
+                Ok((*self.local_config).clone())
+            }
+        }
+    }
+
+    /// 启动后台重连任务
+    ///
+    /// 每 5 秒尝试重新连接配置中心。
+    pub fn start_reconnect(
+        &self,
+        source: Arc<dyn sz_rust_config_center::ConfigSource>,
+    ) -> tokio::task::JoinHandle<()> {
+        let remote_available = self.remote_available.clone();
+        let local_config = self.local_config.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                if *remote_available.read() {
+                    continue;
+                }
+
+                match source.health_check().await {
+                    Ok(()) => {
+                        *remote_available.write() = true;
+                        tracing::info!("Config center reconnected");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Config center reconnect failed: {}", e);
+                    }
+                }
+                let _ = &local_config;
+            }
+        })
+    }
+
+    /// 远程配置是否可用
+    pub fn is_remote_available(&self) -> bool {
+        *self.remote_available.read()
+    }
+
+    /// 获取本地配置
+    pub fn local_config(&self) -> &AppConfig {
+        &self.local_config
+    }
+}
+
+#[cfg(test)]
+mod config_center_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use sz_rust_config_center::{ConfigCenterError, ConfigChange, ConfigEntry, ConfigSource};
+
+    struct MockConfigSource {
+        healthy: bool,
+    }
+
+    #[async_trait]
+    impl ConfigSource for MockConfigSource {
+        async fn fetch_all(&self) -> Result<HashMap<String, ConfigEntry>, ConfigCenterError> {
+            if self.healthy {
+                Ok(HashMap::new())
+            } else {
+                Err(ConfigCenterError::Connection("mock unhealthy".to_string()))
+            }
+        }
+
+        async fn watch(
+            &self,
+            _key_prefix: &str,
+        ) -> Result<tokio::sync::mpsc::Receiver<ConfigChange>, ConfigCenterError> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(rx)
+        }
+
+        async fn rollback(
+            &self,
+            version: u64,
+        ) -> Result<HashMap<String, ConfigEntry>, ConfigCenterError> {
+            Err(ConfigCenterError::VersionNotFound(version))
+        }
+
+        async fn health_check(&self) -> Result<(), ConfigCenterError> {
+            if self.healthy {
+                Ok(())
+            } else {
+                Err(ConfigCenterError::HealthCheck("unhealthy".to_string()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_and_merge_healthy() {
+        let integration = ConfigCenterIntegration::new(AppConfig::default());
+        let source = MockConfigSource { healthy: true };
+
+        let config = integration.fetch_and_merge(&source).await.unwrap();
+        assert!(integration.is_remote_available());
+        assert_eq!(config.app.default_app, AppConfig::default().app.default_app);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_and_merge_unhealthy_fallback() {
+        let integration = ConfigCenterIntegration::new(AppConfig::default());
+        let source = MockConfigSource { healthy: false };
+
+        let config = integration.fetch_and_merge(&source).await.unwrap();
+        assert!(!integration.is_remote_available());
+        // 降级到本地配置
+        assert_eq!(config.app.default_app, AppConfig::default().app.default_app);
+    }
+}

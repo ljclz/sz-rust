@@ -40,6 +40,7 @@ image = { workspace = true }
 imageproc = { workspace = true }
 rand = { workspace = true }
 sz-rust-orm-facade = { workspace = true }
+sz-rust-config-center = { workspace = true }
 
 [dev-dependencies]
 http-body-util = { workspace = true }
