@@ -26,7 +26,10 @@
 //! { "code": <code>, "msg": "<msg>", "data": {} }
 //! ```
 
-use serde::Serialize;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use thiserror::Error;
 
 /// 错误码枚举（对齐 PHP BaseException 的 code 字段）
@@ -210,6 +213,230 @@ impl Default for BaseException {
 }
 
 // ============================================================================
+// 结构化错误响应 — 对齐 ThinkPHP `{code, msg, data, debug}` 格式
+// ============================================================================
+
+/// 调试信息（仅 dev 模式包含，production 模式由 [`StructuredErrorResponse`]
+/// 序列化时剔除）
+///
+/// 包含栈追踪、源文件路径、行号，用于开发期快速定位错误来源。
+/// 生产环境不应暴露此信息，避免泄漏内部实现细节。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugInfo {
+    /// 栈追踪字符串（可选，由 `std::backtrace::Backtrace` 或 tracing 生成）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack_trace: Option<String>,
+    /// 源文件路径（可选，如 `src/handler/user.rs`）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// 源文件行号（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+impl DebugInfo {
+    /// 创建空 DebugInfo（所有字段 None）
+    pub fn new() -> Self {
+        Self {
+            stack_trace: None,
+            file: None,
+            line: None,
+        }
+    }
+
+    /// 设置栈追踪
+    pub fn with_stack_trace(mut self, trace: impl Into<String>) -> Self {
+        self.stack_trace = Some(trace.into());
+        self
+    }
+
+    /// 设置源文件路径
+    pub fn with_file(mut self, file: impl Into<String>) -> Self {
+        self.file = Some(file.into());
+        self
+    }
+
+    /// 设置源文件行号
+    pub fn with_line(mut self, line: u32) -> Self {
+        self.line = Some(line);
+        self
+    }
+}
+
+impl Default for DebugInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 结构化错误响应
+///
+/// 对齐 ThinkPHP 错误响应格式：`{code, msg, data, debug}`。
+///
+/// - `code`：业务错误码（对齐 PHP `BaseException::$code`）
+/// - `msg`：用户可读消息
+/// - `data`：附加数据（可选，默认 `null`）
+/// - `debug`：调试信息（可选，仅 dev 模式包含）
+///
+/// ## production 模式
+///
+/// 当 `is_production = true` 时，序列化结果不包含 `debug` 字段，
+/// 避免向客户端泄漏栈追踪、文件路径等内部信息。
+///
+/// ## 用法
+///
+/// ```ignore
+/// use sz_rust_http_facade::error::{StructuredErrorResponse, DebugInfo, ErrorCode};
+///
+/// // dev 模式：包含 debug
+/// let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "资源不存在")
+///     .with_debug(DebugInfo::new().with_file("src/handler.rs").with_line(42));
+///
+/// // production 模式：剔除 debug
+/// let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "资源不存在")
+///     .is_production(true);
+/// ```
+#[derive(Debug, Clone)]
+pub struct StructuredErrorResponse {
+    /// 业务错误码
+    pub code: i32,
+    /// 用户可读消息
+    pub msg: String,
+    /// 附加数据（可选）
+    pub data: Option<Value>,
+    /// 调试信息（可选，production 模式序列化时剔除）
+    pub debug: Option<DebugInfo>,
+    /// 是否为生产模式（true 时序列化剔除 debug 字段）
+    is_production: bool,
+}
+
+impl StructuredErrorResponse {
+    /// 创建结构化错误响应
+    ///
+    /// 默认 `data = None`、`debug = None`、`is_production = false`。
+    pub fn new(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self {
+            code: code.as_i32(),
+            msg: msg.into(),
+            data: None,
+            debug: None,
+            is_production: false,
+        }
+    }
+
+    /// 从原始 i32 code 创建（用于未在 [`ErrorCode`] 枚举中定义的自定义错误码）
+    pub fn from_raw(code: i32, msg: impl Into<String>) -> Self {
+        Self {
+            code,
+            msg: msg.into(),
+            data: None,
+            debug: None,
+            is_production: false,
+        }
+    }
+
+    /// 设置附加数据
+    pub fn with_data(mut self, data: Value) -> Self {
+        self.data = Some(data);
+        self
+    }
+
+    /// 设置调试信息
+    pub fn with_debug(mut self, debug: DebugInfo) -> Self {
+        self.debug = Some(debug);
+        self
+    }
+
+    /// 设置是否为生产模式
+    ///
+    /// `true` 时序列化结果不包含 `debug` 字段。
+    pub fn is_production(mut self, is_prod: bool) -> Self {
+        self.is_production = is_prod;
+        self
+    }
+
+    /// 查询当前是否为生产模式
+    pub fn is_production_mode(&self) -> bool {
+        self.is_production
+    }
+
+    /// 序列化为 `serde_json::Value`（保证字段顺序 code → msg → data → debug）
+    ///
+    /// production 模式下不包含 `debug` 字段。
+    pub fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("code".to_string(), Value::Number(self.code.into()));
+        map.insert("msg".to_string(), Value::String(self.msg.clone()));
+        map.insert("data".to_string(), self.data.clone().unwrap_or(Value::Null));
+        if !self.is_production {
+            if let Some(ref debug) = self.debug {
+                map.insert(
+                    "debug".to_string(),
+                    serde_json::to_value(debug).unwrap_or(Value::Null),
+                );
+            }
+        }
+        Value::Object(map)
+    }
+
+    /// 序列化为 JSON 字符串
+    pub fn to_json_string(&self) -> String {
+        self.to_value().to_string()
+    }
+
+    /// 对应的 HTTP 状态码（基于 [`ErrorCode`] 映射）
+    pub fn http_status(&self) -> u16 {
+        ErrorCode::from(self.code).http_status()
+    }
+}
+
+impl Serialize for StructuredErrorResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_value().serialize(serializer)
+    }
+}
+
+/// 让 StructuredErrorResponse 可以直接作为 axum handler 返回值
+///
+/// 自动设置：
+/// - HTTP 状态码：由 [`ErrorCode::http_status`] 映射（如 NotFound → 404）
+/// - Content-Type: `application/json; charset=utf-8`
+impl IntoResponse for StructuredErrorResponse {
+    fn into_response(self) -> Response {
+        let body = self.to_json_string();
+        let status =
+            StatusCode::from_u16(self.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        (
+            status,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/json; charset=utf-8",
+            )],
+            body,
+        )
+            .into_response()
+    }
+}
+
+impl From<BaseException> for StructuredErrorResponse {
+    /// 将 [`BaseException`] 转为 [`StructuredErrorResponse`]
+    ///
+    /// 保留 code 与 msg，data/debug 均为 None，默认非生产模式。
+    fn from(ex: BaseException) -> Self {
+        Self {
+            code: ex.code,
+            msg: ex.msg,
+            data: None,
+            debug: None,
+            is_production: false,
+        }
+    }
+}
+
+// ============================================================================
 // 单元测试
 // ============================================================================
 
@@ -327,5 +554,189 @@ mod tests {
         assert_eq!(ErrorCode::UserNotFound.as_i32(), -2);
         // PHP 您已离职 → code=-3
         assert_eq!(ErrorCode::UserDisabled.as_i32(), -3);
+    }
+
+    // ---------- DebugInfo 测试 ----------
+
+    #[test]
+    fn test_debug_info_new_all_none() {
+        let info = DebugInfo::new();
+        assert!(info.stack_trace.is_none());
+        assert!(info.file.is_none());
+        assert!(info.line.is_none());
+    }
+
+    #[test]
+    fn test_debug_info_builders() {
+        let info = DebugInfo::new()
+            .with_stack_trace("fn1 -> fn2")
+            .with_file("src/handler.rs")
+            .with_line(42);
+        assert_eq!(info.stack_trace.as_deref(), Some("fn1 -> fn2"));
+        assert_eq!(info.file.as_deref(), Some("src/handler.rs"));
+        assert_eq!(info.line, Some(42));
+    }
+
+    #[test]
+    fn test_debug_info_default() {
+        let info = DebugInfo::default();
+        assert!(info.stack_trace.is_none());
+        assert!(info.file.is_none());
+        assert!(info.line.is_none());
+    }
+
+    #[test]
+    fn test_debug_info_serialize_skip_none() {
+        let info = DebugInfo::new().with_file("src/x.rs");
+        let val = serde_json::to_value(&info).unwrap();
+        assert!(val.get("stack_trace").is_none() || val["stack_trace"].is_null());
+        assert_eq!(val["file"], "src/x.rs");
+        assert!(val.get("line").is_none() || val["line"].is_null());
+    }
+
+    // ---------- StructuredErrorResponse 测试 ----------
+
+    #[test]
+    fn test_structured_error_basic() {
+        let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "资源不存在");
+        assert_eq!(resp.code, 404);
+        assert_eq!(resp.msg, "资源不存在");
+        assert!(resp.data.is_none());
+        assert!(resp.debug.is_none());
+        assert!(!resp.is_production_mode());
+    }
+
+    #[test]
+    fn test_structured_error_from_raw() {
+        let resp = StructuredErrorResponse::from_raw(9999, "自定义错误");
+        assert_eq!(resp.code, 9999);
+        assert_eq!(resp.msg, "自定义错误");
+    }
+
+    #[test]
+    fn test_structured_error_with_data() {
+        let resp = StructuredErrorResponse::new(ErrorCode::ValidateFailed, "校验失败")
+            .with_data(serde_json::json!({"field": "email"}));
+        assert_eq!(resp.data, Some(serde_json::json!({"field": "email"})));
+    }
+
+    #[test]
+    fn test_structured_error_with_debug() {
+        let debug = DebugInfo::new().with_file("src/x.rs").with_line(10);
+        let resp = StructuredErrorResponse::new(ErrorCode::DbError, "db error").with_debug(debug);
+        assert!(resp.debug.is_some());
+        assert_eq!(
+            resp.debug.as_ref().unwrap().file.as_deref(),
+            Some("src/x.rs")
+        );
+    }
+
+    #[test]
+    fn test_structured_error_to_value_dev_includes_debug() {
+        let debug = DebugInfo::new().with_file("src/x.rs").with_line(10);
+        let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "not found").with_debug(debug);
+        let val = resp.to_value();
+        assert_eq!(val["code"], 404);
+        assert_eq!(val["msg"], "not found");
+        assert_eq!(val["data"], serde_json::Value::Null);
+        assert!(val.get("debug").is_some());
+        assert_eq!(val["debug"]["file"], "src/x.rs");
+        assert_eq!(val["debug"]["line"], 10);
+    }
+
+    #[test]
+    fn test_structured_error_to_value_production_strips_debug() {
+        let debug = DebugInfo::new().with_stack_trace("secret trace");
+        let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "not found")
+            .with_debug(debug)
+            .is_production(true);
+        assert!(resp.is_production_mode());
+        let val = resp.to_value();
+        assert_eq!(val["code"], 404);
+        assert_eq!(val["msg"], "not found");
+        assert_eq!(val["data"], serde_json::Value::Null);
+        assert!(
+            val.get("debug").is_none(),
+            "production mode must not include debug field"
+        );
+    }
+
+    #[test]
+    fn test_structured_error_to_value_no_debug_when_none() {
+        let resp = StructuredErrorResponse::new(ErrorCode::Failed, "fail");
+        let val = resp.to_value();
+        assert!(val.get("debug").is_none());
+    }
+
+    #[test]
+    fn test_structured_error_field_order() {
+        let resp = StructuredErrorResponse::new(ErrorCode::Failed, "fail")
+            .with_data(serde_json::json!({"k": 1}));
+        let json = resp.to_json_string();
+        let code_pos = json.find("\"code\"").unwrap();
+        let msg_pos = json.find("\"msg\"").unwrap();
+        let data_pos = json.find("\"data\"").unwrap();
+        assert!(code_pos < msg_pos);
+        assert!(msg_pos < data_pos);
+    }
+
+    #[test]
+    fn test_structured_error_http_status() {
+        let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "not found");
+        assert_eq!(resp.http_status(), 404);
+        let resp = StructuredErrorResponse::new(ErrorCode::NotLogin, "not login");
+        assert_eq!(resp.http_status(), 401);
+        let resp = StructuredErrorResponse::new(ErrorCode::DbError, "db error");
+        assert_eq!(resp.http_status(), 500);
+    }
+
+    #[test]
+    fn test_structured_error_from_base_exception() {
+        let ex = BaseException::not_login("not_login");
+        let resp: StructuredErrorResponse = ex.into();
+        assert_eq!(resp.code, -1);
+        assert_eq!(resp.msg, "not_login");
+        assert!(resp.data.is_none());
+        assert!(resp.debug.is_none());
+    }
+
+    #[test]
+    fn test_structured_error_into_response_dev() {
+        let debug = DebugInfo::new().with_file("src/x.rs").with_line(1);
+        let resp = StructuredErrorResponse::new(ErrorCode::NotFound, "not found").with_debug(debug);
+        let response = resp.into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_structured_error_into_response_production() {
+        let resp =
+            StructuredErrorResponse::new(ErrorCode::ValidateFailed, "校验失败").is_production(true);
+        let response = resp.into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+
+    #[test]
+    fn test_structured_error_serialize_trait() {
+        let resp = StructuredErrorResponse::new(ErrorCode::Failed, "fail")
+            .with_data(serde_json::json!({"k": "v"}));
+        let val = serde_json::to_value(&resp).unwrap();
+        assert_eq!(val["code"], 0);
+        assert_eq!(val["msg"], "fail");
+        assert_eq!(val["data"]["k"], "v");
+    }
+
+    #[test]
+    fn test_structured_error_production_chain() {
+        let resp = StructuredErrorResponse::new(ErrorCode::Forbidden, "无权限")
+            .with_data(serde_json::json!({"required": "admin"}))
+            .is_production(true);
+        assert!(resp.is_production_mode());
+        let val = resp.to_value();
+        assert_eq!(val["data"]["required"], "admin");
+        assert!(val.get("debug").is_none());
     }
 }

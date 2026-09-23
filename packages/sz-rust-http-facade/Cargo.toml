@@ -31,6 +31,8 @@ tokio = { workspace = true, features = ["net"] }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 tower = { workspace = true }
+# 错误码注册表线程安全读写锁
+parking_lot = { workspace = true }
 # OpenAPI 文档生成
 utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, optional = true }

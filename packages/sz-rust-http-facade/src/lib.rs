@@ -31,6 +31,7 @@
 #![warn(missing_docs)]
 
 pub mod error;
+pub mod error_code_registry;
 /// GraphQL 支持（需启用 `graphql` feature）
 ///
 /// 提供 [`graphql_router_dynamic`] / [`graphql::graphql_router`] 构建 GraphQL axum 路由，
@@ -49,7 +50,8 @@ pub mod tls;
 // 便捷重导出 — 顶层直接访问常用项
 // ============================================================================
 
-pub use error::{BaseException, ErrorCode};
+pub use error::{BaseException, DebugInfo, ErrorCode, StructuredErrorResponse};
+pub use error_code_registry::{ErrorCodeConflict, ErrorCodeEntry, ErrorCodeRegistry};
 pub use response::{
     auto_respond, is_json_request, render_error, render_error_with_code, render_json,
     render_success, respond, respond_html, respond_jsonp, respond_text, ApiResponse, JsonResponse,
