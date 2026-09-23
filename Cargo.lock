@@ -8515,6 +8515,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-api-gateway"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "http",
+ "matchit 0.8.4",
+ "parking_lot",
+ "prost",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-auth-facade"
 version = "1.2.0"
 dependencies = [

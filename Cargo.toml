@@ -45,6 +45,8 @@ members = [
     "packages/sz-rust-service-registry",
 
     "packages/sz-rust-distributed-tx",
+
+    "packages/sz-rust-api-gateway",
 ]
 
 [workspace.package]
@@ -241,6 +243,7 @@ sz-rust-facade = { version = "1.2.0", path = "packages/sz-rust-facade" }
 sz-rust-config-center = { version = "1.2.0", path = "packages/sz-rust-config-center" }
 sz-rust-service-registry = { version = "1.2.0", path = "packages/sz-rust-service-registry" }
 sz-rust-distributed-tx = { version = "1.2.0", path = "packages/sz-rust-distributed-tx" }
+sz-rust-api-gateway = { version = "1.2.0", path = "packages/sz-rust-api-gateway" }
 
 
 # Ed25519 签名（P3-T2 插件市场）
