@@ -49,6 +49,8 @@ members = [
     "packages/sz-rust-api-gateway",
 
     "packages/sz-rust-codegen-loop",
+
+    "packages/sz-rust-testkit",
 ]
 
 [workspace.package]

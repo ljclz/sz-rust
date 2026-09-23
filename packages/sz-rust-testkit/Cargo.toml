@@ -1,0 +1,33 @@
+[package]
+name = "sz-rust-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Test toolkit for sz-rust — TestCase + HttpClient + ModelFactory + Fixture + Mock"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["test", "fixture", "factory", "mock", "thinkphp"]
+categories = ["development-tools::testing"]
+
+[features]
+default = []
+test-utils = ["dep:reqwest", "dep:serde_json"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
