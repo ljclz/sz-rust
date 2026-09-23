@@ -47,6 +47,8 @@ members = [
     "packages/sz-rust-distributed-tx",
 
     "packages/sz-rust-api-gateway",
+
+    "packages/sz-rust-codegen-loop",
 ]
 
 [workspace.package]

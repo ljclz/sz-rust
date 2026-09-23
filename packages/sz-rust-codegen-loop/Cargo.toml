@@ -1,0 +1,32 @@
+[package]
+name = "sz-rust-codegen-loop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AIGC code generation loop for sz-rust — requirement parsing + AI generation + security scan + compile validation + iterative loop"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["codegen", "ai", "loop", "thinkphp"]
+categories = ["development-tools"]
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+regex = { workspace = true }
+tempfile = { workspace = true }
+
+sz-rust-ai-facade = { workspace = true }
+sz-rust-cli = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
