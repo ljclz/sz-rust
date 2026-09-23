@@ -10,25 +10,19 @@ def load_baseline(criterion_dir: Path, baseline: str) -> dict:
     for bench_dir in criterion_dir.iterdir():
         if not bench_dir.is_dir() or bench_dir.name in ('report', 'estimates'):
             continue
-        baseline_dir = bench_dir / baseline
-        if not baseline_dir.exists():
-            continue
-        estimates_file = baseline_dir / 'new' / 'estimates.json'
-        if estimates_file.exists():
-            data = json.loads(estimates_file.read_text())
-            results[bench_dir.name] = {
-                'mean_ns': data.get('mean', {}).get('point_estimate', 0),
-                'median_ns': data.get('median', {}).get('point_estimate', 0),
-            }
         for sub in bench_dir.iterdir():
-            if sub.is_dir() and sub.name != 'report' and sub.name != baseline:
-                sub_est = sub / 'new' / 'estimates.json'
-                if sub_est.exists() and bench_dir.name not in results:
-                    data = json.loads(sub_est.read_text())
-                    results[f"{bench_dir.name}/{sub.name}"] = {
-                        'mean_ns': data.get('mean', {}).get('point_estimate', 0),
-                        'median_ns': data.get('median', {}).get('point_estimate', 0),
-                    }
+            if not sub.is_dir() or sub.name in ('report', 'estimates'):
+                continue
+            if baseline == 'new':
+                est_file = sub / 'new' / 'estimates.json'
+            else:
+                est_file = sub / baseline / 'estimates.json'
+            if est_file.exists():
+                data = json.loads(est_file.read_text())
+                results[f"{bench_dir.name}/{sub.name}"] = {
+                    'mean_ns': data.get('mean', {}).get('point_estimate', 0),
+                    'median_ns': data.get('median', {}).get('point_estimate', 0),
+                }
     return results
 
 
@@ -69,8 +63,8 @@ def main():
     lines.extend([
         "",
         "## 来源标注",
-        f"- 基线数据: `{criterion_dir}/<bench>/{baseline_name}/new/estimates.json`",
-        f"- 当前数据: `{criterion_dir}/<bench>/new/estimates.json`",
+        f"- 基线数据: `{criterion_dir}/<bench>/<sub>/{baseline_name}/estimates.json`",
+        f"- 当前数据: `{criterion_dir}/<bench>/<sub>/new/estimates.json`",
     ])
 
     output_path.write_text('\n'.join(lines), encoding='utf-8')
