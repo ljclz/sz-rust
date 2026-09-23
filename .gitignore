@@ -51,8 +51,12 @@ _*.py
 
 # ZCode agent
 .zcode/
-# Coverage raw data
-build_rs_cov.profraw
+# Coverage raw data（llvm-cov 运行时产物，含 visual 包实测产生的 default_*.profraw）
+*.profraw
+# Python 缓存（scripts/perf 工具）
+__pycache__/
+# Inscode IDE 本地目录
+.inscode/
 
 # WASM build artifacts
 packages/sz-rust-wasm/target/
