@@ -156,4 +156,36 @@ mod tests {
         let decision = handler.decide(FaultStrategy::Retry, &error, 2);
         assert_eq!(decision, FaultDecision::Terminate);
     }
+
+    #[test]
+    fn outcome_terminate() {
+        let result = outcome_from_decision(FaultDecision::Terminate);
+        assert_eq!(result.unwrap(), PluginNodeOutcome::InstanceTerminated);
+    }
+
+    #[test]
+    fn outcome_skip() {
+        let result = outcome_from_decision(FaultDecision::Skip);
+        assert_eq!(result.unwrap(), PluginNodeOutcome::Skipped);
+    }
+
+    #[test]
+    fn outcome_retry_with_remaining() {
+        let decision = FaultDecision::Retry {
+            remaining: 2,
+            backoff: Duration::from_millis(10),
+        };
+        let result = outcome_from_decision(decision);
+        assert_eq!(result.unwrap(), PluginNodeOutcome::Completed);
+    }
+
+    #[test]
+    fn outcome_retry_zero_remaining() {
+        let decision = FaultDecision::Retry {
+            remaining: 0,
+            backoff: Duration::from_millis(10),
+        };
+        let result = outcome_from_decision(decision);
+        assert_eq!(result.unwrap(), PluginNodeOutcome::InstanceTerminated);
+    }
 }

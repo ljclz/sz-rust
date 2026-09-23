@@ -282,4 +282,55 @@ mod tests {
         assert_eq!(result["code"], 1);
         assert_eq!(result["data"]["plugin"], "tracing");
     }
+
+    #[tokio::test]
+    async fn test_create_span_capability_missing_operation_name() {
+        let cap = CreateSpanCapability::new(TracingState::default());
+        let result = cap.call(json!({})).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("operation_name is required"));
+    }
+
+    #[tokio::test]
+    async fn test_create_span_capability_non_string_tag_skipped() {
+        let cap = CreateSpanCapability::new(TracingState::default());
+        let result = cap
+            .call(json!({"operation_name": "test", "tags": {"count": 42, "name": "abc"}}))
+            .await
+            .unwrap();
+        assert_eq!(result["code"], 1);
+        assert_eq!(result["data"]["operation_name"], "test");
+    }
+
+    #[test]
+    fn test_list_spans_capability_metadata() {
+        let cap = ListSpansCapability::new(TracingState::default());
+        assert_eq!(cap.name(), "tracing.list_spans");
+        assert!(!cap.description().is_empty());
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"tracing"));
+        assert!(!cap.requires_confirmation());
+    }
+
+    #[test]
+    fn test_create_span_capability_metadata() {
+        let cap = CreateSpanCapability::new(TracingState::default());
+        assert_eq!(cap.name(), "tracing.create_span");
+        assert!(!cap.description().is_empty());
+        let schema = cap.schema();
+        assert_eq!(schema["required"][0], "operation_name");
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"write"));
+    }
+
+    #[test]
+    fn test_health_check_capability_metadata() {
+        let cap = HealthCheckCapability::new(TracingState::default());
+        assert_eq!(cap.name(), "tracing.health_check");
+        assert!(!cap.description().is_empty());
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"health"));
+        assert!(!cap.requires_confirmation());
+    }
 }

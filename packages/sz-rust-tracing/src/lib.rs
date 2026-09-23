@@ -1250,4 +1250,26 @@ mod tests {
         tracer.end_span(span);
         assert_eq!(tracer.inner().get_spans().len(), 1);
     }
+
+    #[test]
+    fn test_tracing_state_default() {
+        let state = TracingState::default();
+        assert_eq!(state.version, env!("CARGO_PKG_VERSION"));
+        assert!(state.tracer.inner().get_spans().is_empty());
+    }
+
+    #[test]
+    fn test_create_span_request_deserialize() {
+        let json_str =
+            r#"{"operation_name":"query_db","service_name":"api","tags":{"env":"prod"}}"#;
+        let req: CreateSpanRequest = serde_json::from_str(json_str).unwrap();
+        assert_eq!(req.operation_name, "query_db");
+        assert_eq!(req.service_name, "api");
+        assert_eq!(req.tags.get("env"), Some(&"prod".to_string()));
+
+        let default_req: CreateSpanRequest =
+            serde_json::from_str(r#"{"operation_name":"op"}"#).unwrap();
+        assert_eq!(default_req.service_name, "sz300");
+        assert!(default_req.tags.is_empty());
+    }
 }

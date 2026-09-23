@@ -144,4 +144,56 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, WorkflowErrorCode::NoCandidates);
     }
+
+    #[tokio::test]
+    async fn static_strategy_dedup_and_sort() {
+        let resolver = DefaultCandidateResolver::new(
+            Arc::new(DefaultGuardEvaluator::default()),
+            Arc::new(CapabilityRegistry::new()),
+        );
+        let strategy = CandidateStrategy::Static {
+            users: vec!["b".into(), "a".into(), "b".into()],
+            roles: vec![],
+        };
+        let result = resolver
+            .resolve(&strategy, &serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(result, vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn dynamic_strategy_non_array_error() {
+        let resolver = DefaultCandidateResolver::new(
+            Arc::new(DefaultGuardEvaluator::default()),
+            Arc::new(CapabilityRegistry::new()),
+        );
+        let strategy = CandidateStrategy::Dynamic {
+            expr: "true".into(),
+        };
+        let result = resolver.resolve(&strategy, &serde_json::json!({})).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            WorkflowErrorCode::CandidateFormatError
+        );
+    }
+
+    #[tokio::test]
+    async fn capability_strategy_not_found_error() {
+        let resolver = DefaultCandidateResolver::new(
+            Arc::new(DefaultGuardEvaluator::default()),
+            Arc::new(CapabilityRegistry::new()),
+        );
+        let strategy = CandidateStrategy::Capability {
+            capability_name: "nonexistent".into(),
+            args: serde_json::json!({}),
+        };
+        let result = resolver.resolve(&strategy, &serde_json::json!({})).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code,
+            WorkflowErrorCode::CandidateFormatError
+        );
+    }
 }

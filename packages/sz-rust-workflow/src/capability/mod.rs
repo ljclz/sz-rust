@@ -256,4 +256,42 @@ mod tests {
         let result = cap.call(json!({})).await.unwrap();
         assert_eq!(result["code"], 1);
     }
+
+    #[test]
+    fn test_health_check_capability_metadata() {
+        let cap = HealthCheckCapability::new(WorkflowState::default());
+        assert_eq!(cap.name(), "workflow.health_check");
+        assert!(!cap.description().is_empty());
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"workflow"));
+        assert!(!cap.requires_confirmation());
+    }
+
+    #[test]
+    fn test_list_definitions_capability_metadata() {
+        let cap = ListDefinitionsCapability::new();
+        assert_eq!(cap.name(), "workflow.list_definitions");
+        assert!(!cap.description().is_empty());
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"definition"));
+        assert!(!cap.requires_confirmation());
+    }
+
+    #[test]
+    fn test_list_instances_capability_metadata() {
+        let cap = ListInstancesCapability::new();
+        assert_eq!(cap.name(), "workflow.list_instances");
+        assert!(!cap.description().is_empty());
+        assert_eq!(cap.source(), CapabilitySource::Plugin);
+        assert!(cap.tags().contains(&"instance"));
+        assert!(!cap.requires_confirmation());
+    }
+
+    #[test]
+    fn test_workflow_plugin_capability_names() {
+        let plugin = WorkflowPlugin::new(WorkflowState::default());
+        let names = plugin.capability_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"workflow.health_check".to_string()));
+    }
 }
