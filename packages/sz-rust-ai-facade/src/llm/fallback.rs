@@ -288,6 +288,18 @@ mod tests {
     }
 
     #[test]
+    fn fallback_mark_available_actually_restores() {
+        let reg = Arc::new(make_registry());
+        let chain = FallbackChain::new(reg);
+        chain.mark_unavailable("kat-coder");
+        chain.mark_unavailable("deepseek");
+        assert!(chain.route("codegen", RoutingStrategy::Cost).is_err());
+        chain.mark_available("kat-coder");
+        let result = chain.route("codegen", RoutingStrategy::Cost).unwrap();
+        assert_eq!(result.model_name, "kat-coder");
+    }
+
+    #[test]
     fn lb_distributes_across_instances() {
         let reg = Arc::new(make_registry());
         let chain = FallbackChain::new(reg);

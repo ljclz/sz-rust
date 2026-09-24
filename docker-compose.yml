@@ -1,4 +1,4 @@
-# docker-compose.yml — 开发/测试环境
+# docker-compose.yml — 开发/测试环境（v1.4.0 T08：5 种数据库）
 # 生产部署前必须设置所有环境变量，无默认密码
 
 services:
@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8300:8300"
+      - "${SZ300_PORT:-8300}:8300"
     environment:
       - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:?必须设置 JWT 密钥}
       - SZ300_DB_HOST=${SZ300_DB_HOST:-mysql}
@@ -17,35 +17,99 @@ services:
       - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
       - RUST_LOG=info,sz_rust_sz300=debug
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     restart: unless-stopped
 
+  # ── MySQL 8.0 ──
   mysql:
     image: mysql:8.0
     environment:
-      - MYSQL_ROOT_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
-      - MYSQL_DATABASE=${SZ300_DB_NAME:-sz300}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-sz300_dev_pass}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-sz300}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
+  # ── PostgreSQL 16 ──
   postgres:
     image: postgres:16
     environment:
-      - POSTGRES_PASSWORD=${SZ300_PG_PASSWORD:?必须设置 PG 密码}
-      - POSTGRES_DB=${SZ300_PG_NAME:-sz300}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-sz300_dev_pass}
+      - POSTGRES_DB=${POSTGRES_DATABASE:-sz300}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
+  # ── Oracle XE 21c ──
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    environment:
+      - ORACLE_PASSWORD=${ORACLE_PASSWORD:-sz300_dev_pass}
+      - APP_USER=sz300
+      - APP_USER_PASSWORD=${ORACLE_APP_PASSWORD:-sz300_dev_pass}
+    ports:
+      - "${ORACLE_PORT:-1521}:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "tnsping localhost:1521/XEPDB1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ── MSSQL Server 2022 ──
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${MSSQL_PASSWORD:-Sz300DevPass2026}
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+
+  # ── SQLite（文件数据库，sqlite-web 管理界面）──
+  sqlite:
+    image: keinos/sqlite3:latest
+    ports:
+      - "${SQLITE_PORT:-8080}:8080"
+    volumes:
+      - sqlite_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "sqlite3 /data/sz300.db 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Prometheus 监控 ──
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
     restart: unless-stopped
@@ -53,3 +117,6 @@ services:
 volumes:
   mysql_data:
   pg_data:
+  oracle_data:
+  mssql_data:
+  sqlite_data:

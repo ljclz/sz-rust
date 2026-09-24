@@ -1,0 +1,75 @@
+name: 编译时间监控
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  compile-time-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Install sccache
+        run: cargo install sccache
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_CACHE_SIZE=10G" >> $GITHUB_ENV
+
+      - name: Measure compile time
+        run: bash scripts/check-compile-time.sh --phases --threshold-percent=10
+        env:
+          RUSTC_WRAPPER: sccache
+
+      - name: Show sccache stats
+        run: bash scripts/sccache-stats.sh || true
+
+      - name: Upload compile time trend data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-time-trend-${{ github.run_id }}
+          path: |
+            scripts/compile-time-baseline.json
+          retention-days: 90
+
+      - name: Generate trend JSON
+        if: always()
+        run: |
+          python3 -c "
+          import json, datetime, os
+          trend = {
+            'timestamp': datetime.datetime.utcnow().isoformat() + 'Z',
+            'run_id': '${{ github.run_id }}',
+            'commit': '${{ github.sha }}',
+            'branch': '${{ github.ref_name }}',
+            'baseline': json.load(open('scripts/compile-time-baseline.json'))
+          }
+          with open('compile-time-trend.json', 'w') as f:
+            json.dump(trend, f, indent=2)
+          print(json.dumps(trend, indent=2))
+          "
+
+      - name: Upload trend data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-time-trend-data-${{ github.run_id }}
+          path: compile-time-trend.json
+          retention-days: 180

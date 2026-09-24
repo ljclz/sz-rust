@@ -5,6 +5,55 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.4.0] - 2026-09-24
+
+### Added — 编译优化（P1-1）
+
+- **sccache 增量编译缓存**（T01）：`.cargo/config.toml` 集成 sccache wrapper + `scripts/sccache-stats.sh` 缓存统计 + `docs/developer/sccache-guide.md` 使用指南
+- **Cargo Feature Gate 细化**（T02）：12 细粒度 feature（ai-facade/ai-rag/ai-codegen/orm-graphql/orm-grpc/service-registry/distributed-tx/api-gateway/config-center/tracing/observability/wasm）+ 4 聚合 feature + `scripts/check-feature-conflicts.sh` 互斥检查
+- **编译 Profile 优化**（T03）：`[profile.dev]` debug=1/incremental=true/codegen-units=16 + `[profile.bench]` inherits=release/debug=true + `[profile.ci]` inherits=dev/incremental=false/debug=0
+- **编译时间基线监控**（T04）：`scripts/compile-time-baseline.json` 42 crate 基线 + `scripts/check-compile-time.sh` 分阶段报告 + `.github/workflows/compile-time-monitor.yml` CI 趋势追踪
+
+### Added — sz300 Workspace 纳入（P1-2）
+
+- **sz300 源码迁入**（T06）：`packages/sz-rust-sz300/` 从 sz-rust-oss 迁入，32 个 workspace=true 引用，35 个 lib 测试全部通过
+- **框架/业务边界划分**（T07）：`docs/adr/0022-framework-business-boundary.md` ADR + `scripts/check-boundary.sh` 依赖分析（无反向依赖）
+- **迁移验证脚本**（T05）：`scripts/sz300-migration-verify.sh` + `scripts/sz300-test-baseline.json`
+
+### Added — 集成测试文档化（P1-3）
+
+- **docker-compose 一键启动**（T08）：5 种数据库（MySQL/PostgreSQL/SQLite/Oracle/MSSQL）+ healthcheck + 环境变量端口 + `.env.example`
+- **数据库后端 feature gate**（T09）：`sz-rust-orm-facade` 添加 5 个 backend-* feature + backend-all 聚合
+- **集成测试文档**（T10）：`docs/developer/integration-testing.md` 含 5 种数据库连接配置 + 故障排查
+
+### Added — 国际化（P2）
+
+- **多语言错误消息**（T11）：`i18n/zh-cn/errors.json`（30 键中文）+ `i18n/en-us/errors.json`（30 键英文）
+- **i18n 完整性检查**（T12）：`scripts/check-i18n-completeness.sh` + `.github/workflows/i18n-check.yml` CI 门禁
+- **API 文档双语支持**（T13）：`OpenApiBuilder` 添加 `description_bilingual(zh, en)` + `build_for_lang(lang)` + `swagger_ui_routes_with_lang()` + `extract_lang(accept_language)`
+
+### Added — WASM 边缘计算（P3-1）
+
+- **WASM 部署文档**（T14）：`docs/developer/wasm-deployment-guide.md`（编译/部署/运行时配置/沙箱安全/性能指南）
+- **WASM 边缘计算示例**（T15）：4 个示例（wasm_basic / wasm_host_function / wasm_sandbox / wasm_edge_deploy）
+
+### Added — gRPC 完善（P3-2）
+
+- **gRPC 流式模块**（T16）：`packages/sz-rust-api-gateway/src/grpc_streaming.rs`（StreamingSender + StreamingReceiver + ServerStreamingHandler + ClientStreamingHandler + BidiStreamingHandler + 背压机制 + 4 个单元测试）
+- **gRPC 流式使用文档**（T18）：`docs/developer/grpc-streaming-guide.md`（3 种流式模式 + 背压机制 + 错误处理）
+
+### Added — CI/CD 集成（T20）
+
+- 主 CI 添加门禁 26（i18n 完整性检查）和门禁 27（框架-业务边界检查）
+- 编译时间监控 CI（门禁 15）+ 独立 `compile-time-monitor.yml`（sccache + 趋势追踪）
+- i18n 完整性 CI（独立 `i18n-check.yml`）
+
+### Changed
+
+- 根 `Cargo.toml` 添加 workspace root package（`[package]` + `src/lib.rs`）以支持 `cargo build --features`
+- workspace crate 数从 41 增至 42（新增 sz-rust-sz300）
+- `sz-rust-orm-facade` 添加 5 个 backend-* feature gate
+
 ## [v1.3.0] - 2026-09-23
 
 ### Added — 新增 8 crate

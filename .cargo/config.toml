@@ -2,6 +2,17 @@
 # 文档：https://doc.rust-lang.org/cargo/reference/config.html
 
 [build]
+# sccache 增量编译缓存（v1.4.0 T01）
+# 未安装 sccache 时可通过 RUSTC_WRAPPER="" cargo build 临时禁用
+rustc-wrapper = "sccache"
 # 覆盖率插桩（cargo-llvm-cov 使用）
 # 仅在覆盖率测量时生效，正常构建不受影响
 # rustflags = ["-C", "instrument-coverage"]
+
+[env]
+# sccache 本地缓存目录（未设置时使用默认 ~/.cache/sccache）
+# SCCACHE_DIR = { value = "~/.cache/sccache", relative = false }
+# 缓存大小上限
+SCCACHE_CACHE_SIZE = "10G"
+# 远程缓存服务（可选，团队共享缓存）
+# SCCACHE_REMOTE_SERVICE = { value = "https://sccache.example.com", force = false }

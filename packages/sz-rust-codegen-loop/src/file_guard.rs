@@ -38,6 +38,15 @@ impl FileGuard {
         files: &[GeneratedFile],
     ) -> Result<(), CodegenError> {
         for file in files {
+            if std::path::Path::new(&file.path)
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
+                return Err(CodegenError::FileExists(format!(
+                    "path traversal detected: {}",
+                    file.path
+                )));
+            }
             let path = base_dir.join(&file.path);
             self.check(&path)?;
             if let Some(parent) = path.parent() {
@@ -107,5 +116,17 @@ mod tests {
         }];
         guard.write_files(tmp.path(), &files).await.unwrap();
         assert!(tmp.path().join("src/nested/deep.rs").exists());
+    }
+
+    #[tokio::test]
+    async fn refuse_path_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let guard = FileGuard::new(true);
+        let files = vec![GeneratedFile {
+            path: "../../../etc/passwd".into(),
+            content: "malicious".into(),
+        }];
+        let result = guard.write_files(tmp.path(), &files).await;
+        assert!(result.is_err());
     }
 }

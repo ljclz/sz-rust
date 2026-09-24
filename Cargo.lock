@@ -813,6 +813,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcrypt"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b1866ecef4f2d06a0bb77880015fdf2b89e25a1c2e5addacb87e459c86dc67e"
+dependencies = [
+ "base64 0.22.1",
+ "blowfish",
+ "getrandom 0.2.17",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8439,6 +8452,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust"
+version = "1.2.0"
+dependencies = [
+ "sz-rust-ai-facade",
+ "sz-rust-api-gateway",
+ "sz-rust-config-center",
+ "sz-rust-distributed-tx",
+ "sz-rust-frontend-codegen",
+ "sz-rust-observability",
+ "sz-rust-orm-facade",
+ "sz-rust-rag",
+ "sz-rust-service-registry",
+ "sz-rust-tracing",
+ "sz-rust-wasm",
+]
+
+[[package]]
 name = "sz-rust-addon-example"
 version = "1.0.0"
 dependencies = [
@@ -8451,7 +8481,7 @@ version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
- "bcrypt",
+ "bcrypt 0.15.1",
  "chrono",
  "http",
  "http-body-util",
@@ -8601,7 +8631,7 @@ version = "1.2.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
- "bcrypt",
+ "bcrypt 0.15.1",
  "chrono",
  "clap",
  "dialoguer",
@@ -8771,11 +8801,13 @@ dependencies = [
  "sz-rust-core",
  "sz-rust-middleware-facade",
  "sz-rust-orm-facade",
+ "sz-rust-wasm",
  "tokio",
  "tower 0.5.3",
  "tower-http 0.7.0",
  "tracing",
  "tracing-subscriber",
+ "wat",
 ]
 
 [[package]]
@@ -9208,6 +9240,34 @@ dependencies = [
  "tokio",
  "tower 0.5.3",
  "tracing",
+]
+
+[[package]]
+name = "sz-rust-sz300"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "bcrypt 0.16.0",
+ "chrono",
+ "criterion",
+ "futures",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "sz-orm-sqlx",
+ "sz-rust-core",
+ "sz-rust-http-facade",
+ "sz-rust-middleware-facade",
+ "sz-rust-mvc-facade",
+ "sz-rust-observability",
+ "sz-rust-state-facade",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

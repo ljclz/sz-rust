@@ -244,8 +244,6 @@ mod tests {
     #[test]
     fn test_by_percentage_threshold_boundary() {
         let key = "deterministic-key";
-        let hash = fnv1a_hash(key);
-        let threshold_50 = (50.0_f64 / 100.0 * u64::MAX as f64) as u64;
         let rule = GrayReleaseRule {
             strategy: GrayStrategy::ByPercentage { percent: 50 },
         };
@@ -253,13 +251,26 @@ mod tests {
             user_id: Some(key.to_string()),
             ..Default::default()
         };
-        assert_eq!(rule.matches(&context), hash < threshold_50);
+        assert!(!rule.matches(&context));
+    }
+
+    #[test]
+    fn test_by_percentage_known_match() {
+        let key = "other";
+        let rule = GrayReleaseRule {
+            strategy: GrayStrategy::ByPercentage { percent: 50 },
+        };
+        let context = GrayContext {
+            user_id: Some(key.to_string()),
+            ..Default::default()
+        };
+        assert!(rule.matches(&context));
     }
 
     #[test]
     fn test_fnv1a_deterministic() {
-        assert_eq!(fnv1a_hash("test"), fnv1a_hash("test"));
-        assert_ne!(fnv1a_hash("test"), fnv1a_hash("other"));
+        assert_eq!(fnv1a_hash("test"), 18007334074686647077);
+        assert_eq!(fnv1a_hash("other"), 730899674924722773);
     }
 
     #[test]
@@ -367,5 +378,17 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(context.hash_key(), Some("ip".to_string()));
+    }
+
+    #[test]
+    fn test_by_percentage_over_100_always_matches() {
+        let rule = GrayReleaseRule {
+            strategy: GrayStrategy::ByPercentage { percent: 200 },
+        };
+        let context = GrayContext {
+            user_id: Some("any-user".to_string()),
+            ..Default::default()
+        };
+        assert!(rule.matches(&context));
     }
 }

@@ -18,6 +18,7 @@ sz-rust-middleware-facade = { workspace = true }
 sz-rust-addons-admin = { workspace = true }
 sz-rust-addons-loader = { workspace = true }
 sz-rust-capability = { workspace = true }
+sz-rust-wasm = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -27,6 +28,7 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
+wat = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -79,3 +81,18 @@ path = "src/bin/multi_tenant_demo.rs"
 [[bin]]
 name = "admin_demo"
 path = "src/bin/admin_demo.rs"
+[[bin]]
+name = "wasm_basic"
+path = "src/bin/wasm_basic.rs"
+
+[[bin]]
+name = "wasm_host_function"
+path = "src/bin/wasm_host_function.rs"
+
+[[bin]]
+name = "wasm_sandbox"
+path = "src/bin/wasm_sandbox.rs"
+
+[[bin]]
+name = "wasm_edge_deploy"
+path = "src/bin/wasm_edge_deploy.rs"

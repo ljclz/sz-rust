@@ -52,6 +52,15 @@ grpc = ["dep:sz-orm-grpc"]
 # 全量 P2 功能
 p2-addons = ["graphql", "grpc"]
 
+# ── 数据库后端 Feature Gate（v1.4.0 T09）──
+backend-mysql = []
+backend-postgres = []
+backend-sqlite = []
+backend-oracle = []
+backend-mssql = []
+# 全后端
+backend-all = ["backend-mysql", "backend-postgres", "backend-sqlite", "backend-oracle", "backend-mssql"]
+
 [lints]
 workspace = true
 

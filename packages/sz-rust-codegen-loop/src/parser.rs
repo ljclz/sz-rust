@@ -271,4 +271,71 @@ mod tests {
         assert!(task.feature.contains("login"));
         assert!(task.feature.contains("register"));
     }
+
+    #[test]
+    fn test_language_display() {
+        assert_eq!(Language::Rust.to_string(), "rust");
+        assert_eq!(Language::TypeScript.to_string(), "typescript");
+        assert_eq!(Language::Python.to_string(), "python");
+        assert_eq!(Language::Go.to_string(), "go");
+        assert_eq!(Language::Java.to_string(), "java");
+    }
+
+    #[test]
+    fn test_framework_display() {
+        assert_eq!(Framework::Axum.to_string(), "axum");
+        assert_eq!(Framework::Actix.to_string(), "actix");
+        assert_eq!(Framework::Express.to_string(), "express");
+        assert_eq!(Framework::FastApi.to_string(), "fastapi");
+        assert_eq!(Framework::Gin.to_string(), "gin");
+        assert_eq!(Framework::Spring.to_string(), "spring");
+        assert_eq!(Framework::None.to_string(), "none");
+    }
+
+    #[test]
+    fn parse_ts_shorthand() {
+        let task = parse_requirement("用 ts 生成用户 API").unwrap();
+        assert_eq!(task.language, Language::TypeScript);
+    }
+
+    #[test]
+    fn parse_django() {
+        let task = parse_requirement("用 django 生成用户 API").unwrap();
+        assert_eq!(task.language, Language::Python);
+    }
+
+    #[test]
+    fn parse_golang() {
+        let task = parse_requirement("用 golang 生成订单 API").unwrap();
+        assert_eq!(task.language, Language::Go);
+    }
+
+    #[test]
+    fn parse_spring() {
+        let task = parse_requirement("用 spring 生成用户 API").unwrap();
+        assert_eq!(task.language, Language::Java);
+    }
+
+    #[test]
+    fn parse_high_performance_constraint() {
+        let task = parse_requirement("生成 high performance 用户 API").unwrap();
+        assert!(task.constraints.contains(&"high_performance".to_string()));
+    }
+
+    #[test]
+    fn parse_rest_constraint() {
+        let task = parse_requirement("生成 rest 用户 API").unwrap();
+        assert!(task.constraints.contains(&"restful".to_string()));
+    }
+
+    #[test]
+    fn parse_unicode_mixed() {
+        let task = parse_requirement("生成一个用户登录API🚀").unwrap();
+        assert!(task.feature.contains("login"));
+    }
+
+    #[test]
+    fn parse_whitespace_only() {
+        assert!(parse_requirement("   \n\t  ").is_err());
+    }
 }

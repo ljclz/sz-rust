@@ -8,6 +8,7 @@
 pub mod config;
 pub mod error;
 pub mod forwarder;
+pub mod grpc_streaming;
 pub mod middleware;
 #[cfg(feature = "grpc")]
 pub mod protocol_grpc;

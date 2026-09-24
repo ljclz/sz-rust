@@ -171,6 +171,9 @@ impl ModelRouter {
 
     /// 记录路由追踪。
     fn record(&self, rec: RoutingRecord) {
+        if self.max_records == 0 {
+            return;
+        }
         let mut records = self.records.lock();
         if records.len() >= self.max_records {
             records.pop_front();
@@ -240,14 +243,21 @@ mod tests {
     #[test]
     fn route_by_explicit_model() {
         let r = make_router();
-        assert!(r.route(Some("gpt-4o")).is_ok());
-        assert!(r.route(Some("claude-3")).is_ok());
+        r.route(Some("gpt-4o")).unwrap();
+        r.route(Some("claude-3")).unwrap();
+        let records = r.routing_records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].selected_model, "gpt-4o");
+        assert_eq!(records[1].selected_model, "claude-3");
     }
 
     #[test]
     fn route_by_default_model() {
         let r = make_router();
-        assert!(r.route(None).is_ok());
+        r.route(None).unwrap();
+        let records = r.routing_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].selected_model, "gpt-4o");
     }
 
     #[test]
@@ -377,5 +387,34 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert!(records[0].input_model.is_none());
         assert_eq!(records[0].selected_model, "gpt-4o");
+    }
+
+    #[test]
+    fn route_by_capability_cost_selects_min_name() {
+        let mut routes = HashMap::new();
+        routes.insert(
+            "zzz-model".to_string(),
+            Arc::new(MockProvider) as ProviderRef,
+        );
+        routes.insert(
+            "aaa-model".to_string(),
+            Arc::new(MockProvider) as ProviderRef,
+        );
+        routes.insert(
+            "mmm-model".to_string(),
+            Arc::new(MockProvider) as ProviderRef,
+        );
+        let r = ModelRouter::new(routes, "aaa-model".to_string());
+        r.route_by_capability("model", RoutingStrategy::Cost)
+            .unwrap();
+        let records = r.routing_records();
+        assert_eq!(records[0].selected_model, "aaa-model");
+    }
+
+    #[test]
+    fn records_capped_at_zero() {
+        let r = make_router().with_max_records(0);
+        r.route(Some("gpt-4o")).unwrap();
+        assert_eq!(r.routing_records().len(), 0);
     }
 }

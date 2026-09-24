@@ -1,0 +1,13 @@
+name: i18n 完整性检查
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+jobs:
+  i18n-completeness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check i18n completeness
+        run: bash scripts/check-i18n-completeness.sh

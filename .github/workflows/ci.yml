@@ -72,6 +72,8 @@ jobs:
       # P3-3 修复：--jobs 1 规避 Cargo 在高并发编译时的 crate 解析竞争问题
       # 此问题为 Cargo 工具链已知限制（非代码问题），单线程编译可稳定通过
       - run: cargo test --workspace --all-targets --jobs 1
+      # sz-rust-testkit 的测试在 test-utils feature gate 后面，需显式启用
+      - run: cargo test -p sz-rust-testkit --features test-utils --jobs 1
 
   # 门禁 5：文档构建（含 missing_docs 检查）
   doc:
@@ -487,3 +489,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python scripts/check_no_crate_level_allow_dead_code.py --project-root .
+  # 门禁 26：i18n 完整性检查（v1.4.0 T12）
+  i18n-completeness:
+    name: i18n Completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check i18n translation completeness
+        run: bash scripts/check-i18n-completeness.sh
+
+  # 门禁 27：框架-业务边界检查（v1.4.0 T07）
+  boundary-check:
+    name: Framework-Business Boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check no reverse dependencies
+        run: bash scripts/check-boundary.sh

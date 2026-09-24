@@ -53,7 +53,26 @@ members = [
     "packages/sz-rust-testkit",
 
     "packages/sz-rust-ops-api",
+
+    "packages/sz-rust-sz300",
+
 ]
+
+[package]
+name = "sz-rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
 
 [workspace.package]
 version = "1.2.0"
@@ -251,6 +270,10 @@ sz-rust-service-registry = { version = "1.2.0", path = "packages/sz-rust-service
 sz-rust-distributed-tx = { version = "1.2.0", path = "packages/sz-rust-distributed-tx" }
 sz-rust-api-gateway = { version = "1.2.0", path = "packages/sz-rust-api-gateway" }
 sz-rust-ops-api = { version = "1.2.0", path = "packages/sz-rust-ops-api" }
+sz-rust-sz300 = { version = "1.2.0", path = "packages/sz-rust-sz300" }
+
+# 密码哈希（sz300 业务应用）
+bcrypt = "0.16"
 
 
 # Ed25519 签名（P3-T2 插件市场）
@@ -286,11 +309,82 @@ tera = "1.20"
 # 交互式命令行输入（P1-T3 插件模板库）
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 
+# ── Feature Gate 细化（v1.4.0 T02）──
+# 细粒度 feature 实现按需编译，聚合 feature 向后兼容
+
+[features]
+default = []
+
+# === AI 能力 ===
+# AI 推理 facade（LLM 路由、fallback、provider 抽象）
+ai-facade = ["dep:sz-rust-ai-facade"]
+# RAG 检索增强生成（向量存储 + 文档分块 + 语义检索）
+ai-rag = ["ai-facade", "dep:sz-rust-rag"]
+# 前端代码生成（AI 驱动的 Vue/React 代码生成）
+ai-codegen = ["ai-facade", "dep:sz-rust-frontend-codegen"]
+
+# === ORM 扩展 ===
+# GraphQL 查询接口（async-graphql 集成）
+orm-graphql = ["dep:sz-rust-orm-facade", "sz-rust-orm-facade/graphql"]
+# gRPC 查询接口（tonic 集成）
+orm-grpc = ["dep:sz-rust-orm-facade", "sz-rust-orm-facade/grpc"]
+
+# === 微服务 ===
+# 服务注册与发现
+service-registry = ["dep:sz-rust-service-registry"]
+# 分布式事务
+distributed-tx = ["dep:sz-rust-distributed-tx"]
+# API 网关
+api-gateway = ["dep:sz-rust-api-gateway"]
+# 配置中心
+config-center = ["dep:sz-rust-config-center"]
+
+# === 可观测性 ===
+# 分布式追踪
+tracing = ["dep:sz-rust-tracing"]
+# 监控指标
+observability = ["dep:sz-rust-observability"]
+
+# === 边缘计算 ===
+# WASM 边缘计算运行时
+wasm = ["dep:sz-rust-wasm"]
+
+# === 聚合 feature（向后兼容，组合细粒度 feature）===
+# P2 插件扩展（ORM GraphQL + gRPC）
+p2-addons = ["orm-graphql", "orm-grpc"]
+# P3 微服务全家桶
+p3-microservices = ["service-registry", "distributed-tx", "api-gateway", "config-center"]
+# P3 AI 全家桶
+p3-ai = ["ai-rag", "ai-codegen"]
+# P3 边缘计算
+p3-edge = ["wasm"]
+
+# === 互斥 feature 声明 ===
+# Cargo 不支持显式互斥声明，以下组合通过 CI 脚本检查：
+# 互斥组 1：TLS 后端（rustls vs native-tls）— 当前仅 rustls，预留扩展
+# 互斥组 2：数据库后端（backend-mysql / backend-postgres / backend-sqlite / backend-oracle / backend-mssql）
+
+[dependencies]
+# optional 依赖，由 feature gate 控制
+sz-rust-ai-facade = { workspace = true, optional = true }
+sz-rust-rag = { workspace = true, optional = true }
+sz-rust-frontend-codegen = { workspace = true, optional = true }
+sz-rust-orm-facade = { workspace = true, optional = true }
+sz-rust-service-registry = { workspace = true, optional = true }
+sz-rust-distributed-tx = { workspace = true, optional = true }
+sz-rust-api-gateway = { workspace = true, optional = true }
+sz-rust-config-center = { workspace = true, optional = true }
+sz-rust-tracing = { workspace = true, optional = true }
+sz-rust-observability = { workspace = true, optional = true }
+sz-rust-wasm = { workspace = true, optional = true }
+
 # ── 构建优化配置 ──
 
 [profile.dev]
 opt-level = 0
-debug = true
+debug = 1                    # 降低 debuginfo 级别（从 true 改为 1，加速编译）
+incremental = true           # 显式启用增量编译
+codegen-units = 16           # 并行化编译（从默认 256 降至 16 平衡）
 # 启用算术溢出检查（开发期也需 fail-fast，与 release 一致，铁律 1）
 overflow-checks = true
 
@@ -302,3 +396,14 @@ strip = true
 panic = "abort"
 # 启用算术溢出检查（生产安全要求：溢出属于未定义行为，应 fail-fast 而非静默回绕）
 overflow-checks = true
+
+# bench profile：release 性能 + 调试符号（v1.4.0 T03.2）
+[profile.bench]
+inherits = "release"
+debug = true
+
+# ci profile：CI 环境最优编译速度（v1.4.0 T03.3）
+[profile.ci]
+inherits = "dev"
+incremental = false          # CI fresh checkout 无需增量
+debug = 0                    # CI 最小化 debuginfo

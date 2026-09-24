@@ -1,0 +1,1145 @@
+openapi: "3.0.3"
+info:
+  title: 鲜视达 SZ-300 智能秤后端 API
+  description: |
+    鲜视达智能秤 SZ-300 后端服务 API 文档。
+    基础路径: `http://{host}:8300`
+    认证方式: JWT Bearer Token（除 `/health` 和 `/api/v1/auth/*` 外所有接口需要认证）
+  version: "1.0.0"
+  contact:
+    name: 鲜视达开发团队
+  x-stage: development
+
+servers:
+  - url: http://localhost:8300
+    description: 本地开发环境
+  - url: https://api.鲜视达.cn
+    description: 生产环境（待部署）
+
+paths:
+  # ==================== 健康检查 ====================
+  /health:
+    get:
+      operationId: healthCheck
+      summary: 健康检查
+      description: 服务存活检测，无需认证
+      tags: [系统]
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "success"
+                data:
+                  status: "ok"
+                  service: "sz300-server"
+                  version: "0.1.0"
+                  timestamp: 1771257600
+
+  # ==================== 认证模块 ====================
+  /api/v1/auth/login:
+    post:
+      operationId: authLogin
+      summary: 用户登录
+      description: 使用用户名密码登录，获取 JWT Token
+      tags: [认证]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  description: 商户用户名
+                  example: "admin"
+                password:
+                  type: string
+                  description: 密码
+                  example: "123456"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "登录成功"
+                data:
+                  token: "eyJhbGciOiJIUzI1NiIs..."
+                  username: "admin"
+                  user_id: 1
+                  merchant_id: 1
+
+  /api/v1/auth/refresh:
+    post:
+      operationId: authRefresh
+      summary: 刷新 Token
+      description: 刷新当前 JWT Token 的有效期
+      tags: [认证]
+      security: []
+      responses:
+        "200":
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/auth/me:
+    post:
+      operationId: authMe
+      summary: 当前用户信息
+      description: 获取当前登录用户的详细信息
+      tags: [认证]
+      security: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "success"
+                data:
+                  user_id: 1
+                  username: "admin"
+                  roles: ["admin"]
+
+  /api/v1/auth/logout:
+    post:
+      operationId: authLogout
+      summary: 退出登录
+      description: 当前用户退出登录
+      tags: [认证]
+      security: []
+      responses:
+        "200":
+          description: 退出成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "已退出登录"
+
+  # ==================== 商户管理 ====================
+  /api/v1/merchant/list:
+    post:
+      operationId: merchantList
+      summary: 商户列表
+      description: 分页查询商户列表
+      tags: [商户管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PageRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MerchantPageData"
+
+  /api/v1/merchant/info:
+    post:
+      operationId: merchantInfo
+      summary: 商户详情
+      description: 查询单个商户的详细信息
+      tags: [商户管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchant_id]
+              properties:
+                merchant_id:
+                  type: integer
+                  description: 商户ID
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Merchant"
+
+  /api/v1/merchant/create:
+    post:
+      operationId: merchantCreate
+      summary: 创建商户
+      description: 新增商户信息
+      tags: [商户管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MerchantCreateReq"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/merchant/update:
+    post:
+      operationId: merchantUpdate
+      summary: 更新商户
+      description: 修改商户信息
+      tags: [商户管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MerchantUpdateReq"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/merchant/delete:
+    post:
+      operationId: merchantDelete
+      summary: 删除商户
+      description: 删除指定商户（软删除/停用）
+      tags: [商户管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchant_id]
+              properties:
+                merchant_id:
+                  type: integer
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ==================== 商品管理 ====================
+  /api/v1/product/list:
+    post:
+      operationId: productList
+      summary: 商品列表
+      description: 分页查询商品列表，支持按商户/分类筛选
+      tags: [商品管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PageRequest"
+                - type: object
+                  properties:
+                    merchant_id:
+                      type: integer
+                      description: 商户ID筛选
+                    cat_id:
+                      type: integer
+                      description: 分类ID筛选
+                    keyword:
+                      type: string
+                      description: 商品名称/条码模糊搜索
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/ProductPageData"
+
+  /api/v1/product/info:
+    post:
+      operationId: productInfo
+      summary: 商品详情
+      description: 查询单个商品详细信息
+      tags: [商品管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [good_id]
+              properties:
+                good_id:
+                  type: integer
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Product"
+
+  /api/v1/product/create:
+    post:
+      operationId: productCreate
+      summary: 创建商品
+      description: 新增商品信息
+      tags: [商品管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreateReq"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/product/update:
+    post:
+      operationId: productUpdate
+      summary: 更新商品
+      description: 修改商品信息
+      tags: [商品管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdateReq"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/product/delete:
+    post:
+      operationId: productDelete
+      summary: 删除商品
+      description: 删除指定商品（软删除）
+      tags: [商品管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [good_id]
+              properties:
+                good_id:
+                  type: integer
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ==================== 设备管理 ====================
+  /api/v1/device/list:
+    post:
+      operationId: deviceList
+      summary: 设备列表
+      description: 分页查询设备列表，支持按商户筛选
+      tags: [设备管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PageRequest"
+                - type: object
+                  properties:
+                    merchant_id:
+                      type: integer
+                      description: 商户ID筛选
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DevicePageData"
+
+  /api/v1/device/info:
+    post:
+      operationId: deviceInfo
+      summary: 设备详情
+      description: 查询单个设备详细信息
+      tags: [设备管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Device"
+
+  /api/v1/device/bind:
+    post:
+      operationId: deviceBind
+      summary: 绑定设备
+      description: 将智能秤设备绑定到商户
+      tags: [设备管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_sn, merchant_id]
+              properties:
+                device_sn:
+                  type: string
+                  description: 设备序列号
+                  example: "SZ300A0012345"
+                merchant_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: 绑定成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/device/unbind:
+    post:
+      operationId: deviceUnbind
+      summary: 解绑设备
+      description: 解除设备与商户的绑定关系
+      tags: [设备管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: 解绑成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/device/ota:
+    post:
+      operationId: deviceOta
+      summary: 触发 OTA 升级
+      description: 向指定设备推送 OTA 升级指令
+      tags: [设备管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, ota_version]
+              properties:
+                device_id:
+                  type: integer
+                ota_version:
+                  type: string
+                  description: 目标固件版本
+                  example: "v1.2.0"
+      responses:
+        "200":
+          description: 指令已下发
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /api/v1/device/status_report:
+    post:
+      operationId: deviceStatusReport
+      summary: 设备状态上报
+      description: 设备定时上报运行状态（由设备主动调用）
+      tags: [设备管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: integer
+                status:
+                  type: integer
+                  description: 设备状态 0=离线 1=在线
+                  example: 1
+                signal_strength:
+                  type: integer
+                  description: 4G 信号强度 dBm
+                  example: -65
+                fw_version:
+                  type: string
+                  description: 当前固件版本
+                  example: "v1.0.0"
+      responses:
+        "200":
+          description: 上报成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ==================== 订单管理 ====================
+  /api/v1/order/list:
+    post:
+      operationId: orderList
+      summary: 订单列表
+      description: 分页查询订单列表，支持按商户/日期/状态筛选
+      tags: [订单管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PageRequest"
+                - type: object
+                  properties:
+                    merchant_id:
+                      type: integer
+                    device_id:
+                      type: integer
+                    status:
+                      type: integer
+                      description: "0=待支付 1=已支付 2=已退款 3=已取消"
+                    date_from:
+                      type: string
+                      format: date
+                    date_to:
+                      type: string
+                      format: date
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrderPageData"
+
+  /api/v1/order/info:
+    post:
+      operationId: orderInfo
+      summary: 订单详情
+      description: 查询单个订单的详细信息（含商品明细）
+      tags: [订单管理]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id:
+                  type: integer
+                order_no:
+                  type: string
+                  description: 订单号（与 order_id 二选一）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/OrderDetail"
+
+  /api/v1/order/create:
+    post:
+      operationId: orderCreate
+      summary: 创建订单
+      description: 创建交易订单（由智能秤/App调用）
+      tags: [订单管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCreateReq"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  # ==================== 文件管理 ====================
+  /api/v1/file/upload:
+    post:
+      operationId: fileUpload
+      summary: 文件上传（Base64）
+      description: 以 Base64 编码方式上传文件（图片），最大 5MB
+      tags: [文件管理]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, file]
+              properties:
+                filename:
+                  type: string
+                  description: 文件名（含扩展名）
+                  example: "product.jpg"
+                file:
+                  type: string
+                  description: Base64 编码的文件内容（可含 data:image/xxx;base64, 前缀）
+      responses:
+        "200":
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "上传成功"
+                data:
+                  url: "/uploads/2026/07/22/20260722_a1b2c3d4.jpg"
+
+  /api/v1/file/upload_multipart:
+    post:
+      operationId: fileUploadMultipart
+      summary: 文件上传（Multipart）
+      description: 以 multipart/form-data 方式上传文件，支持批量上传
+      tags: [文件管理]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: 文件字段，可传多个
+      responses:
+        "200":
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+              example:
+                code: 1
+                msg: "上传成功"
+                data:
+                  files:
+                    - filename: "product.jpg"
+                      url: "/uploads/2026/07/22/20260722_a1b2c3d4.jpg"
+
+  # ==================== 静态文件服务 ====================
+  /uploads/{path}:
+    get:
+      operationId: fileServe
+      summary: 静态文件服务
+      description: 提供上传文件的 HTTP 访问（图片资源）
+      tags: [文件管理]
+      parameters:
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 文件路径（如 2026/07/22/filename.jpg）
+      responses:
+        "200":
+          description: 文件内容
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: 文件不存在
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "在 Header 中传递 JWT Token: Authorization: Bearer <token>"
+
+  schemas:
+    # ==================== 通用 ====================
+    ApiResponse:
+      type: object
+      required: [code, msg]
+      properties:
+        code:
+          type: integer
+          description: "状态码: 1=成功 0=失败"
+          example: 1
+        msg:
+          type: string
+          description: 提示信息
+          example: "success"
+        data:
+          type: object
+          nullable: true
+          description: 响应数据（可能为 null）
+
+    PageRequest:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+          description: 页码
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 15
+          description: 每页条数
+
+    PageData:
+      type: object
+      required: [list, total, page, page_size]
+      properties:
+        list:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+          description: 总记录数
+        page:
+          type: integer
+          description: 当前页码
+        page_size:
+          type: integer
+          description: 每页条数
+
+    # ==================== 商户 ====================
+    Merchant:
+      type: object
+      properties:
+        merchant_id:
+          type: integer
+        market_id:
+          type: integer
+        name:
+          type: string
+        stall_no:
+          type: string
+        contact_phone:
+          type: string
+        category:
+          type: string
+        status:
+          type: integer
+        bank_account:
+          type: string
+        bank_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MerchantPageData:
+      allOf:
+        - $ref: "#/components/schemas/PageData"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/Merchant"
+
+    MerchantCreateReq:
+      type: object
+      required: [market_id, name]
+      properties:
+        market_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+        stall_no:
+          type: string
+          maxLength: 50
+        contact_phone:
+          type: string
+          maxLength: 20
+        category:
+          type: string
+          maxLength: 50
+
+    MerchantUpdateReq:
+      type: object
+      required: [merchant_id]
+      properties:
+        merchant_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+        stall_no:
+          type: string
+        contact_phone:
+          type: string
+        category:
+          type: string
+        status:
+          type: integer
+
+    # ==================== 商品 ====================
+    Product:
+      type: object
+      properties:
+        good_id:
+          type: integer
+        merchant_id:
+          type: integer
+        cat_id:
+          type: integer
+        name:
+          type: string
+        barcode:
+          type: string
+        price:
+          type: integer
+          description: 单价（分）
+        unit:
+          type: string
+          description: 单位，如 斤/个/份
+        ai_class_id:
+          type: integer
+        image:
+          type: string
+        status:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProductPageData:
+      allOf:
+        - $ref: "#/components/schemas/PageData"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/Product"
+
+    ProductCreateReq:
+      type: object
+      required: [merchant_id, name, price]
+      properties:
+        merchant_id:
+          type: integer
+        cat_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+        barcode:
+          type: string
+          maxLength: 50
+        price:
+          type: integer
+          description: 单价（分）
+        unit:
+          type: string
+          default: "斤"
+        ai_class_id:
+          type: integer
+        image:
+          type: string
+
+    ProductUpdateReq:
+      type: object
+      required: [good_id]
+      properties:
+        good_id:
+          type: integer
+        cat_id:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+        barcode:
+          type: string
+        price:
+          type: integer
+        unit:
+          type: string
+        ai_class_id:
+          type: integer
+        image:
+          type: string
+        status:
+          type: integer
+
+    # ==================== 设备 ====================
+    Device:
+      type: object
+      properties:
+        device_id:
+          type: integer
+        merchant_id:
+          type: integer
+        device_sn:
+          type: string
+        device_model:
+          type: string
+        fw_version:
+          type: string
+        status:
+          type: integer
+          description: "0=离线 1=在线"
+        signal_strength:
+          type: integer
+          description: "4G 信号强度 dBm"
+        bind_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_online_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DevicePageData:
+      allOf:
+        - $ref: "#/components/schemas/PageData"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/Device"
+
+    # ==================== 订单 ====================
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: integer
+        order_no:
+          type: string
+        merchant_id:
+          type: integer
+        device_id:
+          type: integer
+        total_fen:
+          type: integer
+          description: 总金额（分）
+        total_weight_g:
+          type: integer
+          description: 总重量（克）
+        item_count:
+          type: integer
+          description: 商品种类数
+        status:
+          type: integer
+          description: "0=待支付 1=已支付 2=已退款 3=已取消"
+        pay_method:
+          type: integer
+          description: "0=扫码 1=现金 2=其他"
+        pay_at:
+          type: string
+          format: date-time
+          nullable: true
+        offline_seq:
+          type: string
+          description: 离线序列号
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderItem:
+      type: object
+      properties:
+        item_id:
+          type: integer
+        good_id:
+          type: integer
+        good_name:
+          type: string
+        price_fen:
+          type: integer
+        weight_g:
+          type: integer
+        total_fen:
+          type: integer
+        quantity:
+          type: integer
+
+    OrderDetail:
+      allOf:
+        - $ref: "#/components/schemas/Order"
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/OrderItem"
+
+    OrderPageData:
+      allOf:
+        - $ref: "#/components/schemas/PageData"
+        - type: object
+          properties:
+            list:
+              type: array
+              items:
+                $ref: "#/components/schemas/Order"
+
+    OrderCreateReq:
+      type: object
+      required: [merchant_id, device_id, items]
+      properties:
+        merchant_id:
+          type: integer
+        device_id:
+          type: integer
+        offline_seq:
+          type: string
+          description: "离线模式时的本地序列号（用于去重）"
+        pay_method:
+          type: integer
+          default: 0
+          description: "0=扫码 1=现金 2=其他"
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [good_id, good_name, price_fen, total_fen]
+            properties:
+              good_id:
+                type: integer
+              good_name:
+                type: string
+              price_fen:
+                type: integer
+                description: 单价（分）
+              weight_g:
+                type: integer
+                description: 重量（克）
+              total_fen:
+                type: integer
+                description: 小计（分）
+              quantity:
+                type: integer
+                default: 1
+
+security:
+  - BearerAuth: []
