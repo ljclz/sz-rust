@@ -1,13 +1,14 @@
 # PR 审查报告（2026-09-25，branch: main，range: origin/main..HEAD）
 
-> 审查时点: `HEAD @ be259cd`（报告为时点快照；后续新提交不在本报告范围内）
+> 审查时点: `HEAD @ a3b1772`（报告为时点快照；后续新提交不在本报告范围内）
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**
 - 严重度阈值: medium（≥ 该级别阻塞）
 
-## 问题清单（0 critical / 1 high / 0 medium / 0 low）
+## 问题清单（0 critical / 1 high / 1 medium / 0 low）
 
+- [medium] `workspace` **fmt**: 格式不合格: Diff in \\?\E:\vue\test\鲜视达\rust\sz-rust\packages\sz-rust-http-facade\src\openapi.rs:48:      }
 - [high] `integration` **integration-failure**: 集成测试挂起超 10 分钟被强制终止（timeout rc=124，疑似 MySQL 事务/锁路径阻塞，已通过的测试: 9 个）
 
 
@@ -22,13 +23,14 @@
  .github/workflows/i18n-check.yml                   |   13 +
  CHANGELOG.md                                       |   93 ++
  Cargo.lock                                         | 1335 +++++++++++---------
- Cargo.toml                                         |  166 ++-
+ Cargo.toml                                         |  164 ++-
  docker-compose.yml                                 |   87 +-
  docs/2026-09-24-framework-maturity-assessment.md   |  188 +++
  docs/adr/0022-framework-business-boundary.md       |   57 +
  docs/audit/2026-09-24-gate-block-report.md         |   95 ++
  docs/audit/2026-09-24-pr-review-main.md            |  359 ++++++
- docs/audit/events.jsonl                            |    3 +
+ docs/audit/2026-09-25-pr-review-main.md            |  368 ++++++
+ docs/audit/events.jsonl                            |    4 +
  docs/developer/grpc-streaming-guide.md             |   82 ++
  docs/developer/integration-testing.md              |  116 ++
  docs/developer/sccache-guide.md                    |  209 +++
@@ -64,6 +66,7 @@
  packages/sz-rust-api-gateway/tests/integration.rs  |  287 +++++
  packages/sz-rust-auth-facade/src/jwt.rs            |  190 +++
  packages/sz-rust-auth-facade/src/lib.rs            |    6 +
+ packages/sz-rust-cli/Cargo.toml                    |    4 +-
  packages/sz-rust-cli/src/cmd/make.rs               |  190 +++
  packages/sz-rust-codegen-loop/Cargo.toml           |   32 +
  packages/sz-rust-codegen-loop/src/error.rs         |   47 +
@@ -239,10 +242,10 @@
  scripts/sz300-migration-verify.sh                  |  120 ++
  scripts/sz300-test-baseline.json                   |    1 +
  src/lib.rs                                         |    4 +
- 224 files changed, 33671 insertions(+), 669 deletions(-)
+ 226 files changed, 34040 insertions(+), 671 deletions(-)
 ```
 
-## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）
+## AI 评审（仅供参考：不进入问题计数，不参与阻塞判定）（缓存命中 bcbdbab8f5b10fcb）
 
 ## PR 评审报告
 
@@ -365,4 +368,4 @@ tx.commit().await?;
 
 
 ## 结论
-❌ **阻塞**: 1 个 ≥ medium 级别问题，禁止合入
+❌ **阻塞**: 2 个 ≥ medium 级别问题，禁止合入
