@@ -215,27 +215,25 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 proptest = "1"
 
 # 内部依赖（SZ-ORM 全家桶，从 crates.io 拉取）
-# 2026-09-24 全量对齐 7.7.0（最新一致版本线）：生态已分裂（core 8.7.0 存在但 8 个 facade crate
-# 停留在 7.7.0 且死钉 core ^7.1），混用 8.7.0 必产生双 sz-orm-core（mcp E0308 实证）。
-# 注：7.6→7.7 sqlx/core 全树仅格式化差异，MySQL 事务挂起不在本升级修复范围（另行框架侧处置）
-sz-orm-core = "7.7.0"
-sz-orm-auth = "7.7.0"
-sz-orm-storage = "7.7.0"
-sz-orm-queue = "7.7.0"
-sz-orm-mqtt = "7.7.0"
-sz-orm-websocket = "7.7.0"
-sz-orm-scheduler = "7.7.0"
-sz-orm-tracing = "7.7.0"
-sz-orm-logger = "7.7.0"
-sz-orm-limit = "7.7.0"
-sz-orm-config = "7.7.0"
-sz-orm-macros = "7.7.0"
-sz-orm-sql-validator = "7.7.0"
-sz-orm-sqlx = "7.7.0"
+# 2026-09-25 全量对齐 8.8.0（crates.io 全 68 包已发布到 8.8.0）
+sz-orm-core = "8.8.0"
+sz-orm-auth = "8.8.0"
+sz-orm-storage = "8.8.0"
+sz-orm-queue = "8.8.0"
+sz-orm-mqtt = "8.8.0"
+sz-orm-websocket = "8.8.0"
+sz-orm-scheduler = "8.8.0"
+sz-orm-tracing = "8.8.0"
+sz-orm-logger = "8.8.0"
+sz-orm-limit = "8.8.0"
+sz-orm-config = "8.8.0"
+sz-orm-macros = "8.8.0"
+sz-orm-sql-validator = "8.8.0"
+sz-orm-sqlx = "8.8.0"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
-sz-orm-query-builder = "7.7.0"
-sz-orm-graphql = "7.7.0"
-sz-orm-grpc = "7.7.0"
+sz-orm-query-builder = "8.8.0"
+sz-orm-graphql = "8.8.0"
+sz-orm-grpc = "8.8.0"
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "1.2.0", path = "packages/sz-rust-core" }
