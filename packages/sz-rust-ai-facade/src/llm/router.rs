@@ -137,7 +137,10 @@ impl ModelRouter {
         }
 
         let selected = match strategy {
-            RoutingStrategy::Cost => candidates.iter().min_by(|a, b| a.0.cmp(&b.0)).unwrap(),
+            RoutingStrategy::Cost => candidates
+                .iter()
+                .min_by(|a, b| a.0.cmp(&b.0))
+                .expect("candidates 已验证非空，min_by 必返回条目"),
             _ => &candidates[0],
         };
 

@@ -47,4 +47,3 @@ Write-Host "==================================="
 Write-Host "Total requests: $total"
 Write-Host "QPS: $qps"
 Write-Host "==================================="
-

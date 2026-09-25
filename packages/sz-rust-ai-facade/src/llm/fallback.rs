@@ -142,13 +142,23 @@ impl FallbackChain {
         let full_chain: Vec<String> = candidates.iter().map(|e| e.name.clone()).collect();
 
         let selected = match strategy {
-            RoutingStrategy::Cost => cost_optimal(&available).unwrap(),
+            RoutingStrategy::Cost => {
+                cost_optimal(&available).expect("available 已验证非空，cost_optimal 必返回条目")
+            }
             RoutingStrategy::Capability | RoutingStrategy::Fallback => {
                 let names: Vec<&str> = available.iter().map(|e| e.name.as_str()).collect();
-                let idx = self.lb.pick(&names).unwrap();
-                available.iter().find(|e| e.name == *idx).unwrap()
+                let idx = self
+                    .lb
+                    .pick(&names)
+                    .expect("names 来自非空 available，pick 必返回条目");
+                available
+                    .iter()
+                    .find(|e| e.name == *idx)
+                    .expect("pick 返回的名字必来自 names，find 必命中")
             }
-            RoutingStrategy::Explicit => available.first().unwrap(),
+            RoutingStrategy::Explicit => available
+                .first()
+                .expect("available 已验证非空，first 必返回条目"),
         };
 
         let used_fallback = selected.name != full_chain[0];

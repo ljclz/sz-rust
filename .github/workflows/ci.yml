@@ -20,6 +20,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   COVERAGE_THRESHOLD: 85
+  # CI 编译缓存由 Swatinem/rust-cache 承担；sccache 仅为本地开发优化。
+  # .cargo/config.toml 的 rustc-wrapper=sccache 在未安装 sccache 的环境会导致
+  # "could not execute process" 编译失败，CI 统一禁用（与 .githooks/pre-commit 的降级逻辑一致）
+  RUSTC_WRAPPER: ""
 
 jobs:
   # 门禁 1：代码格式检查

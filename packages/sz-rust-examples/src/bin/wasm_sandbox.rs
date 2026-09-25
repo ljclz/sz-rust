@@ -13,7 +13,7 @@ fn main() {
                 i32.add)
         )"#,
     )
-    .unwrap();
+    .expect("内置 WAT 模块必须可解析");
     let module = runtime.compile(&wasm_bytes).expect("编译失败");
     let result = module.execute("safe_add", &[WasmValue::from(1), WasmValue::from(2)]);
     match result {

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
-//! 角色鉴权中间�?�?基于 JWT 角色声明的路由级访问控制
+//! 角色鉴权中间件 — 基于 JWT 角色声明的路由级访问控制
 //!
-//! 提供 [`role_guard`] 中间件，验证请求携带�?JWT 令牌中包含指定角色�?//! 用于保护管理端点（如 `/api/admin/*`），仅允�?`admin` 角色访问�?//!
-//! ## �?[`super::auth_middleware`] 的区�?//!
-//! - `auth_middleware`：全局中间件，验证令牌有效性（是否过期 / 签名是否正确�?//! - `role_guard`：路由级中间件，在令牌有效的基础上进一步校验角�?//!
+//! 提供 [`role_guard`] 中间件，验证请求携带的 JWT 令牌中包含指定角色。
+//! 用于保护管理端点（如 `/api/admin/*`），仅允许 `admin` 角色访问。
+//!
+//! ## 与 [`super::auth_middleware`] 的区别
+//!
+//! - `auth_middleware`：全局中间件，验证令牌有效性（是否过期 / 签名是否正确）
+//! - `role_guard`：路由级中间件，在令牌有效的基础上进一步校验角色
+//!
 //! ## 使用方式
 //!
 //! ```ignore
@@ -25,20 +30,24 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-/// 验证 JWT 令牌中包�?`"admin"` 角色
+/// 验证 JWT 令牌中包含 `"admin"` 角色
 ///
-/// �?`Authorization: Bearer <token>` 头中提取令牌，调�?`auth_service::verify_token`
-/// 验证令牌有效性并获取用户声明，检�?`user.roles` 是否包含 `"admin"`�?///
+/// 从 `Authorization: Bearer <token>` 头中提取令牌，调用 `auth_service::verify_token`
+/// 验证令牌有效性并获取用户声明，检查 `user.roles` 是否包含 `"admin"`。
+///
 /// ## 错误响应
 ///
-/// - 401：未提供令牌 / 令牌无效 / 令牌已过�?/// - 403：令牌有效但用户不具�?`admin` 角色
+/// - 401：未提供令牌 / 令牌无效 / 令牌已过期
+/// - 403：令牌有效但用户不具备 `admin` 角色
 pub async fn admin_role_guard(req: Request<Body>, next: Next) -> Response {
     role_guard(req, next, "admin").await
 }
 
-/// 通用角色鉴权中间�?///
+/// 通用角色鉴权中间件
+///
 /// 验证请求 JWT 中包含指定角色。通过 `axum::middleware::from_fn_with_state`
-/// 可传入任意角色名，此处提供固�?`"admin"` 的便捷版�?[`admin_role_guard`]�?async fn role_guard(req: Request<Body>, next: Next, required_role: &str) -> Response {
+/// 可传入任意角色名，此处提供固定 `"admin"` 的便捷版本 [`admin_role_guard`]。
+async fn role_guard(req: Request<Body>, next: Next, required_role: &str) -> Response {
     let auth_header = req
         .headers()
         .get("Authorization")
@@ -48,7 +57,7 @@ pub async fn admin_role_guard(req: Request<Body>, next: Next) -> Response {
     let token = auth_header.strip_prefix("Bearer ").unwrap_or("");
 
     if token.is_empty() {
-        return (StatusCode::UNAUTHORIZED, "未提供认证令�?).into_response();
+        return (StatusCode::UNAUTHORIZED, "未提供认证令牌").into_response();
     }
 
     let user = match auth_service::verify_token(token) {
@@ -59,7 +68,7 @@ pub async fn admin_role_guard(req: Request<Body>, next: Next) -> Response {
     if !user.roles.iter().any(|r| r == required_role) {
         return (
             StatusCode::FORBIDDEN,
-            format!("需�?{} 角色才能访问此资�?, required_role),
+            format!("需要 {} 角色才能访问此资源", required_role),
         )
             .into_response();
     }
@@ -83,10 +92,11 @@ mod tests {
     use sz_rust_core::orm::jwt::{JwtClaims, JwtEncoder};
     use tower::util::ServiceExt;
 
-    /// 测试�?JWT 密钥
+    /// 测试用 JWT 密钥
     const TEST_SECRET: &str = "test-role-guard-secret-2026";
 
-    /// 初始化测试用 JWT 认证器（仅设�?encoder，不�?DB�?    fn init_test_auth() {
+    /// 初始化测试用 JWT 认证器（仅设置 encoder，不接 DB）
+    fn init_test_auth() {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| {
             crate::services::auth_service::init_auth_test_only(TEST_SECRET);
@@ -127,12 +137,17 @@ mod tests {
             .uri("/protected")
             .header("Authorization", format!("Bearer {}", token))
             .body(Body::empty())
-            .unwrap()
+            .expect("测试请求构造失败")
     }
 
     async fn fetch_body_string(resp: Response) -> String {
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        String::from_utf8(bytes.to_vec()).unwrap()
+        let bytes = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("响应体读取失败")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("响应体应为 UTF-8")
     }
 
     #[tokio::test]
@@ -142,11 +157,11 @@ mod tests {
             .method(Method::GET)
             .uri("/protected")
             .body(Body::empty())
-            .unwrap();
+            .expect("测试请求构造失败");
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
         let body = fetch_body_string(resp).await;
-        assert!(body.contains("未提供认证令�?));
+        assert!(body.contains("未提供认证令牌"));
     }
 
     #[tokio::test]
@@ -159,7 +174,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_valid_token_without_role_returns_403() {
-        // 构造一个不�?admin 角色的用户令�?        let token = issue_token("regular_user", vec!["user"]);
+        // 构造一个不含 admin 角色的用户令牌
+        let token = issue_token("regular_user", vec!["user"]);
 
         let router = build_router("admin");
         let req = bearer_request(&token);

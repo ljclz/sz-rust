@@ -101,5 +101,6 @@ mod tests {
         let manager = FixtureManager::new();
         manager.set_up_all().await;
         manager.tear_down_all().await;
+        assert!(manager.fixtures.is_empty(), "空管理器应无注册 fixture");
     }
 }

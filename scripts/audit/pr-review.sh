@@ -262,15 +262,21 @@ fi
 if [ "$SKIP_INTEGRATION" -eq 1 ]; then
   echo "⚠️ 跳过集成测试（--skip-integration）"
 else
-  transition "integration" "真实集成测试（jobs_integration，需 MySQL）"
+  transition "integration" "真实集成测试（db_integration，需 MySQL）"
   if [ "$SZ300_IN_WS" -eq 0 ]; then
-    note_issue "low" "workspace" "gate-skipped" "sz-rust-sz300 不在 workspace members（1614e84 开源/企业版分离），jobs_integration_test 移交企业版仓库流程"
+    note_issue "low" "workspace" "gate-skipped" "sz-rust-sz300 不在 workspace members（1614e84 开源/企业版分离），db_integration_test 移交企业版仓库流程"
     echo "⚠️ 跳过集成测试（sz-rust-sz300 不在 workspace）"
   else
-  INTEG_OUT=$(cargo test -p sz-rust-sz300 --test jobs_integration_test -j 2 -- --ignored 2>&1)
+  # timeout 保护：集成测试若因连接/事务挂死（如 MySQL 元数据锁等待），10 分钟后强制终止，
+  # 审查流程不挂死（2026-09-24 实测 transaction 测试挂起曾致全量审查阻塞 50 分钟）
+  INTEG_OUT=$(timeout 600 cargo test -p sz-rust-sz300 --test db_integration_test -j 2 -- --ignored 2>&1)
   INTEG_RC=$?
-  if [ $INTEG_RC -ne 0 ]; then
-    INTEG_FAIL=$(echo "$INTEG_OUT" | grep -E "test result: FAILED|panicked|error\[" | head -3 | tr '\n' ' ')
+  if [ $INTEG_RC -eq 124 ]; then
+    # timeout 退出码 124 = 集成测试挂死被强制终止（GNU timeout 不输出文字，靠退出码判定）
+    INTEG_FAIL="集成测试挂起超 10 分钟被强制终止（timeout rc=124，疑似 MySQL 事务/锁路径阻塞，已通过的测试: $(echo "$INTEG_OUT" | grep -cE '^test .+ \.\.\. ok') 个）"
+    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
+  elif [ $INTEG_RC -ne 0 ]; then
+    INTEG_FAIL=$(echo "$INTEG_OUT" | grep -E "test result: FAILED|panicked|error\[|no test target" | head -3 | tr '\n' ' ')
     note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
   fi
   fi

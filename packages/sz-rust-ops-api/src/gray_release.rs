@@ -111,12 +111,18 @@ impl GrayReleaseManager {
 
     /// 添加（或覆盖同名）灰度规则。
     pub fn add_rule(&self, name: String, rule: GrayReleaseRule) {
-        self.rules.write().unwrap().insert(name, rule);
+        self.rules
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(name, rule);
     }
 
     /// 评估上下文，返回命中的规则名称与是否使用新版本。
     pub fn evaluate(&self, context: &GrayContext) -> GrayDecision {
-        let rules = self.rules.read().unwrap();
+        let rules = self
+            .rules
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let matched_rules: Vec<String> = rules
             .iter()
             .filter(|(_, rule)| rule.matches(context))

@@ -94,7 +94,8 @@ mod tests {
             status: 200,
             body: "ok".into(),
         };
-        resp.expect_status(200);
+        let resp = resp.expect_status(200);
+        assert_eq!(resp.status, 200);
     }
 
     #[test]
@@ -113,7 +114,8 @@ mod tests {
             status: 200,
             body: "hello world".into(),
         };
-        resp.expect_body_contains("hello");
+        let resp = resp.expect_body_contains("hello");
+        assert!(resp.body.contains("hello"));
     }
 
     #[test]
@@ -126,9 +128,11 @@ mod tests {
             status: 200,
             body: r#"{"name":"test"}"#.into(),
         };
-        resp.expect_json(&Data {
+        let resp = resp.expect_json(&Data {
             name: "test".into(),
         });
+        let parsed: Data = serde_json::from_str(&resp.body).expect("body 应为合法 JSON");
+        assert_eq!(parsed.name, "test");
     }
 
     #[test]

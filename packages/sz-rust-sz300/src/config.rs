@@ -21,7 +21,7 @@ pub struct ServerConfig {
 }
 
 /// MySQL 数据库配置
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Clone, Deserialize)]
 pub struct DatabaseConfig {
     /// 数据库主机地址
     pub host: String,
@@ -31,12 +31,25 @@ pub struct DatabaseConfig {
     pub database: String,
     /// 数据库用户名
     pub username: String,
-    /// 数据库密码
+    /// 数据库密码（脱敏：禁止序列化输出）
+    #[serde(skip_serializing)]
     pub password: String,
 }
 
+impl std::fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// PostgreSQL 数据库配置
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Clone, Deserialize)]
 pub struct PgDatabaseConfig {
     /// 数据库主机地址
     pub host: String,
@@ -46,8 +59,21 @@ pub struct PgDatabaseConfig {
     pub database: String,
     /// 数据库用户名
     pub username: String,
-    /// 数据库密码
+    /// 数据库密码（脱敏：禁止序列化输出）
+    #[serde(skip_serializing)]
     pub password: String,
+}
+
+impl std::fmt::Debug for PgDatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgDatabaseConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// 从环境变量加载配置（生产安全要求：密钥不硬编码）

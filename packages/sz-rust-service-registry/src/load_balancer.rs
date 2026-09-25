@@ -150,7 +150,9 @@ impl LoadBalancer {
 
         let mut ring = self.hash_ring.write();
         ring.insert(ring_key.clone(), new_ring);
-        let r = ring.get(&ring_key).unwrap();
+        let r = ring
+            .get(&ring_key)
+            .expect("ring_key 刚插入 hash_ring，get 必命中");
         Ok(self.ring_select(serving, r, key))
     }
 

@@ -156,7 +156,7 @@ fn extract_feature(input: &str) -> String {
         }
     }
 
-    let re = Regex::new(r"\b([a-z_]+)\s+api\b").unwrap();
+    let re = Regex::new(r"\b([a-z_]+)\s+api\b").expect("内置静态正则必须有效");
     if let Some(caps) = re.captures(&lower) {
         features.push(caps[1].to_string());
     }

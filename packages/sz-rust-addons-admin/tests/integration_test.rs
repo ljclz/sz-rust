@@ -560,15 +560,6 @@ fn make_super_admin_request_with_body(
         .unwrap()
 }
 
-async fn assert_status(
-    router: axum::Router,
-    req: http::Request<axum::body::Body>,
-    expected: StatusCode,
-) {
-    let response = router.oneshot(req).await.unwrap();
-    assert_eq!(response.status(), expected);
-}
-
 #[tokio::test]
 async fn test_create_user_endpoint_returns_201() {
     let pool = make_mock_pool();
@@ -578,7 +569,8 @@ async fn test_create_user_endpoint_returns_201() {
         "/api/admin/users",
         serde_json::json!({"username":"newuser","password":"password123","email":"u@example.com"}),
     );
-    assert_status(router, req, StatusCode::CREATED).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
 
 #[tokio::test]
@@ -590,7 +582,8 @@ async fn test_create_user_short_password_returns_400() {
         "/api/admin/users",
         serde_json::json!({"username":"newuser","password":"short"}),
     );
-    assert_status(router, req, StatusCode::BAD_REQUEST).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -602,7 +595,8 @@ async fn test_update_user_endpoint_returns_200() {
         "/api/admin/users/1",
         serde_json::json!({"email":"updated@example.com"}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -614,7 +608,8 @@ async fn test_update_user_status_endpoint_returns_200() {
         "/api/admin/users/1/status",
         serde_json::json!({"status":"disabled"}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -622,7 +617,8 @@ async fn test_delete_user_endpoint_returns_204() {
     let pool = make_mock_pool();
     let router = AdminAddonPlugin::new(pool, vec!["super_admin".into()]).router();
     let req = make_super_admin_request("DELETE", "/api/admin/users/1");
-    assert_status(router, req, StatusCode::NO_CONTENT).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -634,7 +630,8 @@ async fn test_assign_user_roles_endpoint_returns_200() {
         "/api/admin/users/1/roles",
         serde_json::json!({"role_ids":[1,2]}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -646,7 +643,8 @@ async fn test_create_role_endpoint_returns_201() {
         "/api/admin/roles",
         serde_json::json!({"name":"编辑者","code":"editor","description":"编辑角色"}),
     );
-    assert_status(router, req, StatusCode::CREATED).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
 
 #[tokio::test]
@@ -658,7 +656,8 @@ async fn test_create_role_empty_name_returns_400() {
         "/api/admin/roles",
         serde_json::json!({"name":"  ","code":"bad"}),
     );
-    assert_status(router, req, StatusCode::BAD_REQUEST).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -670,7 +669,8 @@ async fn test_update_role_endpoint_returns_200() {
         "/api/admin/roles/1",
         serde_json::json!({"name":"改名角色"}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -678,7 +678,8 @@ async fn test_delete_role_endpoint_returns_204() {
     let pool = make_mock_pool();
     let router = AdminAddonPlugin::new(pool, vec!["super_admin".into()]).router();
     let req = make_super_admin_request("DELETE", "/api/admin/roles/1");
-    assert_status(router, req, StatusCode::NO_CONTENT).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -690,7 +691,8 @@ async fn test_assign_role_permissions_endpoint_returns_200() {
         "/api/admin/roles/1/permissions",
         serde_json::json!({"permission_codes":["admin:user:list"]}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -714,7 +716,8 @@ async fn test_create_menu_endpoint_returns_201() {
         "/api/admin/menus",
         serde_json::json!({"name":"用户管理","code":"user_mgr","path":"/admin/users","parent_id":0,"sort":1,"is_visible":true}),
     );
-    assert_status(router, req, StatusCode::CREATED).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
 
 #[tokio::test]
@@ -726,7 +729,8 @@ async fn test_update_menu_endpoint_returns_200() {
         "/api/admin/menus/1",
         serde_json::json!({"name":"改名菜单"}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -734,7 +738,8 @@ async fn test_delete_menu_endpoint_returns_204() {
     let pool = make_mock_pool();
     let router = AdminAddonPlugin::new(pool, vec!["super_admin".into()]).router();
     let req = make_super_admin_request("DELETE", "/api/admin/menus/1");
-    assert_status(router, req, StatusCode::NO_CONTENT).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -758,7 +763,8 @@ async fn test_upsert_config_endpoint_returns_200() {
         "/api/admin/configs/site_name",
         serde_json::json!({"value":"MySite","value_type":"string","group":"system"}),
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -770,7 +776,8 @@ async fn test_upsert_config_type_mismatch_returns_400() {
         "/api/admin/configs/bad",
         serde_json::json!({"value":"not_bool","value_type":"boolean"}),
     );
-    assert_status(router, req, StatusCode::BAD_REQUEST).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -778,7 +785,8 @@ async fn test_delete_config_endpoint_returns_204() {
     let pool = make_mock_pool();
     let router = AdminAddonPlugin::new(pool, vec!["super_admin".into()]).router();
     let req = make_super_admin_request("DELETE", "/api/admin/configs/site_name");
-    assert_status(router, req, StatusCode::NO_CONTENT).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -802,7 +810,8 @@ async fn test_list_operation_logs_with_query_params_returns_200() {
         "GET",
         "/api/admin/operation-logs?page=1&size=10&operation_type=create",
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -813,7 +822,8 @@ async fn test_list_users_with_filter_returns_200() {
         "GET",
         "/api/admin/users?username=admin&status=active&page=1&size=10",
     );
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -821,7 +831,8 @@ async fn test_list_configs_with_group_returns_200() {
     let pool = make_mock_pool();
     let router = AdminAddonPlugin::new(pool, vec!["super_admin".into()]).router();
     let req = make_super_admin_request("GET", "/api/admin/configs?group=system");
-    assert_status(router, req, StatusCode::OK).await;
+    let response = router.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 // =========================================================================
 // Guard middleware 非 super_admin 路径测试

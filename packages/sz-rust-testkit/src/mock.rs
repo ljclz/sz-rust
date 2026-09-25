@@ -29,7 +29,10 @@ impl MockInjector {
     /// 注入 Mock 值。
     pub fn inject(&self, key: &str, value: impl serde::Serialize) {
         let mut mocks = self.mocks.write();
-        mocks.insert(key.to_string(), serde_json::to_value(value).unwrap());
+        mocks.insert(
+            key.to_string(),
+            serde_json::to_value(value).expect("testkit mock 值必须可序列化为 JSON"),
+        );
     }
 
     /// 获取 Mock 值。

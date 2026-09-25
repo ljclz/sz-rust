@@ -36,8 +36,10 @@ impl FactoryBuilder {
 
     /// 设置字段值。
     pub fn with(mut self, key: &str, value: impl Serialize) -> Self {
-        self.fields
-            .insert(key.to_string(), serde_json::to_value(value).unwrap());
+        self.fields.insert(
+            key.to_string(),
+            serde_json::to_value(value).expect("testkit 字段值必须可序列化为 JSON"),
+        );
         self
     }
 
