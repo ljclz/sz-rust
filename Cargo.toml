@@ -215,25 +215,25 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 proptest = "1"
 
 # 内部依赖（SZ-ORM 全家桶，从 crates.io 拉取）
-# 2026-09-25 全量对齐 8.8.0（crates.io 全 68 包已发布到 8.8.0）
-sz-orm-core = "8.8.0"
-sz-orm-auth = "8.8.0"
-sz-orm-storage = "8.8.0"
-sz-orm-queue = "8.8.0"
-sz-orm-mqtt = "8.8.0"
-sz-orm-websocket = "8.8.0"
-sz-orm-scheduler = "8.8.0"
-sz-orm-tracing = "8.8.0"
-sz-orm-logger = "8.8.0"
-sz-orm-limit = "8.8.0"
-sz-orm-config = "8.8.0"
-sz-orm-macros = "8.8.0"
-sz-orm-sql-validator = "8.8.0"
-sz-orm-sqlx = "8.8.0"
+# 2026-09-26 全量对齐 9.0.0（sz-orm v9.0.0 覆盖率战役交付）
+sz-orm-core = "9.0.0"
+sz-orm-auth = "9.0.0"
+sz-orm-storage = "9.0.0"
+sz-orm-queue = "9.0.0"
+sz-orm-mqtt = "9.0.0"
+sz-orm-websocket = "9.0.0"
+sz-orm-scheduler = "9.0.0"
+sz-orm-tracing = "9.0.0"
+sz-orm-logger = "9.0.0"
+sz-orm-limit = "9.0.0"
+sz-orm-config = "9.0.0"
+sz-orm-macros = "9.0.0"
+sz-orm-sql-validator = "9.0.0"
+sz-orm-sqlx = "9.0.0"
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
-sz-orm-query-builder = "8.8.0"
-sz-orm-graphql = "8.8.0"
-sz-orm-grpc = "8.8.0"
+sz-orm-query-builder = "9.0.0"
+sz-orm-graphql = "9.0.0"
+sz-orm-grpc = "9.0.0"
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "1.2.0", path = "packages/sz-rust-core" }
