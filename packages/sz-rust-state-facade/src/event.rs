@@ -325,8 +325,14 @@ impl EventDispatcher {
     /// ]);
     /// ```
     pub fn listen_events(&self, events: Vec<(String, Vec<Arc<dyn Listener>>)>) -> &Self {
-        let mut listener_map = self.listener.write().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let mut listener_map = self
+            .listener
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         for (event, listeners) in events {
             // 应用事件别名（对齐 PHP `if (isset($this->bind[$event]))`）
@@ -359,8 +365,14 @@ impl EventDispatcher {
     /// - `first=false` 时追加队尾（`$this->listener[$event][]`）
     /// - 应用事件别名（`bind` 映射）
     pub fn listen(&self, event: &str, listener: Arc<dyn Listener>, first: bool) -> &Self {
-        let mut listener_map = self.listener.write().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let mut listener_map = self
+            .listener
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 应用事件别名（对齐 PHP `if (isset($this->bind[$event]))`）
         let event = bind_map
@@ -396,8 +408,14 @@ impl EventDispatcher {
         listener: Arc<dyn Listener>,
         priority: i32,
     ) -> &Self {
-        let mut listener_map = self.listener.write().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let mut listener_map = self
+            .listener
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let event = bind_map
             .get(event)
@@ -412,8 +430,14 @@ impl EventDispatcher {
 
     /// 是否存在事件监听（对齐 PHP `hasListener(string $event): bool`）
     pub fn has_listener(&self, event: &str) -> bool {
-        let listener_map = self.listener.read().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let listener_map = self
+            .listener
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 应用事件别名（对齐 PHP `if (isset($this->bind[$event]))`）
         let event = bind_map.get(event).map(|s| s.as_str()).unwrap_or(event);
@@ -423,8 +447,14 @@ impl EventDispatcher {
 
     /// 移除事件监听（对齐 PHP `remove(string $event): void`）
     pub fn remove(&self, event: &str) {
-        let mut listener_map = self.listener.write().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let mut listener_map = self
+            .listener
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 应用事件别名（对齐 PHP `if (isset($this->bind[$event]))`）
         let event = bind_map
@@ -450,7 +480,10 @@ impl EventDispatcher {
     /// dispatcher.bind(vec![("UserLogin".to_string(), "app\\event\\UserLogin".to_string())]);
     /// ```
     pub fn bind(&self, events: Vec<(String, String)>) -> &Self {
-        let mut bind_map = self.bind.write().expect("锁被毒化");
+        let mut bind_map = self
+            .bind
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (alias, real_event) in events {
             bind_map.insert(alias, real_event);
         }
@@ -520,7 +553,10 @@ impl EventDispatcher {
     ///
     /// 提取自 `trigger` 和 `trigger_spawn` 的公共逻辑，避免代码冗余。
     fn collect_listeners(&self, event: &str) -> Vec<Arc<dyn Listener>> {
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 应用事件别名（对齐 PHP `if (isset($this->bind[$event]))`）
         let event = bind_map
@@ -530,7 +566,10 @@ impl EventDispatcher {
 
         drop(bind_map);
 
-        let listener_map = self.listener.read().expect("锁被毒化");
+        let listener_map = self
+            .listener
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 对齐 PHP `$listeners = $this->listener[$event] ?? []`
         let mut listeners: Vec<(i32, Arc<dyn Listener>)> =
@@ -708,8 +747,14 @@ impl EventDispatcher {
 
     /// 获取事件的所有监听器数量（PHP 无对应 API，Rust 扩展用于测试）
     pub fn listener_count(&self, event: &str) -> usize {
-        let listener_map = self.listener.read().expect("锁被毒化");
-        let bind_map = self.bind.read().expect("锁被毒化");
+        let listener_map = self
+            .listener
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bind_map = self
+            .bind
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let event = bind_map.get(event).map(|s| s.as_str()).unwrap_or(event);
 
@@ -2662,5 +2707,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*order.lock().unwrap(), vec![2, 1]);
+    }
+}
+#[cfg(test)]
+mod poisoning_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 回归测试（v1.4）：锁被毒化后事件子系统必须继续可用。
+    ///
+    /// 修复前所有 read/write().expect("锁被毒化") 在锁毒化后会让
+    /// 后续每一次 listen/trigger/remove 全部 panic，事件子系统整体永久瘫痪；
+    /// 修复后用 PoisonError::into_inner 吸收毒化，锁内数据（Vec/HashMap）
+    /// 本身仍是有效状态，继续服务。
+    #[test]
+    fn dispatcher_survives_poisoned_locks() {
+        let dispatcher = EventDispatcher::new();
+        dispatcher.listen(
+            "Ev",
+            Arc::new(ClosureListener::new(|_| Ok(Value::Null))),
+            false,
+        );
+        assert!(dispatcher.trigger("Ev", &Value::Null, false).is_ok());
+
+        // 人为毒化 listener 写锁：持锁期间 panic
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = dispatcher.listener.write();
+            panic!("持锁 panic，毒化写锁");
+        }));
+
+        // 修复后：毒化被 into_inner 吸收，后续操作照常
+        dispatcher.listen(
+            "Ev",
+            Arc::new(ClosureListener::new(|_| Ok(json!("ok")))),
+            false,
+        );
+        let results = dispatcher
+            .trigger("Ev", &Value::Null, false)
+            .expect("毒化后事件系统必须继续可用");
+        assert_eq!(results, vec![Value::Null, json!("ok")]);
+
+        // 其余毒化路径：has_listener / remove / bind 同样必须存活
+        assert!(dispatcher.has_listener("Ev"));
+        dispatcher.bind(vec![("Alias".to_string(), "Ev".to_string())]);
+        dispatcher.remove("Alias");
     }
 }

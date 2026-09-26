@@ -48,8 +48,29 @@
 use crate::config::{AppConfig, DatabaseConnection};
 use parking_lot::RwLock;
 use std::any::{Any, TypeId};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+
+thread_local! {
+    /// 每线程循环依赖检测栈
+    ///
+    /// 依赖链解析是单线程递归过程，栈必须按线程隔离；共享栈会导致
+    /// 并发首解析时跨线程误报"循环依赖"（v1.4 前 bug，见上 `check_and_call_factory`）。
+    static CONSTRUCTING: RefCell<Vec<(&'static str, TypeId)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// 构造栈弹栈守卫：工厂 panic 时也保证栈被正确弹出（tokio worker 会被复用，
+/// 残留条目会让同线程后续解析误报循环依赖）。
+struct ConstructGuard;
+
+impl Drop for ConstructGuard {
+    fn drop(&mut self) {
+        CONSTRUCTING.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 
 /// 服务实例类型别名（消除 `clippy::type_complexity` 警告）
 type ServiceInstance = Arc<dyn Any + Send + Sync>;
@@ -148,14 +169,6 @@ pub struct Container {
     /// 对齐 PHP `app()->when(PhotoController::class)->needs(Filesystem::class)->give(S3Filesystem::class)`。
     /// 通过 `make_for::<T, Consumer>()` 为指定消费者解析上下文绑定的服务。
     context_bindings: RwLock<ContextBindingMap>,
-    /// 循环依赖检测栈：记录当前正在构造中的服务类型链
-    ///
-    /// 用于检测 A → B → C → A 形式的循环依赖。
-    /// 工厂调用期间若发现目标类型已在栈中，立即 panic 并输出完整依赖链。
-    ///
-    /// 存储 `(&'static str, TypeId)` 对：TypeId 用于 O(1) 查找，
-    /// 类型名用于生成可读的错误信息（如 "ServiceA -> ServiceB -> ServiceA"）。
-    constructing: RwLock<Vec<(&'static str, TypeId)>>,
 }
 
 impl Container {
@@ -168,7 +181,6 @@ impl Container {
             aliases: RwLock::new(HashMap::new()),
             tags: RwLock::new(HashMap::new()),
             context_bindings: RwLock::new(HashMap::new()),
-            constructing: RwLock::new(Vec::new()),
         }
     }
 
@@ -484,12 +496,13 @@ impl Container {
         self.aliases.write().clear();
         self.tags.write().clear();
         self.context_bindings.write().clear();
-        self.constructing.write().clear();
+        // 构造栈位于 thread_local（见 CONSTRUCTING），随各线程解析结束自然清空，
+        // 无需也无法跨线程清除；正常情况下任何时刻都是空栈。
     }
 
-    /// 当前构造栈深度（用于调试，正常应为 0）
+    /// 当前线程构造栈深度（用于调试，正常应为 0）
     pub fn constructing_depth(&self) -> usize {
-        self.constructing.read().len()
+        CONSTRUCTING.with(|stack| stack.borrow().len())
     }
 
     /// 已注册服务数量（不含别名）
@@ -664,33 +677,40 @@ impl Container {
 
     /// 循环依赖检测 + 工厂调用（供 make_with_scope 和 make_for 共用）
     ///
-    /// 检查目标类型是否已在构造栈中，若是则 panic；
+    /// 检查目标类型是否已在**本线程**构造栈中，若是则 panic；
     /// 否则压栈、调用工厂、弹栈，返回原始工厂输出（`Box<dyn Any + Send + Sync>`）。
     /// 调用方负责将 `Box` 转为 `Arc` 并按生命周期策略缓存。
+    ///
+    /// # 并发语义（v1.4 修复）
+    ///
+    /// 构造栈按线程隔离（`CONSTRUCTING` thread_local）：依赖链解析发生在
+    /// 单线程内，A → B → C → A 环只可能在同一线程无限递归。此前共享栈
+    /// 在两个线程并发首解析时会把对方在途类型误判为环，直接 panic。
+    ///
+    /// 跨线程同时首次解析同一工厂类型时，工厂可能并发执行多次（随后
+    /// 仅一份进入单例缓存）；要求严格一次执行语义的工厂应在自身内部加锁。
     fn check_and_call_factory(
         &self,
         type_id: TypeId,
         type_name: &'static str,
         factory: &ServiceFactory,
     ) -> Option<Box<dyn Any + Send + Sync>> {
-        // 循环依赖检测
-        {
-            let constructing = self.constructing.read();
-            if constructing.iter().any(|(_, tid)| *tid == type_id) {
-                let chain: Vec<&str> = constructing
+        // 循环依赖检测 + 压栈（本线程）
+        CONSTRUCTING.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if let Some(pos) = stack.iter().position(|(_, tid)| *tid == type_id) {
+                let chain: Vec<&str> = stack[pos..]
                     .iter()
-                    .skip_while(|(_, tid)| *tid != type_id)
                     .map(|(name, _)| *name)
                     .chain(std::iter::once(type_name))
                     .collect();
-                drop(constructing);
                 panic!("DI 容器检测到循环依赖: {}", chain.join(" -> "));
             }
-        }
-
-        self.constructing.write().push((type_name, type_id));
+            stack.push((type_name, type_id));
+        });
+        let _guard = ConstructGuard;
         let instance = factory();
-        self.constructing.write().pop();
+        drop(_guard);
 
         Some(instance)
     }

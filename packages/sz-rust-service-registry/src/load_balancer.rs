@@ -98,6 +98,11 @@ impl LoadBalancer {
         serving: &[&'a ServiceInstance],
     ) -> Result<&'a ServiceInstance, RegistryError> {
         let total: u64 = serving.iter().map(|i| i.weight as u64).sum();
+        // 兜底：全部实例 weight=0 时总权重为 0，gen_range(0..0) 会 panic
+        // （weight 虽在反序列化与 with_weight 处钳制 >=1，但 pub 字段仍可能被直构改写）。
+        if total == 0 {
+            return self.select_random(serving);
+        }
         let mut rng = rand::thread_rng();
         let mut point = rng.gen_range(0..total);
         for inst in serving {
@@ -359,5 +364,48 @@ mod tests {
         lb.on_acquire(&instances[0].instance_id);
         assert_eq!(lb.connections.get(&instances[0].instance_id), 0);
         lb.on_release(&instances[0].instance_id);
+    }
+
+    /// 回归测试（v1.4）：全部实例 weight=0 时加权选择不得 panic。
+    ///
+    /// 修复前 `gen_range(0..total)` 遇 total=0 直接 panic；
+    /// 修复后回退到随机选择。
+    #[test]
+    fn test_weighted_all_zero_weights_no_panic() {
+        let lb = LoadBalancer::new(LoadBalanceStrategy::Weighted);
+        let instances = vec![
+            ServiceInstance {
+                service_name: "svc".into(),
+                instance_id: "z1".into(),
+                host: "h1".into(),
+                port: 80,
+                weight: 0, // 直构绕过 with_weight 钳制
+                metadata: HashMap::new(),
+                health_check_url: None,
+                status: InstanceStatus::Healthy,
+            },
+            ServiceInstance {
+                service_name: "svc".into(),
+                instance_id: "z2".into(),
+                host: "h2".into(),
+                port: 80,
+                weight: 0,
+                metadata: HashMap::new(),
+                health_check_url: None,
+                status: InstanceStatus::Healthy,
+            },
+        ];
+        for _ in 0..10 {
+            let selected = lb.select(&instances, None).unwrap();
+            assert!(selected.instance_id == "z1" || selected.instance_id == "z2");
+        }
+    }
+
+    /// 回归测试（v1.4）：反序列化 weight=0 被钳制为 1
+    #[test]
+    fn test_instance_weight_clamped_on_deserialize() {
+        let json = r#"{"service_name":"svc","instance_id":"i1","host":"h","port":80,"weight":0,"metadata":{},"status":"healthy"}"#;
+        let inst: ServiceInstance = serde_json::from_str(json).unwrap();
+        assert_eq!(inst.weight, 1, "反序列化 weight=0 必须钳制为 1");
     }
 }

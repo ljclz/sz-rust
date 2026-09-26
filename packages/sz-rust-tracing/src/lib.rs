@@ -186,6 +186,9 @@ pub struct SzTracer {
 }
 
 impl SzTracer {
+    /// 已结束 Span 的累积上限：超过后丢弃最旧记录，防止长驻进程内存无界增长。
+    pub const MAX_SPANS: usize = 10_000;
+
     /// 创建一个新的 Tracer，指定服务名。
     pub fn new(service_name: impl Into<String>) -> Self {
         Self {
@@ -206,12 +209,18 @@ impl SzTracer {
 
     /// 返回已累积的 Span 快照（拷贝）。
     pub fn get_spans(&self) -> Vec<Span> {
-        self.spans.read().expect("锁被毒化").clone()
+        self.spans
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// 清空已累积的 Span。
     pub fn clear(&self) {
-        self.spans.write().expect("锁被毒化").clear();
+        self.spans
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 }
 
@@ -236,6 +245,11 @@ impl Tracer for SzTracer {
 
         if let Ok(mut spans) = self.spans.write() {
             spans.push(span);
+            // 上限裁剪：丢弃最旧，防止无界增长（v1.4 修复）
+            if spans.len() > Self::MAX_SPANS {
+                let overflow = spans.len() - Self::MAX_SPANS;
+                spans.drain(0..overflow);
+            }
         }
     }
 

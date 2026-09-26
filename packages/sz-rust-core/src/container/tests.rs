@@ -1360,3 +1360,70 @@ fn test_app_debug_format() {
     assert!(s.contains("App"), "debug={s}");
     assert!(s.contains("config"), "debug={s}");
 }
+// ============================================================================
+// v1.4 并发修复回归：构造栈按线程隔离
+// ============================================================================
+
+#[derive(Debug)]
+struct SlowSvc;
+#[derive(Debug)]
+#[allow(dead_code)] // 字段仅为让工厂制造真实解析路径，无需读取
+struct DepOnSlow(std::sync::Arc<()>);
+
+/// 回归测试：两线程并发首解析时不得跨线程误报“循环依赖”。
+///
+/// 修复前构造栈是容器级共享 `RwLock<Vec>`：线程 A 在 SlowSvc 工厂（慢 200ms）
+/// 执行期间留在栈中的条目，会被线程 B 的 `make::<SlowSvc>()` 看见，
+/// 直接 panic「DI 容器检测到循环依赖」——尽管根本无环。
+/// 修复后构造栈为 thread_local，线程 B 看不到线程 A 的在途条目。
+#[test]
+fn concurrent_first_resolve_no_cross_thread_false_cycle() {
+    let container = Arc::new(Container::new());
+    container.singleton(|| {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        SlowSvc
+    });
+    let c_inner = container.clone();
+    container.singleton(move || {
+        // 工厂内解析 SlowSvc：老代码下会看到线程 A 留在共享栈上的在途条目而误报
+        let _dep = c_inner.make::<SlowSvc>().expect("SlowSvc 应可解析");
+        DepOnSlow(std::sync::Arc::new(()))
+    });
+
+    let c_slow = container.clone();
+    let t1 = std::thread::spawn(move || {
+        assert!(c_slow.make::<SlowSvc>().is_some());
+    });
+
+    // 等线程 A 进入 SlowSvc 工厂（在途条目已在老代码共享栈上）
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let c_dep = container.clone();
+    let t2 = std::thread::spawn(move || {
+        assert!(c_dep.make::<DepOnSlow>().is_some());
+    });
+
+    t1.join().expect("线程 A 不得 panic");
+    t2.join()
+        .expect("线程 B 不得 panic（老代码会误报循环依赖）");
+}
+
+/// 回归测试：工厂 panic 后同线程构造栈必须归零
+/// （tokio worker 会被复用，残留条目会让后续解析误报循环）。
+#[test]
+fn factory_panic_cleans_constructing_stack() {
+    struct Boom;
+    struct Fine;
+    let container = Container::new();
+    container.singleton(|| -> Boom { panic!("工厂故障") });
+    // 触发工厂 panic（必须捕获，否则测试线程直接死）
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = container.make::<Boom>();
+    }));
+    assert_eq!(container.constructing_depth(), 0, "构造栈必须归零");
+
+    // 同线程后续解析不得因残留条目误报
+    container.singleton(|| Fine);
+    assert!(container.make::<Fine>().is_some());
+    assert_eq!(container.constructing_depth(), 0);
+}

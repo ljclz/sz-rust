@@ -34,6 +34,10 @@ pub struct ServiceInstance {
     /// 端口
     pub port: u16,
     /// 权重（加权 LB 用，默认 1）
+    ///
+    /// 反序列化时钳制到 >=1：`weight=0` 会使加权负载均衡的总权重为 0，
+    /// 进而在 `gen_range(0..0)` 上 panic（v1.4 修复）。
+    #[serde(default = "default_weight", deserialize_with = "clamp_weight")]
     pub weight: u32,
     /// 元数据（标签/版本/区域等）
     pub metadata: HashMap<String, String>,
@@ -41,6 +45,19 @@ pub struct ServiceInstance {
     pub health_check_url: Option<String>,
     /// 实例状态
     pub status: InstanceStatus,
+}
+
+fn default_weight() -> u32 {
+    1
+}
+
+/// 反序列化钳制：weight 不得为 0（0 会导致加权 LB 总权重为 0 → gen_range panic）
+fn clamp_weight<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let w = <u32 as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(w.max(1))
 }
 
 impl ServiceInstance {

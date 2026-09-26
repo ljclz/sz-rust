@@ -839,6 +839,10 @@ pub struct Cache {
     inflight: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// 缓存命中率指标（hit/miss 计数）
     metrics: Arc<CacheMetrics>,
+    /// TTL 随机抖动比例（防缓存雪崩）。默认 0.0 = 关闭：
+    /// 调用方传入的 TTL 是语义承诺（如 JWT 黑名单 1s 就是 1s），
+    /// 不得被静默拉长；需要防雪崩的场景用 [`Cache::with_ttl_jitter`] 显式开启。
+    ttl_jitter_ratio: f64,
 }
 
 impl Cache {
@@ -850,7 +854,22 @@ impl Cache {
             remember_lock_timeout: Duration::from_secs(5),
             inflight: Mutex::new(HashMap::new()),
             metrics: Arc::new(CacheMetrics::new()),
+            ttl_jitter_ratio: 0.0,
         }
+    }
+
+    /// 开启 TTL 随机抖动（防缓存雪崩）：实际过期时间 = TTL × (1±ratio)
+    ///
+    /// 仅建议在"大量同 TTL 键集中失效"的场景开启（预热回源、批量刷新）。
+    /// 对 TTL 有精确语义的调用方（JWT 黑名单、限流窗口、会话过期）
+    /// 必须保持默认关闭。
+    pub fn with_ttl_jitter(mut self, ratio: f64) -> Self {
+        assert!(
+            (0.0..=1.0).contains(&ratio),
+            "ttl_jitter_ratio 必须在 [0, 1]"
+        );
+        self.ttl_jitter_ratio = ratio;
+        self
     }
 
     /// 返回缓存命中率指标
@@ -912,7 +931,7 @@ impl Cache {
     ) -> Result<(), CacheError> {
         let cache_value = php_serialize(&value)?;
         let bytes = cache_value.to_bytes();
-        let jittered_ttl = apply_ttl_jitter(ttl, 0.2);
+        let jittered_ttl = apply_ttl_jitter(ttl, self.ttl_jitter_ratio);
         let mgr = self.manager.read();
         let driver = mgr.default_store()?;
         driver.set_raw(key, bytes, jittered_ttl)
