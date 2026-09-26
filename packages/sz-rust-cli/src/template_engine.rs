@@ -85,14 +85,37 @@ impl TemplateEngine {
 
         template_types.sort();
 
+        // 依赖拓扑注册：模板可 {% extends %} 其他模板（如 plugin-master-slave
+        // 继承 plugin-crud），Tera 在 add_raw_template 时即解析继承，要求父模板
+        // 已注册。read_dir 的文件系统顺序跨平台不确定（Windows 与 Linux 实测
+        // 不同序），固定单序注册会在父模板后行的平台挂掉。固定点迭代：每轮
+        // 注册当轮可解析的模板，缺父模板的留待下一轮，直至全部注册；无进展
+        // 说明存在真实语法错误或循环继承，按错误返回。
+        let mut pending: Vec<(String, String)> = Vec::new();
         for file_path in &all_template_files {
             let relative = file_path.strip_prefix(template_dir).unwrap_or(file_path);
             let template_name = relative.to_string_lossy().replace('\\', "/");
-
             let content = tokio::fs::read_to_string(file_path).await?;
+            pending.push((template_name, content));
+        }
 
-            tera.add_raw_template(&template_name, &content)
-                .map_err(|e| map_syntax_error(e, &template_name))?;
+        while !pending.is_empty() {
+            let mut deferred: Vec<(String, String)> = Vec::new();
+            let mut progress = 0usize;
+            for (name, content) in pending.drain(..) {
+                match tera.add_raw_template(&name, &content) {
+                    Ok(()) => progress += 1,
+                    Err(_) => deferred.push((name, content)),
+                }
+            }
+            if progress == 0 && !deferred.is_empty() {
+                // 注册状态未变化，重试必然复现同一错误——取首个真实报错返回
+                let (name, content) = deferred.swap_remove(0);
+                tera.add_raw_template(&name, &content)
+                    .map_err(|e| map_syntax_error(e, &name))?;
+                unreachable!("无进展轮次的重新注册必然返回 Err");
+            }
+            pending = deferred;
         }
 
         tera.register_filter(
