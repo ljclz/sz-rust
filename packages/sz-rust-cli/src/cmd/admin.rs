@@ -119,8 +119,10 @@ const CAPABILITIES: &[(&str, &str, &str)] = &[
     ("admin.dashboard", "仪表盘统计", "dashboard,query"),
 ];
 
-const MIGRATION_SQL: &str =
-    include_str!("../../../sz-rust-addons-admin/src/migrations/001_init_admin.sql");
+// 打包内拷贝：include_str 不能逃出 crate 根（cargo publish 的 tarball 只含本包文件，
+// 跨包相对路径在发布验证时必然找不到——本地工作区因兄弟目录存在而从未暴露）。
+// 源头: packages/sz-rust-addons-admin/src/migrations/001_init_admin.sql（变更需两处同步）
+const MIGRATION_SQL: &str = include_str!("../../assets/migrations/001_init_admin.sql");
 
 /// 执行 admin 命令
 pub async fn execute(cmd: &AdminCommand) -> Result<i32, CliError> {
