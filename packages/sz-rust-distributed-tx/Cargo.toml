@@ -8,7 +8,7 @@ license.workspace = true
 description = "Distributed transactions for sz-rust — Saga + TCC orchestration + compensation + state persistence"
 repository.workspace = true
 homepage.workspace = true
-keywords = ["saga", "tcc", "distributed-transaction", "compensation", "thinkphp"]
+keywords = ["saga", "tcc", "distributed-tx", "compensation", "thinkphp"]
 categories = ["asynchronous"]
 
 [dependencies]
