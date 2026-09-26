@@ -143,7 +143,11 @@ impl ProductController {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    status: data.get("status").and_then(|v| v.as_i64()).unwrap_or(1) as i8,
+                    status: data
+                        .get("status")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(1)
+                        .clamp(i8::MIN as i64, i8::MAX as i64) as i8,
                     created_at: None,
                     updated_at: None,
                 };

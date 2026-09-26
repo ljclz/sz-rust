@@ -254,7 +254,11 @@ fn row_to_menu(row: &std::collections::HashMap<String, Value>) -> Option<MenuMod
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let parent_id = row.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let sort = row.get("sort").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let sort = row
+        .get("sort")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
+        .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
     let is_visible = row
         .get("is_visible")
         .and_then(|v| v.as_bool())

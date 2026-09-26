@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 订单控制器 — 仅负责 HTTP 请求/响应处理，SQL 逻辑下沉到 [`crate::services::order_service`]
 //!
@@ -158,9 +158,18 @@ impl OrderController {
                         .get("total_weight_g")
                         .and_then(|v| v.as_i64())
                         .unwrap_or(0),
-                    item_count: data.get("item_count").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                    item_count: data
+                        .get("item_count")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        .clamp(0, i32::MAX as i64) as i32,
                     status: 1, // 服务层固定为 1=待支付，此字段被忽略
-                    pay_method: data.get("pay_method").and_then(|v| v.as_i64()).unwrap_or(0) as i8,
+                    pay_method: data
+                        .get("pay_method")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        .clamp(i8::MIN as i64, i8::MAX as i64)
+                        as i8,
                     pay_at: None,
                     offline_seq: data
                         .get("offline_seq")

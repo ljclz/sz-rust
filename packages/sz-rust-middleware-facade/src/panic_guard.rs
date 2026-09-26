@@ -19,7 +19,7 @@
 //! use axum::routing::get;
 //! use axum::Router;
 //!
-//! let app = Router::new()
+//! let app: Router<()> = Router::new()
 //!     .route("/", get(|| async { "ok" }))
 //!     .layer(axum::middleware::from_fn_with_state(
 //!         PanicGuardConfig::default(),

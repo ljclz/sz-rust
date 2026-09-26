@@ -872,9 +872,11 @@ mod middleware_tests {
     fn test_generate_request_id_returns_unique() {
         let id1 = generate_request_id();
         let id2 = generate_request_id();
-        // 计数器递增，保证唯一
-        assert_ne!(id1.counter(), id2.counter());
-        assert_eq!(id2.counter(), id1.counter() + 1);
+        // REQUEST_ID_COUNTER 是进程级全局：并行测试/其他线程也会取号，
+        // 语义保证是"严格单调递增"（唯一性），而非恰好 +1
+        // （断言 +1 在全量并行跑下 flaky，v1.4 审查发现）
+        assert!(id2.counter() > id1.counter(), "计数器必须单调递增");
+        assert_ne!(id1.to_hex(), id2.to_hex(), "生成的 id 必须唯一");
     }
 
     #[test]

@@ -84,10 +84,19 @@ pub fn routes_to_spec(routes: &[crate::routing::RouteRule], spec: &mut Value) {
 
     // 路径生成（单一可变借用区间）
     {
+        // 调用方传入的 spec 可能缺 "paths"（或类型不是 object）：
+        // 补建空对象而不是 panic —— openapi 生成属低价值崩溃点。
+        if spec.get("paths").map(|p| !p.is_object()).unwrap_or(true) {
+            if let Some(obj) = spec.as_object_mut() {
+                obj.insert("paths".to_string(), Value::Object(serde_json::Map::new()));
+            } else {
+                return;
+            }
+        }
         let paths = spec
             .get_mut("paths")
             .and_then(|p| p.as_object_mut())
-            .expect("spec must contain a paths object");
+            .expect("上一行已确保 paths 存在且为 object");
 
         for rule in routes {
             let method = match rule.method {
@@ -149,10 +158,11 @@ pub fn routes_to_spec(routes: &[crate::routing::RouteRule], spec: &mut Value) {
         if spec.get("tags").is_none() {
             spec["tags"] = Value::Array(Vec::new());
         }
-        let tag_arr = spec
-            .get_mut("tags")
-            .and_then(|t| t.as_array_mut())
-            .expect("tags must be an array after creation");
+        let tag_arr = match spec.get_mut("tags").and_then(|t| t.as_array_mut()) {
+            Some(arr) => arr,
+            // tags 类型被外部改成非数组：跳过 tag 注入而不是 panic
+            None => return,
+        };
         for (name, desc) in tags_to_add {
             tag_arr.push(json!({ "name": name, "description": desc }));
         }

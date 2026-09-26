@@ -308,6 +308,11 @@ fn lockfile_path() -> PathBuf {
 mod tests {
     use super::*;
 
+    /// HOME/USERPROFILE 是进程级全局，4 个测试并行改写会互踩
+    /// （login/save_token 的 credentials 路径依赖它）—— 串行化 env 敏感测试。
+    /// 与 ai-facade metrics 全局计数器同族的测试隔离问题（v1.4 审查发现）。
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     #[test]
     fn test_client_new() {
         let client = MarketplaceClient::new("http://localhost:8080/", None);
@@ -460,6 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_success_with_mock() {
+        let _env_guard = ENV_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", temp.path());
         std::env::set_var("USERPROFILE", temp.path());
@@ -501,6 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_uninstall_no_lockfile_succeeds() {
+        let _env_guard = ENV_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", temp.path());
         std::env::set_var("USERPROFILE", temp.path());
@@ -511,6 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_no_lockfile_returns_empty() {
+        let _env_guard = ENV_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", temp.path());
         std::env::set_var("USERPROFILE", temp.path());
@@ -522,6 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_token_writes_file() {
+        let _env_guard = ENV_LOCK.lock().await;
         let temp = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", temp.path());
         std::env::set_var("USERPROFILE", temp.path());

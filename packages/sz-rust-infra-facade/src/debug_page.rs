@@ -607,6 +607,9 @@ pub struct DbQueryCollector {
 }
 
 impl DbQueryCollector {
+    /// 查询记录上限：超过后丢弃最旧记录，防止长驻进程内存无界增长。
+    pub const MAX_QUERIES: usize = 5_000;
+
     /// 创建新的查询收集器（默认禁用）
     pub fn new() -> Self {
         Self::default()
@@ -622,10 +625,15 @@ impl DbQueryCollector {
         *self.enabled.lock() = enabled;
     }
 
-    /// 添加查询记录（仅在启用时生效）
+    /// 添加查询记录（仅在启用时生效；超过 [`Self::MAX_QUERIES`] 丢弃最旧）
     pub fn add_query(&self, query: DbQuery) {
         if self.enabled() {
-            self.queries.lock().push(query);
+            let mut queries = self.queries.lock();
+            queries.push(query);
+            if queries.len() > Self::MAX_QUERIES {
+                let overflow = queries.len() - Self::MAX_QUERIES;
+                queries.drain(0..overflow);
+            }
         }
     }
 

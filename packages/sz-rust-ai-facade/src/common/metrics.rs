@@ -28,6 +28,12 @@ pub struct AiMetrics {
 
 static INSTANCE: OnceLock<AiMetrics> = OnceLock::new();
 
+impl Default for AiMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiMetrics {
     pub fn global() -> &'static AiMetrics {
         INSTANCE.get_or_init(|| AiMetrics {
@@ -39,6 +45,23 @@ impl AiMetrics {
             embedding_count: Mutex::new(0),
             cache_hit_count: Mutex::new(0),
         })
+    }
+
+    /// 创建独立的 AiMetrics 实例
+    ///
+    /// 与 [`Self::global`] 互不影响。测试应使用独立实例做增量断言：
+    /// 全局实例被同进程所有测试共享，"读前值→+1→断言" 的模式在
+    /// 并行测试下会互相污染（v1.4 修复的 flaky 根因）。
+    pub fn new() -> Self {
+        Self {
+            handles: Mutex::new(None),
+            llm_request_count: Mutex::new(0),
+            llm_tokens_count: Mutex::new(0),
+            rag_recall_total: Mutex::new(0.0),
+            agent_steps_count: Mutex::new(0),
+            embedding_count: Mutex::new(0),
+            cache_hit_count: Mutex::new(0),
+        }
     }
 
     pub fn register(&self, registry: &MetricsRegistry) {
@@ -208,11 +231,12 @@ mod tests {
 
     #[test]
     fn record_llm_request_increments_count() {
-        let metrics = AiMetrics::global();
-        let before = metrics.llm_request_count();
+        // 独立实例：全局计数器被同 crate 其他测试并行累加，
+        // 增量断言在全局实例上必然 flaky（v1.4 修复）
+        let metrics = AiMetrics::new();
+        assert_eq!(metrics.llm_request_count(), 0);
         metrics.record_llm_request("openai", "gpt-4", "success");
-        let after = metrics.llm_request_count();
-        assert_eq!(after, before + 1);
+        assert_eq!(metrics.llm_request_count(), 1);
     }
 
     #[test]
@@ -259,7 +283,7 @@ mod tests {
 
     #[test]
     fn multiple_record_calls_accumulate() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new(); // 独立实例：全局计数器并行测试下会污染增量断言
         let before = metrics.llm_request_count();
         metrics.record_llm_request("openai", "gpt-4", "success");
         metrics.record_llm_request("claude", "claude-3", "success");
@@ -270,13 +294,13 @@ mod tests {
 
     #[test]
     fn register_with_metrics_registry() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new(); // 独立实例，理由同上
         let registry = sz_rust_observability::MetricsRegistry::new();
         metrics.register(&registry);
         // register 是幂等的，再次调用不应 panic
         metrics.register(&registry);
         // 注册后 record 方法应正常工作（handles 已设置）
-        let before = metrics.llm_request_count();
+        let before = metrics.llm_request_count(); // local instance
         metrics.record_llm_request("openai", "gpt-4", "success");
         metrics.record_llm_tokens("openai", "gpt-4", "prompt", 50);
         metrics.record_llm_request_duration(0.5);

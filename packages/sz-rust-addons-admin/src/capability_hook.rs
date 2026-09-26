@@ -456,7 +456,11 @@ impl Capability for MenuCreateCapability {
             .to_string();
         let icon = args.get("icon").and_then(|v| v.as_str()).map(String::from);
         let parent_id = args.get("parent_id").and_then(|v| v.as_i64()).unwrap_or(0);
-        let sort = args.get("sort").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let sort = args
+            .get("sort")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            .clamp(i32::MIN as i64, i32::MAX as i64) as i32;
         let is_visible = args
             .get("is_visible")
             .and_then(|v| v.as_bool())
@@ -508,7 +512,10 @@ impl Capability for MenuUpdateCapability {
         let path = args.get("path").and_then(|v| v.as_str()).map(String::from);
         let icon = args.get("icon").and_then(|v| v.as_str()).map(String::from);
         let parent_id = args.get("parent_id").and_then(|v| v.as_i64());
-        let sort = args.get("sort").and_then(|v| v.as_i64()).map(|v| v as i32);
+        let sort = args
+            .get("sort")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.clamp(i32::MIN as i64, i32::MAX as i64) as i32);
         let is_visible = args.get("is_visible").and_then(|v| v.as_bool());
         let permission_code = args
             .get("permission_code")

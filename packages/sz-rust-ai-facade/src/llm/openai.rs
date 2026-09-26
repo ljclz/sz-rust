@@ -149,7 +149,11 @@ impl OpenAiProvider {
             .ok_or_else(|| AiError::Internal("OpenAI response missing choices".to_string()))?
             .iter()
             .map(|c| {
-                let index = c.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let index = c
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .min(u32::MAX as u64) as u32;
                 let msg = c.get("message").ok_or_else(|| {
                     AiError::Internal("OpenAI choice missing message".to_string())
                 })?;
@@ -210,12 +214,21 @@ impl OpenAiProvider {
         let usage = resp
             .get("usage")
             .map(|u| Usage {
-                prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                prompt_tokens: u
+                    .get("prompt_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .min(u32::MAX as u64) as u32,
                 completion_tokens: u
                     .get("completion_tokens")
                     .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
-                total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    .unwrap_or(0)
+                    .min(u32::MAX as u64) as u32,
+                total_tokens: u
+                    .get("total_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .min(u32::MAX as u64) as u32,
             })
             .unwrap_or(Usage {
                 prompt_tokens: 0,
@@ -383,7 +396,7 @@ impl LlmProvider for OpenAiProvider {
                     .iter()
                     .map(|text| bpe.encode_with_special_tokens(text).len())
                     .sum();
-                return Ok(total as u32);
+                return Ok(total.min(u32::MAX as usize) as u32);
             }
         }
 

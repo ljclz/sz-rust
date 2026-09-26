@@ -136,13 +136,13 @@ impl ModelExt for Order {
             self.total_weight_g = v;
         }
         if let Some(v) = map.get("item_count").and_then(|v| v.as_i64()) {
-            self.item_count = v as i32;
+            self.item_count = v.clamp(0, i32::MAX as i64) as i32;
         }
         if let Some(v) = map.get("status").and_then(|v| v.as_i64()) {
-            self.status = v as i8;
+            self.status = v.clamp(i8::MIN as i64, i8::MAX as i64) as i8;
         }
         if let Some(v) = map.get("pay_method").and_then(|v| v.as_i64()) {
-            self.pay_method = v as i8;
+            self.pay_method = v.clamp(i8::MIN as i64, i8::MAX as i64) as i8;
         }
         if let Some(v) = map.get("pay_at").and_then(|v| v.as_str()) {
             self.pay_at = Some(v.to_string());

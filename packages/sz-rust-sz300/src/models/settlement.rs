@@ -110,13 +110,13 @@ impl ModelExt for Settlement {
             self.total_fen = v;
         }
         if let Some(v) = map.get("order_count").and_then(|v| v.as_i64()) {
-            self.order_count = v as i32;
+            self.order_count = v.clamp(0, i32::MAX as i64) as i32;
         }
         if let Some(v) = map.get("fee_fen").and_then(|v| v.as_i64()) {
             self.fee_fen = v;
         }
         if let Some(v) = map.get("status").and_then(|v| v.as_i64()) {
-            self.status = v as i8;
+            self.status = v.clamp(i8::MIN as i64, i8::MAX as i64) as i8;
         }
         if let Some(v) = map.get("created_at").and_then(|v| v.as_str()) {
             self.created_at = Some(v.to_string());

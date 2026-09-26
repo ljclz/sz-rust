@@ -189,7 +189,11 @@ impl ClaudeProvider {
         let usage = resp
             .get("usage")
             .map(|u| Usage {
-                prompt_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                prompt_tokens: u
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    .min(u32::MAX as u64) as u32,
                 completion_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
                     as u32,
                 total_tokens: 0,

@@ -582,7 +582,10 @@ impl WechatSdk {
                 .get("nickname")
                 .and_then(|v| v.as_str())
                 .map(String::from),
-            sex: json.get("sex").and_then(|v| v.as_i64()).map(|v| v as i32),
+            sex: json
+                .get("sex")
+                .and_then(|v| v.as_i64())
+                .map(|v| v.clamp(i32::MIN as i64, i32::MAX as i64) as i32),
             province: json
                 .get("province")
                 .and_then(|v| v.as_str())
