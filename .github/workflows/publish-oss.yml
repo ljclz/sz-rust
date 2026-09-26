@@ -15,6 +15,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI 不使用 sccache（runner 未安装，.cargo/config.toml 的 rustc-wrapper 会导致
+  # cargo metadata/metadata 类门禁报 "could not execute process sccache"，
+  # 与 ci.yml / .githooks/pre-commit 的降级逻辑一致）
+  RUSTC_WRAPPER: ""
 
 jobs:
   publish:
