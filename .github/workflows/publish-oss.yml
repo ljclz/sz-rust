@@ -56,6 +56,13 @@ jobs:
       - name: Cargo deny check licenses
         run: cargo deny check licenses
 
+      # sz-rust-visual 依赖 Tauri，Linux 侧构建需要系统库（glib/gtk/webkit，
+      # 与 visual-build.yml 的安装清单一致）；缺失时 glib-sys 构建脚本失败
+      - name: Install Linux system dependencies (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Run workspace tests
         run: cargo test --workspace
 
