@@ -408,3 +408,26 @@ debug = true
 inherits = "dev"
 incremental = false          # CI fresh checkout 无需增量
 debug = 0                    # CI 最小化 debuginfo
+
+# [patch.crates-io] sz-orm 9.0.0 未发布 crates.io —— 指向本地兄弟 workspace
+# （服务器同布局：/www/rust/{sz-orm,sz-rust}，2026-09-26 soak 环境部署）
+[patch.crates-io]
+sz-orm-core = { path = "../sz-orm/packages/sz-orm-core" }
+sz-orm-auth = { path = "../sz-orm/packages/sz-orm-auth" }
+sz-orm-storage = { path = "../sz-orm/packages/sz-orm-storage" }
+sz-orm-queue = { path = "../sz-orm/packages/sz-orm-queue" }
+sz-orm-mqtt = { path = "../sz-orm/packages/sz-orm-mqtt" }
+sz-orm-websocket = { path = "../sz-orm/packages/sz-orm-websocket" }
+sz-orm-scheduler = { path = "../sz-orm/packages/sz-orm-scheduler" }
+sz-orm-tracing = { path = "../sz-orm/packages/sz-orm-tracing" }
+sz-orm-logger = { path = "../sz-orm/packages/sz-orm-logger" }
+sz-orm-limit = { path = "../sz-orm/packages/sz-orm-limit" }
+sz-orm-config = { path = "../sz-orm/packages/sz-orm-config" }
+sz-orm-macros = { path = "../sz-orm/packages/sz-orm-macros" }
+sz-orm-sql-validator = { path = "../sz-orm/packages/sz-orm-sql-validator" }
+sz-orm-sqlx = { path = "../sz-orm/packages/sz-orm-sqlx" }
+sz-orm-query-builder = { path = "../sz-orm/packages/sz-orm-query-builder" }
+sz-orm-graphql = { path = "../sz-orm/packages/sz-orm-graphql" }
+sz-orm-grpc = { path = "../sz-orm/packages/sz-orm-grpc" }
+sz-orm-mssql = { path = "../sz-orm/packages/sz-orm-mssql" }
+sz-orm-oracle = { path = "../sz-orm/packages/sz-orm-oracle" }
