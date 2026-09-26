@@ -8355,7 +8355,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "sz-rust-ai-facade",
  "sz-rust-api-gateway",
@@ -8379,7 +8379,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-admin"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8403,7 +8403,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-loader"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "notify",
@@ -8420,7 +8420,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-ai-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -8448,7 +8448,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-api-gateway"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "http",
@@ -8466,7 +8466,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-auth-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8497,7 +8497,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cache-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "futures",
  "hex",
@@ -8514,7 +8514,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-capability"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -8529,7 +8529,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cli"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8570,7 +8570,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-codegen-loop"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8587,7 +8587,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-config-center"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -8606,7 +8606,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-core"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8675,7 +8675,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-distributed-tx"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8689,7 +8689,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-examples"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8714,7 +8714,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -8735,7 +8735,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade-tests"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "hex",
  "serde_json",
@@ -8757,7 +8757,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-frontend-codegen"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "chrono",
  "quote",
@@ -8775,7 +8775,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-http-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
@@ -8804,7 +8804,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-infra-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -8840,7 +8840,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-macros"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8850,7 +8850,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-marketplace"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8886,7 +8886,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-mcp"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -8903,7 +8903,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-middleware-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
@@ -8935,7 +8935,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-mvc-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -8961,7 +8961,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-observability"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8984,7 +8984,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-ops-api"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
@@ -8997,7 +8997,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-ext-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -9007,7 +9007,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9041,7 +9041,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pay-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "parking_lot",
  "serde",
@@ -9052,7 +9052,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pdf"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9074,7 +9074,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-rag"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -9097,7 +9097,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-router-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -9113,7 +9113,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-service-registry"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9129,7 +9129,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-state-facade"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -9147,7 +9147,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-sz300"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -9175,7 +9175,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-testkit"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -9189,7 +9189,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-tracing"
-version = "1.2.1"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9207,7 +9207,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-vector-db"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -9223,7 +9223,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-visual"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9246,7 +9246,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-wasm"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -9256,7 +9256,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-workflow"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",

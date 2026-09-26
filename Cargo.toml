@@ -75,7 +75,7 @@ categories.workspace = true
 workspace = true
 
 [workspace.package]
-version = "1.2.0"
+version = "1.4.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -236,42 +236,42 @@ sz-orm-graphql = "9.0.0"
 sz-orm-grpc = "9.0.0"
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "1.2.0", path = "packages/sz-rust-core" }
-sz-rust-orm-facade = { version = "1.2.0", path = "packages/sz-rust-orm-facade" }
-sz-rust-http-facade = { version = "1.2.0", path = "packages/sz-rust-http-facade" }
-sz-rust-cache-facade = { version = "1.2.0", path = "packages/sz-rust-cache-facade" }
-sz-rust-state-facade = { version = "1.2.0", path = "packages/sz-rust-state-facade" }
-sz-rust-infra-facade = { version = "1.2.0", path = "packages/sz-rust-infra-facade" }
-sz-rust-auth-facade = { version = "1.2.0", path = "packages/sz-rust-auth-facade" }
-sz-rust-pay-facade = { version = "1.2.0", path = "packages/sz-rust-pay-facade" }
-sz-rust-orm-ext-facade = { version = "1.2.0", path = "packages/sz-rust-orm-ext-facade" }
-sz-rust-router-facade = { version = "1.2.0", path = "packages/sz-rust-router-facade" }
-sz-rust-middleware-facade = { version = "1.2.0", path = "packages/sz-rust-middleware-facade" }
-sz-rust-mvc-facade = { version = "1.2.0", path = "packages/sz-rust-mvc-facade" }
-sz-rust-mcp = { version = "1.2.0", path = "packages/sz-rust-mcp" }
-sz-rust-macros = { version = "1.2.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-loader = { version = "1.2.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-observability = { version = "1.2.0", path = "packages/sz-rust-observability" }
-sz-rust-cli = { version = "1.2.0", path = "packages/sz-rust-cli" }
-sz-rust-ai-facade = { version = "1.2.0", path = "packages/sz-rust-ai-facade" }
-sz-rust-capability = { version = "1.2.0", path = "packages/sz-rust-capability" }
-sz-rust-rag = { version = "1.2.0", path = "packages/sz-rust-rag" }
-sz-rust-frontend-codegen = { version = "1.2.0", path = "packages/sz-rust-frontend-codegen" }
-sz-rust-tracing = { version = "1.2.0", path = "packages/sz-rust-tracing" }
-sz-rust-pdf = { version = "1.2.0", path = "packages/sz-rust-pdf" }
-sz-rust-workflow = { version = "1.2.0", path = "packages/sz-rust-workflow" }
-sz-rust-wasm = { version = "1.2.0", path = "packages/sz-rust-wasm" }
-sz-rust-vector-db = { version = "1.2.0", path = "packages/sz-rust-vector-db" }
-sz-rust-marketplace = { version = "1.2.0", path = "packages/sz-rust-marketplace" }
-sz-rust-visual = { version = "1.2.0", path = "packages/sz-rust-visual" }
-sz-rust-addons-admin = { version = "1.2.0", path = "packages/sz-rust-addons-admin" }
-sz-rust-facade = { version = "1.2.0", path = "packages/sz-rust-facade" }
-sz-rust-config-center = { version = "1.2.0", path = "packages/sz-rust-config-center" }
-sz-rust-service-registry = { version = "1.2.0", path = "packages/sz-rust-service-registry" }
-sz-rust-distributed-tx = { version = "1.2.0", path = "packages/sz-rust-distributed-tx" }
-sz-rust-api-gateway = { version = "1.2.0", path = "packages/sz-rust-api-gateway" }
-sz-rust-ops-api = { version = "1.2.0", path = "packages/sz-rust-ops-api" }
-sz-rust-sz300 = { version = "1.2.0", path = "packages/sz-rust-sz300" }
+sz-rust-core = { version = "1.4.0", path = "packages/sz-rust-core" }
+sz-rust-orm-facade = { version = "1.4.0", path = "packages/sz-rust-orm-facade" }
+sz-rust-http-facade = { version = "1.4.0", path = "packages/sz-rust-http-facade" }
+sz-rust-cache-facade = { version = "1.4.0", path = "packages/sz-rust-cache-facade" }
+sz-rust-state-facade = { version = "1.4.0", path = "packages/sz-rust-state-facade" }
+sz-rust-infra-facade = { version = "1.4.0", path = "packages/sz-rust-infra-facade" }
+sz-rust-auth-facade = { version = "1.4.0", path = "packages/sz-rust-auth-facade" }
+sz-rust-pay-facade = { version = "1.4.0", path = "packages/sz-rust-pay-facade" }
+sz-rust-orm-ext-facade = { version = "1.4.0", path = "packages/sz-rust-orm-ext-facade" }
+sz-rust-router-facade = { version = "1.4.0", path = "packages/sz-rust-router-facade" }
+sz-rust-middleware-facade = { version = "1.4.0", path = "packages/sz-rust-middleware-facade" }
+sz-rust-mvc-facade = { version = "1.4.0", path = "packages/sz-rust-mvc-facade" }
+sz-rust-mcp = { version = "1.4.0", path = "packages/sz-rust-mcp" }
+sz-rust-macros = { version = "1.4.0", path = "packages/sz-rust-macros" }
+sz-rust-addons-loader = { version = "1.4.0", path = "packages/sz-rust-addons-loader" }
+sz-rust-observability = { version = "1.4.0", path = "packages/sz-rust-observability" }
+sz-rust-cli = { version = "1.4.0", path = "packages/sz-rust-cli" }
+sz-rust-ai-facade = { version = "1.4.0", path = "packages/sz-rust-ai-facade" }
+sz-rust-capability = { version = "1.4.0", path = "packages/sz-rust-capability" }
+sz-rust-rag = { version = "1.4.0", path = "packages/sz-rust-rag" }
+sz-rust-frontend-codegen = { version = "1.4.0", path = "packages/sz-rust-frontend-codegen" }
+sz-rust-tracing = { version = "1.4.0", path = "packages/sz-rust-tracing" }
+sz-rust-pdf = { version = "1.4.0", path = "packages/sz-rust-pdf" }
+sz-rust-workflow = { version = "1.4.0", path = "packages/sz-rust-workflow" }
+sz-rust-wasm = { version = "1.4.0", path = "packages/sz-rust-wasm" }
+sz-rust-vector-db = { version = "1.4.0", path = "packages/sz-rust-vector-db" }
+sz-rust-marketplace = { version = "1.4.0", path = "packages/sz-rust-marketplace" }
+sz-rust-visual = { version = "1.4.0", path = "packages/sz-rust-visual" }
+sz-rust-addons-admin = { version = "1.4.0", path = "packages/sz-rust-addons-admin" }
+sz-rust-facade = { version = "1.4.0", path = "packages/sz-rust-facade" }
+sz-rust-config-center = { version = "1.4.0", path = "packages/sz-rust-config-center" }
+sz-rust-service-registry = { version = "1.4.0", path = "packages/sz-rust-service-registry" }
+sz-rust-distributed-tx = { version = "1.4.0", path = "packages/sz-rust-distributed-tx" }
+sz-rust-api-gateway = { version = "1.4.0", path = "packages/sz-rust-api-gateway" }
+sz-rust-ops-api = { version = "1.4.0", path = "packages/sz-rust-ops-api" }
+sz-rust-sz300 = { version = "1.4.0", path = "packages/sz-rust-sz300" }
 
 # 密码哈希（sz300 业务应用）
 bcrypt = "0.16"
