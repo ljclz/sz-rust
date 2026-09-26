@@ -111,6 +111,10 @@ impl MarketplaceService {
     pub async fn publish(&self, req: PublishRequest) -> MarketplaceResult<i64> {
         let manifest = &req.manifest;
 
+        // 纵深防线：即使清单未走 parse_manifest_json（直接构造），
+        // 身份字段也必须可安全用作存储 key 组件，防路径穿越。
+        crate::manifest::validate_manifest_identity(&manifest.base)?;
+
         let new_version = semver::Version::parse(&manifest.base.version)
             .map_err(|e| MarketplaceError::InvalidSemVer(e.to_string()))?;
 

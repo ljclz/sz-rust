@@ -82,7 +82,9 @@ fn test_non_sensitive_tools_no_confirmation() {
     assert!(!McpMigrateCreate.requires_confirmation());
     assert!(!McpMigrateRun.requires_confirmation());
     assert!(!McpTestRun.requires_confirmation());
-    assert!(!McpPluginInstall.requires_confirmation());
+    // v1.4 安全加固：plugin_install 会执行 `cargo add`（供应链入口），
+    // 与 uninstall/deploy 一致要求人工确认
+    assert!(McpPluginInstall.requires_confirmation());
 }
 
 #[test]

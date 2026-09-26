@@ -53,6 +53,10 @@ impl McpTool for McpDeployRun {
             ));
         }
 
+        // 信任边界：script_path 来自 MCP 客户端。钉死为仓库内相对 .js 文件，
+        // 防止借部署工具执行任意本地脚本。
+        crate::tool_guard::validate_rel_path(script_path, "script_path", Some(".js"))?;
+
         let mut cmd = tokio::process::Command::new("node");
         cmd.arg(script_path).arg("--target").arg(target);
 
@@ -73,5 +77,35 @@ impl McpTool for McpDeployRun {
             "stdout": stdout,
             "stderr": stderr
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn deploy_run_rejects_out_of_repo_script() {
+        for evil in [
+            "../evil.js",
+            "/abs/evil.js",
+            "..\\evil.js",
+            "a/../b.js",
+            "evil.sh",
+            "evil.py",
+        ] {
+            let result = McpDeployRun
+                .execute(json!({"target": "docker", "script_path": evil}))
+                .await;
+            assert!(
+                matches!(result, Err(ToolError::InvalidArgs(_))),
+                "script_path={evil:?} 应在参数校验层拒绝"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn deploy_run_requires_confirmation() {
+        assert!(McpDeployRun.requires_confirmation());
     }
 }

@@ -25,6 +25,14 @@ pub trait OAuth2StateStore: Send + Sync {
 
     /// 获取 state 对应的 client_id（校验 state 是否有效）
     fn get_state(&self, state: &str) -> Option<String>;
+
+    /// 消费式读取：取走 state 并使其失效（一次性，防 CSRF state 重放）
+    ///
+    /// 默认实现退化为 [`Self::get_state`]（兼容只读后端）；
+    /// 生产实现应覆写为「读取即删除」。
+    fn consume_state(&self, state: &str) -> Option<String> {
+        self.get_state(state)
+    }
 }
 
 // ============================================================================
@@ -41,6 +49,11 @@ pub struct MemoryOAuth2StateStore {
 }
 
 impl MemoryOAuth2StateStore {
+    /// state 条目上限（防内存无界增长）
+    const MAX_ENTRIES: usize = 10_000;
+}
+
+impl MemoryOAuth2StateStore {
     /// 创建新的内存 state 存储
     pub fn new() -> Self {
         Self::default()
@@ -49,13 +62,21 @@ impl MemoryOAuth2StateStore {
 
 impl OAuth2StateStore for MemoryOAuth2StateStore {
     fn save_state(&self, state: &str, client_id: &str) {
-        self.states
-            .lock()
-            .insert(state.to_string(), client_id.to_string());
+        let mut states = self.states.lock();
+        // 内存上限：超限整体清空（本实现定位为测试/开发用，宁可失效也不无界增长）
+        if states.len() >= Self::MAX_ENTRIES {
+            states.clear();
+        }
+        states.insert(state.to_string(), client_id.to_string());
     }
 
     fn get_state(&self, state: &str) -> Option<String> {
         self.states.lock().get(state).cloned()
+    }
+
+    fn consume_state(&self, state: &str) -> Option<String> {
+        // 读取即删除：同一 state 第二次校验必然失败（防重放）
+        self.states.lock().remove(state)
     }
 }
 
@@ -123,8 +144,8 @@ mod axum_impl {
             }
         };
 
-        // 校验 state（CSRF 防护）
-        match config.state_store.get_state(&state) {
+        // 校验 state（CSRF 防护）— 消费式读取，同一 state 只能用一次
+        match config.state_store.consume_state(&state) {
             Some(_) => {}
             None => {
                 return (
@@ -198,5 +219,43 @@ mod tests {
 
         assert_eq!(store.get_state("state1").as_deref(), Some("client1"));
         assert_eq!(store.get_state("state2").as_deref(), Some("client2"));
+    }
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::*;
+
+    /// 回归测试：consume_state 必须是消费式 —— 第二次读取同一 state 必须 None（防重放）
+    #[test]
+    fn consume_state_is_one_time() {
+        let store = MemoryOAuth2StateStore::new();
+        store.save_state("state123", "client1");
+
+        assert_eq!(store.consume_state("state123").as_deref(), Some("client1"));
+        assert_eq!(store.consume_state("state123"), None, "state 重放必须失败");
+        assert_eq!(store.get_state("state123"), None);
+    }
+
+    /// consume_state 与 get_state 语义隔离：get 不消费，consume 消费
+    #[test]
+    fn get_state_remains_non_consuming() {
+        let store = MemoryOAuth2StateStore::new();
+        store.save_state("s1", "c1");
+        assert_eq!(store.get_state("s1").as_deref(), Some("c1"));
+        assert_eq!(store.get_state("s1").as_deref(), Some("c1"));
+        assert_eq!(store.consume_state("s1").as_deref(), Some("c1"));
+        assert_eq!(store.get_state("s1"), None);
+    }
+
+    /// 内存上限：超过 MAX_ENTRIES 后整体清空，不无界增长
+    #[test]
+    fn memory_store_is_bounded() {
+        let store = MemoryOAuth2StateStore::new();
+        for i in 0..(MemoryOAuth2StateStore::MAX_ENTRIES + 10) {
+            store.save_state(&format!("s{i}"), "c");
+        }
+        let states = store.states.lock();
+        assert!(states.len() <= MemoryOAuth2StateStore::MAX_ENTRIES + 1);
     }
 }

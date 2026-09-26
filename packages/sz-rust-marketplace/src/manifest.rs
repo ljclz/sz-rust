@@ -123,16 +123,51 @@ impl From<AddonManifest> for MarketplaceManifest {
     }
 }
 
+/// 校验清单标识字段（name / identifier）可安全用作存储路径组件
+///
+/// 插件名最终会拼入归档存储 key（`{name}/{version}/{name}.tar.gz`），
+/// 必须限定字符集并排除 `..`，防止发布时路径穿越（写入 root 之外）。
+pub fn validate_manifest_identity(manifest: &AddonManifest) -> MarketplaceResult<()> {
+    for (label, value) in [
+        ("name", manifest.name.as_str()),
+        ("identifier", manifest.identifier.as_str()),
+    ] {
+        if value.is_empty() || value.len() > 64 {
+            return Err(MarketplaceError::InvalidManifest(format!(
+                "{label} 长度必须在 1..=64: {value:?}"
+            )));
+        }
+        if !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        {
+            return Err(MarketplaceError::InvalidManifest(format!(
+                "{label} 含非法字符（仅允许 ASCII 字母数字与 . _ -）: {value:?}"
+            )));
+        }
+        if value.contains("..") {
+            return Err(MarketplaceError::InvalidManifest(format!(
+                "{label} 不允许包含 \"..\": {value:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// 从 JSON 字符串解析市场清单
 pub fn parse_manifest_json(content: &str) -> MarketplaceResult<MarketplaceManifest> {
-    serde_json::from_str(content)
-        .map_err(|e| MarketplaceError::InvalidManifest(format!("JSON 解析失败: {e}")))
+    let manifest: MarketplaceManifest = serde_json::from_str(content)
+        .map_err(|e| MarketplaceError::InvalidManifest(format!("JSON 解析失败: {e}")))?;
+    validate_manifest_identity(&manifest.base)?;
+    Ok(manifest)
 }
 
 /// 从 TOML 字符串解析市场清单
 pub fn parse_manifest_toml(content: &str) -> MarketplaceResult<MarketplaceManifest> {
-    toml::from_str(content)
-        .map_err(|e| MarketplaceError::InvalidManifest(format!("TOML 解析失败: {e}")))
+    let manifest: MarketplaceManifest = toml::from_str(content)
+        .map_err(|e| MarketplaceError::InvalidManifest(format!("TOML 解析失败: {e}")))?;
+    validate_manifest_identity(&manifest.base)?;
+    Ok(manifest)
 }
 
 /// 从 PHP Plugin.php `$info` 数组字符串解析市场清单
@@ -182,6 +217,39 @@ mod tests {
     fn test_manifest_invalid_json() {
         let result = parse_manifest_json("{ invalid json }");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_manifest_rejects_traversal_identity() {
+        for evil in ["../../evil", "a/../b", "foo/bar", "foo\\bar", "..", "..a.."] {
+            let json = format!(
+                r#"{{ "name": "{evil}", "title": "x", "identifier": "id", "author": "a", "version": "1.0.0" }}"#
+            );
+            let result = parse_manifest_json(&json);
+            assert!(result.is_err(), "name={evil:?} 应被拒绝");
+        }
+        for evil in ["com/../evil", "a b", "com:evil", "插件"] {
+            let json = format!(
+                r#"{{ "name": "ok-name", "title": "x", "identifier": "{evil}", "author": "a", "version": "1.0.0" }}"#
+            );
+            let result = parse_manifest_json(&json);
+            assert!(result.is_err(), "identifier={evil:?} 应被拒绝");
+        }
+    }
+
+    #[test]
+    fn test_manifest_accepts_normal_identity() {
+        let json = r#"{
+            "name": "crm-pro_v2",
+            "title": "x",
+            "identifier": "com.szrust.crm",
+            "icon": "icon.png",
+            "author": "a",
+            "version": "1.0.0",
+            "admin": "",
+            "status": 1
+        }"#;
+        assert!(parse_manifest_json(json).is_ok());
     }
 
     #[test]

@@ -35,6 +35,7 @@
 use serde_json::{json, Value};
 
 pub mod tool;
+pub mod tool_guard;
 pub mod tools;
 pub mod whitelist;
 

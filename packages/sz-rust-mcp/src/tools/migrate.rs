@@ -43,6 +43,11 @@ impl McpTool for McpMigrateCreate {
             .and_then(|v| v.as_str())
             .unwrap_or("migrations");
 
+        // 信任边界：name / output_dir 来自 MCP 客户端，未校验前可写任意路径
+        crate::tool_guard::validate_name_component(name, "name", 64)?;
+        crate::tool_guard::validate_rel_path(output_dir, "output_dir", None)?;
+        let description = crate::tool_guard::flatten_single_line(description);
+
         let template = format!(
             "-- Migration: {}\n-- Description: {}\n\n-- UP\n\n\n-- DOWN\n\n",
             name, description
@@ -116,5 +121,41 @@ impl McpTool for McpMigrateRun {
             "stdout": stdout,
             "stderr": stderr
         }))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn migrate_create_rejects_traversal_name() {
+        for evil in ["../evil", "a/../b", "..\\evil", "-x", "a b"] {
+            let result = McpMigrateCreate
+                .execute(json!({"name": evil, "output_dir": "migrations"}))
+                .await;
+            assert!(
+                matches!(result, Err(ToolError::InvalidArgs(_))),
+                "name={evil:?} 应在参数校验层拒绝"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn migrate_create_rejects_traversal_output_dir() {
+        for evil in ["../evil", "/abs", "a/../b", "..\\x", "."] {
+            let result = McpMigrateCreate
+                .execute(json!({"name": "create_user", "output_dir": evil}))
+                .await;
+            assert!(result.is_err(), "output_dir={evil:?} 应被拒绝");
+        }
+    }
+
+    #[tokio::test]
+    async fn migrate_create_rejects_comment_injection() {
+        // description 换行必须被压平，防止逃逸 SQL 注释行
+        let result = McpMigrateCreate
+            .execute(json!({"name": "ok_name", "output_dir": "../out", "description": "x"}))
+            .await;
+        assert!(result.is_err());
     }
 }

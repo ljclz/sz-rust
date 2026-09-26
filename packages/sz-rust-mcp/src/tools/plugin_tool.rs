@@ -16,7 +16,10 @@ impl McpTool for McpPluginInstall {
         "plugin_install"
     }
     fn description(&self) -> &str {
-        "从插件市场安装插件（cargo add + 注册到 CapabilityRegistry）"
+        "从插件市场安装插件（cargo add + 注册到 CapabilityRegistry，需要人工确认）"
+    }
+    fn requires_confirmation(&self) -> bool {
+        true
     }
     fn input_schema(&self) -> Value {
         json!({
@@ -34,6 +37,13 @@ impl McpTool for McpPluginInstall {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("缺少 plugin_name".into()))?;
         let version = args.get("version").and_then(|v| v.as_str());
+
+        // 信任边界：plugin_name/version 拼入 cargo 命令行。限定字符集，
+        // 防止借 `--git=...` 类 flag 注入任意依赖（供应链攻击面）。
+        crate::tool_guard::validate_name_component(plugin_name, "plugin_name", 64)?;
+        if let Some(v) = version {
+            crate::tool_guard::validate_name_component(v, "version", 32)?;
+        }
 
         let mut cmd = tokio::process::Command::new("cargo");
         cmd.arg("add").arg(plugin_name);
@@ -89,6 +99,8 @@ impl McpTool for McpPluginUninstall {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("缺少 plugin_name".into()))?;
 
+        crate::tool_guard::validate_name_component(plugin_name, "plugin_name", 64)?;
+
         let output = tokio::process::Command::new("cargo")
             .arg("remove")
             .arg(plugin_name)
@@ -107,5 +119,42 @@ impl McpTool for McpPluginUninstall {
             "stderr": stderr,
             "post_uninstall": format!("调用 CapabilityRegistry::unregister(\"{}\") 清理注册", plugin_name)
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn plugin_install_rejects_flag_injection() {
+        for evil in [
+            "--git=https://evil.example/x",
+            "-registry=evil",
+            "--registry",
+            "a b",
+            "a/b",
+        ] {
+            let result = McpPluginInstall.execute(json!({"plugin_name": evil})).await;
+            assert!(
+                matches!(result, Err(ToolError::InvalidArgs(_))),
+                "plugin_name={evil:?} 应在参数校验层拒绝"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_uninstall_rejects_flag_injection() {
+        for evil in ["--offline", "-q", "a/b"] {
+            let result = McpPluginUninstall
+                .execute(json!({"plugin_name": evil}))
+                .await;
+            assert!(matches!(result, Err(ToolError::InvalidArgs(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_install_requires_confirmation() {
+        assert!(McpPluginInstall.requires_confirmation());
     }
 }
