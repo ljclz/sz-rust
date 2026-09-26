@@ -1,0 +1,68 @@
+{
+  "updated": "2026-09-26",
+  "totals": {
+    "std-fs": 25,
+    "poison-expect": 5,
+    "narrow-cast": 1,
+    "select-star": 82,
+    "unbounded-channel": 1,
+    "gen-range-var": 2,
+    "dyn-join-key": 4
+  },
+  "files": {
+    "std-fs": {
+      "packages/sz-rust-cli/src/cli.rs": 1,
+      "packages/sz-rust-cli/src/cmd/cache.rs": 3,
+      "packages/sz-rust-cli/src/cmd/make.rs": 4,
+      "packages/sz-rust-cli/src/cmd/scheduler.rs": 1,
+      "packages/sz-rust-cli/src/cmd/seed.rs": 2,
+      "packages/sz-rust-cli/src/safety_validator.rs": 1,
+      "packages/sz-rust-core/examples/rss_stability.rs": 1,
+      "packages/sz-rust-infra-facade/src/static_files.rs": 1,
+      "packages/sz-rust-infra-facade/src/upload/image.rs": 1,
+      "packages/sz-rust-infra-facade/src/upload.rs": 2,
+      "packages/sz-rust-mvc-facade/src/view/inheritance.rs": 1,
+      "packages/sz-rust-mvc-facade/src/view/layout.rs": 2,
+      "packages/sz-rust-mvc-facade/src/view.rs": 2,
+      "packages/sz-rust-pdf/src/csv_export.rs": 1,
+      "packages/sz-rust-pdf/src/excel_import.rs": 2
+    },
+    "poison-expect": {
+      "packages/sz-rust-examples/src/bin/crud_demo.rs": 5
+    },
+    "narrow-cast": {
+      "packages/sz-rust-examples/src/bin/crud_demo.rs": 1
+    },
+    "select-star": {
+      "packages/sz-rust-cli/src/safety_validator.rs": 3,
+      "packages/sz-rust-core/src/lib.rs": 7,
+      "packages/sz-rust-examples/src/bin/ecommerce_demo.rs": 1,
+      "packages/sz-rust-marketplace/src/repository.rs": 1,
+      "packages/sz-rust-mcp/src/lib.rs": 2,
+      "packages/sz-rust-orm-ext-facade/src/relation/belongs_to.rs": 4,
+      "packages/sz-rust-orm-ext-facade/src/relation/has_many.rs": 4,
+      "packages/sz-rust-orm-ext-facade/src/relation/has_one.rs": 5,
+      "packages/sz-rust-orm-ext-facade/src/relation/morph.rs": 13,
+      "packages/sz-rust-orm-ext-facade/src/relation/n_plus_one.rs": 19,
+      "packages/sz-rust-orm-ext-facade/src/relation/with.rs": 12,
+      "packages/sz-rust-orm-facade/src/jobs.rs": 1,
+      "packages/sz-rust-sz300/src/services/device_service.rs": 4,
+      "packages/sz-rust-sz300/src/services/merchant_service.rs": 1,
+      "packages/sz-rust-sz300/src/services/order_service.rs": 3,
+      "packages/sz-rust-sz300/src/services/product_service.rs": 2
+    },
+    "unbounded-channel": {
+      "packages/sz-rust-core/src/h2.rs": 1
+    },
+    "gen-range-var": {
+      "packages/sz-rust-cache-facade/src/lib.rs": 1,
+      "packages/sz-rust-service-registry/src/load_balancer.rs": 1
+    },
+    "dyn-join-key": {
+      "packages/sz-rust-infra-facade/src/upload/storage.rs": 1,
+      "packages/sz-rust-marketplace/src/storage.rs": 1,
+      "packages/sz-rust-mvc-facade/src/view/inheritance.rs": 1,
+      "packages/sz-rust-mvc-facade/src/view/layout.rs": 1
+    }
+  }
+}
