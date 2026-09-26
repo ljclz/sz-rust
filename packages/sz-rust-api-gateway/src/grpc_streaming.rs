@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+
 //! gRPC 流式传输模块（v1.4.0 T16）
 use thiserror::Error;
 use tokio::sync::mpsc;

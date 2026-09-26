@@ -20,7 +20,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ENTERPRISE_CRATES = {
-    "sz-rust-sz300",
+    # sz-rust-sz300 已按 ADR-0022（2026-09-24 Accepted）迁入主 workspace 作为业务层，
+    # 不再属于企业版清单；发布侧 publish-oss.yml 的发布清单本就不含 sz300
+    # （业务层在库不在 crates.io），发布工作流保持自洽
     "sz-rust-addons-crm",
     "sz-rust-addons-ecommerce",
     "sz-rust-addons-cms",

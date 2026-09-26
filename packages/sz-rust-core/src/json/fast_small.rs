@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+
 //! 小 JSON 快速序列化路径（<256B 栈缓冲区）
 
 use serde::Serialize;

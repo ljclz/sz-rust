@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+
 //! WASM 基础示例（v1.4.0 T15.1）
 //! 演示 WASM 模块加载与执行
 use sz_rust_wasm::{WasmRuntime, WasmValue};

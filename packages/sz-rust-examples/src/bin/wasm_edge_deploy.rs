@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2024-2026 SZ-Rust Team
+
 //! WASM 边缘部署示例（v1.4.0 T15.4）
 //! 包含配置文件与部署步骤
 use sz_rust_wasm::{WasmRuntime, WasmValue};
