@@ -32,8 +32,9 @@ const RULES = [
   {
     id: 'std-fs',
     severity: 'error',
-    desc: '铁律违规：使用 std::fs（必须 tokio::fs）',
-    re: /\bstd::fs::/,
+    desc: '铁律违规：使用 std::fs 文件读写（必须 tokio::fs）。豁免 std::fs::metadata（纯 stat）：仅限同步 API 的缓存失效校验场景，如模板编译缓存的 mtime/size 校验',
+    // metadata 是 stat 不是文件 IO，排除；其余一律拦截
+    re: /\bstd::fs::(?!metadata\b)/,
   },
   {
     id: 'poison-expect',

@@ -60,6 +60,50 @@ pub mod layout;
 // 模板继承（对齐 PHP `Template::parseExtend()` + `parseBlock()`）
 pub mod inheritance;
 
+/// 编译期依赖收集器：inheritance/layout 每读一个模板文件就登记路径，
+/// 供 fetch 把「参与合并的全部文件 + mtime/size」存进编译缓存做失效校验。
+pub(crate) mod dep_tracker {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    thread_local! {
+        static DEPS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// 登记一个参与合并的模板文件
+    pub(crate) fn record(path: &std::path::Path) {
+        DEPS.with(|d| d.borrow_mut().push(path.to_path_buf()));
+    }
+
+    /// 清空（每次编译前调用）
+    pub(crate) fn clear() {
+        DEPS.with(|d| d.borrow_mut().clear());
+    }
+
+    /// 取走全部依赖并转为 (路径, mtime, size) 快照（编译结束时调用）
+    pub(crate) fn take_snapshot() -> Vec<(PathBuf, std::time::SystemTime, u64)> {
+        DEPS.with(|d| {
+            std::mem::take(&mut *d.borrow_mut())
+                .into_iter()
+                .map(|p| {
+                    let (mtime, size) = std::fs::metadata(&p)
+                        .map(|m| (m.modified().ok(), m.len()))
+                        .unwrap_or((None, 0));
+                    (p, mtime.unwrap_or(std::time::SystemTime::UNIX_EPOCH), size)
+                })
+                .collect()
+        })
+    }
+}
+
+/// 编译缓存条目：继承 + 布局合并完成后的模板源，以及失效校验所需的依赖快照
+struct CompiledTemplate {
+    /// 合并后的模板源（可直接 render_content）
+    merged: String,
+    /// 参与合并的全部文件：(路径, 编译时 mtime, 编译时 size)
+    deps: Vec<(PathBuf, std::time::SystemTime, u64)>,
+}
+
 // ============================================================================
 // 错误类型
 // ============================================================================
@@ -216,6 +260,11 @@ pub trait TemplateEngine: Send + Sync {
 pub struct SimpleTemplateEngine {
     config: RwLock<ViewConfig>,
     functions: RwLock<HashMap<String, TemplateFn>>,
+    /// 编译缓存：模板路径 → 合并后的模板源（继承+布局，含 mtime/size 失效校验）
+    ///
+    /// v1.4 性能修复：此前每次渲染都同步读盘（主模板 + extend 链 + 布局），
+    /// 高并发 + 慢盘时阻塞 tokio worker。稳态请求零文件读取，仅 metadata stat。
+    compiled: RwLock<HashMap<PathBuf, Arc<CompiledTemplate>>>,
 }
 
 impl SimpleTemplateEngine {
@@ -226,7 +275,34 @@ impl SimpleTemplateEngine {
         Self {
             config: RwLock::new(config),
             functions: RwLock::new(functions),
+            compiled: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// 编译缓存查找：全部依赖 mtime+size 与编译时一致才命中
+    fn compiled_lookup(&self, path: &std::path::Path) -> Option<Arc<CompiledTemplate>> {
+        let entry = self.compiled.read().get(path).cloned()?;
+        let fresh = entry.deps.iter().all(|(p, mtime, size)| {
+            std::fs::metadata(p)
+                .ok()
+                .map(|m| m.modified().ok() == Some(*mtime) && m.len() == *size)
+                .unwrap_or(false)
+        });
+        if fresh {
+            Some(entry)
+        } else {
+            None
+        }
+    }
+
+    /// 清空编译缓存（配置变更 / 测试用）
+    pub fn clear_compiled_cache(&self) {
+        self.compiled.write().clear();
+    }
+
+    #[cfg(test)]
+    fn compiled_cache_entries(&self) -> usize {
+        self.compiled.read().len()
     }
 
     /// 注册自定义函数（对齐 PHP `Template::extend` 扩展机制）
@@ -746,6 +822,11 @@ impl TemplateEngine for SimpleTemplateEngine {
     fn fetch(&self, template: &str, data: &ViewData) -> Result<String, ViewError> {
         let path = self.parse_template_path(template);
 
+        // 编译缓存快路径：依赖文件 mtime+size 未变 → 直接用合并结果（零文件读取）
+        if let Some(entry) = self.compiled_lookup(&path) {
+            return self.render_content(&entry.merged, data);
+        }
+
         if !path.is_file() {
             return Err(ViewError::TemplateNotFound(format!(
                 "{} (解析路径: {})",
@@ -754,13 +835,23 @@ impl TemplateEngine for SimpleTemplateEngine {
             )));
         }
 
+        // 慢路径（仅编译期）：读主模板 → 继承合并 → 布局合并，deps 由读文件处登记
         let content = std::fs::read_to_string(&path)?;
+        dep_tracker::clear();
+        dep_tracker::record(&path);
         let config = self.config.read().clone();
         // PHP `parse()` 顺序：parseExtend → parseLayout
         // 应用继承（对齐 PHP `Template::parseExtend()`）
         let content = inheritance::apply_inheritance(&content, &config)?;
         // 应用布局（对齐 PHP `Template::compiler()` 在 `parse()` 之前应用布局）
         let content = layout::apply_layout(&content, &config)?;
+        self.compiled.write().insert(
+            path,
+            Arc::new(CompiledTemplate {
+                merged: content.clone(),
+                deps: dep_tracker::take_snapshot(),
+            }),
+        );
         self.render_content(&content, data)
     }
 
@@ -776,6 +867,8 @@ impl TemplateEngine for SimpleTemplateEngine {
 
     fn set_config(&mut self, config: ViewConfig) {
         *self.config.write() = config;
+        // 布局名/视图路径等参与合并的配置变了，旧编译结果全部作废
+        self.compiled.write().clear();
     }
 
     fn get_config(&self, name: &str) -> Option<Value> {
@@ -2778,5 +2871,92 @@ mod tests {
         assert!(body.contains("ALICE"));
         assert!(body.contains("N/A"));
         assert!(body.contains("启用"));
+    }
+
+    // =========================================================================
+    // 编译缓存（v1.4 性能修复：合并结果缓存 + mtime/size 失效校验）
+    // =========================================================================
+
+    #[test]
+    fn test_compiled_cache_hit_and_invalidation() {
+        let dir = make_temp_dir();
+        // 两次写入的长度刻意不同：即使 mtime 粒度粗，size 校验也能保证失效
+        write_template(&dir, "cached", "Hello {$name}!");
+        let engine = SimpleTemplateEngine::new(ViewConfig {
+            view_path: dir.clone(),
+            ..Default::default()
+        });
+
+        let data = || ViewData::from([("name".to_string(), json!("world"))]);
+        let r1 = engine.fetch("cached", &data()).unwrap();
+        assert_eq!(r1, "Hello world!");
+        assert_eq!(engine.compiled_cache_entries(), 1, "首次渲染应入缓存");
+
+        let r2 = engine.fetch("cached", &data()).unwrap();
+        assert_eq!(r2, "Hello world!");
+        assert_eq!(
+            engine.compiled_cache_entries(),
+            1,
+            "二次渲染命中缓存，不新增条目"
+        );
+
+        // 模板文件修改 → mtime/size 失效 → 重新编译并反映新内容
+        write_template(&dir, "cached", "Changed {$name}!");
+        let r3 = engine.fetch("cached", &data()).unwrap();
+        assert_eq!(
+            r3, "Changed world!",
+            "模板修改后必须反映新内容（不许脏缓存）"
+        );
+        assert_eq!(engine.compiled_cache_entries(), 1, "重编译覆盖同一路径条目");
+
+        cleanup_dir(&dir);
+    }
+
+    #[test]
+    fn test_compiled_cache_invalidation_on_parent_change() {
+        let dir = make_temp_dir();
+        write_template(
+            &dir,
+            "base",
+            "<html>{block name=\"content\"}AAA{/block}</html>",
+        );
+        let engine = SimpleTemplateEngine::new(ViewConfig {
+            view_path: dir.clone(),
+            ..Default::default()
+        });
+
+        write_template(
+            &dir,
+            "child",
+            r#"{extend name="base"}{block name="content"}hello{/block}"#,
+        );
+        let r1 = engine.fetch("child", &ViewData::new()).unwrap();
+        assert_eq!(r1, "<html>hello</html>");
+        assert_eq!(engine.compiled_cache_entries(), 1, "child 编译入缓存");
+
+        // 只改父模板（长度刻意不同保证 size 校验命中）→ 子模板缓存必须失效
+        write_template(
+            &dir,
+            "base",
+            "<html>{block name=\"content\"}BBBBBBB{/block}</html>",
+        );
+        let r2 = engine.fetch("child", &ViewData::new()).unwrap();
+        assert_eq!(r2, "<html>hello</html>", "子模板覆盖 block，输出不变");
+        assert_eq!(
+            engine.compiled_cache_entries(),
+            1,
+            "父模板变化触发重编译，条目仍为 1"
+        );
+
+        // 子模板删除 block 覆盖后，输出应跟随父模板新默认值
+        // （PHP 语义：extend 子模板 block 外的内容被丢弃）
+        write_template(&dir, "child", r#"{extend name="base"}<p>tail</p>"#);
+        let r3 = engine.fetch("child", &ViewData::new()).unwrap();
+        assert_eq!(
+            r3, "<html>BBBBBBB</html>",
+            "未覆盖 block 使用父模板新默认值"
+        );
+
+        cleanup_dir(&dir);
     }
 }

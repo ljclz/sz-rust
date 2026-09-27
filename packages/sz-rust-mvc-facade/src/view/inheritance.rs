@@ -154,6 +154,7 @@ fn find_extend_recursive(
                 )));
             }
             let extend_content = std::fs::read_to_string(&extend_file)?;
+            super::dep_tracker::record(&extend_file);
             state.extend = extend_content.clone();
 
             // 递归检查继承（对齐 PHP $func($extend)）

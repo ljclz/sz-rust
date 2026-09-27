@@ -86,6 +86,7 @@ pub fn apply_layout(content: &str, config: &ViewConfig) -> Result<String, ViewEr
                 )));
             }
             let layout_content = std::fs::read_to_string(&layout_file)?;
+            super::dep_tracker::record(&layout_file);
             // 对齐 PHP: str_replace(layout_item, content, layout_content)
             // 搜索 layout_item，替换为 result，目标为 layout_content
             result = layout_content.replace(&config.layout_item, &result);
@@ -171,6 +172,7 @@ fn parse_layout_tag(content: &str, config: &ViewConfig) -> Result<String, ViewEr
             )));
         }
         let layout_content = std::fs::read_to_string(&layout_file)?;
+        super::dep_tracker::record(&layout_file);
 
         // 替换布局主体内容
         // 对齐 PHP: str_replace($replace, $content, file_get_contents($layoutFile))
