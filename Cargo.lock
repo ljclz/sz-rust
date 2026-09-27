@@ -8616,6 +8616,7 @@ dependencies = [
  "serde_json",
  "sz-rust-ai-facade",
  "sz-rust-cli",
+ "sz-rust-rag",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -8716,6 +8717,7 @@ version = "1.4.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures",
  "parking_lot",
  "serde",
  "serde_json",
@@ -9046,6 +9048,7 @@ dependencies = [
 name = "sz-rust-orm-facade"
 version = "1.4.0"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "chrono",
  "criterion",
@@ -9056,6 +9059,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2 0.10.9",
+ "sqlx",
  "sz-orm-auth",
  "sz-orm-core",
  "sz-orm-graphql",
@@ -9068,12 +9073,15 @@ dependencies = [
  "sz-orm-queue",
  "sz-orm-scheduler",
  "sz-orm-sql-validator",
+ "sz-orm-sqlx",
  "sz-orm-storage",
  "sz-orm-tracing",
  "sz-orm-websocket",
+ "sz-rust-core",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -9118,6 +9126,7 @@ dependencies = [
  "chrono",
  "mockall",
  "notify",
+ "parking_lot",
  "prometheus",
  "regex",
  "serde",
@@ -9219,9 +9228,14 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sqlx",
+ "sz-orm-sqlx",
+ "sz-rust-core",
+ "sz-rust-orm-facade",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -20,9 +20,13 @@ tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+dtx-parallel = ["dep:futures"]
 
 [lints]
 workspace = true

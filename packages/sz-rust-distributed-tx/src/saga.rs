@@ -132,6 +132,11 @@ impl SagaOrchestrator {
         self
     }
 
+    /// 获取超时配置
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+
     /// 执行 Saga 事务
     pub async fn execute(
         &self,
