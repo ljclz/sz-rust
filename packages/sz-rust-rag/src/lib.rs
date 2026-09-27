@@ -23,3 +23,16 @@ pub mod template;
 pub mod term;
 pub mod vectorize;
 pub mod warning;
+// ============================================================================
+// v1.5.0 P2-3: 混合检索增强
+// ============================================================================
+#[cfg(feature = "rag-hybrid")]
+pub mod hybrid_search;
+#[cfg(feature = "rag-hybrid")]
+pub mod knowledge_isolation;
+#[cfg(feature = "rag-hybrid")]
+pub mod reranker;
+#[cfg(feature = "rag-hybrid")]
+pub mod search_cache;
+#[cfg(feature = "rag-hybrid")]
+pub mod source_citation;

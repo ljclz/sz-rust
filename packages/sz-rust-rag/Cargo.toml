@@ -26,6 +26,12 @@ regex = { workspace = true }
 async-trait = { workspace = true }
 prometheus = "0.13"
 notify = { workspace = true }
+parking_lot = { workspace = true }
+
+[features]
+default = []
+# v1.5.0 P2-3: 混合检索增强
+rag-hybrid = []
 
 [dev-dependencies]
 tempfile = { workspace = true }
