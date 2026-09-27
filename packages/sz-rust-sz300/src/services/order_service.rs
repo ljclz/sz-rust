@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 订单服务层 — 封装订单相关 SQL 操作（含订单项）
 //!
@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
 use crate::models::order::Order;
@@ -137,7 +138,8 @@ impl OrderService {
 
         // 列表查询 — 追加分页参数
         let list_sql = format!(
-            "SELECT * FROM `order` {} ORDER BY order_id DESC LIMIT ? OFFSET ?",
+            "SELECT {} FROM `order` {} ORDER BY order_id DESC LIMIT ? OFFSET ?",
+            Order::columns().join(", "),
             where_clause
         );
         let mut list_params = params.clone();
@@ -169,10 +171,13 @@ impl OrderService {
         })?;
 
         // 查询订单主表
-        let order_sql = "SELECT * FROM `order` WHERE order_id = ?";
+        let order_sql = format!(
+            "SELECT {} FROM `order` WHERE order_id = ?",
+            Order::columns().join(", ")
+        );
         let order_params = [Value::I64(order_id)];
         let order_rows = conn
-            .query_with_params(order_sql, &order_params)
+            .query_with_params(&order_sql, &order_params)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "订单详情查询失败: order_id={}", order_id);
@@ -185,9 +190,12 @@ impl OrderService {
         };
 
         // 查询订单项
-        let items_sql = "SELECT * FROM order_item WHERE order_id = ?";
+        let items_sql = format!(
+            "SELECT {} FROM order_item WHERE order_id = ?",
+            OrderItem::columns().join(", ")
+        );
         let items_rows = conn
-            .query_with_params(items_sql, &order_params)
+            .query_with_params(&items_sql, &order_params)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "订单项查询失败: order_id={}", order_id);

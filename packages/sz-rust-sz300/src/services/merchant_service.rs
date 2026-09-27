@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 商户服务层 — 封装商户相关 SQL 操作
 //!
@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
 use crate::models::merchant::Merchant;
@@ -104,9 +105,12 @@ impl MerchantService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM merchant WHERE merchant_id = ?";
+        let sql = format!(
+            "SELECT {} FROM merchant WHERE merchant_id = ?",
+            Merchant::columns().join(", ")
+        );
         let params = [Value::I64(merchant_id)];
-        let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        let rows = conn.query_with_params(&sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "商户详情查询失败: merchant_id={}", merchant_id);
             "查询失败".to_string()
         })?;

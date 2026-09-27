@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 设备服务层 — 封装设备相关 SQL 操作
 //!
@@ -17,6 +17,9 @@
 
 use std::collections::HashMap;
 
+use crate::models::device::Device;
+use crate::models::ota_version::OtaVersion;
+use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
 /// 设备列表筛选条件
@@ -96,7 +99,8 @@ impl DeviceService {
 
         // 列表查询 — 追加分页参数
         let list_sql = format!(
-            "SELECT * FROM device {} ORDER BY device_id DESC LIMIT ? OFFSET ?",
+            "SELECT {} FROM device {} ORDER BY device_id DESC LIMIT ? OFFSET ?",
+            Device::columns().join(", "),
             where_clause
         );
         let mut list_params = params.clone();
@@ -130,9 +134,12 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM device WHERE device_id = ?";
+        let sql = format!(
+            "SELECT {} FROM device WHERE device_id = ?",
+            Device::columns().join(", ")
+        );
         let params = [Value::I64(device_id)];
-        let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        let rows = conn.query_with_params(&sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "设备详情查询失败: device_id={}", device_id);
             "查询失败".to_string()
         })?;
@@ -162,10 +169,13 @@ impl DeviceService {
         })?;
 
         // 验证设备 SN 存在
-        let check_sql = "SELECT * FROM device WHERE device_sn = ?";
+        let check_sql = format!(
+            "SELECT {} FROM device WHERE device_sn = ?",
+            Device::columns().join(", ")
+        );
         let check_params = [Value::String(device_sn.to_string())];
         let rows = conn
-            .query_with_params(check_sql, &check_params)
+            .query_with_params(&check_sql, &check_params)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "设备绑定查询设备失败: device_sn={}", device_sn);
@@ -268,9 +278,12 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM ota_version WHERE version = ? AND status = 1";
+        let sql = format!(
+            "SELECT {} FROM ota_version WHERE version = ? AND status = 1",
+            OtaVersion::columns().join(", ")
+        );
         let params = [Value::String(version.to_string())];
-        let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        let rows = conn.query_with_params(&sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "OTA 版本查询失败: version={}", version);
             "查询失败".to_string()
         })?;

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 商品服务层 — 封装商品相关 SQL 操作
 //!
@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
 use crate::models::product::Product;
@@ -113,7 +114,8 @@ impl ProductService {
 
         // 列表查询 — 追加分页参数
         let list_sql = format!(
-            "SELECT * FROM good {} ORDER BY good_id DESC LIMIT ? OFFSET ?",
+            "SELECT {} FROM good {} ORDER BY good_id DESC LIMIT ? OFFSET ?",
+            Product::columns().join(", "),
             where_clause
         );
         let mut list_params = params.clone();
@@ -144,9 +146,12 @@ impl ProductService {
             "数据库连接失败".to_string()
         })?;
 
-        let sql = "SELECT * FROM good WHERE good_id = ?";
+        let sql = format!(
+            "SELECT {} FROM good WHERE good_id = ?",
+            Product::columns().join(", ")
+        );
         let params = [Value::I64(good_id)];
-        let rows = conn.query_with_params(sql, &params).await.map_err(|e| {
+        let rows = conn.query_with_params(&sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "商品详情查询失败: good_id={}", good_id);
             "查询失败".to_string()
         })?;
