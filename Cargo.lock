@@ -4230,9 +4230,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.106"
+version = "0.3.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7883d941dae510fb2d978fc3fe018c71c9e2892fd38854de3e8b92c2e5ad9cc5"
+checksum = "ce57d20d1ea864ce2ac172ab472d409214f4fd359f0b2a2775abdf522e2af99e"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -4501,9 +4501,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
-version = "0.1.25"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61ff90caf6077a803a240f62fdbe88645a890bbca49ef8174c3cb0404362171d"
+checksum = "8d8f1ea3f21fd3405dcaf6c9b5c1630af9afc422d9073ea39c5f6d6c772e08ed"
 dependencies = [
  "libc",
 ]
@@ -6706,10 +6706,11 @@ dependencies = [
 
 [[package]]
 name = "redox_users"
-version = "0.5.3"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
+checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
+ "getrandom 0.2.17",
  "libredox",
  "thiserror 2.0.21",
 ]
@@ -7006,9 +7007,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -8135,6 +8136,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-auth"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "797f23bd1cab9a85c243cebf0401448177c109acff242931f53aed35f81e5359"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8153,6 +8156,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-core"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c31d221954687ac258eec3cdb4ea77f0f11124a1f40d2929d65042c3b5b5cc"
 dependencies = [
  "async-trait",
  "bytes",
@@ -8175,6 +8180,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-graphql"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7acef35abf808e33e993b4b2c946029548c6685197e5571f32a17f3a76f4c998"
 dependencies = [
  "serde",
  "serde_json",
@@ -8184,6 +8191,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-grpc"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4821b46b3a05d365b5987682b6f43a352d7254c4e3421a13a21a0505ba689cec"
 dependencies = [
  "parking_lot",
  "serde",
@@ -8194,6 +8203,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-limit"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43b61d00d8ecc513dc64c0aa6da36b896972535bedfae824cfcc21608d99ffc7"
 dependencies = [
  "serde",
  "serde_json",
@@ -8202,6 +8213,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-logger"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5def863f5d4ef2ef2d3602897e19584c9fa445bac68a921e3cc5a3211d5caea"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8212,6 +8225,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-macros"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08885591cf96d9dcbf521f26720f906ce05103b88f0c4d449319344f9f1fcf03"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8221,6 +8236,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-mqtt"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1a88e80aeb696c73e24b45fde722e1f49999714eb43ec592b562bfbf583c3e0"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -8233,6 +8250,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-mssql"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71b694768bed7722fe052fe88cf7fa9b0092f25585e83df9a3673e40a81b3d83"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8250,6 +8269,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-oracle"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "100f9224d26da15bb89d7b619d630e29576d941c0e9d5aa9204e90638607bd90"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8264,6 +8285,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-query-builder"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f96ee922c7f7e656434d6443dea4ad8c97d01c7c2ab55f4c5d781656a88b3c65"
 dependencies = [
  "sz-orm-core",
 ]
@@ -8271,6 +8294,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-queue"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c53301a33475f9bcf23de97a9d4c93ca21300d5318a9a0653ce76f5402535f76"
 dependencies = [
  "async-trait",
  "futures",
@@ -8283,6 +8308,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-scheduler"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65bdb55878dc4994da5efb3e3430cf412389ac6a2ab351c8396de4a109725c92"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8295,6 +8322,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-sql-validator"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebbc482ff0e8334bbf85576dc9ed1aee2a1da0c460b09de3d10b3947a9491ae"
 dependencies = [
  "regex",
  "thiserror 2.0.21",
@@ -8303,6 +8332,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-sqlx"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c93d0b797640afd6902edc3b1bb6c32ae9d00e3337a4f781da9ab2cf8e2ee26f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8321,6 +8352,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-storage"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37221cfd1b64b9f9c85c31fdd68aa80ed7231e0ad5907420bd9cd31296053027"
 dependencies = [
  "async-trait",
  "serde",
@@ -8332,6 +8365,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-tracing"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c66d23a5a046a5bcd7b5fe81eccfac75fcd7005ff5da92de5a55e0139117f213"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8342,6 +8377,8 @@ dependencies = [
 [[package]]
 name = "sz-orm-websocket"
 version = "9.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d156178e6dc3fc06ffa7b3acd21beb1f84095610bb84e319bf6f37ea3e06bd"
 dependencies = [
  "async-trait",
  "flate2",
@@ -10655,9 +10692,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.129"
+version = "0.2.128"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb54f33acc68fd454578d9820b0bde1a1a3d17aa17bb7b6595806d02886d409"
+checksum = "aecb87a33d3b0c5e3b7aa46336eaf486cffafbd281b195e4c8b80d50df2351bf"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -10669,20 +10706,19 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-futures"
-version = "0.4.79"
+version = "0.4.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cbab34de2d982e9b48e18d216d04c4a6f641066ff19ffb699980f591ee3610e"
+checksum = "6ef4c5d3d2cdf5c54f4231181768f5510842e350db025faf1f7163b1030ed928"
 dependencies = [
  "js-sys",
- "tokio",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.129"
+version = "0.2.128"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e29d0c35b16e224a7eeb5cd2d25e3e1968fbd65604117b44d3b789d00ee8535"
+checksum = "a690d511e3c1a8b3a55e33511e3c2c00c78415cd23650f32b808627f5696b9ed"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -10690,9 +10726,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.129"
+version = "0.2.128"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f501a8bc3719dba86ef8ae4728879c08001bea749eb1333ac5b91e040e2a6b7"
+checksum = "411e4887f0071ef2d2164a9d5fdf2d20efbef78fccd3a78b0c10a1dc5295e48a"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -10703,9 +10739,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.129"
+version = "0.2.128"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
+checksum = "81941cd78d0c92026c33e5e01312845a4cb1e9af3407f9134b100dd03144103e"
 dependencies = [
  "unicode-ident",
 ]
@@ -10821,9 +10857,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.106"
+version = "0.3.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88261b9deccee56594c11a3460c462c41f58d148598fe70ad77070126a68aba4"
+checksum = "9fbddc4a036f00ec4f18c83445bd3115cb306a91da554919a099d9222fe4a7f8"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -11794,7 +11830,3 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
-
-[[patch.unused]]
-name = "sz-orm-config"
-version = "9.0.0"
