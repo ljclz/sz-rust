@@ -42,6 +42,7 @@ dashmap = "6"
 tracing = { workspace = true }
 chrono = { workspace = true }
 redis = { workspace = true }
+arc-swap = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -65,7 +66,7 @@ backend-all = ["backend-mysql", "backend-postgres", "backend-sqlite", "backend-o
 auto-rollback = []
 
 # ── v1.5.0 P1-2: 事务超时治理 ──
-tx-timeout = ["auto-rollback"]
+tx-timeout = ["auto-rollback", "dep:arc-swap"]
 
 [lints]
 workspace = true
