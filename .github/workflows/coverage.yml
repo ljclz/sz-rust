@@ -14,8 +14,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # phase2 lib 覆盖率待 CI 环境界定（本地 Docker 不可用无法度量 --include-ignored），暂保持 85
-  COVERAGE_THRESHOLD: 85
+  # v1.5.0 P4-1：覆盖率门禁提升至 95%（spec 5.11.1）
+  COVERAGE_THRESHOLD: 95
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
             -p sz-rust-router-facade \
             -p sz-rust-middleware-facade \
             -p sz-rust-orm-facade \
-            --cobertura --output-path cobertura-p0.xml
+            --branch --cobertura --output-path cobertura-p0.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -69,7 +69,7 @@ jobs:
             -p sz-rust-ai-facade --features all-providers \
             -p sz-rust-auth-facade \
             -p sz-rust-observability \
-            --cobertura --output-path cobertura-p1.xml
+            --branch --cobertura --output-path cobertura-p1.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,7 +101,7 @@ jobs:
             -p sz-rust-mvc-facade \
             -p sz-rust-orm-ext-facade \
             -p sz-rust-pay-facade \
-            --cobertura --output-path cobertura-p2.xml
+            --branch --cobertura --output-path cobertura-p2.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -136,7 +136,7 @@ jobs:
             -p sz-rust-capability \
             -p sz-rust-examples \
             -p sz-rust-facade-tests \
-            --cobertura --output-path cobertura-p3.xml
+            --branch --cobertura --output-path cobertura-p3.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4

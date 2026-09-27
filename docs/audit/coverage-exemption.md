@@ -7,6 +7,27 @@
 | crate_name | reason | approver | approval_date | expiry_date |
 |------------|--------|----------|---------------|-------------|
 | sz-rust-examples | 示例/演示代码（quick_start、multi_tenant_demo 等可运行样例），行覆盖 2.05% 无补测价值；基线数据见 docs/audit/2026-09-14-覆盖率基线与行动项执行报告.md | 用户（会话内批准执行规划） | 2026-09-14 | 2026-12-14 |
+| sz-rust-ai-facade | tests/common/mod.rs `#![allow(dead_code)]`，测试 helper 非生产代码 | CI | 2026-09-27 | 2026-12-27 |
+| sz-rust-core | tests/common/mod.rs `#![allow(dead_code)]`，测试 helper 非生产代码 | CI | 2026-09-27 | 2026-12-27 |
+
+## v1.5.0 新增模块覆盖率基线（2026-09-27）
+
+> 所有 v1.5.0 新增模块行覆盖率 ≥ 96%，分支覆盖率 ≥ 88%，无需豁免。
+
+| Crate | 模块 | 行覆盖率 | 分支覆盖率 |
+|-------|------|---------|-----------|
+| sz-rust-distributed-tx | parallel_saga.rs | 98.14% | 98.51% |
+| sz-rust-service-registry | gray_release.rs | 98.44% | 95.00% |
+| sz-rust-service-registry | gray_rollback.rs | 100.00% | 100.00% |
+| sz-rust-service-registry | metadata_filter.rs | 98.65% | 92.86% |
+| sz-rust-api-gateway | multi_dim_rate_limit.rs | 97.62% | 92.31% |
+| sz-rust-api-gateway | sliding_window.rs | 100.00% | 100.00% |
+| sz-rust-api-gateway | leaky_bucket.rs | 100.00% | 100.00% |
+| sz-rust-api-gateway | slow_call_breaker.rs | 99.11% | 100.00% |
+| sz-rust-api-gateway | degrade_response.rs | 100.00% | 100.00% |
+| sz-rust-observability | leak_detector.rs | 96.17% | 92.68% |
+| sz-rust-observability | drop_counter.rs | 96.02% | 88.89% |
+| sz-rust-observability | leak_report.rs | 100.00% | 100.00% |
 
 ## 审批流程
 
