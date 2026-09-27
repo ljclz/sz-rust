@@ -36,10 +36,17 @@ impl EventFacadeExt for Event {
         params: &Value,
         mode: DispatchMode,
     ) -> Result<DispatchResult, crate::FacadeError> {
-        // 由于 Event::dispatch 是 async fn，这里提供同步 trigger 的 facade 兼容
-        // 完整 async dispatch 直接使用 Event::dispatch
-        let _ = (event, params, mode);
-        unimplemented!("Use Event::dispatch for async dispatch")
+        // v1.4 修复：此前为 unimplemented! 地雷（调用即 panic）。
+        // 同步门面按 Sync 语义分发（复用 Event::dispatch_sync）；
+        // Async 模式需要 async 上下文，返回明确错误而非静默降级 ——
+        // 需要 Async 语义请使用 Event::dispatch(...).await。
+        match mode {
+            DispatchMode::Sync => Event::dispatch_sync(event, params).map_err(Into::into),
+            DispatchMode::Async => Err(crate::FacadeError::Event(
+                "DispatchMode::Async 需要 async 上下文，请使用 Event::dispatch(...).await；同步门面仅支持 DispatchMode::Sync"
+                    .to_string(),
+            )),
+        }
     }
 }
 
@@ -69,5 +76,40 @@ mod tests {
             .unwrap();
         assert!(result.is_success());
         assert_eq!(result.results, vec![json!("ok")]);
+    }
+
+    /// 回归测试（v1.4）：dispatch_facade Sync 模式真实分发（原为 unimplemented! 地雷）
+    #[tokio::test]
+    async fn test_dispatch_facade_sync_mode_works() {
+        Event::listen(
+            "FacadeDispatchSync",
+            Arc::new(ClosureListener::new(|_| Ok(json!("ok_from_listener")))),
+            false,
+        );
+
+        let result =
+            Event::dispatch_facade("FacadeDispatchSync", &Value::Null, EventDispatchMode::Sync)
+                .expect("Sync 模式必须真实分发");
+        assert_eq!(result.results, vec![json!("ok_from_listener")]);
+        assert!(result.is_success());
+    }
+
+    /// 回归测试（v1.4）：Async 模式返回明确错误而非 panic/静默降级
+    #[test]
+    fn test_dispatch_facade_async_mode_returns_err() {
+        let result = Event::dispatch_facade(
+            "FacadeDispatchAsync",
+            &Value::Null,
+            EventDispatchMode::Async,
+        );
+        let err = result.expect_err("Async 模式在同步门面上必须返回明确错误");
+        let msg = match err {
+            crate::FacadeError::Event(m) => m,
+            other => panic!("错误类型不符: {other:?}"),
+        };
+        assert!(
+            msg.contains("Event::dispatch"),
+            "错误信息应指引正确用法: {msg}"
+        );
     }
 }
