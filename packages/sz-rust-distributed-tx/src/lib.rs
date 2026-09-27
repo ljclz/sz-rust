@@ -21,6 +21,4 @@ pub use saga::{
 pub use tcc::{ParticipantResult, TccOrchestrator, TccParticipant, TccPhase, TccResult};
 
 #[cfg(feature = "dtx-parallel")]
-pub use parallel_saga::{
-    BackoffRetry, DependencyGraph, IdempotentCompensate, ParallelSaga,
-};
+pub use parallel_saga::{BackoffRetry, DependencyGraph, IdempotentCompensate, ParallelSaga};
