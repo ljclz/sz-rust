@@ -280,7 +280,7 @@ impl HotAddonLoader {
                 continue;
             }
 
-            match self.load_library(&path, &name) {
+            match self.load_library(&path, &name).await {
                 Ok(manifest) => results.push((name, Ok(manifest))),
                 Err(e) => results.push((name, Err(e))),
             }
@@ -290,33 +290,23 @@ impl HotAddonLoader {
     }
 
     /// 加载单个动态库
-    fn load_library(&self, path: &Path, name: &str) -> Result<HotAddonManifest, HotReloadError> {
-        // 1. 动态加载动态库
-        //    # Safety: libloading 保证 Library 在 Drop 前有效。
-        //    我们用 Arc 持有 Library，确保其生命周期覆盖所有注册的路由。
-        let library = unsafe { Library::new(path) }?;
-
-        // 2. 查找 addon_init 符号
-        //    # Safety: libloading::get 将原始指针转为函数指针，符号存在且类型正确时安全。
-        //    若符号不存在，返回 MissingInitSymbol 错误。
-        let init_symbol: libloading::Symbol<AddonInitFn> = unsafe { library.get(b"addon_init\0") }
-            .map_err(|_| HotReloadError::MissingInitSymbol)?;
-
-        // 3. 调用 addon_init
-        //    extern "Rust" 函数指针调用本身是安全的（同进程 Rust ABI）。
-        //    使用 catch_unwind 防止插件 panic 穿透动态库边界（否则为 UB）。
-        //    AssertUnwindSafe 在此安全：函数指针不捕获任何 Rust 状态。
-        let init_result =
-            panic::catch_unwind(AssertUnwindSafe(*init_symbol)).map_err(|payload| {
-                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "未知 panic（插件 addon_init 崩溃）".to_string()
-                };
-                HotReloadError::InitFailed(format!("插件 {} panic: {}", name, msg))
-            })?;
+    ///
+    /// v1.4 修复：dlopen/dlsym/addon_init 是阻塞 FFI（大插件加载可达数十毫秒以上），
+    /// 移入 `spawn_blocking` 执行，不再阻塞 tokio worker；依赖检查与注册表写入
+    /// （快路径）留在异步侧。
+    async fn load_library(
+        &self,
+        path: &Path,
+        name: &str,
+    ) -> Result<HotAddonManifest, HotReloadError> {
+        // 1-3. dlopen + 符号查找 + addon_init 调用 —— 纯阻塞 FFI 段，无共享状态
+        let blocking_path = path.to_path_buf();
+        let blocking_name = name.to_string();
+        let (library, init_result) = tokio::task::spawn_blocking(move || {
+            Self::load_and_init_blocking(blocking_path, blocking_name)
+        })
+        .await
+        .map_err(|e| HotReloadError::ScanFailed(format!("插件加载线程失败: {e}")))??;
 
         // 4. 检查依赖
         self.check_dependencies(&init_result)?;
@@ -340,6 +330,38 @@ impl HotAddonLoader {
         self.registry.write().insert(name.to_string(), loaded);
 
         Ok(manifest)
+    }
+
+    /// dlopen + 符号查找 + addon_init 调用（纯阻塞 FFI 段，无共享状态）
+    ///
+    /// # Safety
+    /// - `Library::new`：libloading 保证 Library 在 Drop 前有效，调用方以 Arc 持有。
+    /// - `library.get`：将原始指针转为函数指针，符号不存在时返回 MissingInitSymbol。
+    /// - `addon_init` 调用：extern "Rust" 函数指针（同进程 Rust ABI），
+    ///   catch_unwind 防止插件 panic 穿透动态库边界（否则为 UB）；
+    ///   AssertUnwindSafe 安全：函数指针不捕获任何 Rust 状态。
+    fn load_and_init_blocking(
+        path: PathBuf,
+        name: String,
+    ) -> Result<(Library, AddonInitResult), HotReloadError> {
+        let library = unsafe { Library::new(&path) }?;
+
+        let init_symbol: libloading::Symbol<AddonInitFn> = unsafe { library.get(b"addon_init\0") }
+            .map_err(|_| HotReloadError::MissingInitSymbol)?;
+
+        let init_result =
+            panic::catch_unwind(AssertUnwindSafe(*init_symbol)).map_err(|payload| {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "未知 panic（插件 addon_init 崩溃）".to_string()
+                };
+                HotReloadError::InitFailed(format!("插件 {} panic: {}", name, msg))
+            })?;
+
+        Ok((library, init_result))
     }
 
     /// 检查插件依赖是否已全部加载
@@ -568,15 +590,15 @@ mod tests {
         assert!(results.is_empty());
     }
 
-    #[test]
-    fn test_load_fake_library_fails_gracefully() {
+    #[tokio::test]
+    async fn test_load_fake_library_fails_gracefully() {
         // 创建一个假的 .so 文件（实际是文本文件）
         let tmp = tempfile::tempdir().unwrap();
         let fake_so = tmp.path().join("libfake.so");
         std::fs::write(&fake_so, "not a real shared library").unwrap();
 
         let loader = HotAddonLoader::new();
-        let result = loader.load_library(&fake_so, "fake");
+        let result = loader.load_library(&fake_so, "fake").await;
         // 动态库加载应失败（文件不是有效的 ELF/Mach-O/PE）
         assert!(result.is_err());
     }

@@ -46,6 +46,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// - `reset()` 后所有先前返回的引用失效
 /// - 线程安全：`&self` 方法可被多线程并发调用，并发 `reset` 与 `alloc` 需要调用方同步
 ///
+/// ## 跨线程撕裂场景（调用方必须以"纪元边界"同步）
+///
+/// `reset()` 与其他线程**在途分配**并发时构成 use-after-free：在途线程的
+/// `fetch_add` 已把计数器推进，reset 归零后另一线程随即分配到同一段地址，
+/// 覆写第一个线程尚未写完/仍在读取的切片。调用方必须保证：
+/// **所有在途引用（含正在分配中的）都离开作用域后才允许 `reset()`**，
+/// 典型模式是每请求一个池实例或以屏障/JoinHandle 收敛后再复位。
+/// 在借用期与纪元绑定的 scope 化 API 落地前，跨线程共享池 + 并发 reset
+/// 是被禁止的使用方式。
+///
 /// # 为什么是 unsafe fn（设计决策）
 ///
 /// 本 trait 用 `&self` + 生命周期延长实现零拷贝分配，Rust 借用检查器无法
@@ -93,6 +103,12 @@ pub trait MemPool: Send + Sync + std::fmt::Debug {
 /// 使用 `UnsafeCell` + `AtomicUsize` 实现内部可变性，
 /// 通过 `AtomicUsize::fetch_add` 原子递增分配位置，
 /// 多线程并发分配安全（但分配的引用在 `reset` 后失效）。
+///
+/// #[doc(hidden)]：当前**无生产调用方**（v1.4 审查确认），且借用期未与
+/// 纪元绑定（见 trait 文档"跨线程撕裂场景"）。在 scope 化 API
+/// （`pool.scope(|arena| ...)` 模式）落地并经 Miri 验证前，不建议新代码采用；
+/// 保留公开性仅为兼容 2026-08-16 契约收紧时的既有基准测试。
+#[doc(hidden)]
 pub struct StackPool<const CAP: usize> {
     buffer: UnsafeCell<[u8; CAP]>,
     pos: AtomicUsize,

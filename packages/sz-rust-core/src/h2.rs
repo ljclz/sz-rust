@@ -154,15 +154,14 @@ pub struct TlsListener {
     tcp: TcpListener,
     acceptor: TlsAcceptor,
     /// 已完成 TLS 握手的连接队列（由 spawn 的握手任务写入）
-    pending_rx: tokio::sync::mpsc::UnboundedReceiver<(
-        TlsStream<tokio::net::TcpStream>,
-        std::net::SocketAddr,
-    )>,
+    ///
+    /// v1.4 修复：unbounded → bounded(1024)。积压上限 = 已完成握手待 accept 的
+    /// 连接数；满载时握手任务在 send().await 上排队（连接保持打开）形成背压，
+    /// 防止连接风暴下队列无界增长。
+    pending_rx:
+        tokio::sync::mpsc::Receiver<(TlsStream<tokio::net::TcpStream>, std::net::SocketAddr)>,
     /// 用于 spawn 任务发送完成握手的连接
-    pending_tx: tokio::sync::mpsc::UnboundedSender<(
-        TlsStream<tokio::net::TcpStream>,
-        std::net::SocketAddr,
-    )>,
+    pending_tx: tokio::sync::mpsc::Sender<(TlsStream<tokio::net::TcpStream>, std::net::SocketAddr)>,
 }
 
 impl std::fmt::Debug for TlsListener {
@@ -174,9 +173,12 @@ impl std::fmt::Debug for TlsListener {
 }
 
 impl TlsListener {
+    /// 已完成握手连接的积压上限（v1.4：unbounded → bounded）
+    const PENDING_CAPACITY: usize = 1024;
+
     /// 构造 TlsListener
     pub fn new(tcp: TcpListener, acceptor: TlsAcceptor) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(Self::PENDING_CAPACITY);
         Self {
             tcp,
             acceptor,
@@ -215,7 +217,8 @@ impl Listener for TlsListener {
                             tokio::spawn(async move {
                                 match acceptor.accept(tcp).await {
                                     Ok(tls) => {
-                                        if tx.send((tls, addr)).is_err() {
+                                        // 有界队列：满载时在此排队（背压），连接保持打开
+                                        if tx.send((tls, addr)).await.is_err() {
                                             tracing::warn!(
                                                 "pending channel closed, dropping TLS connection from {addr}"
                                             );
