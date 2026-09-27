@@ -1,13 +1,14 @@
 # SZ-Rust Mutation Testing — 变异测试
 #
-# 使用 cargo-mutants 对 sz-rust-core 进行变异测试，评估测试套件质量。
+# 使用 cargo-mutants 对核心 crate 进行变异测试，评估测试套件质量。
 # cargo-mutants 会自动修改源码（如将 > 改为 >=、删除条件判断等），
 # 若变异体仍能通过测试，说明测试覆盖不足。
 #
 # 调度策略：
 #   - 每周日 02:00 UTC（北京时间 10:00）自动运行
 #   - 支持手动触发（workflow_dispatch）
-#   - 仅对 packages/sz-rust-core 运行（避免全 workspace 耗时过长）
+#   - v1.5.0：扩展到 distributed-tx/service-registry/api-gateway/observability
+#   - 分批策略：按 crate 分批运行，避免全 workspace 超时（spec 5.12.3）
 #
 # 参考：sz-orm ci.yml 与 soak.yml 的调度风格
 
@@ -26,9 +27,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # v1.5.0 P4-2：杀死率门禁 ≥90%（spec 5.12.2）
+  MUTANTS_KILL_RATE_THRESHOLD: 90
 
 jobs:
-  mutants:
+  # ── v1.4.0 核心 crate 变异测试 ──
+  mutants-core:
     name: Mutation Testing (sz-rust-core)
     runs-on: ubuntu-latest
     # GitHub 托管 runner 单 job 上限 360min，480 会被静默截断（AI 评审 P3 修正）
@@ -74,7 +78,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-report-${{ github.sha }}
+          name: mutants-core-report-${{ github.sha }}
           path: |
             mutants.out/
             mutants.json
@@ -85,3 +89,78 @@ jobs:
         if: failure()
         run: |
           echo "::warning::Mutation testing detected surviving mutants — 请检查 mutants-report 中的存活变异体"
+
+  # ── v1.5.0 新增模块变异测试（分批策略，spec 5.12.3）──
+  mutants-v15:
+    name: Mutation Testing (v1.5.0 modules)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: sz-rust-distributed-tx
+            features: dtx-parallel
+          - crate: sz-rust-service-registry
+            features: gray-release
+          - crate: sz-rust-api-gateway
+            features: gateway-multidim
+          - crate: sz-rust-observability
+            features: leak-detect
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Run cargo mutants (${{ matrix.crate }})
+        run: >
+          cargo mutants -p ${{ matrix.crate }} --features ${{ matrix.features }}
+          --in-place --no-shuffle
+          --timeout 120
+
+      - name: Assert workspace clean
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::workspace dirty after cargo mutants — 变异源码残留:"
+            git status --porcelain | head -20
+            git checkout -- . 2>/dev/null || true
+            exit 1
+          fi
+          echo "Workspace clean"
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ matrix.crate }}-report-${{ github.sha }}
+          path: |
+            mutants.out/
+            mutants.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Check kill rate
+        if: always()
+        run: |
+          if [ -f mutants.json ]; then
+            TOTAL=$(python3 -c "import json; d=json.load(open('mutants.json')); print(len(d['mutants']))" 2>/dev/null || echo 0)
+            KILLED=$(python3 -c "import json; d=json.load(open('mutants.json')); print(sum(1 for m in d['mutants'] if m['status']=='killed'))" 2>/dev/null || echo 0)
+            if [ "$TOTAL" -gt 0 ]; then
+              RATE=$((KILLED * 100 / TOTAL))
+              echo "Kill rate: ${RATE}% (${KILLED}/${TOTAL})"
+              if [ "$RATE" -lt "$MUTANTS_KILL_RATE_THRESHOLD" ]; then
+                echo "::warning::Kill rate ${RATE}% < threshold ${MUTANTS_KILL_RATE_THRESHOLD}% — 存活变异体需补测"
+              fi
+            fi
+          fi

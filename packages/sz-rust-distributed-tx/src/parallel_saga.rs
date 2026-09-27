@@ -413,6 +413,20 @@ mod tests {
     }
 
     #[test]
+    fn test_dependency_graph_with_dependencies() {
+        let mut deps = std::collections::HashMap::new();
+        deps.insert("b".to_string(), vec!["a".to_string()]);
+        deps.insert("c".to_string(), vec!["b".to_string()]);
+        let graph = DependencyGraph::new().with_dependencies(deps);
+        let steps = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let groups = graph.topological_groups(&steps).unwrap();
+        assert_eq!(groups.len(), 3, "with_dependencies must set deps");
+        assert_eq!(groups[0], vec!["a".to_string()]);
+        assert_eq!(groups[1], vec!["b".to_string()]);
+        assert_eq!(groups[2], vec!["c".to_string()]);
+    }
+
+    #[test]
     fn test_dependency_graph_chain() {
         let mut graph = DependencyGraph::new();
         graph.add_dependency("b", "a");
