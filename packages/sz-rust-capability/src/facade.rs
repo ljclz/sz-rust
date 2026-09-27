@@ -179,7 +179,9 @@ mod tests {
     fn test_facade_lifecycle() {
         Cap::init().ok();
         let cap = Arc::new(TestCapability) as Arc<dyn Capability>;
-        Cap::register(cap).unwrap();
+        // GLOBAL 注册表为进程级共享，并行测试可能已注册同名 capability
+        // —— register 返回 Err 属正常竞争，语义断言以 get/len 为准（v1.4 flaky 修复）
+        Cap::register(cap).ok();
         assert!(Cap::get("test_cap").unwrap().is_some());
         assert!(Cap::len().unwrap() >= 1);
     }
