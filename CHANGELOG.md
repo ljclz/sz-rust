@@ -5,6 +5,47 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.5.0] - 2026-09-27
+
+### Added — P1 数据库与事务健壮性
+
+- **AutoRollbackGuard**（P1-1）：RAII 事务自动回滚守卫，PooledConnection drop 未提交事务时自动 rollback 释放锁（feature `auto-rollback`，4 单元 + 4 MySQL 集成测试）
+- **TransactionManager**（P1-2）：超时管理 + broadcast 事件 + 运行时动态调整超时（feature `tx-timeout`，5 单元 + 8 MySQL 集成测试）
+- **MigrationEnhanced**（P1-3）：SHA-256 校验和 + 并发锁 + 幂等迁移 + 回滚到版本（feature `migration-enhanced`，6 单元 + 7 MySQL 集成测试）
+- **testkit 增强**（P1-4）：TxIsolationFixture + TestTimeoutGuard + ResourceLeakScanner（feature `test-utils`，7 单元 + 6 MySQL 集成测试）
+
+### Added — P2 AI 能力增强
+
+- **代码生成闭环**（P2-1）：ContextInjector + TestGenerator + QualityScorer（features `codegen-context,codegen-test,codegen-quality`，11 单元测试）
+- **多维度模型路由**（P2-2）：MultiDimRouter + FailoverChain + CostTracker（feature `ai-multidim`，12 单元测试）
+- **RAG 混合检索**（P2-3）：HybridSearch + Reranker + SearchCache + KnowledgeIsolation（feature `rag-hybrid`，22 单元测试）
+
+### Added — P3 微服务治理增强
+
+- **ParallelSaga**（P3-1）：分布式事务并行执行 + DependencyGraph 拓扑排序 + IdempotentCompensate 幂等补偿 + BackoffRetry 指数退避（feature `dtx-parallel`，17 单元 + 12 集成测试）
+- **GrayRelease**（P3-2）：灰度发布 + 按权重流量切换 + 失败率自动回滚 + MetadataFilter 元数据过滤（feature `gray-release`，17 单元 + 12 集成测试）
+- **MultiDimRateLimit**（P3-3）：用户/IP/接口/全局四维度限流 + SlidingWindow + LeakyBucket + SlowCallBreaker 慢调用熔断 + DegradeResponse 降级响应（feature `gateway-multidim`，30 单元 + 10 集成测试）
+
+### Added — P4 质量与性能基线
+
+- **覆盖率门禁**（P4-1）：CI `COVERAGE_THRESHOLD` 85→95 + 4 分片添加 `--branch` 分支覆盖
+- **变异测试扩展**（P4-2）：`mutants.yml` 新增 `mutants-v15` matrix job 覆盖 4 个新 crate + 杀死率门禁 ≥90%
+- **基准性能测试**（P4-3）：4 场景 criterion 基准（parallel_saga / multi_dim_rate_limit / multi_dim_router / hybrid_search）
+- **LeakDetector**（P4-4）：内存泄漏检测 + DropCounter + TrackedResource + 增长趋势分析（feature `leak-detect`，21 单元 + 8 集成测试）
+
+### Changed
+
+- workspace.package.version 1.4.0 → 1.5.0
+- CI 覆盖率阈值 85 → 95 + 分支覆盖
+- CI 变异测试从仅 sz-rust-core 扩展至 4 个 v1.5.0 新模块
+
+### 验证
+
+- 全量单元测试通过（排除 sz-rust-wasm/visual 环境缺 WebView2LoaderStatic）
+- MySQL 9.6 集成测试：P1 25/25 + P3 34/34 + P4-4 8/8 + sz300 8/8 全部通过
+- PostgreSQL 18.2 集成测试：sz300 跨后端 2/2 通过
+- 向后兼容：`cargo build --workspace`（无新 feature）编译成功，现有测试零修改通过
+
 ## [v1.4.0] - 2026-09-24
 
 ### Added — 编译优化（P1-1）
