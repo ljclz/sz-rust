@@ -83,6 +83,13 @@ pub mod exporters;
 #[cfg(feature = "admin")]
 pub mod admin;
 
+#[cfg(feature = "leak-detect")]
+pub mod drop_counter;
+#[cfg(feature = "leak-detect")]
+pub mod leak_detector;
+#[cfg(feature = "leak-detect")]
+pub mod leak_report;
+
 pub use exporters::{
     JaegerExporter, MemoryTraceHttpTransport, TraceExportError, TraceHttpTransport, TraceLog,
     TraceSpan, ZipkinExporter,
@@ -90,6 +97,13 @@ pub use exporters::{
 pub use log_level::{LogLevel, LogLevelManager};
 pub use memory_guard::{MemoryGuard, MemoryGuardConfig, MemoryStatus};
 pub use slo::{SloBurnRate, SloConfig, SloMonitor};
+
+#[cfg(feature = "leak-detect")]
+pub use drop_counter::{DropCounter, TrackedResource};
+#[cfg(feature = "leak-detect")]
+pub use leak_detector::{LeakDetectConfig, LeakDetector};
+#[cfg(feature = "leak-detect")]
+pub use leak_report::{GrowthTrend, LeakReport, LeakedResource, ResourceKind, ResourceSnapshot};
 
 /// 指标类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

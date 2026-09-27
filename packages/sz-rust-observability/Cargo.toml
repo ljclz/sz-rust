@@ -23,6 +23,8 @@ otlp = ["dep:opentelemetry", "dep:opentelemetry-otlp", "dep:opentelemetry_sdk"]
 otlp-http = ["otlp", "opentelemetry-otlp/http-proto", "dep:reqwest"]
 # 启用 Admin Monitor API（管理面板：服务器信息 / DB 连接池 / Redis 状态）
 admin = ["dep:sysinfo", "dep:redis"]
+# 启用内存泄漏检测（P4-4）
+leak-detect = []
 
 [dependencies]
 tokio = { workspace = true }
