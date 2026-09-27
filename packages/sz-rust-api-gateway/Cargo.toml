@@ -13,6 +13,7 @@ categories = ["network-programming"]
 
 [features]
 grpc = ["dep:tonic", "dep:prost"]
+gateway-multidim = []
 
 [dependencies]
 async-trait = { workspace = true }
