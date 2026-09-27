@@ -61,11 +61,22 @@ backend-mssql = []
 # 全后端
 backend-all = ["backend-mysql", "backend-postgres", "backend-sqlite", "backend-oracle", "backend-mssql"]
 
+# ── v1.5.0 P1-1: 连接池自动回滚 ──
+auto-rollback = []
+
+# ── v1.5.0 P1-2: 事务超时治理 ──
+tx-timeout = ["auto-rollback"]
+
 [lints]
 workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+sqlx = { workspace = true }
+sz-orm-sqlx = { workspace = true }
+sz-rust-core = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bench]]
 name = "tenant_isolation"
