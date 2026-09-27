@@ -20,3 +20,23 @@ pub use parser::{parse_requirement, CodegenTask, Framework, Language};
 pub use r#loop::{CodegenLoop, CodegenLoopConfig, CodegenResult, CodegenStatus};
 pub use security::SecurityScanner;
 pub use validator::{ValidationResult, Validator};
+// ============================================================================
+// v1.5.0 P2-1: 代码生成闭环增强
+// ============================================================================
+#[cfg(feature = "codegen-context")]
+pub mod context_injector;
+
+#[cfg(feature = "codegen-test")]
+pub mod test_generator;
+
+#[cfg(feature = "codegen-quality")]
+pub mod quality_scorer;
+
+#[cfg(feature = "codegen-context")]
+pub use context_injector::{ContextInjector, InjectionResult};
+
+#[cfg(feature = "codegen-test")]
+pub use test_generator::{GeneratedTest, TestGenerator, TestType};
+
+#[cfg(feature = "codegen-quality")]
+pub use quality_scorer::{QualityReport, QualityScorer};

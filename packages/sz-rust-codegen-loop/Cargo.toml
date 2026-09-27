@@ -24,6 +24,14 @@ tempfile = { workspace = true }
 
 sz-rust-ai-facade = { workspace = true }
 sz-rust-cli = { workspace = true }
+sz-rust-rag = { workspace = true, optional = true }
+
+[features]
+default = []
+# v1.5.0 P2-1: 代码生成闭环增强
+codegen-context = ["dep:sz-rust-rag", "sz-rust-rag/rag-hybrid"]
+codegen-test = []
+codegen-quality = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
