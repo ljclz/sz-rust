@@ -43,6 +43,7 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 redis = { workspace = true }
 arc-swap = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -67,6 +68,9 @@ auto-rollback = []
 
 # ── v1.5.0 P1-2: 事务超时治理 ──
 tx-timeout = ["auto-rollback", "dep:arc-swap"]
+
+# ── v1.5.0 P1-3: 迁移健壮性 ──
+migration-enhanced = ["dep:sha2"]
 
 [lints]
 workspace = true
