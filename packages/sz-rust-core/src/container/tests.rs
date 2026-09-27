@@ -1427,3 +1427,125 @@ fn factory_panic_cleans_constructing_stack() {
     assert!(container.make::<Fine>().is_some());
     assert_eq!(container.constructing_depth(), 0);
 }
+// ============================================================================
+// v1.4 并发修复事二：单例恰好一次构建槽
+// ============================================================================
+
+/// 回归测试：N 线程并发首解析同一单例，工厂必须恰好执行一次。
+///
+/// 修复前：工厂并发执行 N 次（后写者胜缓存），副作用型工厂双份执行。
+#[test]
+fn singleton_factory_executes_exactly_once_concurrent() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counted;
+    let container = Arc::new(Container::new());
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c_calls = calls.clone();
+    container.singleton(move || {
+        c_calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(20)); // 拉大并发窗口
+        Counted
+    });
+
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let c = container.clone();
+        handles.push(std::thread::spawn(move || {
+            assert!(c.make::<Counted>().is_some());
+        }));
+    }
+    for h in handles {
+        h.join().expect("解析线程不得 panic");
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "单例工厂必须恰好执行一次（修复前并发下会执行多次）"
+    );
+}
+
+/// 回归测试：工厂 panic 后槽必须复位 Idle，后续解析可重试（不卡死 Building）。
+#[test]
+fn singleton_slot_recovers_after_factory_panic() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Flaky;
+    let container = Arc::new(Container::new());
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c_calls = calls.clone();
+    container.singleton(move || {
+        if c_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            panic!("首次构建故障");
+        }
+        Flaky
+    });
+
+    // 第一次：工厂 panic（捕获，槽应复位）
+    let c1 = container.clone();
+    let first = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _ = c1.make::<Flaky>();
+    }));
+    assert!(first.is_err(), "首次应因工厂 panic 而失败");
+    assert_eq!(container.constructing_depth(), 0);
+
+    // 第二次：槽已复位，重新执行工厂并成功
+    let second = container.make::<Flaky>();
+    assert!(second.is_some(), "槽复位后重试必须成功");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+/// 回归测试：等待超时后冗余执行兼底，不永久挂起。
+#[test]
+fn singleton_waiter_falls_back_after_timeout() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Slow;
+    let container = Arc::new(Container::new());
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c_calls = calls.clone();
+    container.singleton(move || {
+        c_calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(600)); // 慢工厂
+        Slow
+    });
+
+    crate::container::set_resolution_wait_timeout_ms(100);
+    let _guard = scopeguard_reset(0); // 无论如何都恢复全局超时
+
+    // 构建者先行入场
+    let c1 = container.clone();
+    let builder = std::thread::spawn(move || {
+        assert!(c1.make::<Slow>().is_some());
+    });
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    // 等待者：100ms 超时 < 工厂 600ms → 冗余执行
+    let second = container.make::<Slow>();
+    assert!(second.is_some(), "超时冗余执行后仍应拿到实例");
+    builder.join().expect("构建者线程不得 panic");
+
+    let total = calls.load(Ordering::SeqCst);
+    assert!(
+        (1..=2).contains(&total),
+        "执行次数应在 1..=2（恰好一次或超时冗余）: {total}"
+    );
+    assert_eq!(
+        total, 2,
+        "本测试场景（80ms 后进入 + 100ms 超时 + 600ms 工厂）应确定性走冗余路径"
+    );
+}
+
+/// 恢复全局超时的 RAII 小工具
+fn scopeguard_reset(_prev_ms: u64) -> impl Drop {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            crate::container::set_resolution_wait_timeout_ms(60_000);
+        }
+    }
+    Reset
+}

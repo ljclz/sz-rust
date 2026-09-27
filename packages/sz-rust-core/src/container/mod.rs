@@ -46,7 +46,7 @@
 //! ```
 
 use crate::config::{AppConfig, DatabaseConnection};
-use parking_lot::RwLock;
+use parking_lot::{Condvar, Mutex, RwLock};
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -169,6 +169,69 @@ pub struct Container {
     /// 对齐 PHP `app()->when(PhotoController::class)->needs(Filesystem::class)->give(S3Filesystem::class)`。
     /// 通过 `make_for::<T, Consumer>()` 为指定消费者解析上下文绑定的服务。
     context_bindings: RwLock<ContextBindingMap>,
+    /// 单例构建槽表（TypeId → 构建槽）：保证同一单例工厂跨线程恰好执行一次
+    ///
+    /// v1.4 并发修复之二：此前两线程同时首解析同一未缓存单例，工厂会并发执行
+    /// 两次（后写者胜缓存），副作用型工厂（建连/初始化）产生双份副作用。
+    inflight: Mutex<HashMap<TypeId, Arc<Slot>>>,
+}
+
+/// 单例构建槽状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotState {
+    /// 空闲：下一个拿到锁的线程成为构建者
+    Idle,
+    /// 构建中：其他线程等待（带超时，超时后冗余执行兜底）
+    Building,
+    /// 完成：实例已入 instances 缓存
+    Done,
+}
+
+/// 单例构建槽
+struct Slot {
+    state: Mutex<SlotState>,
+    cv: Condvar,
+}
+
+impl Slot {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(SlotState::Idle),
+            cv: Condvar::new(),
+        }
+    }
+}
+
+/// 单例解析等待超时（毫秒，测试可用 [`set_resolution_wait_timeout_ms`] 调低）
+///
+/// 超时语义：真实依赖环会在单线程递归中被环检测 panic 捕获；两线程同时
+/// 解析互为依赖的类型会互等 —— 超时后回退为冗余执行（与 API 文档语义一致），
+/// 保证任何情况下都不会永久挂起。
+static RESOLUTION_WAIT_TIMEOUT_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(60_000);
+
+/// 调整单例解析等待超时（毫秒）。仅测试与特殊部署场景使用。
+pub fn set_resolution_wait_timeout_ms(ms: u64) {
+    RESOLUTION_WAIT_TIMEOUT_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 构建者守卫：工厂 panic 时把槽从 Building 复位为 Idle 并唤醒等待者，
+/// 让后续解析能重试（否则槽永远卡在 Building）。
+struct SlotBuildGuard<'a> {
+    slot: &'a Slot,
+    done: bool,
+}
+
+impl Drop for SlotBuildGuard<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            let mut state = self.slot.state.lock();
+            if *state == SlotState::Building {
+                *state = SlotState::Idle;
+            }
+            self.slot.cv.notify_all();
+        }
+    }
 }
 
 impl Container {
@@ -181,6 +244,7 @@ impl Container {
             aliases: RwLock::new(HashMap::new()),
             tags: RwLock::new(HashMap::new()),
             context_bindings: RwLock::new(HashMap::new()),
+            inflight: Mutex::new(HashMap::new()),
         }
     }
 
@@ -421,15 +485,15 @@ impl Container {
 
         // 4. 循环依赖检测 + 工厂调用（共用逻辑，含 make_for）
         let type_name = std::any::type_name::<T>();
-        let instance = self.check_and_call_factory(type_id, type_name, &binding.factory)?;
 
         match binding.lifetime {
             Lifetime::Singleton => {
-                let arc: Arc<dyn Any + Send + Sync> = Arc::from(instance);
-                self.instances.write().insert(type_id, arc.clone());
+                // 恰好一次构建：per-type 槽位去重（v1.4 并发修复之二）
+                let arc = self.resolve_singleton_once(type_id, type_name, &binding.factory)?;
                 Arc::downcast::<T>(arc).ok()
             }
             Lifetime::Scoped => {
+                let instance = self.check_and_call_factory(type_id, type_name, &binding.factory)?;
                 let arc: Arc<dyn Any + Send + Sync> = Arc::from(instance);
                 self.scoped_instances
                     .write()
@@ -440,7 +504,99 @@ impl Container {
             }
             Lifetime::Transient => {
                 // 瞬态：直接返回（不缓存）
+                let instance = self.check_and_call_factory(type_id, type_name, &binding.factory)?;
                 Arc::downcast::<T>(Arc::from(instance)).ok()
+            }
+        }
+    }
+
+    /// 单例恰好一次构建：缓存未命中时经 per-type 槽位去重
+    ///
+    /// - 首个线程把槽 Idle→Building 并执行工厂（内部复用线程级环检测）
+    /// - 并发线程在 Condvar 上限时等待（超时见 [`RESOLUTION_WAIT_TIMEOUT_MS`]），
+    ///   完成后从 instances 缓存取实例
+    /// - 等待超时（跨线程互等 / 极慢工厂）→ 回退冗余执行，保证不挂起
+    /// - 工厂 panic → 槽复位 Idle，后续解析可重试
+    fn resolve_singleton_once(
+        &self,
+        type_id: TypeId,
+        type_name: &'static str,
+        factory: &ServiceFactory,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        // 双检缓存（调用方已查过一次，这里覆盖等待者路径）
+        if let Some(cached) = self.instances.read().get(&type_id) {
+            return Some(cached.clone());
+        }
+
+        let slot = self
+            .inflight
+            .lock()
+            .entry(type_id)
+            .or_insert_with(|| Arc::new(Slot::new()))
+            .clone();
+
+        let mut state = slot.state.lock();
+        loop {
+            match *state {
+                SlotState::Idle => {
+                    // 本线程成为构建者：标记 Building 后立即释放槽锁再执行工厂
+                    // （槽内不持有任何锁跨工厂 —— mutex 级 ABBA 死锁结构上不可能）
+                    *state = SlotState::Building;
+                    drop(state);
+                    let mut guard = SlotBuildGuard {
+                        slot: &slot,
+                        done: false,
+                    };
+                    let instance = self.check_and_call_factory(type_id, type_name, factory)?;
+                    let arc: Arc<dyn Any + Send + Sync> = Arc::from(instance);
+                    self.instances.write().insert(type_id, arc.clone());
+                    *slot.state.lock() = SlotState::Done;
+                    guard.done = true; // 正常完成：守卫不再复位
+                    drop(guard);
+                    slot.cv.notify_all();
+                    return Some(arc);
+                }
+                SlotState::Building => {
+                    // 关键：若本线程构造栈里已有该类型，说明是工厂递归解析同类型/环
+                    //（X→Y→X 时外层槽 X 正由本线程 Building）—— 等待者等的就是自己，
+                    // 立即走环检测 panic（输出正确依赖链），绝不傻等超时。
+                    let self_cycle =
+                        CONSTRUCTING.with(|st| st.borrow().iter().any(|(_, tid)| *tid == type_id));
+                    if self_cycle {
+                        drop(state);
+                        // 环检测会在此 panic（返回值仅用于类型对齐：正常不可达）
+                        return self
+                            .check_and_call_factory(type_id, type_name, factory)
+                            .map(Arc::from);
+                    }
+
+                    // 等待者：限时等待构建完成
+                    let timeout = std::time::Duration::from_millis(
+                        RESOLUTION_WAIT_TIMEOUT_MS.load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                    let timed_out = slot
+                        .cv
+                        .wait_while_for(&mut state, |st| *st == SlotState::Building, timeout)
+                        .timed_out();
+                    if timed_out {
+                        // 超时兜底：冗余执行（等价于修复前的并发语义，绝不挂起）
+                        tracing::warn!(
+                            "DI 单例解析等待超时（{}ms），类型 {} 回退冗余执行",
+                            timeout.as_millis(),
+                            type_name
+                        );
+                        drop(state);
+                        let instance = self.check_and_call_factory(type_id, type_name, factory)?;
+                        let arc: Arc<dyn Any + Send + Sync> = Arc::from(instance);
+                        self.instances.write().insert(type_id, arc.clone());
+                        return Some(arc);
+                    }
+                    // 未超时 → 条件已不成立（Done）→ 循环重查缓存
+                }
+                SlotState::Done => {
+                    drop(state);
+                    return self.instances.read().get(&type_id).cloned();
+                }
             }
         }
     }
@@ -496,6 +652,7 @@ impl Container {
         self.aliases.write().clear();
         self.tags.write().clear();
         self.context_bindings.write().clear();
+        self.inflight.lock().clear();
         // 构造栈位于 thread_local（见 CONSTRUCTING），随各线程解析结束自然清空，
         // 无需也无法跨线程清除；正常情况下任何时刻都是空栈。
     }
