@@ -71,6 +71,8 @@ local-model = []
 reranker = []
 # RAG 混合检索（BM25 + 向量 RRF 融合）
 hybrid = []
+# v1.5.0 P2-2: 多维度模型路由
+ai-multidim = []
 
 [package.metadata.cargo-udeps.ignore]
 

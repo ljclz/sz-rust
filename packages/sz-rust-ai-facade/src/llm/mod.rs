@@ -13,6 +13,9 @@ pub mod test_support;
 pub mod token_counter;
 pub mod truncator;
 
+#[cfg(feature = "ai-multidim")]
+pub mod multi_dim_router;
+
 #[cfg(feature = "claude")]
 pub mod claude;
 #[cfg(feature = "gemini")]
@@ -24,6 +27,11 @@ pub use builtin_models::{register_builtin_models, BuiltinProviders};
 pub use failover::ProviderFailover;
 pub use fallback::{cost_optimal, FallbackChain, FallbackResult, RoundRobinLb};
 pub use model_registry::{ModelCost, ModelEntry, ModelRegistry};
+#[cfg(feature = "ai-multidim")]
+pub use multi_dim_router::{
+    CostRecord, CostTracker, FailoverChain, LoadBalanceStrategy, LoadBalancer, ModelMetrics,
+    MultiDimRouter, MultiDimRoutingRecord, MultiDimWeights,
+};
 pub use provider::{
     ChatCompletion, ChatMessage, ChatRequest, FinishReason, LlmProvider, Role, StreamDelta,
     ToolCall, ToolDef, Usage,
