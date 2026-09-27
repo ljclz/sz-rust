@@ -336,6 +336,43 @@ mod tests {
         assert_eq!(running[0].tx_id, "tx-2");
     }
 
+    #[tokio::test]
+    async fn test_is_empty_false_when_non_empty() {
+        let store = InMemoryTxLogStore::new();
+        assert!(store.is_empty());
+        store
+            .save(&make_entry("tx-1", TxState::Running))
+            .await
+            .unwrap();
+        assert!(!store.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_log_compensate_updates_state() {
+        let store = Arc::new(InMemoryTxLogStore::new());
+        let logger = TxLogger::new(store.clone());
+        logger
+            .log_start("tx-1", TxType::Saga, Value::Null, Value::Null)
+            .await
+            .unwrap();
+        logger.log_compensate("tx-1", &Value::Null).await.unwrap();
+        let got = store.get("tx-1").await.unwrap().unwrap();
+        assert_eq!(got.state, TxState::Compensated);
+    }
+
+    #[tokio::test]
+    async fn test_log_fail_updates_state() {
+        let store = Arc::new(InMemoryTxLogStore::new());
+        let logger = TxLogger::new(store.clone());
+        logger
+            .log_start("tx-1", TxType::Saga, Value::Null, Value::Null)
+            .await
+            .unwrap();
+        logger.log_fail("tx-1", &Value::Null).await.unwrap();
+        let got = store.get("tx-1").await.unwrap().unwrap();
+        assert_eq!(got.state, TxState::Failed);
+    }
+
     #[test]
     fn test_tx_type_serde() {
         assert_eq!(serde_json::to_string(&TxType::Saga).unwrap(), "\"saga\"");

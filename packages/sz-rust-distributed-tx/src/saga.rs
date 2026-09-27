@@ -480,6 +480,22 @@ mod tests {
         assert!(result.steps.is_empty());
     }
 
+    #[test]
+    fn test_with_timeout_sets_value() {
+        let orchestrator =
+            SagaOrchestrator::new().with_timeout(Duration::from_millis(200));
+        assert_eq!(
+            orchestrator.timeout(),
+            Some(Duration::from_millis(200))
+        );
+    }
+
+    #[test]
+    fn test_timeout_default_is_none() {
+        let orchestrator = SagaOrchestrator::new();
+        assert!(orchestrator.timeout().is_none());
+    }
+
     #[tokio::test]
     async fn test_saga_timeout() {
         let slow_action = Arc::new(FnAction::new(|_payload: Value| async move {

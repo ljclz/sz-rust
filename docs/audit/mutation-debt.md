@@ -22,11 +22,11 @@
 
 | 位置 | 变异类型 | 状态 | 补测计划 | 限期 |
 |------|---------|------|---------|------|
-| persistence.rs:107 | is_empty → true | 存活 | v1.4.0 遗留，补测 is_empty 逻辑 | v1.6.0 |
-| persistence.rs:197 | log_compensate → Ok(()) | 存活 | v1.4.0 遗留，补测 log_compensate 错误路径 | v1.6.0 |
-| persistence.rs:204 | log_fail → Ok(()) | 存活 | v1.4.0 遗留，补测 log_fail 错误路径 | v1.6.0 |
-| saga.rs:131 | with_timeout → Default | 超时 | v1.4.0 遗留，with_timeout 导致无限循环 | v1.6.0 |
-| saga.rs:137 | timeout → None | 存活 | v1.4.0 遗留，补测 timeout getter | v1.6.0 |
+| persistence.rs:107 | is_empty → true | 已杀死 | test_is_empty_false_when_non_empty | 已完成 |
+| persistence.rs:197 | log_compensate → Ok(()) | 已杀死 | test_log_compensate_updates_state | 已完成 |
+| persistence.rs:204 | log_fail → Ok(()) | 已杀死 | test_log_fail_updates_state | 已完成 |
+| saga.rs:131 | with_timeout → Default | 已杀死 | test_with_timeout_sets_value | 已完成 |
+| saga.rs:137 | timeout → None | 已杀死 | test_with_timeout_sets_value + test_timeout_default_is_none | 已完成 |
 | saga.rs:240 | > → == | 存活 | v1.4.0 遗留，补偿重试边界等价 | 可接受 |
 | saga.rs:240 | > → < | 存活 | v1.4.0 遗留，补偿重试边界等价 | 可接受 |
 | saga.rs:240 | > → >= | 存活 | v1.4.0 遗留，补偿重试边界等价 | 可接受 |
