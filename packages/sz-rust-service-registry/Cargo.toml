@@ -15,6 +15,7 @@ categories = ["network-programming"]
 consul = []
 nacos = []
 kubernetes = []
+gray-release = []
 
 [dependencies]
 async-trait = { workspace = true }

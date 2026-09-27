@@ -30,6 +30,13 @@ pub mod kubernetes;
 #[cfg(feature = "nacos")]
 pub mod nacos;
 
+#[cfg(feature = "gray-release")]
+pub mod gray_release;
+#[cfg(feature = "gray-release")]
+pub mod gray_rollback;
+#[cfg(feature = "gray-release")]
+pub mod metadata_filter;
+
 pub mod load_balancer;
 pub mod local_cache;
 
@@ -39,3 +46,10 @@ pub use local_cache::LocalCache;
 pub use registry::{
     ConnectionCounter, InstanceStatus, LoadBalanceStrategy, ServiceInstance, ServiceRegistry,
 };
+
+#[cfg(feature = "gray-release")]
+pub use gray_release::{GrayRelease, GrayReleaseConfig};
+#[cfg(feature = "gray-release")]
+pub use gray_rollback::{HealthStats, RollbackDecision};
+#[cfg(feature = "gray-release")]
+pub use metadata_filter::MetadataFilter;
