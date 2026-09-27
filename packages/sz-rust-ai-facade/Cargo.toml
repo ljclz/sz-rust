@@ -47,6 +47,11 @@ tempfile = { workspace = true }
 name = "ai_facade_bench"
 harness = false
 
+[[bench]]
+name = "multi_dim_router"
+harness = false
+required-features = ["ai-multidim"]
+
 [[bin]]
 name = "generate_baseline_report"
 path = "benches/generate_baseline_report.rs"

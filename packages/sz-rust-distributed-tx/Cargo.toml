@@ -24,9 +24,15 @@ futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
 
 [features]
 dtx-parallel = ["dep:futures"]
+
+[[bench]]
+name = "parallel_saga"
+harness = false
+required-features = ["dtx-parallel"]
 
 [lints]
 workspace = true

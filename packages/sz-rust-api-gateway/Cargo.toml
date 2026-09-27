@@ -31,6 +31,13 @@ prost = { version = "0.13", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+criterion = { workspace = true }
+
+
+[[bench]]
+name = "multi_dim_rate_limit"
+harness = false
+required-features = ["gateway-multidim"]
 
 [lints]
 workspace = true

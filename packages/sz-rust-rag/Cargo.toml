@@ -37,6 +37,12 @@ rag-hybrid = []
 tempfile = { workspace = true }
 tokio = { workspace = true }
 mockall = "0.13"
+criterion = { workspace = true }
+
+[[bench]]
+name = "hybrid_search"
+harness = false
+required-features = ["rag-hybrid"]
 
 [lints.rust]
 unsafe_code = "forbid"
