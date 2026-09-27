@@ -13,7 +13,7 @@ categories = ["development-tools::testing"]
 
 [features]
 default = []
-test-utils = ["dep:reqwest", "dep:serde_json"]
+test-utils = ["dep:reqwest", "dep:serde_json", "dep:sz-rust-orm-facade"]
 
 [dependencies]
 serde = { workspace = true }
@@ -24,10 +24,15 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true, optional = true }
+sz-rust-orm-facade = { workspace = true, optional = true, features = ["auto-rollback", "tx-timeout"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true }
+sz-orm-sqlx = { workspace = true }
+sz-rust-core = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true
