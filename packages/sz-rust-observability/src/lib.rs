@@ -90,6 +90,18 @@ pub mod leak_detector;
 #[cfg(feature = "leak-detect")]
 pub mod leak_report;
 
+#[cfg(feature = "metrics-instrumentation")]
+pub mod metrics_instrumentation;
+
+#[cfg(feature = "grafana-dashboard")]
+pub mod grafana_dashboard;
+
+#[cfg(feature = "otlp-batch")]
+pub mod otlp_batch;
+
+#[cfg(feature = "tail-sampling")]
+pub mod sampling;
+
 pub use exporters::{
     JaegerExporter, MemoryTraceHttpTransport, TraceExportError, TraceHttpTransport, TraceLog,
     TraceSpan, ZipkinExporter,

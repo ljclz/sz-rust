@@ -25,6 +25,16 @@ otlp-http = ["otlp", "opentelemetry-otlp/http-proto", "dep:reqwest"]
 admin = ["dep:sysinfo", "dep:redis"]
 # 启用内存泄漏检测（P4-4）
 leak-detect = []
+# P3-1: Prometheus metrics 自动埋点
+metrics-instrumentation = []
+# P3-1: Grafana dashboard 模板
+grafana-dashboard = []
+# P3-2: OTLP 批量导出
+otlp-batch = []
+# P3-2: OTLP 重试
+otlp-retry = ["otlp-batch"]
+# P3-3: 分布式追踪采样
+tail-sampling = []
 
 [dependencies]
 tokio = { workspace = true }
