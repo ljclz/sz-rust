@@ -37,6 +37,8 @@ base64 = { workspace = true }
 http-body-util = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }
+hex = { workspace = true }
 
 ipnet = { workspace = true }
 
@@ -46,6 +48,10 @@ reqwest = { workspace = true, optional = true }
 [features]
 # 远程 Token 校验
 remote-validate = ["dep:reqwest"]
+# P4-1: WAF 规则引擎
+waf = []
+# P4-2: API 签名验证
+api-signature = []
 
 [lints]
 workspace = true

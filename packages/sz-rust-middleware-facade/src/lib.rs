@@ -55,6 +55,11 @@ pub mod tenant_admin;
 pub mod tower_compat;
 pub mod trace;
 
+#[cfg(feature = "api-signature")]
+pub mod api_signature;
+#[cfg(feature = "waf")]
+pub mod waf;
+
 /// Panic 兜底中间件 re-export
 pub use panic_guard::{panic_guard_middleware, PanicGuardConfig};
 /// Security 配置段 re-export（应用层直接 `use sz_rust_middleware_facade::SecuritySection`）
