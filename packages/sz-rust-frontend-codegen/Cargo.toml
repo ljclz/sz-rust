@@ -34,6 +34,13 @@ tera = { workspace = true }
 # AST 解析
 syn = { workspace = true }
 quote = { workspace = true }
+# Askama 编译期模板（可选）
+askama = { workspace = true, optional = true }
+# 异步 trait
+async-trait = { workspace = true }
+
+[features]
+askama = ["dep:askama"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -15,4 +15,9 @@
 pub mod controller;
 pub mod guard;
 pub mod i18n_error;
+#[cfg(feature = "ssr")]
+pub mod ssr;
 pub mod view;
+
+#[cfg(feature = "inertia")]
+pub mod inertia;

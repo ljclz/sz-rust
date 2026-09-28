@@ -96,6 +96,7 @@ unsafe_code = "forbid"
 # 异步运行时
 tokio = { version = "1.40", features = ["full"] }
 async-trait = "0.1"
+askama = "0.12"
 futures = "0.3"
 # tokio 工具集 + CPU 核数探测
 tokio-util = { version = "0.7", features = ["rt"] }

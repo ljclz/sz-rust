@@ -43,8 +43,13 @@ pub mod model_parser;
 pub mod path_guard;
 pub mod report;
 pub mod service;
+pub mod template_cache;
 pub mod template_engine;
+pub mod template_engine_trait;
 pub mod ui_adapter;
+
+#[cfg(feature = "askama")]
+pub mod askama_engine;
 
 pub use config::{Framework, GenerationConfig, OverrideStrategy, UiLibrary};
 pub use error::FrontendCodegenError;
