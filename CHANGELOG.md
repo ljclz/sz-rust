@@ -5,6 +5,49 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v1.6.0] - 2026-09-28
+
+### Added — P1 sz300 测试补全
+
+- **集成测试 TODO 清零**（P1-1）：service_coverage_test.rs 16 处 TODO + mqtt_dispatch_test.rs 2 处 TODO 全部实现，全局 Mutex 序列化并行测试（18/18 passed）
+- **设备管理端到端测试**（P1-2）：e2e_device_test.rs 7 场景覆盖绑定/解绑/状态上报/日志/订单/异常路径（7/7 passed）
+- **OTA 升级端到端测试**（P1-3）：e2e_ota_test.rs 7 场景覆盖版本查询/升级触发/状态流转/异常路径（7/7 passed）
+- **MQTT 消息分发端到端测试**（P1-4）：e2e_mqtt_test.rs 7 场景覆盖消息分发/状态同步/未知主题/顺序保证（7/7 passed）
+
+### Added — P2 前端集成
+
+- **SSR 中间件**（P2-1，feature `ssr`）：SsrMiddleware + ComponentRenderer trait + XSS 转义 + 渲染失败/超时降级 CSR 引导（7 单元测试）
+- **Inertia.js 适配**（P2-2，feature `inertia`）：InertiaAdapter + SPA/SSR 模式切换 + 敏感字段脱敏 + 版本协商 + 历史缓存（7 单元测试）
+- **类型安全模板引擎**（P2-3，feature `askama`）：TemplateEngine trait + TemplateCache LRU 淘汰 + AskamaEngine 编译期模板注册 + 自动转义（9 单元测试）
+
+### Added — P3 可观测性增强
+
+- **Prometheus metrics 埋点**（P3-1，feature `metrics-instrumentation`）：MetricsInstrumentation + HistogramBucketConfig + 指标命名 snake_case + 标签敏感信息检测（5 单元测试）
+- **Grafana dashboard**（P3-1，feature `grafana-dashboard`）：GrafanaDashboardTemplate 4 面板模板（HTTP/连接池/缓存/熔断）（3 单元测试）
+- **OTLP 批量/重试**（P3-2，feature `otlp-batch`/`otlp-retry`）：OtlpBackend + BatchConfig + RetryConfig + BackoffStrategy + TlsConfig（6 单元测试）
+- **分布式追踪采样**（P3-3，feature `tail-sampling`）：TailSampler + ProbabilisticSampler + RateLimitSampler + SamplerChain 按优先级组合（12 单元测试）
+
+### Added — P4 安全增强
+
+- **WAF 规则引擎**（P4-1，feature `waf`）：WafRuleEngine + OWASP Top 10 规则集（SQL注入/XSS/路径遍历/命令注入/SSRF）+ Block/Detect 模式 + 热加载 + 优先级排序（11 单元测试）
+- **API 签名验证**（P4-2，feature `api-signature`）：SignatureVerifier HMAC-SHA256 + 时间窗口 + NonceStore 防重放 + KeyManager 多密钥轮换（12 单元测试）
+- **OAuth2 设备码流程**（P4-3，feature `device-code`）：DeviceCodeFlow 颁发 device_code/user_code + 轮询状态机 + 过期 + slow_down（9 单元测试）
+- **OAuth2 授权码 + PKCE + scope**（P4-3，feature `oauth-token-store`）：AuthorizationCodeStore 一次性使用 + PkceParams S256/Plain 双方法 + TokenStore 刷新轮换 + ScopeValidator 超范围拒绝（15 单元测试）
+
+### Changed
+
+- workspace 版本号升级至 1.6.0
+- `sz-rust-middleware-facade` 新增 `regex`/`hex` 依赖（WAF + API 签名）
+- `sz-rust-frontend-codegen` 新增 `askama = "0.12"` 依赖（模板引擎）
+
+### Features
+
+- `ssr` / `inertia`（sz-rust-mvc-facade）：SSR 中间件 + Inertia.js 适配
+- `askama`（sz-rust-frontend-codegen）：类型安全模板引擎
+- `metrics-instrumentation` / `grafana-dashboard` / `otlp-batch` / `otlp-retry` / `tail-sampling`（sz-rust-observability）：可观测性增强
+- `waf` / `api-signature`（sz-rust-middleware-facade）：WAF + API 签名
+- `oauth-token-store`（sz-rust-auth-facade）：OAuth2 授权码 + PKCE + scope
+
 ## [v1.5.0] - 2026-09-27
 
 ### Added — P1 数据库与事务健壮性
