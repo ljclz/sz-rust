@@ -69,4 +69,17 @@ pub mod jwt;
 /// 提供 [`OAuth2StateStore`] trait 和 axum 回调中间件（需 `axum` feature）。
 pub mod oauth_callback;
 
+/// P4-3: OAuth2 设备码流程（spec 5.13.1 规则 5-8）
+///
+/// 提供 [`DeviceCodeFlow`]，颁发 device_code/user_code + 轮询状态机 + 过期 + slow_down。
+#[cfg(feature = "device-code")]
+pub mod oauth_device_flow;
+
+/// P4-3: OAuth2 授权码存储 + 令牌存储 + PKCE + scope 校验（spec 5.13.1 规则 1-4/9-11/13）
+///
+/// 提供 [`AuthorizationCodeStore`]（一次性使用 + PKCE S256/Plain 校验）、
+/// [`TokenStore`]（令牌存储 + 刷新）、[`ScopeValidator`]（scope 超范围拒绝）。
+#[cfg(feature = "oauth-token-store")]
+pub mod oauth_token_store;
+
 pub use jwt::JwtAudienceValidator;

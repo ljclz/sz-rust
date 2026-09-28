@@ -75,6 +75,8 @@ redis-store = ["dep:redis", "dep:tokio"]
 redis-cluster = ["redis-store", "redis/cluster"]
 # Device Code 流程支持（需要 tokio time 用于异步轮询）
 device-code = ["dep:tokio"]
+# P4-3: OAuth2 令牌存储 + 授权码一次性 + PKCE S256/Plain + scope 校验
+oauth-token-store = []
 
 [lints]
 workspace = true
