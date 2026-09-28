@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! MQTT 服务配置集成测试
 //!
@@ -66,18 +66,169 @@ fn test_get_subscribe_topics_use_wildcard() {
 /// 验证：topic 格式解析正确，action 路由到对应 handler，
 /// 短 topic（parts.len() < 5）静默返回，未知 action 仅 warn 日志。
 #[tokio::test]
-#[ignore = "requires real DB (see CI db-integration job)"]
+#[ignore = "requires real MySQL 9.6"]
 async fn test_dispatch_topic_routing_integration() {
-    // TODO: 在 db_integration_test.rs 中补充，使用真实 Pool + 真实 device 记录
+    use std::sync::Arc;
+    use sz_rust_core::orm::Value as OrmValue;
+    use sz_rust_sz300::{config, db, state::AppState};
+
+    let cfg = config::AppConfig {
+        server: config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8300,
+        },
+        database: config::DatabaseConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            username: "root".to_string(),
+            password: "test123".to_string(),
+            database: "sz_orm_test".to_string(),
+        },
+    };
+    let pool = match db::init_pool(&cfg).await {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("⚠️ MySQL 不可达，跳过 dispatch 集成测试");
+            return;
+        }
+    };
+    {
+        let mut conn = match pool.acquire().await {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("⚠️ MySQL 获取连接失败，跳过");
+                pool.close_all().await;
+                return;
+            }
+        };
+        if conn.query("SELECT 1").await.is_err() {
+            eprintln!("⚠️ MySQL 查询失败，跳过");
+            pool.close_all().await;
+            return;
+        }
+        conn.execute("DROP TABLE IF EXISTS device").await.ok();
+        conn.execute(
+            "CREATE TABLE device (\
+             device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
+             device_sn VARCHAR(64) NOT NULL UNIQUE,\
+             merchant_id BIGINT NOT NULL DEFAULT 0,\
+             status INT NOT NULL DEFAULT 0,\
+             signal_strength INT NOT NULL DEFAULT 0,\
+             fw_version VARCHAR(32) NOT NULL DEFAULT '',\
+             bind_at DATETIME NULL,\
+             last_online_at DATETIME NULL\
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        )
+        .await
+        .expect("建 device 表失败");
+        conn.execute_with_params(
+            "INSERT INTO device (device_sn, merchant_id, status) VALUES (?, 100, 1)",
+            &[OrmValue::String("SN_DISPATCH_001".to_string())],
+        )
+        .await
+        .expect("插入 device 失败");
+    }
+
+    let state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        pg_pool: None,
+        metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
+    };
+
+    let payload = serde_json::json!({
+        "status": 2,
+        "signal_strength": 80,
+        "fw_version": "1.2.0"
+    })
+    .to_string();
+    sz_rust_sz300::services::mqtt_listener::MqttDispatcher::dispatch(
+        &state,
+        "/sz/device/SN_DISPATCH_001/status",
+        payload.as_bytes(),
+    )
+    .await;
+
+    {
+        let mut conn = pool.acquire().await.expect("获取连接失败");
+        let rows = conn
+            .query_with_params(
+                "SELECT status, signal_strength, fw_version FROM device WHERE device_sn = ?",
+                &[OrmValue::String("SN_DISPATCH_001".to_string())],
+            )
+            .await
+            .expect("查询失败");
+        assert_eq!(rows.len(), 1);
+        let status = rows[0].get("status").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let signal = rows[0]
+            .get("signal_strength")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
+        let fw = rows[0]
+            .get("fw_version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(status, 2, "dispatch 应将 status 更新为 2");
+        assert_eq!(signal, 80, "dispatch 应将 signal_strength 更新为 80");
+        assert_eq!(fw, "1.2.0", "dispatch 应将 fw_version 更新为 1.2.0");
+    }
+
+    {
+        let mut conn = pool.acquire().await.expect("获取连接失败");
+        conn.execute("DROP TABLE IF EXISTS device").await.ok();
+    }
+    pool.close_all().await;
 }
 
 /// start_consumer 优雅退出集成测试（需真实 DB）
 ///
 /// 验证：收到 shutdown_rx=true 后在合理时间内退出，不泄漏任务。
 #[tokio::test]
-#[ignore = "requires real DB (see CI db-integration job)"]
+#[ignore = "requires real MySQL 9.6"]
 async fn test_start_consumer_graceful_shutdown_integration() {
-    // TODO: 在 db_integration_test.rs 中补充
+    use std::sync::Arc;
+    use sz_rust_sz300::{config, db, state::AppState};
+    use tokio::sync::watch;
+    use tokio::time::Duration;
+
+    let cfg = config::AppConfig {
+        server: config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8300,
+        },
+        database: config::DatabaseConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3306,
+            username: "root".to_string(),
+            password: "test123".to_string(),
+            database: "sz_orm_test".to_string(),
+        },
+    };
+    let pool = match db::init_pool(&cfg).await {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("⚠️ MySQL 不可达，跳过 start_consumer 测试");
+            return;
+        }
+    };
+    let state = AppState {
+        db_pool: Arc::new(pool.clone()),
+        pg_pool: None,
+        metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
+    };
+
+    let (tx, rx) = watch::channel(false);
+    let handle = tokio::spawn(async move {
+        sz_rust_sz300::services::mqtt_listener::MqttDispatcher::start_consumer(state, rx).await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    tx.send(true).expect("发送 shutdown 信号失败");
+
+    let result = tokio::time::timeout(Duration::from_secs(3), handle).await;
+    assert!(result.is_ok(), "start_consumer 应在 3 秒内优雅退出");
+    assert!(result.unwrap().is_ok(), "start_consumer 任务应无 panic");
+
+    pool.close_all().await;
 }
 
 // ============================================================================
