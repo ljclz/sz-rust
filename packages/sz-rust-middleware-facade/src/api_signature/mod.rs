@@ -11,6 +11,7 @@ pub mod nonce_store;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 /// 签名配置
@@ -35,11 +36,12 @@ impl Default for SignatureConfig {
 }
 
 /// API 密钥（spec 5.12.6 + 6.9.2）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ApiKey {
     /// 密钥标识
     pub key_id: String,
     /// 密钥内容（不明文记录日志）
+    #[serde(skip_serializing)]
     pub secret: String,
 }
 

@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use base64::Engine;
+use serde::Serialize;
 
 /// PKCE 方法（spec 5.13.1 规则 3）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,11 +189,13 @@ pub struct RedeemResult {
 }
 
 /// 令牌信息
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TokenInfo {
     /// 访问令牌
+    #[serde(skip_serializing)]
     pub access_token: String,
     /// 刷新令牌（可选）
+    #[serde(skip_serializing)]
     pub refresh_token: Option<String>,
     /// 客户端 ID
     pub client_id: String,

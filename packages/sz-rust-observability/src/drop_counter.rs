@@ -91,7 +91,7 @@ impl<T> TrackedResource<T> {
 
     /// 取出内部值（不再追踪 Drop）
     pub fn take(mut self) -> T {
-        self.value.take().unwrap()
+        self.value.take().expect("TrackedResource 值已被取出过")
     }
 }
 

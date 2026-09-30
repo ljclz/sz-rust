@@ -134,8 +134,8 @@ impl LeakDetector {
                 has_monotonic = true;
                 let leaked_count = counts
                     .last()
-                    .unwrap()
-                    .saturating_sub(*counts.first().unwrap());
+                    .expect("counts.len() >= 2 已在前置守卫确认")
+                    .saturating_sub(*counts.first().expect("counts.len() >= 2 已在前置守卫确认"));
                 if leaked_count > 0 {
                     leaked_resources.push(LeakedResource {
                         kind,
@@ -164,8 +164,8 @@ impl LeakDetector {
             return GrowthTrend::Stable;
         }
 
-        let first = *counts.first().unwrap() as f32;
-        let last = *counts.last().unwrap() as f32;
+        let first = *counts.first().expect("counts.len() >= 2 已在前置守卫确认") as f32;
+        let last = *counts.last().expect("counts.len() >= 2 已在前置守卫确认") as f32;
 
         if first == 0.0 && last > 0.0 {
             return GrowthTrend::MonotonicGrowth;

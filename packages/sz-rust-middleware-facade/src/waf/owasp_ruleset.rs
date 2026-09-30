@@ -22,14 +22,16 @@ pub fn owasp_default_ruleset() -> Vec<WafRule> {
         WafRule {
             id: "owasp_sqli_union".to_string(),
             priority: 1,
-            pattern: Regex::new(r"(?i)(union\s+select|union\s+all\s+select)").unwrap(),
+            pattern: Regex::new(r"(?i)(union\s+select|union\s+all\s+select)")
+                .expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "SQL 注入: UNION SELECT".to_string(),
         },
         WafRule {
             id: "owasp_sqli_boolean".to_string(),
             priority: 1,
-            pattern: Regex::new(r"(?i)('\s*or\s*'1'='1|'\s*or\s*1=1|--\s)").unwrap(),
+            pattern: Regex::new(r"(?i)('\s*or\s*'1'='1|'\s*or\s*1=1|--\s)")
+                .expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "SQL 注入: 布尔盲注".to_string(),
         },
@@ -37,14 +39,15 @@ pub fn owasp_default_ruleset() -> Vec<WafRule> {
         WafRule {
             id: "owasp_xss_script".to_string(),
             priority: 2,
-            pattern: Regex::new(r"(?i)<script[^>]*>").unwrap(),
+            pattern: Regex::new(r"(?i)<script[^>]*>").expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "XSS: <script> 标签".to_string(),
         },
         WafRule {
             id: "owasp_xss_event".to_string(),
             priority: 2,
-            pattern: Regex::new(r"(?i)(onerror|onload|onclick)\s*=").unwrap(),
+            pattern: Regex::new(r"(?i)(onerror|onload|onclick)\s*=")
+                .expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::Medium,
             description: "XSS: 事件处理器".to_string(),
         },
@@ -52,7 +55,7 @@ pub fn owasp_default_ruleset() -> Vec<WafRule> {
         WafRule {
             id: "owasp_path_traversal".to_string(),
             priority: 3,
-            pattern: Regex::new(r"(\.\./|\.\.\\|%2e%2e%2f)").unwrap(),
+            pattern: Regex::new(r"(\.\./|\.\.\\|%2e%2e%2f)").expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "路径遍历".to_string(),
         },
@@ -61,7 +64,7 @@ pub fn owasp_default_ruleset() -> Vec<WafRule> {
             id: "owasp_cmd_injection".to_string(),
             priority: 3,
             pattern: Regex::new(r"(;|\||`|\$\(|%0a|%0d)\s*(cat|ls|id|whoami|wget|curl|bash|sh)\s")
-                .unwrap(),
+                .expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "命令注入".to_string(),
         },
@@ -72,7 +75,7 @@ pub fn owasp_default_ruleset() -> Vec<WafRule> {
             pattern: Regex::new(
                 r"(?i)(http|ftp|file)://(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.169\.254)",
             )
-            .unwrap(),
+            .expect("内置 WAF 规则正则应可编译"),
             risk: RiskLevel::High,
             description: "SSRF: 内网地址".to_string(),
         },

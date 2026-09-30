@@ -2,6 +2,7 @@
 // Copyright (c) 2026 SZ-Rust Team
 //! P2-1 SSR 中间件 axum 端到端集成测试
 
+#![cfg(feature = "ssr")]
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
