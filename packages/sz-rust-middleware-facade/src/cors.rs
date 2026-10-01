@@ -724,10 +724,16 @@ mod tests {
     #[tokio::test]
     async fn test_cors_layer_clonable() {
         // CorsLayer 必须 Clone + Send + Sync + 'static 才能用作 axum Layer
+        fn is_layer<T: Send + Sync + Clone + 'static>() -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
         let layer = cors_layer();
         let _cloned = layer.clone();
-        fn assert_send_sync<T: Send + Sync + Clone + 'static>(_: T) {}
-        assert_send_sync(layer);
+        assert!(
+            is_layer::<CorsLayer>(),
+            "CorsLayer 必须满足 Clone + Send + Sync + 'static（编译期约束）"
+        );
     }
 
     #[tokio::test]

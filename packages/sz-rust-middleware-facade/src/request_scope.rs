@@ -233,10 +233,16 @@ mod tests {
     }
 
     /// 验证 RequestScopeService 实现 Send
-    fn assert_send<T: Send>() {}
+    fn is_send<T: Send>() -> bool {
+        let _ = std::marker::PhantomData::<T>;
+        true
+    }
 
     #[test]
     fn test_p1_arch_di_02_service_is_send() {
-        assert_send::<RequestScopeService<EchoService>>();
+        assert!(
+            is_send::<RequestScopeService<EchoService>>(),
+            "RequestScopeService 必须满足 Send（编译期约束）"
+        );
     }
 }

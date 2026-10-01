@@ -1009,8 +1009,10 @@ mod tests {
     #[test]
     fn test_hostname_returns_value_or_none() {
         // hostname() 在 Windows 上应返回 COMPUTERNAME，在 Unix 上调用 gethostname
-        // 此测试仅验证不 panic
-        let _ = hostname();
+        // 此测试验证调用不 panic，且 Some 值非空
+        if let Some(name) = hostname() {
+            assert!(!name.is_empty(), "hostname() 返回的 Some 值不应为空");
+        }
     }
 
     #[test]

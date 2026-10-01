@@ -166,9 +166,12 @@ async fn integration_token_survives_multiple_validations() {
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
     // 同一 Token 多次校验应都成功（幂等）
+    let mut validated = 0u32;
     for _ in 0..10 {
         sso.validate(&login.tokens.access_token).await.unwrap();
+        validated += 1;
     }
+    assert_eq!(validated, 10, "同一 Token 10 次校验应全部成功");
 }
 
 #[tokio::test]

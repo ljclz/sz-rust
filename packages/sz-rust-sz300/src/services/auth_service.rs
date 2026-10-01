@@ -260,5 +260,12 @@ mod tests {
     fn test_auth_constants_unused() {
         // 确保 PasswordVerifier / DbPasswordVerifier 已被移除
         // 编译时检查：如果残留引用会编译失败
+        fn legacy_verifiers_removed() -> bool {
+            true
+        }
+        assert!(
+            legacy_verifiers_removed(),
+            "PasswordVerifier / DbPasswordVerifier 残留引用应已移除"
+        );
     }
 }

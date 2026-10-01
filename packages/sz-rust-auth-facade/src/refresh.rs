@@ -1880,12 +1880,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_revoker_revoke_idempotent() {
-        let (issuer, _, revoker) = make_issuer();
+        let (issuer, verifier, revoker) = make_issuer();
         let pair = issuer.issue(1, "user1").await.unwrap();
 
         revoker.revoke(&pair.refresh_token).await.unwrap();
         // Second revoke should also succeed (idempotent)
         revoker.revoke(&pair.refresh_token).await.unwrap();
+
+        // 幂等语义：吊销后 refresh token 不应再通过校验
+        let result = verifier.verify_refresh(&pair.refresh_token).await;
+        assert!(
+            matches!(result, Err(RefreshTokenError::Revoked)),
+            "吊销后 refresh token 校验应返回 Revoked"
+        );
     }
 
     // ── T10: 边界测试 ──
@@ -2323,6 +2330,8 @@ mod tests {
         let (new_token, _) = issuer.renew_access(&claims).unwrap();
         verifier.verify_access(&pair.access_token).await.unwrap();
         verifier.verify_access(&new_token).await.unwrap();
+        // 续签应签发新 token，而非复用原 token
+        assert_ne!(new_token, pair.access_token, "续签应签发新 token");
     }
 
     #[tokio::test]
@@ -2331,7 +2340,9 @@ mod tests {
         let pair = issuer.issue(1, "user1").await.unwrap();
         let claims = verifier.verify_access(&pair.access_token).await.unwrap();
         let (new_token, _) = issuer.renew_access(&claims).unwrap();
-        verifier.verify_access(&new_token).await.unwrap();
+        let new_claims = verifier.verify_access(&new_token).await.unwrap();
+        // 续签后的新 token 应可通过校验且用户身份一致
+        assert_eq!(new_claims.user_id, Some(1), "续签 token 应保持用户身份");
     }
 
     #[tokio::test]
@@ -2340,7 +2351,9 @@ mod tests {
         let pair = issuer.issue(1, "user1").await.unwrap();
         let claims = verifier.verify_access(&pair.access_token).await.unwrap();
         let _ = issuer.renew_access(&claims).unwrap();
-        verifier.verify_access(&pair.access_token).await.unwrap();
+        let old_claims = verifier.verify_access(&pair.access_token).await.unwrap();
+        // 续签后原 token 应仍有效（不被吊销）
+        assert_eq!(old_claims.user_id, Some(1), "原 token 在续签后仍应有效");
     }
 
     // ── 边界组合测试 ──

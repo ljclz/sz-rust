@@ -263,5 +263,11 @@ mod tests {
         });
         h1.join().unwrap();
         h2.join().unwrap();
+        // 并发写入/检查后，读取值应落在写入范围（0..100）内
+        let final_mb = guard.current_memory_mb();
+        assert!(
+            final_mb < 100,
+            "并发写入后读取值应来自写入范围（0..100），实际: {final_mb}"
+        );
     }
 }

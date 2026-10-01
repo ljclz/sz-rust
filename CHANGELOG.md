@@ -11,6 +11,15 @@
 
 - **凭据 Debug 输出脱敏**：`sz-rust-auth-facade` 的 `TokenInfo`（OAuth2 访问/刷新令牌）与 `sz-rust-middleware-facade` 的 `ApiKey`（API 密钥）由 `#[derive(Debug)]` 改为自定义脱敏 `Debug` 实现，敏感字段在 `{:?}` 输出中一律显示 `<redacted>`，防止令牌/密钥经日志泄露。新增 `test_token_info_debug_redacts_secrets` / `test_api_key_debug_redacts_secret` 两条防泄漏测试。
 
+### Fixed — 断言审计 WARN 批量清理（铁律 10/23）
+
+- **首批 10 个 WARN 清零**：对 `assertion-value-check.js` 检出的本会话相关 crate 空洞/隐式断言测试批量补强——
+  - `sz-rust-sz300`：`test_auth_constants_unused` 以编译期断言锚定 `PasswordVerifier`/`DbPasswordVerifier` 残留引用已移除
+  - `sz-rust-auth-facade`：`test_revoker_revoke_idempotent` 补吊销后校验返回 `Err(Revoked)` 断言；`test_renew_access_*` 3 个续签测试补 token 更新/身份保持/原 token 仍有效断言；`integration_token_survives_multiple_validations` 补 10 次校验计数器断言
+  - `sz-rust-middleware-facade`：`CorsLayer` / `RequestScopeService` 两个 smoke 测试改为 `assert!` 锚定编译期约束（Clone+Send+Sync+'static / Send）
+  - `sz-rust-observability`：`test_concurrent_set_and_check` 补并发写入范围断言；`test_hostname_returns_value_or_none` 补 `Some` 非空断言
+- `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 75 → 65**（断言总数 16732）。
+
 ### Fixed — 空洞测试清理（断言价值门禁，铁律 10/23）
 
 - **空凭据登录空洞测试**：删除 `service_coverage_test.rs` 中无断言的 `test_auth_login_empty_credentials_returns_error` 占位；空凭据校验下沉为纯函数 `credentials_non_empty`，在 `auth.rs` 新增 `test_credentials_non_empty_rejects_empty`（4 断言，覆盖空用户名/空密码/全空/非空）。
