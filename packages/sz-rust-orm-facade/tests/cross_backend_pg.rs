@@ -4,7 +4,11 @@
 //! 在 PostgreSQL 18.2 上行为与 MySQL 9.6 一致（spec 5.1.4/5.2.6/5.4.4）。
 //!
 //! 运行：cargo test -p sz-rust-orm-facade --features auto-rollback,tx-timeout,migration-enhanced --test cross_backend_pg -- --ignored
-#![cfg(all(feature = "auto-rollback", feature = "tx-timeout", feature = "migration-enhanced"))]
+#![cfg(all(
+    feature = "auto-rollback",
+    feature = "tx-timeout",
+    feature = "migration-enhanced"
+))]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -142,7 +146,11 @@ async fn pg_explicit_rollback_clears() {
     }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(count_rows(&pool, "ar_pg3", 1).await, 0, "PG: 显式回滚应清空");
+    assert_eq!(
+        count_rows(&pool, "ar_pg3", 1).await,
+        0,
+        "PG: 显式回滚应清空"
+    );
 
     cleanup_table(&pool, "ar_pg3").await;
     pool.close_all().await;
@@ -177,7 +185,11 @@ async fn pg_disabled_config_no_auto_rollback() {
         let mut conn = pool.acquire().await.expect("获取连接失败");
         conn.rollback().await.ok();
     }
-    assert_eq!(count_rows(&pool, "ar_pg4", 1).await, 0, "PG: 手动回滚后清空");
+    assert_eq!(
+        count_rows(&pool, "ar_pg4", 1).await,
+        0,
+        "PG: 手动回滚后清空"
+    );
 
     cleanup_table(&pool, "ar_pg4").await;
     pool.close_all().await;
@@ -208,7 +220,11 @@ async fn pg_tx_commit_within_timeout() {
         .expect("插入失败");
     tx.commit().await.expect("提交失败");
 
-    assert_eq!(count_rows(&pool, "tx_pg1", 1).await, 1, "PG: 超时内提交成功");
+    assert_eq!(
+        count_rows(&pool, "tx_pg1", 1).await,
+        1,
+        "PG: 超时内提交成功"
+    );
 
     cleanup_table(&pool, "tx_pg1").await;
     pool.close_all().await;
@@ -274,11 +290,7 @@ async fn pg_migration_idempotent() {
     cleanup_table(&pool, "mig_pg").await;
     cleanup_table(&pool, "__migrations").await;
 
-    let mgr = MigrationEnhanced::new(
-        Arc::new(pool.clone()),
-        pg_migrations(),
-        DbType::PostgreSQL,
-    );
+    let mgr = MigrationEnhanced::new(Arc::new(pool.clone()), pg_migrations(), DbType::PostgreSQL);
 
     let r1 = mgr.migrate().await.expect("首次迁移失败");
     assert_eq!(r1.applied.len(), 2, "PG: 首次应用 2 个迁移");
@@ -300,11 +312,7 @@ async fn pg_migration_checksum_verify() {
     cleanup_table(&pool, "mig_pg").await;
     cleanup_table(&pool, "__migrations").await;
 
-    let mgr = MigrationEnhanced::new(
-        Arc::new(pool.clone()),
-        pg_migrations(),
-        DbType::PostgreSQL,
-    );
+    let mgr = MigrationEnhanced::new(Arc::new(pool.clone()), pg_migrations(), DbType::PostgreSQL);
     mgr.migrate().await.expect("迁移失败");
     mgr.verify_checksums().await.expect("校验和验证失败");
 
@@ -320,14 +328,9 @@ async fn pg_migration_dry_run_no_changes() {
     cleanup_table(&pool, "mig_pg").await;
     cleanup_table(&pool, "__migrations").await;
 
-    let mgr = MigrationEnhanced::new(
-        Arc::new(pool.clone()),
-        pg_migrations(),
-        DbType::PostgreSQL,
-    );
+    let mgr = MigrationEnhanced::new(Arc::new(pool.clone()), pg_migrations(), DbType::PostgreSQL);
     let report = mgr.dry_run().await.expect("dry-run 失败");
     assert_eq!(report.applied.len(), 2, "PG: dry-run 列出待应用迁移");
-
 
     cleanup_table(&pool, "mig_pg").await;
     cleanup_table(&pool, "__migrations").await;

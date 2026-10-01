@@ -482,12 +482,8 @@ mod tests {
 
     #[test]
     fn test_with_timeout_sets_value() {
-        let orchestrator =
-            SagaOrchestrator::new().with_timeout(Duration::from_millis(200));
-        assert_eq!(
-            orchestrator.timeout(),
-            Some(Duration::from_millis(200))
-        );
+        let orchestrator = SagaOrchestrator::new().with_timeout(Duration::from_millis(200));
+        assert_eq!(orchestrator.timeout(), Some(Duration::from_millis(200)));
     }
 
     #[test]
