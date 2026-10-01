@@ -90,6 +90,9 @@ impl<T> TrackedResource<T> {
     }
 
     /// 取出内部值（不再追踪 Drop）
+    ///
+    /// `take` 按值消费 `self`，`value` 仅在 `new` 中置为 `Some` 且 `get` 不转移所有权，
+    /// 因此此处 `None` 分支在类型层面不可达；`expect` 仅作不变式断言，panic 实际不会触发。
     pub fn take(mut self) -> T {
         self.value.take().expect("TrackedResource 值已被取出过")
     }

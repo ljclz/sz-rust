@@ -93,6 +93,8 @@ let value = self.value.take().ok_or_else(|| {
 
 若函数签名不允许返回 `Result`，至少应使用 `expect` 并确保前置条件不可变，但更建议重构为可返回错误的形式。
 
+> **处置（2026-10-01）**：已评估并闭合。`TrackedResource::take(mut self)` 按值消费自身，`value` 仅在 `new` 中置为 `Some`，`get` 不转移所有权，因此 `None` 分支在类型层面不可达——`expect` 属不变式断言而非可恢复错误路径。强行改为 `Result` 会污染公开 API 且调用方（仅测试 `drop_counter.rs:157`）无错误处理场景。已在 `drop_counter.rs` 补充不变式注释说明。生产代码其余位置无裸 `unwrap`（`exporters.rs` 中的 `unwrap` 均在 `#[cfg(test)]` 测试模块内）。
+
 #### 4. 手动实现脱敏的 `Debug`
 
 ```rust
