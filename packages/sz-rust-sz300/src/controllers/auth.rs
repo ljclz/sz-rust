@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use crate::services::auth_service;
 use crate::services::row_to_json;
@@ -43,6 +43,11 @@ fn clear_csrf_cookie(response: &mut Response) {
     }
 }
 
+/// 校验登录凭据是否非空（空用户名或空密码直接拒绝，无需访问 DB）
+fn credentials_non_empty(username: &str, password: &str) -> bool {
+    !username.is_empty() && !password.is_empty()
+}
+
 impl AuthController {
     /// 用户登录 — 仅负责解析请求、调用 service、格式化响应
     ///
@@ -64,7 +69,7 @@ impl AuthController {
         let username = data.get("username").and_then(|v| v.as_str()).unwrap_or("");
         let password = data.get("password").and_then(|v| v.as_str()).unwrap_or("");
 
-        if username.is_empty() || password.is_empty() {
+        if !credentials_non_empty(username, password) {
             return ctrl.render_error("用户名和密码不能为空", json!({}), 0);
         }
 
@@ -254,6 +259,21 @@ mod tests {
         assert!(
             cookie_str.contains("Max-Age=0"),
             "退出登录应清除 CSRF Cookie（Max-Age=0）\nCookie: {cookie_str}"
+        );
+    }
+
+    /// 空用户名/密码应在进入 DB 前被拒绝（P0：无凭据登录防护）
+    #[test]
+    fn test_credentials_non_empty_rejects_empty() {
+        assert!(
+            !credentials_non_empty("", "pass"),
+            "空用户名应判定为凭据无效"
+        );
+        assert!(!credentials_non_empty("user", ""), "空密码应判定为凭据无效");
+        assert!(!credentials_non_empty("", ""), "全空应判定为凭据无效");
+        assert!(
+            credentials_non_empty("user", "pass"),
+            "非空凭据应判定为有效"
         );
     }
 }

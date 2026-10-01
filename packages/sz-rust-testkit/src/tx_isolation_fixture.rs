@@ -59,7 +59,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tx_isolation_fixture_construct() {
-        let _ = std::marker::PhantomData::<TxIsolationFixture>;
+    fn test_tx_isolation_fixture_is_send_sync() {
+        // 夹具会被移动到异步测试任务中跨 .await 使用（见 tests/p1_4_testkit.rs），
+        // Send + Sync 是编译期硬约束：若未来字段破坏该约束，本测试将无法编译。
+        fn is_send_sync<T: Send + Sync>() -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            is_send_sync::<TxIsolationFixture>(),
+            "TxIsolationFixture 必须满足 Send + Sync（异步测试夹具的编译期要求）"
+        );
     }
 }

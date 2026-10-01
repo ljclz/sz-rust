@@ -589,13 +589,8 @@ async fn test_health_metrics_returns_prometheus_format() {
 // auth controller
 // ============================================================================
 
-#[tokio::test]
-async fn test_auth_login_empty_credentials_returns_error() {
-    // login 在 username.is_empty() || password.is_empty() 时直接 render_error
-    // 不依赖 DB，可直接测试
-    // 注：login 是私有方法，通过公共函数测试需构造完整 Request
-    // 此处记录测试需求，实际验证见 controllers/auth.rs 的单元测试
-}
+// 注：空凭据登录校验（P0）不依赖 DB，已在 src/controllers/auth.rs 的
+// test_credentials_non_empty_rejects_empty 单元测试中覆盖，此处不再重复。
 
 #[tokio::test]
 #[ignore = "requires real MySQL 9.6"]
