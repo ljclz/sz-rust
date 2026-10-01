@@ -241,44 +241,59 @@ mod tests {
 
     #[test]
     fn record_llm_tokens_does_not_panic() {
-        let metrics = AiMetrics::global();
+        // 独立实例：token 记录不应影响请求计数（也验证 record 不 panic）
+        let metrics = AiMetrics::new();
         metrics.record_llm_tokens("openai", "gpt-4", "prompt", 100);
         metrics.record_llm_tokens("openai", "gpt-4", "completion", 50);
+        assert_eq!(metrics.llm_request_count(), 0, "token 记录不应影响请求计数");
     }
 
     #[test]
     fn record_llm_request_duration_does_not_panic() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new();
         metrics.record_llm_request_duration(1.5);
         metrics.record_llm_request_duration(0.01);
+        assert_eq!(metrics.llm_request_count(), 0, "时长记录不应影响请求计数");
     }
 
     #[test]
     fn record_rag_recall_does_not_panic() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new();
         metrics.record_rag_recall(0.05);
         metrics.record_rag_recall(0.2);
+        assert_eq!(metrics.llm_request_count(), 0, "召回率记录不应影响请求计数");
     }
 
     #[test]
     fn record_agent_step_does_not_panic() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new();
         metrics.record_agent_step("agent-1", "natural");
         metrics.record_agent_step("agent-2", "max_steps");
+        assert_eq!(
+            metrics.llm_request_count(),
+            0,
+            "智能体步数记录不应影响请求计数"
+        );
     }
 
     #[test]
     fn record_embedding_does_not_panic() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new();
         metrics.record_embedding("openai", "text-embedding-3-small");
         metrics.record_embedding("local", "local");
+        assert_eq!(metrics.llm_request_count(), 0, "嵌入记录不应影响请求计数");
     }
 
     #[test]
     fn record_cache_hit_does_not_panic() {
-        let metrics = AiMetrics::global();
+        let metrics = AiMetrics::new();
         metrics.record_cache_hit("semantic");
         metrics.record_cache_hit("exact");
+        assert_eq!(
+            metrics.llm_request_count(),
+            0,
+            "缓存命中记录不应影响请求计数"
+        );
     }
 
     #[test]

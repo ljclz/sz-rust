@@ -207,7 +207,17 @@ mod tests {
     fn audit_http_client_client_ref_accessible() {
         let client = reqwest::Client::new();
         let audit = AuditHttpClient::new(client, RateLimitConfig::default());
-        let _ref = audit.client();
+        let client_ref = audit.client();
+        // client() 返回的引用应能正常构建请求（编译期验证类型正确）
+        let req = client_ref
+            .get("https://example.com")
+            .build()
+            .expect("client() 返回的引用应能构建请求");
+        assert_eq!(
+            req.url().host_str(),
+            Some("example.com"),
+            "client() 返回的引用应能正常构建请求"
+        );
     }
 
     #[test]

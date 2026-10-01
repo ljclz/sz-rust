@@ -574,8 +574,16 @@ mod tests {
         let pipeline = make_pipeline()
             .with_embedding_model("custom-embed")
             .with_llm_model("custom-llm")
-            .with_metric(SimilarityMetric::Dot);
-        // builder 方法返回 Self，验证链式调用不 panic
-        let _pipeline2 = pipeline.with_reranker(Arc::new(NoopReranker::new()));
+            .with_metric(SimilarityMetric::Dot)
+            .with_reranker(Arc::new(NoopReranker::new()));
+        // RagPipeline 用于异步检索任务，必须满足 Send + Sync（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            assert_send_sync(pipeline),
+            "RagPipeline 必须满足 Send + Sync（编译期约束）"
+        );
     }
 }

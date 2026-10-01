@@ -26,6 +26,11 @@
   - `runtime/shutdown.rs` / `signal.rs` / `spawn.rs`：补 0 超时 shutdown 一致性、`shutdown_future` Send 编译期约束、零超时结果匹配断言
   - `tests/middleware_chaos.rs`：builder 链 smoke 测试补 `RateLimitConfig` Send+Sync 编译期断言
 - `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 65 → 55**（断言总数 16743）。
+- **第三批 sz-rust-ai-facade 8 个 WARN 清零**：对 ai-facade 的空洞/隐式断言测试批量补强——
+  - `common/audit.rs`：`test_audit_http_client_client_ref_accessible` 由 `let _ref` 占位改为实际使用 `client()` 引用构建 GET 请求并断言 `host_str() == "example.com"`
+  - `common/metrics.rs`：6 个 `record_*_does_not_panic` 测试改用独立实例（避免全局计数器并行污染）并补「该记录不改变 LLM 请求计数」断言
+  - `rag/pipeline.rs`：`test_rag_pipeline_builder_methods` 改为完整链式调用（`with_metric` + `with_reranker`）并补 `Send + Sync` 编译期约束断言
+- `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 55 → 47**（断言总数 16763）。
 
 ### Fixed — 空洞测试清理（断言价值门禁，铁律 10/23）
 
