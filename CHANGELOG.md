@@ -5,6 +5,12 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本管理遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### Changed — 安全加固（Debug 脱敏）
+
+- **凭据 Debug 输出脱敏**：`sz-rust-auth-facade` 的 `TokenInfo`（OAuth2 访问/刷新令牌）与 `sz-rust-middleware-facade` 的 `ApiKey`（API 密钥）由 `#[derive(Debug)]` 改为自定义脱敏 `Debug` 实现，敏感字段在 `{:?}` 输出中一律显示 `<redacted>`，防止令牌/密钥经日志泄露。新增 `test_token_info_debug_redacts_secrets` / `test_api_key_debug_redacts_secret` 两条防泄漏测试。
+
 ## [v1.6.0] - 2026-09-28
 
 ### Added — P1 sz300 测试补全

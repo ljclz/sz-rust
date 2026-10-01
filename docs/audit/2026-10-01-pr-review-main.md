@@ -1,7 +1,7 @@
 # PR 审查报告（2026-10-01，branch: main，range: 6abd9ab7^..6abd9ab7）
 
 > 审查时点: `HEAD @ a6e007c0`（报告为时点快照；后续新提交不在本报告范围内）
-> 人工注记（2026-10-01 复核）：本报告 AI 评审使用云知声 Unisound `u2-flash` 模型（`AI_BASE_URL=https://maas-api.unisound.com/v1`，`--no-ai-cache` 强制新鲜生成）。AI 第 2 点称「PR 仅新增报告文档、无代码变更」与事实不符（本 range diff 含 9 个文件的修复+文档）；第 5 点称「AI 评审未执行」系引用 09-30 报告旧文本，本次 AI 已实际执行。AI 第 4 点（`#[derive(Debug)]` 仍可能打印敏感字段）为有效改进建议，暂不阻塞。
+> 人工注记（2026-10-01 复核）：本报告 AI 评审使用云知声 Unisound `u2-flash` 模型（`AI_BASE_URL=https://maas-api.unisound.com/v1`，`--no-ai-cache` 强制新鲜生成）。AI 第 2 点称「PR 仅新增报告文档、无代码变更」与事实不符（本 range diff 含 9 个文件的修复+文档）；第 5 点称「AI 评审未执行」系引用 09-30 报告旧文本，本次 AI 已实际执行。AI 第 4 点（`#[derive(Debug)]` 仍可能打印敏感字段）为有效改进建议，已在后续提交中落实：`oauth_token_store.rs` 的 `TokenInfo` 与 `api_signature/mod.rs` 的 `ApiKey` 改为自定义脱敏 `Debug`（敏感字段输出 `<redacted>`），并新增 `test_token_info_debug_redacts_secrets` / `test_api_key_debug_redacts_secret` 两条防泄漏测试。
 
 ## 状态机
 - scanning → scanning; scanning → compile; compile → static; static → static; static → static; static → security; security → test; test → integration; integration → ai; ai → done; 最终状态: **done**

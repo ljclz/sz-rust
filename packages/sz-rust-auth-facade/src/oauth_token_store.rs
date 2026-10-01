@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -17,18 +18,13 @@ use base64::Engine;
 use serde::Serialize;
 
 /// PKCE 方法（spec 5.13.1 规则 3）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PkceMethod {
     /// S256: code_challenge = BASE64URL(SHA256(code_verifier))
+    #[default]
     S256,
     /// Plain: code_challenge = code_verifier
     Plain,
-}
-
-impl Default for PkceMethod {
-    fn default() -> Self {
-        PkceMethod::S256
-    }
 }
 
 /// PKCE 参数
@@ -189,7 +185,7 @@ pub struct RedeemResult {
 }
 
 /// 令牌信息
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct TokenInfo {
     /// 访问令牌
     #[serde(skip_serializing)]
@@ -201,6 +197,18 @@ pub struct TokenInfo {
     pub client_id: String,
     /// scope
     pub scope: Vec<String>,
+}
+
+impl fmt::Debug for TokenInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 令牌属于敏感凭据：Debug 输出一律脱敏，禁止进入日志
+        f.debug_struct("TokenInfo")
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("client_id", &self.client_id)
+            .field("scope", &self.scope)
+            .finish()
+    }
 }
 
 /// 令牌存储（spec 5.13.1 规则 9/11）
@@ -417,6 +425,28 @@ mod tests {
         let store = TokenStore::new(Duration::from_secs(3600));
         let result = store.refresh("nonexistent");
         assert_eq!(result, Err(AuthCodeError::RefreshTokenInvalid));
+    }
+
+    #[test]
+    fn test_token_info_debug_redacts_secrets() {
+        let token = TokenInfo {
+            access_token: "access_secret_123".to_string(),
+            refresh_token: Some("refresh_secret_456".to_string()),
+            client_id: "client1".to_string(),
+            scope: vec!["read".to_string()],
+        };
+
+        let debug = format!("{token:?}");
+        assert!(
+            !debug.contains("access_secret_123"),
+            "Debug 输出不得包含访问令牌明文"
+        );
+        assert!(
+            !debug.contains("refresh_secret_456"),
+            "Debug 输出不得包含刷新令牌明文"
+        );
+        assert!(debug.contains("client1"));
+        assert!(debug.contains("<redacted>"));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 pub mod key_manager;
 pub mod nonce_store;
 
+use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -36,13 +37,23 @@ impl Default for SignatureConfig {
 }
 
 /// API 密钥（spec 5.12.6 + 6.9.2）
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 pub struct ApiKey {
     /// 密钥标识
     pub key_id: String,
     /// 密钥内容（不明文记录日志）
     #[serde(skip_serializing)]
     pub secret: String,
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 密钥属于敏感凭据：Debug 输出一律脱敏，禁止进入日志
+        f.debug_struct("ApiKey")
+            .field("key_id", &self.key_id)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
 }
 
 impl ApiKey {
@@ -102,6 +113,8 @@ impl SignatureVerifier {
     /// 5. 比对签名
     /// 6. 时间窗口校验
     /// 7. nonce 防重放
+    // 参数数量为签名协议领域固有（方法/路径/时间戳/nonce/签名/正文），保持扁平签名以支持无堆分配调用
+    #[allow(clippy::too_many_arguments)]
     pub fn verify(
         &mut self,
         method: &str,
@@ -256,5 +269,18 @@ mod tests {
         // 第二次相同 nonce 应拒绝
         let r2 = verifier.verify("GET", "/api/data", "key1", ts, "nonce1", &sig, b"");
         assert_eq!(r2, VerifyResult::NonceReplayed);
+    }
+
+    #[test]
+    fn test_api_key_debug_redacts_secret() {
+        let key = ApiKey::new("key1", "super_secret_value");
+
+        let debug = format!("{key:?}");
+        assert!(
+            !debug.contains("super_secret_value"),
+            "Debug 输出不得包含密钥明文"
+        );
+        assert!(debug.contains("key1"));
+        assert!(debug.contains("<redacted>"));
     }
 }
