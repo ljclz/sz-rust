@@ -298,11 +298,15 @@ mod tests {
         let runtime = SchedulerRuntime::new(SchedulerRuntimeConfig::default());
         runtime
             .schedule(ScheduledTask::new("task-1", "测试", "0 * * * *"))
-            .unwrap();
+            .expect("任务应成功注册");
 
         let (handler, _counter) = CounterHandler::new();
         runtime.register_handler("task-1", Arc::new(handler));
-        // 注册成功即可，不验证内部状态
+        // 注册 handler 后任务仍应存在于调度表
+        assert!(
+            runtime.list_tasks().iter().any(|t| t.id == "task-1"),
+            "注册 handler 后任务仍应存在于调度表"
+        );
     }
 
     #[tokio::test]

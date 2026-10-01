@@ -556,10 +556,19 @@ fn chaos_rate_limit_config_builder_chain_does_not_panic() {
     let limiter = Arc::new(SlidingWindowRateLimiter::new(100, Duration::from_secs(60)))
         as Arc<dyn RateLimiter + Send + Sync>;
     // 全链式 builder 调用不应 panic
-    let _config = RateLimitConfig::new(limiter)
+    let config = RateLimitConfig::new(limiter)
         .with_key_extractor(KeyExtractor::IpPlusRoute)
         .with_exclude_paths(vec!["/health".to_string(), "/metrics".to_string()])
         .with_key_prefix("api");
+    // 中间件配置需跨线程放入 axum state，必须满足 Send + Sync（编译期硬约束）
+    fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+        let _ = std::marker::PhantomData::<T>;
+        true
+    }
+    assert!(
+        assert_send_sync(config),
+        "RateLimitConfig 必须满足 Send + Sync（编译期约束）"
+    );
 }
 
 #[tokio::test]

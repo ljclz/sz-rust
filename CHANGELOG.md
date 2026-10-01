@@ -19,6 +19,13 @@
   - `sz-rust-middleware-facade`：`CorsLayer` / `RequestScopeService` 两个 smoke 测试改为 `assert!` 锚定编译期约束（Clone+Send+Sync+'static / Send）
   - `sz-rust-observability`：`test_concurrent_set_and_check` 补并发写入范围断言；`test_hostname_returns_value_or_none` 补 `Some` 非空断言
 - `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 75 → 65**（断言总数 16732）。
+- **第二批 sz-rust-core 10 个 WARN 清零**：对 core 的空洞/隐式断言测试批量补强——
+  - `h2.rs`：`test_tls_acceptor_constructible` / `test_tls_listener_new` / 两个 serve/handshake 集成测试补 `Send+Sync` 编译期约束、`Arc` 引用计数、`peer_addr` 与读响应断言
+  - `runtime/queue.rs`：`test_consumer_no_ack_on_failure` 补「未 ack 消息留在 in_flight 不被重新拉取」行为断言
+  - `runtime/scheduler.rs`：`test_register_handler` 补注册后任务仍存在断言
+  - `runtime/shutdown.rs` / `signal.rs` / `spawn.rs`：补 0 超时 shutdown 一致性、`shutdown_future` Send 编译期约束、零超时结果匹配断言
+  - `tests/middleware_chaos.rs`：builder 链 smoke 测试补 `RateLimitConfig` Send+Sync 编译期断言
+- `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 65 → 55**（断言总数 16743）。
 
 ### Fixed — 空洞测试清理（断言价值门禁，铁律 10/23）
 

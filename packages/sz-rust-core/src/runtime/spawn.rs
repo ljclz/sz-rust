@@ -247,9 +247,14 @@ mod tests {
     async fn test_spawn_with_timeout_zero_timeout() {
         // 零超时仍然允许 future 至少 poll 一次
         let handle = spawn_with_timeout(Duration::from_millis(0), async { 1 });
-        let result = handle.await.unwrap();
-        // 零超时可能成功也可能失败，取决于 race，但不应 panic
-        let _ = result;
+        let result = handle
+            .await
+            .expect("spawn_with_timeout 的 JoinHandle 不应失败");
+        // 零超时可能成功（Ok(1)）也可能失败（TimeoutError），但不应 panic
+        assert!(
+            matches!(result, Ok(1) | Err(_)),
+            "零超时下结果应为 Ok(1) 或 TimeoutError，实际: {result:?}"
+        );
     }
 
     #[tokio::test]

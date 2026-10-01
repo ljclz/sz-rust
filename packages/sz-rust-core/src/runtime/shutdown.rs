@@ -326,9 +326,12 @@ mod tests {
             token.cancelled().await;
         });
         let (success, aborted) = gs.shutdown(Duration::from_millis(0)).await;
-        // 0 超时可能成功也可能失败，取决于任务响应速度
-        // 主要验证不 panic
-        let _ = (success, aborted);
+        // 0 超时可能成功（success=true, aborted=0）也可能因超时强制 abort（success=false, aborted>0），
+        // 但不应出现「未成功且无任务被 abort」的矛盾结果
+        assert!(
+            success || aborted >= 1,
+            "0 超时 shutdown：若未成功则应至少 abort 1 个任务，实际 success={success}, aborted={aborted}"
+        );
     }
 
     #[tokio::test]

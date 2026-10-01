@@ -183,9 +183,15 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_future_is_send() {
         // 验证 shutdown_future() 返回的 Future 是 Send（可在 tokio::spawn 中使用）
-        fn assert_send<T: Send>(_t: T) {}
+        fn assert_send<T: Send>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
         let fut = shutdown_future();
-        assert_send(fut);
+        assert!(
+            assert_send(fut),
+            "shutdown_future() 返回的 Future 必须满足 Send（编译期约束）"
+        );
     }
 
     #[tokio::test]

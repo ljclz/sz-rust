@@ -459,8 +459,19 @@ mod tests {
         let cert_path = write_temp_pem("acceptor_cert.pem", &cert);
         let key_path = write_temp_pem("acceptor_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
+        let config = load_tls_config(&cert_path, &key_path)
+            .await
+            .expect("自签名证书配置应加载成功");
         let _acceptor = tls_acceptor(config);
+        // TlsAcceptor 用于异步 accept 循环，必须满足 Send + Sync（编译期硬约束）
+        fn is_send_sync<T: Send + Sync>() -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            is_send_sync::<TlsAcceptor>(),
+            "TlsAcceptor 必须满足 Send + Sync（编译期约束）"
+        );
     }
 
     #[tokio::test]
@@ -484,8 +495,15 @@ mod tests {
         let cert_path = write_temp_pem("new_cert.pem", &cert);
         let key_path = write_temp_pem("new_key.pem", &key);
 
-        let config = load_tls_config(&cert_path, &key_path).await.unwrap();
-        let _arc: Arc<ServerConfig> = Arc::new(config);
+        let config = load_tls_config(&cert_path, &key_path)
+            .await
+            .expect("自签名证书配置应加载成功");
+        let arc: Arc<ServerConfig> = Arc::new(config);
+        assert_eq!(
+            Arc::strong_count(&arc),
+            1,
+            "新建 Arc<ServerConfig> 引用计数应为 1"
+        );
     }
 
     // ====================================================================
@@ -517,7 +535,12 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // 5. 验证 TCP 端口可达（TLS 握手由客户端发起，这里仅验证 listener 已 listen）
-        let _stream = TcpStream::connect(addr).await.expect("TCP connect failed");
+        let stream = TcpStream::connect(addr).await.expect("TCP connect failed");
+        assert_eq!(
+            stream.peer_addr().expect("peer_addr 不应失败"),
+            addr,
+            "TCP 连接应到达服务器监听地址"
+        );
     }
 
     #[tokio::test]
@@ -576,14 +599,23 @@ mod tests {
 
         // 4. 客户端建立 TCP 连接并发送 ClientHello（TLS 1.2 最简版本）
         //    这里不验证完整 TLS 握手（需要 rustls 客户端），仅验证 TCP 连接可写
-        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = TcpStream::connect(addr).await.expect("TCP connect failed");
+        assert_eq!(
+            stream.peer_addr().expect("peer_addr 不应失败"),
+            addr,
+            "TCP 连接应到达服务器监听地址"
+        );
 
         // 写入一些字节（不是有效的 TLS ClientHello，服务器会关闭连接）
         let _ = stream.write_all(b"GET / HTTP/1.1\r\n\r\n").await;
 
         // 服务器应该关闭连接或返回错误（TLS 握手失败）
         let mut buf = [0u8; 64];
-        let _ = stream.read(&mut buf).await;
+        let n = stream
+            .read(&mut buf)
+            .await
+            .expect("服务器应响应（关闭连接或返回数据）");
+        assert!(n <= buf.len(), "读取字节数不应超过缓冲区大小，实际: {n}");
     }
 
     #[tokio::test]

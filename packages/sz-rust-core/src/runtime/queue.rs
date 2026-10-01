@@ -369,6 +369,11 @@ mod tests {
         // 再次 consume 应该返回 None（因为 in_flight 中的消息不会被重新拉取）
         // 但 in_flight 消息仍占位
         // 注：此行为依赖 InMemoryQueue 的实现
+        let result = queue.consume("orders").await.expect("consume 不应失败");
+        assert!(
+            result.is_none(),
+            "FailingConsumer 未 ack，消息应留在 in_flight 不被重新拉取"
+        );
     }
 
     #[tokio::test]
