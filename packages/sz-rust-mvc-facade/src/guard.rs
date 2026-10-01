@@ -993,6 +993,12 @@ mod tests {
         let guard = AuthGuard::new();
         // 确保 new() 可调用
         let _ = format!("{:?}", guard);
+        // AuthGuard 用于请求中间件链路，必须满足 Send + Sync（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(assert_send_sync(guard), "AuthGuard 必须满足 Send + Sync");
     }
 
     #[test]
@@ -1019,7 +1025,13 @@ mod tests {
 
     #[test]
     fn test_admin_guard_new() {
-        let _guard = AdminGuard::new();
+        let guard = AdminGuard::new();
+        // AdminGuard 用于管理后台鉴权链路，必须满足 Send + Sync（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(assert_send_sync(guard), "AdminGuard 必须满足 Send + Sync");
     }
 
     #[test]

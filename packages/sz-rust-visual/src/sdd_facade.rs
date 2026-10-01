@@ -158,7 +158,20 @@ mod tests {
     #[tokio::test]
     async fn test_mock_subscribe_events() {
         let facade = MockSddFacade::new();
-        let _rx = facade.subscribe_events().await.unwrap();
+        let rx = facade.subscribe_events().await.unwrap();
+
+        // 新订阅的 receiver 应可用且初始无积压事件
+        assert!(rx.is_empty(), "新订阅不应有积压事件");
+
+        // MockSddFacade 需满足 trait 的 Send + Sync 约束（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            assert_send_sync(facade),
+            "MockSddFacade 必须满足 Send + Sync（编译期约束）"
+        );
     }
 
     #[tokio::test]

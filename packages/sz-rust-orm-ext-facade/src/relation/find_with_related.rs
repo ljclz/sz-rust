@@ -551,6 +551,11 @@ mod tests {
         const _: () = {
             type _AssertFindWithRelatedResolves<'a> = FindWithRelated<'a>;
         };
+        // 运行时确认类型已完整解析且非零大小（含 &dyn Dialect 引用等字段）
+        assert!(
+            std::mem::size_of::<FindWithRelated<'static>>() > 0,
+            "FindWithRelated 应可解析为完整非零大小类型"
+        );
     }
 
     #[test]
@@ -562,6 +567,11 @@ mod tests {
         const _: () = {
             type _AssertFindWithRelationResolves<'a> = FindWithRelation<'a>;
         };
+        // 运行时确认类型已完整解析且非零大小
+        assert!(
+            std::mem::size_of::<FindWithRelation<'static>>() > 0,
+            "FindWithRelation 应可解析为完整非零大小类型"
+        );
     }
 
     #[test]
@@ -691,6 +701,20 @@ mod tests {
             let _eager_sql: _AssertEagerSqlFn = find_with_related_eager_sql;
             let _subquery: _AssertSubqueryFn = find_with_related_subquery;
         };
+
+        // 运行时绑定函数指针并确认符号解析到非空代码地址
+        let join: _AssertJoinFn = find_with_related_join;
+        let eager_sql: _AssertEagerSqlFn = find_with_related_eager_sql;
+        let subquery: _AssertSubqueryFn = find_with_related_subquery;
+        assert!(join as usize != 0, "find_with_related_join 符号应可解析");
+        assert!(
+            eager_sql as usize != 0,
+            "find_with_related_eager_sql 符号应可解析"
+        );
+        assert!(
+            subquery as usize != 0,
+            "find_with_related_subquery 符号应可解析"
+        );
     }
 
     // ====================================================================

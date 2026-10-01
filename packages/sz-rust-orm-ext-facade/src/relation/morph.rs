@@ -761,6 +761,9 @@ mod tests {
         let _morph_type_column: &String = &rel.morph_type_column;
         let _morph_id_column: &String = &rel.morph_id_column;
         // 编译时验证：无 morph_type_value 字段
+        // 运行时验证两个字段的默认列名约定
+        assert_eq!(rel.morph_type_column, "commentable_type");
+        assert_eq!(rel.morph_id_column, "commentable_id");
     }
 
     // ====================================================================
@@ -1183,10 +1186,13 @@ mod tests {
         // sz-orm-core::MorphTo struct 也无 morph_type_value 字段
         // 编译时验证：MorphTo 仅有 morph_type_column 和 morph_id_column 两个字段
         let rel = php_morph_to("commentable", None, None);
-        let _type_col: String = rel.morph_type_column.clone();
-        let _id_col: String = rel.morph_id_column.clone();
-        // 若 MorphTo 有 morph_type_value 字段，下方代码会编译失败
+        let type_col: String = rel.morph_type_column.clone();
+        let id_col: String = rel.morph_id_column.clone();
+        // 若 MorphTo 有 morph_type_value 字段，上方字段绑定会编译失败
         // （Rust 编译时保证类型对齐）
+        // 运行时验证默认列名约定
+        assert_eq!(type_col, "commentable_type");
+        assert_eq!(id_col, "commentable_id");
     }
 
     #[test]

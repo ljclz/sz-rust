@@ -204,7 +204,8 @@ mod tests {
     #[test]
     fn test_print_table_does_not_panic() {
         let routes = collect_routes();
-        print_table(&routes);
+        let result = std::panic::catch_unwind(|| print_table(&routes));
+        assert!(result.is_ok(), "print_table 不应 panic");
     }
 
     #[test]

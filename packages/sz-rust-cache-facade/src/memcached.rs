@@ -1001,7 +1001,14 @@ mod tests {
     #[test]
     fn test_driver_tag_clear_empty() {
         let driver = MemcachedCacheDriver::new(MemcachedConfig::default());
-        driver.clear_tag(&[]).unwrap();
+        let result = driver.clear_tag(&[]);
+        assert!(
+            result.is_ok(),
+            "空标签列表清理应返回 Ok，实际: {:?}",
+            result
+        );
+        // 无副作用：不存在的标签项仍为空
+        assert!(driver.get_tag_items("nonexistent").unwrap().is_empty());
     }
 
     // ========================================================================

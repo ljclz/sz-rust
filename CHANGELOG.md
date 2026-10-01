@@ -31,6 +31,13 @@
   - `common/metrics.rs`：6 个 `record_*_does_not_panic` 测试改用独立实例（避免全局计数器并行污染）并补「该记录不改变 LLM 请求计数」断言
   - `rag/pipeline.rs`：`test_rag_pipeline_builder_methods` 改为完整链式调用（`with_metric` + `with_reranker`）并补 `Send + Sync` 编译期约束断言
 - `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 55 → 47**（断言总数 16763）。
+- **第四批 47 个残余 WARN 全部清零（AssertionHardening 收官，铁律 10/23）**：按 crate 并行批量补强——
+  - `sz-rust-pdf` 14 个：`excel_export.rs` 引入 calamine「保存→回读」往返验证，14 个 `test_r5_34/r5_35/set_cell_value_*` 测试补单元格值与类型断言
+  - `sz-rust-orm-ext-facade` 5 个 + `sz-rust-orm-facade` 4 个：re-export 补 `size_of`/函数指针符号解析断言、morph 补默认列名断言、`test_invalidate_all` 补 provider 调用计数验证、tracing 审计补日志捕获断言、auto_rollback 补事务状态断言、PG 迁移补报告断言
+  - `sz-rust-workflow` 5 个 + `sz-rust-visual` 3 个：history 补记录可查断言、audit logger 补 Send+Sync 编译期约束、preview 补端口释放轮询断言等
+  - `sz-rust-cli` 4 个 + `sz-rust-infra-facade` 3 个 + `sz-rust-mvc-facade` 3 个：`print_table` 补 `catch_unwind`、watcher 补配置预检/协调 task 退出断言、editor/guard 补 Send+Sync 编译期约束
+  - `sz-rust-api-gateway`/`sz-rust-cache-facade`/`sz-rust-marketplace`/`sz-rust-rag`/`sz-rust-wasm` 6 个：forwarder 补编译期约束、缓存删除/清标签补 Ok 断言、签名往返补验签断言、noop logger 补 Ok 断言、wasm 大内存编译补 Ok 断言
+- `node scripts/audit/assertion-value-check.js` 复跑：**0 ERROR，WARN 47 → 0**（断言总数 16862，13 个 crate 测试/clippy 全部通过）。
 
 ### Fixed — 空洞测试清理（断言价值门禁，铁律 10/23）
 

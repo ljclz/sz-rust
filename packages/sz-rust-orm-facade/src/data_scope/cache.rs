@@ -118,6 +118,20 @@ mod tests {
         }
     }
 
+    /// 带调用计数的 provider 包装器，用于验证缓存失效后重新拉取
+    struct CountingProvider {
+        inner: MockProvider,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl DeptTreeProvider for CountingProvider {
+        async fn sub_depts(&self, dept_id: i64) -> Result<Vec<i64>, DataScopeError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.sub_depts(dept_id).await
+        }
+    }
+
     #[tokio::test]
     async fn test_cache_hit() {
         let provider = Arc::new(MockProvider {
@@ -157,14 +171,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidate_all() {
-        let provider = Arc::new(MockProvider {
-            tree: [(5, vec![6]), (10, vec![11])].into_iter().collect(),
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = Arc::new(CountingProvider {
+            inner: MockProvider {
+                tree: [(5, vec![6]), (10, vec![11])].into_iter().collect(),
+            },
+            calls: calls.clone(),
         });
         let cache = DeptTreeCache::new(provider, Duration::from_secs(300));
-        let _ = cache.get_with_sub(5).await.unwrap();
-        let _ = cache.get_with_sub(10).await.unwrap();
+        let r1 = cache.get_with_sub(5).await.unwrap();
+        assert_eq!(r1, vec![5, 6]);
+        let r2 = cache.get_with_sub(10).await.unwrap();
+        assert_eq!(r2, vec![10, 11]);
+        let calls_after_first_round = calls.load(std::sync::atomic::Ordering::SeqCst);
         cache.invalidate_all();
-        let _ = cache.get_with_sub(5).await.unwrap();
+        // 全量失效后重新查询应重新调用 provider 拉取（调用次数增加）
+        let r3 = cache.get_with_sub(5).await.unwrap();
+        assert_eq!(r3, vec![5, 6]);
+        assert!(
+            calls.load(std::sync::atomic::Ordering::SeqCst) > calls_after_first_round,
+            "invalidate_all 后应重新调用 provider 拉取数据"
+        );
     }
 
     #[tokio::test]

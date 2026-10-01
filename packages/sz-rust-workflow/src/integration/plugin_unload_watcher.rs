@@ -95,7 +95,11 @@ mod tests {
     #[tokio::test]
     async fn no_running_instances() {
         let repo = Arc::new(InMemoryInstanceRepository::default());
-        let watcher = PluginUnloadWatcher::new(repo);
+        let watcher = PluginUnloadWatcher::new(repo.clone());
         watcher.on_plugin_unload("crm").await.unwrap();
+
+        // 无在途实例时卸载回调应成功返回，且不产生任何实例变更
+        let running = repo.list_running().await.unwrap();
+        assert!(running.is_empty(), "无运行实例时不应产生任何实例");
     }
 }

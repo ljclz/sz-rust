@@ -74,7 +74,8 @@ mod tests {
 
         let package = b"hello marketplace";
         let signature = SignatureService::sign(package, &keypair);
-        SignatureService::verify(package, &signature, &public_key).unwrap();
+        let result = SignatureService::verify(package, &signature, &public_key);
+        assert!(result.is_ok(), "合法签名验签应通过，实际: {:?}", result);
     }
 
     #[test]

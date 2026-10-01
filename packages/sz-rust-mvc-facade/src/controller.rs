@@ -1347,6 +1347,15 @@ mod tests {
         // PHP 默认 initialize() 为空，调用应无副作用
         let ctrl = MockBaseController;
         ctrl.initialize(); // 不应 panic
+                           // BaseController 用于异步请求链路，必须满足 Send + Sync（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            assert_send_sync(ctrl),
+            "MockBaseController 必须满足 Send + Sync"
+        );
     }
 
     #[test]

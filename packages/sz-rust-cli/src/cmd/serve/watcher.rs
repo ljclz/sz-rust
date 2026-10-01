@@ -127,11 +127,20 @@ mod tests {
         writeln!(file, "host: 0.0.0.0\nport: 9090").unwrap();
         drop(file);
 
+        // 预检：合法配置应能正常加载
+        assert!(
+            reload_config(temp_dir.path()).await.is_ok(),
+            "合法配置应加载成功"
+        );
+
         let (tx, rx) = mpsc::channel::<PathBuf>(16);
         let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
         tx.send(config_path).await.unwrap();
         drop(tx);
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        assert!(joined.is_ok(), "协调 task 应在超时前正常退出");
+        let result = joined.unwrap();
+        assert!(result.is_ok(), "协调 task 不应 panic");
     }
 
     #[tokio::test]
@@ -139,14 +148,23 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("创建临时目录失败");
         let config_path = temp_dir.path().join("server.yml");
         let mut file = std::fs::File::create(&config_path).expect("创建配置文件失败");
-        writeln!(file, "host: 0.0.0.0\nport: 9091").unwrap();
+        writeln!(file, "host: [unclosed").unwrap();
         drop(file);
+
+        // 预检：无效 YAML 应导致配置加载失败
+        assert!(
+            reload_config(temp_dir.path()).await.is_err(),
+            "无效配置应加载失败"
+        );
 
         let (tx, rx) = mpsc::channel::<PathBuf>(16);
         let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
         tx.send(config_path).await.unwrap();
         drop(tx);
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        assert!(joined.is_ok(), "协调 task 应在超时前正常退出");
+        let result = joined.unwrap();
+        assert!(result.is_ok(), "协调 task 不应 panic");
     }
 
     #[tokio::test]
@@ -155,7 +173,10 @@ mod tests {
         let (tx, rx) = mpsc::channel::<PathBuf>(16);
         let handle = spawn_reload_coordinator(rx, temp_dir.path().to_path_buf());
         drop(tx);
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
+        assert!(joined.is_ok(), "通道关闭后协调 task 应在超时前退出");
+        let result = joined.unwrap();
+        assert!(result.is_ok(), "协调 task 不应 panic");
     }
 
     #[tokio::test]

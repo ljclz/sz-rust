@@ -1563,8 +1563,26 @@ mod tests {
 
     #[test]
     fn test_editor_new() {
-        let _editor = Editor::new();
-        let _editor2 = Editor;
+        // 编译期约束：Editor 用于异步图像处理，必须满足 Send + Sync
+        fn assert_send_sync<T: Send + Sync>(_t: &T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        let editor = Editor::new();
+        let editor2 = Editor;
+        assert!(
+            assert_send_sync(&editor),
+            "Editor 必须满足 Send + Sync（编译期约束）"
+        );
+        assert!(
+            assert_send_sync(&editor2),
+            "Editor 必须满足 Send + Sync（编译期约束）"
+        );
+        assert_eq!(
+            std::mem::size_of::<Editor>(),
+            0,
+            "Editor 应为零尺寸单元结构体"
+        );
     }
 
     #[tokio::test]
@@ -2252,7 +2270,21 @@ mod tests {
 
     #[test]
     fn test_editor_default() {
-        let _editor = Editor;
+        // 编译期约束：Editor 实现 Default（单元结构体，与直接构造等价）且满足 Send + Sync
+        fn assert_send_sync<T: Send + Sync>(_t: &T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        let editor = Editor;
+        assert!(
+            assert_send_sync(&editor),
+            "Editor 必须满足 Send + Sync（编译期约束）"
+        );
+        assert_eq!(
+            std::mem::size_of::<Editor>(),
+            0,
+            "Editor 应为零尺寸单元结构体"
+        );
     }
 
     #[tokio::test]

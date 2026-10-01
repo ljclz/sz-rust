@@ -163,15 +163,28 @@ mod tests {
         let url = PreviewService::start("test-feature-xyz", DeviceType::Desktop)
             .await
             .unwrap();
+        assert!(
+            url.starts_with("http://127.0.0.1:"),
+            "预览 URL 应为本地地址: {url}"
+        );
 
         // 验证 HTTP 服务可访问
-        let probe = tokio::net::TcpStream::connect(url.trim_start_matches("http://"))
-            .await
-            .unwrap();
+        let probe = tokio::net::TcpStream::connect(url.trim_start_matches("http://")).await;
+        assert!(probe.is_ok(), "预览 HTTP 服务应可连接");
         drop(probe);
 
-        // stop 后端口应已释放
+        // stop 后端口应已释放：轮询重绑直到成功（服务为异步关闭，存在微小竞态）
         PreviewService::stop(&url).await.unwrap();
+        let addr = url.trim_start_matches("http://");
+        let mut rebound = false;
+        for _ in 0..50 {
+            if tokio::net::TcpListener::bind(addr).await.is_ok() {
+                rebound = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(rebound, "stop 后端口应可重新绑定: {addr}");
 
         // 清理临时产物目录
         tokio::fs::remove_dir_all(&artifacts_root).await.unwrap();

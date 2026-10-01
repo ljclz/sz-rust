@@ -313,8 +313,10 @@ async fn pg_migration_checksum_verify() {
     cleanup_table(&pool, "__migrations").await;
 
     let mgr = MigrationEnhanced::new(Arc::new(pool.clone()), pg_migrations(), DbType::PostgreSQL);
-    mgr.migrate().await.expect("迁移失败");
-    mgr.verify_checksums().await.expect("校验和验证失败");
+    let report = mgr.migrate().await.expect("迁移失败");
+    assert_eq!(report.applied.len(), 2, "PG: 首次应用 2 个迁移");
+    assert_eq!(report.failed.len(), 0, "PG: 迁移不应有失败记录");
+    assert!(mgr.verify_checksums().await.is_ok(), "PG: 校验和验证应通过");
 
     cleanup_table(&pool, "mig_pg").await;
     cleanup_table(&pool, "__migrations").await;

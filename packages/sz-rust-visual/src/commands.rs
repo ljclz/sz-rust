@@ -322,7 +322,8 @@ mod tests {
     #[tokio::test]
     async fn test_sdd_cancel_inner() {
         let facade = MockSddFacade::new();
-        sdd_cancel_inner(&facade, "s1").await.unwrap();
+        let result = sdd_cancel_inner(&facade, "s1").await;
+        assert!(result.is_ok(), "取消编排应成功返回");
     }
 
     #[tokio::test]

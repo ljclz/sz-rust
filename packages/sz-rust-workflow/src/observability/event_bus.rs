@@ -192,7 +192,9 @@ mod tests {
             initiator: "u1".into(),
             timestamp: Utc::now(),
         };
-        bus.publish(event).await.unwrap();
+        // Noop 总线应静默接受事件发布，不产生错误
+        let result = bus.publish(event).await;
+        assert!(result.is_ok(), "NoopEventBus 发布事件应返回 Ok");
     }
 
     #[test]

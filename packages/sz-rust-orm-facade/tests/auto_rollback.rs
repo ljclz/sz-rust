@@ -192,11 +192,21 @@ async fn test_disabled_config_no_auto_rollback() {
         let config = AutoRollbackConfig { enabled: false };
         let mut guard = AutoRollbackGuard::with_config(conn, config);
         guard.begin_transaction().await.expect("开启事务失败");
+        assert_eq!(
+            guard.state(),
+            TransactionState::Active,
+            "禁用自动回滚时 begin 后仍应处于 Active"
+        );
         guard
             .connection()
             .execute("INSERT INTO ar_test4 (id, val) VALUES (1, 'no_rollback')")
             .await
             .expect("插入失败");
+        assert_eq!(
+            guard.state(),
+            TransactionState::Active,
+            "INSERT 后事务仍应处于 Active"
+        );
         // drop guard：不自动 rollback（行为与 v1.4.0 一致）
     }
 

@@ -516,6 +516,22 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calamine::{Data, Reader as CalamineReader};
+
+    /// 将工作簿保存为 xlsx 字节流，并用 calamine 回读第一个工作表
+    ///
+    /// rust_xlsxwriter 0.79 不提供单元格值回读 API，因此通过
+    /// 「保存 → calamine 读取」往返验证写入的单元格值与类型。
+    fn read_back_first_sheet(spreadsheet: Spreadsheet) -> calamine::Range<Data> {
+        let bytes = create_writer(spreadsheet).save_to_buffer().unwrap();
+        let cursor = std::io::Cursor::new(bytes);
+        let mut workbook =
+            calamine::open_workbook_auto_from_rs(cursor).expect("xlsx 应能被 calamine 识别");
+        workbook
+            .worksheet_range_at(0)
+            .expect("工作簿应包含第一个工作表")
+            .expect("读取第一个工作表应成功")
+    }
 
     // ------------------------------------------------------------------------
     // R5-33：A1 引用解析测试
@@ -588,7 +604,12 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", "订单号").unwrap();
-        // 写入成功即通过（rust_xlsxwriter 内部记录类型）
+        // 回读验证：A1 应读回字符串 "订单号"
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("订单号".to_string()))
+        );
     }
 
     #[test]
@@ -597,6 +618,9 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", 42i64).unwrap();
+        // 回读验证：A1 应为数字 42（calamine 将数值统一读为 f64）
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Float(42.0)));
     }
 
     #[test]
@@ -605,6 +629,9 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", 2.5f64).unwrap();
+        // 回读验证：A1 应为浮点数 2.5
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Float(2.5)));
     }
 
     #[test]
@@ -614,6 +641,9 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", "123").unwrap();
+        // 回读验证："123" 应被推断为数字 123 而非字符串
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Float(123.0)));
     }
 
     #[test]
@@ -622,6 +652,20 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", CellValue::Null).unwrap();
+        // 写入两个锚点单元格，使 calamine 范围覆盖 A1
+        sheet.set_cell_value("B1", "x").unwrap();
+        sheet.set_cell_value("A2", "y").unwrap();
+        // 回读验证：A1 应为空（null 不写入），锚点单元格值保留
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Empty));
+        assert_eq!(
+            range.get_value((0, 1)),
+            Some(&Data::String("x".to_string()))
+        );
+        assert_eq!(
+            range.get_value((1, 0)),
+            Some(&Data::String("y".to_string()))
+        );
     }
 
     #[test]
@@ -630,6 +674,10 @@ mod tests {
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", true).unwrap();
         sheet.set_cell_value("A2", false).unwrap();
+        // 回读验证：布尔值应原样保留
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Bool(true)));
+        assert_eq!(range.get_value((1, 0)), Some(&Data::Bool(false)));
     }
 
     // ------------------------------------------------------------------------
@@ -645,6 +693,12 @@ mod tests {
         sheet
             .set_cell_value_explicit("A1", "123", CellType::String)
             .unwrap();
+        // 回读验证：强制字符串类型后，A1 应读回字符串 "123" 而非数字
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("123".to_string()))
+        );
     }
 
     #[test]
@@ -656,6 +710,12 @@ mod tests {
         sheet
             .set_cell_value_explicit("A2", "202109010001", CellType::String)
             .unwrap();
+        // 回读验证：长订单号应作为字符串原样保留
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((1, 0)),
+            Some(&Data::String("202109010001".to_string()))
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -825,6 +885,12 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", "\tORD001\t").unwrap();
+        // 回读验证：\t 包裹的订单号应原样保存为字符串
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("\tORD001\t".to_string()))
+        );
     }
 
     // ------------------------------------------------------------------------
@@ -966,6 +1032,23 @@ mod tests {
         sheet.set_column_width(0, 10.0).unwrap();
         sheet.set_column_width(25, 20.0).unwrap();
         sheet.set_column_width(26, 30.0).unwrap();
+        // 在边界列（A/Z/AA）写入值并回读，验证设置列宽后仍可正常读写
+        sheet.set_cell_value("A1", "a").unwrap();
+        sheet.set_cell_value("Z1", "z").unwrap();
+        sheet.set_cell_value("AA1", "aa").unwrap();
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("a".to_string()))
+        );
+        assert_eq!(
+            range.get_value((0, 25)),
+            Some(&Data::String("z".to_string()))
+        );
+        assert_eq!(
+            range.get_value((0, 26)),
+            Some(&Data::String("aa".to_string()))
+        );
     }
 
     #[test]
@@ -1003,6 +1086,16 @@ mod tests {
         sheet
             .set_cell_value_by_row_col(4, 4, CellValue::Null)
             .unwrap();
+        // 回读验证：各类型值按行列号写入正确；(4,4) 为 Null 不产生数据
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("hello".to_string()))
+        );
+        assert_eq!(range.get_value((1, 1)), Some(&Data::Float(42.0)));
+        assert_eq!(range.get_value((2, 2)), Some(&Data::Float(2.5)));
+        assert_eq!(range.get_value((3, 3)), Some(&Data::Bool(true)));
+        assert_eq!(range.get_value((4, 4)), None);
     }
 
     #[test]
@@ -1010,7 +1103,11 @@ mod tests {
         let mut spreadsheet = Spreadsheet::new();
         let mut sheet = spreadsheet.active_sheet();
         sheet.set_cell_value("A1", "2.5").unwrap();
-        sheet.set_cell_value("A2", "3.14").unwrap();
+        sheet.set_cell_value("A2", "3.25").unwrap();
+        // 回读验证："2.5"/"3.25" 是数字字符串，应自动推断为浮点数
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Float(2.5)));
+        assert_eq!(range.get_value((1, 0)), Some(&Data::Float(3.25)));
     }
 
     #[test]
@@ -1020,6 +1117,20 @@ mod tests {
         sheet.set_cell_value("A1", "inf").unwrap();
         sheet.set_cell_value("A2", "nan").unwrap();
         sheet.set_cell_value("A3", "-inf").unwrap();
+        // 回读验证："inf"/"nan"/"-inf" 不是有限数字，应保持为字符串
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(
+            range.get_value((0, 0)),
+            Some(&Data::String("inf".to_string()))
+        );
+        assert_eq!(
+            range.get_value((1, 0)),
+            Some(&Data::String("nan".to_string()))
+        );
+        assert_eq!(
+            range.get_value((2, 0)),
+            Some(&Data::String("-inf".to_string()))
+        );
     }
 
     #[test]
@@ -1032,6 +1143,13 @@ mod tests {
         sheet
             .set_cell_value_explicit("A2", "text", CellType::Auto)
             .unwrap();
+        // 回读验证：CellType::Auto 下 "123" 推断为数字，普通文本保持字符串
+        let range = read_back_first_sheet(spreadsheet);
+        assert_eq!(range.get_value((0, 0)), Some(&Data::Float(123.0)));
+        assert_eq!(
+            range.get_value((1, 0)),
+            Some(&Data::String("text".to_string()))
+        );
     }
 
     #[test]

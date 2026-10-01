@@ -749,15 +749,12 @@ mod tests {
         let temp = create_temp_file(b"\x89PNG\r\n\x1a\n", ".png");
         let file = UploadedFile::new(temp.path(), "photo.png", None, Some(0), true).unwrap();
         let v = FileValidator::new();
-        // 扩展名 png 在白名单中
+        // 扩展名 png 在白名单中，内容为 PNG 签名 → MIME 也应通过
         let result = v.validate_image(&file);
-        // MIME 可能不匹配（因为是假 PNG），但扩展名应该通过
-        // 这里只验证扩展名通过（可能因 MIME 失败，但不应该是 ExtNotAllowed）
-        match result {
-            Ok(()) => {}
-            Err(FileValidateError::ExtNotAllowed { .. }) => panic!("扩展名应通过"),
-            Err(_) => {}
-        }
+        assert!(
+            result.is_ok(),
+            "扩展名与 MIME 均通过时应校验成功，实际: {result:?}"
+        );
     }
 
     #[test]

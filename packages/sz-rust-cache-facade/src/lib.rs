@@ -4348,7 +4348,14 @@ mod tests {
     fn test_php_redis_delete_nonexistent_returns_ok() {
         // R5-Redis-7: delete 不存在的 key 返回 Ok
         let driver = make_redis_driver();
-        driver.delete("nonexistent").unwrap();
+        let result = driver.delete("nonexistent");
+        assert!(
+            result.is_ok(),
+            "删除不存在的 key 应返回 Ok，实际: {:?}",
+            result
+        );
+        // 无副作用：该 key 仍然不存在
+        assert_eq!(driver.get_raw("nonexistent").unwrap(), None);
     }
 
     #[test]

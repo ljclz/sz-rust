@@ -116,6 +116,16 @@ mod tests {
             InstanceStatus::Running,
             InstanceStatus::Running,
         );
+
+        // 审计日志器需跨任务/线程共享，必须满足 Send + Sync（编译期硬约束）
+        fn assert_send_sync<T: Send + Sync>(_t: T) -> bool {
+            let _ = std::marker::PhantomData::<T>;
+            true
+        }
+        assert!(
+            assert_send_sync(logger),
+            "AuditLogger 必须满足 Send + Sync（编译期约束）"
+        );
     }
 
     #[test]

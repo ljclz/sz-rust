@@ -79,7 +79,8 @@ mod tests {
             warnings: vec![],
             timestamp: chrono::Utc::now(),
         };
-        logger.log(entry).await.unwrap();
+        let result = logger.log(entry).await;
+        assert!(result.is_ok(), "noop logger 应静默成功，实际: {:?}", result);
     }
 
     #[tokio::test]

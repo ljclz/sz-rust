@@ -354,7 +354,9 @@ mod tests {
     fn test_wasm_compile_large_memory_not_panic() {
         let rt = WasmRuntime::new();
         let wasm = wat::parse_str(r#"(module (memory 65536))"#).unwrap();
-        let _ = rt.compile(&wasm);
+        // 4GiB（65536 页）内存模块：仅编译不实例化，应成功且不 panic
+        let compiled = rt.compile(&wasm);
+        assert!(compiled.is_ok(), "大内存模块编译应成功");
     }
 
     #[test]

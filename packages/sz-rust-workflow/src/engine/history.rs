@@ -124,19 +124,27 @@ mod tests {
     async fn record_node_event() {
         let registry = Arc::new(SensitiveFieldRegistry::new());
         let repo = Arc::new(InMemoryHistoryRepository::default());
-        let recorder = HistoryRecorder::new(repo, registry);
+        let recorder = HistoryRecorder::new(repo.clone(), registry);
 
-        recorder
+        let entry = recorder
             .record_node_event("i1", Some("n0"), "n1", HistoryEntryType::NodeEnter)
             .await
             .unwrap();
+        assert_eq!(entry.instance_id, "i1");
+        assert_eq!(entry.entry_type, HistoryEntryType::NodeEnter);
+        assert_eq!(entry.from_node.as_deref(), Some("n0"));
+        assert_eq!(entry.to_node.as_deref(), Some("n1"));
+
+        let list = repo.list_by_instance("i1").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].entry_type, HistoryEntryType::NodeEnter);
     }
 
     #[tokio::test]
     async fn record_task_handled() {
         let registry = Arc::new(SensitiveFieldRegistry::new());
         let repo = Arc::new(InMemoryHistoryRepository::default());
-        let recorder = HistoryRecorder::new(repo, registry);
+        let recorder = HistoryRecorder::new(repo.clone(), registry);
 
         let record = ApprovalRecord {
             record_id: "r1".into(),
@@ -149,6 +157,14 @@ mod tests {
             target_user: None,
             timestamp: Utc::now(),
         };
-        recorder.record_task_handled(record).await.unwrap();
+        let entry = recorder.record_task_handled(record).await.unwrap();
+        assert_eq!(entry.instance_id, "i1");
+        assert_eq!(entry.entry_type, HistoryEntryType::TaskHandled);
+        assert_eq!(entry.from_node.as_deref(), Some("n1"));
+        assert_eq!(entry.context_snapshot["action"], "approve");
+
+        let list = repo.list_by_instance("i1").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].entry_type, HistoryEntryType::TaskHandled);
     }
 }

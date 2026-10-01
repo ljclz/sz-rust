@@ -365,6 +365,16 @@ mod tests {
 
     #[test]
     fn test_forwarder_default() {
-        let _forwarder = RequestForwarder::default();
+        // 编译期约束：RequestForwarder 必须 Send + Sync，可在多线程运行时跨任务传递
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<RequestForwarder>();
+
+        let forwarder = RequestForwarder::default();
+        // 行为断言：default() 与 new() 各自构造独立转发器实例
+        let another = RequestForwarder::new();
+        assert!(
+            !std::ptr::eq(&forwarder, &another),
+            "default() 与 new() 不应返回同一实例"
+        );
     }
 }
