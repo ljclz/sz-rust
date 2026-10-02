@@ -1,0 +1,17 @@
+[package]
+name = "sz-rust-codegen-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 代码生成器 UI"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sz-rust-frontend-codegen = { workspace = true }
+axum = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

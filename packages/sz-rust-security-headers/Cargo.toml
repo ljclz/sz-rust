@@ -1,0 +1,18 @@
+[package]
+name = "sz-rust-security-headers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 安全头中间件"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+thiserror = { workspace = true }

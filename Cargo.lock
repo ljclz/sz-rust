@@ -1101,6 +1101,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "bytecheck"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26333eeac754f0ad8a6bcd0eb0ac012156302e4e16b852b72ee399aea4f12c29"
+dependencies = [
+ "bytecheck_derive",
+ "ptr_meta",
+ "rancor",
+ "simdutf8",
+]
+
+[[package]]
+name = "bytecheck_derive"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46d07918caa9eeaaf06b7873925c53a61daac173539b4f7715090745e44e4e69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "bytecount"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4934,6 +4957,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
+name = "munge"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e17401f259eba956ca16491461b6e8f72913a0a114e39736ce404410f915a0c"
+dependencies = [
+ "munge_macro",
+]
+
+[[package]]
+name = "munge_macro"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4568f25ccbd45ab5d5603dc34318c1ec56b117531781260002151b8530a9f931"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "nalgebra"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6311,6 +6354,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
+name = "ptr_meta"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "743da816b98c921cdbe8628ef7381b76f25ecf4da599fc80aca90eae7ef70cc0"
+dependencies = [
+ "ptr_meta_derive",
+]
+
+[[package]]
+name = "ptr_meta_derive"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c8d9ca532f185d5d4db7a7c9d51420b452168ea1c2b913953281bd6fe1fcbd0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "publicsuffix"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6465,6 +6528,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "rancor"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b534442d0fcdb55d66f373d9cac6d33b6293a2335bc2136dbd06ce0e87d2572"
+dependencies = [
+ "ptr_meta",
+]
 
 [[package]]
 name = "rand"
@@ -6834,6 +6906,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rend"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "663ba70707f96e871406fe10d68128412e619b06d1d47cb91c3a4c6501176240"
+dependencies = [
+ "bytecheck",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6943,6 +7024,36 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rkyv"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9776093b7ca170454ab1406954f7b7d97a57c51dc6c0642957fb2ef25c2d399"
+dependencies = [
+ "bytecheck",
+ "bytes",
+ "hashbrown 0.17.1",
+ "indexmap 2.14.2",
+ "munge",
+ "ptr_meta",
+ "rancor",
+ "rend",
+ "rkyv_derive",
+ "tinyvec",
+ "uuid",
+]
+
+[[package]]
+name = "rkyv_derive"
+version = "0.8.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c25ef604ac7dd839d44d64648952ea23c97866f124ff671b0ed2cf3ad9bb06e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -8461,19 +8572,39 @@ dependencies = [
 
 [[package]]
 name = "sz-rust"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
+ "sz-rust-addons-loader",
+ "sz-rust-admin-ui",
  "sz-rust-ai-facade",
+ "sz-rust-alert-engine",
  "sz-rust-api-gateway",
+ "sz-rust-auth-facade",
+ "sz-rust-benchmark-suite",
+ "sz-rust-codegen-ui",
  "sz-rust-config-center",
+ "sz-rust-data-mask",
  "sz-rust-distributed-tx",
  "sz-rust-frontend-codegen",
+ "sz-rust-http-facade",
+ "sz-rust-i18n",
+ "sz-rust-key-rotation",
+ "sz-rust-log-aggregator",
+ "sz-rust-marketplace",
+ "sz-rust-monitor-panel",
  "sz-rust-observability",
  "sz-rust-orm-facade",
+ "sz-rust-pipeline",
+ "sz-rust-plugin-sdk",
  "sz-rust-rag",
+ "sz-rust-security-headers",
  "sz-rust-service-registry",
  "sz-rust-tracing",
+ "sz-rust-upload",
+ "sz-rust-visual",
  "sz-rust-wasm",
+ "sz-rust-websocket",
+ "sz-rust-zerocopy",
 ]
 
 [[package]]
@@ -8485,7 +8616,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-admin"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8509,7 +8640,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-loader"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "notify",
@@ -8525,8 +8656,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-admin-ui"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "sz-rust-auth-facade",
+ "sz-rust-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-ai-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -8553,8 +8694,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-alert-engine"
+version = "1.7.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "sz-rust-observability",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-api-gateway"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -8573,7 +8724,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-auth-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8603,8 +8754,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-benchmark-suite"
+version = "1.7.0"
+dependencies = [
+ "sz-rust-core",
+ "sz-rust-orm-facade",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-cache-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "futures",
  "hex",
@@ -8621,7 +8781,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-capability"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -8636,7 +8796,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cli"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8677,7 +8837,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-codegen-loop"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8694,8 +8854,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-codegen-ui"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde_json",
+ "sz-rust-frontend-codegen",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-config-center"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -8714,7 +8884,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-core"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8782,8 +8952,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-data-mask"
+version = "1.7.0"
+dependencies = [
+ "regex",
+ "serde",
+ "sha2 0.10.9",
+ "sz-rust-core",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-distributed-tx"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8799,7 +8980,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-examples"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8824,7 +9005,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -8845,7 +9026,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade-tests"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "hex",
  "serde_json",
@@ -8867,7 +9048,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-frontend-codegen"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "askama",
  "async-trait",
@@ -8887,7 +9068,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-http-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
@@ -8915,8 +9096,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-i18n"
+version = "1.7.0"
+dependencies = [
+ "parking_lot",
+ "serde",
+ "serde_yaml",
+ "sz-rust-core",
+ "thiserror 2.0.21",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "sz-rust-infra-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -8951,8 +9144,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-key-rotation"
+version = "1.7.0"
+dependencies = [
+ "serde",
+ "sz-rust-data-mask",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "sz-rust-log-aggregator"
+version = "1.7.0"
+dependencies = [
+ "serde_json",
+ "sz-rust-observability",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-macros"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8962,7 +9175,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-marketplace"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8998,7 +9211,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-mcp"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -9015,7 +9228,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-middleware-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
@@ -9048,8 +9261,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-monitor-panel"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "sz-rust-alert-engine",
+ "sz-rust-observability",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-mvc-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9076,7 +9299,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-observability"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9099,7 +9322,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-ops-api"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
@@ -9112,7 +9335,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-ext-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -9122,7 +9345,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -9162,7 +9385,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pay-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "parking_lot",
  "serde",
@@ -9173,7 +9396,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pdf"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9194,8 +9417,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-pipeline"
+version = "1.7.0"
+dependencies = [
+ "futures",
+ "sz-rust-core",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower 0.5.3",
+]
+
+[[package]]
+name = "sz-rust-plugin-sdk"
+version = "1.7.0"
+dependencies = [
+ "async-trait",
+ "semver",
+ "sz-rust-addons-loader",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sz-rust-rag"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -9220,7 +9464,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-router-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -9235,8 +9479,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-security-headers"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde",
+ "sz-rust-http-facade",
+ "thiserror 2.0.21",
+ "tower-http 0.7.1",
+]
+
+[[package]]
 name = "sz-rust-service-registry"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9252,7 +9507,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-state-facade"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -9270,7 +9525,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-sz300"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -9298,7 +9553,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-testkit"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -9334,8 +9589,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-upload"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "sha2 0.10.9",
+ "sz-rust-http-facade",
+ "sz-rust-infra-facade",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "sz-rust-vector-db"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -9351,7 +9618,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-visual"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9374,7 +9641,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-wasm"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -9383,8 +9650,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-websocket"
+version = "1.7.0"
+dependencies = [
+ "axum 0.8.9",
+ "dashmap",
+ "sz-rust-auth-facade",
+ "sz-rust-http-facade",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "sz-rust-workflow"
-version = "1.6.0"
+version = "1.7.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9404,6 +9683,17 @@ dependencies = [
  "tower 0.5.3",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "sz-rust-zerocopy"
+version = "1.7.0"
+dependencies = [
+ "rkyv",
+ "serde",
+ "sz-rust-core",
+ "thiserror 2.0.21",
+ "zerocopy",
 ]
 
 [[package]]

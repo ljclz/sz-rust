@@ -1,0 +1,16 @@
+[package]
+name = "sz-rust-benchmark-suite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 基准压测套件"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sz-rust-core = { workspace = true }
+sz-rust-orm-facade = { workspace = true }
+thiserror = { workspace = true }

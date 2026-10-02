@@ -1,0 +1,18 @@
+[package]
+name = "sz-rust-data-mask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 数据脱敏"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
+sz-rust-core = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,17 @@
+[package]
+name = "sz-rust-alert-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 告警规则引擎"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sz-rust-observability = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

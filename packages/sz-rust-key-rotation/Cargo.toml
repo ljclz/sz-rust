@@ -1,0 +1,17 @@
+[package]
+name = "sz-rust-key-rotation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 密钥轮换"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+sz-rust-data-mask = { workspace = true }
+thiserror = { workspace = true }

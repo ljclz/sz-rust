@@ -1,0 +1,19 @@
+[package]
+name = "sz-rust-upload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 文件上传/分片"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+sz-rust-http-facade = { workspace = true }
+sz-rust-infra-facade = { workspace = true }
+thiserror = { workspace = true }

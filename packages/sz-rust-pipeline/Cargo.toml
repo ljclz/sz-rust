@@ -1,0 +1,18 @@
+[package]
+name = "sz-rust-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 异步流水线"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }
+tower = { workspace = true }
+sz-rust-core = { workspace = true }
+thiserror = { workspace = true }

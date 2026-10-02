@@ -56,6 +56,23 @@ members = [
 
     "packages/sz-rust-sz300",
 
+    # v1.7.0 新增 crate
+    "packages/sz-rust-i18n",
+    "packages/sz-rust-plugin-sdk",
+    "packages/sz-rust-pipeline",
+    "packages/sz-rust-zerocopy",
+    "packages/sz-rust-benchmark-suite",
+    "packages/sz-rust-alert-engine",
+    "packages/sz-rust-log-aggregator",
+    "packages/sz-rust-data-mask",
+    "packages/sz-rust-key-rotation",
+    "packages/sz-rust-security-headers",
+    "packages/sz-rust-websocket",
+    "packages/sz-rust-upload",
+    "packages/sz-rust-admin-ui",
+    "packages/sz-rust-monitor-panel",
+    "packages/sz-rust-codegen-ui",
+
 ]
 
 [package]
@@ -75,7 +92,7 @@ categories.workspace = true
 workspace = true
 
 [workspace.package]
-version = "1.6.0"
+version = "1.7.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -274,6 +291,23 @@ sz-rust-api-gateway = { version = "1.4.0", path = "packages/sz-rust-api-gateway"
 sz-rust-ops-api = { version = "1.4.0", path = "packages/sz-rust-ops-api" }
 sz-rust-sz300 = { version = "1.4.0", path = "packages/sz-rust-sz300" }
 
+# v1.7.0 新增 crate
+sz-rust-i18n = { version = "1.7.0", path = "packages/sz-rust-i18n" }
+sz-rust-plugin-sdk = { version = "1.7.0", path = "packages/sz-rust-plugin-sdk" }
+sz-rust-pipeline = { version = "1.7.0", path = "packages/sz-rust-pipeline" }
+sz-rust-zerocopy = { version = "1.7.0", path = "packages/sz-rust-zerocopy" }
+sz-rust-benchmark-suite = { version = "1.7.0", path = "packages/sz-rust-benchmark-suite" }
+sz-rust-alert-engine = { version = "1.7.0", path = "packages/sz-rust-alert-engine" }
+sz-rust-log-aggregator = { version = "1.7.0", path = "packages/sz-rust-log-aggregator" }
+sz-rust-data-mask = { version = "1.7.0", path = "packages/sz-rust-data-mask" }
+sz-rust-key-rotation = { version = "1.7.0", path = "packages/sz-rust-key-rotation" }
+sz-rust-security-headers = { version = "1.7.0", path = "packages/sz-rust-security-headers" }
+sz-rust-websocket = { version = "1.7.0", path = "packages/sz-rust-websocket" }
+sz-rust-upload = { version = "1.7.0", path = "packages/sz-rust-upload" }
+sz-rust-admin-ui = { version = "1.7.0", path = "packages/sz-rust-admin-ui" }
+sz-rust-monitor-panel = { version = "1.7.0", path = "packages/sz-rust-monitor-panel" }
+sz-rust-codegen-ui = { version = "1.7.0", path = "packages/sz-rust-codegen-ui" }
+
 # 密码哈希（sz300 业务应用）
 bcrypt = "0.16"
 
@@ -310,6 +344,11 @@ clap = { version = "4.5", features = ["derive"] }
 tera = "1.20"
 # 交互式命令行输入（P1-T3 插件模板库）
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
+
+# ── v1.7.0 新增外部依赖 ──
+rkyv = "0.8"
+zerocopy = "0.8"
+dashmap = "6"
 
 # ── Feature Gate 细化（v1.4.0 T02）──
 # 细粒度 feature 实现按需编译，聚合 feature 向后兼容
@@ -366,6 +405,50 @@ p3-edge = ["wasm"]
 # 互斥组 1：TLS 后端（rustls vs native-tls）— 当前仅 rustls，预留扩展
 # 互斥组 2：数据库后端（backend-mysql / backend-postgres / backend-sqlite / backend-oracle / backend-mssql）
 
+# === v1.7.0 全栈能力跃升 ===
+# 方向1：插件生态与扩展性
+plugin-market = ["dep:sz-rust-marketplace"]
+plugin-hot-reload = ["dep:sz-rust-addons-loader"]
+plugin-theme = ["dep:sz-rust-frontend-codegen"]
+plugin-i18n = ["dep:sz-rust-i18n"]
+plugin-sdk = ["dep:sz-rust-plugin-sdk"]
+# 方向2：性能优化与基准
+perf-pool = ["dep:sz-rust-orm-facade"]
+perf-query-cache = ["dep:sz-rust-orm-facade"]
+perf-pipeline = ["dep:sz-rust-pipeline"]
+perf-zerocopy = ["dep:sz-rust-zerocopy"]
+perf-benchmark = ["dep:sz-rust-benchmark-suite"]
+# 方向3：可观测性深化
+obs-otel-fullchain = ["dep:sz-rust-observability"]
+obs-alert-engine = ["dep:sz-rust-alert-engine"]
+obs-log-aggregator = ["dep:sz-rust-log-aggregator"]
+obs-health-probe = ["dep:sz-rust-observability"]
+# 方向4：安全合规加固
+sec-rbac = ["dep:sz-rust-auth-facade"]
+sec-data-mask = ["dep:sz-rust-data-mask"]
+sec-audit = ["dep:sz-rust-auth-facade"]
+sec-key-rotation = ["dep:sz-rust-key-rotation"]
+sec-security-headers = ["dep:sz-rust-security-headers"]
+# 方向5：API 协议扩展
+api-graphql = ["dep:sz-rust-orm-facade"]
+api-websocket = ["dep:sz-rust-websocket"]
+api-sse = ["dep:sz-rust-http-facade"]
+api-upload = ["dep:sz-rust-upload"]
+# 方向6：前端与可视化
+frontend-tauri = ["dep:sz-rust-visual"]
+frontend-admin-ui = ["dep:sz-rust-admin-ui"]
+frontend-monitor-panel = ["dep:sz-rust-monitor-panel"]
+frontend-codegen-ui = ["dep:sz-rust-codegen-ui"]
+
+# v1.7.0 方向聚合 feature
+d1-plugin-ecosystem = ["plugin-market", "plugin-hot-reload", "plugin-theme", "plugin-i18n", "plugin-sdk"]
+d2-performance = ["perf-pool", "perf-query-cache", "perf-pipeline", "perf-zerocopy", "perf-benchmark"]
+d3-observability = ["obs-otel-fullchain", "obs-alert-engine", "obs-log-aggregator", "obs-health-probe"]
+d4-security = ["sec-rbac", "sec-data-mask", "sec-audit", "sec-key-rotation", "sec-security-headers"]
+d5-api-protocol = ["api-graphql", "api-websocket", "api-sse", "api-upload"]
+d6-frontend = ["frontend-tauri", "frontend-admin-ui", "frontend-monitor-panel", "frontend-codegen-ui"]
+all-v1-7 = ["d1-plugin-ecosystem", "d2-performance", "d3-observability", "d4-security", "d5-api-protocol", "d6-frontend"]
+
 [dependencies]
 # optional 依赖，由 feature gate 控制
 sz-rust-ai-facade = { workspace = true, optional = true }
@@ -379,6 +462,29 @@ sz-rust-config-center = { workspace = true, optional = true }
 sz-rust-tracing = { workspace = true, optional = true }
 sz-rust-observability = { workspace = true, optional = true }
 sz-rust-wasm = { workspace = true, optional = true }
+
+# v1.7.0 新增 optional 依赖
+sz-rust-i18n = { workspace = true, optional = true }
+sz-rust-plugin-sdk = { workspace = true, optional = true }
+sz-rust-pipeline = { workspace = true, optional = true }
+sz-rust-zerocopy = { workspace = true, optional = true }
+sz-rust-benchmark-suite = { workspace = true, optional = true }
+sz-rust-alert-engine = { workspace = true, optional = true }
+sz-rust-log-aggregator = { workspace = true, optional = true }
+sz-rust-data-mask = { workspace = true, optional = true }
+sz-rust-key-rotation = { workspace = true, optional = true }
+sz-rust-security-headers = { workspace = true, optional = true }
+sz-rust-websocket = { workspace = true, optional = true }
+sz-rust-upload = { workspace = true, optional = true }
+sz-rust-admin-ui = { workspace = true, optional = true }
+sz-rust-monitor-panel = { workspace = true, optional = true }
+sz-rust-codegen-ui = { workspace = true, optional = true }
+# v1.7.0 现有 crate 设为 optional
+sz-rust-marketplace = { workspace = true, optional = true }
+sz-rust-addons-loader = { workspace = true, optional = true }
+sz-rust-auth-facade = { workspace = true, optional = true }
+sz-rust-http-facade = { workspace = true, optional = true }
+sz-rust-visual = { workspace = true, optional = true }
 
 # ── 构建优化配置 ──
 

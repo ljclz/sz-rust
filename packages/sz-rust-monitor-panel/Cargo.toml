@@ -1,0 +1,17 @@
+[package]
+name = "sz-rust-monitor-panel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 可视化监控面板"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sz-rust-observability = { workspace = true }
+sz-rust-alert-engine = { workspace = true }
+axum = { workspace = true }
+thiserror = { workspace = true }

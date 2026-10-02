@@ -1,0 +1,17 @@
+[package]
+name = "sz-rust-admin-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 管理后台 UI 后端 API"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sz-rust-core = { workspace = true }
+sz-rust-auth-facade = { workspace = true }
+axum = { workspace = true }
+thiserror = { workspace = true }
