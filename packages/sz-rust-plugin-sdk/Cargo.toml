@@ -3,7 +3,7 @@ name = "sz-rust-plugin-sdk"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SZ-Rust 插件 SDK"
+description = "SZ-Rust 插件 SDK — 生命周期钩子 + API 稳定性 + 版本兼容声明"
 repository.workspace = true
 homepage.workspace = true
 
@@ -15,3 +15,10 @@ sz-rust-addons-loader = { workspace = true }
 semver = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
