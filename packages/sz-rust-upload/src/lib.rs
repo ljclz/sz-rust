@@ -6,16 +6,20 @@
 //!
 //! # 组成
 //!
-//! - [`engine`]：完整上传引擎 re-export（来自 `sz-rust-infra-facade::upload`）：
-//!   `File` / `UploadedFile` / 5 种存储引擎（Local / 阿里云 OSS / 腾讯云 COS / 七牛 Kodo / AWS S3）/
-//!   校验 / 图像处理。等价于 `sz_rust_core::upload`。
+//! - [`engine`]：完整上传引擎 re-export（来自 `sz-rust-infra-facade::upload`）
 //! - [`chunk`]：分片上传 + 断点续传引擎（sha256 校验 + 磁盘持久化 + 幂等去重）
+//! - [`multipart`]：Multipart 表单文件上传（spec §5.23 规则 1）
+//! - [`vscan`]：病毒扫描钩子（spec §5.23 规则 4）
+//! - [`storage`]：存储抽象（Local/S3/MinIO/OSS，spec §5.23 规则 5）
 //! - [`error`]：本 crate 错误类型（错误码 17150 起）
 
 #![forbid(unsafe_code)]
 
 pub mod chunk;
 pub mod error;
+pub mod multipart;
+pub mod storage;
+pub mod vscan;
 
 pub use error::*;
 

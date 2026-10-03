@@ -30,6 +30,9 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+/// DataLoader 批量加载器（需启用 `graphql` feature，spec §5.20 规则 3）
+#[cfg(feature = "graphql")]
+pub mod dataloader;
 pub mod error;
 pub mod error_code_registry;
 /// GraphQL 支持（需启用 `graphql` feature）

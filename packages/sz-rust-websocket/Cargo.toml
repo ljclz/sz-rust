@@ -12,8 +12,12 @@ workspace = true
 
 [dependencies]
 axum = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
 dashmap = { workspace = true }
 sz-rust-http-facade = { workspace = true }
 sz-rust-auth-facade = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }

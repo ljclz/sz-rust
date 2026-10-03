@@ -273,6 +273,168 @@ pub type GraphQLRequest = async_graphql_axum::GraphQLRequest;
 pub type GraphQLResponse = async_graphql_axum::GraphQLResponse;
 
 // ============================================================================
+// GraphQLExecutor — 深度/复杂度限制（spec §5.20，v1.7.0 新增）
+// ============================================================================
+
+/// GraphQL 执行器配置（spec §6.20）
+#[derive(Debug, Clone)]
+pub struct GraphQLExecutorConfig {
+    /// 查询深度限制（默认 ≤ 10，spec §6.20 规则 1）
+    pub max_depth: usize,
+    /// 复杂度限制（spec §6.20 规则 2）
+    pub max_complexity: usize,
+    /// DataLoader 批量大小（默认 ≤ 100，spec §6.20 规则 3）
+    pub dataloader_batch_size: usize,
+}
+
+impl Default for GraphQLExecutorConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: 10,
+            max_complexity: 1000,
+            dataloader_batch_size: 100,
+        }
+    }
+}
+
+impl GraphQLExecutorConfig {
+    /// 创建默认配置
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 设置最大深度
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    /// 设置最大复杂度
+    pub fn with_max_complexity(mut self, max_complexity: usize) -> Self {
+        self.max_complexity = max_complexity;
+        self
+    }
+
+    /// 设置 DataLoader 批量大小
+    pub fn with_dataloader_batch_size(mut self, batch_size: usize) -> Self {
+        self.dataloader_batch_size = batch_size;
+        self
+    }
+
+    /// 校验查询深度（spec §6.20 规则 1）
+    pub fn validate_depth(&self, depth: usize) -> Result<(), GraphQLLimitError> {
+        if depth > self.max_depth {
+            Err(GraphQLLimitError::DepthExceeded {
+                actual: depth,
+                max: self.max_depth,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// 校验查询复杂度（spec §6.20 规则 2）
+    pub fn validate_complexity(&self, complexity: usize) -> Result<(), GraphQLLimitError> {
+        if complexity > self.max_complexity {
+            Err(GraphQLLimitError::ComplexityExceeded {
+                actual: complexity,
+                max: self.max_complexity,
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// GraphQL 限制错误
+#[derive(Debug, Clone, thiserror::Error, serde::Serialize)]
+pub enum GraphQLLimitError {
+    /// 查询深度超限（spec §5.20 规则 4）
+    #[error("查询深度超限: {actual} > {max}")]
+    DepthExceeded {
+        /// 实际深度
+        actual: usize,
+        /// 最大允许深度
+        max: usize,
+    },
+    /// 查询复杂度超限（spec §5.20 规则 4）
+    #[error("查询复杂度超限: {actual} > {max}")]
+    ComplexityExceeded {
+        /// 实际复杂度
+        actual: usize,
+        /// 最大允许复杂度
+        max: usize,
+    },
+}
+
+/// 估算 GraphQL 查询深度（简单解析，spec §5.20 规则 1）
+///
+/// 通过大括号嵌套层数估算查询深度。
+pub fn estimate_query_depth(query: &str) -> usize {
+    let mut max_depth: usize = 0;
+    let mut current_depth: usize = 0;
+    for ch in query.chars() {
+        if ch == '{' {
+            current_depth += 1;
+            if current_depth > max_depth {
+                max_depth = current_depth;
+            }
+        } else if ch == '}' {
+            current_depth = current_depth.saturating_sub(1);
+        }
+    }
+    max_depth.saturating_sub(1)
+}
+
+/// 估算 GraphQL 查询复杂度（字段数 × 嵌套层数，spec §5.20 规则 4）
+pub fn estimate_query_complexity(query: &str) -> usize {
+    let depth = estimate_query_depth(query);
+    let field_count = query
+        .chars()
+        .filter(|c| c.is_alphabetic() || *c == '_')
+        .count();
+    field_count * (depth + 1)
+}
+
+/// GraphQL 执行器（spec §5.20）
+///
+/// 封装 async-graphql Schema + 深度/复杂度限制。
+pub struct GraphQLExecutor {
+    config: GraphQLExecutorConfig,
+}
+
+impl GraphQLExecutor {
+    /// 创建执行器
+    pub fn new(config: GraphQLExecutorConfig) -> Self {
+        Self { config }
+    }
+
+    /// 获取配置引用
+    pub fn config(&self) -> &GraphQLExecutorConfig {
+        &self.config
+    }
+
+    /// 校验查询（深度 + 复杂度，spec §5.20 规则 4）
+    ///
+    /// # 后置条件
+    /// - 超深度/超复杂度 → 返回错误
+    /// - 通过 → 返回 Ok
+    pub fn validate_query(&self, query: &str) -> Result<(), GraphQLLimitError> {
+        let depth = estimate_query_depth(query);
+        self.config.validate_depth(depth)?;
+        let complexity = estimate_query_complexity(query);
+        self.config.validate_complexity(complexity)?;
+        Ok(())
+    }
+}
+
+impl Default for GraphQLExecutor {
+    fn default() -> Self {
+        Self::new(GraphQLExecutorConfig::default())
+    }
+}
+
+// ============================================================================
 // 单元测试
 // ============================================================================
 
@@ -483,5 +645,89 @@ mod tests {
         let html = graphiql_html("/graphql");
         assert!(html.contains("react@18"));
         assert!(html.contains("graphiql@3"));
+    }
+
+    // ------------------------------------------------------------------------
+    // GraphQLExecutor 测试（v1.7.0 新增）
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_executor_config_default() {
+        let config = GraphQLExecutorConfig::default();
+        assert_eq!(config.max_depth, 10);
+        assert_eq!(config.max_complexity, 1000);
+        assert_eq!(config.dataloader_batch_size, 100);
+    }
+
+    #[test]
+    fn test_executor_config_builder() {
+        let config = GraphQLExecutorConfig::new()
+            .with_max_depth(5)
+            .with_max_complexity(500)
+            .with_dataloader_batch_size(50);
+        assert_eq!(config.max_depth, 5);
+        assert_eq!(config.max_complexity, 500);
+        assert_eq!(config.dataloader_batch_size, 50);
+    }
+
+    #[test]
+    fn test_estimate_query_depth() {
+        assert_eq!(estimate_query_depth("{ hello }"), 0);
+        assert_eq!(estimate_query_depth("{ user { name } }"), 1);
+        assert_eq!(estimate_query_depth("{ user { posts { title } } }"), 2);
+        assert_eq!(estimate_query_depth("{ a { b { c { d } } } }"), 3);
+    }
+
+    #[test]
+    fn test_validate_depth_ok() {
+        let config = GraphQLExecutorConfig::new().with_max_depth(10);
+        assert!(config.validate_depth(5).is_ok());
+        assert!(config.validate_depth(10).is_ok());
+    }
+
+    #[test]
+    fn test_validate_depth_exceeded() {
+        let config = GraphQLExecutorConfig::new().with_max_depth(3);
+        let err = config.validate_depth(5).unwrap_err();
+        assert!(matches!(
+            err,
+            GraphQLLimitError::DepthExceeded { actual: 5, max: 3 }
+        ));
+    }
+
+    #[test]
+    fn test_validate_complexity_ok() {
+        let config = GraphQLExecutorConfig::new().with_max_complexity(1000);
+        assert!(config.validate_complexity(500).is_ok());
+    }
+
+    #[test]
+    fn test_validate_complexity_exceeded() {
+        let config = GraphQLExecutorConfig::new().with_max_complexity(10);
+        let err = config.validate_complexity(50).unwrap_err();
+        assert!(matches!(
+            err,
+            GraphQLLimitError::ComplexityExceeded {
+                actual: 50,
+                max: 10
+            }
+        ));
+    }
+
+    #[test]
+    fn test_executor_validate_query_ok() {
+        let executor = GraphQLExecutor::default();
+        assert!(executor.validate_query("{ hello }").is_ok());
+        assert!(executor.validate_query("{ user { name } }").is_ok());
+    }
+
+    #[test]
+    fn test_executor_validate_query_depth_exceeded() {
+        let config = GraphQLExecutorConfig::new()
+            .with_max_depth(1)
+            .with_max_complexity(10000);
+        let executor = GraphQLExecutor::new(config);
+        let deep_query = "{ a { b { c } } }";
+        assert!(executor.validate_query(deep_query).is_err());
     }
 }

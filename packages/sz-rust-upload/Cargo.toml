@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 axum = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
 sz-rust-http-facade = { workspace = true }
 sz-rust-infra-facade = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+async-trait = { workspace = true }
