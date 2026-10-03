@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod aggregator;
 pub mod error;
 
+pub use aggregator::*;
 pub use error::*;

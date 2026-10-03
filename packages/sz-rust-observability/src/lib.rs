@@ -759,3 +759,10 @@ mod tests {
         assert!((counter.value() - 2000.0).abs() < 1e-9);
     }
 }
+// ============================================================================
+// v1.7.0 P3-3.1: OTel 全链路 span 属性 + baggage
+// ============================================================================
+#[cfg(feature = "otel-span-attributes")]
+pub mod span_attributes;
+#[cfg(feature = "otel-span-attributes")]
+pub use span_attributes::{Baggage, SpanAttributes, SpanContext};

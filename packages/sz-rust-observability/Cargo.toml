@@ -36,6 +36,9 @@ otlp-retry = ["otlp-batch"]
 # P3-3: 分布式追踪采样
 tail-sampling = []
 
+# v1.7.0 P3-3.1: OTel span 属性 + baggage
+otel-span-attributes = []
+
 [dependencies]
 tokio = { workspace = true }
 async-trait = { workspace = true }

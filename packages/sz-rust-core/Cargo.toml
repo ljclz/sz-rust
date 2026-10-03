@@ -139,6 +139,9 @@ mem-pool = []
 bumpalo-pool = ["dep:bumpalo", "mem-pool"]
 # T065: 可选重导出 feature gate（不启用时不编译对应 crate）
 facade = ["dep:sz-rust-facade"]
+
+# v1.7.0 P3-3.4: 健康探针增强（就绪/存活分离 + 依赖级联）
+health-probe = []
 config-center = ["dep:sz-rust-config-center"]
 service-registry = ["dep:sz-rust-service-registry"]
 distributed-tx = ["dep:sz-rust-distributed-tx"]

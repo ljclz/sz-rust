@@ -76,6 +76,15 @@ pub mod multi_app;
 pub mod multi_tenant;
 pub mod plugin;
 
+// v1.7.0 P3-3.4: 健康探针增强（就绪/存活分离 + 依赖级联）
+#[cfg(feature = "health-probe")]
+pub mod health_probe;
+#[cfg(feature = "health-probe")]
+pub use health_probe::{
+    DependencyHealthCheck, HealthProbe, LivenessProbe, ProbeConfig, ProbeResult, ProbeStatus,
+    ReadinessProbe,
+};
+
 // P3: alloc 计数 GlobalAlloc wrapper（仅 alloc-count feature 启用时编译）
 #[cfg(feature = "alloc-count")]
 pub mod alloc_counter;

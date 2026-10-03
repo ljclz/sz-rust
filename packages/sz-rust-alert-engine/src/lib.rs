@@ -7,5 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod rule;
 
 pub use error::*;
+pub use rule::*;
