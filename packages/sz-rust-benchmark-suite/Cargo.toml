@@ -14,3 +14,6 @@ workspace = true
 sz-rust-core = { workspace = true }
 sz-rust-orm-facade = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

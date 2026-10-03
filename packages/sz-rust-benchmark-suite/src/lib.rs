@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod benchmark;
 pub mod error;
 
+pub use benchmark::*;
 pub use error::*;

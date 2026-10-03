@@ -8757,9 +8757,12 @@ dependencies = [
 name = "sz-rust-benchmark-suite"
 version = "1.7.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sz-rust-core",
  "sz-rust-orm-facade",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -9053,6 +9056,7 @@ dependencies = [
  "askama",
  "async-trait",
  "chrono",
+ "parking_lot",
  "quote",
  "serde",
  "serde_json",
@@ -9421,7 +9425,11 @@ dependencies = [
 name = "sz-rust-pipeline"
 version = "1.7.0"
 dependencies = [
+ "async-trait",
  "futures",
+ "parking_lot",
+ "serde",
+ "serde_json",
  "sz-rust-core",
  "thiserror 2.0.21",
  "tokio",
@@ -9433,9 +9441,13 @@ name = "sz-rust-plugin-sdk"
 version = "1.7.0"
 dependencies = [
  "async-trait",
+ "parking_lot",
  "semver",
+ "serde",
+ "serde_json",
  "sz-rust-addons-loader",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -9692,6 +9704,7 @@ version = "1.7.0"
 dependencies = [
  "rkyv",
  "serde",
+ "serde_json",
  "sz-rust-core",
  "thiserror 2.0.21",
  "zerocopy",
