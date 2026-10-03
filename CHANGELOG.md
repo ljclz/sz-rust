@@ -7,6 +7,49 @@
 
 ## [Unreleased]
 
+## [v1.7.0] - 2026-10-03
+
+### Added — P1 插件生态
+
+- **插件市场**（P1-1.1，`sz-rust-marketplace`）：PluginManifest + MarketplaceRegistry + 版本约束 + 签名验证 + 依赖解析
+- **插件隔离加载**（P1-1.2，`sz-rust-addons-loader`）：WASM 沙盒 + 资源配额 + 超时 + 热加载/卸载
+- **前端代码生成器主题**（P1-1.3，`sz-rust-frontend-codegen`）：ThemeConfig + 多主题切换 + 代码模板渲染
+- **国际化**（P1-1.4，`sz-rust-i18n`）：I18nManager + 多语言资源 + 运行时切换 + 缺失键回退
+- **插件 SDK**（P1-1.5，`sz-rust-plugin-sdk`）：Plugin trait + 生命周期钩子 + 上下文注入 + 版本协商
+
+### Added — P2 性能基准
+
+- **流水线并行化**（P2-2.3，`sz-rust-pipeline`）：PipelineStage + 并行执行 + 依赖图 + 结果合并
+- **Zerocopy 优化**（P2-2.4，`sz-rust-zerocopy`）：rkyv 0.8 + zerocopy 0.8 零拷贝序列化 + 内存布局验证
+- **基准测试套件**（P2-2.5，`sz-rust-benchmark-suite`）：Baseline + 回归检测 + JSON 报告 + 阈值门禁
+
+### Added — P3 可观测深化
+
+- **OTel Span 丰富化**（P3-3.1，`sz-rust-observability`）：Span 属性注入 + 事件关联 + 采样优化
+- **告警引擎**（P3-3.2，`sz-rust-alert-engine`）：AlertRule + 多条件组合 + 静默 + 分级通知
+- **日志聚合**（P3-3.3，`sz-rust-log-aggregator`）：LogEntry + 结构化聚合 + 多目标输出 + 采样
+
+### Added — P4 安全合规
+
+- **RBAC 细粒度权限**（P4-4.1，`sz-rust-auth-facade` feature `rbac`）：RbacEngine + 角色继承 BFS + 环检测 + 深度限制(16) + 权限缓存（9 单元测试）
+- **数据脱敏**（P4-4.2，`sz-rust-data-mask`）：MaskEngine + 内置规则(手机/身份证/邮箱/银行卡) + 自定义脱敏函数 + 场景化（10 单元测试）
+- **审计日志链式哈希**（P4-4.3，`sz-rust-middleware-facade` feature `audit-chain`）：ChainHashAuditor + SHA256 链式哈希 + 完整性校验 + 多维查询（8 单元测试）
+- **密钥轮换**（P4-4.4，`sz-rust-key-rotation`）：KeyManager + rotate/get_active/get_valid_keys + retire 逻辑（8 单元测试）
+- **CSP/HSTS 安全头**（P4-4.5，`sz-rust-security-headers`）：SecurityHeadersConfig + SecurityHeadersMiddleware + CSP/HSTS/X-Frame-Options（10 单元测试）
+
+### Added — P5 API 协议
+
+- **GraphQL Executor + DataLoader**（P5-5.1，`sz-rust-http-facade` feature `graphql`）：GraphQLExecutor + 深度/复杂度校验 + BatchLoader 去重分批 + CachedBatchLoader 缓存优先（17 单元测试）
+- **WebSocket 长连接**（P5-5.2，`sz-rust-websocket`）：ConnectionManager + RoomManager + Broadcaster + Heartbeat + ConnectionAuthenticator（22 单元测试）
+- **SSE 重连恢复 + 背压**（P5-5.3，`sz-rust-http-facade` feature `api-sse`）：EventId 单调递增 + SseRecovery + BackpressureBuffer + EventFilter（11 单元测试）
+- **文件上传增强**（P5-5.4，`sz-rust-upload`）：MultipartConfig + VirusScanner trait + ClamAV + Quarantine + StorageBackend(Local/S3/MinIO/OSS)（24 单元测试）
+
+### Added — P6 前端可视化
+
+- **管理后台 API**（P6-6.2，`sz-rust-admin-ui`）：PermissionService + RouteService 动态路由 + ThemeService + CrudService（22 单元测试）
+- **监控面板**（P6-6.3，`sz-rust-monitor-panel`）：GrafanaEmbed + Dashboard/ChartType + RealtimeBuffer + AlertDisplayService + MetricQuery/PromQL（29 单元测试）
+- **代码生成器 UI**（P6-6.4，`sz-rust-codegen-ui`）：DataModel + CodeTemplate + SyntaxHighlighter + ExportService(ZIP/硬编码密钥检测) + DeployService（31 单元测试）
+
 ### Changed — 安全加固（Debug 脱敏）
 
 - **凭据 Debug 输出脱敏**：`sz-rust-auth-facade` 的 `TokenInfo`（OAuth2 访问/刷新令牌）与 `sz-rust-middleware-facade` 的 `ApiKey`（API 密钥）由 `#[derive(Debug)]` 改为自定义脱敏 `Debug` 实现，敏感字段在 `{:?}` 输出中一律显示 `<redacted>`，防止令牌/密钥经日志泄露。新增 `test_token_info_debug_redacts_secrets` / `test_api_key_debug_redacts_secret` 两条防泄漏测试。

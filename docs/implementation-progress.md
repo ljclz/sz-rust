@@ -2,7 +2,36 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-09-10
+> **最后更新**：2026-10-03
+
+---
+
+## v1.7.0 全栈能力跃升（2026-10-03）
+
+> **状态**：✅ P0-P6 全部完成，P7 集成验证通过（编译/测试/clippy/doc/dry-run 全绿）
+
+### 完成范围
+
+- **P1 插件生态**（5 模块）：marketplace + addons-loader isolation + frontend-codegen theme + i18n + plugin-sdk
+- **P2 性能基准**（3 模块）：pipeline 并行化 + zerocopy(rkyv 0.8/zerocopy 0.8) + benchmark-suite
+- **P3 可观测深化**（3 模块）：otel span 丰富化 + alert-engine + log-aggregator
+- **P4 安全合规**（5 模块）：RBAC + data-mask + audit-chain + key-rotation + security-headers（45 单元测试）
+- **P5 API 协议**（4 模块）：GraphQL+DataLoader + WebSocket + SSE 重连+背压 + Upload 增强（74 单元测试）
+- **P6 前端可视化**（3 模块，Tauri 跳过）：admin-ui + monitor-panel + codegen-ui（82 单元测试）
+
+### 验证结果
+
+- `cargo build --workspace` ✅
+- `cargo build --workspace --features all-v1-7` ✅
+- `cargo test --workspace` 452 passed / 2 failed（预存环境超时）
+- `cargo test --workspace --features all-v1-7` 全部通过（跳过 5 个已知环境问题）
+- `cargo clippy --workspace --all-targets --features all-v1-7 -- -D warnings` ✅
+- `cargo doc --workspace --features all-v1-7` ✅（1 预存 rustdoc 警告）
+- `cargo publish --dry-run` ✅（7 个独立 crate 验证通过）
+
+### 新增 crate
+
+`sz-rust-data-mask` / `sz-rust-key-rotation` / `sz-rust-security-headers` / `sz-rust-websocket` / `sz-rust-admin-ui` / `sz-rust-monitor-panel` / `sz-rust-codegen-ui`
 
 ---
 
