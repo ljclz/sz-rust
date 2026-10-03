@@ -29,6 +29,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "
 default = []
 # 热重载（M2 方案：进程重启 + 状态迁移，避免 dlopen unsafe）
 hot-reload = ["dep:notify"]
+# 插件隔离 + 热加载事件总线 + 路由原子切换（v1.7.0 spec §5.2）
+plugin-hot-reload = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

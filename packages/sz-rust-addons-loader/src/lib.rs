@@ -63,6 +63,8 @@ pub mod capability_hook;
 pub mod error;
 #[cfg(feature = "hot-reload")]
 pub mod hot_reload;
+#[cfg(feature = "plugin-hot-reload")]
+pub mod isolation;
 pub mod loader;
 pub mod manifest;
 pub mod registry;
