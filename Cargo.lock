@@ -8660,6 +8660,9 @@ name = "sz-rust-admin-ui"
 version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
+ "parking_lot",
+ "serde",
+ "serde_json",
  "sz-rust-auth-facade",
  "sz-rust-core",
  "thiserror 2.0.21",
@@ -8866,9 +8869,11 @@ name = "sz-rust-codegen-ui"
 version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
+ "serde",
  "serde_json",
  "sz-rust-frontend-codegen",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -9157,6 +9162,8 @@ dependencies = [
 name = "sz-rust-key-rotation"
 version = "1.7.0"
 dependencies = [
+ "chrono",
+ "parking_lot",
  "serde",
  "sz-rust-data-mask",
  "thiserror 2.0.21",
@@ -9279,6 +9286,10 @@ name = "sz-rust-monitor-panel"
 version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
  "sz-rust-alert-engine",
  "sz-rust-observability",
  "thiserror 2.0.21",
@@ -9615,7 +9626,9 @@ dependencies = [
 name = "sz-rust-upload"
 version = "1.7.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.9",
+ "serde",
  "sha2 0.10.9",
  "sz-rust-http-facade",
  "sz-rust-infra-facade",
@@ -9676,12 +9689,16 @@ dependencies = [
 name = "sz-rust-websocket"
 version = "1.7.0"
 dependencies = [
+ "async-trait",
  "axum 0.8.9",
  "dashmap",
+ "parking_lot",
+ "serde",
  "sz-rust-auth-facade",
  "sz-rust-http-facade",
  "thiserror 2.0.21",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
