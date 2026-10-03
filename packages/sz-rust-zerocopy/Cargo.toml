@@ -3,7 +3,7 @@ name = "sz-rust-zerocopy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SZ-Rust 零拷贝序列化"
+description = "SZ-Rust 零拷贝序列化 — rkyv/zerocopy 集成 + 跨序列化器互操作"
 repository.workspace = true
 homepage.workspace = true
 
@@ -14,5 +14,6 @@ workspace = true
 rkyv = { workspace = true }
 zerocopy = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sz-rust-core = { workspace = true }
 thiserror = { workspace = true }
