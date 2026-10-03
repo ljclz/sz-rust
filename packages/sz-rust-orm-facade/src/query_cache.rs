@@ -186,6 +186,11 @@ impl QueryCache {
         self.stats.read().misses
     }
 
+    /// 缓存驱逐数
+    pub fn evictions(&self) -> u64 {
+        self.stats.read().evictions
+    }
+
     /// LRU 淘汰（简化版：淘汰最早过期的条目）
     fn evict_oldest(&self, entries: &mut HashMap<String, CacheEntry>) {
         if let Some((oldest_key, _)) = entries

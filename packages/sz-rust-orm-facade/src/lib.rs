@@ -263,6 +263,35 @@ pub use pool_warmer::{PoolWarmer, WarmupError as PoolWarmupError};
 pub use query_cache::{QueryCache, QueryCacheConfig, QueryCacheError};
 
 // ============================================================================
+// v1.7.0 P2-2.1: 连接池健康检查驱逐 + 指标暴露
+// ============================================================================
+#[cfg(feature = "pool-health-check")]
+pub mod pool_health_check;
+#[cfg(feature = "pool-health-check")]
+pub use pool_health_check::{
+    ConnectionHealth, ConnectionInfo, HealthCheckConfig, HealthCheckEvictor, HealthCheckResult,
+    HealthCheckablePool, PoolHealthError,
+};
+
+#[cfg(feature = "pool-health-check")]
+pub mod pool_metrics_exporter;
+#[cfg(feature = "pool-health-check")]
+pub use pool_metrics_exporter::{PoolEventTracker, PoolMetricsExporter, PoolMetricsSnapshot};
+
+// ============================================================================
+// v1.7.0 P2-2.2: 查询缓存透明层 + 指标暴露
+// ============================================================================
+#[cfg(feature = "query-cache-transparent")]
+pub mod query_cache_transparent;
+#[cfg(feature = "query-cache-transparent")]
+pub use query_cache_transparent::{TableInvalidator, TransparentCacheLayer};
+
+#[cfg(feature = "query-cache-transparent")]
+pub mod query_cache_metrics;
+#[cfg(feature = "query-cache-transparent")]
+pub use query_cache_metrics::{QueryCacheMetricsExporter, QueryCacheMetricsSnapshot};
+
+// ============================================================================
 // 可靠任务队列（数据库持久化 Job 表：状态机 / 原子领取 / 退避重试 / 幂等 / 死信）
 // ============================================================================
 pub mod jobs;
