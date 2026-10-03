@@ -3,7 +3,7 @@ name = "sz-rust-pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SZ-Rust 异步流水线"
+description = "SZ-Rust 异步流水线 — 阶段并行 + 背压控制 + 阶段取消"
 repository.workspace = true
 homepage.workspace = true
 
@@ -16,3 +16,10 @@ futures = { workspace = true }
 tower = { workspace = true }
 sz-rust-core = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
