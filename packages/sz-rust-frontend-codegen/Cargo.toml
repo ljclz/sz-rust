@@ -29,6 +29,8 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+# 并发原语
+parking_lot = { workspace = true }
 # 模板引擎
 tera = { workspace = true }
 # AST 解析
@@ -41,6 +43,8 @@ async-trait = { workspace = true }
 
 [features]
 askama = ["dep:askama"]
+# 主题继承与运行时切换（v1.7.0 spec §5.3）
+plugin-theme = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -50,6 +50,8 @@ pub mod ui_adapter;
 
 #[cfg(feature = "askama")]
 pub mod askama_engine;
+#[cfg(feature = "plugin-theme")]
+pub mod theme;
 
 pub use config::{Framework, GenerationConfig, OverrideStrategy, UiLibrary};
 pub use error::FrontendCodegenError;
