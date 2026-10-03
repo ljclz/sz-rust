@@ -14,6 +14,8 @@ A Rust Web framework built on axum 0.8 + SZ-ORM, with API design aligned to Thin
 
 All features below are from actual `sz-rust-core` source code. Module structure: `packages/sz-rust-core/src/lib.rs`.
 
+> 🔒 **Enterprise-repo note**: In the `✅ Production:` annotations below, `sz300` refers to the **production sz300 business app** (smart-scale SaaS backend), whose full version lives in the **enterprise repo** (`E:/www/rust/sz-rust-enterprise/packages/sz-rust-sz300`). This open-source workspace also contains a **simplified example** `packages/sz-rust-sz300` (CORS + CSRF + JWT only, basic merchant/product/device/order/file CRUD + MQTT sample) — not the same codebase the citations refer to. Line numbers point at the enterprise repo and may drift as it evolves. `sz-rust-oss` (github.com/ljclz/sz-rust, HEAD 2026-08-07 v0.6.1) is a separate historical snapshot containing sz300 (pre-split source), not a branch of the enterprise repo.
+
 - **HTTP Server + Routing**: Built on axum 0.8 + tower 0.5 + hyper 1.x, supporting three-layer routing (attribute macro / config-based / convention-based).
 - **Controller Layer**: `SzController` → `BaseController` → `AddonsBaseController` three-layer trait inheritance chain, aligned with PHP `app\SzController` / `app\BaseController` / `addons\BaseController`. Provides `renderJson` / `renderSuccess` / `renderError` / `postData` / `getData` methods.
 - **Model Layer**: `BaseModel` trait composing SZ-ORM's `Model` + `ModelExt` + `RelationLoader`, aligned with `think\Model`. Supports `$append` virtual fields, accessors (`Accessor`), mutators (`Mutator`), dynamic append (`Appendable`).
