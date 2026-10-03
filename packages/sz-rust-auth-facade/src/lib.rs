@@ -83,3 +83,13 @@ pub mod oauth_device_flow;
 pub mod oauth_token_store;
 
 pub use jwt::JwtAudienceValidator;
+// ============================================================================
+// v1.7.0 P4-4.1: RBAC 细粒度权限
+// ============================================================================
+#[cfg(feature = "rbac")]
+pub mod rbac;
+#[cfg(feature = "rbac")]
+pub use rbac::{
+    DataScope, NoCache, PermissionCache, PermissionDecision, RbacEngine, RbacError, Resource,
+    RoleId,
+};

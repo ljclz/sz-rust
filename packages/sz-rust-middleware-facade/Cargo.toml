@@ -53,5 +53,8 @@ waf = []
 # P4-2: API 签名验证
 api-signature = []
 
+# v1.7.0 P4-4.3: 审计日志链式哈希
+audit-chain = []
+
 [lints]
 workspace = true

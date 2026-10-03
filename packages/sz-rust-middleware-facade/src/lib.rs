@@ -26,6 +26,8 @@
 /// 请求作用域 ID（原定义于 sz-rust-core::container，P3 迁移至此消除双向环）
 pub type ScopeId = u64;
 
+#[cfg(feature = "audit-chain")]
+pub mod audit_chain;
 pub mod audit_log;
 pub mod auth;
 pub mod body_size_limit;

@@ -78,6 +78,9 @@ device-code = ["dep:tokio"]
 # P4-3: OAuth2 令牌存储 + 授权码一次性 + PKCE S256/Plain + scope 校验
 oauth-token-store = []
 
+# v1.7.0 P4-4.1: RBAC 细粒度权限
+rbac = []
+
 [lints]
 workspace = true
 

@@ -5,6 +5,9 @@
 //! v1.7.0 新增模块，通过 Cargo feature gate 控制，默认不启用。
 
 #![forbid(unsafe_code)]
+
 pub mod error;
+pub mod headers;
 
 pub use error::*;
+pub use headers::*;
