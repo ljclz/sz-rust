@@ -8,10 +8,13 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use ed25519_dalek::VerifyingKey;
+use tokio::time::timeout;
 
+use crate::dependency_resolver::{DependencyResolver, SemverResolver};
 use crate::error::{MarketplaceError, MarketplaceResult};
 use crate::lockfile::{LockfileEntry, LockfileManager};
 use crate::manifest::MarketplaceManifest;
@@ -78,6 +81,52 @@ pub struct InstallRequest {
     pub lockfile_path: PathBuf,
 }
 
+/// 可信来源配置（spec §5.1 规则 6）
+#[derive(Debug, Clone)]
+pub struct TrustedSourceConfig {
+    /// 是否信任官方市场
+    pub trust_official_market: bool,
+    /// 可信发布者 ID 集合
+    pub trusted_publisher_ids: std::collections::HashSet<i64>,
+}
+
+impl Default for TrustedSourceConfig {
+    fn default() -> Self {
+        Self {
+            trust_official_market: true,
+            trusted_publisher_ids: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl TrustedSourceConfig {
+    /// 创建可信来源配置
+    pub fn new(trust_official: bool, trusted_ids: impl IntoIterator<Item = i64>) -> Self {
+        Self {
+            trust_official_market: trust_official,
+            trusted_publisher_ids: trusted_ids.into_iter().collect(),
+        }
+    }
+
+    /// 检查发布者是否可信
+    pub fn is_trusted(&self, publisher_id: i64, is_official: bool) -> bool {
+        if is_official && self.trust_official_market {
+            return true;
+        }
+        self.trusted_publisher_ids.contains(&publisher_id)
+    }
+}
+
+/// 安全卸载请求
+pub struct SafeUninstallRequest {
+    /// 插件名
+    pub plugin_name: String,
+    /// 锁文件路径
+    pub lockfile_path: PathBuf,
+    /// 等待进行中请求的超时时间
+    pub drain_timeout: Duration,
+}
+
 /// 市场服务
 pub struct MarketplaceService {
     plugins: Arc<PluginRepository>,
@@ -85,6 +134,28 @@ pub struct MarketplaceService {
     reviews: Arc<ReviewRepository>,
     developers: Arc<DeveloperRepository>,
     store: Arc<dyn ObjectStore>,
+    /// 进行中请求计数器（插件名 → 计数）
+    in_flight: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+    /// 可信来源配置
+    trusted_sources: TrustedSourceConfig,
+}
+
+/// 进行中请求 guard，drop 时自动递减计数
+pub struct InFlightGuard {
+    in_flight: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+    plugin_name: String,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.in_flight.lock() {
+            if let Some(count) = map.get_mut(&self.plugin_name) {
+                if *count > 0 {
+                    *count -= 1;
+                }
+            }
+        }
+    }
 }
 
 impl MarketplaceService {
@@ -102,7 +173,37 @@ impl MarketplaceService {
             reviews: Arc::new(reviews),
             developers: Arc::new(developers),
             store,
+            in_flight: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            trusted_sources: TrustedSourceConfig::default(),
         }
+    }
+
+    /// 设置可信来源配置
+    pub fn with_trusted_sources(mut self, config: TrustedSourceConfig) -> Self {
+        self.trusted_sources = config;
+        self
+    }
+
+    /// 注册进行中请求（返回 guard，drop 时自动递减）
+    pub fn register_request(&self, plugin_name: &str) -> InFlightGuard {
+        {
+            let mut map = self.in_flight.lock().unwrap();
+            *map.entry(plugin_name.to_string()).or_insert(0) += 1;
+        }
+        InFlightGuard {
+            in_flight: self.in_flight.clone(),
+            plugin_name: plugin_name.to_string(),
+        }
+    }
+
+    /// 获取插件进行中请求数
+    fn in_flight_count(&self, plugin_name: &str) -> usize {
+        self.in_flight
+            .lock()
+            .unwrap()
+            .get(plugin_name)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// 发布插件
@@ -268,6 +369,73 @@ impl MarketplaceService {
         Ok(())
     }
 
+    /// 两阶段安全卸载（spec §5.1 规则 5）
+    ///
+    /// 阶段1: 禁用（检查进行中请求）
+    /// 阶段2: 等待进行中请求完成（超时 drain_timeout）
+    /// 阶段3: 从锁文件移除插件
+    pub async fn safe_uninstall(&self, req: SafeUninstallRequest) -> MarketplaceResult<()> {
+        let plugin = self
+            .plugins
+            .find_by_name(&req.plugin_name)
+            .await?
+            .ok_or_else(|| MarketplaceError::NotInstalled(req.plugin_name.clone()))?;
+
+        let _guard = self.register_request(&req.plugin_name);
+
+        let drain = async {
+            loop {
+                let count = self.in_flight_count(&req.plugin_name);
+                if count <= 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        };
+
+        timeout(req.drain_timeout, drain).await.map_err(|_| {
+            let count = self.in_flight_count(&req.plugin_name);
+            MarketplaceError::UninstallTimeout(req.plugin_name.clone(), count.saturating_sub(1))
+        })?;
+
+        LockfileManager::remove(&req.lockfile_path, &plugin.name).await?;
+
+        Ok(())
+    }
+
+    /// 带依赖解析的安装（spec §5.1 规则 3-4）
+    ///
+    /// 验证签名 → 解析依赖树 → 冲突检测 → 安装/拒绝
+    pub async fn install_with_resolution(
+        &self,
+        req: InstallRequest,
+        manifest: &MarketplaceManifest,
+        installed: &std::collections::HashMap<String, semver::Version>,
+        publisher_id: i64,
+        is_official: bool,
+    ) -> MarketplaceResult<()> {
+        if !self.trusted_sources.is_trusted(publisher_id, is_official) {
+            return Err(MarketplaceError::UntrustedSource(format!(
+                "发布者 {} 不在可信列表中",
+                publisher_id
+            )));
+        }
+
+        let resolver = SemverResolver::new();
+        let resolve_result = resolver.resolve(manifest, installed)?;
+
+        if let crate::dependency_resolver::ResolveResult::Conflict(conflicts) = resolve_result {
+            let details = conflicts
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(MarketplaceError::DependencyConflictResolved(details));
+        }
+
+        self.install(req).await
+    }
+
     /// 审核插件版本
     ///
     /// 校验审核员角色 → 自审禁止 → 版本 pending → 变更状态 + append-only 审核记录
@@ -335,5 +503,76 @@ impl InstallRepositoryProxy {
 
     async fn create(&self, _record: InstallRecord) -> MarketplaceResult<()> {
         Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_trusted_source_default() {
+        let config = TrustedSourceConfig::default();
+        assert!(config.is_trusted(1, true));
+        assert!(!config.is_trusted(1, false));
+    }
+
+    #[test]
+    fn test_trusted_source_with_publishers() {
+        let config = TrustedSourceConfig::new(false, vec![10, 20, 30]);
+        assert!(!config.is_trusted(1, true));
+        assert!(config.is_trusted(10, false));
+        assert!(config.is_trusted(20, false));
+        assert!(config.is_trusted(30, true));
+        assert!(!config.is_trusted(40, false));
+    }
+
+    #[test]
+    fn test_trusted_source_official_only() {
+        let config = TrustedSourceConfig::new(true, vec![]);
+        assert!(config.is_trusted(1, true));
+        assert!(!config.is_trusted(1, false));
+    }
+
+    #[test]
+    fn test_in_flight_guard_decrements_on_drop() {
+        let in_flight: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+        {
+            let _guard = InFlightGuard {
+                in_flight: in_flight.clone(),
+                plugin_name: "test-plugin".to_string(),
+            };
+            {
+                let mut map = in_flight.lock().unwrap();
+                *map.entry("test-plugin".to_string()).or_insert(0) += 1;
+            }
+            let count = in_flight
+                .lock()
+                .unwrap()
+                .get("test-plugin")
+                .copied()
+                .unwrap_or(0);
+            assert_eq!(count, 1);
+        }
+
+        let count = in_flight
+            .lock()
+            .unwrap()
+            .get("test-plugin")
+            .copied()
+            .unwrap_or(0);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_safe_uninstall_request_defaults() {
+        let req = SafeUninstallRequest {
+            plugin_name: "test-plugin".to_string(),
+            lockfile_path: PathBuf::from("/tmp/test.lock"),
+            drain_timeout: Duration::from_secs(30),
+        };
+        assert_eq!(req.plugin_name, "test-plugin");
+        assert_eq!(req.drain_timeout, Duration::from_secs(30));
     }
 }

@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod client;
+pub mod dependency_resolver;
 pub mod error;
 pub mod lockfile;
 pub mod manifest;

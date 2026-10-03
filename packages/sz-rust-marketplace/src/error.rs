@@ -63,6 +63,22 @@ pub enum MarketplaceError {
     #[error("下载失败: {0}")]
     DownloadFailed(String),
 
+    /// 非可信来源拒绝（spec §5.1 规则 6）
+    #[error("非可信来源: {0}")]
+    UntrustedSource(String),
+
+    /// 卸载超时（spec §5.1 规则 5）
+    #[error("卸载超时: 插件 {0} 仍有 {1} 个进行中请求")]
+    UninstallTimeout(String, usize),
+
+    /// 依赖解析冲突（spec §5.1 规则 3）
+    #[error("依赖冲突: {0}")]
+    DependencyConflictResolved(String),
+
+    /// 插件未安装
+    #[error("插件未安装: {0}")]
+    NotInstalled(String),
+
     /// 内部错误
     #[error("内部错误: {0}")]
     InternalError(String),
