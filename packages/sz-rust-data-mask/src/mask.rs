@@ -89,11 +89,11 @@ fn mask_email(value: &str) -> String {
         if local.len() <= 1 {
             format!("*{domain}")
         } else if local.len() == 2 {
-            let last = local.chars().last().unwrap();
+            let last = local.chars().last().unwrap_or('*');
             format!("*{last}{domain}")
         } else {
-            let first = local.chars().next().unwrap();
-            let last = local.chars().last().unwrap();
+            let first = local.chars().next().unwrap_or('*');
+            let last = local.chars().last().unwrap_or('*');
             format!("{}{}{}{domain}", first, "*".repeat(local.len() - 2), last)
         }
     } else {

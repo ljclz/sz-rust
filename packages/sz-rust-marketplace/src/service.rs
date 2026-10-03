@@ -187,7 +187,10 @@ impl MarketplaceService {
     /// 注册进行中请求（返回 guard，drop 时自动递减）
     pub fn register_request(&self, plugin_name: &str) -> InFlightGuard {
         {
-            let mut map = self.in_flight.lock().unwrap();
+            let mut map = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             *map.entry(plugin_name.to_string()).or_insert(0) += 1;
         }
         InFlightGuard {
@@ -200,7 +203,7 @@ impl MarketplaceService {
     fn in_flight_count(&self, plugin_name: &str) -> usize {
         self.in_flight
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(plugin_name)
             .copied()
             .unwrap_or(0)
