@@ -33,6 +33,8 @@ pub enum BuiltinMaskRule {
     Email,
     /// 银行卡中间 *
     BankCard,
+    /// 完全脱敏（全部替换为 *）
+    Full,
 }
 
 impl BuiltinMaskRule {
@@ -43,6 +45,7 @@ impl BuiltinMaskRule {
             BuiltinMaskRule::IdCard => mask_id_card(value),
             BuiltinMaskRule::Email => mask_email(value),
             BuiltinMaskRule::BankCard => mask_bank_card(value),
+            BuiltinMaskRule::Full => "*".repeat(value.len().max(4)),
         }
     }
 }

@@ -74,3 +74,6 @@ artifacts/
 
 # CodeArts Doer 本地产物（规划文档、中间产物）
 .codeartsdoer/
+scripts/.server_key
+scripts/deploy-check.js
+scripts/deploy-upload.js

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! SZ-300 业务 API OpenAPI 规范构建与文档端点
 //!
@@ -50,6 +50,9 @@ fn build_openapi_spec() -> Value {
         .tag("订单管理", "订单查询与创建")
         .tag("文件上传", "文件与图片上传")
         .tag("健康检查", "存活、就绪、启动探针与 Prometheus 指标")
+        .tag("GraphQL", "GraphQL 查询与变更端点")
+        .tag("WebSocket", "WebSocket 实时通信端点")
+        .tag("SSE", "Server-Sent Events 事件订阅端点")
         .bearer_auth("BearerAuth")
         // ===== 健康检查 =====
         .path("/health", HttpMethod::Get, |op| {
@@ -253,6 +256,36 @@ fn build_openapi_spec() -> Value {
                 .response(200, "上传成功，返回文件 URL", "application/json")
                 .response(400, "参数错误或文件类型不允许", "application/json");
         })
+        .path("/api/v1/file/upload_enhanced", HttpMethod::Post, |op| {
+            op.summary("文件上传（增强）")
+                .description("v1.8.0 增强上传端点，支持大小限制校验与多存储后端")
+                .tag("文件上传")
+                .response(200, "上传成功，返回文件 URL 与元信息", "application/json")
+                .response(400, "参数错误或文件类型不允许", "application/json")
+                .response(413, "文件超过大小限制", "application/json");
+        })
+        // ===== GraphQL =====
+        .path("/graphql", HttpMethod::Post, |op| {
+            op.summary("GraphQL 查询端点")
+                .description("v1.8.0 GraphQL 端点，支持 Query 和 Mutation")
+                .tag("GraphQL")
+                .response(200, "GraphQL 响应", "application/json")
+                .response(400, "GraphQL 语法错误", "application/json");
+        })
+        // ===== WebSocket =====
+        .path("/ws", HttpMethod::Get, |op| {
+            op.summary("WebSocket 连接端点")
+                .description("v1.8.0 WebSocket 端点，用于设备实时通信与心跳")
+                .tag("WebSocket")
+                .response(101, "切换到 WebSocket 协议", "");
+        })
+        // ===== SSE =====
+        .path("/events", HttpMethod::Get, |op| {
+            op.summary("SSE 事件订阅端点")
+                .description("v1.8.0 Server-Sent Events 端点，支持 Last-Event-ID 恢复")
+                .tag("SSE")
+                .response(200, "SSE 事件流", "text/event-stream");
+        })
         .build()
 }
 
@@ -291,7 +324,7 @@ mod tests {
     fn test_spec_has_tags() {
         let spec = &*OPENAPI_SPEC;
         let tags = spec["tags"].as_array().expect("tags 应为数组");
-        assert!(tags.len() >= 7, "应至少有 7 个标签");
+        assert!(tags.len() >= 10, "应至少有 10 个标签");
     }
 
     #[test]
@@ -381,6 +414,21 @@ mod tests {
         let spec = &*OPENAPI_SPEC;
         assert!(spec["paths"]["/api/v1/file/upload"]["post"].is_object());
         assert!(spec["paths"]["/api/v1/file/upload_multipart"]["post"].is_object());
+        assert!(spec["paths"]["/api/v1/file/upload_enhanced"]["post"].is_object());
+    }
+
+    #[test]
+    fn test_spec_includes_v18_endpoints() {
+        let spec = &*OPENAPI_SPEC;
+        assert!(
+            spec["paths"]["/graphql"]["post"].is_object(),
+            "缺少 GraphQL 端点"
+        );
+        assert!(
+            spec["paths"]["/ws"]["get"].is_object(),
+            "缺少 WebSocket 端点"
+        );
+        assert!(spec["paths"]["/events"]["get"].is_object(), "缺少 SSE 端点");
     }
 
     #[test]
@@ -409,7 +457,7 @@ mod tests {
                 }
             }
         }
-        // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 2 = 29
-        assert_eq!(count, 29, "端点总数应为 29，实际: {}", count);
+        // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 3 + GraphQL 1 + WS 1 + SSE 1 = 33
+        assert_eq!(count, 33, "端点总数应为 33，实际: {}", count);
     }
 }

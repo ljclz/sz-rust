@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 服务层模块聚合
 //!
@@ -31,6 +31,12 @@ pub mod mqtt_service;
 pub mod order_service;
 /// 商品服务模块（封装商品 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod product_service;
+/// v1.8.0 SSE 服务
+#[cfg(feature = "v18-sse")]
+pub mod sse_service;
+/// v1.8.0 WebSocket 服务
+#[cfg(feature = "v18-websocket")]
+pub mod ws_service;
 
 /// 将 DB 行（`HashMap<String, Value>`）转换为 JSON 对象（供控制器使用）
 ///

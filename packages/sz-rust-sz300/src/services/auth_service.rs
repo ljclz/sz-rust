@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -11,6 +11,114 @@ static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
 static DB_POOL: OnceLock<Arc<Pool>> = OnceLock::new();
 
+/// v1.8.0 密钥轮换：JWT 签名密钥 ID
+#[cfg(feature = "v18-key-rotation")]
+const JWT_KEY_ID: &str = "jwt-signing";
+
+/// v1.8.0 密钥轮换：全局 KeyManager
+#[cfg(feature = "v18-key-rotation")]
+static KEY_MANAGER: OnceLock<Arc<sz_rust_key_rotation::KeyManager>> = OnceLock::new();
+
+/// v1.8.0 初始化密钥轮换管理器
+///
+/// 创建 KeyManager 并执行首次轮换生成活跃密钥。
+/// `rotation_interval` = 30 天，`keep_history` = 5（grace period 内旧 token 仍可验证）。
+#[cfg(feature = "v18-key-rotation")]
+pub fn init_key_rotation(_initial_secret: &str) -> Arc<sz_rust_key_rotation::KeyManager> {
+    use sz_rust_key_rotation::{KeyId, KeyManager, RotationPolicy};
+
+    let policy = RotationPolicy {
+        interval: std::time::Duration::from_secs(30 * 86400),
+        keep_history: 5,
+    };
+    let manager = KeyManager::new(policy, Box::new(sz_rust_key_rotation::RandomKeyGenerator));
+    let key_id = KeyId::new(JWT_KEY_ID);
+    let _ = manager.rotate(&key_id);
+
+    let arc = Arc::new(manager);
+    let _ = KEY_MANAGER.set(arc.clone());
+    arc
+}
+
+/// v1.8.0 获取全局 KeyManager
+#[cfg(feature = "v18-key-rotation")]
+pub fn get_key_manager() -> &'static Arc<sz_rust_key_rotation::KeyManager> {
+    KEY_MANAGER
+        .get()
+        .expect("KeyManager not initialized — 请先调用 init_key_rotation")
+}
+
+/// v1.8.0 使用活跃密钥签发 JWT
+///
+/// 从 KeyManager 获取活跃密钥 → 用该密钥创建 JwtEncoder → 编码 claims。
+#[cfg(feature = "v18-key-rotation")]
+pub fn sign_token_with_rotation(
+    claims: &sz_rust_core::orm::jwt::JwtClaims,
+) -> Result<String, String> {
+    use sz_rust_key_rotation::KeyId;
+
+    let manager = get_key_manager();
+    let key_id = KeyId::new(JWT_KEY_ID);
+    let active = manager
+        .get_active(&key_id)
+        .ok_or_else(|| "无活跃密钥".to_string())?;
+
+    let secret = String::from_utf8_lossy(&active.key_material);
+    let encoder = sz_rust_core::orm::jwt::JwtEncoder::new(&*secret);
+    encoder
+        .encode(claims)
+        .map_err(|e| format!("JWT 编码失败: {}", e))
+}
+
+/// v1.8.0 使用密钥轮换验证 JWT
+///
+/// 依次尝试所有历史密钥（活跃 + 已退役但未清除）验证 token，任一成功即返回用户。
+/// grace period 由 `keep_history` 控制：旧密钥保留在历史中仍可验证，直到被清除。
+#[cfg(feature = "v18-key-rotation")]
+pub fn verify_token_with_rotation(token: &str) -> Result<User, String> {
+    use sz_rust_key_rotation::KeyId;
+
+    let manager = get_key_manager();
+    let key_id = KeyId::new(JWT_KEY_ID);
+    let all_versions = manager.list_versions(&key_id);
+
+    for key in &all_versions {
+        let secret = String::from_utf8_lossy(&key.key_material);
+        let auth = JwtAuthenticator::new(&*secret, "sz300", 86400);
+        if let Ok(user) = auth.verify_token(token) {
+            return Ok(user);
+        }
+    }
+
+    Err("token 验证失败：无匹配密钥".to_string())
+}
+
+/// v1.8.0 执行密钥轮换
+///
+/// 生成新密钥版本，旧密钥保留在历史中（grace period 内仍可验证）。
+#[cfg(feature = "v18-key-rotation")]
+pub fn rotate_key() -> Result<u64, String> {
+    use sz_rust_key_rotation::{KeyId, RotationEvent};
+
+    let manager = get_key_manager();
+    let key_id = KeyId::new(JWT_KEY_ID);
+    match manager.rotate(&key_id) {
+        Ok(RotationEvent::Rotated { new_version, .. }) => Ok(new_version),
+        Ok(_) => Ok(0),
+        Err(e) => Err(format!("密钥轮换失败: {}", e)),
+    }
+}
+
+/// v1.8.0 测试辅助：创建带初始密钥的 KeyManager（不设全局静态）
+#[cfg(feature = "v18-key-rotation")]
+pub fn default_key_manager_for_tests() -> Arc<sz_rust_key_rotation::KeyManager> {
+    use sz_rust_key_rotation::{KeyId, KeyManager};
+
+    let km = KeyManager::with_default();
+    let _ = km.rotate(&KeyId::new(JWT_KEY_ID));
+    Arc::new(km)
+}
+
 /// 初始化认证模块 — 配置 JWT 密钥、签发者、过期时间与数据库连接池
 ///
 /// 同时将连接池存入全局静态变量，供 [`authenticate_async`] 执行参数化查询使用。
@@ -21,6 +129,16 @@ pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
     let _ = AUTH.set(auth);
     let _ = RBAC.set(RbacAuthorizer::new());
     let _ = DB_POOL.set(pool);
+}
+
+/// 测试用认证初始化 — 仅配置 JWT，不接数据库
+///
+/// 用于集成测试中仅需 `verify_token` 而不需要 DB 查询的场景（如 RBAC 中间件测试）。
+#[cfg(any(test, feature = "v18-rbac"))]
+pub fn init_auth_test_only(secret: &str) {
+    let auth = JwtAuthenticator::new(secret, "sz300-test", 86400);
+    let _ = AUTH.set(auth);
+    let _ = RBAC.set(RbacAuthorizer::new());
 }
 
 /// 获取已初始化的 JWT 认证器（调用前必须先调用 [`init_auth`]）

@@ -143,17 +143,59 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
-    let app_state = AppState {
-        db_pool: Arc::new(pool),
-        pg_pool,
-        metrics_registry: metrics_registry.clone(),
-    };
 
     // 初始化 JWT 认证（传入数据库连接池用于密码验证）
     // JWT 密钥从环境变量 SZ300_JWT_SECRET 读取（生产安全要求）
     let jwt_secret = std::env::var("SZ300_JWT_SECRET")
         .expect("SZ300_JWT_SECRET 环境变量未设置 — 请在启动前设置 JWT 密钥");
-    services::auth_service::init_auth(&jwt_secret, "sz300", 86400, app_state.db_pool.clone());
+    let db_pool = Arc::new(pool);
+    services::auth_service::init_auth(&jwt_secret, "sz300", 86400, db_pool.clone());
+
+    // v1.8.0 初始化密钥轮换 + 启动定时轮换任务
+    #[cfg(feature = "v18-key-rotation")]
+    let key_manager = {
+        let km = services::auth_service::init_key_rotation(&jwt_secret);
+        // 启动定时轮换：每 30 天轮换一次
+        tokio::spawn(async move {
+            let interval = std::time::Duration::from_secs(30 * 86400);
+            loop {
+                tokio::time::sleep(interval).await;
+                match services::auth_service::rotate_key() {
+                    Ok(v) => tracing::info!("密钥轮换成功，新版本: {}", v),
+                    Err(e) => tracing::error!("密钥轮换失败: {}", e),
+                }
+            }
+        });
+        km
+    };
+
+    #[cfg(feature = "v18-websocket")]
+    let (ws_manager, ws_rooms) = sz_rust_sz300::services::ws_service::WsService::default_managers();
+
+    #[cfg(feature = "v18-sse")]
+    let sse_service = sz_rust_sz300::services::sse_service::SseService::with_defaults();
+
+    let app_state = AppState {
+        db_pool,
+        pg_pool,
+        metrics_registry: metrics_registry.clone(),
+        #[cfg(feature = "v18-rbac")]
+        rbac_engine: Arc::new(sz_rust_sz300::rbac::roles::init_rbac_engine()),
+        #[cfg(feature = "v18-key-rotation")]
+        key_manager,
+        #[cfg(feature = "v18-audit-chain")]
+        chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-upload")]
+        upload_config: config::upload_config(),
+        #[cfg(feature = "v18-graphql")]
+        graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v18-websocket")]
+        ws_manager,
+        #[cfg(feature = "v18-websocket")]
+        ws_rooms,
+        #[cfg(feature = "v18-sse")]
+        sse_service,
+    };
 
     // 初始化 MQTT 消费者 — 带优雅退出信号
     let (shutdown_tx, shutdown_rx) = watch::channel(false);

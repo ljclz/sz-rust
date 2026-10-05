@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 鲜视达 SZ-300 后端服务 — 端到端集成示例
 //!
@@ -26,6 +26,9 @@ pub mod config;
 pub mod controllers;
 /// 数据库连接池初始化（MySQL + PostgreSQL）
 pub mod db;
+/// v1.8.0 GraphQL 端点
+#[cfg(feature = "v18-graphql")]
+pub mod graphql;
 pub mod i18n_error;
 /// 应用中间件（JWT 认证、日志等）
 pub mod middleware;
@@ -33,6 +36,9 @@ pub mod middleware;
 pub mod models;
 /// OpenAPI 规范构建与 API 文档端点
 pub mod openapi;
+/// v1.8.0 RBAC 细粒度权限
+#[cfg(feature = "v18-rbac")]
+pub mod rbac;
 /// 路由注册
 pub mod router;
 /// 业务服务层（MQTT、认证、文件等）

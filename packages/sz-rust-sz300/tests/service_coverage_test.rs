@@ -68,6 +68,26 @@ async fn make_app_state(pool: Pool) -> AppState {
         db_pool: Arc::new(pool),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
+        #[cfg(feature = "v18-rbac")]
+        rbac_engine: std::sync::Arc::new(sz_rust_sz300::rbac::roles::init_rbac_engine()),
+        #[cfg(feature = "v18-key-rotation")]
+        key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
+        #[cfg(feature = "v18-audit-chain")]
+        chain_auditor: std::sync::Arc::new(
+            sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
+        ),
+        #[cfg(feature = "v18-upload")]
+        upload_config: sz_rust_sz300::config::upload_config(),
+        #[cfg(feature = "v18-graphql")]
+        graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v18-websocket")]
+        ws_manager: std::sync::Arc::new(
+            sz_rust_websocket::manager::ConnectionManager::with_defaults(),
+        ),
+        #[cfg(feature = "v18-websocket")]
+        ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
+        #[cfg(feature = "v18-sse")]
+        sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
     }
 }
 
@@ -540,6 +560,26 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
         db_pool: Arc::new(pool.clone()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
+        #[cfg(feature = "v18-rbac")]
+        rbac_engine: std::sync::Arc::new(sz_rust_sz300::rbac::roles::init_rbac_engine()),
+        #[cfg(feature = "v18-key-rotation")]
+        key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
+        #[cfg(feature = "v18-audit-chain")]
+        chain_auditor: std::sync::Arc::new(
+            sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
+        ),
+        #[cfg(feature = "v18-upload")]
+        upload_config: sz_rust_sz300::config::upload_config(),
+        #[cfg(feature = "v18-graphql")]
+        graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v18-websocket")]
+        ws_manager: std::sync::Arc::new(
+            sz_rust_websocket::manager::ConnectionManager::with_defaults(),
+        ),
+        #[cfg(feature = "v18-websocket")]
+        ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
+        #[cfg(feature = "v18-sse")]
+        sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
     };
 
     let response = sz_rust_sz300::controllers::health::startup(axum::extract::State(state)).await;
@@ -567,6 +607,26 @@ async fn test_health_metrics_returns_prometheus_format() {
         db_pool: Arc::new(pool.clone()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
+        #[cfg(feature = "v18-rbac")]
+        rbac_engine: std::sync::Arc::new(sz_rust_sz300::rbac::roles::init_rbac_engine()),
+        #[cfg(feature = "v18-key-rotation")]
+        key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
+        #[cfg(feature = "v18-audit-chain")]
+        chain_auditor: std::sync::Arc::new(
+            sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
+        ),
+        #[cfg(feature = "v18-upload")]
+        upload_config: sz_rust_sz300::config::upload_config(),
+        #[cfg(feature = "v18-graphql")]
+        graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v18-websocket")]
+        ws_manager: std::sync::Arc::new(
+            sz_rust_websocket::manager::ConnectionManager::with_defaults(),
+        ),
+        #[cfg(feature = "v18-websocket")]
+        ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
+        #[cfg(feature = "v18-sse")]
+        sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
     };
 
     let response = sz_rust_sz300::controllers::health::metrics(axum::extract::State(state)).await;

@@ -7,7 +7,9 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod layer;
 pub mod mask;
 
 pub use error::*;
+pub use layer::*;
 pub use mask::*;

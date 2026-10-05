@@ -8,6 +8,8 @@
 
 pub mod error;
 pub mod headers;
+pub mod layer;
 
 pub use error::*;
 pub use headers::*;
+pub use layer::*;

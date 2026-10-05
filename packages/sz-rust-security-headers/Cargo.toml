@@ -12,7 +12,13 @@ workspace = true
 
 [dependencies]
 axum = { workspace = true }
+http = { workspace = true }
+tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
 sz-rust-http-facade = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tokio = { workspace = true }

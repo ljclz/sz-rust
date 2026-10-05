@@ -41,6 +41,25 @@ tracing-subscriber.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 once_cell.workspace = true
+# v1.8.0 安全头中间件（feature gate 控制，默认不启用）
+sz-rust-security-headers = { workspace = true, optional = true }
+# v1.8.0 数据脱敏中间件（feature gate 控制，默认不启用）
+sz-rust-data-mask = { workspace = true, optional = true }
+# v1.8.0 RBAC 细粒度权限（feature gate 控制，默认不启用）
+sz-rust-auth-facade = { workspace = true, optional = true, features = ["rbac"] }
+# v1.8.0 JWT 密钥轮换（feature gate 控制，默认不启用）
+sz-rust-key-rotation = { workspace = true, optional = true }
+# v1.8.0 文件上传增强（feature gate 控制，默认不启用）
+sz-rust-upload = { workspace = true, optional = true }
+# v1.8.0 GraphQL 端点（feature gate 控制，默认不启用）
+async-graphql = { workspace = true, optional = true, features = ["dataloader"] }
+async-graphql-axum = { workspace = true, optional = true }
+# v1.8.0 WebSocket 端点（feature gate 控制，默认不启用）
+sz-rust-websocket = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+# v1.8.0 SSE 端点（feature gate 控制，默认不启用）
+# 使用 axum 内置 SSE 支持，无需额外依赖
+
 
 [features]
 default = []
@@ -52,6 +71,24 @@ real-broker = ["sz-rust-core/real-broker"]
 otlp = ["sz-rust-observability/otlp"]
 # 启用 OTLP HTTP/protobuf 分布式追踪导出（端口 4318）
 otlp-http = ["sz-rust-observability/otlp-http"]
+# v1.8.0 安全头中间件接入
+v18-security-headers = ["dep:sz-rust-security-headers"]
+# v1.8.0 数据脱敏中间件接入
+v18-data-mask = ["dep:sz-rust-data-mask"]
+# v1.8.0 RBAC 细粒度权限接入
+v18-rbac = ["dep:sz-rust-auth-facade"]
+# v1.8.0 JWT 密钥轮换接入
+v18-key-rotation = ["dep:sz-rust-key-rotation"]
+# v1.8.0 审计链式哈希接入
+v18-audit-chain = ["sz-rust-middleware-facade/audit-chain"]
+# v1.8.0 文件上传增强接入
+v18-upload = ["dep:sz-rust-upload"]
+# v1.8.0 GraphQL 端点接入
+v18-graphql = ["dep:async-graphql", "dep:async-graphql-axum"]
+# v1.8.0 WebSocket 端点接入
+v18-websocket = ["dep:sz-rust-websocket", "dep:futures"]
+# v1.8.0 SSE 端点接入
+v18-sse = ["dep:futures"]
 
 [[bin]]
 name = "sz300-server"
@@ -61,6 +98,12 @@ path = "src/main.rs"
 name = "api_bench"
 harness = false
 
+[[bench]]
+name = "hot_path"
+harness = false
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
 futures.workspace = true
+tower = { workspace = true }
+http-body-util = { workspace = true }

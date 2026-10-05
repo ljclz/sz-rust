@@ -359,10 +359,12 @@ dependencies = [
  "bytes",
  "fast_chemail",
  "fnv",
+ "futures-channel",
  "futures-util",
  "handlebars",
  "http",
  "indexmap 2.14.2",
+ "lru 0.16.4",
  "mime",
  "multer",
  "num-traits",
@@ -4688,6 +4690,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+dependencies = [
+ "hashbrown 0.16.1",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8779,7 +8790,7 @@ version = "1.7.0"
 dependencies = [
  "futures",
  "hex",
- "lru",
+ "lru 0.12.5",
  "md-5 0.10.6",
  "parking_lot",
  "rand 0.8.8",
@@ -8968,11 +8979,17 @@ dependencies = [
 name = "sz-rust-data-mask"
 version = "1.7.0"
 dependencies = [
+ "axum 0.8.9",
+ "http",
+ "http-body-util",
  "regex",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "sz-rust-core",
  "thiserror 2.0.21",
+ "tokio",
+ "tower 0.5.3",
 ]
 
 [[package]]
@@ -9517,9 +9534,13 @@ name = "sz-rust-security-headers"
 version = "1.7.0"
 dependencies = [
  "axum 0.8.9",
+ "http",
+ "http-body-util",
  "serde",
  "sz-rust-http-facade",
  "thiserror 2.0.21",
+ "tokio",
+ "tower 0.5.3",
  "tower-http 0.7.1",
 ]
 
@@ -9562,24 +9583,34 @@ name = "sz-rust-sz300"
 version = "1.7.0"
 dependencies = [
  "anyhow",
+ "async-graphql",
+ "async-graphql-axum",
  "axum 0.8.9",
  "base64 0.22.1",
  "bcrypt 0.16.0",
  "chrono",
  "criterion",
  "futures",
+ "http-body-util",
  "once_cell",
  "serde",
  "serde_json",
  "sqlx",
  "sz-orm-sqlx",
+ "sz-rust-auth-facade",
  "sz-rust-core",
+ "sz-rust-data-mask",
  "sz-rust-http-facade",
+ "sz-rust-key-rotation",
  "sz-rust-middleware-facade",
  "sz-rust-mvc-facade",
  "sz-rust-observability",
+ "sz-rust-security-headers",
  "sz-rust-state-facade",
+ "sz-rust-upload",
+ "sz-rust-websocket",
  "tokio",
+ "tower 0.5.3",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -36,10 +36,18 @@ if [ -f scripts/check-unwrap.py ]; then
   fi
 fi
 
-echo "▶ 3/3 cargo clippy（工作区，-D warnings）"
+echo "▶ 3/4 cargo clippy（工作区，-D warnings）"
 if ! cargo clippy --workspace --all-targets -- -D warnings 2>/dev/null; then
   echo "❌ clippy 未通过"
   exit 1
+fi
+
+echo "▶ 4/4 OpenAPI-路由一致性检查"
+if [ -f scripts/audit/openapi-consistency.js ] && command -v node >/dev/null 2>&1; then
+  if ! node scripts/audit/openapi-consistency.js; then
+    echo "❌ OpenAPI spec 与路由定义不一致"
+    exit 1
+  fi
 fi
 
 echo "✅ pre-commit 检查全部通过"
