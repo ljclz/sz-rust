@@ -82,7 +82,7 @@ impl QueryRoot {
     /// 按 ID 查询商户
     async fn merchant(&self, ctx: &Context<'_>, id: i64) -> Option<MerchantGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let store = store.lock().unwrap();
+        let store = store.lock().ok()?;
         store.merchants.get(&id).cloned()
     }
 
@@ -90,10 +90,10 @@ impl QueryRoot {
     async fn merchants(&self, ctx: &Context<'_>) -> Vec<MerchantGql> {
         let store = ctx.data_opt::<GraphqlStore>();
         match store {
-            Some(s) => {
-                let s = s.lock().unwrap();
-                s.merchants.values().cloned().collect()
-            }
+            Some(s) => match s.lock() {
+                Ok(g) => g.merchants.values().cloned().collect(),
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -101,7 +101,7 @@ impl QueryRoot {
     /// 按 ID 查询商品
     async fn product(&self, ctx: &Context<'_>, id: i64) -> Option<ProductGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let store = store.lock().unwrap();
+        let store = store.lock().ok()?;
         store.products.get(&id).cloned()
     }
 
@@ -109,10 +109,10 @@ impl QueryRoot {
     async fn products(&self, ctx: &Context<'_>) -> Vec<ProductGql> {
         let store = ctx.data_opt::<GraphqlStore>();
         match store {
-            Some(s) => {
-                let s = s.lock().unwrap();
-                s.products.values().cloned().collect()
-            }
+            Some(s) => match s.lock() {
+                Ok(g) => g.products.values().cloned().collect(),
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -120,7 +120,7 @@ impl QueryRoot {
     /// 按 ID 查询订单
     async fn order(&self, ctx: &Context<'_>, id: i64) -> Option<OrderGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let store = store.lock().unwrap();
+        let store = store.lock().ok()?;
         store.orders.get(&id).cloned()
     }
 
@@ -128,10 +128,10 @@ impl QueryRoot {
     async fn orders(&self, ctx: &Context<'_>) -> Vec<OrderGql> {
         let store = ctx.data_opt::<GraphqlStore>();
         match store {
-            Some(s) => {
-                let s = s.lock().unwrap();
-                s.orders.values().cloned().collect()
-            }
+            Some(s) => match s.lock() {
+                Ok(g) => g.orders.values().cloned().collect(),
+                Err(_) => Vec::new(),
+            },
             None => Vec::new(),
         }
     }
@@ -152,7 +152,7 @@ impl MutationRoot {
         unit: String,
     ) -> Option<ProductGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().ok()?;
         let id = store.next_product_id();
         let product = ProductGql {
             good_id: id,
@@ -171,7 +171,7 @@ impl MutationRoot {
     /// 更新商品状态
     async fn update_product(&self, ctx: &Context<'_>, id: i64, status: i8) -> Option<ProductGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().ok()?;
         if let Some(product) = store.products.get_mut(&id) {
             product.status = status;
             return Some(product.clone());
@@ -190,7 +190,7 @@ impl MutationRoot {
         item_count: i32,
     ) -> Option<OrderGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().ok()?;
         let id = store.next_order_id();
         let order = OrderGql {
             order_id: id,
@@ -215,7 +215,7 @@ impl MutationRoot {
         pay_method: i8,
     ) -> Option<OrderGql> {
         let store = ctx.data_opt::<GraphqlStore>()?;
-        let mut store = store.lock().unwrap();
+        let mut store = store.lock().ok()?;
         if let Some(order) = store.orders.get_mut(&id) {
             order.status = status;
             order.pay_method = pay_method;

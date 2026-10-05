@@ -6,6 +6,11 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# sccache 未安装时禁用 rustc-wrapper（.cargo/config.toml 默认 rustc-wrapper=sccache，同 .githooks/pre-commit）
+if ! command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER=""
+fi
+
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-F:/cargo-target}"
 FAIL=0
 

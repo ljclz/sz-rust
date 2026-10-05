@@ -216,12 +216,22 @@ mod tests {
 
     #[test]
     fn test_rkyv_serializer_creation() {
-        let _serializer = RkyvSerializer::new();
+        let serializer = RkyvSerializer::new();
+        assert_eq!(
+            std::mem::size_of_val(&serializer),
+            0,
+            "RkyvSerializer 应为零大小"
+        );
     }
 
     #[test]
     fn test_zerocopy_serializer_creation() {
-        let _serializer = ZerocopySerializer::new();
+        let serializer = ZerocopySerializer::new();
+        assert_eq!(
+            std::mem::size_of_val(&serializer),
+            0,
+            "ZerocopySerializer 应为零大小"
+        );
     }
 
     #[test]

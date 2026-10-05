@@ -61,6 +61,7 @@ async fn test_e2e_metrics_endpoint_has_security_headers() {
         .await
         .unwrap();
 
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
     assertions::assert_all_security_headers(response.headers());
 }
 
@@ -167,5 +168,10 @@ async fn test_e2e_security_headers_on_error_response() {
         .await
         .unwrap();
 
+    assert!(
+        !response.status().is_success(),
+        "错误响应不应为 2xx，实际: {}",
+        response.status()
+    );
     assertions::assert_all_security_headers(response.headers());
 }

@@ -28,7 +28,7 @@ impl async_graphql::dataloader::Loader<i64> for MerchantLoader {
     type Error = String;
 
     async fn load(&self, keys: &[i64]) -> Result<HashMap<i64, Self::Value>, Self::Error> {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().map_err(|e| e.to_string())?;
         let mut result = HashMap::new();
         for &key in keys {
             if let Some(merchant) = store.get(&key) {
@@ -56,7 +56,7 @@ impl async_graphql::dataloader::Loader<i64> for ProductLoader {
     type Error = String;
 
     async fn load(&self, keys: &[i64]) -> Result<HashMap<i64, Self::Value>, Self::Error> {
-        let store = self.store.lock().unwrap();
+        let store = self.store.lock().map_err(|e| e.to_string())?;
         let mut result = HashMap::new();
         for &key in keys {
             if let Some(product) = store.get(&key) {

@@ -26,6 +26,11 @@ if ! command -v cargo >/dev/null 2>&1; then
   done
 fi
 
+# sccache 未安装时禁用 rustc-wrapper（.cargo/config.toml 默认 rustc-wrapper=sccache，同 .githooks/pre-commit）
+if ! command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER=""
+fi
+
 # ---- 参数解析 ----
 RANGE="HEAD~1..HEAD"
 THRESHOLD="medium"
@@ -101,6 +106,10 @@ transition() {
   STATE="$1"
   echo "▶ [$STATE] $2"
 }
+# 按字符截断（head -c 按字节截断会切碎多字节 UTF-8，导致报告编码损坏）
+safe_trunc() { # safe_trunc <字符数>：从 stdin 读取，输出最多 N 个字符
+  python -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' "$1"
+}
 
 # ---- 环节 1: diff 扫描 ----
 transition "scanning" "git diff 扫描（$RANGE）"
@@ -151,7 +160,7 @@ print(json.dumps({
     -X POST "${AI_BASE_URL}/chat/completions" \
     -H "Authorization: Bearer ${AI_API_KEY}" \
     -H "Content-Type: application/json" \
-    -d "$body" 2>&1) || { echo "AI 请求失败: $(echo "$resp" | head -c 120)"; return 1; }
+    -d "$body" 2>&1) || { echo "AI 请求失败: $(echo "$resp" | safe_trunc 120)"; return 1; }
   printf '%s' "$resp" | python -c '
 import json, sys
 if hasattr(sys.stdin, "reconfigure"):
@@ -166,7 +175,7 @@ print(data["choices"][0]["message"]["content"])
 
 if [ "$AI" -eq 1 ] && [ "$AI_PARALLEL" -eq 1 ] && [ -n "$AI_API_KEY" ]; then
   transition "ai-bg" "AI 评审后台预启动（--ai-parallel）"
-  DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
+  DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | safe_trunc 8000)
   DIFF_HASH=$(printf '%s' "$DIFF_TEXT" | sha256sum | cut -c1-16)
   if [ "$AI_CACHE" -eq 1 ] && [ -f "$AI_CACHE_DIR/${DIFF_HASH}.md" ]; then
     cp "$AI_CACHE_DIR/${DIFF_HASH}.md" "$AI_BG_OUT"
@@ -186,8 +195,8 @@ if [ $? -ne 0 ]; then
   # 提取 error 位置行（error[E...] 或 error: 后跟的文件行）
   while IFS= read -r line; do
     case "$line" in
-      error\[*) note_issue "critical" "check" "compile-error" "$(echo "$line" | head -c 120)" ;;
-      error:*) note_issue "critical" "check" "compile-error" "$(echo "$line" | head -c 120)" ;;
+      error\[*) note_issue "critical" "check" "compile-error" "$(echo "$line" | safe_trunc 120)" ;;
+      error:*) note_issue "critical" "check" "compile-error" "$(echo "$line" | safe_trunc 120)" ;;
     esac
   done <<< "$CHECK_OUT"
 fi
@@ -205,8 +214,8 @@ if [ $CLIPPY_RC -ne 0 ]; then
   # 提取 error/warning 行（含位置）
   while IFS= read -r line; do
     case "$line" in
-      error:*) note_issue "critical" "clippy" "compile-error" "$(echo "$line" | head -c 120)" ;;
-      warning:*) note_issue "medium" "clippy" "lint-warning" "$(echo "$line" | head -c 120)" ;;
+      error:*) note_issue "critical" "clippy" "compile-error" "$(echo "$line" | safe_trunc 120)" ;;
+      warning:*) note_issue "medium" "clippy" "lint-warning" "$(echo "$line" | safe_trunc 120)" ;;
     esac
   done <<< "$CLIPPY_OUT"
 fi
@@ -223,7 +232,7 @@ else
 fi
 
 # ---- 环节 4: 安全与一致性门禁 ----
-transition "security" "门禁脚本（sensitive-field / doc-code / feature / assertion / adr）"
+transition "security" "门禁脚本（sensitive-field / doc-code / feature / assertion / adr / openapi）"
 run_gate() { # run_gate <name> <severity-on-fail> <script...>
   local name="$1" sev="$2"; shift 2
   local runner
@@ -232,7 +241,7 @@ run_gate() { # run_gate <name> <severity-on-fail> <script...>
     *)    runner=node ;;
   esac
   if ! $runner "$@" >/tmp/pr-review-gate.log 2>&1; then
-    note_issue "$sev" "gate" "$name" "$(grep -m1 -E '❌|EXPOSED|error|FAIL' /tmp/pr-review-gate.log | head -c 120)"
+    note_issue "$sev" "gate" "$name" "$(grep -m1 -E '❌|EXPOSED|error|FAIL' /tmp/pr-review-gate.log | safe_trunc 120)"
   fi
 }
 run_gate "sensitive-field" "critical" scripts/audit/sensitive-field-audit.js
@@ -241,6 +250,7 @@ run_gate "doc-code-consistency" "low" scripts/audit/doc-code-consistency.js
 run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
 run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
+run_gate "openapi-consistency" "low" scripts/audit/openapi-consistency.js
 
 # ---- 环节 5: 单元测试 ----
 transition "test" "cargo test（facade lib + sz300）"
@@ -255,7 +265,7 @@ TEST_RC=$?
 if [ $TEST_RC -ne 0 ]; then
   # 提取失败摘要（test result: FAILED / error）
   TEST_FAIL=$(echo "$TEST_OUT" | grep -E "test result: FAILED|^error" | head -3 | tr '\n' ' ')
-  note_issue "critical" "test" "test-failure" "$(echo "$TEST_FAIL" | head -c 200)"
+  note_issue "critical" "test" "test-failure" "$(echo "$TEST_FAIL" | safe_trunc 200)"
 fi
 
 # ---- 环节 6: 真实服务集成（需本机 MySQL，可 --skip-integration） ----
@@ -274,10 +284,10 @@ else
   if [ $INTEG_RC -eq 124 ]; then
     # timeout 退出码 124 = 集成测试挂死被强制终止（GNU timeout 不输出文字，靠退出码判定）
     INTEG_FAIL="集成测试挂起超 10 分钟被强制终止（timeout rc=124，疑似 MySQL 事务/锁路径阻塞，已通过的测试: $(echo "$INTEG_OUT" | grep -cE '^test .+ \.\.\. ok') 个）"
-    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
+    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | safe_trunc 200)"
   elif [ $INTEG_RC -ne 0 ]; then
     INTEG_FAIL=$(echo "$INTEG_OUT" | grep -E "test result: FAILED|panicked|error\[|no test target" | head -3 | tr '\n' ' ')
-    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | head -c 200)"
+    note_issue "high" "integration" "integration-failure" "$(echo "$INTEG_FAIL" | safe_trunc 200)"
   fi
   fi
 fi
@@ -289,7 +299,7 @@ if [ "$DEEP" -eq 1 ]; then
   MUT_RC=$?
   if [ $MUT_RC -ne 0 ]; then
     MUT_SUM=$(echo "$MUT_OUT" | grep -E "mutants tested|MISSED" | tail -2 | tr '\n' ' ')
-    note_issue "high" "deep" "mutation-killrate" "$(echo "$MUT_SUM" | head -c 200)"
+    note_issue "high" "deep" "mutation-killrate" "$(echo "$MUT_SUM" | safe_trunc 200)"
   fi
 
   transition "deep" "变更行覆盖率（llvm-cov，jobs.rs ≥75% 行）"
@@ -321,7 +331,7 @@ if [ "$AI" -eq 1 ]; then
   if [ -z "$AI_API_KEY" ]; then
     note_issue "medium" "ai" "missing-key" "AI_API_KEY 未设置（或旧变量 CSDN_API_KEY），AI 评审跳过（设置后重跑 --ai）"
   else
-    DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | head -c 8000)
+    DIFF_TEXT=$(git diff "$RANGE" 2>/dev/null | safe_trunc 8000)
     DIFF_HASH=$(printf '%s' "$DIFF_TEXT" | sha256sum | cut -c1-16)
     CACHE_TAG=""
     if [ "$AI_PARALLEL" -eq 1 ] && [ -n "$AI_BG_PID" ]; then
@@ -333,7 +343,7 @@ if [ "$AI" -eq 1 ]; then
         echo "✅ AI 评审完成（并行后台）"
         [ "$AI_CACHE" -eq 1 ] && { mkdir -p "$AI_CACHE_DIR"; cp "$AI_BG_OUT" "$AI_CACHE_DIR/${DIFF_HASH}.md"; }
       else
-        note_issue "medium" "ai" "ai-failed" "后台 AI 评审失败: $(head -c 120 "$AI_BG_ERR" 2>/dev/null || echo '无输出')"
+        note_issue "medium" "ai" "ai-failed" "后台 AI 评审失败: $(safe_trunc 120 < "$AI_BG_ERR" 2>/dev/null || echo '无输出')"
       fi
     elif [ "$AI_BG_RC" = "0" ] && [ -s "$AI_BG_OUT" ]; then
       # 路径 B：缓存命中（预启动阶段已就绪，未调 LLM）
@@ -347,12 +357,12 @@ if [ "$AI" -eq 1 ]; then
         CACHE_TAG="（缓存命中 ${DIFF_HASH}）"
         echo "✅ AI 评审完成（缓存命中）"
       else
-        ISSUES_TEXT=$(printf '%s' "$ISSUES" | head -c 3000)
+        ISSUES_TEXT=$(printf '%s' "$ISSUES" | safe_trunc 3000)
         if AI_REVIEW=$(run_ai_review "$DIFF_TEXT" "$ISSUES_TEXT" 2>"$AI_ERR_LOG"); then
           echo "✅ AI 评审完成"
           [ "$AI_CACHE" -eq 1 ] && { mkdir -p "$AI_CACHE_DIR"; printf '%s' "$AI_REVIEW" > "$AI_CACHE_DIR/${DIFF_HASH}.md"; }
         else
-          note_issue "medium" "ai" "ai-failed" "$(head -c 120 "$AI_ERR_LOG")"
+          note_issue "medium" "ai" "ai-failed" "$(safe_trunc 120 < "$AI_ERR_LOG")"
           AI_REVIEW=""
         fi
       fi
@@ -370,6 +380,8 @@ BLOCKING=0
 while IFS='|' read -r sev file rule msg; do
   [ -z "$sev" ] && continue
   COUNTS[$sev]=$(( ${COUNTS[$sev]:-0} + 1 ))
+  # AI 评审环节不参与阻塞判定（skill 约定，仅计入问题清单）
+  [ "$file" = "ai" ] && continue
   for i in "${!SEVERITY_ORDER[@]}"; do
     if [ "${SEVERITY_ORDER[$i]}" = "$sev" ] && [ $i -ge $THRESHOLD_IDX ]; then
       BLOCKING=$((BLOCKING + 1))
@@ -410,7 +422,7 @@ REPORT="${REPORT:-docs/audit/${DATE}-pr-review-${BRANCH}.md}"
   echo "## 结论"
   if [ "$STATE" = "done" ]; then
     if [ $BLOCKING -eq 0 ]; then
-      echo "✅ 通过（无 ≥ $THRESHOLD 级别问题）"
+      echo "✅ 通过（无 ≥ $THRESHOLD 阻塞问题；AI 评审问题不参与阻塞判定）"
     else
       echo "❌ **阻塞**: $BLOCKING 个 ≥ $THRESHOLD 级别问题，禁止合入"
     fi
