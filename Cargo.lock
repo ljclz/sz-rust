@@ -8990,6 +8990,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
+ "tracing",
 ]
 
 [[package]]

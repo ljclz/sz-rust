@@ -13,6 +13,19 @@
 - **审查流水线加固**（`scripts/audit/pr-review.sh`、`scripts/audit/jobs-gauntlet.sh`）：sccache 缺失时自动禁用 rustc-wrapper 消除编译/静态误报；`head -c` 字节截断替换为 UTF-8 安全截断（`safe_trunc`）；AI 评审问题不参与阻塞判定；`openapi-consistency` 门禁接入。
 - **断言补强**（`sz-rust-zerocopy`、`sz-rust-sz300`）：零大小序列化器断言 + 集成安全头响应状态断言（含错误响应非 2xx 校验）。
 
+### Fixed — DataMaskLayer 产品级缺陷修复 + 审查弱点跟踪（2026-10-05）
+
+- **DataMaskLayer 5 项缺陷修复**（`sz-rust-data-mask`）：
+  - 响应体脱敏上限 10MB → 1MB，并按 Content-Length 提前短路，防内存放大/DoS
+  - body 读取失败返回 502，不再返回与 Content-Length 不一致的空 body
+  - 递归脱敏增加深度上限（32），防深层嵌套 JSON 栈溢出
+  - 脱敏后更新 Content-Length 并清除 ETag，保持 HTTP 协议一致
+  - mask 规则执行失败按 fail-safe 替换为 `***` 并记录日志，不再静默放行明文
+  - 新增 4 条针对性测试（Content-Length 更新 / 超大响应跳过 / 深度上限 / 规则失败脱敏）
+- **pre-commit OpenAPI 检查 fail-closed**（`.githooks/pre-commit`）：node 缺失或脚本缺失时直接失败，不再静默跳过
+- **sz300 启动安全告警**：未启用任何 v1.8.0 安全/协议 feature 时输出 WARN，防生产「裸奔但自检全绿」
+- **债务跟踪**：`docs/audit/doc-debt.md` 新增 DB-2026-10-05-01，跟踪剩余产品级弱点（GraphQL 内存存储无持久化 / JWT audience 上游依赖 / GraphQL-RBAC 互斥 / mutation 基线 / 覆盖率豁免）
+
 ## [v1.7.0] - 2026-10-03
 
 ### Added — P1 插件生态

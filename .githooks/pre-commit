@@ -43,11 +43,18 @@ if ! cargo clippy --workspace --all-targets -- -D warnings 2>/dev/null; then
 fi
 
 echo "▶ 4/4 OpenAPI-路由一致性检查"
-if [ -f scripts/audit/openapi-consistency.js ] && command -v node >/dev/null 2>&1; then
+if [ -f scripts/audit/openapi-consistency.js ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    echo "❌ OpenAPI 一致性检查需要 node，但未找到 node（fail-closed）"
+    exit 1
+  fi
   if ! node scripts/audit/openapi-consistency.js; then
     echo "❌ OpenAPI spec 与路由定义不一致"
     exit 1
   fi
+else
+  echo "❌ scripts/audit/openapi-consistency.js 缺失，无法执行 OpenAPI 一致性检查（fail-closed）"
+  exit 1
 fi
 
 echo "✅ pre-commit 检查全部通过"

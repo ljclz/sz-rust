@@ -207,6 +207,24 @@ async fn main() -> anyhow::Result<()> {
     // 注册路由
     let app = router::create_router(app_state);
 
+    // v1.8.0 安全/协议能力默认全关告警：防止生产部署漏配 feature 导致「裸奔但自检全绿」
+    #[cfg(not(any(
+        feature = "v18-security-headers",
+        feature = "v18-data-mask",
+        feature = "v18-rbac",
+        feature = "v18-key-rotation",
+        feature = "v18-audit-chain",
+        feature = "v18-upload",
+        feature = "v18-graphql",
+        feature = "v18-websocket",
+        feature = "v18-sse",
+    )))]
+    {
+        tracing::warn!(
+            "未启用任何 v1.8.0 安全/协议 feature（security-headers/data-mask/rbac/key-rotation/audit-chain/upload/graphql/websocket/sse）。生产部署请使用 --features 显式启用，否则相关保护不生效。"
+        );
+    }
+
     // 启动 HTTP 服务器
     let addr = format!("{}:{}", config.server.host, config.server.port);
 
