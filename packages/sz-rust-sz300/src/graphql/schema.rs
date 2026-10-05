@@ -260,7 +260,15 @@ pub type GraphQLSchema =
     async_graphql::Schema<QueryRoot, MutationRoot, async_graphql::EmptySubscription>;
 
 /// 构建 GraphQL Schema（深度限制 ≤10，复杂度 ≤1000）
+///
+/// # 注意
+/// 当前实现使用进程内 `GraphqlStore`（`Mutex<HashMap>`）作为数据源：
+/// 数据**重启即丢失**、多实例间不共享，仅适用于演示/测试环境。
+/// 生产环境请使用 REST API（`/api/v1/*`，MySQL 持久化）；DB-backed GraphQL 实现尚在跟踪中（doc-debt DB-2026-10-05-01）。
 pub fn build_schema() -> GraphQLSchema {
+    tracing::warn!(
+        "GraphQL 端点使用内存数据存储（GraphqlStore），数据重启即丢失、多实例不共享，仅限演示/测试环境；生产请使用 REST API。"
+    );
     let store = GraphqlStore::new(GraphqlStoreInner::default());
     async_graphql::Schema::build(QueryRoot, MutationRoot, async_graphql::EmptySubscription)
         .data(store)

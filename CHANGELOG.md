@@ -26,6 +26,12 @@
 - **sz300 启动安全告警**：未启用任何 v1.8.0 安全/协议 feature 时输出 WARN，防生产「裸奔但自检全绿」
 - **债务跟踪**：`docs/audit/doc-debt.md` 新增 DB-2026-10-05-01，跟踪剩余产品级弱点（GraphQL 内存存储无持久化 / JWT audience 上游依赖 / GraphQL-RBAC 互斥 / mutation 基线 / 覆盖率豁免）
 
+### Changed — 审查弱点闭环（2026-10-05 续）
+
+- **债务修正**：核验确认 GraphQL 与 RBAC 可共存（`router.rs` RBAC 分支已注册 graphql_route，挂 `merchant:read` 权限），原「互斥」判断为误报，已从 DB-2026-10-05-01 弱点清单移除
+- **GraphQL 演示用途显式标注**：`build_schema()` 增加运行时警告 + 文档注释，明确内存存储重启即丢失、多实例不共享、生产请用 REST API；DB-backed 实现保持债务跟踪
+- **变异测试基线补齐启动**：distributed-tx / service-registry / api-gateway / observability 四 crate 变异测试开始运行，结果将记录到 `mutation-debt.md`
+
 ## [v1.7.0] - 2026-10-03
 
 ### Added — P1 插件生态
