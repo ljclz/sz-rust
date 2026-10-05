@@ -275,4 +275,91 @@ mod tests {
         let result: Vec<i32> = serializer.deserialize(&bytes).unwrap();
         assert_eq!(data, result);
     }
+
+    #[test]
+    fn test_serde_serializer_default() {
+        let s1 = SerdeSerializer;
+        let s2 = SerdeSerializer::new();
+        let data = make_test_data();
+        let b1 = s1.serialize(&data).unwrap();
+        let b2 = s2.serialize(&data).unwrap();
+        assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn test_rkyv_serializer_default() {
+        let _s = RkyvSerializer;
+    }
+
+    #[test]
+    fn test_zerocopy_serializer_default() {
+        let _s = ZerocopySerializer;
+    }
+
+    #[test]
+    fn test_default_interop_default() {
+        let interop = DefaultInterop;
+        let data = make_test_data();
+        let result = interop.serde_to_rkyv(&data).unwrap();
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_cross_interop_rkyv_to_serde_invalid() {
+        let interop = DefaultInterop::new();
+        let result = interop.rkyv_to_serde::<TestData>(b"invalid bytes");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_serde_serializer_string() {
+        let serializer = SerdeSerializer::new();
+        let data = "hello world".to_string();
+        let bytes = serializer.serialize(&data).unwrap();
+        let result: String = serializer.deserialize(&bytes).unwrap();
+        assert_eq!(data, result);
+    }
+
+    #[test]
+    fn test_serde_serializer_bool() {
+        let serializer = SerdeSerializer::new();
+        let bytes = serializer.serialize(&true).unwrap();
+        let result: bool = serializer.deserialize(&bytes).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_serde_serializer_option() {
+        let serializer = SerdeSerializer::new();
+        let some_val = Some(42i32);
+        let bytes = serializer.serialize(&some_val).unwrap();
+        let result: Option<i32> = serializer.deserialize(&bytes).unwrap();
+        assert_eq!(some_val, result);
+
+        let none_val: Option<i32> = None;
+        let bytes = serializer.serialize(&none_val).unwrap();
+        let result: Option<i32> = serializer.deserialize(&bytes).unwrap();
+        assert_eq!(none_val, result);
+    }
+
+    #[test]
+    fn test_estimate_size_empty() {
+        let data = TestData {
+            name: String::new(),
+            value: 0,
+            items: Vec::new(),
+        };
+        let size = estimate_size(&data).unwrap();
+        assert!(size > 0);
+    }
+
+    #[test]
+    fn test_cross_interop_roundtrip() {
+        let interop = DefaultInterop::new();
+        let data = make_test_data();
+        let rkyv_bytes = interop.serde_to_rkyv(&data).unwrap();
+        let serde_bytes = interop.rkyv_to_serde::<TestData>(&rkyv_bytes).unwrap();
+        let back: TestData = serde_json::from_slice(&serde_bytes).unwrap();
+        assert_eq!(data, back);
+    }
 }

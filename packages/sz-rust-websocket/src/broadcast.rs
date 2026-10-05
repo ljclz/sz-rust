@@ -28,3 +28,68 @@ impl Broadcaster {
         Ok(sent)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manager::ConnectionManager;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_broadcast_all_empty() {
+        let mgr = ConnectionManager::with_defaults();
+        let sent = Broadcaster::broadcast_all(&mgr, "hello").await.unwrap();
+        assert_eq!(sent, 0);
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_all_single() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx, mut rx) = mpsc::channel(10);
+        mgr.register(tx, None).unwrap();
+        let sent = Broadcaster::broadcast_all(&mgr, "ping").await.unwrap();
+        assert_eq!(sent, 1);
+        assert_eq!(rx.recv().await.unwrap(), "ping");
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_all_multiple() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx1, mut rx1) = mpsc::channel(10);
+        let (tx2, mut rx2) = mpsc::channel(10);
+        let (tx3, mut rx3) = mpsc::channel(10);
+        mgr.register(tx1, Some("u1".into())).unwrap();
+        mgr.register(tx2, Some("u2".into())).unwrap();
+        mgr.register(tx3, None).unwrap();
+        let sent = Broadcaster::broadcast_all(&mgr, "broadcast").await.unwrap();
+        assert_eq!(sent, 3);
+        assert_eq!(rx1.recv().await.unwrap(), "broadcast");
+        assert_eq!(rx2.recv().await.unwrap(), "broadcast");
+        assert_eq!(rx3.recv().await.unwrap(), "broadcast");
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_all_after_unregister() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx1, _rx1) = mpsc::channel(10);
+        let (tx2, mut rx2) = mpsc::channel(10);
+        let conn1 = mgr.register(tx1, None).unwrap();
+        mgr.register(tx2, None).unwrap();
+        mgr.unregister(&conn1);
+        let sent = Broadcaster::broadcast_all(&mgr, "msg").await.unwrap();
+        assert_eq!(sent, 1);
+        assert_eq!(rx2.recv().await.unwrap(), "msg");
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_all_dropped_receiver() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx1, rx1) = mpsc::channel(10);
+        let (tx2, mut rx2) = mpsc::channel(10);
+        mgr.register(tx1, None).unwrap();
+        mgr.register(tx2, None).unwrap();
+        drop(rx1);
+        let sent = Broadcaster::broadcast_all(&mgr, "msg").await.unwrap();
+        assert_eq!(sent, 1);
+        assert_eq!(rx2.recv().await.unwrap(), "msg");
+    }
+}

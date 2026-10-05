@@ -145,4 +145,49 @@ mod tests {
         let result = auth.authenticate("not-a-jwt").await;
         assert!(matches!(result, Err(WebSocketError::Unauthenticated)));
     }
+
+    #[tokio::test]
+    async fn test_simple_authenticator_with_tokens_multiple() {
+        let auth = SimpleTokenAuthenticator::new().with_tokens(vec![
+            "t1".into(),
+            "t2".into(),
+            "t3".into(),
+        ]);
+        assert!(auth.authenticate("t1").await.is_ok());
+        assert!(auth.authenticate("t2").await.is_ok());
+        assert!(auth.authenticate("t3").await.is_ok());
+        assert!(matches!(
+            auth.authenticate("t4").await,
+            Err(WebSocketError::Unauthenticated)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_simple_authenticator_default() {
+        let auth = SimpleTokenAuthenticator::default();
+        assert!(matches!(
+            auth.authenticate("any").await,
+            Err(WebSocketError::Unauthenticated)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_jwt_authenticator_secret_accessor() {
+        let auth = JwtAuthenticator::new("my-secret-key");
+        assert_eq!(auth.secret(), "my-secret-key");
+    }
+
+    #[tokio::test]
+    async fn test_jwt_authenticator_two_parts() {
+        let auth = JwtAuthenticator::new("secret");
+        let result = auth.authenticate("only.two").await;
+        assert!(matches!(result, Err(WebSocketError::Unauthenticated)));
+    }
+
+    #[tokio::test]
+    async fn test_jwt_authenticator_four_parts() {
+        let auth = JwtAuthenticator::new("secret");
+        let result = auth.authenticate("a.b.c.d").await;
+        assert!(matches!(result, Err(WebSocketError::Unauthenticated)));
+    }
 }

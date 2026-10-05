@@ -2,7 +2,54 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-10-03
+> **最后更新**：2026-10-04
+
+---
+
+## v1.7.0 覆盖率与质量提升（2026-10-04）
+
+> **状态**：✅ 全部完成，所有 v1.7.0 新 crate 覆盖率 ≥ 90%（多数 95-100%）
+
+### 覆盖率提升汇总
+
+| Crate | 文件 | 改前 | 改后 | 新增测试 |
+|-------|------|------|------|----------|
+| sz-rust-websocket | broadcast.rs | 0% | 100% | +5 |
+| sz-rust-websocket | auth.rs | 85% | 96% | +5 |
+| sz-rust-websocket | heartbeat.rs | 86% | 96% | +2 |
+| sz-rust-websocket | manager.rs | 89% | 97% | +9 |
+| sz-rust-i18n | resource.rs | 85% | 99% | +14 |
+| sz-rust-zerocopy | serializer.rs | 88% | 97% | +10 |
+| sz-rust-admin-ui | theme.rs | 90% | 100% | +11 |
+| sz-rust-monitor-panel | alert_display.rs | 90% | 100% | +9 |
+| sz-rust-codegen-ui | model.rs | 75% | 100% | +13 |
+| sz-rust-codegen-ui | preview.rs | 85% | 100% | +10 |
+| sz-rust-codegen-ui | template_editor.rs | 87% | 100% | +9 |
+
+- **新增测试总数**：+97 个（跨 6 个 crate）
+- **clippy**：全部通过（`--all-targets -- -D warnings`）
+- **已验证覆盖率 ≥ 90% 的 crate**：data-mask(97%)、security-headers(98%)、key-rotation(98%)、websocket(97%)、alert-engine(95%)、pipeline(92%)、log-aggregator(95%)、i18n(98%)、plugin-sdk(98%)、zerocopy(97%)、benchmark-suite(96%)、admin-ui(100%)、monitor-panel(96%)、codegen-ui(98%)
+
+---
+
+## v1.8.0 生产接线 + 质量硬化（2026-10-04 规划中）
+
+> **状态**：📋 SDD 规划完成（spec.md + design.md + tasks.md），待启动开发
+> **SDD 文档**：`.codeartsdoer/specs/v1.8.0/`
+
+### 规划范围
+
+- **P1 安全合规接线**（5 模块）：RBAC + 数据脱敏 + 安全头 + 审计链 + 密钥轮换 → sz300 生产路由
+- **P2 API 协议接线**（4 模块）：GraphQL + WebSocket + SSE + Upload 增强 → sz300 生产路由
+- **P3 集成测试套件**（7 模块）：sz300 + v1.7.0 全部新能力端到端测试 ≥ 225 测试
+- **P4 性能基线**（4 模块）：热路径 QPS 基线 + RBAC 缓存 + 脱敏吞吐 + 连接池调优
+- **P5 OpenAPI 文档**（3 模块）：自动生成 openapi.yaml + Swagger UI + CI 一致性检查
+
+### 前置条件
+
+- ✅ v1.7.0 已发布 crates.io（50 crate）
+- ✅ sz300 已部署到生产服务器（121.204.253.75:8300，health 200）
+- ✅ sz-pay 已集成 v1.7.0（5195 测试通过）
 
 ---
 

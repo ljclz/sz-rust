@@ -155,4 +155,71 @@ mod tests {
         let result = render_template("SELECT {{ field }} FROM {{ table }}", &vars).unwrap();
         assert_eq!(result, "SELECT id FROM users");
     }
+
+    #[test]
+    fn test_template_with_output_path() {
+        let template =
+            CodeTemplate::new("t1", "name", "content").with_output_path("src/models/user.rs");
+        assert_eq!(template.output_path, "src/models/user.rs");
+    }
+
+    #[test]
+    fn test_template_validate_empty_name() {
+        let template = CodeTemplate::new("t1", "", "content");
+        assert!(template.validate().is_err());
+    }
+
+    #[test]
+    fn test_template_validate_empty_content() {
+        let template = CodeTemplate::new("t1", "name", "");
+        assert!(template.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_syntax_valid() {
+        assert!(CodeTemplate::validate_syntax("no placeholders").is_ok());
+        assert!(CodeTemplate::validate_syntax("{{ a }} {{ b }}").is_ok());
+    }
+
+    #[test]
+    fn test_validate_syntax_unmatched() {
+        assert!(CodeTemplate::validate_syntax("{{ a ").is_err());
+        assert!(CodeTemplate::validate_syntax("{{{{ a }}").is_err());
+        assert!(CodeTemplate::validate_syntax("a }}").is_err());
+    }
+
+    #[test]
+    fn test_template_variable_new() {
+        let var = TemplateVariable::new("name", "用户名");
+        assert_eq!(var.name, "name");
+        assert_eq!(var.description, "用户名");
+        assert!(var.default_value.is_none());
+    }
+
+    #[test]
+    fn test_template_variable_with_default() {
+        let var = TemplateVariable::new("name", "用户名").with_default("default_user");
+        assert_eq!(var.default_value, Some("default_user".to_string()));
+    }
+
+    #[test]
+    fn test_render_template_invalid_syntax() {
+        let vars = HashMap::new();
+        assert!(render_template("{{ unclosed", &vars).is_err());
+    }
+
+    #[test]
+    fn test_render_template_no_variables() {
+        let vars = HashMap::new();
+        let result = render_template("plain text", &vars).unwrap();
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_render_template_partial_match() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "User".to_string());
+        let result = render_template("{{ name }} and {{ unknown }}", &vars).unwrap();
+        assert_eq!(result, "User and {{ unknown }}");
+    }
 }

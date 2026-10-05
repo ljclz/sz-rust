@@ -264,4 +264,162 @@ mod tests {
         assert_eq!(model.table_name, "users");
         assert_eq!(model.fields.len(), 2);
     }
+
+    #[test]
+    fn test_field_type_parse_all_variants() {
+        assert_eq!(FieldType::parse("string").unwrap(), FieldType::String);
+        assert_eq!(FieldType::parse("integer").unwrap(), FieldType::Integer);
+        assert_eq!(FieldType::parse("int").unwrap(), FieldType::Integer);
+        assert_eq!(FieldType::parse("i32").unwrap(), FieldType::Integer);
+        assert_eq!(FieldType::parse("bigint").unwrap(), FieldType::BigInt);
+        assert_eq!(FieldType::parse("i64").unwrap(), FieldType::BigInt);
+        assert_eq!(FieldType::parse("float").unwrap(), FieldType::Float);
+        assert_eq!(FieldType::parse("f64").unwrap(), FieldType::Float);
+        assert_eq!(FieldType::parse("decimal").unwrap(), FieldType::Decimal);
+        assert_eq!(FieldType::parse("boolean").unwrap(), FieldType::Boolean);
+        assert_eq!(FieldType::parse("bool").unwrap(), FieldType::Boolean);
+        assert_eq!(FieldType::parse("datetime").unwrap(), FieldType::DateTime);
+        assert_eq!(FieldType::parse("date").unwrap(), FieldType::Date);
+        assert_eq!(FieldType::parse("json").unwrap(), FieldType::Json);
+        assert_eq!(FieldType::parse("binary").unwrap(), FieldType::Binary);
+        assert_eq!(FieldType::parse("bytes").unwrap(), FieldType::Binary);
+        assert_eq!(FieldType::parse("text").unwrap(), FieldType::Text);
+        assert_eq!(FieldType::parse("uuid").unwrap(), FieldType::Uuid);
+    }
+
+    #[test]
+    fn test_field_type_as_str_all() {
+        assert_eq!(FieldType::String.as_str(), "string");
+        assert_eq!(FieldType::Integer.as_str(), "integer");
+        assert_eq!(FieldType::BigInt.as_str(), "bigint");
+        assert_eq!(FieldType::Float.as_str(), "float");
+        assert_eq!(FieldType::Decimal.as_str(), "decimal");
+        assert_eq!(FieldType::Boolean.as_str(), "boolean");
+        assert_eq!(FieldType::DateTime.as_str(), "datetime");
+        assert_eq!(FieldType::Date.as_str(), "date");
+        assert_eq!(FieldType::Json.as_str(), "json");
+        assert_eq!(FieldType::Binary.as_str(), "binary");
+        assert_eq!(FieldType::Text.as_str(), "text");
+        assert_eq!(FieldType::Uuid.as_str(), "uuid");
+    }
+
+    #[test]
+    fn test_field_type_to_rust_type_all() {
+        assert_eq!(FieldType::String.to_rust_type(), "String");
+        assert_eq!(FieldType::Integer.to_rust_type(), "i32");
+        assert_eq!(FieldType::BigInt.to_rust_type(), "i64");
+        assert_eq!(FieldType::Float.to_rust_type(), "f64");
+        assert_eq!(FieldType::Decimal.to_rust_type(), "Decimal");
+        assert_eq!(FieldType::Boolean.to_rust_type(), "bool");
+        assert_eq!(FieldType::DateTime.to_rust_type(), "DateTime<Utc>");
+        assert_eq!(FieldType::Date.to_rust_type(), "NaiveDate");
+        assert_eq!(FieldType::Json.to_rust_type(), "serde_json::Value");
+        assert_eq!(FieldType::Binary.to_rust_type(), "Vec<u8>");
+        assert_eq!(FieldType::Text.to_rust_type(), "String");
+        assert_eq!(FieldType::Uuid.to_rust_type(), "Uuid");
+    }
+
+    #[test]
+    fn test_model_field_builder() {
+        let field = ModelField::new("email", FieldType::String)
+            .nullable()
+            .with_comment("用户邮箱");
+        assert_eq!(field.name, "email");
+        assert!(field.nullable);
+        assert_eq!(field.comment, Some("用户邮箱".to_string()));
+    }
+
+    #[test]
+    fn test_data_model_with_relation() {
+        let model = DataModel::new("orders")
+            .with_field(ModelField::new("id", FieldType::BigInt))
+            .with_relation(ModelRelation::BelongsTo {
+                target: "users".to_string(),
+                foreign_key: "user_id".to_string(),
+            })
+            .with_relation(ModelRelation::HasMany {
+                target: "order_items".to_string(),
+                foreign_key: "order_id".to_string(),
+            });
+        assert_eq!(model.relations.len(), 2);
+    }
+
+    #[test]
+    fn test_data_model_validate_empty_field_name() {
+        let model = DataModel::new("users").with_field(ModelField::new("", FieldType::String));
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_data_model_from_json_missing_table_name() {
+        let json = serde_json::json!({"fields": []});
+        assert!(DataModel::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn test_data_model_from_json_missing_field_name() {
+        let json = serde_json::json!({
+            "table_name": "users",
+            "fields": [{"type": "string"}]
+        });
+        assert!(DataModel::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn test_data_model_from_json_missing_field_type() {
+        let json = serde_json::json!({
+            "table_name": "users",
+            "fields": [{"name": "id"}]
+        });
+        assert!(DataModel::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn test_data_model_from_json_nullable_true() {
+        let json = serde_json::json!({
+            "table_name": "users",
+            "fields": [
+                {"name": "id", "type": "bigint"},
+                {"name": "email", "type": "string", "nullable": true}
+            ]
+        });
+        let model = DataModel::from_json(&json).unwrap();
+        assert!(!model.fields[0].nullable);
+        assert!(model.fields[1].nullable);
+    }
+
+    #[test]
+    fn test_data_model_from_json_no_fields() {
+        let json = serde_json::json!({"table_name": "users"});
+        let model = DataModel::from_json(&json).unwrap();
+        assert_eq!(model.table_name, "users");
+        assert!(model.fields.is_empty());
+    }
+
+    #[test]
+    fn test_data_model_from_json_invalid_type() {
+        let json = serde_json::json!({
+            "table_name": "users",
+            "fields": [{"name": "id", "type": "invalid_type"}]
+        });
+        assert!(DataModel::from_json(&json).is_err());
+    }
+
+    #[test]
+    fn test_model_relation_variants() {
+        let r1 = ModelRelation::HasOne {
+            target: "profile".to_string(),
+            foreign_key: "profile_id".to_string(),
+        };
+        let r2 = ModelRelation::ManyToMany {
+            target: "roles".to_string(),
+            pivot: "user_roles".to_string(),
+        };
+        let model = DataModel::new("users")
+            .with_field(ModelField::new("id", FieldType::BigInt))
+            .with_relation(r1)
+            .with_relation(r2);
+        assert_eq!(model.relations.len(), 2);
+        assert!(model.validate().is_ok());
+    }
 }

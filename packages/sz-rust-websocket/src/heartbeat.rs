@@ -94,4 +94,60 @@ mod tests {
         let next = Heartbeat::next_heartbeat(now, Duration::from_secs(30));
         assert!(next > now);
     }
+
+    #[tokio::test]
+    async fn test_run_loop_calls_on_timeout() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let config = crate::manager::WebSocketConfig {
+            idle_timeout: Duration::from_millis(1),
+            heartbeat_interval: Duration::from_millis(5),
+            ..Default::default()
+        };
+        let mgr = ConnectionManager::new(config);
+        let (tx, _rx) = mpsc::channel(10);
+        let conn_id = mgr.register(tx, None).unwrap();
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = count.clone();
+        let conn_id_clone = conn_id.clone();
+
+        let handle = tokio::spawn(async move {
+            Heartbeat::run_loop(&mgr, move |id| {
+                if id == conn_id_clone {
+                    count_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+            .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        handle.abort();
+        assert!(count.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_run_loop_no_idle_no_callback() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let mgr = ConnectionManager::with_defaults();
+        let (tx, _rx) = mpsc::channel(10);
+        mgr.register(tx, None).unwrap();
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = count.clone();
+
+        let handle = tokio::spawn(async move {
+            Heartbeat::run_loop(&mgr, move |_| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        handle.abort();
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
 }

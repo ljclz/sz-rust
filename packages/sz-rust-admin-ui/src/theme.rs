@@ -187,4 +187,79 @@ mod tests {
         let svc = ThemeService::new();
         assert!(svc.switch_theme("", Theme::Dark).is_err());
     }
+
+    #[test]
+    fn test_theme_service_set_variable_empty_user() {
+        let svc = ThemeService::new();
+        assert!(svc.set_variable("", "key", "value").is_err());
+    }
+
+    #[test]
+    fn test_theme_default() {
+        assert_eq!(Theme::default(), Theme::Light);
+    }
+
+    #[test]
+    fn test_theme_parse_empty() {
+        assert!(Theme::parse("").is_err());
+    }
+
+    #[test]
+    fn test_theme_parse_mixed_case() {
+        assert_eq!(Theme::parse("Light").unwrap(), Theme::Light);
+        assert_eq!(Theme::parse("DARK").unwrap(), Theme::Dark);
+        assert_eq!(Theme::parse("Auto").unwrap(), Theme::Auto);
+    }
+
+    #[test]
+    fn test_theme_config_new() {
+        let config = ThemeConfig::new();
+        assert_eq!(config.current, Theme::Light);
+        assert!(config.variables.is_empty());
+    }
+
+    #[test]
+    fn test_theme_config_with_theme() {
+        let config = ThemeConfig::new().with_theme(Theme::Dark);
+        assert_eq!(config.current, Theme::Dark);
+    }
+
+    #[test]
+    fn test_theme_config_with_variable() {
+        let config = ThemeConfig::new()
+            .with_variable("color", "#fff")
+            .with_variable("bg", "#000");
+        assert_eq!(config.variables.get("color"), Some(&"#fff".to_string()));
+        assert_eq!(config.variables.get("bg"), Some(&"#000".to_string()));
+    }
+
+    #[test]
+    fn test_theme_config_default() {
+        let config = ThemeConfig::default();
+        assert_eq!(config.current, Theme::Light);
+    }
+
+    #[test]
+    fn test_theme_service_default_constructor() {
+        let svc = ThemeService::default();
+        assert_eq!(svc.get_theme("anyone"), Theme::Light);
+    }
+
+    #[test]
+    fn test_theme_service_get_config_nonexistent() {
+        let svc = ThemeService::new();
+        let config = svc.get_config("nonexistent");
+        assert_eq!(config.current, Theme::Light);
+        assert!(config.variables.is_empty());
+    }
+
+    #[test]
+    fn test_theme_service_switch_multiple_users() {
+        let svc = ThemeService::new();
+        svc.switch_theme("user1", Theme::Dark).unwrap();
+        svc.switch_theme("user2", Theme::Auto).unwrap();
+        assert_eq!(svc.get_theme("user1"), Theme::Dark);
+        assert_eq!(svc.get_theme("user2"), Theme::Auto);
+        assert_eq!(svc.get_theme("user3"), Theme::Light);
+    }
 }

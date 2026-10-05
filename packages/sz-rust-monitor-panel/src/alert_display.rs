@@ -205,4 +205,90 @@ mod tests {
         let filtered = AlertDisplayService::filter_by_severity(&alerts, AlertSeverity::Warning);
         assert_eq!(filtered.len(), 2);
     }
+
+    #[test]
+    fn test_alert_severity_as_str() {
+        assert_eq!(AlertSeverity::Info.as_str(), "info");
+        assert_eq!(AlertSeverity::Warning.as_str(), "warning");
+        assert_eq!(AlertSeverity::Critical.as_str(), "critical");
+    }
+
+    #[test]
+    fn test_alert_severity_parse_all() {
+        assert_eq!(AlertSeverity::parse("info"), Some(AlertSeverity::Info));
+        assert_eq!(
+            AlertSeverity::parse("warning"),
+            Some(AlertSeverity::Warning)
+        );
+        assert_eq!(
+            AlertSeverity::parse("critical"),
+            Some(AlertSeverity::Critical)
+        );
+        assert_eq!(AlertSeverity::parse("INFO"), Some(AlertSeverity::Info));
+        assert_eq!(
+            AlertSeverity::parse("WARNING"),
+            Some(AlertSeverity::Warning)
+        );
+    }
+
+    #[test]
+    fn test_alert_state_as_str() {
+        assert_eq!(AlertState::Fired.as_str(), "fired");
+        assert_eq!(AlertState::Resolved.as_str(), "resolved");
+        assert_eq!(AlertState::Silenced.as_str(), "silenced");
+        assert_eq!(AlertState::Inhibited.as_str(), "inhibited");
+    }
+
+    #[test]
+    fn test_alert_summary_without_message() {
+        let alert = AlertSummary::new("r1", "test", AlertSeverity::Info, AlertState::Resolved);
+        assert_eq!(alert.message, "");
+        assert_eq!(alert.state, AlertState::Resolved);
+    }
+
+    #[test]
+    fn test_filter_active_empty() {
+        let alerts: Vec<AlertSummary> = vec![];
+        let active = AlertDisplayService::filter_active(&alerts);
+        assert!(active.is_empty());
+    }
+
+    #[test]
+    fn test_sort_by_severity_empty() {
+        let mut alerts: Vec<AlertSummary> = vec![];
+        AlertDisplayService::sort_by_severity(&mut alerts);
+        assert!(alerts.is_empty());
+    }
+
+    #[test]
+    fn test_filter_by_severity_empty() {
+        let alerts: Vec<AlertSummary> = vec![];
+        let filtered = AlertDisplayService::filter_by_severity(&alerts, AlertSeverity::Info);
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_filter_by_severity_critical_only() {
+        let alerts = vec![
+            AlertSummary::new("r1", "a1", AlertSeverity::Info, AlertState::Fired),
+            AlertSummary::new("r2", "a2", AlertSeverity::Critical, AlertState::Fired),
+            AlertSummary::new("r3", "a3", AlertSeverity::Warning, AlertState::Fired),
+        ];
+        let filtered = AlertDisplayService::filter_by_severity(&alerts, AlertSeverity::Critical);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].severity, AlertSeverity::Critical);
+    }
+
+    #[test]
+    fn test_filter_active_all_states() {
+        let alerts = vec![
+            AlertSummary::new("r1", "a1", AlertSeverity::Info, AlertState::Fired),
+            AlertSummary::new("r2", "a2", AlertSeverity::Info, AlertState::Resolved),
+            AlertSummary::new("r3", "a3", AlertSeverity::Info, AlertState::Silenced),
+            AlertSummary::new("r4", "a4", AlertSeverity::Info, AlertState::Inhibited),
+        ];
+        let active = AlertDisplayService::filter_active(&alerts);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].rule_id, "r1");
+    }
 }

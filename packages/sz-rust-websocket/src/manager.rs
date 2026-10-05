@@ -287,4 +287,102 @@ mod tests {
         let config = WebSocketConfig::default();
         assert!(config.validate().is_ok());
     }
+
+    #[test]
+    fn test_config_validate_heartbeat_zero() {
+        let config = WebSocketConfig {
+            heartbeat_interval: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_idle_timeout_zero() {
+        let config = WebSocketConfig {
+            idle_timeout: Duration::ZERO,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_max_connections_zero() {
+        let config = WebSocketConfig {
+            max_connections: 0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_touch_nonexistent() {
+        let mgr = ConnectionManager::with_defaults();
+        let fake_id = ConnectionId::new();
+        let result = mgr.touch(&fake_id);
+        assert!(matches!(result, Err(WebSocketError::ConnectionNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_unregister_removes_connection() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx1, _rx1) = mpsc::channel(10);
+        let (tx2, _rx2) = mpsc::channel(10);
+        let conn1 = mgr.register(tx1, None).unwrap();
+        let conn2 = mgr.register(tx2, None).unwrap();
+        assert_eq!(mgr.connection_count(), 2);
+        mgr.unregister(&conn1);
+        assert_eq!(mgr.connection_count(), 1);
+        assert!(!mgr.contains(&conn1));
+        assert!(mgr.contains(&conn2));
+        mgr.unregister(&conn2);
+        assert_eq!(mgr.connection_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_idle_connections_multiple() {
+        let config = WebSocketConfig {
+            idle_timeout: Duration::from_millis(1),
+            ..Default::default()
+        };
+        let mgr = ConnectionManager::new(config);
+        let (tx1, _rx1) = mpsc::channel(10);
+        let (tx2, _rx2) = mpsc::channel(10);
+        let conn1 = mgr.register(tx1, None).unwrap();
+        let conn2 = mgr.register(tx2, None).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        let idle = mgr.idle_connections();
+        assert_eq!(idle.len(), 2);
+        assert!(idle.contains(&conn1));
+        assert!(idle.contains(&conn2));
+    }
+
+    #[tokio::test]
+    async fn test_connections_iter_multiple() {
+        let mgr = ConnectionManager::with_defaults();
+        let (tx1, _rx1) = mpsc::channel(10);
+        let (tx2, _rx2) = mpsc::channel(10);
+        let conn1 = mgr.register(tx1, None).unwrap();
+        let conn2 = mgr.register(tx2, None).unwrap();
+        let ids: Vec<_> = mgr.connections_iter().collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&conn1));
+        assert!(ids.contains(&conn2));
+    }
+
+    #[test]
+    fn test_config_new_equals_default() {
+        let c1 = WebSocketConfig::new();
+        let c2 = WebSocketConfig::default();
+        assert_eq!(c1.heartbeat_interval, c2.heartbeat_interval);
+        assert_eq!(c1.idle_timeout, c2.idle_timeout);
+        assert_eq!(c1.max_connections, c2.max_connections);
+    }
+
+    #[test]
+    fn test_config_with_max_connections() {
+        let config = WebSocketConfig::new().with_max_connections(50000);
+        assert_eq!(config.max_connections, 50000);
+        assert!(config.validate().is_ok());
+    }
 }

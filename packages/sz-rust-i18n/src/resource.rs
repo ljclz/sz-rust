@@ -272,4 +272,99 @@ name = "Name"
         let result = parse_resource(ResourceFormat::Json, "{invalid}");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_parse_invalid_toml() {
+        let result = parse_resource(ResourceFormat::Toml, "invalid = = =");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_invalid_yaml() {
+        let result = parse_resource(ResourceFormat::Yaml, ": : :");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_language_code_as_str() {
+        let code = LanguageCode::new("en-US").unwrap();
+        assert_eq!(code.as_str(), "en-US");
+    }
+
+    #[test]
+    fn test_bcp47_3_digit_numeric() {
+        assert!(is_valid_bcp47("zh-123"));
+    }
+
+    #[test]
+    fn test_bcp47_variant_too_long() {
+        assert!(!is_valid_bcp47("en-verylongvariant"));
+    }
+
+    #[test]
+    fn test_bcp47_valid_variant() {
+        assert!(is_valid_bcp47("en-US-variant"));
+    }
+
+    #[test]
+    fn test_bcp47_4_letter_script() {
+        assert!(is_valid_bcp47("zh-Hans"));
+        assert!(is_valid_bcp47("zh-Hant-TW"));
+    }
+
+    #[test]
+    fn test_bcp47_empty_part() {
+        assert!(!is_valid_bcp47("en--US"));
+    }
+
+    #[test]
+    fn test_parse_json_non_object() {
+        let result = parse_resource(ResourceFormat::Json, "[1, 2, 3]");
+        assert!(result.is_ok());
+        let map = result.unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_toml_with_int_and_bool() {
+        let content = r#"
+count = 42
+flag = true
+"#;
+        let map = parse_resource(ResourceFormat::Toml, content).unwrap();
+        assert_eq!(
+            map.get("count").unwrap(),
+            &Value::Number(serde_json::Number::from(42))
+        );
+        assert_eq!(map.get("flag").unwrap(), &Value::Bool(true));
+    }
+
+    #[test]
+    fn test_parse_yaml_with_int_and_bool() {
+        let content = "count: 42\nflag: true\n";
+        let map = parse_resource(ResourceFormat::Yaml, content).unwrap();
+        assert_eq!(
+            map.get("count").unwrap(),
+            &Value::Number(serde_json::Number::from(42))
+        );
+        assert_eq!(map.get("flag").unwrap(), &Value::Bool(true));
+    }
+
+    #[test]
+    fn test_parse_yaml_non_mapping() {
+        let result = parse_resource(ResourceFormat::Yaml, "just a string");
+        assert!(result.is_ok());
+        let map = result.unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_json_nested_object() {
+        let content = r#"{"a": {"b": {"c": "deep"}}}"#;
+        let map = parse_resource(ResourceFormat::Json, content).unwrap();
+        assert_eq!(
+            map.get("a.b.c").unwrap(),
+            &Value::String("deep".to_string())
+        );
+    }
 }
