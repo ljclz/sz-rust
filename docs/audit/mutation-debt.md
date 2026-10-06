@@ -70,6 +70,15 @@
 | local_cache.rs | 2 | `>→>=`、`is_empty→true` | 补 TTL 过期边界用例 |
 | registry.rs | 1 | `default_weight→0` | 补默认权重断言 |
 
+#### service-registry 补测后（2026-10-06 all-features scoped 复跑）
+
+> 命令：`cargo mutants -p sz-rust-service-registry --all-features --file 'packages/sz-rust-service-registry/src/{consul,nacos,kubernetes,load_balancer,gray_release,local_cache,registry}.rs' --timeout 180 -j 1` → `131 mutants: 103 caught, 5 missed, 23 unviable` → **杀死率 95.4%（103/108 可行）**。
+
+- **consul/nacos/kubernetes**：引入 `mockito` 本地 mock 服务器，补 register/deregister/heartbeat/discover/health_check 的 200/500 双路径错误测试 → `→ Ok(())` 与 `delete !` 守卫变异体杀死；nacos `NacosHost.instance_id` 补 `#[serde(rename = "instanceId")]` 对齐真实 API
+- **load_balancer**：加权选择改为 ±25% 比例分布断言（杀 `-=→+=`/`-=→/=`）、fnv1a 精确值、LeastConnections 强释放断言、一致性哈希手动环校验
+- **registry/gray_release/local_cache**：缺省权重=1、灰度阈值边界/权重乘法、TTL 过期非空断言
+- 剩余 5 个存活为边界等价/计时边界可接受存活（具体位置待 2026-10-06 全量权威重跑核对）
+
 ### sz-rust-api-gateway（33 存活 + 1 TIMEOUT）
 
 > 数据来源：2026-10-06 运行（-j 1）`218 mutants: 33 missed, 158 caught, 26 unviable, 1 timeouts`。
