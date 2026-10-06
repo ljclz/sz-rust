@@ -12,9 +12,9 @@
 | Crate | Feature | 总变异体 | 已杀死 | 存活 | 杀死率 | 状态 |
 |-------|---------|---------|--------|------|--------|------|
 | sz-rust-distributed-tx | dtx-parallel | 77 | 58 | 6 | **90.6%**（可行 64 中） | **达标**（6 存活均为边界等价；证据来源：2026-10-06 复跑 `77 mutants: 6 missed, 58 caught, 13 unviable`） |
-| sz-rust-service-registry | all-features | 139 | 76 | 38（另有 24 unviable + 1 TIMEOUT） | 66.7%（可行 114 中） | 已完成（38 存活待处置；证据来源：`cargo mutants` 输出 `139 mutants: 38 missed, 76 caught`，见「运行记录与崩溃诊断」） |
-| sz-rust-api-gateway | gateway-multidim | 218 | 158 | 33（另有 26 unviable + 1 TIMEOUT） | 82.7%（可行 191 中） | 已完成（33 存活待处置；证据来源：`cargo mutants` 输出 `218 mutants: 33 missed, 158 caught`，见「运行记录与崩溃诊断」） |
-| sz-rust-observability | ~~leak-detect~~ → all-features | 471 | 238 | 207（另有 23 unviable + 3 TIMEOUT） | 53.5%（可行 445 中） | 基线（leak-detect 口径，feature 门控模块测试未运行导致存活高估） |
+| sz-rust-service-registry | all-features | 139 | 111 | 4（另有 24 unviable） | **96.5%**（可行 115 中） | **达标**（4 存活均为边界等价/不可达兜底；权威重跑 `139 mutants: 4 missed, 111 caught, 24 unviable`，见「运行记录与崩溃诊断」） |
+| sz-rust-api-gateway | all-features | 218 | 185 | 6（另有 27 unviable） | **96.9%**（可行 191 中） | **达标**（6 存活均为边界等价/排序等价；权威重跑 `218 mutants: 6 missed, 185 caught, 27 unviable`） |
+| sz-rust-observability | all-features | 476 | 425 | 15（另有 36 unviable） | **96.6%**（可行 440 中） | **达标**（15 存活均为边界等价/feature 门控/平台相关；权威重跑 `476 mutants: 15 missed, 425 caught, 36 unviable`） |
 
 > **基线 feature 口径说明（2026-10-06 发现）**：cargo-mutants 会为 crate 内**所有源文件**生成变异体（包括 `#[cfg(feature)]` 门控模块），但运行测试时只编译启用 feature 对应的测试。原 observability 基线用 `--features leak-detect`，导致 span_attributes/admin/sampling/otlp-batch/metrics-instrumentation/grafana-dashboard 等门控模块的测试未运行，存活被**高估**（span_attributes 在 leak-detect 下 49 全存活，all-features 下仅 17 存活）。`mutation-baseline.sh` 已改为 `--all-features` 口径。
 >
@@ -22,7 +22,7 @@
 
 > **observability 补测后（all-features scoped 复跑，2026-10-06）**：覆盖全部已修改文件，`459 mutants: 405 caught, 24 missed, 30 unviable` → **杀死率 94.4%（405/429 可行）**。剩余 24 个存活已全部归类：14 个边界等价/平台相关可接受 + 4 个 sysinfo 补测项已在本次复跑确认杀死 + 2 个 OTLP 需真实 tracer 集成测试 + 2 个采样 `<=` 边界等价 + 2 个 feature 门控伪存活（详见「observability 存活清单」）。
 
-> 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：58 ÷ 64 = **90.6%（达标）**；service-registry：76 ÷ 114 = 66.7%；api-gateway：158 ÷ 191 = 82.7%；observability：238 ÷ 445 = 53.5%。**service-registry / api-gateway / observability 低于 90% 门禁，存活清单与补测计划见下；distributed-tx 已跨过门禁。**
+> 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：58 ÷ 64 = **90.6%（达标）**；service-registry（权威）：111 ÷ 115 = **96.5%（达标）**；api-gateway（权威）：185 ÷ 191 = **96.9%（达标）**；observability（权威）：425 ÷ 440 = **96.6%（达标）**。**四 crate 均已跨过 90% 门禁，存活全部为边界等价/feature 门控/平台相关可接受，清单见下。**
 
 ## 运行记录与崩溃诊断（2026-10-06）
 
@@ -32,7 +32,8 @@
 - **重跑（-j 1 --timeout 180）**：8m 完成，`139 mutants: 38 missed, 76 caught, 24 unviable, 1 timeouts`（`SRC_RC=3`）。nacos heartbeat 变异体本次 4s 完成（此前 TIMEOUT 系资源争用），唯一 TIMEOUT 为 `load_balancer.rs:112` `-=→+=`（瞬时卡顿，算法为有限循环无死循环可能；变异体未被测试杀死，见存活清单）。**处置生效：-j 1 可稳定跑完。**
 - **api-gateway**：34m 完成，`218 mutants: 33 missed, 158 caught, 26 unviable, 1 timeouts`（`AGW_RC=3`）。
 - **observability**：81m 完成，`471 mutants: 207 missed, 238 caught, 23 unviable, 3 timeouts`（`OB_RC=3`）。3 个 TIMEOUT 全部在 `otlp.rs`（`OtlpConfig::from_env/with_endpoint/with_protocol → Default`），每次 180s——疑似 OTLP 导出测试尝试连接真实 collector 等待超时，**需改为 mock 端点**（见补测计划）。
-- **权威基线重跑（2026-10-06 20:26）因 sccache 缓存污染失败**：`cargo mutants` 在**未变异树**上 `cargo test -p sz-rust-service-registry --all-features` 即失败（`Failure(101)`），无变异体被测试（`mutants.out/debug.log`：`cargo test failed in an unmutated tree, so no mutants were tested`）。失败为 `local_cache` 3 个用例（`test_cache_clear` / `test_cache_default_empty` / `test_cache_update_and_get`），断言行为自相矛盾（update 后 `is_empty()==true`、clear/默认后 `is_empty()==false`）。**根因**：`.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`，sccache 全局缓存被此前变异测试的变异代码编译产物污染，源码恢复后正常构建仍命中错误缓存。**处置**：`cargo --config 'build.rustc-wrapper=""' clean -p sz-rust-service-registry` + 清空 `%LOCALAPPDATA%\Mozilla\sccache\cache`（6.5GB）。**验证**：清缓存后 `--config 'build.rustc-wrapper=""'` 下三 crate 全测通过（service-registry 98 单元 + 6 fault_injection + 12 gray_release、api-gateway 120 + 12 + 10 multi_dim、observability 237 单元 + 8 leak_detector + 9 doc-tests）。**教训**：变异测试与 sccache 混用会污染全局编译缓存，建议变异测试禁用 sccache（`cargo --config 'build.rustc-wrapper=""' mutants ...` 或临时注释 config）。**权威基线重跑未产出数据**，待 sccache 可用环境重新执行以核对 service-registry 剩余 5 个存活（见 73-80 行）。
+- **权威基线重跑（2026-10-06 20:26）因 sccache 缓存污染失败**：`cargo mutants` 在**未变异树**上 `cargo test -p sz-rust-service-registry --all-features` 即失败（`Failure(101)`），无变异体被测试（`mutants.out/debug.log`：`cargo test failed in an unmutated tree, so no mutants were tested`）。失败为 `local_cache` 3 个用例（`test_cache_clear` / `test_cache_default_empty` / `test_cache_update_and_get`），断言行为自相矛盾（update 后 `is_empty()==true`、clear/默认后 `is_empty()==false`）。**根因**：`.cargo/config.toml` 配置 `rustc-wrapper = "sccache"`，sccache 全局缓存被此前变异测试的变异代码编译产物污染，源码恢复后正常构建仍命中错误缓存。**处置**：`cargo --config 'build.rustc-wrapper=""' clean -p sz-rust-service-registry` + 清空 `%LOCALAPPDATA%\Mozilla\sccache\cache`（6.5GB）。**验证**：清缓存后 `--config 'build.rustc-wrapper=""'` 下三 crate 全测通过（service-registry 98 单元 + 6 fault_injection + 12 gray_release、api-gateway 120 + 12 + 10 multi_dim、observability 237 单元 + 8 leak_detector + 9 doc-tests）。**教训**：变异测试与 sccache 混用会污染全局编译缓存，建议变异测试禁用 sccache（`cargo --config 'build.rustc-wrapper=""' mutants ...` 或临时注释 config）。
+- **权威基线重跑（2026-10-07 独立 target，全部成功）**：首次尝试发现共享 `F:\cargo-target` 被此前 cargo-mutants 变异产物污染——未变异树基线 `0s build` 直接命中变异二进制导致失败（service-registry `is_empty`、api-gateway `slow_call_breaker`、observability `tail_sampler` 均呈现变异行为），`cargo --config 'build.rustc-wrapper=""' clean -p` 三 crate（1879 文件 / 1.9GiB）后工作区恢复。改用独立 `CARGO_TARGET_DIR=/tmp/mutants-target-*` 隔离后全部成功：**service-registry** `139 mutants: 4 missed, 111 caught, 24 unviable`（96.5%）；**api-gateway** `218 mutants: 6 missed, 185 caught, 27 unviable`（96.9%）；**observability** `476 mutants: 15 missed, 425 caught, 36 unviable`（96.6%）。**教训**：cargo-mutants 必须在干净/独立 target 目录运行，且同一 target 上不得先跑聚焦变异再跑全量（聚焦变异产物会被全量基线误用）；变异测试需禁用 sccache（`-C '--config' -C 'build.rustc-wrapper=""'`）。
 
 ## 存活变异体清单
 
@@ -57,9 +58,9 @@
 | parallel_saga.rs:331 | - → + | 存活 | 退避间隔 `interval(attempt-1)` 变异，测试不断言 sleep 时长 | 可接受 |
 | parallel_saga.rs:331 | - → / | 存活 | 退避间隔等价（`interval(attempt/1)` ≡ 原式） | 可接受 |
 
-### sz-rust-service-registry（38 存活 + 1 TIMEOUT）
+### sz-rust-service-registry（权威重跑 4 存活）
 
-> 数据来源：2026-10-06 重跑（-j 1）`139 mutants: 38 missed, 76 caught, 24 unviable, 1 timeouts`。
+> 权威数据来源：2026-10-07 干净独立 target 全量重跑（-j 1）`139 mutants: 4 missed, 111 caught, 24 unviable` → 杀死率 **96.5%**。4 个存活全部为边界等价/不可达兜底，见「可接受存活的变异体」。
 
 | 模块 | 存活数 | 主要变异模式 | 补测计划 |
 |------|--------|-------------|---------|
@@ -78,11 +79,11 @@
 - **consul/nacos/kubernetes**：引入 `mockito` 本地 mock 服务器，补 register/deregister/heartbeat/discover/health_check 的 200/500 双路径错误测试 → `→ Ok(())` 与 `delete !` 守卫变异体杀死；nacos `NacosHost.instance_id` 补 `#[serde(rename = "instanceId")]` 对齐真实 API
 - **load_balancer**：加权选择改为 ±25% 比例分布断言（杀 `-=→+=`/`-=→/=`）、fnv1a 精确值、LeastConnections 强释放断言、一致性哈希手动环校验
 - **registry/gray_release/local_cache**：缺省权重=1、灰度阈值边界/权重乘法、TTL 过期非空断言
-- 剩余 5 个存活为边界等价/计时边界可接受存活（具体位置待 2026-10-06 全量权威重跑核对）
+- 剩余 4 个存活全部为边界等价/不可达兜底（**2026-10-07 权威全量重跑确认**）：`load_balancer.rs:114` 兜底 `serving[len-1]` 的 `-→+/ /`（不可达代码）、`load_balancer.rs:171` `ring_select <→<=`（一致性哈希环边界）、`local_cache.rs:59` `>→>=`（TTL 计时边界）
 
-### sz-rust-api-gateway（33 存活 + 1 TIMEOUT）
+### sz-rust-api-gateway（权威重跑 6 存活）
 
-> 数据来源：2026-10-06 运行（-j 1）`218 mutants: 33 missed, 158 caught, 26 unviable, 1 timeouts`。
+> 权威数据来源：2026-10-07 干净独立 target 全量重跑（-j 1）`218 mutants: 6 missed, 185 caught, 27 unviable` → 杀死率 **96.9%**。6 个存活全部为边界等价/排序等价：middleware.rs:197、router_engine.rs:121/123、sliding_window.rs:38/52、slow_call_breaker.rs:198（见「可接受存活的变异体」）。
 
 | 模块 | 存活数 | 主要变异模式 | 补测计划 |
 |------|--------|-------------|---------|
@@ -116,9 +117,9 @@
 - **sliding_window**：补「窗口过期归零 + 部分过期窗口保留」边界测试；`38:54`/`52:54` 两个 `<→<=` 仍为可接受存活（真实时钟无法构造 `duration == window` 精确相等）
 | grpc_streaming.rs | 1 TIMEOUT | `send→Ok(())`（180s 超时） | 已修复：timeout 收包 + ChannelClosed 错误路径测试；聚焦复跑 0 timeouts 确认 |
 
-### sz-rust-observability（207 存活 + 3 TIMEOUT）
+### sz-rust-observability（权威重跑 15 存活）
 
-> 数据来源：2026-10-06 运行（-j 1）`471 mutants: 207 missed, 238 caught, 23 unviable, 3 timeouts`。
+> 权威数据来源：2026-10-07 干净独立 target 全量重跑（-j 1）`476 mutants: 15 missed, 425 caught, 36 unviable` → 杀死率 **96.6%**。15 个存活全部为边界等价/feature 门控/平台相关：slo.rs:355-358 ×4、otlp.rs:421/584/703、leak_detector.rs:92/139/149/174、sysinfo_collector.rs:183 ×2、probabilistic_sampler.rs:56、tail_sampler.rs:81（见「observability 补测后存活」与「可接受存活的变异体」）。
 
 | 模块 | 存活数 | 主要变异模式 | 补测计划 |
 |------|--------|-------------|---------|
@@ -168,6 +169,9 @@
 | router_engine.rs:121/123 | `*→+` / `+→*` | 通配/精确路由相对评分顺序不变，排序等价 |
 | sliding_window.rs:38/52 | `<` → `<=` | 窗口边界计时等价（duration==window 概率为零） |
 | slow_call_breaker.rs:198 | `<` → `<=` | 统计窗口计时边界等价 |
+| load_balancer.rs:114 | `-→+` / `-→/` | 加权选择兜底 `serving[len-1]` 为不可达代码（循环内必命中），变异不影响行为 |
+| load_balancer.rs:171 | `<` → `<=` | 一致性哈希环选择边界（hash 恰等于环点概率为零） |
+| sysinfo_collector.rs:183 | `os_version → String::new() / "xyzzy"` | 平台相关（读 OS 环境变量），单测价值低 |
 | middleware.rs:197 | `>` → `>=` | 熔断恢复计时边界等价（elapsed==0 不可能精确触发） |
 
 ## 审批流程
