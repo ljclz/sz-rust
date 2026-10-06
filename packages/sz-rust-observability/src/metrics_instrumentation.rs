@@ -149,6 +149,19 @@ mod tests {
     }
 
     #[test]
+    fn test_metrics_instrumentation_getters() {
+        let custom_buckets = HistogramBucketConfig {
+            buckets: vec![0.1, 0.5, 1.0],
+            namespace: "custom_ns".to_string(),
+        };
+        let mi = MetricsInstrumentation::new("prod".to_string(), custom_buckets.clone());
+        assert_eq!(mi.namespace(), "prod");
+        // 使用自定义配置断言（默认配置与 Default 相同，无法杀死 histogram_buckets→Default 变异体）
+        assert_eq!(mi.histogram_buckets().namespace, "custom_ns");
+        assert_eq!(mi.histogram_buckets().buckets, vec![0.1, 0.5, 1.0]);
+    }
+
+    #[test]
     fn test_histogram_bucket_validation() {
         let config = HistogramBucketConfig::default();
         assert!(config.validate().is_ok(), "默认配置应有效");
@@ -161,6 +174,28 @@ mod tests {
             namespace: "test".to_string(),
         };
         assert!(config.validate().is_err(), "超过 20 个桶应无效");
+    }
+
+    #[test]
+    fn test_histogram_bucket_exactly_twenty_valid() {
+        // 恰好 20 个严格递增桶 → 有效。`buckets.len() > 20` 的 `>=` 变异体会误报。
+        let buckets: Vec<f64> = (0..20).map(|i| i as f64 + 1.0).collect();
+        let config = HistogramBucketConfig {
+            buckets,
+            namespace: "test".to_string(),
+        };
+        assert!(config.validate().is_ok(), "恰好 20 个递增桶应有效");
+    }
+
+    #[test]
+    fn test_histogram_bucket_twenty_one_invalid() {
+        // 21 个严格递增桶 → 仍应无效（数量超限）。`>`→`==`/`<` 变异体会漏报。
+        let buckets: Vec<f64> = (0..21).map(|i| i as f64 + 1.0).collect();
+        let config = HistogramBucketConfig {
+            buckets,
+            namespace: "test".to_string(),
+        };
+        assert!(config.validate().is_err(), "21 个桶应因数量超限无效");
     }
 
     #[test]

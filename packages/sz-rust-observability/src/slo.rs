@@ -456,6 +456,170 @@ mod tests {
     }
 
     #[test]
+    fn test_slo_exact_burn_rate_at_threshold() {
+        // 990 成功 + 10 失败 = 99% 成功率，目标 99% → 允许错误率 0.01，燃烧率恰好 = 1.0。
+        // 阈值设为 1.0：`burn > 1.0` 应为 false（不告警），`>`→`>=` 变异体会误报。
+        let monitor = SloMonitor::new(SloConfig {
+            target_success_rate: 0.99,
+            short_window: Duration::from_millis(100),
+            long_window: Duration::from_millis(200),
+            burn_rate_threshold: 1.0,
+            ticket_short_window: Duration::from_millis(300),
+            ticket_long_window: Duration::from_millis(500),
+            ticket_burn_rate_threshold: 1.0,
+        });
+        for _ in 0..990 {
+            monitor.record_success();
+        }
+        for _ in 0..10 {
+            monitor.record_failure();
+        }
+        let rate = monitor.burn_rate();
+        assert!(
+            (rate.short_burn_rate - 1.0).abs() < 1e-9,
+            "短窗口燃烧率应恰好为 1.0: {:?}",
+            rate.short_burn_rate
+        );
+        assert!(
+            (rate.long_burn_rate - 1.0).abs() < 1e-9,
+            "长窗口燃烧率应恰好为 1.0: {:?}",
+            rate.long_burn_rate
+        );
+        assert!(
+            (rate.ticket_short_burn_rate - 1.0).abs() < 1e-9,
+            "ticket 短窗口燃烧率应恰好为 1.0: {:?}",
+            rate.ticket_short_burn_rate
+        );
+        assert!(
+            (rate.ticket_long_burn_rate - 1.0).abs() < 1e-9,
+            "ticket 长窗口燃烧率应恰好为 1.0: {:?}",
+            rate.ticket_long_burn_rate
+        );
+        assert!(
+            (rate.error_budget_remaining - 0.0).abs() < 1e-9,
+            "预算应恰好耗尽: {:?}",
+            rate.error_budget_remaining
+        );
+        assert!(
+            !rate.page_alerting,
+            "燃烧率等于阈值（非超过）时不应告警: {:?}",
+            rate
+        );
+        assert!(
+            !rate.ticket_alerting,
+            "ticket 燃烧率等于阈值时不应告警: {:?}",
+            rate
+        );
+    }
+
+    #[test]
+    fn test_slo_error_budget_partial_consumption() {
+        // 995 成功 + 5 失败 = 99.5% 成功率，目标 99% → 错误率 0.005 = 允许值一半，
+        // 剩余预算应为 0.5。此用例可杀死 `total_failure / total` 的 `%` 变异体。
+        let monitor = SloMonitor::new(SloConfig {
+            target_success_rate: 0.99,
+            short_window: Duration::from_millis(100),
+            long_window: Duration::from_millis(200),
+            burn_rate_threshold: 100.0,
+            ticket_short_window: Duration::from_millis(300),
+            ticket_long_window: Duration::from_millis(500),
+            ticket_burn_rate_threshold: 100.0,
+        });
+        for _ in 0..995 {
+            monitor.record_success();
+        }
+        for _ in 0..5 {
+            monitor.record_failure();
+        }
+        let rate = monitor.burn_rate();
+        assert!(
+            (rate.error_budget_remaining - 0.5).abs() < 1e-9,
+            "剩余预算应为 0.5: {:?}",
+            rate.error_budget_remaining
+        );
+    }
+
+    #[test]
+    fn test_slo_target_success_rate_one_with_failure() {
+        // 目标成功率 = 1.0 → 允许错误率 = 0.0。原始逻辑 `allowed > 0.0` 为 false → 燃烧率 0。
+        // `>`→`>=` 变异体会进入除法分支产生 inf 并误报告警。
+        let monitor = SloMonitor::new(SloConfig {
+            target_success_rate: 1.0,
+            short_window: Duration::from_millis(100),
+            long_window: Duration::from_millis(200),
+            burn_rate_threshold: 1.0,
+            ticket_short_window: Duration::from_millis(300),
+            ticket_long_window: Duration::from_millis(500),
+            ticket_burn_rate_threshold: 1.0,
+        });
+        for _ in 0..100 {
+            monitor.record_success();
+        }
+        monitor.record_failure();
+        let rate = monitor.burn_rate();
+        assert!(
+            rate.short_burn_rate == 0.0,
+            "目标成功率 100% 时短窗口燃烧率应为 0.0（`>→>=` 变异体会产生 inf）: {:?}",
+            rate.short_burn_rate
+        );
+        assert!(
+            rate.long_burn_rate == 0.0,
+            "长窗口燃烧率应为 0.0: {:?}",
+            rate.long_burn_rate
+        );
+        assert!(
+            rate.ticket_short_burn_rate == 0.0,
+            "ticket 短窗口燃烧率应为 0.0: {:?}",
+            rate.ticket_short_burn_rate
+        );
+        assert!(
+            rate.ticket_long_burn_rate == 0.0,
+            "ticket 长窗口燃烧率应为 0.0: {:?}",
+            rate.ticket_long_burn_rate
+        );
+        assert!(
+            !rate.page_alerting,
+            "目标成功率 100% 时允许错误率为 0，燃烧率应保持 0 不告警: {:?}",
+            rate
+        );
+        assert!(!rate.ticket_alerting, "ticket 同样不应告警: {:?}", rate);
+    }
+
+    #[test]
+    fn test_slo_only_long_window_alerting_no_page() {
+        // 短窗口过期（burn≈0）但长窗口仍告警：page_alerting = false && true = false。
+        // `&&`→`||` 变异体会误报 true。
+        let monitor = SloMonitor::new(SloConfig {
+            target_success_rate: 0.999,
+            short_window: Duration::from_millis(50),
+            long_window: Duration::from_millis(500),
+            burn_rate_threshold: 1.0,
+            ticket_short_window: Duration::from_millis(50),
+            ticket_long_window: Duration::from_millis(500),
+            ticket_burn_rate_threshold: 1.0,
+        });
+        for _ in 0..100 {
+            monitor.record_success();
+        }
+        for _ in 0..10 {
+            monitor.record_failure();
+        }
+        // 短窗口（50ms）过期，长窗口（500ms）仍保留故障数据
+        sleep(Duration::from_millis(150));
+        let rate = monitor.burn_rate();
+        assert!(
+            !rate.page_alerting,
+            "仅长窗口超过阈值时 Page 不应告警: {:?}",
+            rate
+        );
+        assert!(
+            !rate.ticket_alerting,
+            "仅长窗口超过阈值时 Ticket 不应告警: {:?}",
+            rate
+        );
+    }
+
+    #[test]
     fn test_slo_ticket_alerting_independent() {
         // 验证 Ticket 告警独立于 Page 告警
         let monitor = SloMonitor::new(SloConfig {

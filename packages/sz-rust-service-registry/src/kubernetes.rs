@@ -264,4 +264,58 @@ mod tests {
         assert_eq!(instances[0].host, "10.0.0.1");
         assert_eq!(instances[0].port, 8080);
     }
+
+    // ------------------------------------------------------------------------
+    // HTTP 错误路径测试（mockito 本地 mock 服务器）
+    // ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_k8s_cache_getter_reflects_registered_instances() {
+        let r = KubernetesRegistry::new("http://unreachable.invalid", "default");
+        let inst = ServiceInstance::new("svc", "10.0.0.1", 8080);
+        r.register(&inst).await.unwrap();
+        let cached = r.cache().get("svc").unwrap_or_default();
+        assert_eq!(
+            cached.len(),
+            1,
+            "cache() 应返回真实缓存（杀死 cache→Default 变异体）"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_discover_http_error() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/api/v1/namespaces/default/endpoints/user-svc")
+            .with_status(500)
+            .create_async()
+            .await;
+
+        let r = KubernetesRegistry::new(&server.url(), "default");
+        // 本地缓存为空 → 走 HTTP 发现 → 500 应返回 Unreachable
+        let result = r.discover("user-svc").await;
+        assert!(
+            matches!(result, Err(RegistryError::Unreachable(_))),
+            "endpoints 500 应返回 Unreachable: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_health_check_http_error() {
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("GET", "/healthz")
+            .with_status(500)
+            .create_async()
+            .await;
+
+        let r = KubernetesRegistry::new(&server.url(), "default");
+        let result = r.health_check().await;
+        assert!(
+            matches!(result, Err(RegistryError::Unreachable(_))),
+            "healthz 500 应返回 Unreachable: {:?}",
+            result
+        );
+    }
 }

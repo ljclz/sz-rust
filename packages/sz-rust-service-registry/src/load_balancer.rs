@@ -227,6 +227,8 @@ mod tests {
     #[test]
     fn test_fnv1a_known_values() {
         assert_eq!(fnv1a(""), 0xcbf29ce484222325);
+        // 精确值断言杀死 `hash ^= b` 的 `^=`→`|=` 变异体
+        assert_eq!(fnv1a("abc"), 16654208175385433931);
     }
 
     #[test]
@@ -280,17 +282,29 @@ mod tests {
     #[test]
     fn test_weighted_select_returns_valid() {
         let lb = LoadBalancer::new(LoadBalanceStrategy::Weighted);
-        let instances = make_instances();
+        let instances = make_instances(); // 权重 1:3:2
         let mut counts = HashMap::new();
         for _ in 0..600 {
             let selected = lb.select(&instances, None).unwrap();
             *counts.entry(selected.instance_id.clone()).or_insert(0) += 1;
         }
-        let w2 = counts.get("svc-10.0.0.2-8080").copied().unwrap_or(0);
         let w1 = counts.get("svc-10.0.0.1-8080").copied().unwrap_or(0);
+        let w2 = counts.get("svc-10.0.0.2-8080").copied().unwrap_or(0);
+        let w3 = counts.get("svc-10.0.0.3-8080").copied().unwrap_or(0);
+        // 比例分布断言（600 次采样，权重 1:3:2 → 期望 100/300/200，允许 ±25% 偏差）。
+        // `point -= weight` 被替换为 `+=`/`/=` 的变异体会把分布扭曲为 1:2:3
+        // （w2≈200、w3≈300），从而被杀死。
         assert!(
-            w2 > w1,
-            "weight=3 instance should be selected more than weight=1: w2={w2} w1={w1}"
+            (75..=125).contains(&w1),
+            "weight=1 应约 100 次（±25%）: w1={w1}"
+        );
+        assert!(
+            (225..=375).contains(&w2),
+            "weight=3 应约 300 次（±25%）: w2={w2}"
+        );
+        assert!(
+            (150..=250).contains(&w3),
+            "weight=2 应约 200 次（±25%）: w3={w3}"
         );
     }
 
@@ -315,6 +329,21 @@ mod tests {
         lb.on_release(&instances[0].instance_id);
         let selected = lb.select(&instances, None).unwrap();
         assert_eq!(selected.instance_id, instances[2].instance_id);
+    }
+
+    #[test]
+    fn test_least_connections_release_changes_selection() {
+        // i0 连接数 2，i1/i2 各 1；释放 i0 后三者并列最小（均为 1），按迭代顺序应选 i0。
+        // `on_release` 被替换为 `()` 的变异体不递减，此时最小为 i1，从而被杀死。
+        let lb = LoadBalancer::new(LoadBalanceStrategy::LeastConnections);
+        let instances = make_instances();
+        lb.on_acquire(&instances[0].instance_id);
+        lb.on_acquire(&instances[0].instance_id);
+        lb.on_acquire(&instances[1].instance_id);
+        lb.on_acquire(&instances[2].instance_id);
+        lb.on_release(&instances[0].instance_id);
+        let selected = lb.select(&instances, None).unwrap();
+        assert_eq!(selected.instance_id, instances[0].instance_id);
     }
 
     #[test]
@@ -354,6 +383,43 @@ mod tests {
         assert!(
             hits.len() > 1,
             "different keys should hit different instances"
+        );
+    }
+
+    #[test]
+    fn test_consistent_hash_matches_manual_ring_lookup() {
+        // 用与 ring_select 相同的算法手工计算期望实例。
+        // `find(|i| i.instance_id == *target_id)` 被替换为 `!=` 的变异体会
+        // 返回 serving[0]（或错误实例），从而被杀死。
+        let lb = LoadBalancer::new(LoadBalanceStrategy::ConsistentHash);
+        let instances = make_instances();
+        let key = "user-123";
+
+        let mut ring: Vec<(u64, String)> = Vec::new();
+        for inst in &instances {
+            for vnode in 0..150u32 {
+                ring.push((
+                    fnv1a(&format!("{}:{vnode}", inst.instance_id)),
+                    inst.instance_id.clone(),
+                ));
+            }
+        }
+        ring.sort_by_key(|(h, _)| *h);
+        let hash = fnv1a(key);
+        let pos = ring.partition_point(|(h, _)| *h < hash);
+        let pos = if pos >= ring.len() { 0 } else { pos };
+        let target_id = &ring[pos].1;
+        let expected = instances
+            .iter()
+            .find(|i| i.instance_id == *target_id)
+            .unwrap()
+            .instance_id
+            .clone();
+
+        let selected = lb.select(&instances, Some(key)).unwrap();
+        assert_eq!(
+            selected.instance_id, expected,
+            "一致性哈希应命中手工计算的实例（杀死 ==→!= 变异体）"
         );
     }
 

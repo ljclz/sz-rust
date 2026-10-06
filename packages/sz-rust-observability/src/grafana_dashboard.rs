@@ -157,4 +157,39 @@ mod tests {
         let http_panel = &panels[0];
         assert_eq!(http_panel["title"], "HTTP Request Rate");
     }
+
+    #[test]
+    fn test_dashboard_all_panels_present() {
+        // 分别断言四个面板的内容，杀死各面板返回 Default::default() 的变异体。
+        let template = GrafanaDashboardTemplate::new(
+            "Test".to_string(),
+            "prod".to_string(),
+            "sz300".to_string(),
+        );
+        let dashboard = template.render();
+        let panels = dashboard["panels"].as_array().unwrap();
+        assert_eq!(panels[0]["type"], "graph");
+        assert_eq!(panels[1]["title"], "DB Connection Pool");
+        assert!(panels[1]["targets"][0]["expr"]
+            .as_str()
+            .unwrap()
+            .contains("sz300_pool_connections_active"));
+        assert_eq!(panels[2]["title"], "Cache Hit Rate");
+        assert_eq!(panels[2]["type"], "gauge");
+        assert_eq!(panels[3]["title"], "Circuit Breaker State");
+        assert_eq!(panels[3]["type"], "stat");
+    }
+
+    #[test]
+    fn test_dashboard_parameterize_updates_instance() {
+        let mut template = GrafanaDashboardTemplate::new(
+            "Test".to_string(),
+            "dev".to_string(),
+            "inst1".to_string(),
+        );
+        template.parameterize("production".to_string(), "sz300".to_string());
+        let dashboard = template.render();
+        let instance = &dashboard["templating"]["list"][1]["query"];
+        assert_eq!(instance, "sz300", "参数化应更新实例变量");
+    }
 }

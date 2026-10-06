@@ -382,6 +382,24 @@ mod tests {
     }
 
     #[test]
+    fn test_group_by_trace_groups_same_trace() {
+        let s1 = sample_span();
+        let mut s2 = sample_span();
+        s2.span_id = "2222334455667788".to_string();
+        let mut s3 = sample_span();
+        s3.trace_id = "ffee001122334455".to_string();
+
+        let spans = [s1, s2, s3];
+        let groups = group_by_trace(&spans);
+        // `==`→`!=` 变异体会把同 trace 的 s2 错误拆成新组，并把 s3 并入第一组。
+        assert_eq!(groups.len(), 2, "两个 trace_id 应分成两组");
+        assert_eq!(groups[0].0, "aabbccdd11223344");
+        assert_eq!(groups[0].1.len(), 2, "第一组应包含同 trace 的两个 span");
+        assert_eq!(groups[1].0, "ffee001122334455");
+        assert_eq!(groups[1].1.len(), 1);
+    }
+
+    #[test]
     fn test_trace_span_with_tags() {
         let span = TraceSpan {
             trace_id: "trace1".to_string(),

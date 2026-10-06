@@ -9551,6 +9551,7 @@ version = "1.7.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "mockito",
  "parking_lot",
  "rand 0.8.8",
  "reqwest 0.12.28",

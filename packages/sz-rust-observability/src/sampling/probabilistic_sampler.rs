@@ -93,6 +93,19 @@ mod tests {
     }
 
     #[test]
+    fn test_probability_getter() {
+        let sampler = ProbabilisticSampler::new(0.25).unwrap();
+        assert!((sampler.probability() - 0.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_simple_hash_exact() {
+        // FNV-1a 64 位精确值；杀死 simple_hash 返回 0/1 及 `^=`→`|=`/`&=` 变异体。
+        assert_eq!(simple_hash("abc"), 16654208175385433931);
+        assert_eq!(simple_hash(""), 14695981039346656037);
+    }
+
+    #[test]
     fn test_probability_one_always_sample() {
         let sampler = ProbabilisticSampler::new(1.0).unwrap();
         let trace = make_trace("t1");

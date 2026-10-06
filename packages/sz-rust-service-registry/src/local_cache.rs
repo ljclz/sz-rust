@@ -112,6 +112,7 @@ mod tests {
         cache.update("user-svc", make_instances());
         let result = cache.get("user-svc").unwrap();
         assert_eq!(result.len(), 2);
+        assert!(!cache.is_empty(), "更新后缓存不应为空");
     }
 
     #[test]

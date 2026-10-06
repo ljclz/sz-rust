@@ -131,11 +131,7 @@ pub async fn collect_server_info() -> ServerInfo {
             total: format_bytes(total_mem),
             used: format_bytes(used_mem),
             free: format_bytes(free_mem),
-            rate: if total_mem == 0 {
-                "0.0".to_string()
-            } else {
-                format!("{:.1}", used_mem as f64 / total_mem as f64 * 100.0)
-            },
+            rate: memory_rate_percent(used_mem, total_mem),
         },
         env: EnvInfo {
             rust_version: RUST_VERSION.clone(),
@@ -162,11 +158,7 @@ fn collect_disk_partitions() -> Vec<DiskPartition> {
             let total = disk.total_space();
             let avail = disk.available_space();
             let used = total.saturating_sub(avail);
-            let pct = if total == 0 {
-                0.0
-            } else {
-                used as f64 / total as f64 * 100.0
-            };
+            let pct = disk_use_percentage(used, total);
             // sysinfo 的 mount_point 在 Windows 上是 "C:\\"，Linux 上是 "/" 等
             let mount_point = disk.mount_point().to_string_lossy().to_string();
             let filesystem = if mount_point.is_empty() {
@@ -273,6 +265,24 @@ fn format_bytes(bytes: u64) -> String {
     format!("{:.2} {}", value, units[i])
 }
 
+/// 计算内存使用率百分比字符串（`total == 0` 时返回 `"0.0"`）
+fn memory_rate_percent(used_mem: u64, total_mem: u64) -> String {
+    if total_mem == 0 {
+        "0.0".to_string()
+    } else {
+        format!("{:.1}", used_mem as f64 / total_mem as f64 * 100.0)
+    }
+}
+
+/// 计算磁盘使用率百分比（`total == 0` 时返回 `0.0`）
+fn disk_use_percentage(used: u64, total: u64) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        used as f64 / total as f64 * 100.0
+    }
+}
+
 // ============================================================================
 // 单元测试
 // ============================================================================
@@ -350,6 +360,52 @@ mod tests {
         assert_eq!(format_bytes(1024 * 1024), "1.00 MB");
         assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GB");
         assert_eq!(format_bytes(1024 * 1024 * 1024 * 1024), "1.00 TB");
+    }
+
+    #[test]
+    fn test_format_bytes_boundaries() {
+        assert_eq!(format_bytes(1), "1.00 B");
+        assert_eq!(format_bytes(1023), "1023.00 B");
+        assert_eq!(format_bytes(1536), "1.50 KB");
+        // 恰好 1024^5 → 仍应封顶在 TB（units.len()-1 的算术变异体会越界）
+        assert_eq!(format_bytes(1024u64.pow(5)), "1024.00 TB");
+        assert_eq!(format_bytes(u64::MAX), "16777216.00 TB");
+    }
+
+    #[test]
+    fn test_memory_rate_percent() {
+        assert_eq!(memory_rate_percent(0, 0), "0.0");
+        assert_eq!(memory_rate_percent(50, 100), "50.0");
+        assert_eq!(memory_rate_percent(1, 3), "33.3");
+    }
+
+    #[test]
+    fn test_disk_use_percentage() {
+        assert_eq!(disk_use_percentage(0, 0), 0.0);
+        assert_eq!(disk_use_percentage(50, 100), 50.0);
+        assert!((disk_use_percentage(1, 3) - 33.333333333333336).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_get_current_process_start_time_nonzero() {
+        // 当前进程必然有启动时间（Unix 秒，远大于 2024-01-01）。
+        // `get_current_process_start_time` 返回 0/1 的变异体会在此断言下失败。
+        assert!(
+            get_current_process_start_time() > 1704067200,
+            "进程启动时间应为 Unix 秒且大于 2024-01-01"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_get_hostname_matches_computername() {
+        if let Ok(name) = std::env::var("COMPUTERNAME") {
+            assert_eq!(
+                get_hostname(),
+                name,
+                "Windows 下 get_hostname 应返回 COMPUTERNAME"
+            );
+        }
     }
 
     #[test]

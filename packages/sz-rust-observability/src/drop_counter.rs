@@ -120,6 +120,7 @@ mod tests {
         assert_eq!(counter.dropped(), 1);
         assert_eq!(counter.leaked(), 1);
         assert!(counter.has_leak());
+        assert_eq!(counter.name(), "test", "name() 应返回创建时传入的名称");
     }
 
     #[test]
@@ -161,6 +162,13 @@ mod tests {
         assert_eq!(val, 42);
         assert_eq!(counter.created(), 1);
         assert_eq!(counter.dropped(), 0, "take() should not count as drop");
+    }
+
+    #[test]
+    fn test_tracked_resource_get() {
+        let counter = Arc::new(DropCounter::new("resource"));
+        let r = TrackedResource::new(7, counter.clone());
+        assert_eq!(r.get(), Some(&7), "get() 应返回内部值引用");
     }
 
     #[test]

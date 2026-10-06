@@ -248,4 +248,45 @@ mod tests {
         };
         assert_eq!(gr.check_rollback(&stats), RollbackDecision::Continue);
     }
+
+    #[test]
+    fn test_config_getter_returns_custom() {
+        let cfg = GrayReleaseConfig::new(0.3, 0.7, 5);
+        let gr = GrayRelease::new(cfg.clone());
+        assert_eq!(gr.config().new_version_weight, 0.3);
+        assert_eq!(gr.config().failure_rate_threshold, 0.7);
+        assert_eq!(gr.config().consecutive_failures, 5);
+    }
+
+    #[test]
+    fn test_route_weight_multiplication() {
+        // 权重 10 的 canary 实例：`10 * 0.1 = 1`，`*`→`+` 变异体会得到 `10 + 0.1 = 10`。
+        let mut canary = make_instance("canary-1", Some("canary"), InstanceStatus::Healthy);
+        canary.weight = 10;
+        let old = make_instance("old-1", None, InstanceStatus::Healthy);
+        let instances = vec![old, canary];
+        let cfg = GrayReleaseConfig::new(0.1, 0.5, 3);
+        let gr = GrayRelease::new(cfg);
+        let routed = gr.route(&instances);
+        let routed_canary = routed.iter().find(|i| i.instance_id == "canary-1").unwrap();
+        assert_eq!(
+            routed_canary.weight, 1,
+            "canary 权重 = 10 * 0.1 = 1（max(1) 钳制）"
+        );
+    }
+
+    #[test]
+    fn test_check_rollback_failure_rate_at_threshold_no_rollback() {
+        // failure_rate 恰好等于阈值（0.5）：`>`→`>=` 变异体会误判回滚。
+        let gr = GrayRelease::new(GrayReleaseConfig::new(0.1, 0.5, 3));
+        let stats = HealthStats {
+            failure_rate: 0.5,
+            consecutive_failures: 3,
+        };
+        assert_eq!(
+            gr.check_rollback(&stats),
+            RollbackDecision::Continue,
+            "失败率等于阈值（未超过）不应回滚"
+        );
+    }
 }

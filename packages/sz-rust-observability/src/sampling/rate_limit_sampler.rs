@@ -138,5 +138,30 @@ mod tests {
     #[test]
     fn test_zero_limit_rejected() {
         assert!(RateLimitSampler::new(0).is_err());
+        assert!(
+            RateLimitSampler::with_window(0, Duration::from_secs(1)).is_err(),
+            "with_window 的零配额也应被拒绝"
+        );
+    }
+
+    #[test]
+    fn test_limit_getter() {
+        let sampler = RateLimitSampler::new(7).unwrap();
+        assert_eq!(sampler.limit(), 7);
+    }
+
+    #[test]
+    fn test_rate_limit_window_resets() {
+        // 极短窗口（1ms）：填满配额后等待窗口轮转，应恢复采样。
+        let sampler = RateLimitSampler::with_window(1, Duration::from_millis(1)).unwrap();
+        let trace = make_trace();
+        assert_eq!(sampler.should_sample(&trace), SampleDecision::Sample);
+        assert_eq!(sampler.should_sample(&trace), SampleDecision::Drop);
+        std::thread::sleep(Duration::from_millis(5));
+        assert_eq!(
+            sampler.should_sample(&trace),
+            SampleDecision::Sample,
+            "窗口轮转后应恢复采样"
+        );
     }
 }

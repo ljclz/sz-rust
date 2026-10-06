@@ -45,6 +45,14 @@
 - **observability 基线完成**（`sz-rust-observability`，feature `leak-detect`）：471 变异体 = 238 killed / 207 missed / 23 unviable / 3 timeout，杀死率 **53.5%**；存活集中为 span_attributes/slo/sampling 阈值边界与 sysinfo 单位换算；**3 个 OTLP TIMEOUT 疑似导出测试真实网络等待，需改 mock 端点**，已按模块记录到 `mutation-debt.md`
 - **四 crate 基线全部完成**：存活清单（distributed-tx 8 / service-registry 38 / api-gateway 33 / observability 207）已全量记录至 `mutation-debt.md`，附逐模块补测计划
 
+### Changed — 变异补测与修复（2026-10-06）
+
+- **observability 补测 30+ 用例**（`sz-rust-observability`）：span_attributes 脱敏精确输出（`=`/`:`/空格/大写/空值边界）、leak_detector 双样本与增长率阈值边界、slo 燃烧率精确值与单窗口告警、sampling 哈希/概率/窗口重置、metrics/grafana/otlp_batch getter 自定义配置断言、format_bytes 单位边界；all-features scoped 复跑 `459 mutants: 405 caught / 24 missed / 30 unviable` → **杀死率 94.4%**（剩余 24 个已归类为边界等价/平台相关/feature 门控伪存活）
+- **OTLP 变异体 180s TIMEOUT 根因修复**：`OtlpConfig::default()` 不再委托 `from_env()`，切断 `default() → from_env() → Default::default()` 无限递归；3 个 TIMEOUT 变异体消除（`mutation-debt.md` 原「需 mock 端点」结论修正为递归死循环，非真实网络等待）
+- **基线 feature 口径修正**：发现 cargo-mutants 会为所有源文件生成变异体但仅运行启用 feature 的测试；`mutation-baseline.sh` 将 observability 改为 `--all-features`，避免 feature 门控模块存活被高估（span_attributes 在 leak-detect 下 49 全存活 → all-features 下 17 存活）
+- **service-registry 错误路径补测**（`sz-rust-service-registry`）：引入 `mockito` 本地 mock 服务器，为 consul/nacos/kubernetes 的 register/deregister/heartbeat/discover/health_check 补 200/500 双路径测试；加权选择改为 ±25% 比例分布断言（杀 `-=→+=`/`-=→/=`）；registry 缺省权重=1、gray_release 阈值边界/权重乘法、local_cache 非空断言、fnv1a 精确值、LeastConnections 强释放断言
+- **sysinfo_collector 可测性重构**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数，补 total=0 与算术边界单测；补进程启动时间与 Windows 主机名精确断言
+
 ## [v1.7.0] - 2026-10-03
 
 ### Added — P1 插件生态

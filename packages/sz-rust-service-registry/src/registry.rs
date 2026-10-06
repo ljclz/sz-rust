@@ -283,6 +283,15 @@ mod tests {
     }
 
     #[test]
+    fn test_instance_missing_weight_defaults_to_one() {
+        // JSON 中缺少 weight 字段时使用 default_weight()（=1）。
+        // `default_weight` 返回 0 的变异体在此输入下会产生 weight=0。
+        let json = r#"{"service_name":"svc","instance_id":"i1","host":"h","port":80,"metadata":{},"status":"healthy"}"#;
+        let inst: ServiceInstance = serde_json::from_str(json).unwrap();
+        assert_eq!(inst.weight, 1, "缺少 weight 字段时默认权重应为 1");
+    }
+
+    #[test]
     fn test_lb_strategy_all() {
         let all = LoadBalanceStrategy::all();
         assert_eq!(all.len(), 5);

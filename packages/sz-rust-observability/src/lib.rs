@@ -630,6 +630,23 @@ mod tests {
     }
 
     #[test]
+    fn test_gauge_name_and_help() {
+        let registry = MetricsRegistry::new();
+        let gauge = registry.register_gauge("conn_active", "Active connections");
+        assert_eq!(gauge.name(), "conn_active");
+        assert_eq!(gauge.help(), "Active connections");
+    }
+
+    #[test]
+    fn test_histogram_name_and_help() {
+        let registry = MetricsRegistry::new();
+        let histogram =
+            registry.register_histogram("latency_seconds", "Latency in seconds", vec![0.1, 1.0]);
+        assert_eq!(histogram.name(), "latency_seconds");
+        assert_eq!(histogram.help(), "Latency in seconds");
+    }
+
+    #[test]
     fn test_histogram_basic() {
         let registry = MetricsRegistry::new();
         let histogram =

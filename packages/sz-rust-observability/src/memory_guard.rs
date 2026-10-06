@@ -228,6 +228,9 @@ mod tests {
                 threshold_mb: 100,
             }
         );
+        // config() 必须返回构造时注入的自定义配置（杀死 config→Default 变异体）
+        assert_eq!(guard.config().warning_threshold_mb, 100);
+        assert_eq!(guard.config().critical_threshold_mb, 200);
     }
 
     #[test]

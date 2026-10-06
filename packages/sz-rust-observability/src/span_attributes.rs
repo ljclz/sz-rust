@@ -254,6 +254,27 @@ mod tests {
     }
 
     #[test]
+    fn test_baggage_not_empty_after_insert() {
+        let mut b = Baggage::new();
+        b.insert("key1".into(), "val1".into());
+        assert!(!b.is_empty(), "插入键值对后 baggage 不应为空");
+    }
+
+    #[test]
+    fn test_baggage_from_w3c_with_whitespace() {
+        let b = Baggage::from_w3c(" key1 = val1 , key2 = val2 ");
+        assert_eq!(b.get("key1").map(|s| s.as_str()), Some("val1"));
+        assert_eq!(b.get("key2").map(|s| s.as_str()), Some("val2"));
+    }
+
+    #[test]
+    fn test_baggage_from_w3c_malformed_pair_skipped() {
+        let b = Baggage::from_w3c("key1=val1,noequals");
+        assert_eq!(b.len(), 1, "缺少 '=' 的分段应被跳过");
+        assert_eq!(b.get("key1").map(|s| s.as_str()), Some("val1"));
+    }
+
+    #[test]
     fn test_span_attributes_desensitize_db_statement() {
         let mut attrs = SpanAttributes {
             http_url: None,
@@ -292,6 +313,56 @@ mod tests {
     }
 
     #[test]
+    fn test_desensitize_string_exact_output_equals_form() {
+        // `password=abc123` → `password=***`（输入仅含 password 一个敏感词，避免二次脱敏）。
+        // 精确断言可杀死 desensitize_string 中 value_start 算术（`+`→`-`/`*`）变异体。
+        assert_eq!(desensitize_string("password=abc123"), "password=***");
+    }
+
+    #[test]
+    fn test_desensitize_string_exact_output_colon_form() {
+        // `api_key: secret` → `api_key:***`（冒号分支，仅含 api_key 一个敏感词）。
+        // 现有测试未覆盖冒号分支，导致该分支所有变异体存活。
+        assert_eq!(desensitize_string("api_key: secret"), "api_key:***");
+    }
+
+    #[test]
+    fn test_desensitize_string_uppercase() {
+        // 大写敏感词：`to_lowercase()` 被替换为 `to_string()` 的变异体在此输入下会漏脱敏。
+        assert_eq!(desensitize_string("Password=abc"), "Password=***");
+    }
+
+    #[test]
+    fn test_desensitize_string_empty_value_after_equals_unchanged() {
+        // value_start == s.len() 时原始逻辑不追加 `***`；`<`→`<=` 变异体在此输入下会错误截断。
+        assert_eq!(desensitize_string("password="), "password=");
+    }
+
+    #[test]
+    fn test_desensitize_string_empty_value_after_colon_unchanged() {
+        assert_eq!(desensitize_string("api_key:"), "api_key:");
+    }
+
+    #[test]
+    fn test_desensitize_string_token_no_separator() {
+        // 无 `=`/`:` 分隔符 → 走 else 分支，只保留敏感词前缀。
+        assert_eq!(desensitize_string("token abc"), "token***");
+    }
+
+    #[test]
+    fn test_desensitize_string_equals_with_space() {
+        // `password = abc`（'=' 前有空格）：eq_pos = 1，`pattern.len() + eq_pos` 的
+        // `+`→`-` 变异体会产生不同 value_start，精确断言可将其杀死。
+        assert_eq!(desensitize_string("password = abc"), "password =***");
+    }
+
+    #[test]
+    fn test_desensitize_string_colon_with_space() {
+        // `api_key : secret`（':' 前有空格）：colon_pos = 1，同上杀死冒号分支算术变异体。
+        assert_eq!(desensitize_string("api_key : secret"), "api_key :***");
+    }
+
+    #[test]
     fn test_span_attributes_has_sensitive() {
         let attrs = SpanAttributes {
             http_url: None,
@@ -314,6 +385,37 @@ mod tests {
     }
 
     #[test]
+    fn test_span_attributes_has_sensitive_http_url_only() {
+        // db/cache 均无敏感信息，仅 http_url 含 token —— 用于杀死 has_sensitive_info
+        // 中最后一个 `||` 被替换为 `&&` 的变异体（原始语义：任一字段敏感即 true）
+        let attrs = SpanAttributes {
+            http_url: Some("http://api?token=abc123".to_string()),
+            db_statement: Some("SELECT 1".to_string()),
+            cache_key: Some("user:1".to_string()),
+            mqtt_topic: None,
+        };
+        assert!(
+            attrs.has_sensitive_info(),
+            "http_url 含 token 时整体应判定为敏感"
+        );
+    }
+
+    #[test]
+    fn test_span_attributes_desensitize_http_url() {
+        let mut attrs = SpanAttributes {
+            http_url: Some("http://api?token=abc123".to_string()),
+            db_statement: None,
+            cache_key: None,
+            mqtt_topic: None,
+        };
+        attrs.desensitize();
+        assert!(
+            !attrs.http_url.as_ref().unwrap().contains("abc123"),
+            "http_url 中的 token 值应被脱敏"
+        );
+    }
+
+    #[test]
     fn test_span_context_traceparent_round_trip() {
         let ctx = SpanContext::new("0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331");
         let tp = ctx.to_traceparent();
@@ -324,5 +426,16 @@ mod tests {
     #[test]
     fn test_span_context_from_invalid_traceparent() {
         assert!(SpanContext::from_traceparent("invalid").is_none());
+    }
+
+    #[test]
+    fn test_span_context_from_traceparent_more_than_four_parts() {
+        // `>= 4` 被替换为 `== 4` 的变异体对 5 段输入返回 None，此测试杀死该变异体。
+        let parsed = SpanContext::from_traceparent(
+            "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01-extra",
+        )
+        .unwrap();
+        assert_eq!(parsed.trace_id, "0af7651916cd43dd8448eb211c80319c");
+        assert_eq!(parsed.span_id, "b7ad6b7169203331");
     }
 }

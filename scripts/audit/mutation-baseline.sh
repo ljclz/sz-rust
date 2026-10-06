@@ -31,7 +31,11 @@ declare -A FEATURES=(
   [sz-rust-distributed-tx]="dtx-parallel"
   [sz-rust-service-registry]="all-features"
   [sz-rust-api-gateway]="gateway-multidim"
-  [sz-rust-observability]="leak-detect"
+  # observability 使用 all-features：cargo-mutants 会为所有源文件生成变异体，
+  # 但仅编译启用 feature 对应的测试；`--features leak-detect` 会让 feature 门控模块
+  # （span_attributes/admin/sampling/otlp-batch 等）的测试不运行，导致存活被高估。
+  # 详见 docs/audit/mutation-debt.md「基线 feature 口径说明」。
+  [sz-rust-observability]="all-features"
 )
 ALL_CRATES=(sz-rust-distributed-tx sz-rust-service-registry sz-rust-api-gateway sz-rust-observability)
 

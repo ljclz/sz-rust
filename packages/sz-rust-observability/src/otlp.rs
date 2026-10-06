@@ -151,7 +151,24 @@ pub struct OtlpConfig {
 
 impl Default for OtlpConfig {
     fn default() -> Self {
-        Self::from_env()
+        // 确定性默认值（与 from_env() 在无环境变量时的回退值一致）。
+        // 不委托 from_env()，避免 cargo-mutants 将 from_env 替换为 Default::default()
+        // 时形成无限递归（default() → from_env() → Default::default() → ...）。
+        Self {
+            endpoint: format!("http://localhost:{}", OtlpProtocol::Grpc.default_port()),
+            protocol: OtlpProtocol::Grpc,
+            service_name: "sz300-server".to_string(),
+            service_version: env!("CARGO_PKG_VERSION").to_string(),
+            service_instance_id: None,
+            host_name: hostname(),
+            deployment_environment: "development".to_string(),
+            timeout_ms: 5000,
+            extra_resource_attributes: Vec::new(),
+            batch_size: None,
+            export_interval_ms: None,
+            headers: Vec::new(),
+            sampling: SamplingConfig::default(),
+        }
     }
 }
 
@@ -1016,6 +1033,31 @@ mod tests {
     }
 
     #[test]
+    fn test_hostname_reads_otel_host_name_env() {
+        let _guard = env_lock().lock().unwrap();
+        cleanup_otel_env();
+        std::env::set_var("OTEL_HOST_NAME", "custom-host");
+        assert_eq!(
+            hostname().as_deref(),
+            Some("custom-host"),
+            "hostname() 应优先读取 OTEL_HOST_NAME 环境变量"
+        );
+        std::env::remove_var("OTEL_HOST_NAME");
+    }
+
+    #[test]
+    fn test_init_otlp_tracer_rejects_invalid_config() {
+        let _guard = env_lock().lock().unwrap();
+        cleanup_otel_env();
+        let config = OtlpConfig::default().with_endpoint("not-a-url");
+        let result = init_otlp_tracer(&config);
+        assert!(
+            result.is_err(),
+            "endpoint 非 URL 时 init_otlp_tracer 应返回 Err"
+        );
+    }
+
+    #[test]
     fn test_startup_timestamp_nonzero() {
         let ts = startup_timestamp();
         // 启动时间戳应大于 2024-01-01（1704067200）
@@ -1245,6 +1287,7 @@ mod tests {
         let evicted0 = queue.push(1);
         assert_eq!(evicted0, 0);
         assert_eq!(queue.len(), 1);
+        assert!(!queue.is_empty(), "push 后队列不应为空");
 
         let evicted1 = queue.push(2);
         assert_eq!(evicted1, 0);

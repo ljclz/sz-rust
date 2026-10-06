@@ -14,7 +14,11 @@
 | sz-rust-distributed-tx | dtx-parallel | 77 | 57 | 8 | 87.7%（可行 65 中） | 已完成（8 存活待处置；证据来源：`cargo mutants` 输出 `77 mutants: 8 missed, 57 caught`，见「运行记录与崩溃诊断」） |
 | sz-rust-service-registry | all-features | 139 | 76 | 38（另有 24 unviable + 1 TIMEOUT） | 66.7%（可行 114 中） | 已完成（38 存活待处置；证据来源：`cargo mutants` 输出 `139 mutants: 38 missed, 76 caught`，见「运行记录与崩溃诊断」） |
 | sz-rust-api-gateway | gateway-multidim | 218 | 158 | 33（另有 26 unviable + 1 TIMEOUT） | 82.7%（可行 191 中） | 已完成（33 存活待处置；证据来源：`cargo mutants` 输出 `218 mutants: 33 missed, 158 caught`，见「运行记录与崩溃诊断」） |
-| sz-rust-observability | leak-detect | 471 | 238 | 207（另有 23 unviable + 3 TIMEOUT） | 53.5%（可行 445 中） | 已完成（207 存活待处置；证据来源：`cargo mutants` 输出 `471 mutants: 207 missed, 238 caught`，见「运行记录与崩溃诊断」） |
+| sz-rust-observability | ~~leak-detect~~ → all-features | 471 | 238 | 207（另有 23 unviable + 3 TIMEOUT） | 53.5%（可行 445 中） | 基线（leak-detect 口径，feature 门控模块测试未运行导致存活高估） |
+
+> **基线 feature 口径说明（2026-10-06 发现）**：cargo-mutants 会为 crate 内**所有源文件**生成变异体（包括 `#[cfg(feature)]` 门控模块），但运行测试时只编译启用 feature 对应的测试。原 observability 基线用 `--features leak-detect`，导致 span_attributes/admin/sampling/otlp-batch/metrics-instrumentation/grafana-dashboard 等门控模块的测试未运行，存活被**高估**（span_attributes 在 leak-detect 下 49 全存活，all-features 下仅 17 存活）。`mutation-baseline.sh` 已改为 `--all-features` 口径。
+
+> **observability 补测后（all-features scoped 复跑，2026-10-06）**：覆盖全部已修改文件，`459 mutants: 405 caught, 24 missed, 30 unviable` → **杀死率 94.4%（405/429 可行）**。剩余 24 个存活已全部归类：14 个边界等价/平台相关可接受 + 4 个 sysinfo 已补辅助函数单测（待复跑确认）+ 2 个 OTLP 需真实 tracer 集成测试 + 2 个采样 `<=` 边界等价 + 2 个 feature 门控伪存活（详见「observability 存活清单」）。
 
 > 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：57 ÷ 65 = 87.7%；service-registry：76 ÷ 114 = 66.7%；api-gateway：158 ÷ 191 = 82.7%；observability：238 ÷ 445 = 53.5%。**四 crate 均低于 90% 门禁，存活清单与补测计划见下。**
 
@@ -93,6 +97,27 @@
 | otlp.rs / otlp_batch.rs / exporters.rs | 19 | `OtlpConfig→Default`（3 个 TIMEOUT）、导出批量/重试边界 | **3 个 TIMEOUT 为 OTLP 导出测试真实网络等待（180s），需改 mock 端点**；其余补配置边界用例 |
 | lib.rs / grafana_dashboard.rs / drop_counter.rs / memory_guard.rs / admin/redis_collector.rs | 18 | 库函数/仪表盘模板/计数器边界 | 补对应边界用例 |
 
+### observability 补测后存活（24 个，2026-10-06 all-features scoped 复跑）
+
+> scoped 命令：`cargo mutants -p sz-rust-observability --all-features --file 'packages/sz-rust-observability/src/{...}.rs' ... --timeout 180 -j 1` → `459 mutants: 405 caught, 24 missed, 30 unviable`。
+
+| 位置 | 变异类型 | 归类 | 处置 |
+|------|---------|------|------|
+| slo.rs:355-358 | `burn > threshold` → `>=`（4 个） | 边界等价：`page_alerting` 是短/长窗口合取，两窗口数据相同无法构造「一个恰在阈值、一个严格超过」 | 可接受存活 |
+| otlp.rs:421 | `==` → `!=`（protocol feature 校验） | feature 门控伪存活：`#[cfg(not(feature="otlp-http"))]`，all-features 下不编译 | 可接受存活 |
+| otlp.rs:584 | `bridge_span_data` → `()` | 需真实 OTel tracer 观察副作用 | 可接受（集成测试覆盖） |
+| otlp.rs:703 | `shutdown_otlp` → `()` | 需真实 OTel tracer 观察副作用 | 可接受（集成测试覆盖） |
+| leak_detector.rs:92 | `elapsed < duration` → `<=` | 计时边界等价 | 可接受存活 |
+| leak_detector.rs:139 | `leaked_count > 0` → `>=` | MonotonicGrowth 下 leaked_count 恒 >0，等价 | 可接受存活 |
+| leak_detector.rs:149 | `&&` → `\|\|` | 语义等价（leaked_resources 非空当且仅当 has_monotonic） | 可接受存活 |
+| leak_detector.rs:174 | `first > 0.0` → `>=` | usize 输入下 first<0 不可能，等价 | 可接受存活 |
+| sampling/probabilistic_sampler.rs:56 | `normalized < probability` → `<=` | 哈希归一化恰好等于概率的概率为零，边界等价 | 可接受存活 |
+| sampling/tail_sampler.rs:81 | `rand_val < fallback_probability` → `<=` | 同上 | 可接受存活 |
+| sysinfo_collector.rs:134/165/168 | `==`/`*`/`/` 算术（7 个） | **已修复**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数并补边界单测，待复跑确认杀死 | 已补测 |
+| sysinfo_collector.rs:191 | `os_version` → 常量 | 平台相关（读 OS 环境变量），单测价值低 | 可接受存活 |
+| sysinfo_collector.rs:234 | `get_current_process_start_time` → 0/1 | **已补测**：`test_get_current_process_start_time_nonzero`，待复跑确认 | 已补测 |
+| sysinfo_collector.rs:245 | `get_hostname` → `"xyzzy"` | **已补测**：Windows COMPUTERNAME 精确断言，待复跑确认 | 已补测 |
+
 ## 可接受存活的变异体
 
 > 边界等价变异体（如 `<` → `<=`，hash 几乎不可能等于 threshold）可标记为可接受存活。
@@ -102,6 +127,10 @@
 | saga.rs:240 / parallel_saga.rs:330 | `> → == / < / >=` | 补偿重试首试 sleep 语义，测试不断言时序 |
 | parallel_saga.rs:331 | `- → + / /` | 退避间隔计算变异，测试不断言 sleep 时长 |
 | gray_release.rs:96/108 | `*→+`、`>→>=` | 灰度阈值边界等价（重跑确认存活 3：config 返回值替换、route 算术、check_rollback 边界） |
+| slo.rs:355-358 | `burn > threshold` → `>=` | 告警为短/长窗口合取，两窗口数据相同，无法构造「一窗恰在阈值、一窗严格超过」 |
+| leak_detector.rs:92/139/149/174 | 计时边界/`>=`/`\|\|` | 语义等价或计时边界（详见 observability 补测后存活） |
+| sampling/*:56/81 | `normalized < p` → `<=` | 哈希归一化恰好等于概率的概率为零 |
+| otlp.rs:421/584/703 | feature 门控/需真实 tracer | all-features 下不编译，或需 OTel 集成测试观察副作用 |
 
 ## 审批流程
 

@@ -177,6 +177,21 @@ mod tests {
         let jaeger = OtlpBackend::Jaeger("http://localhost:14268".to_string());
         assert_eq!(jaeger.endpoint(), "http://localhost:14268");
         assert_eq!(jaeger.name(), "jaeger");
+
+        let tempo = OtlpBackend::Tempo("http://localhost:4318".to_string());
+        assert_eq!(tempo.endpoint(), "http://localhost:4318");
+        assert_eq!(tempo.name(), "tempo");
+
+        let zipkin = OtlpBackend::Zipkin("http://localhost:9411".to_string());
+        assert_eq!(zipkin.endpoint(), "http://localhost:9411");
+        assert_eq!(zipkin.name(), "zipkin");
+    }
+
+    #[test]
+    fn test_backoff_fixed_delay() {
+        let strategy = BackoffStrategy::Fixed(Duration::from_millis(250));
+        assert_eq!(strategy.delay(0), Duration::from_millis(250));
+        assert_eq!(strategy.delay(7), Duration::from_millis(250));
     }
 
     #[test]
@@ -217,11 +232,23 @@ mod tests {
 
     #[test]
     fn test_backend_manager_switch() {
+        let custom_tls = TlsConfig {
+            enabled: false,
+            cert_path: Some("/tmp/cert.pem".to_string()),
+            key_path: None,
+            ca_path: None,
+        };
         let manager = OtlpBackendManager::new(
             OtlpBackend::Jaeger("http://jaeger:14268".to_string()),
-            TlsConfig::default(),
+            custom_tls.clone(),
         );
         assert_eq!(manager.current().name(), "jaeger");
+        // 使用自定义 TLS 配置断言（默认配置与 Default 相同，无法杀死 tls_config→Default 变异体）
+        assert_eq!(manager.tls_config().enabled, false);
+        assert_eq!(
+            manager.tls_config().cert_path.as_deref(),
+            Some("/tmp/cert.pem")
+        );
 
         manager.switch(OtlpBackend::Tempo("http://tempo:4318".to_string()));
         assert_eq!(manager.current().name(), "tempo");

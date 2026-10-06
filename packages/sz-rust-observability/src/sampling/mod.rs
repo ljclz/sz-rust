@@ -95,3 +95,22 @@ impl SamplerStats {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sampler_stats_record_and_snapshot() {
+        let stats = SamplerStats::new();
+        stats.record(SampleDecision::Sample);
+        stats.record(SampleDecision::Sample);
+        stats.record(SampleDecision::Drop);
+        stats.record(SampleDecision::Pending);
+
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.total_traces, 4);
+        assert_eq!(snapshot.sampled_traces, 2);
+        assert_eq!(snapshot.dropped_traces, 1, "Pending 不应计入 dropped");
+    }
+}

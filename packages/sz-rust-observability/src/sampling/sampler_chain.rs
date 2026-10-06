@@ -133,4 +133,24 @@ mod tests {
         assert_eq!(stats.total_traces, 1);
         assert_eq!(stats.dropped_traces, 1);
     }
+
+    #[test]
+    fn test_chain_all_pending_drops() {
+        // 所有采样器都返回 Pending → 最终决策应为 Drop（spec 5.10.6 默认不采样）。
+        let tail = TailSampler::new(TailSamplerConfig {
+            error_keep: false,
+            slow_threshold: Duration::from_secs(3600),
+            ..Default::default()
+        });
+        let chain = SamplerChain::new(vec![Box::new(tail)]);
+        let trace = make_trace(false, Duration::from_millis(1));
+        assert_eq!(
+            chain.decide(&trace),
+            SampleDecision::Drop,
+            "全 Pending 时应默认丢弃"
+        );
+        let stats = chain.stats_snapshot();
+        assert_eq!(stats.total_traces, 1);
+        assert_eq!(stats.dropped_traces, 1);
+    }
 }

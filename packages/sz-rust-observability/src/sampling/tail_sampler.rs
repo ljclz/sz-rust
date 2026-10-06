@@ -153,6 +153,70 @@ mod tests {
     }
 
     #[test]
+    fn test_config_getter() {
+        let config = TailSamplerConfig {
+            error_keep: false,
+            slow_threshold: Duration::from_millis(123),
+            buffer_limit: 42,
+            fallback_probability: 0.5,
+        };
+        let sampler = TailSampler::new(config.clone());
+        assert_eq!(sampler.config().error_keep, false);
+        assert_eq!(sampler.config().slow_threshold, Duration::from_millis(123));
+        assert_eq!(sampler.config().buffer_limit, 42);
+        assert!((sampler.config().fallback_probability - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_slow_trace_at_threshold_sampled() {
+        // duration 恰好等于 slow_threshold → 应采样；`>=`→`<` 变异体会误判为 Pending。
+        let config = TailSamplerConfig {
+            slow_threshold: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let sampler = TailSampler::new(config);
+        let trace = make_trace(false, Duration::from_millis(100));
+        assert_eq!(
+            sampler.should_sample(&trace),
+            SampleDecision::Sample,
+            "耗时等于阈值时应采样"
+        );
+    }
+
+    #[test]
+    fn test_error_keep_disabled_not_auto_sampled() {
+        // error_keep=false 时错误链路不应被 100% 保留（`&&`→`||` 变异体会误采样）。
+        let config = TailSamplerConfig {
+            error_keep: false,
+            ..Default::default()
+        };
+        let sampler = TailSampler::new(config);
+        let trace = make_trace(true, Duration::from_millis(1));
+        assert_ne!(
+            sampler.should_sample(&trace),
+            SampleDecision::Sample,
+            "error_keep=false 时错误链路不应自动采样"
+        );
+    }
+
+    #[test]
+    fn test_buffer_usage_tracks_pending() {
+        let sampler = TailSampler::new(TailSamplerConfig::default());
+        assert_eq!(sampler.buffer_usage(), 0);
+        let trace = make_trace(false, Duration::from_millis(1));
+        sampler.should_sample(&trace);
+        sampler.should_sample(&trace);
+        assert_eq!(sampler.buffer_usage(), 2, "两次 Pending 后缓冲使用量应为 2");
+    }
+
+    #[test]
+    fn test_simple_hash_exact() {
+        // FNV-1a 64 位精确值；杀死 simple_hash 返回 0/1 及 `^=`→`|=`/`&=` 变异体。
+        assert_eq!(simple_hash("abc"), 16654208175385433931);
+        assert_eq!(simple_hash(""), 14695981039346656037);
+    }
+
+    #[test]
     fn test_buffer_overflow_fallback_sampling() {
         let config = TailSamplerConfig {
             buffer_limit: 2,

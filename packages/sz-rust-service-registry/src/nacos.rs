@@ -203,6 +203,7 @@ struct NacosHost {
     healthy: bool,
     #[serde(default)]
     weight: f64,
+    #[serde(rename = "instanceId")]
     instance_id: String,
     #[serde(default)]
     metadata: std::collections::HashMap<String, String>,
@@ -322,5 +323,168 @@ mod tests {
     fn test_nacos_instance_list_empty() {
         let list = NacosInstanceList { hosts: None };
         assert!(list.hosts.is_none());
+    }
+
+    // ------------------------------------------------------------------------
+    // HTTP 错误路径测试（mockito 本地 mock 服务器）
+    // ------------------------------------------------------------------------
+
+    fn test_instance() -> ServiceInstance {
+        ServiceInstance::new("user-svc", "10.0.0.1", 8080)
+    }
+
+    #[tokio::test]
+    async fn test_nacos_register_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("POST", "/nacos/v1/ns/instance")
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = NacosRegistry::new(&server.url(), "public");
+        let inst = test_instance();
+        assert!(r.register(&inst).await.is_ok(), "200 响应应注册成功");
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("POST", "/nacos/v1/ns/instance")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(
+            matches!(
+                r.register(&inst).await,
+                Err(RegistryError::RegisterFailed(_, _))
+            ),
+            "500 响应应返回 RegisterFailed"
+        );
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_nacos_deregister_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("DELETE", "/nacos/v1/ns/instance")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = NacosRegistry::new(&server.url(), "public");
+        assert!(r.deregister("inst-1").await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("DELETE", "/nacos/v1/ns/instance")
+            .match_query(mockito::Matcher::Any)
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.deregister("inst-1").await,
+            Err(RegistryError::DeregisterFailed(_, _))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_nacos_heartbeat_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("PUT", "/nacos/v1/ns/instance/beat")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = NacosRegistry::new(&server.url(), "public");
+        assert!(r.heartbeat("inst-1").await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("PUT", "/nacos/v1/ns/instance/beat")
+            .match_query(mockito::Matcher::Any)
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.heartbeat("inst-1").await,
+            Err(RegistryError::HeartbeatFailed(_, _))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_nacos_discover_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let body = r#"{
+            "hosts": [
+                {
+                    "ip": "10.0.0.1",
+                    "port": 8080,
+                    "valid": true,
+                    "healthy": true,
+                    "weight": 3.0,
+                    "instanceId": "inst-1",
+                    "metadata": {"version": "v2"}
+                }
+            ]
+        }"#;
+        let m_ok = server
+            .mock("GET", "/nacos/v1/ns/instance/list")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(body)
+            .create_async()
+            .await;
+        let r = NacosRegistry::new(&server.url(), "public");
+        let instances = r.discover("user-svc").await.unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].instance_id, "inst-1");
+        assert_eq!(instances[0].service_name, "user-svc");
+        assert_eq!(instances[0].weight, 3);
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("GET", "/nacos/v1/ns/instance/list")
+            .match_query(mockito::Matcher::Any)
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.discover("user-svc").await,
+            Err(RegistryError::Http(_))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_nacos_health_check_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("GET", "/nacos/v1/ns/operator/metrics")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
+        let r = NacosRegistry::new(&server.url(), "public");
+        assert!(r.health_check().await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("GET", "/nacos/v1/ns/operator/metrics")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.health_check().await,
+            Err(RegistryError::Unreachable(_))
+        ));
+        m_err.assert_async().await;
     }
 }

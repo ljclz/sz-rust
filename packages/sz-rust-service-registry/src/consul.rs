@@ -316,4 +316,163 @@ mod tests {
         let inst = entry.into_instance();
         assert_eq!(inst.status, InstanceStatus::Healthy);
     }
+
+    // ------------------------------------------------------------------------
+    // HTTP 错误路径测试（mockito 本地 mock 服务器）
+    // ------------------------------------------------------------------------
+
+    fn test_instance() -> ServiceInstance {
+        ServiceInstance::new("user-svc", "10.0.0.1", 8080)
+    }
+
+    #[tokio::test]
+    async fn test_consul_register_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("PUT", "/v1/agent/service/register")
+            .match_header("X-Consul-Token", "secret")
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = ConsulRegistry::new(&server.url(), Some("secret".into()));
+        let inst = test_instance();
+        assert!(r.register(&inst).await.is_ok(), "200 响应应注册成功");
+        m_ok.assert_async().await;
+
+        // 500 → RegisterFailed；同时杀死 `!resp.status().is_success()` 的 `delete !` 变异体
+        let m_err = server
+            .mock("PUT", "/v1/agent/service/register")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(
+            matches!(
+                r.register(&inst).await,
+                Err(RegistryError::RegisterFailed(_, _))
+            ),
+            "500 响应应返回 RegisterFailed"
+        );
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_consul_deregister_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("PUT", "/v1/agent/service/deregister/svc-1")
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = ConsulRegistry::new(&server.url(), None);
+        assert!(r.deregister("svc-1").await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("PUT", "/v1/agent/service/deregister/svc-1")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.deregister("svc-1").await,
+            Err(RegistryError::DeregisterFailed(_, _))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_consul_heartbeat_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("PUT", "/v1/agent/check/pass/service:svc-1")
+            .with_status(200)
+            .create_async()
+            .await;
+        let r = ConsulRegistry::new(&server.url(), None);
+        assert!(r.heartbeat("svc-1").await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("PUT", "/v1/agent/check/pass/service:svc-1")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.heartbeat("svc-1").await,
+            Err(RegistryError::HeartbeatFailed(_, _))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_consul_discover_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let body = r#"[
+            {
+                "Service": {
+                    "ID": "svc-1",
+                    "Service": "user-svc",
+                    "Address": "10.0.0.1",
+                    "Port": 8080,
+                    "Weight": 3,
+                    "Tags": ["version=v2"]
+                },
+                "Checks": [{"Status": "passing"}]
+            }
+        ]"#;
+        let m_ok = server
+            .mock("GET", "/v1/health/service/user-svc?passing=true")
+            .with_status(200)
+            .with_header("Content-Type", "application/json")
+            .with_body(body)
+            .create_async()
+            .await;
+        let r = ConsulRegistry::new(&server.url(), None);
+        let instances = r.discover("user-svc").await.unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].instance_id, "svc-1");
+        assert_eq!(instances[0].service_name, "user-svc");
+        assert_eq!(instances[0].weight, 3);
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("GET", "/v1/health/service/user-svc?passing=true")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.discover("user-svc").await,
+            Err(RegistryError::Http(_))
+        ));
+        m_err.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_consul_health_check_success_and_error() {
+        let mut server = mockito::Server::new_async().await;
+
+        let m_ok = server
+            .mock("GET", "/v1/status/leader")
+            .with_status(200)
+            .with_body("\"127.0.0.1:8300\"")
+            .create_async()
+            .await;
+        let r = ConsulRegistry::new(&server.url(), None);
+        assert!(r.health_check().await.is_ok());
+        m_ok.assert_async().await;
+
+        let m_err = server
+            .mock("GET", "/v1/status/leader")
+            .with_status(500)
+            .create_async()
+            .await;
+        assert!(matches!(
+            r.health_check().await,
+            Err(RegistryError::Unreachable(_))
+        ));
+        m_err.assert_async().await;
+    }
 }

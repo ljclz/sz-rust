@@ -266,6 +266,82 @@ mod tests {
         assert_eq!(trend, GrowthTrend::Fluctuating);
     }
 
+    #[test]
+    fn test_analyze_trend_two_samples_monotonic_from_zero() {
+        // first=0,last>0 → MonotonicGrowth；杀死 `last > 0.0` 的 `==`/`<` 变异体。
+        let counts = vec![0, 5];
+        let trend = LeakDetector::analyze_trend(&counts, 0.1);
+        assert_eq!(trend, GrowthTrend::MonotonicGrowth);
+    }
+
+    #[test]
+    fn test_analyze_trend_two_samples_both_zero() {
+        // first=0,last=0 → Stable；杀死 `last > 0.0` 的 `>=` 变异体。
+        let counts = vec![0, 0];
+        let trend = LeakDetector::analyze_trend(&counts, 0.1);
+        assert_eq!(trend, GrowthTrend::Stable);
+    }
+
+    #[test]
+    fn test_analyze_trend_two_samples() {
+        // 恰好 2 个样本仍应分析（杀死 `counts.len() < 2` 的 `==`/`<=` 变异体）。
+        let counts = vec![5, 6];
+        let trend = LeakDetector::analyze_trend(&counts, 0.1);
+        assert_eq!(trend, GrowthTrend::MonotonicGrowth);
+    }
+
+    #[test]
+    fn test_analyze_trend_growth_rate_division() {
+        // (11-10)/10 = 0.1 < 0.5 → Stable；`/`→`*` 变异体会得到 10 > 0.5 → MonotonicGrowth。
+        let counts = vec![10, 11];
+        let trend = LeakDetector::analyze_trend(&counts, 0.5);
+        assert_eq!(trend, GrowthTrend::Stable);
+    }
+
+    #[test]
+    fn test_analyze_trend_growth_rate_boundary() {
+        // (15-10)/10 = 0.5 恰好等于阈值 → Stable；`>`→`>=` 变异体会误判为增长。
+        let counts = vec![10, 15];
+        let trend = LeakDetector::analyze_trend(&counts, 0.5);
+        assert_eq!(trend, GrowthTrend::Stable);
+    }
+
+    #[test]
+    fn test_analyze_trend_monotonic_with_equal_adjacent() {
+        // [1,2,2,3] 严格非降 → MonotonicGrowth；`<`→`<=` 变异体会在相等处误判下降。
+        let counts = vec![1, 2, 2, 3];
+        let trend = LeakDetector::analyze_trend(&counts, 0.1);
+        assert_eq!(trend, GrowthTrend::MonotonicGrowth);
+    }
+
+    #[tokio::test]
+    async fn test_detect_two_samples_expects_leak() {
+        // 精确构造 2 个样本（duration=90ms/interval=50ms），验证 `samples.len() < 2` 的
+        // `==`/`<=` 变异体不会提前返回 no_leak。
+        let cfg = LeakDetectConfig::new(
+            Duration::from_millis(90),
+            Duration::from_millis(50),
+            0.1,
+            100,
+        );
+        let mut detector = LeakDetector::new(cfg);
+
+        let report = detector
+            .detect(|idx| async move {
+                let mut counts = HashMap::new();
+                counts.insert(ResourceKind::ConnectionPool, 5 + idx as usize);
+                counts
+            })
+            .await;
+
+        assert!(report.leaked, "两个单调增长样本应判定为泄漏");
+        assert!(report.sample_count >= 2);
+        assert!(
+            detector.samples().len() >= 2,
+            "detect 后 samples() 应返回已采集样本（杀死 samples→空切片变异体）"
+        );
+    }
+
     #[tokio::test]
     async fn test_detect_no_leak() {
         let cfg = LeakDetectConfig::new(
