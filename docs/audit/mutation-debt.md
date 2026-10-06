@@ -11,7 +11,7 @@
 
 | Crate | Feature | 总变异体 | 已杀死 | 存活 | 杀死率 | 状态 |
 |-------|---------|---------|--------|------|--------|------|
-| sz-rust-distributed-tx | dtx-parallel | 77 | 57 | 8 | 87.7%（可行 65 中） | 已完成（8 存活待处置；证据来源：`cargo mutants` 输出 `77 mutants: 8 missed, 57 caught`，见「运行记录与崩溃诊断」） |
+| sz-rust-distributed-tx | dtx-parallel | 77 | 58 | 6 | **90.6%**（可行 64 中） | **达标**（6 存活均为边界等价；证据来源：2026-10-06 复跑 `77 mutants: 6 missed, 58 caught, 13 unviable`） |
 | sz-rust-service-registry | all-features | 139 | 76 | 38（另有 24 unviable + 1 TIMEOUT） | 66.7%（可行 114 中） | 已完成（38 存活待处置；证据来源：`cargo mutants` 输出 `139 mutants: 38 missed, 76 caught`，见「运行记录与崩溃诊断」） |
 | sz-rust-api-gateway | gateway-multidim | 218 | 158 | 33（另有 26 unviable + 1 TIMEOUT） | 82.7%（可行 191 中） | 已完成（33 存活待处置；证据来源：`cargo mutants` 输出 `218 mutants: 33 missed, 158 caught`，见「运行记录与崩溃诊断」） |
 | sz-rust-observability | ~~leak-detect~~ → all-features | 471 | 238 | 207（另有 23 unviable + 3 TIMEOUT） | 53.5%（可行 445 中） | 基线（leak-detect 口径，feature 门控模块测试未运行导致存活高估） |
@@ -22,11 +22,11 @@
 
 > **observability 补测后（all-features scoped 复跑，2026-10-06）**：覆盖全部已修改文件，`459 mutants: 405 caught, 24 missed, 30 unviable` → **杀死率 94.4%（405/429 可行）**。剩余 24 个存活已全部归类：14 个边界等价/平台相关可接受 + 4 个 sysinfo 已补辅助函数单测（待复跑确认）+ 2 个 OTLP 需真实 tracer 集成测试 + 2 个采样 `<=` 边界等价 + 2 个 feature 门控伪存活（详见「observability 存活清单」）。
 
-> 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：57 ÷ 65 = 87.7%；service-registry：76 ÷ 114 = 66.7%；api-gateway：158 ÷ 191 = 82.7%；observability：238 ÷ 445 = 53.5%。**四 crate 均低于 90% 门禁，存活清单与补测计划见下。**
+> 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：58 ÷ 64 = **90.6%（达标）**；service-registry：76 ÷ 114 = 66.7%；api-gateway：158 ÷ 191 = 82.7%；observability：238 ÷ 445 = 53.5%。**service-registry / api-gateway / observability 低于 90% 门禁，存活清单与补测计划见下；distributed-tx 已跨过门禁。**
 
 ## 运行记录与崩溃诊断（2026-10-06）
 
-- **sz-rust-distributed-tx**：77 变异体 5m 完成，`DTX_RC=2`。存活 8：`saga.rs:235`（错误路径无测试，真实缺口）+ `saga.rs:240`/`parallel_saga.rs:330-331` 共 7 个边界/退避等价。
+- **sz-rust-distributed-tx**：77 变异体 5m 完成，`DTX_RC=2`。存活 8：`saga.rs:235`（错误路径无测试，真实缺口）+ `saga.rs:240`/`parallel_saga.rs:330-331` 共 7 个边界/退避等价。**2026-10-06 复跑确认**：`77 mutants: 6 missed, 58 caught, 13 unviable` → 杀死率 **90.6%**，`saga.rs:235` 补测生效杀死，`parallel_saga.rs:330 >→>=` 亦被现有测试杀死，剩余 6 个全为边界等价可接受。
 - **sz-rust-service-registry（首次）**：139 变异体。跑至 `load_balancer.rs:172` 后进程异常终止，**未输出汇总行**（killed/unviable 分解丢失），后台任务 exit code = **1073807364 (0x40010004)**。
 - **崩溃归因**：`nacos.rs` 变异体构建/测试极重（单变异体最高 154s build + 120s 测试超时；`heartbeat→Ok(())` 触发 TIMEOUT）。`-j 2` 并行 + reqwest 真实网络调用叠加，疑似资源耗尽导致 cargo-mutants 进程被系统终止（Windows 进程终止码 0x40010004）。
 - **重跑（-j 1 --timeout 180）**：8m 完成，`139 mutants: 38 missed, 76 caught, 24 unviable, 1 timeouts`（`SRC_RC=3`）。nacos heartbeat 变异体本次 4s 完成（此前 TIMEOUT 系资源争用），唯一 TIMEOUT 为 `load_balancer.rs:112` `-=→+=`（瞬时卡顿，算法为有限循环无死循环可能；变异体未被测试杀死，见存活清单）。**处置生效：-j 1 可稳定跑完。**
@@ -46,13 +46,13 @@
 | persistence.rs:204 | log_fail → Ok(()) | 已杀死 | test_log_fail_updates_state | 已完成 |
 | saga.rs:131 | with_timeout → Default | 已杀死 | test_with_timeout_sets_value | 已完成 |
 | saga.rs:137 | timeout → None | 已杀死 | test_with_timeout_sets_value + test_timeout_default_is_none | 已完成 |
-| saga.rs:235 | execute_compensate → Ok(()) | 存活 | **真实缺口**：已补测 `test_execute_compensate_returns_err_when_retries_exhausted`（直接断言 Err 返回值），待变异重跑确认杀死 | 2026-10-13 |
+| saga.rs:235 | execute_compensate → Ok(()) | 已杀死 | **真实缺口已闭环**：`test_execute_compensate_returns_err_when_retries_exhausted`（直接断言 Err 返回值）；2026-10-06 复跑确认杀死 | 已完成 |
 | saga.rs:240 | > → == | 存活 | 补偿重试边界等价（`attempt>0` 仅影响首试前是否 sleep，测试不区分） | 可接受 |
 | saga.rs:240 | > → < | 存活 | 补偿重试边界等价 | 可接受 |
 | saga.rs:240 | > → >= | 存活 | 补偿重试边界等价 | 可接受 |
 | parallel_saga.rs:44 | with_dependencies → Default | 已杀死 | 已补测 test_dependency_graph_with_dependencies | 已完成 |
 | parallel_saga.rs:330 | > → < | 存活 | 重试边界等价（同 saga.rs:240） | 可接受 |
-| parallel_saga.rs:330 | > → >= | 存活 | 重试边界等价 | 可接受 |
+| parallel_saga.rs:330 | > → >= | 已杀死 | 2026-10-06 复跑确认被现有测试杀死（8 missed → 6 missed） | 已完成 |
 | parallel_saga.rs:331 | - → + | 存活 | 退避间隔 `interval(attempt-1)` 变异，测试不断言 sleep 时长 | 可接受 |
 | parallel_saga.rs:331 | - → / | 存活 | 退避间隔等价（`interval(attempt/1)` ≡ 原式） | 可接受 |
 

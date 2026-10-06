@@ -56,6 +56,7 @@
 - **api-gateway 基线 feature 口径修正**：`gateway-multidim` 不启用 `grpc`，protocol_grpc/grpc_streaming 测试未运行导致存活高估；`mutation-baseline.sh` 改为 `--all-features`（protocol_grpc 10 个存活实为 feature 门控伪存活）
 - **sysinfo_collector 可测性重构**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数，补 total=0 与算术边界单测；补进程启动时间与 Windows 主机名精确断言
 - **api-gateway 补测收尾确认**（`sz-rust-api-gateway`）：sliding_window 补「窗口过期归零/部分过期窗口保留」边界、protocol_grpc 补缺字段 pass-through/非字符串值/同名映射/空 body 错误共 7 用例；聚焦复跑 `sliding_window+protocol_grpc+grpc_streaming` 三文件 `25 mutants: 21 caught / 2 missed / 2 unviable / 0 timeouts` → **grpc_streaming 180s TIMEOUT 确认消除**、protocol_grpc 10 个 feature 门控伪存活全部杀死，仅剩 sliding_window 2 个 `<→<=` 计时边界可接受存活
+- **distributed-tx 复跑达标**（`sz-rust-distributed-tx`，all-features）：`77 mutants: 58 caught / 6 missed / 13 unviable` → 杀死率 **90.6%（58/64 可行），跨过 90% 门禁**；`saga.rs:235` 真实缺口补测（`test_execute_compensate_returns_err_when_retries_exhausted`）确认杀死，`parallel_saga.rs:330 >→>=` 亦被现有测试杀死（8 missed → 6 missed），剩余 6 个全为补偿重试/退避间隔边界等价可接受存活
 
 ## [v1.7.0] - 2026-10-03
 
