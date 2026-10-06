@@ -20,7 +20,7 @@
 >
 > **api-gateway 同款问题**：`gateway-multidim` 不启用 `grpc` feature，导致 protocol_grpc（10 个存活）与 grpc_streaming（1 个 TIMEOUT）的测试未运行、存活被高估。基线脚本已同步改为 `--all-features`。
 
-> **observability 补测后（all-features scoped 复跑，2026-10-06）**：覆盖全部已修改文件，`459 mutants: 405 caught, 24 missed, 30 unviable` → **杀死率 94.4%（405/429 可行）**。剩余 24 个存活已全部归类：14 个边界等价/平台相关可接受 + 4 个 sysinfo 已补辅助函数单测（待复跑确认）+ 2 个 OTLP 需真实 tracer 集成测试 + 2 个采样 `<=` 边界等价 + 2 个 feature 门控伪存活（详见「observability 存活清单」）。
+> **observability 补测后（all-features scoped 复跑，2026-10-06）**：覆盖全部已修改文件，`459 mutants: 405 caught, 24 missed, 30 unviable` → **杀死率 94.4%（405/429 可行）**。剩余 24 个存活已全部归类：14 个边界等价/平台相关可接受 + 4 个 sysinfo 补测项已在本次复跑确认杀死 + 2 个 OTLP 需真实 tracer 集成测试 + 2 个采样 `<=` 边界等价 + 2 个 feature 门控伪存活（详见「observability 存活清单」）。
 
 > 杀死率口径：已杀死 ÷（已杀死 + 存活），不计 unviable/timeout。distributed-tx：58 ÷ 64 = **90.6%（达标）**；service-registry：76 ÷ 114 = 66.7%；api-gateway：158 ÷ 191 = 82.7%；observability：238 ÷ 445 = 53.5%。**service-registry / api-gateway / observability 低于 90% 门禁，存活清单与补测计划见下；distributed-tx 已跨过门禁。**
 
@@ -137,10 +137,10 @@
 | leak_detector.rs:174 | `first > 0.0` → `>=` | usize 输入下 first<0 不可能，等价 | 可接受存活 |
 | sampling/probabilistic_sampler.rs:56 | `normalized < probability` → `<=` | 哈希归一化恰好等于概率的概率为零，边界等价 | 可接受存活 |
 | sampling/tail_sampler.rs:81 | `rand_val < fallback_probability` → `<=` | 同上 | 可接受存活 |
-| sysinfo_collector.rs:134/165/168 | `==`/`*`/`/` 算术（7 个） | **已修复**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数并补边界单测，待复跑确认杀死 | 已补测 |
+| sysinfo_collector.rs:134/165/168 | `==`/`*`/`/` 算术（7 个） | **已修复**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数并补边界单测，94.4% 复跑确认杀死（未再存活） | 已完成 |
 | sysinfo_collector.rs:191 | `os_version` → 常量 | 平台相关（读 OS 环境变量），单测价值低 | 可接受存活 |
-| sysinfo_collector.rs:234 | `get_current_process_start_time` → 0/1 | **已补测**：`test_get_current_process_start_time_nonzero`，待复跑确认 | 已补测 |
-| sysinfo_collector.rs:245 | `get_hostname` → `"xyzzy"` | **已补测**：Windows COMPUTERNAME 精确断言，待复跑确认 | 已补测 |
+| sysinfo_collector.rs:234 | `get_current_process_start_time` → 0/1 | **已补测**：`test_get_current_process_start_time_nonzero`，94.4% 复跑确认杀死（未再存活） | 已完成 |
+| sysinfo_collector.rs:245 | `get_hostname` → `"xyzzy"` | **已补测**：Windows COMPUTERNAME 精确断言，94.4% 复跑确认杀死（未再存活） | 已完成 |
 
 ## 可接受存活的变异体
 
