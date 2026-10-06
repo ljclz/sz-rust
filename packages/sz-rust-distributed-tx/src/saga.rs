@@ -473,6 +473,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_compensate_returns_err_when_retries_exhausted() {
+        let forward_calls = Arc::new(AtomicUsize::new(0));
+
+        let steps = vec![SagaStep::new(
+            "step-1",
+            make_action(forward_calls.clone(), false),
+            make_action(Arc::new(AtomicUsize::new(0)), true),
+        )];
+
+        let orchestrator = SagaOrchestrator::new()
+            .with_compensate_retries(2)
+            .with_retry_interval(Duration::from_millis(1));
+
+        let mut results = Vec::new();
+        let mut payload = Value::Null;
+        let outcome = orchestrator
+            .execute_compensate(&steps, &[0], &mut results, &mut payload)
+            .await;
+
+        // 变异体把 `return Err(...)` 替换为 `Ok(())` 时，仅断言副作用（StepResult）的
+        // 现有测试无法杀死；必须断言返回值本身为 Err。
+        assert!(outcome.is_err(), "补偿重试耗尽必须以 Err 返回，而非 Ok(())");
+        assert!(matches!(
+            outcome,
+            Err(DtxError::CompensateRetryExhausted {
+                ref step_id,
+                retries: 2
+            }) if step_id == "step-1"
+        ));
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| r.status == StepStatus::CompensateFailed)
+                .count(),
+            1,
+            "补偿失败步骤应被标记"
+        );
+    }
+
+    #[tokio::test]
     async fn test_saga_empty_steps() {
         let orchestrator = SagaOrchestrator::new();
         let result = orchestrator.execute(vec![], Value::Null).await.unwrap();

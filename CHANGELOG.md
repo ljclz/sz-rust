@@ -32,6 +32,19 @@
 - **GraphQL 演示用途显式标注**：`build_schema()` 增加运行时警告 + 文档注释，明确内存存储重启即丢失、多实例不共享、生产请用 REST API；DB-backed 实现保持债务跟踪
 - **变异测试基线补齐启动**：distributed-tx / service-registry / api-gateway / observability 四 crate 变异测试开始运行，结果将记录到 `mutation-debt.md`
 
+### Changed — 变异测试基线（2026-10-06 续跑）
+
+- **distributed-tx 基线完成**（`sz-rust-distributed-tx`，feature `dtx-parallel`）：77 变异体 = 57 killed / 8 missed / 12 unviable，杀死率 **87.7%**（门禁 90%）
+  - 补测 `saga.rs:235` 真实缺口：新增 `test_execute_compensate_returns_err_when_retries_exhausted`，直接断言补偿重试耗尽返回 `Err(CompensateRetryExhausted)`（原测试仅断言副作用，无法杀死 `return Err → Ok(())` 变异体）
+  - 其余 7 个存活归因为补偿重试边界/退避间隔等价（测试不断言时序），标记「可接受存活」
+- **service-registry 基线完成**（`sz-rust-service-registry`，all-features）：139 变异体 = 76 killed / 38 missed / 24 unviable / 1 timeout，杀死率 **66.7%**
+  - 存活集中为 consul/nacos 错误路径守卫（`register/heartbeat/discover → Ok(())`、`delete !`）、load_balancer 加权/一致性哈希边界、gray_release/local_cache 边界
+  - 已按模块记录到 `mutation-debt.md` 并附补测计划（错误路径单测 + 加权分布比例断言）
+- **变异测试稳定性修复**：nacos 重 reqwest 测试在 `-j 2` 下导致 cargo-mutants 进程崩溃（exit 1073807364 = 0x40010004，资源耗尽）；新增 `scripts/audit/mutation-baseline.sh`，统一 `-j 1 --timeout 180` 参数后 8 分钟稳定跑完 service-registry（nacos heartbeat 由 120s TIMEOUT 降为 4s）
+- **api-gateway 基线完成**（`sz-rust-api-gateway`，feature `gateway-multidim`）：218 变异体 = 158 killed / 33 missed / 26 unviable / 1 timeout，杀死率 **82.7%**；存活集中为 protocol_grpc 字段映射、router_engine 路由匹配、forwarder 方法路由，已按模块记录到 `mutation-debt.md`
+- **observability 基线完成**（`sz-rust-observability`，feature `leak-detect`）：471 变异体 = 238 killed / 207 missed / 23 unviable / 3 timeout，杀死率 **53.5%**；存活集中为 span_attributes/slo/sampling 阈值边界与 sysinfo 单位换算；**3 个 OTLP TIMEOUT 疑似导出测试真实网络等待，需改 mock 端点**，已按模块记录到 `mutation-debt.md`
+- **四 crate 基线全部完成**：存活清单（distributed-tx 8 / service-registry 38 / api-gateway 33 / observability 207）已全量记录至 `mutation-debt.md`，附逐模块补测计划
+
 ## [v1.7.0] - 2026-10-03
 
 ### Added — P1 插件生态
