@@ -424,4 +424,84 @@ mod tests {
         assert_eq!(breaker.total_requests(), 3);
         assert_eq!(breaker.slow_requests(), 2);
     }
+
+    #[test]
+    fn test_latency_at_threshold_not_slow() {
+        // 延迟恰好等于阈值（100ms）：`latency > threshold` 应为 false（不判慢）。
+        // `>`→`>=` 变异体会判慢并打开熔断。
+        let cfg = SlowCallBreakerConfig {
+            slow_call_threshold_ms: 100,
+            slow_call_rate_threshold: 0.5,
+            window: Duration::from_secs(10),
+            min_requests: 1,
+            max_half_open_probes: 3,
+            recovery_timeout: Duration::from_millis(50),
+        };
+        let breaker = SlowCallBreaker::new(cfg);
+        breaker.record_latency(Duration::from_millis(100));
+        assert_eq!(
+            breaker.state(),
+            BreakerState::Closed,
+            "延迟等于阈值（未超过）不应判慢"
+        );
+    }
+
+    #[test]
+    fn test_slow_rate_at_threshold_not_open() {
+        // 慢调用率恰好等于阈值 0.5（2 慢 + 2 快）：`rate > threshold` 应为 false。
+        // `>`→`>=` 变异体会打开熔断。
+        let cfg = SlowCallBreakerConfig {
+            slow_call_threshold_ms: 100,
+            slow_call_rate_threshold: 0.5,
+            window: Duration::from_secs(10),
+            min_requests: 4,
+            max_half_open_probes: 3,
+            recovery_timeout: Duration::from_millis(50),
+        };
+        let breaker = SlowCallBreaker::new(cfg);
+        breaker.record_latency(Duration::from_millis(200));
+        breaker.record_latency(Duration::from_millis(200));
+        breaker.record_latency(Duration::from_millis(50));
+        breaker.record_latency(Duration::from_millis(50));
+        assert_eq!(
+            breaker.state(),
+            BreakerState::Closed,
+            "慢调用率等于阈值（未超过）不应打开熔断"
+        );
+    }
+
+    #[test]
+    fn test_half_open_successes_at_max_closes() {
+        // 半开成功数恰好等于 max_half_open_probes：`>=`→`<` 变异体会保持 HalfOpen。
+        let cfg = SlowCallBreakerConfig {
+            slow_call_threshold_ms: 100,
+            slow_call_rate_threshold: 0.5,
+            window: Duration::from_secs(10),
+            min_requests: 1,
+            max_half_open_probes: 2,
+            recovery_timeout: Duration::from_millis(10),
+        };
+        let breaker = SlowCallBreaker::new(cfg);
+        breaker.record_latency(Duration::from_millis(200));
+        assert_eq!(breaker.state(), BreakerState::Open);
+
+        std::thread::sleep(Duration::from_millis(15));
+        breaker.can_request().unwrap();
+        breaker.record_latency(Duration::from_millis(50));
+        // 原逻辑：成功数 1 < max 2 → 仍为 HalfOpen。
+        // `>=`→`<` 变异体在这里就提前关闭，从而被杀死。
+        assert_eq!(
+            breaker.state(),
+            BreakerState::HalfOpen,
+            "半开成功数未达上限前不应关闭熔断"
+        );
+        breaker.can_request().unwrap();
+        breaker.record_latency(Duration::from_millis(50));
+
+        assert_eq!(
+            breaker.state(),
+            BreakerState::Closed,
+            "半开成功数达到上限应关闭熔断"
+        );
+    }
 }

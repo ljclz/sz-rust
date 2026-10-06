@@ -302,6 +302,19 @@ mod tests {
     }
 
     #[test]
+    fn test_forward_response_status_300_not_success() {
+        // status 300 不属于 2xx 成功区间；`status < 300` 的 `<`→`<=` 变异体会误判。
+        let resp = ForwardResponse::error(300, "multiple choices");
+        assert!(!resp.is_success(), "status 300 不应视为成功");
+    }
+
+    #[test]
+    fn test_forward_response_status_599_not_success() {
+        let resp = ForwardResponse::error(599, "server error");
+        assert!(!resp.is_success());
+    }
+
+    #[test]
     fn test_backend_instance_url() {
         let backend = BackendInstance::new("10.0.0.1", 8080);
         assert_eq!(backend.url("/api/users"), "http://10.0.0.1:8080/api/users");
@@ -375,6 +388,102 @@ mod tests {
         assert!(
             !std::ptr::eq(&forwarder, &another),
             "default() 与 new() 不应返回同一实例"
+        );
+    }
+
+    fn auth_ok() -> AuthResult {
+        AuthResult {
+            authorized: true,
+            user_id: None,
+            user_context: HashMap::new(),
+        }
+    }
+
+    fn backend_for(server: &mockito::Server) -> BackendInstance {
+        let port = server
+            .url()
+            .split(':')
+            .next_back()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        BackendInstance::new("127.0.0.1", port)
+    }
+
+    #[tokio::test]
+    async fn test_forward_supports_all_http_methods() {
+        let mut server = mockito::Server::new_async().await;
+        let backend = backend_for(&server);
+        let route = GatewayRoute::simple("r1", "/api/*", "user-svc");
+        let forwarder = RequestForwarder::new();
+        let auth = auth_ok();
+
+        let requests: Vec<(&str, ForwardRequest)> = vec![
+            ("GET", ForwardRequest::get("/api/test")),
+            ("POST", ForwardRequest::post("/api/test", b"{}".to_vec())),
+            (
+                "PUT",
+                ForwardRequest {
+                    method: "PUT".to_string(),
+                    path: "/api/test".to_string(),
+                    headers: HashMap::new(),
+                    body: None,
+                },
+            ),
+            (
+                "DELETE",
+                ForwardRequest {
+                    method: "DELETE".to_string(),
+                    path: "/api/test".to_string(),
+                    headers: HashMap::new(),
+                    body: None,
+                },
+            ),
+            (
+                "PATCH",
+                ForwardRequest {
+                    method: "PATCH".to_string(),
+                    path: "/api/test".to_string(),
+                    headers: HashMap::new(),
+                    body: None,
+                },
+            ),
+        ];
+
+        for (method, req) in requests {
+            let m = server
+                .mock(method, "/api/test")
+                .with_status(200)
+                .with_body("ok")
+                .create_async()
+                .await;
+            let resp = forwarder.forward(&route, &backend, &req, &auth).await;
+            assert!(
+                matches!(resp, Ok(r) if r.status == 200),
+                "HTTP {method} 应成功转发"
+            );
+            m.assert_async().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_forward_unsupported_method_returns_error() {
+        let server = mockito::Server::new_async().await;
+        let backend = backend_for(&server);
+        let route = GatewayRoute::simple("r1", "/api/*", "user-svc");
+        let forwarder = RequestForwarder::new();
+        let auth = auth_ok();
+
+        let req = ForwardRequest {
+            method: "TRACE".to_string(),
+            path: "/api/test".to_string(),
+            headers: HashMap::new(),
+            body: None,
+        };
+        let result = forwarder.forward(&route, &backend, &req, &auth).await;
+        assert!(
+            matches!(result, Err(GatewayError::Forward(_))),
+            "不支持的方法应返回 Forward 错误"
         );
     }
 }

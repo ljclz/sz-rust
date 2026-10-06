@@ -107,4 +107,16 @@ mod tests {
         let w2 = lb.current_water();
         assert!(w2 < w1, "water should decrease over time");
     }
+
+    #[test]
+    fn test_current_water_reaches_zero_after_long_sleep() {
+        // 容量 5、速率 100 滴/秒：注水 2 滴后等 50ms，应漏完 5 滴 → 水量 0。
+        // `elapsed * leak_rate` 的 `*`→`/` 与 `water - leaked` 的 `-`→`/`
+        // 变异体都会产生非零水量，从而被杀死。
+        let lb = LeakyBucket::new(5, 100.0);
+        lb.try_acquire();
+        lb.try_acquire();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(lb.current_water(), 0.0, "50ms 后水量应完全漏完为 0");
+    }
 }

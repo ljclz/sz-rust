@@ -254,6 +254,17 @@ mod tests {
     }
 
     #[test]
+    fn test_dimensions_union_same_bit() {
+        // 相同位合并：`self.0 | other.0` 的 `|`→`^` 变异体会得到 0，
+        // 导致 contains(USER) 为 false，从而被杀死。
+        let dims = RateLimitDimensions::USER.union(RateLimitDimensions::USER);
+        assert!(
+            dims.contains(RateLimitDimensions::USER),
+            "USER 与自身合并应仍是 USER"
+        );
+    }
+
+    #[test]
     fn test_user_dimension_independent() {
         let rl = MultiDimRateLimit::new(config(
             RateLimitDimensions::USER,

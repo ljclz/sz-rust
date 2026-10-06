@@ -8730,6 +8730,7 @@ dependencies = [
  "criterion",
  "http",
  "matchit 0.8.4",
+ "mockito",
  "parking_lot",
  "prost",
  "reqwest 0.12.28",

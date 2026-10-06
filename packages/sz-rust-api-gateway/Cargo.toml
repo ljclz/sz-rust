@@ -32,6 +32,7 @@ prost = { version = "0.13", optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 criterion = { workspace = true }
+mockito = "1"
 
 
 [[bench]]

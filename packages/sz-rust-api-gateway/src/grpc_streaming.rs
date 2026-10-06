@@ -74,6 +74,7 @@ pub trait BidiStreamingHandler<Req, Resp>: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_sender_new() {
@@ -88,7 +89,20 @@ mod tests {
         let (sender, rx) = StreamingSender::<i32>::new(10);
         let mut receiver = StreamingReceiver::new(rx);
         sender.send(42).await.unwrap();
-        assert_eq!(receiver.recv().await, Some(42));
+        // 用超时防止 `send` 被替换为 `Ok(())`（不实际发送）时 recv 永久阻塞。
+        let received = tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await;
+        assert_eq!(received, Ok(Some(42)), "send 后应能从 channel 收到消息");
+    }
+
+    #[tokio::test]
+    async fn test_send_to_dropped_receiver_returns_error() {
+        let (sender, rx) = StreamingSender::<i32>::new(10);
+        drop(rx);
+        let result = sender.send(42).await;
+        assert!(
+            matches!(result, Err(GrpcStreamError::ChannelClosed)),
+            "接收端已 drop，send 应返回 ChannelClosed"
+        );
     }
 
     #[tokio::test]

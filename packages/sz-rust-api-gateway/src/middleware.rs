@@ -414,4 +414,17 @@ mod tests {
         assert!(cb.can_request().is_ok());
         assert_eq!(cb.state(), CircuitState::HalfOpen);
     }
+
+    #[test]
+    fn test_token_bucket_refill_rate_multiplication() {
+        // 容量 2，速率 100 令牌/秒。清空后等 10ms → 应补充 1 个令牌。
+        // `elapsed * refill_rate` 的 `*`→`/` 变异体只会补充 0.0001 个令牌，
+        // 无法通过 `tokens >= 1.0` 检查，从而被杀死。
+        let mut bucket = TokenBucket::new(2, 100);
+        assert!(bucket.try_consume());
+        assert!(bucket.try_consume());
+        assert!(!bucket.try_consume(), "令牌已耗尽");
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(bucket.try_consume(), "10ms 后应按速率补充至少 1 个令牌");
+    }
 }

@@ -288,4 +288,69 @@ mod tests {
         assert_eq!(req.host.as_deref(), Some("example.com"));
         assert_eq!(req.headers.get("X-Key").unwrap(), "value");
     }
+
+    #[test]
+    fn test_match_star_pattern_score_zero() {
+        // 模式 "*" 的特异性评分为 0。`best_score: i32 = -1` 的 `delete -` 变异体
+        // 会把初始值改为 1，导致评分 0 无法胜过 1 → NoRoute，从而被杀死。
+        let engine = RouterEngine::new(vec![make_route("r1", "*", "svc")]);
+        let req = MatchRequest::new("/anything");
+        let route = engine.match_route(&req).unwrap();
+        assert_eq!(route.route_id, "r1");
+    }
+
+    #[test]
+    fn test_tie_prefers_first_route() {
+        // 两条完全相同评分的路由：`score > best_score` 的 `>`→`>=` 变异体会选后一条。
+        let routes = vec![
+            make_route("first", "/api/users", "svc1"),
+            make_route("second", "/api/users", "svc2"),
+        ];
+        let engine = RouterEngine::new(routes);
+        let req = MatchRequest::new("/api/users");
+        let route = engine.match_route(&req).unwrap();
+        assert_eq!(route.route_id, "first");
+    }
+
+    #[test]
+    fn test_host_match_score_preferred_over_no_host() {
+        // host 命中 `score += 100` 的 `+=`→`*=` 变异体在 "*" 模式（基础分 0）下
+        // 得到 0，导致带 host 的路由与不带 host 的路由同分，从而选择错误路由。
+        let routes = vec![
+            make_route("no-host", "*", "svc1"),
+            make_route("with-host", "*", "svc2").with_host("api.example.com"),
+        ];
+        let engine = RouterEngine::new(routes);
+        let req = MatchRequest::new("/anything").with_host("api.example.com");
+        let route = engine.match_route(&req).unwrap();
+        assert_eq!(route.route_id, "with-host");
+    }
+
+    #[test]
+    fn test_header_match_score_preferred_over_no_header() {
+        // header 命中 `score += 10` 的 `+=`→`-=`/`*=` 变异体在 "*" 模式下
+        // 得到负分或 0，导致带 header 的路由落选。
+        let routes = vec![
+            make_route("no-header", "*", "svc1"),
+            make_route("with-header", "*", "svc2").with_header_match("X-Version", "2"),
+        ];
+        let engine = RouterEngine::new(routes);
+        let req = MatchRequest::new("/anything").with_header("X-Version", "2");
+        let route = engine.match_route(&req).unwrap();
+        assert_eq!(route.route_id, "with-header");
+    }
+
+    #[test]
+    fn test_wildcard_specificity_plus_mutant_prefers_wildcard() {
+        // `path_specificity` 通配符分支 `count * 10` 的 `*`→`+` 变异体把 "*" 模式
+        // 评分从 0 变成 10，从而胜过精确路由 "/x"（评分 5）。
+        let routes = vec![
+            make_route("wildcard", "*", "svc1"),
+            make_route("exact", "/x", "svc2"),
+        ];
+        let engine = RouterEngine::new(routes);
+        let req = MatchRequest::new("/x");
+        let route = engine.match_route(&req).unwrap();
+        assert_eq!(route.route_id, "exact");
+    }
 }

@@ -51,6 +51,9 @@
 - **OTLP 变异体 180s TIMEOUT 根因修复**：`OtlpConfig::default()` 不再委托 `from_env()`，切断 `default() → from_env() → Default::default()` 无限递归；3 个 TIMEOUT 变异体消除（`mutation-debt.md` 原「需 mock 端点」结论修正为递归死循环，非真实网络等待）
 - **基线 feature 口径修正**：发现 cargo-mutants 会为所有源文件生成变异体但仅运行启用 feature 的测试；`mutation-baseline.sh` 将 observability 改为 `--all-features`，避免 feature 门控模块存活被高估（span_attributes 在 leak-detect 下 49 全存活 → all-features 下 17 存活）
 - **service-registry 错误路径补测**（`sz-rust-service-registry`）：引入 `mockito` 本地 mock 服务器，为 consul/nacos/kubernetes 的 register/deregister/heartbeat/discover/health_check 补 200/500 双路径测试；加权选择改为 ±25% 比例分布断言（杀 `-=→+=`/`-=→/=`）；registry 缺省权重=1、gray_release 阈值边界/权重乘法、local_cache 非空断言、fnv1a 精确值、LeastConnections 强释放断言
+- **api-gateway 补测 20+ 用例**（`sz-rust-api-gateway`）：forwarder 五种 HTTP 方法 mockito E2E + 300/599 状态边界、router_engine 零分通配/平局首选/host-header 评分、TokenBucket 补充速率、leaky_bucket 漏尽精确断言、multi_dim 相同位合并、slow_call_breaker 阈值相等与半开中间状态；all-features scoped 复跑 `193 mutants: 165 caught / 6 missed / 20 unviable / 2 timeouts` → **杀死率 96.5%**
+- **grpc_streaming 180s TIMEOUT 根因修复**：`send→Ok(())` 变异体使 `test_send_recv` 的 `recv().await` 永久阻塞（消息从未入队）；改为 `tokio::time::timeout` 收包并补 `send` 到已 drop 接收端的 `ChannelClosed` 错误路径测试
+- **api-gateway 基线 feature 口径修正**：`gateway-multidim` 不启用 `grpc`，protocol_grpc/grpc_streaming 测试未运行导致存活高估；`mutation-baseline.sh` 改为 `--all-features`（protocol_grpc 10 个存活实为 feature 门控伪存活）
 - **sysinfo_collector 可测性重构**：提取 `memory_rate_percent`/`disk_use_percentage` 辅助函数，补 total=0 与算术边界单测；补进程启动时间与 Windows 主机名精确断言
 
 ## [v1.7.0] - 2026-10-03

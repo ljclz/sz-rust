@@ -30,7 +30,9 @@ fi
 declare -A FEATURES=(
   [sz-rust-distributed-tx]="dtx-parallel"
   [sz-rust-service-registry]="all-features"
-  [sz-rust-api-gateway]="gateway-multidim"
+  # api-gateway 使用 all-features：`gateway-multidim` 不启用 grpc feature，
+  # 导致 protocol_grpc/grpc_streaming 的测试不运行、存活被高估（同 observability 口径）。
+  [sz-rust-api-gateway]="all-features"
   # observability 使用 all-features：cargo-mutants 会为所有源文件生成变异体，
   # 但仅编译启用 feature 对应的测试；`--features leak-detect` 会让 feature 门控模块
   # （span_attributes/admin/sampling/otlp-batch 等）的测试不运行，导致存活被高估。
