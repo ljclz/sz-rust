@@ -88,4 +88,42 @@ mod tests {
         let sw = SlidingWindow::new(0, Duration::from_secs(10));
         assert!(!sw.try_acquire());
     }
+
+    #[test]
+    fn test_current_count_expires_to_zero() {
+        let sw = SlidingWindow::new(3, Duration::from_millis(50));
+        assert!(sw.try_acquire());
+        assert!(sw.try_acquire());
+        assert_eq!(sw.current_count(), 2);
+
+        std::thread::sleep(Duration::from_millis(60));
+        assert_eq!(
+            sw.current_count(),
+            0,
+            "all timestamps should be purged after window expiry"
+        );
+        assert!(
+            sw.try_acquire(),
+            "quota should be fully reclaimed after expiry"
+        );
+    }
+
+    #[test]
+    fn test_partial_window_keeps_active_records() {
+        let sw = SlidingWindow::new(3, Duration::from_millis(100));
+        assert!(sw.try_acquire());
+        assert!(sw.try_acquire());
+
+        // 未到窗口边界，记录应保留
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(sw.current_count(), 2);
+
+        // 过半后首条记录已过期、第二条仍在窗口内
+        std::thread::sleep(Duration::from_millis(40));
+        let count = sw.current_count();
+        assert!(
+            (1..=2).contains(&count),
+            "expected 1-2 active records after partial expiry, got {count}"
+        );
+    }
 }

@@ -142,4 +142,58 @@ mod tests {
         let result = mapping.json_to_grpc(json).unwrap();
         assert_eq!(result, json);
     }
+
+    #[test]
+    fn test_json_to_grpc_missing_field_passthrough() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("user_id", "userId");
+        let json = br#"{"other":"value"}"#;
+        let result = mapping.json_to_grpc(json).unwrap();
+        assert_eq!(result, json, "missing mapped field should not alter body");
+    }
+
+    #[test]
+    fn test_grpc_to_json_missing_field_passthrough() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("user_id", "userId");
+        let grpc = br#"{"other":"value"}"#;
+        let result = mapping.grpc_to_json(grpc).unwrap();
+        assert_eq!(result, grpc, "missing mapped field should not alter body");
+    }
+
+    #[test]
+    fn test_json_to_grpc_non_string_value() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("count", "cnt");
+        let json = br#"{"count":42}"#;
+        let result = mapping.json_to_grpc(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(
+            parsed["cnt"], 42,
+            "non-string value should be remapped verbatim"
+        );
+        assert!(parsed.get("count").is_none());
+    }
+
+    #[test]
+    fn test_json_to_grpc_same_field_name_no_remove() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("id", "id");
+        let json = br#"{"id":"1"}"#;
+        let result = mapping.json_to_grpc(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["id"], "1");
+    }
+
+    #[test]
+    fn test_grpc_to_json_same_field_name_no_remove() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("id", "id");
+        let grpc = br#"{"id":"1"}"#;
+        let result = mapping.grpc_to_json(grpc).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        assert_eq!(parsed["id"], "1");
+    }
+
+    #[test]
+    fn test_json_to_grpc_invalid_json_keeps_original_error() {
+        let mapping = GrpcFieldMapping::new("svc/method").with_field("user_id", "userId");
+        let result = mapping.json_to_grpc(b"");
+        assert!(matches!(result, Err(GatewayError::ProtocolConversion(_))));
+    }
 }

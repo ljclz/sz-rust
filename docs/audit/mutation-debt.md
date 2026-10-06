@@ -96,7 +96,15 @@
 - **grpc_streaming TIMEOUT 根因**：`send→Ok(())` 变异体使 `test_send_recv` 的 `recv().await` 永久阻塞（消息从未入队）→ 改为 `tokio::time::timeout` 收包 + 补 `send` 到已 drop 接收端返回 `ChannelClosed` 的错误路径测试
 - **protocol_grpc（10 个存活）**：`grpc` feature 门控伪存活（`gateway-multidim` 不启用），all-features 下现有测试运行，已计入本次 165 caught
 - **sliding_window `<→<=`（2 个）**：窗口边界计时等价（duration==window 恰好相等的概率为零）→ 可接受存活
-| grpc_streaming.rs | 1 TIMEOUT | `send→Ok(())`（180s 超时） | 补流式发送错误路径；TIMEOUT 待复跑确认 |
+
+#### api-gateway 收尾聚焦复跑确认（2026-10-06）
+
+> 命令：`cargo mutants -p sz-rust-api-gateway --all-features --file 'packages/sz-rust-api-gateway/src/{sliding_window,protocol_grpc,grpc_streaming}.rs' --timeout 180 -j 1` → `25 mutants: 21 caught, 2 missed, 2 unviable, 0 timeouts` → **聚焦范围杀死率 91.3%（21/23 可行）**。
+
+- **grpc_streaming TIMEOUT 确认消除**：0 timeouts，`send→Ok(())` 变异体现在被 `timeout` 收包 + `ChannelClosed` 错误路径测试快速杀死
+- **protocol_grpc 伪存活闭环**：10 个 feature 门控伪存活在 all-features 下全部被现有测试杀死（本次补充缺字段 pass-through / 非字符串值 / 同名映射 / 空 body 错误用例，11 个测试全过）
+- **sliding_window**：补「窗口过期归零 + 部分过期窗口保留」边界测试；`38:54`/`52:54` 两个 `<→<=` 仍为可接受存活（真实时钟无法构造 `duration == window` 精确相等）
+| grpc_streaming.rs | 1 TIMEOUT | `send→Ok(())`（180s 超时） | 已修复：timeout 收包 + ChannelClosed 错误路径测试；聚焦复跑 0 timeouts 确认 |
 
 ### sz-rust-observability（207 存活 + 3 TIMEOUT）
 
