@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Fixed — marketplace 集成测试隔离（2026-10-07）
+
+- **cwd 并行互踩修复**（`sz-rust-marketplace` `tests/client_tests.rs`）：`test_client_uninstall_no_lockfile` / `test_client_list_empty_no_lockfile` 并行运行时通过 `set_current_dir` 互踩进程级 cwd，导致 lockfile 路径指向已删除目录而偶发 `NotFound`。引入 `CWD_LOCK` 串行化 cwd 敏感测试（与 `client.rs` 内部 `ENV_LOCK` 同族模式），全仓并行测试稳定通过。
+
 ### Fixed — 铁律 2 生产裸 unwrap 清偿（PR 审查修复）
 
 - **GraphQL 内存存储 Mutex 中毒恢复**（`sz-rust-sz300`）：`graphql/dataloaders.rs`、`graphql/schema.rs` 共 12 处生产裸 `lock().unwrap()` 改为 `lock().ok()?` / `lock().map_err(|e| e.to_string())?` / `match lock()` 模式，Mutex 中毒后按 API 语义返回空结果或错误，不再 panic。

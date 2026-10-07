@@ -7,6 +7,10 @@
 
 use sz_rust_marketplace::client::MarketplaceClient;
 
+/// cwd 是进程级全局，`set_current_dir` 并行会互踩（uninstall/list 的 lockfile 路径依赖当前工作目录）。
+/// 与 client.rs 内部 ENV_LOCK 同族的测试隔离问题（v1.7 全仓并行测试暴露）—— 串行化 cwd 敏感测试。
+static CWD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn test_client_search_mock() {
     let mut mock_server = mockito::Server::new_async().await;
@@ -114,6 +118,7 @@ async fn test_client_install_not_found() {
 
 #[tokio::test]
 async fn test_client_uninstall_no_lockfile() {
+    let _guard = CWD_LOCK.lock().await;
     let temp = tempfile::tempdir().unwrap();
     let orig = std::env::current_dir().unwrap();
     std::env::set_current_dir(temp.path()).unwrap();
@@ -127,6 +132,7 @@ async fn test_client_uninstall_no_lockfile() {
 
 #[tokio::test]
 async fn test_client_list_empty_no_lockfile() {
+    let _guard = CWD_LOCK.lock().await;
     let temp = tempfile::tempdir().unwrap();
     let orig = std::env::current_dir().unwrap();
     std::env::set_current_dir(temp.path()).unwrap();
