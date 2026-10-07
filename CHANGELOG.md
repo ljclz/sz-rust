@@ -7,6 +7,47 @@
 
 ## [Unreleased]
 
+## [v1.9.0] — 2026-10-07
+
+### Added — v1.9.0 生产深化 + 闭环验证 + 债务清偿
+
+10 大核心能力 + P0 债务清偿，全部通过 `all-v1-9` feature gate 控制，默认不启用。
+
+#### P0 债务清偿
+
+- **GraphQL 持久化**（`v19-graphql-persist`）：DB-backed schema（`build_schema_with_db`），resolver 直接查 DB，13 集成测试
+- **JWT Audience 安全增强**（`v19-jwt-audience`）：`verify_token_with_audience` + `AudienceConfig`（service_id/grace_period/enabled）+ grace period 兼容 + 13 集成测试
+- **覆盖率豁免清偿**（`scripts/audit/coverage-exemption.js`）：doc-debt RESOLVED
+
+#### P1 功能开发
+
+- **Saga 分布式事务接入订单**（`v19-saga`）：6 个 Saga Action + `create_with_saga` + `OrderCreateResult` + DbTxLogStore 持久化 + 4 E2E 测试
+- **可观测性闭环**（`v19-obs-closure`）：tracing_middleware 全链路追踪 + TraceID + Span 本地缓冲 + SilenceManager 告警静默去重 + BusinessAlertRules 业务告警规则集 + 6 E2E 测试
+- **性能深化**：热路径基线（3 条）+ CI 性能回归门禁 + N+1 检测门禁 + 连接池调优（`PoolConfig` + `PoolExhaustedError`）+ 查询缓存（LRU + TTL + 命中率统计）
+
+#### P2 功能开发
+
+- **AI 智能分类**（`v19-ai-classify`）：`AiClassifier` + `AiFacade` trait + 脱敏 + 置信度决策 + 人工 override + 降级 + 7 E2E 测试
+- **国际化接入**（`v19-i18n`）：`I18nExtractor` + `ErrorCode` 枚举 + `translate_error` + zh-CN/en 资源文件 + 7 E2E 测试
+- **配置中心动态配置**（`v19-config-center`）：`DynamicConfig` + `ConfigSource` trait + 降级 + 本地缓存恢复 + 4 E2E 测试
+
+#### P3 功能开发
+
+- **插件生态落地**（`v19-plugin-flow`）：`PluginManager` + `PluginMarketplace` trait + `InMemoryMarketplace` + Ed25519 签名校验 + install/uninstall/list 端点 + 6 E2E 测试
+- **全量集成测试**（`tests/v19_integration.rs`）：10 个跨模块集成测试，验证 all-v1-9 feature 下各模块无状态冲突
+- **生产配置接入**（`V19Config`）：`AudienceSettings` + `ai_classifier_threshold` + `dynamic_config_source` + `alert_silence_duration` + `trace_sample_rate` + env 加载
+
+### 验证证据
+
+- `cargo test --lib --features all-v1-9` = 106 passed
+- `cargo test --test v19_integration --features all-v1-9` = 10 passed
+- `cargo test --test plugin_flow_e2e --features all-v1-9` = 6 passed
+- `cargo clippy --all-targets --features all-v1-9 -- -D warnings` = 0 warning
+- `node scripts/nplus1-detect.js` = 0 违规
+- `node scripts/perf-regression.js --skip-bench` = PASS
+
+## [Unreleased]
+
 ### Fixed — 测试隔离加固（2026-10-07）
 
 - **cwd 并行互踩修复**（`sz-rust-marketplace` `tests/client_tests.rs`）：`test_client_uninstall_no_lockfile` / `test_client_list_empty_no_lockfile` 并行运行时通过 `set_current_dir` 互踩进程级 cwd，导致 lockfile 路径指向已删除目录而偶发 `NotFound`。引入 `CWD_LOCK` 串行化 cwd 敏感测试（与 `client.rs` 内部 `ENV_LOCK` 同族模式），全仓并行测试稳定通过。

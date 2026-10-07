@@ -42,6 +42,23 @@ All features below are from actual `sz-rust-core` source code. Module structure:
 - **WASM Edge Compute**: `sz-rust-wasm` crate based on wasmi (pure Rust WASM interpreter), provides `WasmRuntime` for loading/executing WASM modules. (✅ Production: enterprise sz300 `POST /api/wasm/execute` endpoint, accepts base64-encoded WASM module + function name + args, returns execution result)
 - **K8s Operator**: (⚠️ Removed: `sz-rust-k8s-operator` was an orphan crate with no consumers; the 22 tests remain in git history, see ADR-038)
 
+### v1.9.0 Production Deepening + Closed-Loop Validation + Debt Clearance (2026-10-07)
+
+10 core capabilities, all gated by `all-v1-9` feature flag, disabled by default. SDD docs: `.codeartsdoer/specs/v1.9.0/`.
+
+- **GraphQL Persistence** (`v19-graphql-persist`): DB-backed schema, resolvers query DB directly
+- **JWT Audience Security** (`v19-jwt-audience`): `verify_token_with_audience` + grace period compatibility
+- **Saga Distributed Transactions** (`v19-saga`): 6 Saga Actions + `create_with_saga` + DbTxLogStore persistence
+- **Observability Closed-Loop** (`v19-obs-closure`): Full-chain tracing + TraceID + alert silence dedup + business alert rules
+- **Performance Deepening**: Hot-path baselines + CI perf regression gate + N+1 detection gate + pool tuning + query cache (LRU+TTL)
+- **AI Smart Classification** (`v19-ai-classify`): `AiClassifier` + sanitization + confidence decision + degradation
+- **Internationalization** (`v19-i18n`): `I18nExtractor` + `ErrorCode` enum + zh-CN/en resources
+- **Dynamic Config Center** (`v19-config-center`): `DynamicConfig` + degradation + local cache recovery
+- **Plugin Ecosystem** (`v19-plugin-flow`): `PluginManager` + Ed25519 signature verification + install/uninstall/list endpoints
+- **Production Config** (`V19Config`): env loading, disabled by default (gradual rollout)
+
+Verification: `cargo test --lib --features all-v1-9` = 106 passed; clippy 0 warning. See [CHANGELOG v1.9.0](CHANGELOG.md).
+
 ---
 
 ## Quick Start

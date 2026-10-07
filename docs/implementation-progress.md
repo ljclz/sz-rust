@@ -2,7 +2,7 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-10-04
+> **最后更新**：2026-10-07
 
 ---
 
@@ -32,24 +32,80 @@
 
 ---
 
-## v1.8.0 生产接线 + 质量硬化（2026-10-04 规划中）
+## v1.9.0 生产深化 + 闭环验证 + 债务清偿（2026-10-05 规划，2026-10-07 完成）
 
-> **状态**：📋 SDD 规划完成（spec.md + design.md + tasks.md），待启动开发
+> **状态**：✅ P0-P3 全部完成，10 大核心能力 + P0 债务清偿，全部通过 `all-v1-9` feature gate 控制
+> **SDD 文档**：`.codeartsdoer/specs/v1.9.0/`（spec.md 753行 + design.md 1059行 + tasks.md 594行）
+
+### 完成范围
+
+#### P0 债务清偿
+
+- **GraphQL 持久化**（`v19-graphql-persist`）：DB-backed schema（`build_schema_with_db`），resolver 直接查 DB，13 集成测试
+- **JWT Audience 安全增强**（`v19-jwt-audience`）：`verify_token_with_audience` + `AudienceConfig`（service_id/grace_period/enabled）+ grace period 兼容 + 13 集成测试
+- **覆盖率豁免清偿**（`scripts/audit/coverage-exemption.js`）：doc-debt RESOLVED
+
+#### P1 功能开发
+
+- **Saga 分布式事务接入订单**（`v19-saga`）：6 个 Saga Action + `create_with_saga` + `OrderCreateResult` + DbTxLogStore 持久化 + 4 E2E 测试
+- **可观测性闭环**（`v19-obs-closure`）：tracing_middleware 全链路追踪 + TraceID + Span 本地缓冲 + SilenceManager 告警静默去重 + BusinessAlertRules 业务告警规则集 + 6 E2E 测试
+- **性能深化**：热路径基线（3 条）+ CI 性能回归门禁（`scripts/perf-regression.js`）+ N+1 检测门禁（`scripts/nplus1-detect.js`）+ 连接池调优（`PoolConfig` + `PoolExhaustedError`）+ 查询缓存（LRU + TTL + 命中率统计）
+
+#### P2 功能开发
+
+- **AI 智能分类**（`v19-ai-classify`）：`AiClassifier` + `AiFacade` trait + 脱敏 + 置信度决策 + 人工 override + 降级 + 7 E2E 测试
+- **国际化接入**（`v19-i18n`）：`I18nExtractor` + `ErrorCode` 枚举 + `translate_error` + zh-CN/en 资源文件 + 7 E2E 测试
+- **配置中心动态配置**（`v19-config-center`）：`DynamicConfig` + `ConfigSource` trait + 降级 + 本地缓存恢复 + 4 E2E 测试
+
+#### P3 功能开发
+
+- **插件生态落地**（`v19-plugin-flow`）：`PluginManager` + `PluginMarketplace` trait + `InMemoryMarketplace` + Ed25519 签名校验 + install/uninstall/list 端点 + 6 E2E 测试
+- **全量集成测试**（`tests/v19_integration.rs`）：10 个跨模块集成测试，验证 all-v1-9 feature 下各模块无状态冲突
+- **生产配置接入**（`V19Config`）：`AudienceSettings` + `ai_classifier_threshold` + `dynamic_config_source` + `alert_silence_duration` + `trace_sample_rate` + env 加载
+
+### 验证结果
+
+- `cargo test --lib --features all-v1-9` = 106 passed
+- `cargo test --test v19_integration --features all-v1-9` = 10 passed
+- `cargo test --test plugin_flow_e2e --features all-v1-9` = 6 passed
+- `cargo clippy --all-targets --features all-v1-9 -- -D warnings` = 0 warning
+- `node scripts/nplus1-detect.js` = 0 违规
+- `node scripts/perf-regression.js --skip-bench` = PASS
+
+### 提交记录
+
+- `10e31e82` P0 GraphQL 持久化 + JWT Audience
+- `e51dbd59` P0 覆盖率豁免清偿
+- `9fe56c99` P1 Saga 分布式事务
+- `9e4aca62` P1 可观测性闭环
+- `2226bae3` P1 性能深化
+- `41ad7242` P2 AI 智能分类
+- `f05ff187` P2 国际化接入
+- `0e0647ba` P2 配置中心动态配置
+- `da90bc82` P3 插件生态落地
+- `226a7d00` P3 集成测试与全量门禁
+- `f8ba74ac` P3 生产配置接入
+
+---
+
+## v1.8.0 生产接线 + 质量硬化（2026-10-04 完成）
+
+> **状态**：✅ P1-P5 全部完成，已推送 + tag v1.8.0
 > **SDD 文档**：`.codeartsdoer/specs/v1.8.0/`
 
-### 规划范围
+### 完成范围
 
-- **P1 安全合规接线**（5 模块）：RBAC + 数据脱敏 + 安全头 + 审计链 + 密钥轮换 → sz300 生产路由
-- **P2 API 协议接线**（4 模块）：GraphQL + WebSocket + SSE + Upload 增强 → sz300 生产路由
-- **P3 集成测试套件**（7 模块）：sz300 + v1.7.0 全部新能力端到端测试 ≥ 225 测试
-- **P4 性能基线**（4 模块）：热路径 QPS 基线 + RBAC 缓存 + 脱敏吞吐 + 连接池调优
-- **P5 OpenAPI 文档**（3 模块）：自动生成 openapi.yaml + Swagger UI + CI 一致性检查
+- **P1 安全合规接线**（5 模块）：RBAC + 数据脱敏 + 安全头 + 审计链 + 密钥轮换 → sz300 生产路由（46 测试）
+- **P2 API 协议接线**（4 模块）：GraphQL + WebSocket + SSE + Upload 增强 → sz300 生产路由（75 测试）
+- **P3 集成测试套件**（7 模块）：sz300 + v1.7.0 全部新能力端到端测试 29 E2E 测试
+- **P4 性能基线**（4 模块）：热路径 QPS 基线 + RBAC 缓存 + 脱敏吞吐 + 连接池调优（13 benchmark 函数）
+- **P5 OpenAPI 文档**（3 模块）：自动生成 openapi.yaml（33 端点）+ Swagger UI + CI 一致性检查
 
-### 前置条件
+### 验证结果
 
-- ✅ v1.7.0 已发布 crates.io（50 crate）
-- ✅ sz300 已部署到生产服务器（121.204.253.75:8300，health 200）
-- ✅ sz-pay 已集成 v1.7.0（5195 测试通过）
+- 全部 239 测试通过
+- clippy 0 warning
+- tag v1.8.0 已推送
 
 ---
 

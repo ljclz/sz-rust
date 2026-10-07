@@ -47,6 +47,23 @@
 - **AI 能力栈生产接线（v1.2.0 audit_remediation_v3）**：5 项高风险幻影交付修复——`LlmChatCapability` 注册到 CapabilityRegistry（`ai.llm_chat`）；`POST /api/v1/ai/embed` 端点接线 `Ai::embed`；`POST /api/v1/ai/stream` SSE 端点接线 `Ai::stream_chat`；`McpToolBridge` 注入 6 个 MCP 工具（parse_path/build_select_query/openapi_spec/redaction_check/url_decode/sql_validate）到 Agent ToolRegistry；`AiMetrics` 12 项指标接入 Prometheus；5 端到端测试验证接线。（✅ 生产已接入）
 - **Admin 后台管理插件（v1.2.0 新增）**：`sz-rust-addons-admin` 提供 7 大模块（用户/角色/权限/菜单/配置/操作日志/仪表盘）21 个 REST API 端点 + 17 个 `admin.*` Capability。`AdminAddonPlugin` 通过 `plugin.router()` 合并路由 + `plugin.capability_hook()` 注册 Capability 实现生产接线。内置 `permission_guard_middleware`（路由→权限项映射，超级管理员 bypass）、bcrypt 密码脱敏、配置租户继承（tenant_id=0 全局 + 租户覆盖）、操作日志异步写入。（✅ 生产已接入：sz-rust-examples 演示接线 + 9 端到端验证测试）
 
+### v1.9.0 生产深化 + 闭环验证 + 债务清偿（2026-10-07）
+
+10 大核心能力，全部通过 `all-v1-9` feature gate 控制，默认不启用。SDD 文档：`.codeartsdoer/specs/v1.9.0/`。
+
+- **GraphQL 持久化**（`v19-graphql-persist`）：DB-backed schema，resolver 直接查 DB
+- **JWT Audience 安全增强**（`v19-jwt-audience`）：`verify_token_with_audience` + grace period 兼容
+- **Saga 分布式事务**（`v19-saga`）：6 个 Saga Action + `create_with_saga` + DbTxLogStore 持久化
+- **可观测性闭环**（`v19-obs-closure`）：全链路追踪 + TraceID + 告警静默去重 + 业务告警规则集
+- **性能深化**：热路径基线 + CI 性能回归门禁 + N+1 检测门禁 + 连接池调优 + 查询缓存（LRU+TTL）
+- **AI 智能分类**（`v19-ai-classify`）：`AiClassifier` + 脱敏 + 置信度决策 + 降级
+- **国际化接入**（`v19-i18n`）：`I18nExtractor` + `ErrorCode` 枚举 + zh-CN/en 资源
+- **配置中心动态配置**（`v19-config-center`）：`DynamicConfig` + 降级 + 本地缓存恢复
+- **插件生态落地**（`v19-plugin-flow`）：`PluginManager` + Ed25519 签名校验 + install/uninstall/list 端点
+- **生产配置接入**（`V19Config`）：env 加载，默认关闭（灰度策略）
+
+验证：`cargo test --lib --features all-v1-9` = 106 passed；clippy 0 warning。详见 [CHANGELOG v1.9.0](CHANGELOG.md)。
+
 ---
 
 ## 快速上手
