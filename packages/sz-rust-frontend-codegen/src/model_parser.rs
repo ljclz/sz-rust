@@ -334,7 +334,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_dir_not_found() {
-        let result = ModelParser::parse_dir(Path::new("/nonexistent_dir_12345")).await;
+        // 用 tempfile 临时目录下的不存在子路径，避免固定路径在 Windows 上被意外同名目录干扰
+        //（2026-10-07 盘根残留 nonexistent_dir_12345 曾致本测试失败）。
+        let temp = tempfile::tempdir().unwrap();
+        let missing_dir = temp.path().join("definitely_missing_12345");
+        let result = ModelParser::parse_dir(&missing_dir).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, FrontendCodegenError::ModelDirNotFound(_)));

@@ -7,9 +7,10 @@
 
 ## [Unreleased]
 
-### Fixed — marketplace 集成测试隔离（2026-10-07）
+### Fixed — 测试隔离加固（2026-10-07）
 
 - **cwd 并行互踩修复**（`sz-rust-marketplace` `tests/client_tests.rs`）：`test_client_uninstall_no_lockfile` / `test_client_list_empty_no_lockfile` 并行运行时通过 `set_current_dir` 互踩进程级 cwd，导致 lockfile 路径指向已删除目录而偶发 `NotFound`。引入 `CWD_LOCK` 串行化 cwd 敏感测试（与 `client.rs` 内部 `ENV_LOCK` 同族模式），全仓并行测试稳定通过。
+- **固定路径测试加固**（`sz-rust-frontend-codegen` `src/model_parser.rs`）：`test_parse_dir_not_found` 改用 tempfile 临时目录下的不存在子路径，消除 Windows 盘根意外同名目录导致失败的脆弱性（2026-10-07 `E:\nonexistent_dir_12345` 残留曾触发）。
 
 ### Fixed — 铁律 2 生产裸 unwrap 清偿（PR 审查修复）
 
