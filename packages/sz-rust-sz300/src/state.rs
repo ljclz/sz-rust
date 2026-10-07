@@ -40,6 +40,9 @@ pub struct AppState {
     /// v1.8.0 SSE 服务（feature gate 控制）
     #[cfg(feature = "v18-sse")]
     pub sse_service: Arc<crate::services::sse_service::SseService>,
+    /// v1.9.0 插件管理器（feature gate 控制，spec §5.10）
+    #[cfg(feature = "v19-plugin-flow")]
+    pub plugin_manager: Arc<crate::services::plugin_manager::PluginManager>,
 }
 
 impl AppState {

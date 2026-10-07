@@ -92,6 +92,15 @@ async fn make_app_state(pool: Pool) -> AppState {
         ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
         #[cfg(feature = "v18-sse")]
         sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
+        #[cfg(feature = "v19-plugin-flow")]
+        plugin_manager: std::sync::Arc::new(
+            sz_rust_sz300::services::plugin_manager::PluginManager::new(
+                std::sync::Arc::new(
+                    sz_rust_sz300::services::plugin_manager::InMemoryMarketplace::new(),
+                ),
+                "test_pub_key".to_string(),
+            ),
+        ),
     }
 }
 
@@ -588,6 +597,15 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
         ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
         #[cfg(feature = "v18-sse")]
         sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
+        #[cfg(feature = "v19-plugin-flow")]
+        plugin_manager: std::sync::Arc::new(
+            sz_rust_sz300::services::plugin_manager::PluginManager::new(
+                std::sync::Arc::new(
+                    sz_rust_sz300::services::plugin_manager::InMemoryMarketplace::new(),
+                ),
+                "test_pub_key".to_string(),
+            ),
+        ),
     };
 
     let response = sz_rust_sz300::controllers::health::startup(axum::extract::State(state)).await;
@@ -639,6 +657,15 @@ async fn test_health_metrics_returns_prometheus_format() {
         ws_rooms: std::sync::Arc::new(sz_rust_websocket::room::RoomManager::new()),
         #[cfg(feature = "v18-sse")]
         sse_service: sz_rust_sz300::services::sse_service::SseService::with_defaults(),
+        #[cfg(feature = "v19-plugin-flow")]
+        plugin_manager: std::sync::Arc::new(
+            sz_rust_sz300::services::plugin_manager::PluginManager::new(
+                std::sync::Arc::new(
+                    sz_rust_sz300::services::plugin_manager::InMemoryMarketplace::new(),
+                ),
+                "test_pub_key".to_string(),
+            ),
+        ),
     };
 
     let response = sz_rust_sz300::controllers::health::metrics(axum::extract::State(state)).await;

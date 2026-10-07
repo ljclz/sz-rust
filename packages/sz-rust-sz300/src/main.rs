@@ -178,6 +178,16 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "v19-graphql-persist")]
     let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
 
+    // v1.9.0 插件管理器（spec §5.10）
+    #[cfg(feature = "v19-plugin-flow")]
+    let plugin_manager = {
+        let marketplace = sz_rust_sz300::services::plugin_manager::InMemoryMarketplace::new();
+        Arc::new(sz_rust_sz300::services::plugin_manager::PluginManager::new(
+            Arc::new(marketplace),
+            std::env::var("PLUGIN_PUBLIC_KEY").unwrap_or_default(),
+        ))
+    };
+
     let app_state = AppState {
         db_pool,
         pg_pool,
@@ -200,6 +210,8 @@ async fn main() -> anyhow::Result<()> {
         ws_rooms,
         #[cfg(feature = "v18-sse")]
         sse_service,
+        #[cfg(feature = "v19-plugin-flow")]
+        plugin_manager,
     };
 
     // 初始化 MQTT 消费者 — 带优雅退出信号

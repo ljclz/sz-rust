@@ -32,6 +32,9 @@ pub mod mqtt_listener;
 pub mod mqtt_service;
 /// 订单服务模块（封装订单 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod order_service;
+/// v1.9.0 插件管理器（spec §5.10）
+#[cfg(feature = "v19-plugin-flow")]
+pub mod plugin_manager;
 /// 商品服务模块（封装商品 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod product_service;
 /// v1.9.0 Saga 分布式事务订单服务

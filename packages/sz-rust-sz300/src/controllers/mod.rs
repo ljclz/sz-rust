@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 /// 认证相关控制器（对齐 PHP AuthController）
 pub mod auth;
@@ -16,5 +16,8 @@ pub mod health;
 pub mod merchant;
 /// 订单管理控制器（对齐 PHP OrderController）
 pub mod order;
+/// v1.9.0 插件管理控制器（spec §5.10）
+#[cfg(feature = "v19-plugin-flow")]
+pub mod plugin;
 /// 商品管理控制器（对齐 PHP ProductController）
 pub mod product;

@@ -113,7 +113,7 @@ v19-config-center = ["dep:async-trait"]
 # v1.9.0 可观测性闭环
 v19-obs-closure = ["dep:sz-rust-alert-engine", "dep:sz-rust-data-mask"]
 # v1.9.0 插件生态落地
-v19-plugin-flow = []
+v19-plugin-flow = ["dep:async-trait"]
 # v1.9.0 聚合 feature
 all-v1-9 = ["v19-graphql-persist", "v19-jwt-audience", "v19-saga", "v19-ai-classify", "v19-i18n", "v19-config-center", "v19-obs-closure", "v19-plugin-flow"]
 

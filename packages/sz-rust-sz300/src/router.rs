@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
+#[cfg(feature = "v19-plugin-flow")]
+use crate::controllers::plugin;
 use crate::controllers::{auth, device, file, file_serve, health, merchant, order, product};
 use crate::middleware::auth_middleware;
 use crate::openapi;
@@ -94,6 +96,13 @@ pub fn create_router(state: AppState) -> Router {
             "/api/v1/file/upload_multipart",
             post(file::upload_multipart),
         );
+
+    // v1.9.0 插件管理端点（spec §5.10，非 RBAC 模式）
+    #[cfg(all(feature = "v19-plugin-flow", not(feature = "v18-rbac")))]
+    let api_routes = api_routes
+        .route("/api/v1/plugin/install", post(plugin::install))
+        .route("/api/v1/plugin/uninstall", post(plugin::uninstall))
+        .route("/api/v1/plugin/list", get(plugin::list));
 
     // v1.8.0 增强上传端点（非 RBAC 模式，带大小限制中间件）
     #[cfg(all(feature = "v18-upload", not(feature = "v18-rbac")))]
@@ -249,7 +258,31 @@ pub fn create_router(state: AppState) -> Router {
                 rbac_guard,
             ));
 
-        #[cfg(feature = "v18-graphql")]
+        // v1.9.0 插件管理路由（RBAC 模式，使用 merchant:create 权限）
+        #[cfg(feature = "v19-plugin-flow")]
+        let plugin_routes = Router::new()
+            .route("/api/v1/plugin/install", post(plugin::install))
+            .route("/api/v1/plugin/uninstall", post(plugin::uninstall))
+            .route("/api/v1/plugin/list", get(plugin::list))
+            .layer(middleware::from_fn_with_state(
+                (engine.clone(), perm::merchant("create")),
+                rbac_guard,
+            ));
+
+        #[cfg(all(feature = "v18-graphql", feature = "v19-plugin-flow"))]
+        let merged = auth_routes
+            .merge(merchant_read)
+            .merge(merchant_write)
+            .merge(product_read)
+            .merge(product_write)
+            .merge(device_read)
+            .merge(device_manage)
+            .merge(order_read)
+            .merge(order_create)
+            .merge(file_routes)
+            .merge(graphql_route)
+            .merge(plugin_routes);
+        #[cfg(all(feature = "v18-graphql", not(feature = "v19-plugin-flow")))]
         let merged = auth_routes
             .merge(merchant_read)
             .merge(merchant_write)
@@ -261,7 +294,19 @@ pub fn create_router(state: AppState) -> Router {
             .merge(order_create)
             .merge(file_routes)
             .merge(graphql_route);
-        #[cfg(not(feature = "v18-graphql"))]
+        #[cfg(all(not(feature = "v18-graphql"), feature = "v19-plugin-flow"))]
+        let merged = auth_routes
+            .merge(merchant_read)
+            .merge(merchant_write)
+            .merge(product_read)
+            .merge(product_write)
+            .merge(device_read)
+            .merge(device_manage)
+            .merge(order_read)
+            .merge(order_create)
+            .merge(file_routes)
+            .merge(plugin_routes);
+        #[cfg(all(not(feature = "v18-graphql"), not(feature = "v19-plugin-flow")))]
         let merged = auth_routes
             .merge(merchant_read)
             .merge(merchant_write)
