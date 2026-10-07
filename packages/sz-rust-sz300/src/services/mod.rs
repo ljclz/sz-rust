@@ -13,6 +13,9 @@ use std::collections::HashMap;
 
 use sz_rust_core::orm::Value;
 
+/// v1.9.0 AI 智能分类（spec §5.4）
+#[cfg(feature = "v19-ai-classify")]
+pub mod ai_classifier;
 /// 认证服务模块（对齐 PHP AuthService）
 pub mod auth_service;
 /// 设备服务模块（封装设备 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）

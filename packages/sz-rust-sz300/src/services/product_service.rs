@@ -292,6 +292,57 @@ impl ProductService {
 
         Ok(())
     }
+
+    /// v1.9.0 带 AI 分类的商品创建（spec §5.4）
+    ///
+    /// 流程：脱敏 → AI 分类 → 决策 → 创建商品。
+    /// AI 超时/错误时降级为人工分类，不阻塞商品创建（spec §5.4.3 异常 1/2）。
+    #[cfg(feature = "v19-ai-classify")]
+    pub async fn create_with_ai(
+        pool: &Pool,
+        product: &Product,
+        classifier: &crate::services::ai_classifier::AiClassifier,
+        manual_category: Option<(i64, i64)>,
+    ) -> Result<(i64, crate::services::ai_classifier::ClassificationDecision), String> {
+        use crate::services::ai_classifier::{
+            sanitize_classification_input, ClassificationRequest,
+        };
+
+        let sanitized =
+            sanitize_classification_input(&product.name, &product.barcode, &product.name);
+        let req = ClassificationRequest {
+            product_name: sanitized.name,
+            product_desc: sanitized.description,
+        };
+
+        let decision = match classifier.classify(&req).await {
+            Ok(result) => classifier.decide(result, manual_category),
+            Err(e) => {
+                tracing::warn!(error = %e, "AI 分类降级为人工分类");
+                classifier.degrade()
+            }
+        };
+
+        let mut product = product.clone();
+        match &decision {
+            crate::services::ai_classifier::ClassificationDecision::AutoAdopt {
+                category_id,
+                ..
+            } => {
+                product.ai_class_id = *category_id;
+            }
+            crate::services::ai_classifier::ClassificationDecision::ManualOverride {
+                overridden_to,
+                ..
+            } => {
+                product.cat_id = *overridden_to;
+            }
+            _ => {}
+        }
+
+        let good_id = Self::create(pool, &product).await?;
+        Ok((good_id, decision))
+    }
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）

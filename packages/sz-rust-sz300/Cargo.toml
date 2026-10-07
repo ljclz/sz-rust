@@ -105,7 +105,7 @@ v19-jwt-audience = ["dep:hmac", "dep:sha2"]
 # v1.9.0 Saga 分布式事务接入订单
 v19-saga = ["dep:sz-rust-distributed-tx", "dep:async-trait"]
 # v1.9.0 AI 智能分类接入商品管理
-v19-ai-classify = []
+v19-ai-classify = ["dep:async-trait"]
 # v1.9.0 国际化接入 sz300
 v19-i18n = []
 # v1.9.0 配置中心动态配置
