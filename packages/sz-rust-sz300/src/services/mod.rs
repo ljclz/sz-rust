@@ -31,6 +31,9 @@ pub mod mqtt_service;
 pub mod order_service;
 /// 商品服务模块（封装商品 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod product_service;
+/// v1.9.0 Saga 分布式事务订单服务
+#[cfg(feature = "v19-saga")]
+pub mod saga_order;
 /// v1.8.0 SSE 服务
 #[cfg(feature = "v18-sse")]
 pub mod sse_service;
