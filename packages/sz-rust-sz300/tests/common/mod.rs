@@ -62,8 +62,11 @@ pub async fn ensure_mysql() -> Option<Pool> {
 /// 构造 AppState（启用所有 v1.8.0 feature gate 字段）
 pub fn make_state(pool: Pool) -> AppState {
     let metrics = Arc::new(MetricsRegistry::new());
+    let db_pool = Arc::new(pool);
+    #[cfg(feature = "v19-graphql-persist")]
+    let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
     AppState {
-        db_pool: Arc::new(pool),
+        db_pool,
         pg_pool: None,
         metrics_registry: metrics,
         #[cfg(feature = "v18-rbac")]
@@ -76,6 +79,8 @@ pub fn make_state(pool: Pool) -> AppState {
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
         graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v19-graphql-persist")]
+        graphql_schema_db,
         #[cfg(feature = "v18-websocket")]
         ws_manager: Arc::new(sz_rust_websocket::manager::ConnectionManager::with_defaults()),
         #[cfg(feature = "v18-websocket")]

@@ -175,6 +175,9 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "v18-sse")]
     let sse_service = sz_rust_sz300::services::sse_service::SseService::with_defaults();
 
+    #[cfg(feature = "v19-graphql-persist")]
+    let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
+
     let app_state = AppState {
         db_pool,
         pg_pool,
@@ -189,6 +192,8 @@ async fn main() -> anyhow::Result<()> {
         upload_config: config::upload_config(),
         #[cfg(feature = "v18-graphql")]
         graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v19-graphql-persist")]
+        graphql_schema_db,
         #[cfg(feature = "v18-websocket")]
         ws_manager,
         #[cfg(feature = "v18-websocket")]

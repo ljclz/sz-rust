@@ -323,8 +323,21 @@ pub fn create_router(state: AppState) -> Router {
         router
     }
 }
-/// v1.8.0 GraphQL handler
-#[cfg(feature = "v18-graphql")]
+/// v1.8.0 GraphQL handler（DB-backed 模式，v1.9.0+）
+#[cfg(all(feature = "v18-graphql", feature = "v19-graphql-persist"))]
+async fn graphql_handler(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: async_graphql_axum::GraphQLRequest,
+) -> async_graphql_axum::GraphQLResponse {
+    state
+        .graphql_schema_db
+        .execute(request.into_inner())
+        .await
+        .into()
+}
+
+/// v1.8.0 GraphQL handler（内存模式，v1.8.0）
+#[cfg(all(feature = "v18-graphql", not(feature = "v19-graphql-persist")))]
 async fn graphql_handler(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: async_graphql_axum::GraphQLRequest,

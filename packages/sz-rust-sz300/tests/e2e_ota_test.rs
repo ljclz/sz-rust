@@ -60,7 +60,7 @@ async fn ensure_mysql() -> Option<Pool> {
 
 async fn make_state(pool: Pool) -> AppState {
     AppState {
-        db_pool: Arc::new(pool),
+        db_pool: Arc::new(pool.clone()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -75,6 +75,10 @@ async fn make_state(pool: Pool) -> AppState {
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
         graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v19-graphql-persist")]
+        graphql_schema_db: sz_rust_sz300::graphql::build_schema_with_db(std::sync::Arc::new(
+            pool.clone(),
+        )),
         #[cfg(feature = "v18-websocket")]
         ws_manager: std::sync::Arc::new(
             sz_rust_websocket::manager::ConnectionManager::with_defaults(),

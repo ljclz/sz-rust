@@ -55,7 +55,7 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
     }
 
     Some(sz_rust_sz300::state::AppState {
-        db_pool: Arc::new(pool),
+        db_pool: Arc::new(pool.clone()),
         pg_pool: None,
         metrics_registry: Arc::new(MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -68,6 +68,8 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
         graphql_schema: sz_rust_sz300::graphql::build_schema(),
+        #[cfg(feature = "v19-graphql-persist")]
+        graphql_schema_db: sz_rust_sz300::graphql::build_schema_with_db(Arc::new(pool)),
         #[cfg(feature = "v18-websocket")]
         ws_manager: Arc::new(sz_rust_websocket::manager::ConnectionManager::with_defaults()),
         #[cfg(feature = "v18-websocket")]

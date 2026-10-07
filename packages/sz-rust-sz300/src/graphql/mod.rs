@@ -9,3 +9,5 @@ pub mod dataloaders;
 pub mod schema;
 
 pub use schema::{build_schema, GraphQLSchema};
+#[cfg(feature = "v19-graphql-persist")]
+pub use schema::{build_schema_with_db, GraphQLSchemaDb};

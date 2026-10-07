@@ -28,6 +28,9 @@ pub struct AppState {
     /// v1.8.0 GraphQL Schema（feature gate 控制）
     #[cfg(feature = "v18-graphql")]
     pub graphql_schema: crate::graphql::GraphQLSchema,
+    /// v1.9.0 DB-backed GraphQL Schema（feature gate 控制，持久化模式）
+    #[cfg(feature = "v19-graphql-persist")]
+    pub graphql_schema_db: crate::graphql::GraphQLSchemaDb,
     /// v1.8.0 WebSocket 连接管理器（feature gate 控制）
     #[cfg(feature = "v18-websocket")]
     pub ws_manager: Arc<sz_rust_websocket::manager::ConnectionManager>,
