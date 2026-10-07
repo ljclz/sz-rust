@@ -5,6 +5,9 @@
 pub mod audit_chain;
 /// 认证中间件模块
 pub mod auth_middleware;
+/// v1.9.0 全链路追踪中间件
+#[cfg(feature = "v19-obs-closure")]
+pub mod tracing_middleware;
 /// v1.8.0 上传大小限制中间件
 #[cfg(feature = "v18-upload")]
 pub mod upload_limit;

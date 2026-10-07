@@ -297,6 +297,13 @@ pub fn create_router(state: AppState) -> Router {
         .layer(cors_layer())
         .with_state(state);
 
+    // v1.9.0 全链路追踪中间件（feature gate 控制，默认不启用）
+    // 为每个请求生成 TraceID + Root Span，注入 X-Trace-Id 响应头
+    #[cfg(feature = "v19-obs-closure")]
+    let router = router.layer(middleware::from_fn(
+        crate::middleware::tracing_middleware::tracing_middleware,
+    ));
+
     // v1.8.0 审计链式哈希中间件（仅 POST/PUT/DELETE，排除 /health /metrics）
     #[cfg(feature = "v18-audit-chain")]
     let router = router.layer(middleware::from_fn_with_state(

@@ -8,6 +8,8 @@
 
 pub mod error;
 pub mod rule;
+pub mod silence;
 
 pub use error::*;
 pub use rule::*;
+pub use silence::*;

@@ -9603,6 +9603,7 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "sz-orm-sqlx",
+ "sz-rust-alert-engine",
  "sz-rust-auth-facade",
  "sz-rust-core",
  "sz-rust-data-mask",

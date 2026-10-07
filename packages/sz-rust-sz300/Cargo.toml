@@ -65,6 +65,8 @@ futures = { workspace = true, optional = true }
 # v1.9.0 Saga 分布式事务（feature gate 控制，默认不启用）
 sz-rust-distributed-tx = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
+# v1.9.0 可观测性闭环（feature gate 控制，默认不启用）
+sz-rust-alert-engine = { workspace = true, optional = true }
 
 
 [features]
@@ -108,7 +110,7 @@ v19-i18n = []
 # v1.9.0 配置中心动态配置
 v19-config-center = []
 # v1.9.0 可观测性闭环
-v19-obs-closure = []
+v19-obs-closure = ["dep:sz-rust-alert-engine", "dep:sz-rust-data-mask"]
 # v1.9.0 插件生态落地
 v19-plugin-flow = []
 # v1.9.0 聚合 feature

@@ -20,6 +20,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+/// v1.9.0 业务告警规则集
+#[cfg(feature = "v19-obs-closure")]
+pub mod alert_rules;
 /// 环境变量驱动的配置加载
 pub mod config;
 /// HTTP 路由处理器（对齐 PHP controller）
