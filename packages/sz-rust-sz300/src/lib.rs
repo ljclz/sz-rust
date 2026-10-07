@@ -33,6 +33,9 @@ pub mod db;
 #[cfg(feature = "v18-graphql")]
 pub mod graphql;
 pub mod i18n_error;
+/// v1.9.0 国际化语言提取器（spec §5.5.1 规则 1）
+#[cfg(feature = "v19-i18n")]
+pub mod i18n_extractor;
 /// 应用中间件（JWT 认证、日志等）
 pub mod middleware;
 /// 数据模型（对齐 PHP model）
