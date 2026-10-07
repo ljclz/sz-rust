@@ -112,6 +112,106 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
     })
 }
 
+/// v1.9.0 配置段（spec §5.1-5.10）
+///
+/// 聚合 v1.9.0 各模块的配置项，通过环境变量或配置文件加载。
+/// 生产环境按灰度策略逐步开启各 feature，默认关闭。
+#[derive(Debug, Clone, Deserialize)]
+pub struct V19Config {
+    /// JWT Audience 配置（spec §5.2）
+    pub audience_config: AudienceSettings,
+    /// AI 分类置信度阈值（spec §5.4，默认 0.8）
+    pub ai_classifier_threshold: f64,
+    /// 动态配置中心地址（spec §5.6，为空则使用本地缓存）
+    pub dynamic_config_source: String,
+    /// 告警静默时长（秒，spec §5.7，默认 1800=30min）
+    pub alert_silence_duration: u64,
+    /// 链路追踪采样率（spec §5.7，0.0-1.0，默认 1.0=全采样）
+    pub trace_sample_rate: f64,
+}
+
+/// JWT Audience 配置（spec §5.2）
+#[derive(Debug, Clone, Deserialize)]
+pub struct AudienceSettings {
+    /// 本服务期望的 audience 值
+    pub service_id: String,
+    /// grace period 时长（秒）
+    pub grace_period_secs: i64,
+    /// 是否启用 audience 校验
+    pub enabled: bool,
+}
+
+impl Default for V19Config {
+    fn default() -> Self {
+        Self {
+            audience_config: AudienceSettings {
+                service_id: "sz300-api".into(),
+                grace_period_secs: 3600,
+                enabled: false,
+            },
+            ai_classifier_threshold: 0.8,
+            dynamic_config_source: String::new(),
+            alert_silence_duration: 1800,
+            trace_sample_rate: 1.0,
+        }
+    }
+}
+
+/// 从环境变量加载 v1.9.0 配置（生产入口）
+pub fn load_v19_config() -> V19Config {
+    V19Config {
+        audience_config: AudienceSettings {
+            service_id: std::env::var("V19_AUDIENCE_SERVICE_ID")
+                .unwrap_or_else(|_| "sz300-api".into()),
+            grace_period_secs: std::env::var("V19_AUDIENCE_GRACE_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3600),
+            enabled: std::env::var("V19_AUDIENCE_ENABLED")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
+        },
+        ai_classifier_threshold: std::env::var("V19_AI_THRESHOLD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.8),
+        dynamic_config_source: std::env::var("V19_CONFIG_SOURCE").unwrap_or_default(),
+        alert_silence_duration: std::env::var("V19_ALERT_SILENCE_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1800),
+        trace_sample_rate: std::env::var("V19_TRACE_SAMPLE_RATE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0),
+    }
+}
+
+#[cfg(test)]
+mod v19_config_tests {
+    use super::*;
+
+    #[test]
+    fn test_v19_config_default() {
+        let config = V19Config::default();
+        assert!(!config.audience_config.enabled);
+        assert_eq!(config.ai_classifier_threshold, 0.8);
+        assert_eq!(config.alert_silence_duration, 1800);
+        assert_eq!(config.trace_sample_rate, 1.0);
+    }
+
+    #[test]
+    fn test_load_v19_config_from_env() {
+        std::env::set_var("V19_AUDIENCE_ENABLED", "true");
+        std::env::set_var("V19_AI_THRESHOLD", "0.9");
+        let config = load_v19_config();
+        assert!(config.audience_config.enabled);
+        assert_eq!(config.ai_classifier_threshold, 0.9);
+        std::env::remove_var("V19_AUDIENCE_ENABLED");
+        std::env::remove_var("V19_AI_THRESHOLD");
+    }
+}
+
 /// PostgreSQL 连接配置（从环境变量读取）
 ///
 /// 环境变量：
