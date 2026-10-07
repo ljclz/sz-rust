@@ -88,7 +88,7 @@ impl SpanBuffer {
 
     /// 推入 Span 条目（超出容量时丢弃最旧条目）
     pub fn push(&self, entry: SpanEntry) {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
         if entries.len() >= self.max_size {
             entries.pop_front();
         }
@@ -97,13 +97,13 @@ impl SpanBuffer {
 
     /// 排空缓冲并返回所有条目（用于后端恢复后补传）
     pub fn drain(&self) -> Vec<SpanEntry> {
-        let mut entries = self.entries.write().unwrap();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
         entries.drain(..).collect()
     }
 
     /// 当前缓冲条目数
     pub fn len(&self) -> usize {
-        self.entries.read().unwrap().len()
+        self.entries.read().unwrap_or_else(|e| e.into_inner()).len()
     }
 
     /// 缓冲是否为空
@@ -114,17 +114,17 @@ impl SpanBuffer {
     /// 设置采样率（0.0-1.0，超出范围自动钳位）
     pub fn set_sampling_rate(&self, rate: f64) {
         let clamped = rate.clamp(0.0, 1.0);
-        *self.sampling_rate.write().unwrap() = clamped;
+        *self.sampling_rate.write().unwrap_or_else(|e| e.into_inner()) = clamped;
     }
 
     /// 获取当前采样率
     pub fn sampling_rate(&self) -> f64 {
-        *self.sampling_rate.read().unwrap()
+        *self.sampling_rate.read().unwrap_or_else(|e| e.into_inner())
     }
 
     /// 根据采样率决定是否采样
     pub fn should_sample(&self) -> bool {
-        let rate = *self.sampling_rate.read().unwrap();
+        let rate = *self.sampling_rate.read().unwrap_or_else(|e| e.into_inner());
         if rate >= 1.0 {
             return true;
         }

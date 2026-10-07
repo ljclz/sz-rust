@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+#![allow(clippy::items_after_test_module)]
 
 /// v1.9.0 业务告警规则集
 #[cfg(feature = "v19-obs-closure")]
