@@ -29,6 +29,9 @@ pub mod config;
 pub mod controllers;
 /// 数据库连接池初始化（MySQL + PostgreSQL）
 pub mod db;
+/// v1.9.0 配置中心动态配置（spec §5.6）
+#[cfg(feature = "v19-config-center")]
+pub mod dynamic_config;
 /// v1.8.0 GraphQL 端点
 #[cfg(feature = "v18-graphql")]
 pub mod graphql;

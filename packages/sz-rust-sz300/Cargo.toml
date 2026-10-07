@@ -109,7 +109,7 @@ v19-ai-classify = ["dep:async-trait"]
 # v1.9.0 国际化接入 sz300
 v19-i18n = []
 # v1.9.0 配置中心动态配置
-v19-config-center = []
+v19-config-center = ["dep:async-trait"]
 # v1.9.0 可观测性闭环
 v19-obs-closure = ["dep:sz-rust-alert-engine", "dep:sz-rust-data-mask"]
 # v1.9.0 插件生态落地
