@@ -9617,6 +9617,7 @@ dependencies = [
  "sz-rust-state-facade",
  "sz-rust-upload",
  "sz-rust-websocket",
+ "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
  "tracing",

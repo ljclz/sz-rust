@@ -1,0 +1,45 @@
+{
+  "version": "v1.9.0-initial",
+  "measured_at": "2026-10-07T00:00:00Z",
+  "note": "初始基线，需通过 scripts/perf-regression.js --init 在目标环境实际压测后校准",
+  "hardware_spec": "待校准（首次 CI 运行时自动填充）",
+  "regression_threshold_pct": 5.0,
+  "hot_paths": [
+    {
+      "path": "/health",
+      "method": "GET",
+      "concurrency": 100,
+      "duration_s": 30,
+      "qps": 50000.0,
+      "p50_ms": 0.5,
+      "p95_ms": 1.0,
+      "p99_ms": 2.0,
+      "error_rate_pct": 0.0,
+      "total_requests": 1500000
+    },
+    {
+      "path": "/api/v1/product/list",
+      "method": "POST",
+      "concurrency": 50,
+      "duration_s": 30,
+      "qps": 8000.0,
+      "p50_ms": 3.0,
+      "p95_ms": 8.0,
+      "p99_ms": 15.0,
+      "error_rate_pct": 0.0,
+      "total_requests": 240000
+    },
+    {
+      "path": "/api/v1/order/list",
+      "method": "POST",
+      "concurrency": 50,
+      "duration_s": 30,
+      "qps": 7000.0,
+      "p50_ms": 4.0,
+      "p95_ms": 10.0,
+      "p99_ms": 20.0,
+      "error_rate_pct": 0.0,
+      "total_requests": 210000
+    }
+  ]
+}

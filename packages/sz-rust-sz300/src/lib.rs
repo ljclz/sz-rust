@@ -39,6 +39,8 @@ pub mod middleware;
 pub mod models;
 /// OpenAPI 规范构建与 API 文档端点
 pub mod openapi;
+/// v1.9.0 查询缓存（spec §5.8.1 规则 3）
+pub mod query_cache;
 /// v1.8.0 RBAC 细粒度权限
 #[cfg(feature = "v18-rbac")]
 pub mod rbac;
