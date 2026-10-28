@@ -1,0 +1,155 @@
+{
+  "total": 29,
+  "success": 29,
+  "already_exists": 0,
+  "failed": 0,
+  "generated_at": "2026-08-09T23:00:33.798Z",
+  "target_version": "0.7.0",
+  "records": [
+    {
+      "crate": "sz-rust-addons-loader",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-loader/0.7.0"
+    },
+    {
+      "crate": "sz-rust-auth-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-auth-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-http-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-http-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-macros",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-macros/0.7.0"
+    },
+    {
+      "crate": "sz-rust-observability",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-observability/0.7.0"
+    },
+    {
+      "crate": "sz-rust-operator",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-operator/0.7.0"
+    },
+    {
+      "crate": "sz-rust-orm-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-orm-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-cache-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-cache-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-infra-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-infra-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-middleware-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-middleware-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-orm-ext-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-orm-ext-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-pay-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-pay-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-pdf",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-pdf/0.7.0"
+    },
+    {
+      "crate": "sz-rust-router-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-router-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-mcp",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-mcp/0.7.0"
+    },
+    {
+      "crate": "sz-rust-state-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-state-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-mvc-facade",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-mvc-facade/0.7.0"
+    },
+    {
+      "crate": "sz-rust-core",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-core/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-cms",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-cms/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-crm",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-crm/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-ecommerce",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-ecommerce/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-erp",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-erp/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-forum",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-forum/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-im",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-im/0.7.0"
+    },
+    {
+      "crate": "sz-rust-addons-operate",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-addons-operate/0.7.0"
+    },
+    {
+      "crate": "sz-rust-cli",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-cli/0.7.0"
+    },
+    {
+      "crate": "sz-rust-examples",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-examples/0.7.0"
+    },
+    {
+      "crate": "sz-rust-sz300",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-sz300/0.7.0"
+    },
+    {
+      "crate": "sz-rust-tracing",
+      "status": "verified",
+      "crates_io_url": "https://crates.io/crates/sz-rust-tracing/0.7.0"
+    }
+  ]
+}

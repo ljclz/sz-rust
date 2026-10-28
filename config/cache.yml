@@ -1,0 +1,13 @@
+# 缓存配置 — 对齐 PHP think-cache
+default: memory
+
+stores:
+  memory:
+    type: memory
+    capacity: 10000
+
+  multi_level:
+    type: multi_level
+    levels:
+      - memory
+      - redis

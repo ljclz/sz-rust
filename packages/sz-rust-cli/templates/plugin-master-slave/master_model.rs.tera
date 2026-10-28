@@ -1,0 +1,17 @@
+{% extends "plugin-crud/model.rs.tera" %}
+
+{% block table_name %}{{ master_table }}{% endblock %}
+
+{% block table_name_doc %}{{ master_table }}{% endblock %}
+
+{% block struct_name %}{{ master_class_name }}{% endblock %}
+
+{% block fields %}
+{%- for field in master_fields %}
+    pub {{ field.name }}: {{ field.rust_type }},
+{%- endfor %}
+{% endblock %}
+
+{% block struct_name_impl %}{{ master_class_name }}{% endblock %}
+
+{% block table_name_method %}{{ master_table }}{% endblock %}

@@ -1,0 +1,19 @@
+{
+    "name": "report",
+    "version": "1.0.0",
+    "description": "Data aggregation report plugin template with dimension grouping, metrics, sorting, and pagination",
+    "required_variables": [
+        "plugin_name",
+        "table_name",
+        "class_name",
+        "fields",
+        "module_path",
+        "template_type",
+        "template_version",
+        "generated_at",
+        "primary_key_name",
+        "primary_key_type",
+        "dimensions",
+        "metrics"
+    ]
+}

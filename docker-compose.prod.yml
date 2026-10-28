@@ -1,0 +1,86 @@
+# docker-compose.prod.yml — 生产部署模板（2026-10-25 新增，2026-10-28 整改）
+#
+# 与开发环境 docker-compose.yml 的区别：
+#   1. 通过 SZ300_FEATURES 构建参数显式启用可选安全 feature
+#      （v18-rbac/v18-upload 等；security-headers/data-mask/audit-chain/key-rotation/jwt-audience
+#        已随 sz300 默认 features 启用，见 README「生产部署安全基线」）
+#   2. 强制设置 SZ300_METRICS_TOKEN / SZ300_CORS_ORIGIN（未设置拒绝启动）
+#   3. 日志级别收紧为 warn（减少敏感信息与噪声）
+#   4. 仅启动 MySQL（按需自行扩展 PostgreSQL/Redis 等）
+#   5. MySQL 端口仅绑定 127.0.0.1，禁止公网暴露
+#
+# 使用：
+#   export SZ300_JWT_SECRET="<强随机 JWT 密钥>"
+#   export SZ300_DB_PASSWORD="<强数据库密码>"
+#   export SZ300_METRICS_TOKEN="<强随机 metrics 令牌>"
+#   export SZ300_CORS_ORIGIN="https://<你的域名>"
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# TLS 说明（2026-10-28 整改）：
+#   - 本 compose 不包含 TLS 终止组件。生产必须置于 HTTPS 反向代理之后
+#     （nginx / ingress / 云负载均衡），由前置代理终止 TLS 并将明文 HTTP
+#     转发到本服务的 8300 端口。
+#   - SZ300_COOKIE_SECURE 默认 true，要求 Cookie 仅经 HTTPS 传输；
+#     若前置代理未正确终止 TLS，会话 Cookie 将无法工作，请确保代理已配置
+#     X-Forwarded-Proto 等标准头。
+#
+# 推荐的安全 feature 组合（可根据部署裁剪）：
+#   v18-security-headers  安全响应头（CSP/HSTS/X-Frame-Options）
+#   v18-data-mask          响应体敏感字段脱敏
+#   v18-rbac               细粒度 RBAC 权限
+#   v18-key-rotation       JWT 密钥轮换
+#   v18-audit-chain        审计链式哈希
+#   v18-upload             增强上传（大小限制 + 多存储后端）
+#   v18-websocket / v18-sse / v18-graphql 按需追加
+
+services:
+  sz300-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SZ300_FEATURES: "${SZ300_FEATURES:-v18-security-headers,v18-data-mask,v18-rbac,v18-key-rotation,v18-audit-chain,v18-upload}"
+    ports:
+      # 生产必须置于 HTTPS 反向代理之后；如需直连调试，建议仅绑定 127.0.0.1，
+      # 例如 "127.0.0.1:${SZ300_PORT:-8300}:8300"
+      - "${SZ300_PORT:-8300}:8300"
+    environment:
+      - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:?必须设置 JWT 密钥}
+      - SZ300_DB_HOST=${SZ300_DB_HOST:-mysql}
+      - SZ300_DB_PORT=${SZ300_DB_PORT:-3306}
+      - SZ300_DB_NAME=${SZ300_DB_NAME:-sz300}
+      - SZ300_DB_USER=${SZ300_DB_USER:-root}
+      - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
+      # 保护 /metrics 端点（强制要求，未设置则拒绝启动）
+      - SZ300_METRICS_TOKEN=${SZ300_METRICS_TOKEN:?必须设置 metrics 令牌}
+      # 可信前端来源（强制要求，未设置则拒绝启动；生产必须精确匹配实际域名）
+      - SZ300_CORS_ORIGIN=${SZ300_CORS_ORIGIN:?必须设置 CORS 允许来源}
+      # AI 能力（v2.0.0 合并企业版：设置后 /api/v1/ai/* 端点可用）
+      - SZ300_AI_API_KEY=${SZ300_AI_API_KEY:-}
+      - SZ300_AI_BASE_URL=${SZ300_AI_BASE_URL:-}
+      # 生产日志级别：仅 warn+ 输出，避免敏感信息进入日志
+      - RUST_LOG=${RUST_LOG:-warn,sz_rust_sz300=info}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:?必须设置 MySQL root 密码}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-sz300}
+    ports:
+      # 安全整改（2026-10-28）：仅绑定 127.0.0.1，禁止将 MySQL 暴露到宿主机公网
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

@@ -1,0 +1,122 @@
+name: AI Facade Performance Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/sz-rust-ai-facade/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/sz-rust-ai-facade/**'
+  workflow_dispatch:
+
+jobs:
+  perf-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+
+      - name: Verify 8 benchmark groups exist
+        run: |
+          set -euo pipefail
+          LISTING=$(cargo bench --package sz-rust-ai-facade --bench ai_facade_bench -- --list 2>&1)
+          echo "$LISTING"
+          REQUIRED=(
+            "chat_latency"
+            "stream_throughput"
+            "embedding_batch"
+            "rag_three_stage"
+            "agent_multi_round"
+            "concurrent_qps_p99"
+            "context_truncation"
+            "memory_rss"
+          )
+          MISSING=0
+          for NAME in "${REQUIRED[@]}"; do
+            if echo "$LISTING" | grep -q "$NAME"; then
+              echo "✅ $NAME present"
+            else
+              echo "❌ $NAME MISSING"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::Missing $MISSING benchmark groups (required 8)"
+            exit 1
+          fi
+          echo "✅ All 8 benchmark groups present"
+
+      # SDET P1-5：PR 从 gh-pages-bench-ai-facade 分支恢复上次保存的 criterion 基线，
+      # 无基线（首次运行）时降级为 save-baseline
+      - name: Restore baseline criterion data (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin gh-pages-bench-ai-facade 2>/dev/null || echo "no baseline branch yet"
+          if git rev-parse --verify origin/gh-pages-bench-ai-facade >/dev/null 2>&1; then
+            git checkout origin/gh-pages-bench-ai-facade -- target/criterion/
+            echo "BASELINE_AVAILABLE=1" >> "$GITHUB_ENV"
+            echo "baseline restored from gh-pages-bench-ai-facade"
+          else
+            echo "BASELINE_AVAILABLE=0" >> "$GITHUB_ENV"
+            echo "no baseline available, will save new baseline"
+          fi
+
+      - name: Run benchmarks with baseline
+        run: |
+          if [ "$BASELINE_AVAILABLE" = "1" ]; then
+            cargo bench --package sz-rust-ai-facade --bench ai_facade_bench -- \
+              --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+              --baseline current
+          else
+            cargo bench --package sz-rust-ai-facade --bench ai_facade_bench -- \
+              --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+              --save-baseline current
+          fi
+
+      # SDET P1-5：性能回归门禁接线（与 current 基线对比，延迟增加 >10% 阻塞 PR）
+      - name: Performance regression gate
+        if: github.event_name == 'pull_request' && env.BASELINE_AVAILABLE == '1'
+        run: bash scripts/perf/regression_gate.sh current 10
+
+      - name: Generate baseline report
+        run: |
+          cargo run --package sz-rust-ai-facade --bin generate_baseline_report
+
+      - name: Save benchmark results to branch (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages-bench-ai-facade
+          git add -f target/criterion/
+          git commit -m "Update ai-facade benchmark baseline for ${{ github.sha }}"
+          git push origin gh-pages-bench-ai-facade --force
+
+      - name: Upload criterion results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-facade-criterion-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Upload baseline report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-facade-perf-report-${{ github.sha }}
+          path: docs/audit/ai-facade-performance-baseline.md
+          retention-days: 90

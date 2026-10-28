@@ -1,0 +1,67 @@
+# cargo-audit 配置 — 安全漏洞扫描
+#
+# cargo-audit 0.22.2 配置格式（本文件位于 .cargo/audit.toml 才会被 cargo-audit 自动加载）
+# 字段：ignore / informational_warnings / severity_threshold
+#
+# 说明：2026-10-25 架构评测修复。原根目录 audit.toml 不被 cargo-audit 自动加载，
+# 导致 ignore 列表从未生效。本文件为唯一生效配置，根目录 audit.toml 已移除。
+
+[advisories]
+# 忽略的 advisory（与 deny.toml 保持一致，不再报告）
+ignore = [
+    # === rustls-webpki 传递依赖系列（上游 0.104 为不兼容版本，无稳定补丁）===
+    # 来源: reqwest/tokio-rustls → rustls → rustls-webpki 0.102.8/0.103.15
+    # 影响: CRL/name-constraints 校验在默认编译中不参与；项目使用 rustls-tls-native-roots
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0382",
+    # === rustls 0.23.45（0.23.x 已是最新，0.24 尚为 dev）===
+    # RUSTSEC-2026-0346: Debug 输出泄露 TLS 秘密（需本地 Debug 访问）
+    # RUSTSEC-2026-0347/0349: ECH 场景（项目未启用 ECH）
+    # RUSTSEC-2026-0348: Brotli 证书解压（rustls 未启用 brotli feature）
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0347",
+    "RUSTSEC-2026-0348",
+    "RUSTSEC-2026-0349",
+    # === zip 2.4.2（rust_xlsxwriter 写 xlsx / utoipa-swagger-ui 构建期嵌入）===
+    # 影响: 三个公告均针对 extract()/ZipStreamReader::extract() 解压攻击者控制的归档；
+    # 本 workspace 仅使用 zip 2.4.2 写 xlsx 与构建期嵌入自有 dist，无运行时解压攻击面。
+    # 注: Cargo.lock 中 zip 8.6.0 已由 calamine（sz-rust-pdf）真实引入，无 MSRV 兼容问题；公告针对 2.4.2 解压路径。
+    # 跟踪: 父 crate 升级后移除
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    # === rsa 0.9.10 及其传递依赖（jsonwebtoken rust_crypto feature）===
+    # 影响: Marvin Attack 针对 RSA 私钥解密时序；jsonwebtoken 仅使用公钥签名验证。
+    # rsa 0.9.x 无稳定补丁（0.10 为 RC）。跟踪: jsonwebtoken 迁移后端后移除
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2026-0387",
+    "RUSTSEC-2026-0385",
+    # === lru 0.12.5（cache-facade 可选 feature lru-cache，生产默认不启用）===
+    "RUSTSEC-2026-0002",
+    "RUSTSEC-2026-0253",
+    # === rand 0.7.3（旧版传递依赖，仅自定义 logger 场景 unsound）===
+    "RUSTSEC-2026-0097",
+    # === webpki-roots 1.0.9（hyper-rustls/reqwest/sqlx-core 传递依赖；项目使用 native-roots 缓解）===
+    "RUSTSEC-2026-0381",
+    # === 测试/构建期传递依赖 ===
+    "RUSTSEC-2025-0111", # tokio-tar（testcontainers dev-dependency，仅测试）
+    "RUSTSEC-2024-0437", # protobuf 2.28.0（prometheus 0.13.4 → sz-rust-rag / sz-rust-migration 非可选引入，仅指标编码，无不可信输入解析面）
+    # === unmaintained 系列（仅警告，无安全风险）===
+    "RUSTSEC-2024-0436", # paste unmaintained（wasmi_core/pulp/oracle 传递依赖，仅宏展开期）
+    "RUSTSEC-2025-0134", # rustls-pemfile unmaintained（tokio-rustls 传递依赖，仅证书解析加载）
+    "RUSTSEC-2026-0192", # ttf-parser unmaintained（ab_glyph→owned_ttf_parser 传递依赖，仅字体解析）
+    # RUSTSEC-2026-0258: h2 empty DATA frames DoS（h2 < 0.4.16）；Cargo.lock 中 h2 0.4.19 已含修复版本 0.4.16+，公告不适用
+    "RUSTSEC-2026-0258",
+    # RUSTSEC-2024-0370: proc-macro-error unmaintained（1.0.4 在树中，过程宏展开期依赖，无运行时攻击面；无补丁版本）
+    "RUSTSEC-2024-0370",
+]
+
+# 信息性公告（不阻断，仅警告）
+informational_warnings = [
+    "unmaintained",
+    "unsound",
+    "notice",
+]

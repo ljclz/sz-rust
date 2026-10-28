@@ -1,0 +1,238 @@
+[
+  {
+    "crate": "sz-rust-addons-loader",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 1
+  },
+  {
+    "crate": "sz-rust-auth-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 2
+  },
+  {
+    "crate": "sz-rust-http-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 3
+  },
+  {
+    "crate": "sz-rust-macros",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 4
+  },
+  {
+    "crate": "sz-rust-observability",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 5
+  },
+  {
+    "crate": "sz-rust-operator",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 6
+  },
+  {
+    "crate": "sz-rust-orm-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 7
+  },
+  {
+    "crate": "sz-rust-cache-facade",
+    "layer": 1,
+    "dependencies": [
+      "sz-rust-orm-facade"
+    ],
+    "publish_order": 8
+  },
+  {
+    "crate": "sz-rust-infra-facade",
+    "layer": 1,
+    "dependencies": [
+      "sz-rust-orm-facade"
+    ],
+    "publish_order": 9
+  },
+  {
+    "crate": "sz-rust-middleware-facade",
+    "layer": 2,
+    "dependencies": [
+      "sz-rust-orm-facade",
+      "sz-rust-cache-facade",
+      "sz-rust-http-facade",
+      "sz-rust-infra-facade",
+      "sz-rust-auth-facade"
+    ],
+    "publish_order": 10
+  },
+  {
+    "crate": "sz-rust-orm-ext-facade",
+    "layer": 1,
+    "dependencies": [
+      "sz-rust-orm-facade"
+    ],
+    "publish_order": 11
+  },
+  {
+    "crate": "sz-rust-pay-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 12
+  },
+  {
+    "crate": "sz-rust-pdf",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 13
+  },
+  {
+    "crate": "sz-rust-router-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 14
+  },
+  {
+    "crate": "sz-rust-mcp",
+    "layer": 1,
+    "dependencies": [
+      "sz-rust-router-facade",
+      "sz-rust-orm-facade",
+      "sz-rust-http-facade",
+      "sz-rust-pay-facade"
+    ],
+    "publish_order": 15
+  },
+  {
+    "crate": "sz-rust-state-facade",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 16
+  },
+  {
+    "crate": "sz-rust-mvc-facade",
+    "layer": 3,
+    "dependencies": [
+      "sz-rust-http-facade",
+      "sz-rust-infra-facade",
+      "sz-rust-middleware-facade",
+      "sz-rust-orm-facade",
+      "sz-rust-state-facade"
+    ],
+    "publish_order": 17
+  },
+  {
+    "crate": "sz-rust-core",
+    "layer": 4,
+    "dependencies": [
+      "sz-rust-macros",
+      "sz-rust-addons-loader",
+      "sz-rust-orm-facade",
+      "sz-rust-orm-ext-facade",
+      "sz-rust-router-facade",
+      "sz-rust-mvc-facade",
+      "sz-rust-http-facade",
+      "sz-rust-cache-facade",
+      "sz-rust-state-facade",
+      "sz-rust-middleware-facade",
+      "sz-rust-infra-facade",
+      "sz-rust-auth-facade",
+      "sz-rust-pay-facade"
+    ],
+    "publish_order": 18
+  },
+  {
+    "crate": "sz-rust-addons-cms",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 19
+  },
+  {
+    "crate": "sz-rust-addons-crm",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 20
+  },
+  {
+    "crate": "sz-rust-addons-ecommerce",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 21
+  },
+  {
+    "crate": "sz-rust-addons-erp",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 22
+  },
+  {
+    "crate": "sz-rust-addons-forum",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 23
+  },
+  {
+    "crate": "sz-rust-addons-im",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 24
+  },
+  {
+    "crate": "sz-rust-addons-operate",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 25
+  },
+  {
+    "crate": "sz-rust-cli",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 26
+  },
+  {
+    "crate": "sz-rust-examples",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core"
+    ],
+    "publish_order": 27
+  },
+  {
+    "crate": "sz-rust-sz300",
+    "layer": 5,
+    "dependencies": [
+      "sz-rust-core",
+      "sz-rust-mvc-facade",
+      "sz-rust-middleware-facade",
+      "sz-rust-http-facade",
+      "sz-rust-state-facade",
+      "sz-rust-observability"
+    ],
+    "publish_order": 28
+  },
+  {
+    "crate": "sz-rust-tracing",
+    "layer": 0,
+    "dependencies": [],
+    "publish_order": 29
+  }
+]

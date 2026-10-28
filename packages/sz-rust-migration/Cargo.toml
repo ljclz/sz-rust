@@ -1,0 +1,45 @@
+[package]
+name = "sz-rust-migration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust AI 辅助迁移工具 — TP6 → sz-rust 端到端迁移流水线"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["migration", "tp6", "thinkphp", "sz-rust", "ai"]
+categories.workspace = true
+
+[dependencies]
+sz-rust-ai-facade = { workspace = true }
+sz-rust-sdd = { workspace = true }
+sz-rust-capability = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+arc-swap = { workspace = true }
+parking_lot = { workspace = true }
+regex = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+prometheus = "0.13"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+mockall = "0.13"
+wiremock = "0.6"
+
+[lib]
+name = "sz_rust_migration"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"

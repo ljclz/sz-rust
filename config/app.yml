@@ -1,0 +1,18 @@
+# 应用配置 — 对齐 PHP config/app.php
+app_host: ""
+app_namespace: ""
+with_route: true
+with_event: true
+default_app: "index"
+default_timezone: "Asia/Shanghai"
+auto_multi_app: true
+app_map:
+  oapc: oapc
+  admin: admin
+  api: api
+  farm: farm
+  oapi: oapi
+  cashier: cashier
+  scene: scene
+deny_app_list:
+  - common

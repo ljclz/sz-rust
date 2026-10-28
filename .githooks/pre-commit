@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# sz-rust pre-commit 钩子：四门禁快速检查（fmt / clippy 增量 / unwrap 铁律）
+# 安装：git config core.hooksPath .githooks
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# sccache 未安装时禁用，避免 RUSTC_WRAPPER 指向不存在的二进制
+if ! command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER=""
+fi
+
+# git commit 触发的钩子进程 PATH 可能不含 ~/.cargo/bin（Windows Git Bash 常见），
+# 显式探测并追加，确保 cargo 可用
+if ! command -v cargo >/dev/null 2>&1; then
+  for dir in "$HOME/.cargo/bin" "$USERPROFILE/.cargo/bin"; do
+    if [ -x "$dir/cargo" ] || [ -x "$dir/cargo.exe" ]; then
+      export PATH="$dir:$PATH"
+      break
+    fi
+  done
+fi
+
+echo "▶ 1/3 cargo fmt --check（逐包执行，规避 Windows 命令行长度限制）"
+# cargo fmt --all 在 Windows 上会把本地 path 依赖（含 sz-orm 全家桶）的所有文件一次性
+# 传给 rustfmt，导致命令行超长（os error 206）。改为逐 workspace member 检查。
+PKG_LIST=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python -c "import json,sys; print('\n'.join(p['name'] for p in json.load(sys.stdin)['packages']))" | tr -d '\r')
+FMT_FAILED=""
+for pkg in $PKG_LIST; do
+  if ! cargo fmt -p "$pkg" -- --check 2>/dev/null; then
+    FMT_FAILED="$FMT_FAILED $pkg"
+  fi
+done
+if [ -n "$FMT_FAILED" ]; then
+  echo "❌ 格式不合格：$FMT_FAILED"
+  exit 1
+fi
+echo "✅ fmt 通过（$(printf '%s\n' "$PKG_LIST" | sed '/^$/d' | wc -l) 个包）"
+
+echo "▶ 2/3 铁律 2：生产代码裸 unwrap 检查"
+if [ -f scripts/check-unwrap.py ]; then
+  TOTAL=$(python scripts/check-unwrap.py 2>/dev/null | grep -oE 'AUTHORITATIVE_PROD_UNWRAP: [0-9]+' | awk '{print $2}')
+  if [ "${TOTAL:-0}" != "0" ]; then
+    echo "⚠️ 发现 ${TOTAL} 处候选 unwrap（含 examples，生产代码需人工复核）"
+  else
+    echo "✅ 合规"
+  fi
+fi
+
+echo "▶ 3/4 cargo clippy（工作区，-D warnings）"
+if ! cargo clippy --workspace --all-targets -- -D warnings 2>/dev/null; then
+  echo "❌ clippy 未通过"
+  exit 1
+fi
+
+echo "▶ 4/4 OpenAPI-路由一致性检查"
+if [ -f scripts/audit/openapi-consistency.js ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    echo "❌ OpenAPI 一致性检查需要 node，但未找到 node（fail-closed）"
+    exit 1
+  fi
+  if ! node scripts/audit/openapi-consistency.js; then
+    echo "❌ OpenAPI spec 与路由定义不一致"
+    exit 1
+  fi
+else
+  echo "❌ scripts/audit/openapi-consistency.js 缺失，无法执行 OpenAPI 一致性检查（fail-closed）"
+  exit 1
+fi
+
+echo "✅ pre-commit 检查全部通过"
