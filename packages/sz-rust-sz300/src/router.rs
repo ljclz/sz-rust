@@ -402,10 +402,13 @@ pub fn create_router(state: AppState) -> Router {
     //
     // 2026-10-28：从最外层下移到 api_routes 内层（auth 之内）——
     // 鉴权中间件先注入 CurrentUser，审计才能记录真实操作人；
-    // 连接池由最外层的 `Extension<Arc<Pool>>` 提供（见下方 .layer(Extension(..))）。
+    // 2026-10-29：落库改为有界异步缓冲（AuditSink），后台任务持连接池写入。
     #[cfg(feature = "v18-audit-chain")]
     let api_routes = api_routes.layer(middleware::from_fn_with_state(
-        state.chain_auditor.clone(),
+        (
+            state.chain_auditor.clone(),
+            Some(state.audit_sink.clone()),
+        ),
         crate::middleware::audit_chain::audit_chain_middleware,
     ));
 

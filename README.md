@@ -185,7 +185,7 @@ sz-rust/                          # workspace 根目录（唯一真源）
 详细文档位于 `docs/` 目录：
 
 - [docs 根目录文档导航](docs/README.md) — docs/ 根目录全部文档索引（ADR/审计/基准/规范/指南等）
-- [ADR 索引](docs/adr/README.md) — 49 个架构决策记录（`docs/adr/*.md`，2026-10-29 实测计数）
+- [ADR 索引](docs/adr/README.md) — 50 个架构决策记录（`docs/adr/*.md`，2026-10-30 实测计数）
 - [ADR-011 可观测性模块](docs/adr/0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) — MetricsRegistry 设计、SLO 多窗口燃烧率、四层可观测性模型（v0.2.0）
 - [ADR-012 分布式追踪](docs/adr/0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) — W3C TraceContext 标准、OTLP exporter 路径（v0.2.0）
 - [ThinkPHP API 对照表](docs/thinkphp-api-mapping.md) — SZ-Rust 门面与 ThinkPHP API 逐项对照

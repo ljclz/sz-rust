@@ -132,6 +132,8 @@ async fn test_dispatch_topic_routing_integration() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -245,6 +247,8 @@ async fn test_start_consumer_graceful_shutdown_integration() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]

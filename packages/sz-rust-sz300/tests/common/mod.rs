@@ -75,6 +75,13 @@ pub fn make_state(pool: Pool) -> AppState {
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            // 集成测试保持通道畅通但不落库（避免依赖测试 DB 的 operate_log 表）。
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -117,6 +124,13 @@ pub fn make_state_with_marketplace(
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            // 集成测试保持通道畅通但不落库（避免依赖测试 DB 的 operate_log 表）。
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -408,4 +422,12 @@ pub async fn setup_order_table(pool: &Pool) {
 pub async fn setup_all_tables(pool: &Pool) {
     migrate_schema(pool).await;
     teardown_all(pool).await;
+}
+
+/// 构造测试用审计缓冲（通道保持畅通但不落库），避免集成测试中的丢弃噪音。
+#[cfg(feature = "v18-audit-chain")]
+pub fn test_audit_sink() -> Arc<sz_rust_sz300::middleware::audit_chain::AuditSink> {
+    let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+    sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+    sink
 }

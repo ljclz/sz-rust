@@ -302,6 +302,12 @@ fn make_upload_state(pool: Pool) -> AppState {
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         upload_config: UploadConfig {
             backend: StorageBackend::local("./test_uploads"),
             max_size: 1024,

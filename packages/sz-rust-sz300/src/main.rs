@@ -267,6 +267,21 @@ async fn main() -> anyhow::Result<()> {
         ))
     };
 
+    // v1.8.0 审计落库异步缓冲（有界通道 + 后台重试；丢弃计数暴露到 /metrics）
+    #[cfg(feature = "v18-audit-chain")]
+    let (audit_sink, audit_rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(Some(
+        metrics_registry.register_counter(
+            "sz300_audit_dropped_total",
+            "Audit records dropped due to full buffer or exhausted retries",
+        ),
+    ));
+    #[cfg(feature = "v18-audit-chain")]
+    sz_rust_sz300::middleware::audit_chain::spawn_audit_worker(
+        audit_sink.clone(),
+        audit_rx,
+        db_pool.clone(),
+    );
+
     let app_state = AppState {
         db_pool,
         pg_pool,
@@ -279,6 +294,8 @@ async fn main() -> anyhow::Result<()> {
         key_manager,
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink,
         #[cfg(feature = "v18-upload")]
         upload_config: config::upload_config(),
         #[cfg(feature = "v18-graphql")]

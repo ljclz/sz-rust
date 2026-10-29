@@ -264,6 +264,13 @@ mod http_endpoint {
             chain_auditor: Arc::new(
                 sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
             ),
+            #[cfg(feature = "v18-audit-chain")]
+            audit_sink: {
+                let (sink, rx) =
+                    sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+                sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+                sink
+            },
             #[cfg(feature = "v18-upload")]
             upload_config: sz_rust_sz300::config::upload_config(),
             #[cfg(feature = "v18-graphql")]

@@ -19,7 +19,7 @@ use axum::middleware;
 use axum::routing::{get, post};
 use axum::Router;
 use sz_rust_middleware_facade::audit_chain::{AuditRecord, ChainHashAuditor};
-use sz_rust_sz300::middleware::audit_chain::audit_chain_middleware;
+use sz_rust_sz300::middleware::audit_chain::{AuditSink, audit_chain_middleware};
 use tower::ServiceExt;
 
 // ============================================================================
@@ -103,7 +103,7 @@ fn make_router(auditor: Arc<ChainHashAuditor>) -> Router {
         .route("/api/v1/test_get", get(|| async { "ok" }))
         .route("/health", get(|| async { "healthy" }))
         .layer(middleware::from_fn_with_state(
-            auditor,
+            (auditor, None::<Arc<AuditSink>>),
             audit_chain_middleware,
         ))
 }

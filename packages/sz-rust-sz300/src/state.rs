@@ -26,6 +26,9 @@ pub struct AppState {
     /// v1.8.0 链式哈希审计器（feature gate 控制）
     #[cfg(feature = "v18-audit-chain")]
     pub chain_auditor: Arc<sz_rust_middleware_facade::audit_chain::ChainHashAuditor>,
+    /// v1.8.0 审计落库异步缓冲（feature gate 控制；生产由 `main.rs` 接线后台落库任务）
+    #[cfg(feature = "v18-audit-chain")]
+    pub audit_sink: Arc<crate::middleware::audit_chain::AuditSink>,
     /// v1.8.0 上传配置（feature gate 控制）
     #[cfg(feature = "v18-upload")]
     pub upload_config: crate::config::UploadConfig,
@@ -95,6 +98,13 @@ impl AppState {
             chain_auditor: Arc::new(
                 sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
             ),
+            #[cfg(feature = "v18-audit-chain")]
+            audit_sink: {
+                // 单元测试不接线后台落库：直接丢弃接收端（通道关闭），
+                // 审计中间件在这些测试中不投递，因此不会有丢弃噪音。
+                let (sink, _rx) = crate::middleware::audit_chain::AuditSink::new(None);
+                sink
+            },
             #[cfg(feature = "v18-upload")]
             upload_config: crate::config::upload_config(),
             #[cfg(feature = "v18-graphql")]
