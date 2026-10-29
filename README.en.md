@@ -182,7 +182,7 @@ sz-rust/                          # workspace root (single source of truth)
 
 Detailed docs in `docs/` directory:
 
-- [ADR Index](docs/adr/README.en.md) — 47 Architecture Decision Records (ADR-001~023 + ADR-026~044 + ADR-AI-01~05)
+- [ADR Index](docs/adr/README.en.md) — 49 Architecture Decision Records (counted from `docs/adr/*.md` on 2026-10-29)
 - [ADR-011 Observability](docs/adr/0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) — MetricsRegistry design, SLO multi-window burn rate, four-layer observability model (v0.2.0)
 - [ADR-012 Distributed Tracing](docs/adr/0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) — W3C TraceContext standard, OTLP exporter path (v0.2.0)
 - [ThinkPHP API Mapping](docs/thinkphp-api-mapping.md) — SZ-Rust facade vs ThinkPHP API reference
@@ -196,16 +196,17 @@ Detailed docs in `docs/` directory:
 
 ## CI Gates & Quality Assurance
 
-Project implements its gate system via GitHub Actions (`ci.yml` actually has 26 jobs, corrected by real measurement on 2026-10-25 — the old README claimed 23 jobs with "no continue-on-error", a stale description; `machete` runs with `continue-on-error: true` and is non-blocking; `coverage` and `miri` are blocking gates — `miri` fails closed on UB/memory issues):
+Project implements its gate system via GitHub Actions (`ci.yml` actually has 37 jobs, re-verified on 2026-10-28 by parsing the direct children of `jobs:` — the old README claimed 23 jobs with "no continue-on-error", a stale description; `machete` runs with `continue-on-error: true` and is non-blocking; `coverage` and `miri` are blocking gates — `miri` fails closed on UB/memory issues):
 
 | Workflow | Trigger | Responsibility |
 |----------|---------|----------------|
-| `ci.yml` | push/PR | 26 jobs: fmt / check / clippy / test / doc(missing_docs) / audit / deny(cargo-deny) / no-placeholder / feature-matrix / unused-deps / outdated / machete* / adr-coverage / coverage / compile-time / miri / windows / ai-facade / **doc-code-consistency (gate 19, no phantom delivery)** / **adr-code (gate 20, ADR code reference check)** / **assertion-value (gate 21, no empty tests)** / **feature-consistency (gate 22, feature declaration check)** / license-compliance (Apache-2.0 header + field) / no-crate-dead-code / i18n-completeness / boundary-check (* marks `continue-on-error` non-blocking; `coverage` and `miri` are blocking gates; the former isolation job was removed along with the ADR-043 Single Edition merge) |
+| `ci.yml` | push/PR | 37 jobs: fmt / check / clippy / test / doc(missing_docs) / audit / deny(cargo-deny) / no-placeholder / feature-matrix / unused-deps / outdated / machete* / adr-coverage / coverage / compile-time / miri / windows / ai-facade / **doc-code-consistency (gate 19, no phantom delivery)** / **adr-code (gate 20, ADR code reference check)** / **assertion-value (gate 21, no empty tests)** / **feature-consistency (gate 22, feature declaration check)** / license-compliance (Apache-2.0 header + field) / no-crate-dead-code / i18n-completeness / boundary-check (* marks `continue-on-error` non-blocking; `coverage` and `miri` are blocking gates; the former isolation job was removed along with the ADR-043 Single Edition merge) |
 | `coverage.yml` | push/PR | cargo-tarpaulin coverage + Codecov upload |
 | `benchmark.yml` | push main / PR | criterion benchmarks + **9-category baseline gate** + gh-pages-bench branch |
-| `security.yml` | push/PR + Every Sunday 00:00 UTC | cargo-audit (**blocking**; ignore list and reasons in `.cargo/audit.toml`) + **unmaintained compile check (paste/rustls-pemfile/rkyv verified as real deps)** + cargo-geiger (non-blocking summary) |
+| `security.yml` | push/PR + Every Sunday 00:00 UTC | cargo-audit (**blocking**; ignore list and reasons in `.cargo/audit.toml`) + **unmaintained compile check (paste/rustls-pemfile verified as real deps)** + cargo-geiger (non-blocking summary) |
 | `fuzz.yml` | push/PR + Every Saturday 00:00 UTC + workflow_dispatch | 10 cases × 1000 iterations fuzzing, supports `FUZZ_ITERATIONS` |
 | `mcdc.yml` / `mutants.yml` | push/PR | Branch coverage gate / mutation testing |
+| `perf-gate.yml` | PR (baseline shape only) / Every Sunday 04:00 UTC / workflow_dispatch | **End-to-end HTTP performance gate** (`scripts/perf-regression.js` v2): MySQL 9.6 + migrations 001–007 + deterministic 20k-row dataset + release build + real load (10 s warmup / 60 s steady × 3). A missing fingerprint baseline **fails** the gate and seeds the artifact — never "no baseline ⇒ pass". Methodology and thresholds: ADR-046 |
 | `publish-oss.yml` / `release.yml` | Release flow | crates.io publishing / release build |
 | `marketplace-ci.yml` | Marketplace path changes | ✅ references `sz-rust-marketplace` (concretely delivered: 130 tests + CLI wiring; the former "fictional delivery" characterization is outdated) |
 

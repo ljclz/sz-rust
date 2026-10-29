@@ -26,6 +26,47 @@
   （`45-50s 5099/5099`），`connection_created_total` 20→40（起库后重建连接），`acquire_failed_total` 停止增长。
 - **未覆盖**：上游 `release`/`Drop` 归还前不校验 `is_connected()` 的死连接路径未单独构造用例（上游增强项 ③）。
 
+### Changed — 性能工程整改（2026-10-29）
+
+> 来源：`docs/audit/2026-10-29-性能工程评测报告.md`（27/100，grade F）与 `docs/audit/2026-10-29-性能整改五维审查.md`。
+> 决策记录：`docs/adr/0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md`。
+
+- **限流键修复**：`trust_proxy=false` 时客户端键恒为 `"unknown"`（全站共用一个桶，实测 429 占 89.95%/94.24%）→ 改从 `ConnectInfo<SocketAddr>` 取对端 IP；仅 `trust_proxy=true` 才解析 `X-Forwarded-For`/`X-Real-IP` 且必须可解析为 `IpAddr`。`max_keys` 溢出的 `Err`（中间件 fail-open → 限流被完全绕过）改为「按 `full_refill` 回收空闲桶 + 共享兜底桶」；`reset_at` 由 `now.elapsed()`（≈0）改为真实 Unix 毫秒。`main.rs` 改用 `into_make_service_with_connect_info::<SocketAddr>()`。
+- **熔断器统计窗口 O(1)**：`Vec<(bool, Instant)>` + 每请求全窗 `retain` 改为 60 个定长时间桶环形缓冲（默认 60 s 窗口 = 1 s 粒度）；失败时仅固定 60 槽扫描，Closed→Open→HalfOpen→Closed 语义与探测行为不变。修复前同二进制 `STAT_WINDOW=1` 实测：单发生器 4.4k → 6.4–6.7k rps、p99 83 → 17.6–23.8 ms。
+- **连接池探活默认关闭**：`PoolConfig::test_before_acquire` 与 PostgreSQL 池由硬编码 `true` 改为默认 `false`（少一次 `SELECT 1` 往返），保留 `SZ300_POOL_TEST_BEFORE_ACQUIRE` / `SZ_PG_POOL_TEST_BEFORE_ACQUIRE` 回退开关。
+- **日志级别**：`product/order/merchant/device` 读路径每请求 2 条 `info!` 降为 `debug!`；`main.rs` 默认过滤器由 `info,sz_rust_sz300=debug` 改为 `info`（否则降级不生效），`docker-compose.yml` 的 `RUST_LOG` 同步改为 `info`。
+- **业务热路径 grace-period 告警采样**（现场验证中新发现，评测与整改均未覆盖）：`auth_service.rs` 对「无 `aud` 旧令牌在 grace period 内放行」按请求写 `warn!`，实测占全部日志字节的 **99.78%**（156,708 个业务请求 → 157,068 行 WARN / 49,726,841 B）——即持有无 `aud` 令牌的客户端可用最小成本灌满日志盘。改为 `audience::WarnSampler` 60 s 采样窗口（`WARN_SAMPLE_INTERVAL_SECS`），窗口内抑制计数随下条告警一并输出（`suppressed_in_window`），安全信号不丢；同步 `middleware/auth_middleware.rs` 文档注释。复测两档同结论：debug 档 83,067 请求 → **3 行 / 3,149 B**；release 档 251,267 请求 → **7 行 / 2,600 B**（全日志 18 行 / 4,637 B），且「已输出 + `suppressed_in_window` 求和」与请求数守恒（无丢事件）。
+- **性能门禁 v2**（`scripts/perf-regression.js` 全量重写）：预热 10 s + 稳态 60 s × 3 次重复、闭环；QPS 只计 2xx/3xx、错误率独立门禁（>0.5% 失败）；分位数覆盖全部已完成响应；有效阈值 = max(名义 5%, 3×CV)；基线按环境指纹分槽（`schema=2`），删除全部跨机器占位数字；现场签发 JWT + CSRF 双提交；默认仅允许回环地址；输出 p50/p90/p95/p99/p99.9 中位值；退出码 0/1/2/3。
+- **门禁接入 CI**：新增 `.github/workflows/perf-gate.yml`（PR 仅做基线结构检查；手动/定时跑 MySQL 9.6 + migrations 001–007 + `deploy/sql/perf-seed.sql` 确定性 2 万行数据集 + release 构建 + 真实负载），无指纹基线时退出码 3 **判定失败**并播种 artifact，不产生"假绿"。`deploy/sql/perf-seed.sql` 在首次真库运行中暴露并修正：`merchant.market_id` 为 NOT NULL 且无默认值（原 seed 缺 `market`/`merchant` 行直接 `ERROR 1364`），现显式插入市场与商户、补 `good.stock`、按 002 语义分布订单状态、`created_at` 按分钟确定性展开。
+- 验证：`cargo test -p sz-rust-middleware-facade --lib -- circuit_breaker rate_limit` = **86 passed / 0 failed**；`cargo test -p sz-rust-core --test middleware_chaos` = **26 passed / 0 failed**；`cargo test -p sz-rust-sz300 --lib` = **106 passed / 0 failed**；`cargo clippy -p sz-rust-sz300 --all-targets -- -D warnings` = 0 error；`cargo check -p sz-rust-sz300 --bin sz300-server` = 0 error。门禁 v2 在一次性回环桩服务上三向验证（稳定 exit 0 / 注入 20 ms 延迟 exit 1 / 2.255% 错误率 exit 1），并在一次性 MySQL 9.6 + 真库 release 实例上端到端跑通（7/7 migration + seed + 三端点 0% 错误率，详见 `docs/audit/2026-10-29-性能整改现场验证记录.md`）。
+- **已实测收益**：`/health`（不查库、不走鉴权分支，唯一同档可比项）c=50 中位 QPS 4364 → **5886.8 / 6248.7（两轮独立 release 实测，+34.9% ~ +43.2%，对外只引用下界 +34.9%）**，p99 32–79 ms → **12.10–12.99 ms（−59%~−85%）**；第一轮测量期间有 34.5–100% 外部负载干扰，属保守下界——两轮已达单进程压测器自身天花板（6.2–6.9k）的 92–99%，瓶颈已从熔断器全局锁转移到压测器。
+- **未验证**：业务端点（`product/list`、`order/list`）修复前后吞吐 A/B 仍为未验证——两侧 DB 版本/部署形态/buffer pool 与数据集行数三重不可比，详见验证记录 §1/§8；评测 §6 的 +86% / 3–4× 为外推值，不得作为已实现收益引用。
+
+### Fixed — 独立评测整改执行（2026-10-28）
+
+> 来源：`docs/audit/2026-10-28-独立评测报告.md`（70.5/100，C 级）。修复跟踪：`docs/audit/2026-10-28-独立评测整改执行报告.md`。
+
+- **可靠性**：release `panic` 由 `abort` 改 `unwind`（`Cargo.toml:532`），`panic_guard` 的 `catch_unwind` 恢复有效——此前单请求 panic 会 abort 整个进程。
+- **安全默认值 fail-closed**：`/metrics` 无令牌返回 401、生产未配置令牌启动即失败（`health.rs`/`main.rs`/`state.rs`）；生产未配置 `SZ300_CORS_ORIGIN` 拒绝全部跨域（`router.rs`）；CSRF Cookie 生产强制 `Secure`，环境变量不可关闭（`auth.rs`）。
+- **越权与资源耗尽**：商户创建限管理员；WASM 执行加全局信号量（默认并发 4，超限 429）；令牌黑名单 `HashSet`+O(n) 改 `HashMap<hash,exp>` O(1)。
+- **上传链路**：`/uploads` 纳入公开路径；下载改 `ReaderStream` 流式，根目录由 `SZ300_UPLOAD_ROOT` 配置（修 P0「能上传不能访问」与整文件入内存）。
+- **供应链**：sz-orm 依赖锁 10.13.0 + `.sz-orm-commit`；`deny.toml` 21 条 RUSTSEC ignore 全部加 `review-by` 到期日；`security.yml` 增加 advisory-db 缓存/刷新/新鲜度检查与 `cargo audit --stale`。
+- **门禁新增**：35 性能静态检测器（warn 级）、36 advisory ignore 到期（`scripts/audit/advisory-ignore-expiry.py`）、37 未接线 crate 清单（`scripts/audit/unwired-crates.{js,json}`）；mcdc 分支覆盖率阈值 75%、mutants core 杀灭率 90% 均 fail-closed， mutants 矩阵新增 `sz-rust-auth-facade`。
+- **门禁修复**：`check-unwrap.py` 重写作用域判定（注释/字符串/生命周期/嵌套 `#[cfg(test)]` 深度栈），`AUTHORITATIVE_PROD_UNWRAP: 0`；`cargo fmt` 与 `link-check`/`doc-code-consistency`/`ci-config-audit`/`orphan-module`/`test-hygiene` 全绿。
+- **文档与仓库卫生**：README 数字对齐（CI job 37 / ADR 48 / 11 门面）；ADR-0001 修正「`#[get]`/`#[post]` 属性宏已实现」的不实描述；新增 `addons/`（ABI 边界说明）与 `scripts/legacy/`（13 个一次性脚本归档）。
+- **测试与静态检查**：`pool_warmer` 超时用例改暂停时钟（0.00s，原真实 60s sleep）；测试/bench 连接串改环境变量优先，源码不含口令；DB 集成测试接 MySQL/Redis service container；`AppState` 增加编译期 `Send + Sync + 'static` 断言；并发会话遗留的 `outbox.rs`/`mqtt_service.rs`/`merchant.rs` lint 问题清理完毕。
+- 验证：`cargo test -p sz-rust-sz300 --lib` = **104 passed / 0 failed**；`cargo clippy -p sz-rust-sz300 --all-targets -- -D warnings` = 0 error；`cargo clippy -p sz-rust-orm-facade --all-targets -- -D warnings` = 0 error；8 个静态门禁全绿（依赖可复现门禁因 `../sz-orm` 本地未推送提交而在本机 FAIL，详见执行报告 §6）。
+
+### Fixed — 系统架构师评测整改执行（2026-10-28）
+
+> 来源：`docs/audit/2026-10-27-系统架构师评测报告.md`（生产就绪路线图）。修复跟踪：`docs/audit/2026-10-28-系统架构师评测整改执行报告.md`。
+
+- **插件真实验签（AppSec P0-1，Phase 0-1）**：`sz-rust-sz300` 的 `plugin_manager.rs` 弃用 `signature.len() >= 64` 伪验签，接入 `ed25519-dalek` 对「Base64 公钥 + Base64 签名 + Base64 插件包内容」做完整 Ed25519 验签；任一解码失败或验签不通过均 fail-closed。新增负例测试：伪造 64 字节签名被拒绝、无效公钥被拒绝。
+- **测试夹具对齐生产 DDL（数据层 D1/D4 跟进）**：`tests/common/mod.rs` 的 merchant 测试表列 `merchant_name` 改为生产 DDL（`migrations/001_init.sql`）的 `name`，并补齐 `market_id/stall_no/category/bank_account/bank_name` 等生产列；`tests/common/fixtures.rs` 同步。消除「测试自造 Schema 掩盖生产列名不一致」的根因。
+- **sz300 纳入覆盖率矩阵（Phase 0-3）**：`coverage.yml` P4 分片新增 `-p sz-rust-sz300`，`per-crate-coverage.js` 首次对主业务应用输出报告；按 coverage-exemption 流程登记豁免（`docs/audit/coverage-exemption.md`，2027-01-28 复审）。
+- **幻影依赖清理（Phase 0-4）**：`rkyv`/`zerocopy` 在 `sz-rust-zerocopy` 中仅声明从未调用（serializer 实际走 serde_json），从 workspace `Cargo.toml` 与 `sz-rust-zerocopy/Cargo.toml` 移除，消除幻影依赖。
+- 验证：`cargo test -p sz-rust-sz300 --lib` = **99 passed / 0 failed**（含插件验签新负例）；`cargo check -p sz-rust-zerocopy` = 0 error；门禁 `doc-code-consistency.js` / `link-check.js` 0 ERROR。
+
 ### Fixed — UXR 定性体验评测整改（2026-10-28）
 
 > 来源：`docs/audit/uxr-eval-prompt.md` 触发的只读 UXR 评测（10 条 Nielsen 启发式平均 5.4/10）。修复跟踪：`docs/audit/2026-10-28-UXR整改执行报告.md`。
@@ -186,7 +227,7 @@
 - `cargo test --test plugin_flow_e2e --features all-v1-9` = 6 passed
 - `cargo clippy --all-targets --features all-v1-9 -- -D warnings` = 0 warning
 - `node scripts/nplus1-detect.js` = 0 违规
-- `node scripts/perf-regression.js --skip-bench` = PASS
+- `node scripts/perf-regression.js --skip-bench` = PASS（v1.9.0 时点旧脚本语义；2026-10-29 门禁 v2 后，无指纹基线时输出 `GATE INACTIVE` 告警，见 ADR-046）
 
 ## [Unreleased]
 

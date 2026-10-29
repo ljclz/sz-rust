@@ -55,7 +55,7 @@ fn minimal_router() -> Router {
 fn chaos_extract_ip_empty_x_forwarded_for() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", HeaderValue::from_static(""));
-    assert_eq!(extract_client_ip(&headers, true), "unknown");
+    assert_eq!(extract_client_ip(&headers, true, None), "unknown");
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn chaos_extract_ip_only_commas_x_forwarded_for() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", HeaderValue::from_static(" , , , "));
     // 全是逗号和空格，trim 后为空 → 回退到 unknown
-    assert_eq!(extract_client_ip(&headers, true), "unknown");
+    assert_eq!(extract_client_ip(&headers, true, None), "unknown");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn chaos_extract_ip_multiple_x_forwarded_for() {
         HeaderValue::from_static("1.1.1.1, 2.2.2.2, 3.3.3.3"),
     );
     // 取第一个非空段
-    assert_eq!(extract_client_ip(&headers, true), "1.1.1.1");
+    assert_eq!(extract_client_ip(&headers, true, None), "1.1.1.1");
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn chaos_extract_ip_invalid_header_value() {
     // 包含非 ASCII 字节，to_str() 会失败
     let invalid = HeaderValue::from_bytes(b"\xff\xfe").expect("invalid bytes");
     headers.insert("x-forwarded-for", invalid);
-    assert_eq!(extract_client_ip(&headers, true), "unknown");
+    assert_eq!(extract_client_ip(&headers, true, None), "unknown");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn chaos_extract_ip_x_real_ip_takes_after_x_forwarded_for() {
     headers.insert("x-forwarded-for", HeaderValue::from_static(""));
     headers.insert("x-real-ip", HeaderValue::from_static("9.9.9.9"));
     // X-Forwarded-For 为空 → 回退到 X-Real-IP
-    assert_eq!(extract_client_ip(&headers, true), "9.9.9.9");
+    assert_eq!(extract_client_ip(&headers, true, None), "9.9.9.9");
 }
 
 // ============================================================================
@@ -349,7 +349,7 @@ fn chaos_duplicate_headers_does_not_panic() {
     let mut headers = HeaderMap::new();
     headers.append("x-forwarded-for", HeaderValue::from_static("1.1.1.1"));
     headers.append("x-forwarded-for", HeaderValue::from_static("2.2.2.2"));
-    let ip = extract_client_ip(&headers, true);
+    let ip = extract_client_ip(&headers, true, None);
     // 取第一个
     assert_eq!(ip, "1.1.1.1");
 }
@@ -366,7 +366,7 @@ async fn chaos_huge_x_forwarded_for_truncated_safely() {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", value);
     // 不应 panic，应取第一个 IP
-    let ip = extract_client_ip(&headers, true);
+    let ip = extract_client_ip(&headers, true, None);
     assert_eq!(ip, "1.1.1.1");
 }
 

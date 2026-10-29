@@ -28,7 +28,7 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct ProductController;
 impl SzController for ProductController {}
@@ -56,13 +56,14 @@ impl ProductController {
                         .map(|s| s.to_string()),
                 };
 
-                info!("查询商品列表: page={}, page_size={}", page, page_size);
+                // 读路径按请求打印会放大日志 IO 开销（2026-10-29 性能评测整改：降为 debug）
+                debug!("查询商品列表: page={}, page_size={}", page, page_size);
 
                 match ProductService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!("商品列表查询成功: total={}", page_data.total);
+                        debug!("商品列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -94,7 +95,7 @@ impl ProductController {
                     _ => return ctrl.render_error("缺少有效的 good_id 参数", json!({}), 0),
                 };
 
-                info!("查询商品信息: good_id={}", good_id);
+                debug!("查询商品信息: good_id={}", good_id);
 
                 match ProductService::get(&state.db_pool, good_id).await {
                     Ok(Some(row)) => {
@@ -104,7 +105,7 @@ impl ProductController {
                             return ctrl.render_error("无权访问该商品", json!({}), 403);
                         }
                         let product = row_to_json(&row);
-                        info!("商品查询完成: good_id={}", good_id);
+                        debug!("商品查询完成: good_id={}", good_id);
                         ctrl.render_success("success", json!({ "product": product }))
                     }
                     Ok(None) => ctrl.render_error("商品不存在", json!({}), 0),

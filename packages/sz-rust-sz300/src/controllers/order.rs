@@ -27,7 +27,7 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct OrderController;
 impl SzController for OrderController {}
@@ -65,13 +65,13 @@ impl OrderController {
                         .filter(|id| *id > 0),
                 };
 
-                info!("查询订单列表: page={}, page_size={}", page, page_size);
+                debug!("查询订单列表: page={}, page_size={}", page, page_size);
 
                 match OrderService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!("订单列表查询成功: total={}", page_data.total);
+                        debug!("订单列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -117,7 +117,7 @@ impl OrderController {
                     }
                 };
 
-                info!("查询订单详情: order_id={}", order_id);
+                debug!("查询订单详情: order_id={}", order_id);
 
                 match OrderService::get_with_items(&state.db_pool, order_id).await {
                     Ok(Some(detail)) => {
@@ -129,7 +129,7 @@ impl OrderController {
                         let order = row_to_json(&detail.order);
                         let items: Vec<serde_json::Value> =
                             detail.items.iter().map(row_to_json).collect();
-                        info!(
+                        debug!(
                             "订单详情查询完成: order_id={}, items={}",
                             order_id,
                             items.len()

@@ -505,9 +505,9 @@ flowchart LR
 
 ---
 
-> **最后更新**: 2026-10-27
+> **最后更新**: 2026-10-29
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.7
+> **规范版本**: v1.8
 >
 > **v2.0 变更摘要**（2026-10-27，tech-writer 整改：门禁 19 扩展为文档-代码一致性总门禁）：
 > - 铁律 24 新增（`.trae/rules/project_rules.md`）：文档-代码一致性门禁强制——Markdown 链接可解析 / README 版本号与 Cargo.toml 一致 / `--features` 引用存在 / 文件名 UTF-8 无乱码
@@ -547,6 +547,15 @@ flowchart LR
 > - **门禁 33 `test-hygiene-check.js`**：async 内 thread::sleep（ERROR）、长 sleep≥30s / 固定端口 / panic! 断言 / 硬编码凭据（WARN/ERROR），剔除注释字符串误报；存量 6 项 async-thread-sleep 与 36 个孤儿文件入基线棘轮（`test-hygiene-baseline.json` / `orphan-module-baseline.json`），新增才阻塞
 > - **门禁 34 `orphan-module-check.js`**：src/ 下未被 lib.rs/main.rs/bin 挂载的 .rs 文件（含 core/src/orm.rs 等 36 个存量候选，需排期挂载或删除）
 > - 5 个门禁均已接入 ci.yml 门禁 30-34 与 `pr-review.sh`，本机 node 实跑全部 PASS
+>
+> **v2.0.3 变更摘要**（2026-10-29，性能工程评测 `docs/audit/2026-10-29-性能工程评测报告.md` 整改，27/100）：
+> - **门禁 32 扩展**：新增「端到端性能门禁接线」检查——`perf-gate.yml` 必须调用 `scripts/perf-regression.js`、必须含无基线 `--init` 播种路径、且播种后 `exit 1`（禁止"无基线即通过"的假绿）。背景：该脚本在 2026-10-29 前被全仓 workflow 零引用，「CI 性能回归门禁」只存在于文档
+> - **门禁重写**：`scripts/perf-regression.js` v2 —— 预热 10 s + 稳态 60 s × 3 次、闭环、QPS 只计 2xx/3xx、错误率独立门禁、分位数覆盖全部响应、有效阈值 = max(名义 5%, 3×CV)、基线按环境指纹分槽（schema=2）、现场签发 JWT + CSRF 双提交、默认仅回环地址、退出码 0/1/2/3；删除旧版跨机器占位基线（`/health` 50000 QPS）
+> - **新 workflow**：`.github/workflows/perf-gate.yml`（PR 仅做基线结构检查；手动/定时跑 MySQL 9.6 service + migrations 001–007 + `deploy/sql/perf-seed.sql` 确定性 2 万行 + release 构建 + 真实负载）
+> - **运行时性能修复**：限流改按对端 IP 分桶（`ConnectInfo<SocketAddr>`，仅 `trust_proxy=true` 才信代理头）+ 桶表溢出改「回收空闲桶 + 共享兜底桶」（旧版溢出的 `Err` 被中间件 fail-open，限流可被完全绕过）；熔断器统计窗口改 60 桶 O(1) 环形缓冲；`test_before_acquire` 默认关闭（保留环境变量回退）；读路径 `info!` 降 `debug!` 且默认日志级别回到 `info`
+> - **热路径告警采样**（真库端到端验证中新发现，评测与整改均未覆盖）：`v19-jwt-audience` 的「无 `aud` 旧令牌 grace period 放行」分支按请求写 `warn!`，实测占全部日志字节 99.78%（156,708 请求 → 157,068 行 / 49.7 MB），属可被无 `aud` 令牌持有者低成本放大的输出面 → 改 `WarnSampler` 60 s 采样窗口并携带 `suppressed_in_window`（抑制计数不丢事件）；复测 83,067 请求 → 3 行 / 3,149 B（debug 档）、251,267 请求 → 7 行 / 2,600 B（release 档）
+> - 验证：middleware-facade 86 passed、core middleware_chaos 26 passed、sz300 lib 106 passed、`cargo clippy --all-targets -D warnings` 0 error、`cargo check --bin sz300-server` 0 error；门禁 32 实跑 PASS；门禁 v2 在一次性 MySQL 9.6 + 真库 release 实例端到端跑通（三端点 0% 错误率）。**已实测**：`/health`（不查库、不走鉴权分支，唯一同档可比项）c=50 中位 QPS 4364 → 5886.8 / 6248.7（两轮独立 release 实测，+34.9% ~ +43.2%，对外只引用下界 +34.9%；p99 32–79 ms → 12.10–12.99 ms），第一轮测量期间有 34.5–100% 外部负载干扰，属保守下界。业务端点吞吐 A/B **仍未验证**（DB 版本/buffer pool/数据集行数三重不可比），详见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §7/§11
+> - 详见 `docs/adr/0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md` 与 `docs/audit/2026-10-29-性能整改五维审查.md`
 >
 > **v1.6 变更摘要**（2026-08-13，防幻影交付三件套 + 四项新门禁）：
 > - 铁律 23 新增（`.trae/rules/project_rules.md`）：完成声称证据链强制（交付物路径 + 验证命令真实输出 + 变更标识），CI 门禁 19 自动检查

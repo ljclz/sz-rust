@@ -32,7 +32,15 @@
 //! | `UserId` | 已认证用户 ID（需前置 Auth 中间件） | 用户级限流 |
 //! | `IpPlusRoute` | `IP:route_path` | 路由级限流 |
 //!
-//! 客户端 IP 提取优先级：`X-Forwarded-For`（取第一个）> `X-Real-IP` > `"unknown"`
+//! 客户端 IP 提取优先级（`trust_proxy_headers = false`，默认）：
+//! socket 对端 IP > `"unknown"`（**忽略**所有代理头，防止伪造绕过）
+//!
+//! 客户端 IP 提取优先级（`trust_proxy_headers = true`，部署于可信代理之后）：
+//! `X-Forwarded-For`（取第一个可解析为 IP 的段）> `X-Real-IP` > socket 对端 IP > `"unknown"`
+//!
+//! socket 对端地址来自 `ConnectInfo<SocketAddr>` 请求扩展，需服务端以
+//! `into_make_service_with_connect_info::<SocketAddr>()` 启动（sz300 已启用）；
+//! 缺失该扩展时（如嵌入式测试）退化为全局共享桶。
 //!
 //! ## 响应格式
 //!
@@ -88,8 +96,10 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sz_rust_orm_facade::{RateLimitError, RateLimitResult, RateLimiter};
 
@@ -204,50 +214,61 @@ impl RateLimitConfig {
     }
 }
 
-/// 从请求 headers 提取客户端 IP
+/// 从请求 extensions 提取 socket 对端 IP
 ///
-/// 安全修复 M-2（2026-08-14）：`trust_proxy` 为 `false`（默认）时**不信任**
-/// `X-Forwarded-For` / `X-Real-IP`，返回 `"unknown"`（限流按 unknown 统一计数，
-/// 避免客户端伪造代理头绕过限流）；仅在可信反向代理之后部署时置 `true`。
-pub fn extract_client_ip(headers: &HeaderMap, trust_proxy: bool) -> String {
+/// 依赖服务端以 `into_make_service_with_connect_info::<SocketAddr>()` 启动，
+/// hyper 会把对端地址写入每个请求的 `ConnectInfo<SocketAddr>` 扩展。
+/// 未启用时返回 `None`。
+pub fn peer_ip(req: &Request) -> Option<IpAddr> {
+    req.extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip())
+}
+
+/// 取请求头中第一个可解析为 IP 的值（`X-Forwarded-For` 取首段）
+fn header_ip(headers: &HeaderMap, name: &str) -> Option<IpAddr> {
+    let value = headers.get(name)?.to_str().ok()?;
+    let first = value.split(',').next()?.trim();
+    first.parse::<IpAddr>().ok()
+}
+
+/// 从请求提取客户端 IP
+///
+/// - `trust_proxy == false`（默认，安全修复 M-2）：**只信任 socket 对端地址**，
+///   完全忽略 `X-Forwarded-For` / `X-Real-IP`，避免客户端伪造代理头绕过限流。
+///   对端地址不可用（未启用 `ConnectInfo`）时退化为 `"unknown"`（全局共享桶）。
+/// - `trust_proxy == true`（仅部署于可信反向代理之后）：`X-Forwarded-For` 首段
+///   > `X-Real-IP` > 对端地址 > `"unknown"`；非法 IP 值直接跳过，不会写入 key 空间。
+pub fn extract_client_ip(headers: &HeaderMap, trust_proxy: bool, peer: Option<IpAddr>) -> String {
     if trust_proxy {
-        if let Some(forwarded) = headers.get("x-forwarded-for") {
-            if let Ok(value) = forwarded.to_str() {
-                // X-Forwarded-For: client, proxy1, proxy2
-                if let Some(first) = value.split(',').next() {
-                    let trimmed = first.trim();
-                    if !trimmed.is_empty() {
-                        return trimmed.to_string();
-                    }
-                }
-            }
+        if let Some(ip) = header_ip(headers, "x-forwarded-for") {
+            return ip.to_string();
         }
-        if let Some(real_ip) = headers.get("x-real-ip") {
-            if let Ok(value) = real_ip.to_str() {
-                let trimmed = value.trim();
-                if !trimmed.is_empty() {
-                    return trimmed.to_string();
-                }
-            }
+        if let Some(ip) = header_ip(headers, "x-real-ip") {
+            return ip.to_string();
         }
     }
-    "unknown".to_string()
+    match peer {
+        Some(ip) => ip.to_string(),
+        None => "unknown".to_string(),
+    }
 }
 
 /// 从请求中提取限流 Key
 ///
 /// 根据 [`RateLimitConfig::key_extractor`] 策略提取 Key，并拼接 `key_prefix`（如果非空）。
 pub fn extract_rate_limit_key(req: &Request, config: &RateLimitConfig) -> String {
+    let peer = peer_ip(req);
     let trust_proxy = config.trust_proxy_headers;
     let inner_key = match config.key_extractor {
-        KeyExtractor::Ip => extract_client_ip(req.headers(), trust_proxy),
+        KeyExtractor::Ip => extract_client_ip(req.headers(), trust_proxy, peer),
         KeyExtractor::UserId => req
             .extensions()
             .get::<AuthenticatedUser>()
             .map(|u| u.user_id.to_string())
-            .unwrap_or_else(|| extract_client_ip(req.headers(), trust_proxy)),
+            .unwrap_or_else(|| extract_client_ip(req.headers(), trust_proxy, peer)),
         KeyExtractor::IpPlusRoute => {
-            let ip = extract_client_ip(req.headers(), trust_proxy);
+            let ip = extract_client_ip(req.headers(), trust_proxy, peer);
             let path = req.uri().path();
             format!("{}:{}", ip, path)
         }
@@ -410,18 +431,42 @@ pub fn token_bucket_config(capacity: u64, refill_per_second: f64) -> RateLimitCo
 ///
 /// 算法：容量固定，按时间差补充令牌（refill_per_second * elapsed_secs），
 /// 请求消耗 1 令牌。使用 `parking_lot::Mutex` 保护内部状态。
-/// `max_keys` 防止 OOM DoS（默认 10,000）。
+///
+/// ## 桶表边界（2026-10-29 修复）
+///
+/// `max_keys`（默认 10,000）限制内存占用。达到上限时：
+/// 1. 先回收「已回满」的空闲桶（空闲时长 ≥ `capacity / refill_per_second`，
+///    回收不改变限流语义，因为该桶此刻等效于新建）；
+/// 2. 仍满则新 key 进入**共享兜底桶**——既不无限增长内存，也不会像旧实现那样
+///    返回 `Err` 被中间件 fail-open 变成绕过限流。
 pub struct TokenBucket {
     capacity: u64,
     refill_per_second: f64,
     max_keys: usize,
-    entries: parking_lot::Mutex<std::collections::HashMap<String, TokenBucketEntry>>,
+    /// 空桶回满所需时长 = capacity / refill_per_second
+    full_refill: Duration,
+    inner: parking_lot::Mutex<TokenBucketInner>,
+}
+
+struct TokenBucketInner {
+    entries: HashMap<String, TokenBucketEntry>,
+    /// key 表满时新 key 共享的兜底桶
+    overflow: TokenBucketEntry,
 }
 
 #[derive(Clone)]
 struct TokenBucketEntry {
     tokens: f64,
-    last_refill: std::time::Instant,
+    last_refill: Instant,
+}
+
+impl TokenBucketEntry {
+    fn full(capacity: u64, now: Instant) -> Self {
+        Self {
+            tokens: capacity as f64,
+            last_refill: now,
+        }
+    }
 }
 
 impl TokenBucket {
@@ -429,11 +474,17 @@ impl TokenBucket {
     pub fn new(capacity: u64, refill_per_second: f64) -> Self {
         assert!(capacity > 0, "capacity must be > 0");
         assert!(refill_per_second > 0.0, "refill_per_second must be > 0.0");
+        let full_refill = Duration::from_secs_f64(capacity as f64 / refill_per_second);
+        let now = Instant::now();
         Self {
             capacity,
             refill_per_second,
             max_keys: 10_000,
-            entries: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            full_refill,
+            inner: parking_lot::Mutex::new(TokenBucketInner {
+                entries: HashMap::new(),
+                overflow: TokenBucketEntry::full(capacity, now),
+            }),
         }
     }
 
@@ -442,31 +493,59 @@ impl TokenBucket {
         self.max_keys = max_keys;
         self
     }
+
+    /// 消耗一个令牌并返回结果
+    ///
+    /// `reset_at` 为「下一次请求会被放行」的 UNIX 毫秒时间戳。
+    fn consume(&self, entry: &mut TokenBucketEntry, now: Instant) -> RateLimitResult {
+        let elapsed = now.saturating_duration_since(entry.last_refill).as_secs_f64();
+        entry.tokens = (entry.tokens + elapsed * self.refill_per_second).min(self.capacity as f64);
+        entry.last_refill = now;
+
+        let allowed = entry.tokens >= 1.0;
+        if allowed {
+            entry.tokens -= 1.0;
+        }
+        let wait_ms = if allowed {
+            0
+        } else {
+            ((1.0 - entry.tokens) / self.refill_per_second * 1000.0).ceil() as i64
+        };
+        let reset_at = current_unix_ms().saturating_add(wait_ms);
+        if allowed {
+            RateLimitResult::allowed(entry.tokens as u64, reset_at)
+        } else {
+            RateLimitResult::rejected(0, reset_at)
+        }
+    }
 }
 
 impl RateLimiter for TokenBucket {
     fn acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
-        let mut entries = self.entries.lock();
-        if entries.len() >= self.max_keys && !entries.contains_key(key) {
-            return Err(RateLimitError::Internal("max keys exceeded".to_string()));
+        let mut inner = self.inner.lock();
+        let now = Instant::now();
+
+        if let Some(entry) = inner.entries.get_mut(key) {
+            return Ok(self.consume(entry, now));
         }
-        let now = std::time::Instant::now();
-        let entry = entries.entry(key.to_string()).or_insert(TokenBucketEntry {
-            tokens: self.capacity as f64,
-            last_refill: now,
-        });
-        let elapsed = now.duration_since(entry.last_refill).as_secs_f64();
-        entry.tokens = (entry.tokens + elapsed * self.refill_per_second).min(self.capacity as f64);
-        entry.last_refill = now;
-        if entry.tokens >= 1.0 {
-            entry.tokens -= 1.0;
-            let remaining = entry.tokens as u64;
-            let reset_at = now.elapsed().as_millis() as i64;
-            Ok(RateLimitResult::allowed(remaining, reset_at))
+
+        if inner.entries.len() >= self.max_keys {
+            let stale_after = self.full_refill;
+            inner
+                .entries
+                .retain(|_, entry| now.saturating_duration_since(entry.last_refill) < stale_after);
+        }
+
+        let use_overflow = inner.entries.len() >= self.max_keys;
+        let entry = if use_overflow {
+            &mut inner.overflow
         } else {
-            let reset_at = now.elapsed().as_millis() as i64;
-            Ok(RateLimitResult::rejected(0, reset_at))
-        }
+            inner
+                .entries
+                .entry(key.to_string())
+                .or_insert_with(|| TokenBucketEntry::full(self.capacity, now))
+        };
+        Ok(self.consume(entry, now))
     }
 
     fn try_acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
@@ -474,7 +553,7 @@ impl RateLimiter for TokenBucket {
     }
 
     fn reset(&self, key: &str) -> Result<(), RateLimitError> {
-        self.entries.lock().remove(key);
+        self.inner.lock().entries.remove(key);
         Ok(())
     }
 }
@@ -483,12 +562,19 @@ impl RateLimiter for TokenBucket {
 ///
 /// 算法：保留窗口内所有请求时间戳，清理过期时间戳后检查数量。
 /// 使用 `parking_lot::Mutex` 保护内部状态。
-/// `max_keys` 防止 OOM DoS（默认 10,000）。
+///
+/// `max_keys`（默认 10,000）限制内存占用，达到上限时先回收窗口已过期的空闲 key，
+/// 仍满则新 key 共享兜底窗口（语义同 [`TokenBucket`] 的兜底桶）。
 pub struct SlidingWindow {
     max_requests: u64,
     window_size: Duration,
     max_keys: usize,
-    entries: parking_lot::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+    inner: parking_lot::Mutex<SlidingWindowInner>,
+}
+
+struct SlidingWindowInner {
+    entries: HashMap<String, Vec<Instant>>,
+    overflow: Vec<Instant>,
 }
 
 impl SlidingWindow {
@@ -500,7 +586,10 @@ impl SlidingWindow {
             max_requests,
             window_size,
             max_keys: 10_000,
-            entries: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            inner: parking_lot::Mutex::new(SlidingWindowInner {
+                entries: HashMap::new(),
+                overflow: Vec::new(),
+            }),
         }
     }
 
@@ -509,27 +598,52 @@ impl SlidingWindow {
         self.max_keys = max_keys;
         self
     }
+
+    fn check(&self, timestamps: &mut Vec<Instant>, now: Instant) -> RateLimitResult {
+        let window_start = now.checked_sub(self.window_size).unwrap_or(now);
+        timestamps.retain(|&t| t > window_start);
+        // 窗口清空后的最早时间戳决定配额何时释放
+        let oldest = timestamps.first().copied().unwrap_or(now);
+        if timestamps.len() < self.max_requests as usize {
+            timestamps.push(now);
+            let remaining = self.max_requests.saturating_sub(timestamps.len() as u64);
+            RateLimitResult::allowed(remaining, current_unix_ms())
+        } else {
+            let release_in = self
+                .window_size
+                .saturating_sub(now.saturating_duration_since(oldest));
+            let reset_at = current_unix_ms().saturating_add(release_in.as_millis() as i64);
+            RateLimitResult::rejected(0, reset_at)
+        }
+    }
 }
 
 impl RateLimiter for SlidingWindow {
     fn acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
-        let mut entries = self.entries.lock();
-        if entries.len() >= self.max_keys && !entries.contains_key(key) {
-            return Err(RateLimitError::Internal("max keys exceeded".to_string()));
+        let mut inner = self.inner.lock();
+        let now = Instant::now();
+
+        if let Some(timestamps) = inner.entries.get_mut(key) {
+            return Ok(self.check(timestamps, now));
         }
-        let now = std::time::Instant::now();
-        let window_start = now - self.window_size;
-        let timestamps = entries.entry(key.to_string()).or_default();
-        timestamps.retain(|&t| t > window_start);
-        if timestamps.len() < self.max_requests as usize {
-            timestamps.push(now);
-            let remaining = self.max_requests.saturating_sub(timestamps.len() as u64);
-            let reset_at = now.elapsed().as_millis() as i64;
-            Ok(RateLimitResult::allowed(remaining, reset_at))
+
+        if inner.entries.len() >= self.max_keys {
+            let window = self.window_size;
+            let cutoff = now.checked_sub(window).unwrap_or(now);
+            inner.entries.retain(|_, timestamps| {
+                timestamps
+                    .last()
+                    .is_some_and(|last| *last > cutoff)
+            });
+        }
+
+        let use_overflow = inner.entries.len() >= self.max_keys;
+        let timestamps = if use_overflow {
+            &mut inner.overflow
         } else {
-            let reset_at = now.elapsed().as_millis() as i64;
-            Ok(RateLimitResult::rejected(0, reset_at))
-        }
+            inner.entries.entry(key.to_string()).or_default()
+        };
+        Ok(self.check(timestamps, now))
     }
 
     fn try_acquire(&self, key: &str) -> Result<RateLimitResult, RateLimitError> {
@@ -537,7 +651,7 @@ impl RateLimiter for SlidingWindow {
     }
 
     fn reset(&self, key: &str) -> Result<(), RateLimitError> {
-        self.entries.lock().remove(key);
+        self.inner.lock().entries.remove(key);
         Ok(())
     }
 }
@@ -596,11 +710,42 @@ mod tests {
     }
 
     #[test]
-    fn test_token_bucket_max_keys_oom_protection() {
+    fn test_token_bucket_max_keys_falls_back_to_overflow_bucket() {
         let tb = TokenBucket::new(1, 1.0).with_max_keys(2);
         assert!(tb.acquire("k1").unwrap().allowed);
         assert!(tb.acquire("k2").unwrap().allowed);
-        assert!(tb.acquire("k3").is_err());
+        // 表满：新 key 进入共享兜底桶（不再 Err → 不再被 fail-open 绕过）
+        assert!(tb.acquire("k3").unwrap().allowed);
+        assert!(!tb.acquire("k4").unwrap().allowed);
+        // 已有 key 的桶不受影响
+        assert!(!tb.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_reclaims_idle_buckets_before_overflow() {
+        // capacity 1 / refill 100 ⇒ 10ms 回满；空闲超过 10ms 的桶可安全回收
+        let tb = TokenBucket::new(1, 100.0).with_max_keys(1);
+        assert!(tb.acquire("k1").unwrap().allowed);
+        std::thread::sleep(Duration::from_millis(20));
+        // k1 已回满且空闲 ⇒ 被回收，k2 获得独立桶（而非落进兜底桶）
+        assert!(tb.acquire("k2").unwrap().allowed);
+        assert!(!tb.acquire("k2").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_token_bucket_rejected_reset_at_is_epoch_ms() {
+        let tb = TokenBucket::new(1, 1.0);
+        assert!(tb.acquire("k1").unwrap().allowed);
+        let rejected = tb.acquire("k1").unwrap();
+        assert!(!rejected.allowed);
+        // 下一次放行约在 1s 后（capacity 1 / refill 1/s）
+        let now = current_unix_ms();
+        assert!(
+            rejected.reset_at > now && rejected.reset_at <= now + 1_100,
+            "reset_at={} now={}",
+            rejected.reset_at,
+            now
+        );
     }
 
     #[test]
@@ -638,11 +783,24 @@ mod tests {
     }
 
     #[test]
-    fn test_sliding_window_max_keys_oom_protection() {
+    fn test_sliding_window_max_keys_falls_back_to_overflow_window() {
         let sw = SlidingWindow::new(1, Duration::from_secs(60)).with_max_keys(2);
         assert!(sw.acquire("k1").unwrap().allowed);
         assert!(sw.acquire("k2").unwrap().allowed);
-        assert!(sw.acquire("k3").is_err());
+        // 表满：新 key 进入共享兜底窗口
+        assert!(sw.acquire("k3").unwrap().allowed);
+        assert!(!sw.acquire("k4").unwrap().allowed);
+        assert!(!sw.acquire("k1").unwrap().allowed);
+    }
+
+    #[test]
+    fn test_sliding_window_reclaims_expired_keys() {
+        let sw = SlidingWindow::new(1, Duration::from_millis(30)).with_max_keys(1);
+        assert!(sw.acquire("k1").unwrap().allowed);
+        std::thread::sleep(Duration::from_millis(50));
+        // k1 窗口已过期 ⇒ 可被回收，k2 获得独立窗口
+        assert!(sw.acquire("k2").unwrap().allowed);
+        assert!(!sw.acquire("k2").unwrap().allowed);
     }
 
     #[test]
@@ -766,7 +924,7 @@ mod tests {
     fn test_extract_client_ip_from_x_forwarded_for() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "1.2.3.4".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true, None), "1.2.3.4");
     }
 
     #[test]
@@ -777,14 +935,14 @@ mod tests {
             "x-forwarded-for",
             "1.2.3.4, 5.6.7.8, 9.10.11.12".parse().unwrap(),
         );
-        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true, None), "1.2.3.4");
     }
 
     #[test]
     fn test_extract_client_ip_from_x_real_ip() {
         let mut headers = HeaderMap::new();
         headers.insert("x-real-ip", "1.2.3.4".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true, None), "1.2.3.4");
     }
 
     #[test]
@@ -792,13 +950,13 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "1.1.1.1".parse().unwrap());
         headers.insert("x-real-ip", "2.2.2.2".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers, true), "1.1.1.1");
+        assert_eq!(extract_client_ip(&headers, true, None), "1.1.1.1");
     }
 
     #[test]
     fn test_extract_client_ip_no_headers() {
         let headers = HeaderMap::new();
-        assert_eq!(extract_client_ip(&headers, true), "unknown");
+        assert_eq!(extract_client_ip(&headers, true, None), "unknown");
     }
 
     #[test]
@@ -806,7 +964,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "".parse().unwrap());
         // 空 X-Forwarded-For 应回退到 X-Real-IP 或 unknown
-        assert_eq!(extract_client_ip(&headers, true), "unknown");
+        assert_eq!(extract_client_ip(&headers, true, None), "unknown");
     }
 
     #[test]
@@ -814,14 +972,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "".parse().unwrap());
         headers.insert("x-real-ip", "3.3.3.3".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers, true), "3.3.3.3");
+        assert_eq!(extract_client_ip(&headers, true, None), "3.3.3.3");
     }
 
     #[test]
     fn test_extract_client_ip_trims_whitespace() {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", "  1.2.3.4  ".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers, true), "1.2.3.4");
+        assert_eq!(extract_client_ip(&headers, true, None), "1.2.3.4");
     }
 
     // ====================================================================
@@ -891,6 +1049,92 @@ mod tests {
         req.extensions_mut()
             .insert(AuthenticatedUser { user_id: 100 });
         assert_eq!(extract_rate_limit_key(&req, &config), "api:100");
+    }
+
+    // ====================================================================
+    // 对端地址限流键（2026-10-29 修复：trust_proxy=false 不再统一 "unknown"）
+    // ====================================================================
+
+    fn request_with_peer(method: &str, uri: &str, peer: SocketAddr) -> Request {
+        let mut req = make_request(method, uri);
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(peer));
+        req
+    }
+
+    #[test]
+    fn test_extract_client_ip_untrusted_ignores_proxy_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "1.2.3.4".parse().unwrap());
+        let peer: IpAddr = "203.0.113.7".parse().unwrap();
+        // 不信任代理头 ⇒ 用对端地址，伪造的 XFF 无效
+        assert_eq!(
+            extract_client_ip(&headers, false, Some(peer)),
+            "203.0.113.7"
+        );
+        // 信任代理头 ⇒ XFF 优先
+        assert_eq!(extract_client_ip(&headers, true, Some(peer)), "1.2.3.4");
+        // 无对端地址 ⇒ 退化为 unknown（全局共享桶）
+        assert_eq!(extract_client_ip(&headers, false, None), "unknown");
+    }
+
+    #[test]
+    fn test_extract_client_ip_trusted_proxy_invalid_header_falls_back() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "not-an-ip".parse().unwrap());
+        headers.insert("x-real-ip", "198.51.100.9".parse().unwrap());
+        let peer: IpAddr = "10.0.0.1".parse().unwrap();
+        assert_eq!(
+            extract_client_ip(&headers, true, Some(peer)),
+            "198.51.100.9"
+        );
+        let empty = HeaderMap::new();
+        assert_eq!(extract_client_ip(&empty, true, Some(peer)), "10.0.0.1");
+    }
+
+    #[test]
+    fn test_extract_rate_limit_key_uses_peer_ip_when_untrusted() {
+        let config = sliding_window_config(10, Duration::from_secs(60));
+        let mut req = request_with_peer("GET", "/api", SocketAddr::from(([203, 0, 113, 7], 5000)));
+        req.headers_mut()
+            .insert("x-forwarded-for", "1.2.3.4".parse().unwrap());
+        assert_eq!(extract_rate_limit_key(&req, &config), "203.0.113.7");
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_middleware_isolates_peers_by_socket_addr() {
+        let config = sliding_window_config(1, Duration::from_secs(60)).with_key_prefix("peer");
+        let app = Router::new()
+            .route(
+                "/api",
+                axum::routing::get(|| async { axum::http::StatusCode::OK }),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                config,
+                rate_limit_middleware,
+            ));
+
+        let peer_a = SocketAddr::from(([203, 0, 113, 1], 1000));
+        let peer_b = SocketAddr::from(([203, 0, 113, 2], 1001));
+
+        let resp = app
+            .clone()
+            .oneshot(request_with_peer("GET", "/api", peer_a))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app
+            .clone()
+            .oneshot(request_with_peer("GET", "/api", peer_a))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        // 另一对端地址拥有独立配额
+        let resp = app
+            .oneshot(request_with_peer("GET", "/api", peer_b))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     // ====================================================================

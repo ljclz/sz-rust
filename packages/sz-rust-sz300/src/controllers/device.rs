@@ -27,7 +27,7 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct DeviceController;
 impl SzController for DeviceController {}
@@ -50,7 +50,7 @@ impl DeviceController {
                     merchant_id: scope_mid,
                 };
 
-                info!(
+                debug!(
                     "查询设备列表: page={}, page_size={}, merchant_id={:?}",
                     page, page_size, filters.merchant_id
                 );
@@ -59,7 +59,7 @@ impl DeviceController {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!(
+                        debug!(
                             "设备列表查询成功: page={}, page_size={}, total={}",
                             page, page_size, page_data.total
                         );
@@ -94,7 +94,7 @@ impl DeviceController {
                     _ => return ctrl.render_error("缺少有效的 device_id 参数", json!({}), 0),
                 };
 
-                info!("查询设备详情: device_id={}", device_id);
+                debug!("查询设备详情: device_id={}", device_id);
 
                 match DeviceService::get(&state.db_pool, device_id).await {
                     Ok(Some(row)) => {
@@ -104,7 +104,7 @@ impl DeviceController {
                             return ctrl.render_error("无权访问该设备", json!({}), 403);
                         }
                         let device = row_to_json(&row);
-                        info!("设备查询完成: device_id={}", device_id);
+                        debug!("设备查询完成: device_id={}", device_id);
                         ctrl.render_success(
                             "success",
                             json!({

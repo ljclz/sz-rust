@@ -14,8 +14,11 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志 — EnvFilter + JSON 格式（生产环境友好）
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,sz_rust_sz300=debug"));
+    //
+    // 默认 `info`（2026-10-29 性能修复）：旧默认 `info,sz_rust_sz300=debug` 会让
+    // 业务热路径的 debug! 默认全部落盘，即使已把读路径日志降到 debug! 也照样输出。
+    // 排障时用 `RUST_LOG=sz_rust_sz300=debug` 显式开启（k8s 部署为 `warn,sz_rust_sz300=info`）。
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt().with_env_filter(filter).json().init();
 
     tracing::info!("鲜视达 SZ-300 后端服务启动");
@@ -349,7 +352,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("监听地址: {}", addr);
 
-    axum::serve(listener, app)
+    // 注入 socket 对端地址：限流中间件按真实对端 IP 分桶（trust_proxy=false 时
+    // 不再把所有请求并进同一个 "unknown" 桶），见 sz-rust-middleware-facade/rate_limit.rs
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
         .with_graceful_shutdown(async move {
             let ctrl_c = async {
                 signal::ctrl_c()

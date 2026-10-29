@@ -32,6 +32,14 @@
 //! }));
 //! ```
 
+//! ## 统计窗口（2026-10-29 重写）
+//!
+//! 错误率统计使用**固定 60 桶的环形时间窗**：每桶覆盖 `stat_window / 60`，
+//! 记录一条结果只写一个桶（O(1)，与窗口内请求量无关）；判定时扫描固定 60 个桶。
+//! 旧实现为 `Vec<(bool, Instant)>` + 每请求全量 `retain`，统计量随吞吐线性增长
+//! （4.4k rps × 60s ≈ 26 万条），单次记录退化为 O(n)，实测把 /health 吞吐压到
+//! 约 2/3。分桶后 60s 语义不变，精度为 1 个桶宽。
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -68,10 +76,86 @@ pub enum CircuitBreakerDecision {
     Reject,
 }
 
+/// 统计窗口的分桶数（固定值：窗口内记录成本与请求量无关）
+const STAT_BUCKETS: usize = 60;
+
+#[derive(Clone, Copy)]
+struct StatBucket {
+    epoch: u64,
+    successes: u32,
+    failures: u32,
+}
+
+impl StatBucket {
+    const fn empty() -> Self {
+        Self {
+            epoch: 0,
+            successes: 0,
+            failures: 0,
+        }
+    }
+}
+
+/// 固定分桶的错误率统计窗口
+struct ErrorWindow {
+    started: Instant,
+    bucket_nanos: u64,
+    buckets: [StatBucket; STAT_BUCKETS],
+}
+
+impl ErrorWindow {
+    fn new(window: Duration) -> Self {
+        let bucket_nanos = (window.as_nanos() / STAT_BUCKETS as u128).max(1) as u64;
+        Self {
+            started: Instant::now(),
+            bucket_nanos,
+            buckets: [StatBucket::empty(); STAT_BUCKETS],
+        }
+    }
+
+    fn epoch(&self, now: Instant) -> u64 {
+        (now.saturating_duration_since(self.started).as_nanos() as u64) / self.bucket_nanos
+    }
+
+    fn record(&mut self, now: Instant, success: bool) {
+        let epoch = self.epoch(now);
+        let slot = &mut self.buckets[(epoch % STAT_BUCKETS as u64) as usize];
+        if slot.epoch != epoch {
+            *slot = StatBucket {
+                epoch,
+                ..StatBucket::empty()
+            };
+        }
+        if success {
+            slot.successes = slot.successes.saturating_add(1);
+        } else {
+            slot.failures = slot.failures.saturating_add(1);
+        }
+    }
+
+    /// 返回窗口内 (失败数, 总数)
+    fn snapshot(&self, now: Instant) -> (u64, u64) {
+        let current = self.epoch(now);
+        let mut failures = 0u64;
+        let mut total = 0u64;
+        for bucket in &self.buckets {
+            if bucket.epoch <= current && current - bucket.epoch < STAT_BUCKETS as u64 {
+                failures += u64::from(bucket.failures);
+                total += u64::from(bucket.failures) + u64::from(bucket.successes);
+            }
+        }
+        (failures, total)
+    }
+
+    fn clear(&mut self) {
+        self.buckets = [StatBucket::empty(); STAT_BUCKETS];
+    }
+}
+
 struct CircuitBreakerInner {
     state: CircuitState,
-    /// 统计窗口内的请求记录（success/failure + timestamp）
-    records: Vec<(bool, Instant)>,
+    /// 统计窗口（固定分桶，O(1) 记录）
+    window: ErrorWindow,
     /// Open 态开始时间（用于判断冷却是否到期）
     opened_at: Option<Instant>,
     /// HalfOpen 态探测结果
@@ -98,10 +182,10 @@ impl CircuitBreaker {
             "stat_window must be > 0"
         );
         Self {
-            config,
+            config: config.clone(),
             inner: parking_lot::Mutex::new(CircuitBreakerInner {
                 state: CircuitState::Closed,
-                records: Vec::new(),
+                window: ErrorWindow::new(config.stat_window),
                 opened_at: None,
                 probe_results: Vec::new(),
             }),
@@ -143,14 +227,13 @@ impl CircuitBreaker {
         let now = Instant::now();
         match inner.state {
             CircuitState::Closed => {
-                inner.records.push((true, now));
-                Self::prune_records(&mut inner, self.config.stat_window, now);
+                inner.window.record(now, true);
             }
             CircuitState::HalfOpen => {
                 inner.probe_results.push(true);
                 if inner.probe_results.len() >= self.config.probe_requests as usize {
                     inner.state = CircuitState::Closed;
-                    inner.records.clear();
+                    inner.window.clear();
                     inner.opened_at = None;
                     inner.probe_results.clear();
                 }
@@ -165,16 +248,11 @@ impl CircuitBreaker {
         let now = Instant::now();
         match inner.state {
             CircuitState::Closed => {
-                inner.records.push((false, now));
-                Self::prune_records(&mut inner, self.config.stat_window, now);
-                let total = inner.records.len();
-                if total > 0 {
-                    let failures = inner.records.iter().filter(|(s, _)| !s).count();
-                    let error_rate = failures as f64 / total as f64;
-                    if error_rate >= self.config.error_threshold {
-                        inner.state = CircuitState::Open;
-                        inner.opened_at = Some(now);
-                    }
+                inner.window.record(now, false);
+                let (failures, total) = inner.window.snapshot(now);
+                if total > 0 && failures as f64 / total as f64 >= self.config.error_threshold {
+                    inner.state = CircuitState::Open;
+                    inner.opened_at = Some(now);
                 }
             }
             CircuitState::HalfOpen => {
@@ -189,11 +267,6 @@ impl CircuitBreaker {
     /// 查询当前状态
     pub fn state(&self) -> CircuitState {
         self.inner.lock().state
-    }
-
-    fn prune_records(inner: &mut CircuitBreakerInner, window: Duration, now: Instant) {
-        let cutoff = now - window;
-        inner.records.retain(|(_, t)| *t > cutoff);
     }
 }
 
@@ -323,6 +396,46 @@ mod tests {
         cb.record_success();
         cb.record_success();
         cb.record_failure();
+        assert_eq!(cb.state(), CircuitState::Closed);
+    }
+
+    #[test]
+    fn test_stat_window_expires_old_records() {
+        let config = CircuitBreakerConfig {
+            error_threshold: 0.75,
+            cooldown: Duration::from_millis(100),
+            probe_requests: 1,
+            stat_window: Duration::from_millis(60),
+        };
+        let cb = CircuitBreaker::new(config);
+        cb.record_success();
+        cb.record_failure();
+        // 窗口内 1/2 = 0.5 < 0.75
+        assert_eq!(cb.state(), CircuitState::Closed);
+        thread::sleep(Duration::from_millis(120));
+        cb.record_failure();
+        // 旧记录全部出窗，仅剩本次失败 ⇒ 1.0 ≥ 0.75
+        assert_eq!(cb.state(), CircuitState::Open);
+    }
+
+    #[test]
+    fn test_many_records_stay_closed_with_low_error_rate() {
+        // 大量成功记录不应触发熔断，也不应随记录数增长放大内存
+        let config = CircuitBreakerConfig {
+            error_threshold: 0.5,
+            cooldown: Duration::from_millis(100),
+            probe_requests: 1,
+            stat_window: Duration::from_secs(60),
+        };
+        let cb = CircuitBreaker::new(config);
+        // 1% 失败率：既验证窗口统计不受记录量影响，也验证不会因首条记录误熔断
+        for i in 0..100_000u32 {
+            if i % 100 == 99 {
+                cb.record_failure();
+            } else {
+                cb.record_success();
+            }
+        }
         assert_eq!(cb.state(), CircuitState::Closed);
     }
 

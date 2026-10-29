@@ -10,8 +10,8 @@
 
 ## 1. ADR Directory
 
-> Current ADR count: **47** (ADR-001~023 + ADR-026~044 + ADR-AI-01~05; this English table below lists ADR-001~020 + latest ADRs, full list in the [Chinese index](README.md))
-> ADR density: 47 / 42 modules = **1.119** (exceeds ≥ 0.15 target, see "ADR and Production Bug Localization Spec" Section 4)
+> Current ADR count: **49** (ADR-001~023 + ADR-026~046 + ADR-AI-01~05; this English table below lists ADR-001~020 + latest ADRs, full list in the [Chinese index](README.md))
+> ADR density: 49 / 42 modules = **1.167** (exceeds ≥ 0.15 target, see "ADR and Production Bug Localization Spec" Section 4)
 
 | ID | Title | Status | Date | Decision Maker | File |
 |----|-------|--------|------|----------------|------|
@@ -37,8 +37,9 @@
 | ADR-020 | Async file I/O migration (std::fs → tokio::fs, iron rule 4 compliance) | Accepted | 2026-08-05 | SZ-Rust Team | [0020-async-file-io-migration.md](0020-async-file-io-migration.md) |
 | ADR-023 | matchit integration decision (K1 stays with axum) | Decided | 2026-08-06 | SZ-Rust Team | [0023-matchit-K1-决策.md](0023-matchit-K1-决策.md) |
 | ADR-042 | QR code generation-verification closed loop (rqrr lightweight decode replacing rxing) | Accepted | 2026-10-20 | SZ-Rust Team | [ADR-042-qr-verify-rqrr-closed-loop.md](ADR-042-qr-verify-rqrr-closed-loop.md) |
+| ADR-046 | Performance engineering remediation (per-peer rate-limit buckets / 60-bucket O(1) breaker window / pool probe off / log level / gate v2 in CI) | Accepted | 2026-10-29 | SZ-Rust Team | [0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md](0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md) |
 
-> **Note**: This English index was historically maintained up to ADR-020. The complete up-to-date index (ADR-001~023 + ADR-026~044 + ADR-AI-01~05, 47 decisions) is maintained in the [Chinese index](README.md).
+> **Note**: This English index was historically maintained up to ADR-020. The complete up-to-date index (ADR-001~023 + ADR-026~046 + ADR-AI-01~05, 49 decisions) is maintained in the [Chinese index](README.md).
 
 **Status definitions**:
 - `Proposed`: Submitted but not yet reviewed

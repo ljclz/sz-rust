@@ -55,7 +55,7 @@ pub fn init_audience_config(config: auth_service::AudienceConfig) {
 ///
 /// v1.9.0 增强（feature `v19-jwt-audience`）：
 /// - 启用后额外校验 JWT `aud` 声明，aud 不匹配返回 401
-/// - 无 aud 旧令牌在 grace period 内放行 + WARN，超出后按 deny_no_audience 策略处理
+/// - 无 aud 旧令牌在 grace period 内放行 + WARN（每 60 s 采样一条，附被抑制条数），超出后按 deny_no_audience 策略处理
 /// - 未调用 `init_audience_config` 时回退为不校验 audience
 pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let auth_header = req

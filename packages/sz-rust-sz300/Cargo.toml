@@ -80,6 +80,8 @@ sz-rust-distributed-tx = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 # v1.9.0 可观测性闭环（feature gate 控制，默认不启用）
 sz-rust-alert-engine = { workspace = true, optional = true }
+# v1.9.0 插件生态：Ed25519 真实验签（2026-10-28 修复 AppSec P0-1 伪验签）
+ed25519-dalek.workspace = true
 
 
 [features]

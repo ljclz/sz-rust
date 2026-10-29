@@ -12,7 +12,9 @@
  *   3. 变异门禁 kill-rate 必须 fail-closed：mutants.yml 不得仅 ::warning::
  *      （必须 exit 1）。
  *   4. 性能回归门禁接线：benchmark.yml 与 ai-facade-perf-gate.yml 必须调用
- *      scripts/perf/regression_gate.sh。
+ *      scripts/perf/regression_gate.sh；perf-gate.yml 必须调用
+ *      scripts/perf-regression.js（2026-10-29 补：该脚本此前零 workflow 引用，
+ *      「CI 性能回归门禁」只存在于文档中，本条防止再次脱钩）。
  *   5. 禁用的 workflow：存在 *.disabled 文件视为 ERROR（应重新启用或删除）。
  *
  * 用法：node scripts/audit/ci-config-audit.js
@@ -31,6 +33,7 @@ const SECURITY_YML = path.join(WF_DIR, 'security.yml');
 const MCDC_YML = path.join(WF_DIR, 'mcdc.yml');
 const BENCHMARK_YML = path.join(WF_DIR, 'benchmark.yml');
 const AI_PERF_YML = path.join(WF_DIR, 'ai-facade-perf-gate.yml');
+const E2E_PERF_YML = path.join(WF_DIR, 'perf-gate.yml');
 const PROJECT_RULES = path.join(ROOT, '.trae', 'rules', 'project_rules.md');
 const SKILL = path.join(ROOT, '.trae', 'skills', 'sz-rust-test-coverage', 'SKILL.md');
 
@@ -114,6 +117,25 @@ function main() {
     if (!wired) failures.push(`${name} 未调用 scripts/perf/regression_gate.sh`);
   }
 
+  // 4b. 端到端性能门禁接线（HTTP 负载，非 criterion 微基准）
+  {
+    const text = read(E2E_PERF_YML);
+    const wired = /scripts\/perf-regression\.js/.test(text);
+    const hasInit = /--init/.test(text);
+    const noBaselineFails = /--init[\s\S]{0,800}?exit\s+1/.test(text);
+    console.log(`\nperf-gate.yml 调用 perf-regression.js: ${wired ? 'OK' : '❌'}`);
+    if (!wired) {
+      failures.push('perf-gate.yml 未调用 scripts/perf-regression.js（端到端性能门禁脱钩）');
+    } else {
+      console.log(`perf-gate.yml 基线播种（--init）: ${hasInit ? 'OK' : '❌'}`);
+      if (!hasInit) failures.push('perf-gate.yml 缺少无基线时的 --init 播种路径');
+      console.log(`perf-gate.yml 无基线判定失败（exit 1）: ${noBaselineFails ? 'OK' : '❌'}`);
+      if (!noBaselineFails) {
+        failures.push('perf-gate.yml 在无指纹基线时未判定失败（会产生"假绿"）');
+      }
+    }
+  }
+
   // 5. 禁用 workflow
   const disabled = fs.existsSync(WF_DIR)
     ? fs.readdirSync(WF_DIR).filter((f) => f.endsWith('.disabled'))
@@ -126,7 +148,7 @@ function main() {
   if (failures.length > 0) {
     console.error('\n❌ 门禁 32 失败：');
     for (const f of failures) console.error(`  - ${f}`);
-    console.error('处置：统一阈值为 85；深度门禁移除 continue-on-error；kill-rate exit 1；接线 regression_gate.sh；删除/启用 .disabled。');
+    console.error('处置：统一阈值为 85；深度门禁移除 continue-on-error；kill-rate exit 1；接线 regression_gate.sh / perf-regression.js；删除/启用 .disabled。');
     process.exit(1);
   }
   console.log('\n✅ 门禁 32 通过（WARN ' + warns.length + ' 条）');

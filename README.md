@@ -185,11 +185,12 @@ sz-rust/                          # workspace 根目录（唯一真源）
 详细文档位于 `docs/` 目录：
 
 - [docs 根目录文档导航](docs/README.md) — docs/ 根目录全部文档索引（ADR/审计/基准/规范/指南等）
-- [ADR 索引](docs/adr/README.md) — 47 个架构决策记录（ADR-001~023 + ADR-026~044 + ADR-AI-01~05）
+- [ADR 索引](docs/adr/README.md) — 49 个架构决策记录（`docs/adr/*.md`，2026-10-29 实测计数）
 - [ADR-011 可观测性模块](docs/adr/0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) — MetricsRegistry 设计、SLO 多窗口燃烧率、四层可观测性模型（v0.2.0）
 - [ADR-012 分布式追踪](docs/adr/0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) — W3C TraceContext 标准、OTLP exporter 路径（v0.2.0）
 - [ThinkPHP API 对照表](docs/thinkphp-api-mapping.md) — SZ-Rust 门面与 ThinkPHP API 逐项对照
 - [工程化实践规范](docs/sz-rust-engineering-practices.md) — 10 道门禁、CI/CD、代码风格
+- [数据库支持矩阵](docs/database-support-matrix.md) — 各方言支持状态与运维基线（MySQL 单主）
 - [软件项目审计清单](docs/软件项目审计清单.md) — P0/P1/P2 审计维度
 - [ADR 与生产 Bug 定位规范](docs/ADR与生产Bug定位规范.md) — 可复用规范（v1.0）
 - [初始审计报告](docs/audit/archive/2026-07/2026-07-22-初始审计.md) — P0 全通过 / P1 需改进 2 项
@@ -269,16 +270,17 @@ export SZ300_CORS_ORIGIN="https://admin.example.com"
 
 ## CI 门禁与质量保障
 
-项目通过 GitHub Actions 实施门禁体系（`ci.yml` 实际 27 个 job，2026-10-25 实测修正——旧版 README 声称 23 个 job 系过时数字；`machete` 为 `continue-on-error: true` 非阻塞；`coverage` 与 `miri` 为阻塞门禁，miri 检出 UB/内存问题即 fail-closed）：
+项目通过 GitHub Actions 实施门禁体系（`ci.yml` 实际 **37 个 job**，2026-10-28 复核修正——数字以 `grep -c '^  [a-z-]*:$'` 解析 `jobs:` 直接子键为准；`machete` 为 `continue-on-error: true` 非阻塞；`coverage` 与 `miri` 为阻塞门禁，miri 检出 UB/内存问题即 fail-closed）：
 
 | Workflow | 触发条件 | 职责 |
 |----------|---------|------|
-| `ci.yml` | push/PR | 26 个 job：fmt / check / clippy / test / doc(missing_docs) / audit / deny(cargo-deny) / no-placeholder / feature-matrix / unused-deps / outdated / machete* / adr-coverage / coverage / compile-time / miri / windows / ai-facade / **doc-code-consistency（防幻影交付）** / **adr-code（ADR 引用代码对账）** / **assertion-value（拒绝无断言空洞测试）** / **feature-consistency（feature 声明对账）** / license-compliance（Apache-2.0 头+字段） / no-crate-dead-code / i18n-completeness / boundary-check（* 标记为 continue-on-error 非阻塞；coverage 与 miri 为阻塞门禁；原 isolation 隔离检查已随 ADR-043 单一版本合并废止） |
+| `ci.yml` | push/PR | 37 个 job：fmt / check / **repro-check（依赖可复现：sz-orm 提交固定 + 声明版本一致）** / clippy / test / doc(missing_docs) / audit / deny(cargo-deny) / no-placeholder / feature-matrix / unused-deps / outdated / machete* / adr-coverage / coverage / compile-time / miri / windows / ai-facade / **doc-code-consistency（防幻影交付）** / **adr-code（ADR 引用代码对账）** / **assertion-value（拒绝无断言空洞测试）** / **feature-consistency（feature 声明对账）** / license-compliance（Apache-2.0 头+字段） / no-crate-dead-code / i18n-completeness / boundary-check / openapi-consistency / unwrap-gate（生产 unwrap=0） / ignored-test-routing / coverage-matrix-completeness / ci-config-audit / test-hygiene-check / orphan-module-check / **perf-static（N+1/锁跨 await/阻塞调用/串行 await，warn 级）** / **advisory-ignore-expiry（RUSTSEC 忽略项到期日）** / **unwired-crates（零入度 crate 登记）**（* 标记为 continue-on-error 非阻塞；coverage 与 miri 为阻塞门禁；原 isolation 隔离检查已随 ADR-043 单一版本合并废止） |
 | `coverage.yml` | push/PR | cargo-tarpaulin 覆盖率统计 + Codecov 上传 |
-| `benchmark.yml` | push main / PR | criterion 性能基准测试 + **9 类基准覆盖门禁** + gh-pages-bench 分支保存 |
-| `security.yml` | push/PR + 每周日 00:00 UTC | cargo-audit（**阻塞**，2026-10-25 起移除 continue-on-error；忽略清单及理由见 `.cargo/audit.toml`）+ **unmaintained 真实编译检查（paste/rustls-pemfile/rkyv）** + cargo-geiger（非阻塞，仅汇总） |
+| `benchmark.yml` | push main / PR | criterion 性能基准测试 + **11 类基准覆盖门禁**（`benchmark.yml` 第 30-62 行校验 `>= 11 categories`）+ gh-pages-bench 分支保存 |
+| `perf-gate.yml` | PR（仅基线结构检查）/ 每周日 04:00 UTC / workflow_dispatch | **端到端 HTTP 性能门禁**（`scripts/perf-regression.js` v2）：MySQL 9.6 + migrations 001–007 + 确定性 2 万行数据集 + release 构建 + 真实负载（预热 10 s / 稳态 60 s × 3）；无指纹基线即**判定失败**并播种 artifact，不做"无基线即通过"。口径与阈值见 ADR-046 |
+| `security.yml` | push/PR + 每周日 00:00 UTC | cargo-audit（**阻塞**，2026-10-25 起移除 continue-on-error；忽略清单及理由见 `.cargo/audit.toml`）+ **unmaintained 真实编译检查（paste/rustls-pemfile）** + cargo-geiger（非阻塞，仅汇总） |
 | `fuzz.yml` | push/PR + 每周六 00:00 UTC + workflow_dispatch | 10 用例 × 1000 迭代模糊测试，支持 `FUZZ_ITERATIONS` 自定义 |
-| `mcdc.yml` / `mutants.yml` | push/PR | 分支覆盖率门禁 / 变异测试 |
+| `mcdc.yml` / `mutants.yml` | 每周 schedule + workflow_dispatch | 分支覆盖率门禁（阈值 75%，fail-closed） / 变异测试（杀死率 ≥90%，fail-closed） |
 | `publish-oss.yml` / `release.yml` | 发布流程 | crates.io 发布 / release 构建 |
 | `marketplace-ci.yml` | 插件市场路径变更 | 插件市场 crate CI（`sz-rust-marketplace` 已实体交付：130 测试 + CLI 接线，旧「虚构交付」定性已过时） |
 

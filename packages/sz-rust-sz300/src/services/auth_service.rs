@@ -537,6 +537,42 @@ mod audience {
         NoAudienceDenied,
     }
 
+    /// 告警采样窗口（秒）：同一类按请求触发的告警最多每窗口输出一条
+    const WARN_SAMPLE_INTERVAL_SECS: i64 = 60;
+
+    /// 按时间窗采样输出告警的状态（窗口起点 + 被抑制条数）
+    ///
+    /// Why：「无 aud 旧令牌在 grace period 内放行」是**每个请求**都会命中的分支，
+    /// 逐条 WARN 会把日志 I/O 计费到业务热路径上（2026-10-29 现场验证：3 次 60 s 稳态
+    /// 内落盘 157,068 条），并且任何持无 aud 令牌的客户端都能用它灌满磁盘。
+    /// 安全信号本身要保留，因此改为采样输出并附带被抑制条数。
+    #[derive(Default)]
+    pub(crate) struct WarnSampler {
+        last_secs: std::sync::atomic::AtomicI64,
+        suppressed: std::sync::atomic::AtomicU64,
+    }
+
+    impl WarnSampler {
+        /// 返回 `(should_log, suppressed_since_last_log)`
+        pub(crate) fn sample(&self, now: i64) -> (bool, u64) {
+            use std::sync::atomic::Ordering::Relaxed;
+            let last = self.last_secs.load(Relaxed);
+            if now - last >= WARN_SAMPLE_INTERVAL_SECS
+                && self
+                    .last_secs
+                    .compare_exchange(last, now, Relaxed, Relaxed)
+                    .is_ok()
+            {
+                (true, self.suppressed.swap(0, Relaxed))
+            } else {
+                self.suppressed.fetch_add(1, Relaxed);
+                (false, 0)
+            }
+        }
+    }
+
+    static NO_AUDIENCE_WARN: std::sync::OnceLock<WarnSampler> = std::sync::OnceLock::new();
+
     /// Audience 校验配置
     ///
     /// - `service_id`：本服务期望的 audience 值（如 "sz300-api"）
@@ -669,11 +705,17 @@ mod audience {
             // 无 aud — 检查 grace period
             let now = now_secs();
             if payload.iat + config.grace_period_secs > now {
-                tracing::warn!(
-                    iat = payload.iat,
-                    grace_period_secs = config.grace_period_secs,
-                    "无 aud 旧令牌在 grace period 内放行，建议轮换"
-                );
+                let sampler = NO_AUDIENCE_WARN.get_or_init(WarnSampler::default);
+                let (should_log, suppressed) = sampler.sample(now);
+                if should_log {
+                    tracing::warn!(
+                        iat = payload.iat,
+                        grace_period_secs = config.grace_period_secs,
+                        suppressed_in_window = suppressed,
+                        "无 aud 旧令牌在 grace period 内放行，建议轮换（每 {} s 采样一条）",
+                        WARN_SAMPLE_INTERVAL_SECS
+                    );
+                }
                 Ok(user)
             } else if config.deny_no_audience {
                 tracing::warn!("无 aud 旧令牌超出 grace period，拒绝");
@@ -765,5 +807,29 @@ mod tests {
             legacy_verifiers_removed(),
             "PasswordVerifier / DbPasswordVerifier 残留引用应已移除"
         );
+    }
+
+    /// grace-period 告警必须按窗口采样，且不能丢失被抑制条数
+    ///
+    /// 用独立的 `WarnSampler` 实例（而非进程级静态），避免与并行用例相互干扰。
+    #[cfg(feature = "v19-jwt-audience")]
+    #[test]
+    fn test_no_audience_warning_is_sampled_per_window() {
+        use super::audience::WarnSampler;
+
+        let sampler = WarnSampler::default();
+        let base = 1_700_000_000_i64;
+
+        // 窗口外首次命中：输出，抑制数为 0
+        assert_eq!(sampler.sample(base), (true, 0));
+        // 同窗口内后续命中：不输出
+        for _ in 0..9 {
+            assert!(!sampler.sample(base + 1).0);
+        }
+        // 下一个窗口：输出且携带上一窗口累计的 9 条抑制
+        assert_eq!(sampler.sample(base + 60), (true, 9));
+        // 窗口内未再次到期：仍不输出
+        assert!(!sampler.sample(base + 90).0);
+        assert_eq!(sampler.sample(base + 120), (true, 1));
     }
 }

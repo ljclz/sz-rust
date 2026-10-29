@@ -24,6 +24,11 @@ pub struct PoolConfig {
     /// 连接最大存活时间（秒），0 表示不限制
     pub max_lifetime_secs: u64,
     /// 借出前探活（`SELECT 1`），防止把已断开的连接交给业务
+    ///
+    /// 2026-10-29 性能评测整改：默认关闭（`false`）。开启时每次借出连接都要多一次
+    /// 网络往返（业务热路径每请求 3 次 SQL ⇒ 多 3 次 RTT），而空闲连接已由
+    /// `idle_timeout`（600s）/ `max_lifetime`（1800s）回收，残存死连接的概率很低。
+    /// 需要严格兜底时用 `SZ300_POOL_TEST_BEFORE_ACQUIRE=1` 显式打开。
     pub test_before_acquire: bool,
 }
 
@@ -36,7 +41,7 @@ impl Default for PoolConfig {
             connection_timeout_secs: 10,
             idle_timeout_secs: 600,
             max_lifetime_secs: 1800,
-            test_before_acquire: true,
+            test_before_acquire: false,
         }
     }
 }
@@ -50,7 +55,7 @@ impl PoolConfig {
     /// - `SZ300_POOL_ACQUIRE_TIMEOUT`（默认 5 秒）
     /// - `SZ300_POOL_IDLE_TIMEOUT`（默认 600 秒，0=禁用）
     /// - `SZ300_POOL_MAX_LIFETIME`（默认 1800 秒，0=禁用）
-    /// - `SZ300_POOL_TEST_BEFORE_ACQUIRE`（默认 true）
+    /// - `SZ300_POOL_TEST_BEFORE_ACQUIRE`（默认 false；置 1/true/yes 开启借出前 `SELECT 1`）
     pub fn from_env() -> Self {
         let default = Self::default();
         Self {
@@ -185,7 +190,10 @@ pub async fn init_pool_with_config(
     config: &crate::config::AppConfig,
     pool_config: PoolConfig,
 ) -> anyhow::Result<Pool> {
-    let tls_mode = resolve_tls_mode(std::env::var("SZ300_DB_TLS").ok().as_deref(), crate::config::is_production())?;
+    let tls_mode = resolve_tls_mode(
+        std::env::var("SZ300_DB_TLS").ok().as_deref(),
+        crate::config::is_production(),
+    )?;
 
     let mut connect_options = sqlx::mysql::MySqlConnectOptions::new()
         .host(&config.database.host)
@@ -204,7 +212,9 @@ pub async fn init_pool_with_config(
                 .ok()
                 .filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| {
-                    anyhow::anyhow!("SZ300_DB_TLS={tls_mode:?} 需要设置 SZ300_DB_TLS_CA 指向 CA 证书")
+                    anyhow::anyhow!(
+                        "SZ300_DB_TLS={tls_mode:?} 需要设置 SZ300_DB_TLS_CA 指向 CA 证书"
+                    )
                 })?;
             let mode = if tls_mode == DbTlsMode::VerifyCa {
                 sqlx::mysql::MySqlSslMode::VerifyCa
@@ -254,6 +264,7 @@ pub async fn init_pool_with_config(
 /// - `SZ_PG_POOL_ACQUIRE_TIMEOUT`（默认 5 秒）
 /// - `SZ_PG_POOL_IDLE_TIMEOUT`（默认 600 秒，0=禁用）
 /// - `SZ_PG_POOL_MAX_LIFETIME`（默认 1800 秒，0=禁用）
+/// - `SZ_PG_POOL_TEST_BEFORE_ACQUIRE`（默认 false；置 1/true/yes 开启借出前探活）
 pub async fn init_pg_pool(config: &crate::config::PgDatabaseConfig) -> anyhow::Result<Pool> {
     fn env_u64(key: &str, default: u64) -> u64 {
         std::env::var(key)
@@ -267,6 +278,9 @@ pub async fn init_pg_pool(config: &crate::config::PgDatabaseConfig) -> anyhow::R
     let acquire_timeout_secs = env_u64("SZ_PG_POOL_ACQUIRE_TIMEOUT", 5);
     let idle_timeout_secs = env_u64("SZ_PG_POOL_IDLE_TIMEOUT", 600);
     let max_lifetime_secs = env_u64("SZ_PG_POOL_MAX_LIFETIME", 1800);
+    let test_before_acquire = std::env::var("SZ_PG_POOL_TEST_BEFORE_ACQUIRE")
+        .map(|s| !matches!(s.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+        .unwrap_or(false);
 
     let connect_options = sqlx::postgres::PgConnectOptions::new()
         .host(&config.host)
@@ -279,7 +293,7 @@ pub async fn init_pg_pool(config: &crate::config::PgDatabaseConfig) -> anyhow::R
         .max_connections(max_connections)
         .min_connections(min_idle)
         .acquire_timeout(std::time::Duration::from_secs(acquire_timeout_secs))
-        .test_before_acquire(true);
+        .test_before_acquire(test_before_acquire);
     if idle_timeout_secs > 0 {
         options = options.idle_timeout(Some(std::time::Duration::from_secs(idle_timeout_secs)));
     }
@@ -310,6 +324,17 @@ mod tests {
         assert_eq!(cfg.min_idle, 10);
         assert_eq!(cfg.acquire_timeout_secs, 5);
         assert_eq!(cfg.connection_timeout_secs, 10);
+        // 2026-10-29 整改：默认不做借出前探活（省一次 SQL 往返）
+        assert!(!cfg.test_before_acquire);
+    }
+
+    #[test]
+    fn test_pool_config_test_before_acquire_env_override() {
+        std::env::set_var("SZ300_POOL_TEST_BEFORE_ACQUIRE", "1");
+        assert!(PoolConfig::from_env().test_before_acquire);
+        std::env::set_var("SZ300_POOL_TEST_BEFORE_ACQUIRE", "false");
+        assert!(!PoolConfig::from_env().test_before_acquire);
+        std::env::remove_var("SZ300_POOL_TEST_BEFORE_ACQUIRE");
     }
 
     #[test]
