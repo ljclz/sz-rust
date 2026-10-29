@@ -158,6 +158,8 @@ criterion = { workspace = true, features = ["html_reports"] }
 futures.workspace = true
 tower = { workspace = true }
 http-body-util = { workspace = true }
+# pool_cancel_safe_test 自定义 ConnectionFactory（trait 使用 #[async_trait]）
+async-trait.workspace = true
 # v2.0.0 合并企业版：WASM 测试编译 wat 模块
 wat = "1"
 # 2026-10-27 性能基线落地：windows_memory_baseline 用 sysinfo 实测进程 RSS

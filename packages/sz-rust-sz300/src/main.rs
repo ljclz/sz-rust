@@ -299,6 +299,29 @@ async fn main() -> anyhow::Result<()> {
         services::mqtt_listener::MqttDispatcher::start_consumer(app_state_clone, shutdown_rx).await;
     });
 
+    // 事务性 Outbox（006_outbox.sql）：订单事件与订单同事务落库。
+    // 只有在配置了真实下游 `SZ300_OUTBOX_WEBHOOK_URL` 时才启动投递循环 ——
+    // 未配置时保持"只写不投递"，并显式告警，避免运维把"事件已写入"误读成"事件已送出"。
+    match std::env::var("SZ300_OUTBOX_WEBHOOK_URL")
+        .ok()
+        .filter(|u| !u.trim().is_empty())
+    {
+        Some(url) => {
+            let dispatch_pool = (*app_state.db_pool).clone();
+            let _dispatcher = services::outbox::spawn_dispatcher(
+                dispatch_pool,
+                services::outbox::webhook_handler(url),
+                std::time::Duration::from_secs(5),
+            );
+            // 不打印 URL：可能携带下游访问令牌
+            tracing::info!("Outbox 投递已启用（HTTP Webhook，轮询间隔 5s，仅 2xx 视为送达）");
+        }
+        None => tracing::warn!(
+            "Outbox 只写不投递：未配置 SZ300_OUTBOX_WEBHOOK_URL；\
+             order.created 会持续堆积在 outbox_event，配置下游后自动开始投递"
+        ),
+    }
+
     // 注册路由
     let app = router::create_router(app_state);
 

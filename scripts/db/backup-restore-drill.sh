@@ -48,7 +48,9 @@ cmd_full() {
   out="$BACKUP_DIR/${SZ_BACKUP_DB}_full_${stamp}.sql.gz"
   pos="$BACKUP_DIR/${SZ_BACKUP_DB}_full_${stamp}.pos"
 
-  "${MYSQL[@]}" -N -e "SHOW MASTER STATUS" > "$pos" || true
+  # SHOW MASTER STATUS 在 8.0 返回 5 列（含空的 Binlog_Do_DB/Executed_Gtid_Set），
+  # -N 下会带一串空字段的制表符；只留 <file> <position>，便于直接喂给 --start-position
+  "${MYSQL[@]}" -N -e "SHOW MASTER STATUS" | awk '{print $1" "$2}' > "$pos" || true
 
   # --single-transaction：InnoDB 一致性快照，不锁表
   # --source-data=2：把 binlog 位点写进 dump 注释（MySQL 8.0.26+）
@@ -68,8 +70,10 @@ cmd_binlog() {
   files="$("${MYSQL[@]}" -N -e "SHOW BINARY LOGS" | awk '{print $1}')"
   [ -n "$files" ] || die "未开启 binlog（log_bin=ON 才能做增量恢复）"
   for f in $files; do
+    # --raw 时 -r 指向目录（末尾带 /）：输出名 = 目录 + binlog 文件名。
+    # 传完整路径会让 mysqlbinlog 再追加一次文件名（binlog.000001binlog.000001）。
     mysqlbinlog -h "$SZ_BACKUP_HOST" -P "$SZ_BACKUP_PORT" -u "$SZ_BACKUP_USER" \
-      -R --raw -r "$BACKUP_DIR/binlog/$f" "$f"
+      -R --raw -r "$BACKUP_DIR/binlog/" "$f"
   done
   echo "binlog 归档完成: $BACKUP_DIR/binlog（$(( $(echo "$files" | wc -l) )) 个文件）"
 }

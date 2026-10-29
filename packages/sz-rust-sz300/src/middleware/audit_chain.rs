@@ -37,6 +37,7 @@ use axum::{
 use sz_rust_core::orm::{Pool, Value};
 use sz_rust_middleware_facade::audit_chain::{AuditRecord, ChainHashAuditor};
 
+use crate::db::acquire_cancel_safe;
 use crate::middleware::auth_middleware::CurrentUser;
 use crate::services::redact_sensitive;
 
@@ -147,8 +148,7 @@ async fn persist_record(
     let write = async {
         // sz-orm 10.13 的 Pool::acquire 返回独立 PoolError，未提供 From<PoolError> for DbError，
         // 需显式下沉到 DbError::PoolError 才能与 execute_with_params 的错误类型统一。
-        let mut conn = pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(pool)
             .await
             .map_err(sz_rust_core::orm::DbError::PoolError)?;
         conn.execute_with_params(sql, &params).await

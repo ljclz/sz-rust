@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sz_orm_sqlx::{
     MySqlPoolHandle, PgPoolHandle, SqlxMySqlConnectionFactory, SqlxPgConnectionFactory,
 };
-use sz_rust_core::orm::{Pool, PoolConfigBuilder};
+use sz_rust_core::orm::{Pool, PoolConfigBuilder, PoolError, PooledConnection};
 
 /// v1.9.0 连接池配置（spec §5.8.1 规则 2）
 ///
@@ -98,6 +98,28 @@ pub struct PoolExhaustedError {
 /// 初始化 MySQL 连接池
 pub async fn init_pool(config: &crate::config::AppConfig) -> anyhow::Result<Pool> {
     init_pool_with_config(config, PoolConfig::from_env()).await
+}
+
+/// 取消安全的连接获取（规避上游 `Pool::acquire` 的槽位泄漏）
+///
+/// 上游 `Pool::acquire` 先 CAS 递增 `total_count` 再 `await` 建连，future 在该
+/// await 点被取消时不会执行回滚 `fetch_sub`，槽位永久丢失；累计 `max_size` 次
+/// 取消后池子彻底卡死（`total_count == max_size` 但无可用连接）。
+/// 客户端断连、`tokio::time::timeout` 包裹、请求 future 被 drop 都会触发该路径。
+///
+/// 因此把 `acquire` 放进独立任务：调用方被取消时任务继续跑完，`send` 失败后
+/// 连接随 `Result` 一起被 drop，正常归还池中。
+///
+/// 同构实现见 `sz_rust_orm_facade::acquire_cancel_safe`（供 addons 等业务包使用）；
+/// sz300 不直接依赖该 facade，故保留本地副本，两处逻辑必须保持一致。
+pub async fn acquire_cancel_safe(pool: &Pool) -> Result<PooledConnection, PoolError> {
+    let pool = pool.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        // 接收端已 drop 时 send 返回 Err(连接)，随作用域结束归还
+        let _ = tx.send(pool.acquire().await);
+    });
+    rx.await.unwrap_or(Err(PoolError::Closed))
 }
 
 /// MySQL 传输加密模式（映射到 sqlx `MySqlSslMode`）

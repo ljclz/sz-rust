@@ -169,7 +169,10 @@ async fn test_same_seq_on_different_devices_is_independent() {
     let device_b = OrderService::create(&pool, &make_order("IDEM-DEV-B", 9004, "SEQ-X"), &items)
         .await
         .expect("设备 B 使用相同序列号不应冲突");
-    assert_ne!(device_a, device_b, "幂等键是 (device_id, offline_seq)，跨设备必须独立");
+    assert_ne!(
+        device_a, device_b,
+        "幂等键是 (device_id, offline_seq)，跨设备必须独立"
+    );
 
     common::teardown_all(&pool).await;
     pool.close_all().await;

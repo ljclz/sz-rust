@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
+use crate::db::acquire_cancel_safe;
 use crate::models::merchant::Merchant;
 
 /// 商户分页结果
@@ -57,7 +58,7 @@ impl MerchantService {
 
         // P1-SEC-06: 外部 IO 超时保护（默认 5s）
         sz_rust_core::runtime::spawn::with_timeout(async {
-            let mut conn = pool.acquire().await.map_err(|e| {
+            let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
                 tracing::error!(error = %e, "商户列表获取 DB 连接失败");
                 "数据库连接失败".to_string()
             })?;
@@ -121,7 +122,7 @@ impl MerchantService {
         pool: &Pool,
         merchant_id: i64,
     ) -> Result<Option<HashMap<String, Value>>, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "商户详情获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;
@@ -147,7 +148,7 @@ impl MerchantService {
     /// - `merchant`：商户实体（`merchant_id` 字段被忽略，由 DB 自增生成）
     #[tracing::instrument(skip(pool, merchant))]
     pub async fn create(pool: &Pool, merchant: &Merchant) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "创建商户获取 DB 连接失败: name={}", merchant.name);
             "数据库连接失败".to_string()
         })?;
@@ -194,7 +195,7 @@ impl MerchantService {
             return Err("未提供需要更新的字段".to_string());
         }
 
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "更新商户获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;
@@ -242,7 +243,7 @@ impl MerchantService {
     /// 删除商户（软删除 — 将 status 置为 0）
     #[tracing::instrument(skip(pool))]
     pub async fn delete(pool: &Pool, merchant_id: i64) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "删除商户获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;

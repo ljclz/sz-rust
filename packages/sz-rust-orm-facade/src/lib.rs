@@ -42,6 +42,7 @@ pub use sz_orm_core::{
     PoolConfig,
     PoolConfigBuilder,
     PoolError,
+    PooledConnection,
     Relation,
     RelationAccess,
     RelationError,
@@ -56,6 +57,26 @@ pub use sz_orm_core::{
 
 // MultiLevelCache is publicly re-exported at the sz_orm_core crate root via `pub use cache::*`
 pub use sz_orm_core::MultiLevelCache;
+
+/// 取消安全的连接获取
+///
+/// `sz_orm_core::Pool::acquire` 先 CAS 递增 `total_count`，再 `await` 建连；
+/// future 在该 await 点被取消（客户端断连、`tokio::time::timeout`、任务 abort、
+/// `select!` 分支丢弃）时回滚分支不执行，槽位永久泄漏，累计 `max_size` 次后
+/// 连接池彻底卡死（`total_count == max_size` 但无可用连接），只能重启进程恢复。
+///
+/// 本包装把 `acquire` 放进独立任务：调用方被取消时任务继续跑完，`send` 失败后
+/// 连接随 `Result` 被丢弃并自动归还池中。业务包直接 `acquire()` 的路径应改为调用
+/// 本函数（`async fn` 位于请求 future 内，任何 await 点都可能被取消）。
+pub async fn acquire_cancel_safe(pool: &Pool) -> Result<PooledConnection, PoolError> {
+    let pool = pool.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        // 接收端已 drop 时 send 返回 Err(连接)，随作用域结束归还
+        let _ = tx.send(pool.acquire().await);
+    });
+    rx.await.unwrap_or(Err(PoolError::Closed))
+}
 
 /// 仓储子模块（Repository trait + WhereCondition/WhereOp 条件构造）
 ///

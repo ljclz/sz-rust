@@ -53,6 +53,7 @@ pub use sz_orm_core::{
     PoolConfigBuilder,
     PoolError,
     PoolStatus,
+    PooledConnection,
     Relation,
     RelationAccess,
     RelationError,

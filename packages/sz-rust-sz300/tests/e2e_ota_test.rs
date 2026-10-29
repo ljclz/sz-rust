@@ -173,6 +173,17 @@ fn json_request(body: serde_json::Value) -> Request<Body> {
         .unwrap()
 }
 
+/// 直接调用控制器会绕过 auth 中间件，需手动注入身份（对齐中间件注入的 CurrentUser）
+fn as_merchant(req: &mut Request<Body>, merchant_id: i64) {
+    req.extensions_mut()
+        .insert(sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+            user_id: 1,
+            username: "merchant_owner".to_string(),
+            merchant_id: Some(merchant_id),
+            is_admin: false,
+        });
+}
+
 // ============================================================================
 // spec 5.3.1: OTA 版本查询端到端
 // ============================================================================
@@ -244,10 +255,11 @@ async fn e2e_ota_trigger_valid_version_returns_success() {
     insert_ota_version(&pool, "1.5.0", 1, "http://ota.example.com/v1.5.0.bin").await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(serde_json::json!({
+    let mut req = json_request(serde_json::json!({
         "device_id": device_id,
         "ota_version": "1.5.0"
     }));
+    as_merchant(&mut req, 100);
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), req).await;
     let json = read_json(response).await;
@@ -283,10 +295,30 @@ async fn e2e_ota_trigger_unknown_version_returns_error() {
     let device_id = insert_device(&pool, "SN_OTA_UNKNOWN", 100).await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(serde_json::json!({
+    // 跨商户 IDOR：其他商户操作本商户设备必须被拒绝
+    let mut foreign = json_request(serde_json::json!({
         "device_id": device_id,
         "ota_version": "99.99.99"
     }));
+    as_merchant(&mut foreign, 999);
+    let response = sz_rust_sz300::controllers::device::trigger_ota(
+        axum::extract::State(state.clone()),
+        foreign,
+    )
+    .await;
+    let foreign_json = read_json(response).await;
+    assert_eq!(
+        foreign_json.get("code").and_then(|v| v.as_i64()),
+        Some(403),
+        "跨商户触发 OTA 应被 IDOR 防护拒绝: {:?}",
+        foreign_json
+    );
+
+    let mut req = json_request(serde_json::json!({
+        "device_id": device_id,
+        "ota_version": "99.99.99"
+    }));
+    as_merchant(&mut req, 100);
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), req).await;
     let json = read_json(response).await;

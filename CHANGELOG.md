@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### Fixed — 连接池取消泄漏（2026-10-29）
+
+> 来源：`docs/audit/2026-10-28-数据库层路线图修复记录.md` §2「61-90.4」与 §5 命令 26–31。
+> 上游同源缺陷：`../sz-orm` 提交 `c72d90a1`（`SlotGuard`）。本轮改动**尚未提交**（无 SHA）。
+
+- **新增 pub API**：`sz_rust_orm_facade::acquire_cancel_safe(&Pool)` 与 `sz_rust_sz300::db::acquire_cancel_safe(&Pool)`
+  —— 把 `pool.acquire()` 放进独立 `tokio::spawn` 并以 `oneshot` 回传，调用方 future 被取消时
+  连接随 `Err` 归还池中，规避上游 `acquire()` 在 CAS 递增 `total_count` 后于 `factory.create()` await 点
+  被取消导致**槽位永久泄漏、池彻底卡死**（此前只能重启进程恢复）。`sz_rust_core::orm` 同步转发 `PooledConnection`。
+- **调用点替换 85 处 / 18 文件**：sz300 54 处（`services/{saga_order,device,auth,merchant,product,mqtt,order,outbox}`、
+  `graphql/schema.rs`、`middleware/audit_chain.rs`）+ addons-admin 31 处（`guard.rs` 与 7 个 service）；
+  `services/health_service.rs` 因其本身已在 spawn 任务内执行而保留裸 `acquire()`。
+- **回归测试**：`packages/sz-rust-sz300/tests/pool_cancel_safe_test.rs`（免真库，`SlowFactory` + `max_size=2`）。
+  红/绿对照：裸 `acquire` → `1 passed; 1 failed`（`取消 2 次后连接池已卡死——槽位泄漏回归`）；
+  包装后 `2 passed`。`cargo test -p sz-rust-sz300 --lib` = **105 passed / 0 failed**。
+- **真机复测**：3 次"停库 23s + c=16 并发"演练，**进程不重启**即在起库后 7s / 17s 内回到满吞吐
+  （`45-50s 5099/5099`），`connection_created_total` 20→40（起库后重建连接），`acquire_failed_total` 停止增长。
+- **未覆盖**：上游 `release`/`Drop` 归还前不校验 `is_connected()` 的死连接路径未单独构造用例（上游增强项 ③）。
+
 ### Fixed — UXR 定性体验评测整改（2026-10-28）
 
 > 来源：`docs/audit/uxr-eval-prompt.md` 触发的只读 UXR 评测（10 条 Nielsen 启发式平均 5.4/10）。修复跟踪：`docs/audit/2026-10-28-UXR整改执行报告.md`。

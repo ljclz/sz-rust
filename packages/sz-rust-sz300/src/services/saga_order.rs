@@ -21,6 +21,7 @@ use sz_rust_distributed_tx::{
     TxLogStore, TxState, TxType,
 };
 
+use crate::db::acquire_cancel_safe;
 use crate::models::order::Order;
 use crate::models::order_item::OrderItem;
 
@@ -61,9 +62,7 @@ impl DbStockService {
 #[async_trait]
 impl StockService for DbStockService {
     async fn deduct(&self, good_id: i64, quantity: i32) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE good SET stock = stock - ? WHERE good_id = ? AND stock >= ?";
@@ -86,9 +85,7 @@ impl StockService for DbStockService {
     }
 
     async fn restore(&self, good_id: i64, quantity: i32) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE good SET stock = stock + ? WHERE good_id = ?";
@@ -115,9 +112,7 @@ impl DbPaymentService {
 #[async_trait]
 impl PaymentService for DbPaymentService {
     async fn initiate(&self, order_id: i64, amount_fen: i64) -> Result<String, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE `order` SET status = 2, pay_at = NOW(), updated_at = NOW() \
@@ -143,9 +138,7 @@ impl PaymentService for DbPaymentService {
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| DtxError::Generic(format!("无效的 payment_id: {}", payment_id)))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE `order` SET status = 0, updated_at = NOW() WHERE order_id = ?";
@@ -191,9 +184,7 @@ impl SagaAction for CreateOrderAction {
         )
         .map_err(|e| DtxError::Serialization(format!("反序列化 items 失败: {}", e)))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
 
@@ -270,9 +261,7 @@ impl SagaAction for CancelOrderAction {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| DtxError::Generic("payload 缺少 order_id".into()))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
 
@@ -464,9 +453,7 @@ fn str_to_state(s: &str) -> TxState {
 #[async_trait]
 impl TxLogStore for DbTxLogStore {
     async fn save(&self, entry: &TxLogEntry) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let steps_json = serde_json::to_string(&entry.steps)
@@ -506,9 +493,7 @@ impl TxLogStore for DbTxLogStore {
         state: TxState,
         payload: &Value,
     ) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let state_str = state_to_str(state);
@@ -530,9 +515,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn get(&self, tx_id: &str) -> Result<Option<TxLogEntry>, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let sql = "SELECT tx_id, tx_type, state, steps, payload, created_at, updated_at \
@@ -548,9 +531,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn list_running(&self) -> Result<Vec<TxLogEntry>, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let sql = "SELECT tx_id, tx_type, state, steps, payload, created_at, updated_at \
@@ -563,9 +544,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn delete(&self, tx_id: &str) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         conn.execute_with_params(

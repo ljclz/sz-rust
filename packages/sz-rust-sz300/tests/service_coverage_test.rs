@@ -745,14 +745,48 @@ async fn test_device_trigger_ota_unknown_version_returns_error() {
         "ota_version": "99.99.99"
     })
     .to_string();
-    let request = axum::http::Request::builder()
+
+    // 直接调用控制器会绕过 auth 中间件：未注入 CurrentUser 时必须 403（IDOR 防护先于版本查询）
+    let unauth = axum::http::Request::builder()
+        .method("POST")
+        .uri("/device/trigger_ota")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body.clone()))
+        .unwrap();
+    let response = sz_rust_sz300::controllers::device::trigger_ota(
+        axum::extract::State(state.clone()),
+        unauth,
+    )
+    .await;
+    // 业务层统一返回 HTTP 200，错误通过 JSON code 传递（render_error 语义）
+    let unauth_json = read_json_body(response).await;
+    assert_eq!(
+        unauth_json.get("code").and_then(|v| v.as_i64()),
+        Some(403),
+        "未认证请求不得触发 OTA（IDOR 防护）: {}",
+        unauth_json
+    );
+
+    // 管理员身份：越过 IDOR 校验后，不存在的 OTA 版本返回 HTTP 200 + code=0 业务错误
+    let mut request = axum::http::Request::builder()
         .method("POST")
         .uri("/device/trigger_ota")
         .header("Content-Type", "application/json")
         .body(axum::body::Body::from(body))
         .unwrap();
-    let response =
-        sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), request).await;
+    request.extensions_mut().insert(
+        sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+            user_id: 1,
+            username: "admin".to_string(),
+            merchant_id: None,
+            is_admin: true,
+        },
+    );
+    let response = sz_rust_sz300::controllers::device::trigger_ota(
+        axum::extract::State(state),
+        request,
+    )
+    .await;
     // ThinkPHP 风格：OTA 版本不存在返回 HTTP 200 + JSON {"code": 0, "msg": "OTA 版本不存在或未启用"}
     let json = read_json_body(response).await;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(1);

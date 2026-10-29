@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::repository::PageResult;
 use sz_rust_orm_facade::{Pool, Value};
 
@@ -74,7 +75,7 @@ impl OperationLogService {
     }
 
     async fn write_log(pool: &Arc<Pool>, log: &OperationLogModel) -> Result<(), AdminError> {
-        let mut conn = pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(pool).await?;
         let detail_str = log
             .detail
             .as_ref()
@@ -144,7 +145,7 @@ impl OperationLogService {
         let count_sql = format!("SELECT COUNT(*) AS cnt FROM ({sql}) AS sub");
         let list_sql = format!("{sql} ORDER BY id DESC LIMIT ? OFFSET ?");
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let count_rows = conn.query_with_params(&count_sql, &params).await?;
         let total: u64 = count_rows
             .first()
@@ -165,7 +166,7 @@ impl OperationLogService {
 
     pub async fn cleanup_expired(&self, retention_days: i64) -> Result<u64, AdminError> {
         let cutoff = Utc::now() - chrono::Duration::days(retention_days);
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let affected = conn
             .execute_with_params(
                 "DELETE FROM operation_logs WHERE created_at < ?",

@@ -4,12 +4,12 @@ use serde_json::Value;
 use sz_rust_core::orm::Value as OrmValue;
 use sz_rust_core::orm::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
+use crate::db::acquire_cancel_safe;
 use crate::state::AppState;
 
 use super::redact_sensitive;
 
 /// SZ-300 MQTT Topic 定义
-
 pub struct SzMqttTopics;
 
 impl SzMqttTopics {
@@ -55,7 +55,7 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -92,7 +92,7 @@ impl MqttMessageHandler {
             .unwrap_or(0);
         let items = payload.get("items").and_then(|v| v.as_array());
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -192,7 +192,7 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;

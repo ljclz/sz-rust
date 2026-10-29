@@ -2,6 +2,7 @@
 // Copyright (c) 2026 SZ-Rust Team
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use crate::db::acquire_cancel_safe;
 use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
@@ -256,7 +257,7 @@ pub async fn authenticate_async(
 
     // P1-SEC-06: 外部 IO 超时保护（默认 5s）— 仅包裹 DB 查询
     let rows = sz_rust_core::runtime::spawn::with_timeout(async {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "认证时获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -308,7 +309,7 @@ pub async fn authenticate_async(
 
     // 更新最后登录时间 — 参数化，避免注入（P1-SEC-06: 超时保护）
     let _ = sz_rust_core::runtime::spawn::with_timeout(async {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "更新最后登录时间获取连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -370,8 +371,7 @@ pub async fn authenticate_async(
 #[tracing::instrument]
 pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool
-        .acquire()
+    let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败");
@@ -414,8 +414,7 @@ pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String,
 #[tracing::instrument]
 pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool
-        .acquire()
+    let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败: user_id={}", user_id);
@@ -452,8 +451,7 @@ pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>>
 #[tracing::instrument(skip_all)]
 pub async fn try_get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
     let pool = DB_POOL.get()?;
-    let mut conn = pool
-        .acquire()
+    let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "查询用户上下文：获取 DB 连接失败: user_id={}", user_id);

@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 
+use crate::db::acquire_cancel_safe;
 use crate::models::device::Device;
 use crate::models::ota_version::OtaVersion;
 use sz_rust_core::orm::ModelExt;
@@ -77,7 +78,7 @@ impl DeviceService {
             format!("WHERE {}", conditions.join(" AND "))
         };
 
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备列表获取 DB 连接失败");
             "数据库连接失败".to_string()
         })?;
@@ -129,7 +130,7 @@ impl DeviceService {
         pool: &Pool,
         device_id: i64,
     ) -> Result<Option<HashMap<String, Value>>, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备详情获取 DB 连接失败: device_id={}", device_id);
             "数据库连接失败".to_string()
         })?;
@@ -163,7 +164,7 @@ impl DeviceService {
     /// - `Err(msg)`：DB 错误（msg 不泄露内部信息）
     #[tracing::instrument(skip(pool))]
     pub async fn bind(pool: &Pool, device_sn: &str, merchant_id: i64) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备绑定获取 DB 连接失败: device_sn={}", device_sn);
             "数据库连接失败".to_string()
         })?;
@@ -221,7 +222,7 @@ impl DeviceService {
     /// 解绑设备（将 merchant_id 置为 0，状态置为离线，bind_at 置为 NULL）
     #[tracing::instrument(skip(pool))]
     pub async fn unbind(pool: &Pool, device_id: i64) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备解绑获取 DB 连接失败: device_id={}", device_id);
             "数据库连接失败".to_string()
         })?;
@@ -246,7 +247,7 @@ impl DeviceService {
     /// - `Err(msg)`：DB 错误
     #[tracing::instrument(skip(pool))]
     pub async fn exists(pool: &Pool, device_id: i64) -> Result<bool, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备存在性检查获取 DB 连接失败: device_id={}", device_id);
             "数据库连接失败".to_string()
         })?;
@@ -282,7 +283,7 @@ impl DeviceService {
         merchant_id: Option<i64>,
         is_admin: bool,
     ) -> Result<bool, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备存在性检查获取 DB 连接失败: device_id={}", device_id);
             "数据库连接失败".to_string()
         })?;
@@ -318,7 +319,7 @@ impl DeviceService {
         pool: &Pool,
         version: &str,
     ) -> Result<Option<HashMap<String, Value>>, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "OTA 版本查询获取 DB 连接失败: version={}", version);
             "数据库连接失败".to_string()
         })?;
@@ -347,7 +348,7 @@ impl DeviceService {
         signal_strength: i64,
         fw_version: &str,
     ) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "设备状态上报获取 DB 连接失败: device_id={}", device_id);
             "数据库连接失败".to_string()
         })?;

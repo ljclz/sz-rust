@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
+use crate::db::acquire_cancel_safe;
 use crate::models::order::Order;
 use crate::models::order_item::OrderItem;
 
@@ -158,7 +159,7 @@ impl OrderService {
             format!("WHERE {}", conditions.join(" AND "))
         };
 
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "订单列表获取 DB 连接失败");
             "数据库连接失败".to_string()
         })?;
@@ -179,10 +180,22 @@ impl OrderService {
             .unwrap_or(0);
 
         // 列表查询 — 追加分页参数（keyset 模式不生成 OFFSET 子句）
+        //
+        // keyset 深翻页固定 `ORDER BY order_id DESC`：优化器会优先选覆盖索引
+        // `idx_merchant_created (merchant_id, created_at)`，再对整段商户订单做 filesort
+        // （实测 1000 行/商户时 0.53ms vs 0.017ms）。显式指定 `idx_merchant`，其二级索引
+        // 尾部带主键，反向扫描可直接产出有序的 20 行。仅在带 merchant_id 时提示，
+        // 否则纯设备游标场景会退化为全索引扫描。
+        let list_from = if keyset && filters.merchant_id.is_some() {
+            "`order` FORCE INDEX (idx_merchant)"
+        } else {
+            "`order`"
+        };
         let list_sql = if keyset {
             format!(
-                "SELECT {} FROM `order` {} ORDER BY order_id DESC LIMIT ?",
+                "SELECT {} FROM {} {} ORDER BY order_id DESC LIMIT ?",
                 Order::columns().join(", "),
+                list_from,
                 where_clause
             )
         } else {
@@ -230,7 +243,7 @@ impl OrderService {
     /// - `Err(msg)`：DB 错误（msg 不泄露内部信息）
     #[tracing::instrument(skip(pool))]
     pub async fn get_with_items(pool: &Pool, order_id: i64) -> Result<Option<OrderDetail>, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "订单详情获取 DB 连接失败: order_id={}", order_id);
             "数据库连接失败".to_string()
         })?;
@@ -301,7 +314,7 @@ impl OrderService {
         /// 单条 INSERT 的最大行数（7 列 × 500 行 = 3500 参数，远低于 MySQL 上限）
         const MAX_ROWS_PER_INSERT: usize = 500;
 
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "创建订单获取 DB 连接失败: order_no={}", order.order_no);
             "数据库连接失败".to_string()
         })?;

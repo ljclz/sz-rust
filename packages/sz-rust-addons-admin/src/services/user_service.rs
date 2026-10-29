@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::repository::PageResult;
 use sz_rust_orm_facade::{Pool, Value};
 
@@ -134,7 +135,7 @@ impl UserService {
         let count_sql = format!("SELECT COUNT(*) AS cnt FROM ({sql}) AS sub");
         let list_sql = format!("{sql} ORDER BY id DESC LIMIT ? OFFSET ?");
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let count_rows = conn.query_with_params(&count_sql, &params).await?;
         let total: u64 = count_rows
             .first()
@@ -163,7 +164,7 @@ impl UserService {
         UserModel::validate_username(&req.username)?;
         UserModel::validate_password_strength(&req.password)?;
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let exists_rows = conn
             .query_with_params(
                 "SELECT id FROM users WHERE username = ? AND tenant_id = ? LIMIT 1",
@@ -215,7 +216,7 @@ impl UserService {
         req: UpdateUserRequest,
         tenant_id: i64,
     ) -> Result<UserResponse, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let exists = conn
             .query_with_params(
                 "SELECT id FROM users WHERE id = ? AND tenant_id = ? LIMIT 1",
@@ -268,7 +269,7 @@ impl UserService {
         status: UserStatus,
         tenant_id: i64,
     ) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let now = Utc::now();
         let affected = conn
             .execute_with_params(
@@ -292,7 +293,7 @@ impl UserService {
             return Err(AdminError::SuperAdminProtected);
         }
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         conn.begin_transaction().await?;
         conn.execute_with_params(
             "DELETE FROM user_roles WHERE user_id = ? AND tenant_id = ?",
@@ -319,7 +320,7 @@ impl UserService {
         role_ids: Vec<i64>,
         tenant_id: i64,
     ) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         conn.begin_transaction().await?;
         conn.execute_with_params(
             "DELETE FROM user_roles WHERE user_id = ? AND tenant_id = ?",
@@ -344,7 +345,7 @@ impl UserService {
     }
 
     pub async fn is_super_admin(&self, user_id: i64, tenant_id: i64) -> Result<bool, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT r.code AS code FROM user_roles ur \
@@ -357,7 +358,7 @@ impl UserService {
     }
 
     async fn get_by_id(&self, user_id: i64, tenant_id: i64) -> Result<UserResponse, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, username, email, phone, status, tenant_id, created_at, updated_at, last_login_at \

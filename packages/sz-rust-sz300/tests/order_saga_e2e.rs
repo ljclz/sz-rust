@@ -140,11 +140,17 @@ fn make_order_item(good_id: i64, quantity: i32, price_fen: i64) -> OrderItem {
 }
 
 fn unique_order_no(prefix: &str) -> String {
+    // order_no 为 VARCHAR(32)（001_init.sql），拼接纳秒时间戳会造成超长截断错误，
+    // 统一用 12 位尾号并把前缀裁剪到剩余长度内
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
-    format!("{}-{}", prefix, ts)
+        .as_nanos()
+        % 1_000_000_000_000;
+    let suffix = ts.to_string();
+    let room = 32usize.saturating_sub(suffix.len() + 1);
+    let head: String = prefix.chars().take(room).collect();
+    format!("{}-{}", head, suffix)
 }
 
 struct FailPaymentService;
