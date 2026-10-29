@@ -95,7 +95,7 @@
 - **可观测性闭环**（`v19-obs-closure`）：tracing_middleware 全链路追踪 + TraceID + Span 本地缓冲 + SilenceManager 告警静默去重 + BusinessAlertRules 业务告警规则集 + 6 E2E 测试
 - **性能深化**：热路径基线（3 条）+ CI 性能回归门禁（`scripts/perf-regression.js`）+ N+1 检测门禁（`scripts/nplus1-detect.js`）+ 连接池调优（`PoolConfig` + `PoolExhaustedError`）+ 查询缓存（LRU + TTL + 命中率统计）
   - 2026-10-29 更正：上述门禁在 2026-10-29 前**未被任何 workflow 引用**，且脚本用 5 s 短跑 + 失败计数 + 跨机器占位基线，不可作为性能证据。已重写为 v2 并接入 `.github/workflows/perf-gate.yml`，见 `docs/adr/0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md`。
-  - 2026-10-29 真库端到端验证：一次性 MySQL 9.6 + migrations 001–007 + `deploy/sql/perf-seed.sql`（首跑暴露并修正 `merchant.market_id` NOT NULL 缺列）+ release 实例跑通门禁 v2，`/health` 实测 +34.9%；期间新发现并修复「无 `aud` 令牌 grace-period 告警按请求落盘」（占日志字节 99.78% → `WarnSampler` 60 s 采样），另登记一个未修缺陷「审计链 c=50 下丢 397 条记录（1 s 超时即弃）」需合规决策。证据见 `docs/audit/2026-10-29-性能整改现场验证记录.md`。
+  - 2026-10-29 真库端到端验证：一次性 MySQL 9.6 + migrations 001–007 + `deploy/sql/perf-seed.sql`（首跑暴露并修正 `merchant.market_id` NOT NULL 缺列）+ release 实例跑通门禁 v2，`/health` 实测 +34.9%（V）；**同源 A/B**（同一容器+同一数据集）product +5.2% / order +8.6%（W，无回归）；本机指纹已 `--init` 播种真实基线。期间新发现并修复「无 `aud` 令牌 grace-period 告警按请求落盘」（占日志字节 99.78% → `WarnSampler` 60 s 采样），另登记一个未修缺陷「审计链 c=50 下丢 397 条记录（1 s 超时即弃）」需合规决策。证据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §7/§11/§12。
 
 #### P2 功能开发
 

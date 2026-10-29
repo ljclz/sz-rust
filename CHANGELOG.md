@@ -40,7 +40,7 @@
 - **门禁接入 CI**：新增 `.github/workflows/perf-gate.yml`（PR 仅做基线结构检查；手动/定时跑 MySQL 9.6 + migrations 001–007 + `deploy/sql/perf-seed.sql` 确定性 2 万行数据集 + release 构建 + 真实负载），无指纹基线时退出码 3 **判定失败**并播种 artifact，不产生"假绿"。`deploy/sql/perf-seed.sql` 在首次真库运行中暴露并修正：`merchant.market_id` 为 NOT NULL 且无默认值（原 seed 缺 `market`/`merchant` 行直接 `ERROR 1364`），现显式插入市场与商户、补 `good.stock`、按 002 语义分布订单状态、`created_at` 按分钟确定性展开。
 - 验证：`cargo test -p sz-rust-middleware-facade --lib -- circuit_breaker rate_limit` = **86 passed / 0 failed**；`cargo test -p sz-rust-core --test middleware_chaos` = **26 passed / 0 failed**；`cargo test -p sz-rust-sz300 --lib` = **106 passed / 0 failed**；`cargo clippy -p sz-rust-sz300 --all-targets -- -D warnings` = 0 error；`cargo check -p sz-rust-sz300 --bin sz300-server` = 0 error。门禁 v2 在一次性回环桩服务上三向验证（稳定 exit 0 / 注入 20 ms 延迟 exit 1 / 2.255% 错误率 exit 1），并在一次性 MySQL 9.6 + 真库 release 实例上端到端跑通（7/7 migration + seed + 三端点 0% 错误率，详见 `docs/audit/2026-10-29-性能整改现场验证记录.md`）。
 - **已实测收益**：`/health`（不查库、不走鉴权分支，唯一同档可比项）c=50 中位 QPS 4364 → **5886.8 / 6248.7（两轮独立 release 实测，+34.9% ~ +43.2%，对外只引用下界 +34.9%）**，p99 32–79 ms → **12.10–12.99 ms（−59%~−85%）**；第一轮测量期间有 34.5–100% 外部负载干扰，属保守下界——两轮已达单进程压测器自身天花板（6.2–6.9k）的 92–99%，瓶颈已从熔断器全局锁转移到压测器。
-- **未验证**：业务端点（`product/list`、`order/list`）修复前后吞吐 A/B 仍为未验证——两侧 DB 版本/部署形态/buffer pool 与数据集行数三重不可比，详见验证记录 §1/§8；评测 §6 的 +86% / 3–4× 为外推值，不得作为已实现收益引用。
+- **已验证/未验证边界**：`/health` V 级 +34.9%（下界）~ +43.2%；业务端点**同源 A/B 已做**（同一容器+同一数据集，product +5.2% / order +8.6%，W 级——无回归但受同机争用干扰，量值待空闲机复测，详见验证记录 §12）；评测 §6 的 +86% / 3–4× 仍为外推值，不得作为已实现收益引用。本机指纹 `a17a08aab11946f1` 已由 `--init` 播种真实基线（三端点 0% 错误，CV 0.3%/0.8%/2.3%）。
 
 ### Fixed — 独立评测整改执行（2026-10-28）
 
