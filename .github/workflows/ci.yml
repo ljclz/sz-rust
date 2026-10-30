@@ -41,7 +41,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      # 不能直接用 cargo fmt --all：--all 会连带格式化本地 path 依赖 ../sz-orm，
+      # 而上游仓库在钉住提交上并非 rustfmt-clean，会把本仓库门禁拖红。
+      # cargo fmt 也没有 --workspace，故按 workspace 成员逐个 --check。
+      - name: Check formatting (workspace members only)
+        run: |
+          set -uo pipefail
+          members=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[].name')
+          status=0
+          for p in $members; do
+            cargo fmt -p "$p" --check || status=1
+          done
+          exit $status
 
   # 门禁 2：工作空间编译验证
   check:
@@ -54,6 +66,7 @@ jobs:
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
 
@@ -86,6 +99,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: ./.github/actions/install-tauri-linux-deps
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -100,6 +114,7 @@ jobs:
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
       - uses: Swatinem/rust-cache@v2
       # P3-3 修复：--jobs 1 规避 Cargo 在高并发编译时的 crate 解析竞争问题
       # 此问题为 Cargo 工具链已知限制（非代码问题），单线程编译可稳定通过
@@ -118,6 +133,7 @@ jobs:
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --workspace
         env:
@@ -171,13 +187,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 检查禁止的占位实现
+        # 只看代码行：文档注释里出现 `unimplemented!()` 示例（如 plugin-sdk 的
+        # 错误处理示例）不是占位实现，按注释行过滤，避免误判。
         run: |
-          if grep -rn 'todo!()\|unimplemented!()\|panic!("not implemented' --include="*.rs" packages/; then
+          hits=$(grep -rnE '\b(todo!\(\)|unimplemented!\(\)|panic!\("not implemented)' \
+            --include="*.rs" packages/ | grep -vE ':[0-9]+:[[:space:]]*//' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
             echo "❌ 发现禁止的占位实现"
             exit 1
-          else
-            echo "✅ 未发现占位实现"
           fi
+          echo "✅ 未发现占位实现"
 
   # 门禁 8：feature 全组合编译验证
   feature-matrix:
@@ -191,6 +211,7 @@ jobs:
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
       - name: Install cargo-hack
         run: cargo install cargo-hack --locked
       - name: Cache cargo registry
@@ -210,6 +231,7 @@ jobs:
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/install-tauri-linux-deps
       - name: Install cargo-udeps
         run: cargo install cargo-udeps --locked
       - name: Cache cargo registry
@@ -232,7 +254,12 @@ jobs:
       - name: Install cargo-outdated
         run: cargo install cargo-outdated --locked
       - name: Check outdated dependencies
-        run: cargo outdated --workspace --depth 2
+        # cargo-outdated 把工作区复制到 /tmp/cargo-outdatedXXXX 后再解析，此时
+        # Cargo.toml 的 path = "../sz-orm/..." 解析为 /tmp/sz-orm；先补软链，
+        # 否则报 "failed to read /tmp/sz-orm/packages/sz-orm-auth/Cargo.toml"。
+        run: |
+          ln -sfn "$(cd .. && pwd)/sz-orm" /tmp/sz-orm
+          cargo outdated --workspace --depth 2
 
   # 门禁 11：cargo-machete 未使用依赖检测
   machete:
@@ -352,6 +379,7 @@ jobs:
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
@@ -497,6 +525,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # docs/adr/README*.md 与 .trae/skills 下有指向 ../sz-orm 的相对链接，
+      # 缺兄弟仓库时 link-check 会判 broken
+      - uses: ./.github/actions/checkout-sz-orm
       - name: Check claimed crates + links + version + features (gate 19)
         run: node scripts/audit/doc-code-consistency.js
       - name: Standalone link/version/feature check (gate 19, rerunnable)
@@ -566,6 +597,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # check-boundary.sh 内部执行 cargo metadata，缺 ../sz-orm 时直接非零退出
+      - uses: ./.github/actions/checkout-sz-orm
       - name: Check no reverse dependencies
         run: bash scripts/check-boundary.sh
 
@@ -668,7 +701,15 @@ jobs:
               echo "::error::missing detector $script"
               exit 1
             fi
-            out=$(python "$script" packages 2>&1); code=$?
+            # GitHub 用 bash -e 执行；直接 out=$(cmd) 会让 cmd 非零（= 有命中）在赋值处
+            # 终止整个 job。用 `|| code=$?` 接住，命中(1)按 warn 处理，真崩溃(>1)仍失败。
+            code=0
+            out=$(python "$script" packages 2>&1) || code=$?
+            if [ "$code" -gt 1 ]; then
+              echo "::error::detector crashed (exit=$code) $script"
+              printf '%s\n' "$out"
+              exit 1
+            fi
             echo "::group::$label (exit=$code)"
             echo "$out"
             echo "::endgroup::"

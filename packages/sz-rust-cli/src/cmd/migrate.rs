@@ -295,11 +295,7 @@ async fn acquire_migration_lock(
                 .map_err(|e| CliError::Migration(format!("Failed to acquire lock: {}", e)))?;
             let acquired = rows
                 .first()
-                .and_then(|r| {
-                    r.values()
-                        .next()
-                        .and_then(|v| v.as_i64())
-                })
+                .and_then(|r| r.values().next().and_then(|v| v.as_i64()))
                 .unwrap_or(0);
             if acquired != 1 {
                 return Err(CliError::Migration(format!(
@@ -320,7 +316,8 @@ async fn acquire_migration_lock(
                 .unwrap_or(0);
             if acquired != 1 {
                 return Err(CliError::Migration(
-                    "Another migration is running (pg_try_advisory_lock returned false)".to_string(),
+                    "Another migration is running (pg_try_advisory_lock returned false)"
+                        .to_string(),
                 ));
             }
         }

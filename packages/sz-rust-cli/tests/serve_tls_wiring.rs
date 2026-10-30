@@ -26,7 +26,10 @@ fn test_parse_serve_tls_args() {
     ]);
     // SDET P2-4：断言宏替代 panic!（断言价值门禁只统计 assert 宏）
     assert!(cli.command.is_some(), "expected Serve command");
-    let Some(CliCommand::Serve { tls_cert, tls_key, .. }) = cli.command else {
+    let Some(CliCommand::Serve {
+        tls_cert, tls_key, ..
+    }) = cli.command
+    else {
         unreachable!("cli.command is_some checked above");
     };
     assert_eq!(tls_cert.as_deref(), Some(std::path::Path::new("cert.pem")));
@@ -38,7 +41,10 @@ fn test_parse_serve_tls_args() {
 fn test_parse_serve_no_tls_default() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
     assert!(cli.command.is_some(), "expected Serve command");
-    let Some(CliCommand::Serve { tls_cert, tls_key, .. }) = cli.command else {
+    let Some(CliCommand::Serve {
+        tls_cert, tls_key, ..
+    }) = cli.command
+    else {
         unreachable!("cli.command is_some checked above");
     };
     assert!(tls_cert.is_none());

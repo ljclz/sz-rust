@@ -1578,7 +1578,7 @@ app_map:
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // 修改配置文件
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         std::fs::write(dir.join("app.yml"), "default_app: hot_reloaded\n").unwrap();
 
         // 等待 watcher 轮询检测到变化

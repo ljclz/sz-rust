@@ -21,13 +21,15 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
-
+      # 先检出兄弟仓库再跑 rust-cache：rust-cache 会执行 cargo metadata 推导 target 目录，
+      # Cargo.toml 的 path = "../sz-orm/..." 缺失时该命令以 101 退出，缓存判定失真。
       - name: Checkout sz-orm dependency
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
 
       - name: Verify 8 benchmark groups exist
         run: |

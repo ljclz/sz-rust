@@ -1876,9 +1876,7 @@ mod tests {
         // 失败文案跨平台不同：Windows 直报 Cargo.toml 缺失，Linux 走
         // CompileFailed 包装为 "编译失败: [...]"——断言失败族而非文案
         assert!(
-            err.contains("Cargo.toml")
-                || err.contains("CompileFailed")
-                || err.contains("编译失败"),
+            err.contains("Cargo.toml") || err.contains("CompileFailed") || err.contains("编译失败"),
             "应含编译失败: {err}"
         );
     }

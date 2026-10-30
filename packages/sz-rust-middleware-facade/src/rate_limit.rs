@@ -498,7 +498,9 @@ impl TokenBucket {
     ///
     /// `reset_at` 为「下一次请求会被放行」的 UNIX 毫秒时间戳。
     fn consume(&self, entry: &mut TokenBucketEntry, now: Instant) -> RateLimitResult {
-        let elapsed = now.saturating_duration_since(entry.last_refill).as_secs_f64();
+        let elapsed = now
+            .saturating_duration_since(entry.last_refill)
+            .as_secs_f64();
         entry.tokens = (entry.tokens + elapsed * self.refill_per_second).min(self.capacity as f64);
         entry.last_refill = now;
 
@@ -630,11 +632,9 @@ impl RateLimiter for SlidingWindow {
         if inner.entries.len() >= self.max_keys {
             let window = self.window_size;
             let cutoff = now.checked_sub(window).unwrap_or(now);
-            inner.entries.retain(|_, timestamps| {
-                timestamps
-                    .last()
-                    .is_some_and(|last| *last > cutoff)
-            });
+            inner
+                .entries
+                .retain(|_, timestamps| timestamps.last().is_some_and(|last| *last > cutoff));
         }
 
         let use_overflow = inner.entries.len() >= self.max_keys;

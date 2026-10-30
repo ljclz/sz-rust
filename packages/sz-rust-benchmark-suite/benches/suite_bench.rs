@@ -8,7 +8,9 @@
 //! 提供真实 criterion 基准目标。
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use sz_rust_benchmark_suite::{BaselineFile, BenchmarkResult, BenchmarkSuite, BenchmarkSuiteConfig};
+use sz_rust_benchmark_suite::{
+    BaselineFile, BenchmarkResult, BenchmarkSuite, BenchmarkSuiteConfig,
+};
 
 /// 回归百分比计算（套件核心热路径）
 fn bench_calc_regression_pct(c: &mut Criterion) {

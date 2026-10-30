@@ -70,7 +70,7 @@ async fn test_touch_updates_active_time() {
     let mgr = ConnectionManager::with_defaults();
     let (tx, _rx) = mpsc::channel(10);
     let conn_id = mgr.register(tx, None).unwrap();
-    std::thread::sleep(Duration::from_millis(10));
+    tokio::time::sleep(Duration::from_millis(10)).await;
     mgr.touch(&conn_id).unwrap();
     let idle = mgr.idle_connections();
     assert!(idle.is_empty());
@@ -85,7 +85,7 @@ async fn test_idle_connections_detection() {
     let mgr = ConnectionManager::new(config);
     let (tx, _rx) = mpsc::channel(10);
     let conn_id = mgr.register(tx, None).unwrap();
-    std::thread::sleep(Duration::from_millis(10));
+    tokio::time::sleep(Duration::from_millis(10)).await;
     let idle = mgr.idle_connections();
     assert!(idle.contains(&conn_id));
 }

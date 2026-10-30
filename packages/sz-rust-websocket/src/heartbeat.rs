@@ -73,7 +73,7 @@ mod tests {
         let mgr = ConnectionManager::new(config);
         let (tx, _rx) = mpsc::channel(10);
         let conn_id = mgr.register(tx, None).unwrap();
-        std::thread::sleep(Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(10)).await;
         let idle = Heartbeat::check_once(&mgr);
         assert!(idle.contains(&conn_id));
     }

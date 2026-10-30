@@ -1200,7 +1200,7 @@ fn test_container_circular_long_chain() {
 /// 由于 type_name 返回模块全路径，故 expected 使用完整类型路径。
 #[test]
 #[should_panic(
-    expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX",
+    expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX"
 )]
 fn test_container_circular_error_message_contains_chain() {
     use std::sync::Arc;

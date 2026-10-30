@@ -7,7 +7,10 @@
 //! wasmi 解释执行，无需 JIT 编译，启动快、内存占用低，适合服务端边缘计算。
 
 use thiserror::Error;
-use wasmi::{Config, Engine, Error as WasmError, Extern, ExternType, Linker, Module, Store, StoreLimitsBuilder, Value};
+use wasmi::{
+    Config, Engine, Error as WasmError, Extern, ExternType, Linker, Module, Store,
+    StoreLimitsBuilder, Value,
+};
 
 /// 单次 WASM 执行的默认燃料上限（wasmi 指令级计量）。
 ///
@@ -407,13 +410,16 @@ mod tests {
     #[test]
     fn test_wasm_infinite_loop_fuel_exhausted() {
         let rt = WasmRuntime::new();
-        let wasm =
-            wat::parse_str(r#"(module (func (export "loop") (loop (br 0))))"#).unwrap();
+        let wasm = wat::parse_str(r#"(module (func (export "loop") (loop (br 0))))"#).unwrap();
         let module = rt.compile(&wasm).unwrap();
         let start = std::time::Instant::now();
         // 燃料计量应让无限循环快速返回 OutOfFuel 错误，而不是永久占住线程
         let result = module.execute("loop", &[]);
-        assert!(result.is_err(), "无限循环应因燃料耗尽而失败，实际: {:?}", result);
+        assert!(
+            result.is_err(),
+            "无限循环应因燃料耗尽而失败，实际: {:?}",
+            result
+        );
         assert!(
             start.elapsed() < std::time::Duration::from_secs(5),
             "燃料耗尽应在 5 秒内返回，实际耗时 {:?}",

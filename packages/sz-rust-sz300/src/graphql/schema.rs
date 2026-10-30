@@ -290,7 +290,7 @@ mod db_backed {
     use async_graphql::{Context, Object};
     use sz_rust_core::orm::{Pool, Value};
 
-    use super::{MerchantGql, OrderGql, ProductGql};
+    use super::{acquire_cancel_safe, MerchantGql, OrderGql, ProductGql};
 
     /// 从查询行提取商户
     fn row_to_merchant(row: &std::collections::HashMap<String, Value>) -> Option<MerchantGql> {

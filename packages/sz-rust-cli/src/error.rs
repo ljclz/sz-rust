@@ -265,8 +265,6 @@ mod tests {
     #[test]
     fn test_master_slave_same_display() {
         let err = CliError::MasterSlaveSame;
-        assert!(err
-            .to_string()
-            .contains("主表与从表不能同名"));
+        assert!(err.to_string().contains("主表与从表不能同名"));
     }
 }

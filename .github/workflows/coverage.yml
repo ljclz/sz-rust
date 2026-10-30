@@ -2,6 +2,11 @@
 #
 # CI-004~007：分片并行覆盖率矩阵 + 合并校验 + COVERAGE_THRESHOLD 环境变量
 # 使用 cargo-llvm-cov 统计覆盖率，分 4 个优先级分片并行执行后合并
+#
+# 2026-10-30：分片命令带 --branch（采集分支覆盖），cargo-llvm-cov 会传
+# -Z coverage-options=branch，该选项仅 nightly 接受。此前用 @stable 导致
+# 5 个分片全部报 "the option `Z` is only accepted on the nightly compiler"，
+# 故分片 job 统一改用 nightly（与 mcdc.yml 的分支覆盖口径一致）。
 
 name: Coverage
 
@@ -36,7 +41,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -67,7 +72,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -97,7 +102,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -131,7 +136,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -174,7 +179,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2

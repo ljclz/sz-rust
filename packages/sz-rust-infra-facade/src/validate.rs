@@ -345,56 +345,131 @@ pub static DEFAULT_ZH_LANG: Lazy<Arc<dyn message::Lang>> = Lazy::new(|| {
             .set(":attribute must be integer", ":attribute 必须为整数")
             .set(":attribute must be float", ":attribute 必须为浮点数")
             .set(":attribute must be bool", ":attribute 必须为布尔值")
-            .set(":attribute not a valid email address", ":attribute 不是有效的邮箱地址")
-            .set(":attribute not a valid mobile", ":attribute 不是有效的手机号")
+            .set(
+                ":attribute not a valid email address",
+                ":attribute 不是有效的邮箱地址",
+            )
+            .set(
+                ":attribute not a valid mobile",
+                ":attribute 不是有效的手机号",
+            )
             .set(":attribute must be a array", ":attribute 必须为数组")
-            .set(":attribute must be yes,on or 1", ":attribute 必须为 yes、on 或 1")
-            .set(":attribute not a valid datetime", ":attribute 不是有效的日期时间")
+            .set(
+                ":attribute must be yes,on or 1",
+                ":attribute 必须为 yes、on 或 1",
+            )
+            .set(
+                ":attribute not a valid datetime",
+                ":attribute 不是有效的日期时间",
+            )
             .set(":attribute not a valid file", ":attribute 不是有效的文件")
             .set(":attribute not a valid image", ":attribute 不是有效的图片")
             .set(":attribute must be alpha", ":attribute 必须为字母")
-            .set(":attribute must be alpha-numeric", ":attribute 必须为字母或数字")
+            .set(
+                ":attribute must be alpha-numeric",
+                ":attribute 必须为字母或数字",
+            )
             .set(
                 ":attribute must be alpha-numeric, dash, underscore",
                 ":attribute 必须为字母、数字、短横线或下划线",
             )
-            .set(":attribute not a valid domain or ip", ":attribute 不是有效的域名或 IP")
+            .set(
+                ":attribute not a valid domain or ip",
+                ":attribute 不是有效的域名或 IP",
+            )
             .set(":attribute must be chinese", ":attribute 必须为中文")
-            .set(":attribute must be chinese or alpha", ":attribute 必须为中文或字母")
-            .set(":attribute must be chinese,alpha-numeric", ":attribute 必须为中文、字母或数字")
+            .set(
+                ":attribute must be chinese or alpha",
+                ":attribute 必须为中文或字母",
+            )
+            .set(
+                ":attribute must be chinese,alpha-numeric",
+                ":attribute 必须为中文、字母或数字",
+            )
             .set(
                 ":attribute must be chinese,alpha-numeric,underscore, dash",
                 ":attribute 必须为中文、字母、数字、下划线或短横线",
             )
             .set(":attribute not a valid url", ":attribute 不是有效的 URL")
             .set(":attribute not a valid ip", ":attribute 不是有效的 IP")
-            .set(":attribute must be dateFormat of :rule", ":attribute 必须符合格式 :rule")
+            .set(
+                ":attribute must be dateFormat of :rule",
+                ":attribute 必须符合格式 :rule",
+            )
             .set(":attribute must be in :rule", ":attribute 必须在 :rule 中")
             .set(":attribute be notin :rule", ":attribute 不能在 :rule 中")
-            .set(":attribute must between :1 - :2", ":attribute 必须在 :1 到 :2 之间")
-            .set(":attribute not between :1 - :2", ":attribute 不能在 :1 到 :2 之间")
-            .set("size of :attribute must be :rule", ":attribute 长度必须为 :rule")
-            .set("max size of :attribute must be :rule", ":attribute 长度不能超过 :rule")
-            .set("min size of :attribute must be :rule", ":attribute 长度不能小于 :rule")
-            .set(":attribute cannot be less than :rule", ":attribute 不能小于 :rule")
-            .set(":attribute cannot exceed :rule", ":attribute 不能超过 :rule")
-            .set(":attribute not within :rule", ":attribute 不在 :rule 范围内")
+            .set(
+                ":attribute must between :1 - :2",
+                ":attribute 必须在 :1 到 :2 之间",
+            )
+            .set(
+                ":attribute not between :1 - :2",
+                ":attribute 不能在 :1 到 :2 之间",
+            )
+            .set(
+                "size of :attribute must be :rule",
+                ":attribute 长度必须为 :rule",
+            )
+            .set(
+                "max size of :attribute must be :rule",
+                ":attribute 长度不能超过 :rule",
+            )
+            .set(
+                "min size of :attribute must be :rule",
+                ":attribute 长度不能小于 :rule",
+            )
+            .set(
+                ":attribute cannot be less than :rule",
+                ":attribute 不能小于 :rule",
+            )
+            .set(
+                ":attribute cannot exceed :rule",
+                ":attribute 不能超过 :rule",
+            )
+            .set(
+                ":attribute not within :rule",
+                ":attribute 不在 :rule 范围内",
+            )
             .set("access IP is not allowed", "访问 IP 不被允许")
             .set("access IP denied", "访问 IP 被拒绝")
-            .set(":attribute out of accord with :2", ":attribute 与 :2 不一致")
-            .set(":attribute cannot be same with :2", ":attribute 不能与 :2 相同")
-            .set(":attribute must greater than or equal :rule", ":attribute 必须大于或等于 :rule")
-            .set(":attribute must greater than :rule", ":attribute 必须大于 :rule")
-            .set(":attribute must less than or equal :rule", ":attribute 必须小于或等于 :rule")
-            .set(":attribute must less than :rule", ":attribute 必须小于 :rule")
+            .set(
+                ":attribute out of accord with :2",
+                ":attribute 与 :2 不一致",
+            )
+            .set(
+                ":attribute cannot be same with :2",
+                ":attribute 不能与 :2 相同",
+            )
+            .set(
+                ":attribute must greater than or equal :rule",
+                ":attribute 必须大于或等于 :rule",
+            )
+            .set(
+                ":attribute must greater than :rule",
+                ":attribute 必须大于 :rule",
+            )
+            .set(
+                ":attribute must less than or equal :rule",
+                ":attribute 必须小于或等于 :rule",
+            )
+            .set(
+                ":attribute must less than :rule",
+                ":attribute 必须小于 :rule",
+            )
             .set(":attribute must equal :rule", ":attribute 必须等于 :rule")
             .set(":attribute has exists", ":attribute 已存在")
-            .set(":attribute not conform to the rules", ":attribute 不符合规则")
+            .set(
+                ":attribute not conform to the rules",
+                ":attribute 不符合规则",
+            )
             .set("invalid Request method", "无效的请求方法")
             .set("invalid token", "无效的令牌")
             .set("filesize not match", "文件大小不匹配")
             .set("extensions to upload is not allowed", "不允许上传该扩展名")
-            .set("mimetype to upload is not allowed", "不允许上传该 MIME 类型"),
+            .set(
+                "mimetype to upload is not allowed",
+                "不允许上传该 MIME 类型",
+            ),
     )
 });
 

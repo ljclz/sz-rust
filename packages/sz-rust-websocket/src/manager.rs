@@ -276,7 +276,7 @@ mod tests {
         let mgr = ConnectionManager::with_defaults();
         let (tx, _rx) = mpsc::channel(10);
         let conn_id = mgr.register(tx, None).unwrap();
-        std::thread::sleep(Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(10)).await;
         mgr.touch(&conn_id).unwrap();
         let idle = mgr.idle_connections();
         assert!(idle.is_empty());
@@ -350,7 +350,7 @@ mod tests {
         let (tx2, _rx2) = mpsc::channel(10);
         let conn1 = mgr.register(tx1, None).unwrap();
         let conn2 = mgr.register(tx2, None).unwrap();
-        std::thread::sleep(Duration::from_millis(10));
+        tokio::time::sleep(Duration::from_millis(10)).await;
         let idle = mgr.idle_connections();
         assert_eq!(idle.len(), 2);
         assert!(idle.contains(&conn1));
