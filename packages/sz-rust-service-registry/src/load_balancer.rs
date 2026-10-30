@@ -282,29 +282,32 @@ mod tests {
     #[test]
     fn test_weighted_select_returns_valid() {
         let lb = LoadBalancer::new(LoadBalanceStrategy::Weighted);
-        let instances = make_instances(); // 权重 1:3:2
+        // 权重 1:3:2
+        let instances = make_instances();
+        // 采样量取 6000：600 次时 weight=1 的 ±25% 带只有 2.7σ（单次运行约 0.6%
+        // 概率越界，run 41043729136 实测 w1=74 误报），6000 次后同一带宽约 8.7σ。
         let mut counts = HashMap::new();
-        for _ in 0..600 {
+        for _ in 0..6000 {
             let selected = lb.select(&instances, None).unwrap();
             *counts.entry(selected.instance_id.clone()).or_insert(0) += 1;
         }
         let w1 = counts.get("svc-10.0.0.1-8080").copied().unwrap_or(0);
         let w2 = counts.get("svc-10.0.0.2-8080").copied().unwrap_or(0);
         let w3 = counts.get("svc-10.0.0.3-8080").copied().unwrap_or(0);
-        // 比例分布断言（600 次采样，权重 1:3:2 → 期望 100/300/200，允许 ±25% 偏差）。
+        // 比例分布断言（6000 次采样，权重 1:3:2 → 期望 1000/3000/2000，允许 ±25% 偏差）。
         // `point -= weight` 被替换为 `+=`/`/=` 的变异体会把分布扭曲为 1:2:3
-        // （w2≈200、w3≈300），从而被杀死。
+        // （w2≈2000、w3≈3000），从而被杀死。
         assert!(
-            (75..=125).contains(&w1),
-            "weight=1 应约 100 次（±25%）: w1={w1}"
+            (750..=1250).contains(&w1),
+            "weight=1 应约 1000 次（±25%）: w1={w1}"
         );
         assert!(
-            (225..=375).contains(&w2),
-            "weight=3 应约 300 次（±25%）: w2={w2}"
+            (2250..=3750).contains(&w2),
+            "weight=3 应约 3000 次（±25%）: w2={w2}"
         );
         assert!(
-            (150..=250).contains(&w3),
-            "weight=2 应约 200 次（±25%）: w3={w3}"
+            (1500..=2500).contains(&w3),
+            "weight=2 应约 2000 次（±25%）: w3={w3}"
         );
     }
 
