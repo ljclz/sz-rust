@@ -30,14 +30,8 @@ impl QualityReport {
     }
 }
 
-/// 生成的文件
-#[derive(Debug, Clone)]
-pub struct GeneratedFile {
-    /// 文件路径
-    pub path: String,
-    /// 文件内容
-    pub content: String,
-}
+/// 生成的文件（复用 generator 的规范类型，避免同名结构体在特性组合下分叉）
+pub use crate::generator::GeneratedFile;
 
 /// 质量评分器
 pub struct QualityScorer {

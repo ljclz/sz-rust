@@ -212,7 +212,7 @@ mod tests {
         let auditor = ChainHashAuditor::new();
         let mut records = Vec::new();
         for i in 0..5 {
-            let mut r = AuditRecord::new("user1", "action", &format!("target:{i}"), "success");
+            let mut r = AuditRecord::new("user1", "action", format!("target:{i}"), "success");
             auditor.append(&mut r);
             records.push(r);
         }
@@ -224,7 +224,7 @@ mod tests {
         let auditor = ChainHashAuditor::new();
         let mut records = Vec::new();
         for i in 0..3 {
-            let mut r = AuditRecord::new("user1", "action", &format!("target:{i}"), "success");
+            let mut r = AuditRecord::new("user1", "action", format!("target:{i}"), "success");
             auditor.append(&mut r);
             records.push(r);
         }
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn test_query_audit_limit() {
         let records: Vec<AuditRecord> = (0..10)
-            .map(|i| AuditRecord::new("u1", "action", &format!("t{i}"), "ok"))
+            .map(|i| AuditRecord::new("u1", "action", format!("t{i}"), "ok"))
             .collect();
         let q = AuditQuery {
             limit: 3,

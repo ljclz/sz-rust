@@ -56,13 +56,16 @@ where
 // 组 1：spawn 吞吐量测试
 // ============================================================================
 
-#[tokio::test]
+// 本组测试自带 SzRuntime（内部持有 tokio runtime），必须用同步 #[test]：
+// 在 #[tokio::test] 上下文里再建/drop 运行时直接 panic
+// （"Cannot start a runtime from within a runtime"，CI run 41023742091）。
+#[test]
 #[ignore = "性能测试默认不运行，使用 --ignored 触发"]
-async fn perf_spawn_10k_tasks_throughput() {
+fn perf_spawn_10k_tasks_throughput() {
     let rt = SzRuntime::with_worker_threads(4);
     let counter = Arc::new(AtomicUsize::new(0));
 
-    measure_async("spawn 10k tasks", || async {
+    rt.block_on(measure_async("spawn 10k tasks", || async {
         let mut handles = Vec::with_capacity(10_000);
         for _ in 0..10_000 {
             let c = counter.clone();
@@ -74,8 +77,7 @@ async fn perf_spawn_10k_tasks_throughput() {
         for h in handles {
             let _ = h.await;
         }
-    })
-    .await;
+    }));
 
     assert_eq!(counter.load(Ordering::SeqCst), 10_000);
 }
@@ -126,17 +128,20 @@ async fn perf_cancel_propagation_latency() {
         });
     }
 
-    // 测量从 cancel() 到所有任务响应的延迟
+    // 测量从 cancel() 到所有任务响应的延迟：轮询实际完成数，
+    // 不能先固定 sleep(50ms) 再计时（那样 elapsed 恒 >= 50ms，CI 上必失败）。
     let start = Instant::now();
     token_clone.cancel();
 
-    // 等待所有任务完成
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let deadline = start + Duration::from_secs(5);
+    while completed_clone.load(Ordering::SeqCst) < 100 && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
     let elapsed = start.elapsed();
 
     println!("[PERF] cancel propagation for 100 tasks: {:?}", elapsed);
     assert_eq!(completed_clone.load(Ordering::SeqCst), 100);
-    // 取消传播应在 50ms 内完成
+    // 取消传播应在 50ms 内完成（1ms 轮询粒度已计入）
     assert!(
         elapsed < Duration::from_millis(50),
         "cancel propagation too slow: {:?}",
@@ -314,9 +319,11 @@ async fn perf_token_clone_benchmark() {
 // 组 8：SzRuntime 创建/销毁开销
 // ============================================================================
 
-#[tokio::test]
+// 同步 #[test]：循环创建/销毁自带 runtime 的 SzRuntime，不能在 tokio 上下文里做
+// （drop runtime 时 panic "Cannot drop a runtime in a context where blocking is not allowed"）。
+#[test]
 #[ignore = "性能测试默认不运行，使用 --ignored 触发"]
-async fn perf_runtime_create_destroy() {
+fn perf_runtime_create_destroy() {
     let iterations = 10;
     let start = Instant::now();
     for _ in 0..iterations {
@@ -399,9 +406,11 @@ async fn perf_queue_runtime_consumer_loop() {
 // 组 10：综合场景 — spawn + cancel + join
 // ============================================================================
 
-#[tokio::test]
+// 同步 #[test]：SzRuntime 自带 runtime，等任务执行用其 block_on 推进时钟，
+// 不在外部 tokio 上下文里 sleep/await。
+#[test]
 #[ignore = "性能测试默认不运行，使用 --ignored 触发"]
-async fn perf_integrated_scenario() {
+fn perf_integrated_scenario() {
     let rt = SzRuntime::with_worker_threads(2);
     let token = rt.shutdown_token();
     let counter = Arc::new(AtomicUsize::new(0));
@@ -422,8 +431,10 @@ async fn perf_integrated_scenario() {
         }));
     }
 
-    // 等待一段时间让任务执行
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // 等待一段时间让任务执行（sleep 必须在 runtime 上下文内创建，故包一层 async 块）
+    rt.block_on(async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    });
 
     // 触发关闭
     let start = Instant::now();

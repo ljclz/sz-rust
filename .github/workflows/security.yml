@@ -94,20 +94,20 @@ jobs:
         run: cargo audit --stale
         id: audit
 
-      # P0-2 unmaintained 真实编译检查
-      # 校验登记在 .cargo/audit.toml 的 unmaintained crate 真实存在于依赖树（需先 clone sz-orm 路径依赖）：
-      # - paste 1.0.15 经 wasmi_core / pulp / oracle 仍在树中（非 ab_glyph）
-      # - rustls-pemfile 2.2.0 经 tokio-rustls 在树中
-      # 任一 crate 缺失即视为 ignore 条目过期，fail 提示移除对应条目。
-      - name: Verify unmaintained dependencies are real (present in tree)
+      # P0-2 unmaintained 真实存在检查
+      # 校验登记在 .cargo/audit.toml 的 unmaintained crate 真实存在于依赖清单。
+      # 不能用 cargo tree -i：它只解析默认 feature 的解析图，而 cargo audit 扫的是
+      # Cargo.lock（含可选/非默认 feature 引入的依赖）。paste 1.0.15、rustls-pemfile
+      # 2.2.0 正是仅经可选 feature 进入 lockfile 的 crate，用 cargo tree 会误判为
+      # “不在树中”（run 41023742108 实测）。故直接核对 lockfile。
+      - name: Verify unmaintained dependencies are real (present in lockfile)
         run: |
           set -uo pipefail
           for CRATE in paste rustls-pemfile; do
-            echo "=== cargo tree -i $CRATE ==="
-            if cargo tree -i "$CRATE" > /dev/null 2>&1; then
-              echo "✅ $CRATE is genuinely present in the dependency tree (ignore entry is justified)"
+            if grep -qx "name = \"$CRATE\"" Cargo.lock; then
+              echo "✅ $CRATE present in Cargo.lock (ignore entry is justified)"
             else
-              echo "::error::$CRATE not found in dependency tree — the corresponding ignore entry in .cargo/audit.toml is stale and should be removed"
+              echo "::error::$CRATE not found in Cargo.lock — the corresponding ignore entry in .cargo/audit.toml is stale and should be removed"
               exit 1
             fi
           done

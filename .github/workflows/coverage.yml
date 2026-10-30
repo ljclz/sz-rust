@@ -3,10 +3,15 @@
 # CI-004~007：分片并行覆盖率矩阵 + 合并校验 + COVERAGE_THRESHOLD 环境变量
 # 使用 cargo-llvm-cov 统计覆盖率，分 4 个优先级分片并行执行后合并
 #
-# 2026-10-30：分片命令带 --branch（采集分支覆盖），cargo-llvm-cov 会传
-# -Z coverage-options=branch，该选项仅 nightly 接受。此前用 @stable 导致
-# 5 个分片全部报 "the option `Z` is only accepted on the nightly compiler"，
-# 故分片 job 统一改用 nightly（与 mcdc.yml 的分支覆盖口径一致）。
+# 2026-10-30：分片回到 stable + 仅行覆盖（不带 --branch）。
+# - 带 --branch 时 cargo-llvm-cov 传 -Z coverage-options=branch，仅 nightly 接受，
+#   stable 下 5 个分片全部报 "the option `Z` is only accepted on the nightly compiler"；
+# - 改用 nightly 后又撞上上游 bug：`llvm-cov export -format=lcov` 对 P0 的
+#   ~40 个 -object 直接 SIGSEGV（run 41023742102），cobertura 无法产出；
+# - 分支覆盖率由 mcdc.yml（每周一 nightly，`--summary-only` 走 `llvm-cov report`
+#   而非 export，长期绿）单独门禁，阈值 75%；
+# - 本文件历史上最后一次全绿（run 35609425340）用的正是 stable + 无 --branch，
+#   本矩阵的职责是 per-crate 行覆盖 ≥ 85%（per-crate-coverage.js）。
 
 name: Coverage
 
@@ -41,7 +46,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -54,7 +59,7 @@ jobs:
             -p sz-rust-router-facade \
             -p sz-rust-middleware-facade \
             -p sz-rust-orm-facade \
-            --branch --cobertura --output-path cobertura-p0.xml
+            --cobertura --output-path cobertura-p0.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -72,7 +77,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -84,7 +89,7 @@ jobs:
             -p sz-rust-ai-facade --features all-providers \
             -p sz-rust-auth-facade \
             -p sz-rust-observability \
-            --branch --cobertura --output-path cobertura-p1.xml
+            --cobertura --output-path cobertura-p1.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -102,7 +107,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -118,7 +123,7 @@ jobs:
             -p sz-rust-mvc-facade \
             -p sz-rust-orm-ext-facade \
             -p sz-rust-pay-facade \
-            --branch --cobertura --output-path cobertura-p2.xml
+            --cobertura --output-path cobertura-p2.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -136,7 +141,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -156,7 +161,7 @@ jobs:
             -p sz-rust-capability \
             -p sz-rust-examples \
             -p sz-rust-facade-tests \
-            --branch --cobertura --output-path cobertura-p3.xml
+            --cobertura --output-path cobertura-p3.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -179,7 +184,7 @@ jobs:
         run: |
           git clone https://github.com/ljclz/sz-orm.git ../sz-orm
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -215,7 +220,7 @@ jobs:
             -p sz-rust-sdd \
             -p sz-rust-migration \
             -p sz-rust-sz300 \
-            --branch --cobertura --output-path cobertura-p4.xml
+            --cobertura --output-path cobertura-p4.xml
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4

@@ -91,7 +91,7 @@ fn content_type_for(path: &std::path::Path) -> &'static str {
 ///
 /// # 安全
 ///
-/// - 路径遍历防护见 [`resolve_upload_path`]（三重校验）。
+/// - 路径遍历防护见 `resolve_upload_path`（三重校验）。
 /// - 流式读取，避免大文件整块进内存。
 #[tracing::instrument(skip_all)]
 pub async fn serve_file(

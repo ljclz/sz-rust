@@ -6,7 +6,7 @@
 //! 为生成代码自动生成测试用例（正常/边界/异常，spec 5.5.4）。
 #![forbid(unsafe_code)]
 
-use crate::quality_scorer::GeneratedFile;
+use crate::generator::GeneratedFile;
 
 /// 生成的测试文件
 #[derive(Debug, Clone)]

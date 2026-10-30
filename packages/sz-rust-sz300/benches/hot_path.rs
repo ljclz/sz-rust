@@ -107,15 +107,17 @@ fn bench_health_endpoint(c: &mut Criterion) {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    c.bench_function("hot_path/health_full_middleware", |b| {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let state = rt.block_on(async { build_app_state().await });
-        let Some(state) = state else {
-            eprintln!("⚠️ MySQL 不可达，跳过 health endpoint benchmark");
-            return;
-        };
-        let app = sz_rust_sz300::router::create_router(state);
+    // 状态构建必须放在 bench_function 之前：criterion 要求闭包内至少调用一次
+    // Bencher::iter，在闭包里提前 return 会触发 "Benchmark function must call
+    // Bencher::iter or related method" panic（run 41023742211 实测）。
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let Some(state) = rt.block_on(async { build_app_state().await }) else {
+        eprintln!("⚠️ MySQL 不可达，跳过 health endpoint benchmark");
+        return;
+    };
+    let app = sz_rust_sz300::router::create_router(state);
 
+    c.bench_function("hot_path/health_full_middleware", |b| {
         b.to_async(tokio::runtime::Runtime::new().unwrap())
             .iter(|| async {
                 let response = app
@@ -138,15 +140,14 @@ fn bench_metrics_endpoint(c: &mut Criterion) {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    c.bench_function("hot_path/metrics_full_middleware", |b| {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let state = rt.block_on(async { build_app_state().await });
-        let Some(state) = state else {
-            eprintln!("⚠️ MySQL 不可达，跳过 metrics endpoint benchmark");
-            return;
-        };
-        let app = sz_rust_sz300::router::create_router(state);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let Some(state) = rt.block_on(async { build_app_state().await }) else {
+        eprintln!("⚠️ MySQL 不可达，跳过 metrics endpoint benchmark");
+        return;
+    };
+    let app = sz_rust_sz300::router::create_router(state);
 
+    c.bench_function("hot_path/metrics_full_middleware", |b| {
         b.to_async(tokio::runtime::Runtime::new().unwrap())
             .iter(|| async {
                 let response = app

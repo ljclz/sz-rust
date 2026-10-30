@@ -26,7 +26,7 @@ const PING_BUDGET: Duration = Duration::from_secs(3);
 /// ## 返回
 ///
 /// - `true`：DB 探活成功
-/// - `false`：DB 探活失败（连接池 acquire 失败、SELECT 1 失败或超出 [`PING_BUDGET`]）
+/// - `false`：DB 探活失败（连接池 acquire 失败、SELECT 1 失败或超出 `PING_BUDGET`）
 ///
 /// ## 错误处理
 ///

@@ -75,7 +75,7 @@ pub struct AuditJob {
 
 /// 审计落库的异步缓冲入口：请求侧只投递，落库由后台任务负责。
 ///
-/// 有界通道（[`AUDIT_BUFFER_CAPACITY`]）保证内存不随数据库故障无限增长；
+/// 有界通道（`AUDIT_BUFFER_CAPACITY`）保证内存不随数据库故障无限增长；
 /// 丢弃计数同时写入内部原子计数器与可选的 Prometheus Counter。
 pub struct AuditSink {
     tx: mpsc::Sender<AuditJob>,

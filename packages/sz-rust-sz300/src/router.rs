@@ -47,7 +47,7 @@ pub const PUBLIC_PATHS: &[&str] = &[
 ///
 /// - 普通路径：精确匹配，避免 `/api/v1/auth/` 之类前缀绕过。
 /// - 静态资源：`/uploads/` 前缀放行（浏览器 `<img src>` 无法携带 Authorization）。
-///   路径穿越由 [`crate::controllers::file_serve::resolve_upload_path`] 的三重校验负责，
+///   路径穿越由 `crate::controllers::file_serve::resolve_upload_path` 的三重校验负责，
 ///   越界请求返回 400/404，不会读到上传目录之外的文件。
 pub fn is_public_path(path: &str) -> bool {
     if path == "/uploads" || path.starts_with("/uploads/") {

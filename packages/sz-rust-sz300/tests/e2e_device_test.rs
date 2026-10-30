@@ -188,6 +188,18 @@ fn json_request(method: &str, uri: &str, body: serde_json::Value) -> Request<Bod
         .unwrap()
 }
 
+/// 直接调用控制器会绕过 auth 中间件，需手动注入身份（对齐中间件注入的 CurrentUser）；
+/// IDOR 修复后控制器要求请求扩展里存在当前用户，否则返回 401/403。
+fn as_merchant(req: &mut Request<Body>, merchant_id: i64) {
+    req.extensions_mut()
+        .insert(sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+            user_id: 1,
+            username: "merchant_owner".to_string(),
+            merchant_id: Some(merchant_id),
+            is_admin: false,
+        });
+}
+
 // ============================================================================
 // spec 5.2.1: 设备绑定端到端
 // ============================================================================
@@ -205,11 +217,12 @@ async fn e2e_device_bind_creates_binding_record() {
     insert_unbound_device(&pool, "SN_E2E_BIND").await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(
+    let mut req = json_request(
         "POST",
         "/api/v1/device/bind",
         serde_json::json!({"device_sn": "SN_E2E_BIND", "merchant_id": 200}),
     );
+    as_merchant(&mut req, 200);
     let response = sz_rust_sz300::controllers::device::bind(axum::extract::State(state), req).await;
     let json = read_json(response).await;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -255,11 +268,12 @@ async fn e2e_device_unbind_resets_fields() {
     let device_id = insert_bound_device(&pool, "SN_E2E_UNBIND", 300).await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(
+    let mut req = json_request(
         "POST",
         "/api/v1/device/unbind",
         serde_json::json!({"device_id": device_id}),
     );
+    as_merchant(&mut req, 300);
     let response =
         sz_rust_sz300::controllers::device::unbind(axum::extract::State(state), req).await;
     let json = read_json(response).await;
@@ -384,7 +398,7 @@ async fn e2e_device_log_inserts_to_operate_log() {
     assert!(cnt >= 1, "operate_log 应至少有 1 条记录");
 
     let log_rows = conn
-        .query("SELECT operator, action, detail FROM operate_log ORDER BY id DESC LIMIT 1")
+        .query("SELECT operator, action, detail FROM operate_log ORDER BY log_id DESC LIMIT 1")
         .await
         .expect("查询日志详情失败");
     assert_eq!(log_rows.len(), 1);
@@ -474,11 +488,12 @@ async fn e2e_device_bind_nonexistent_returns_error() {
     setup_operate_log_table(&pool).await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(
+    let mut req = json_request(
         "POST",
         "/api/v1/device/bind",
         serde_json::json!({"device_sn": "NONEXISTENT_SN", "merchant_id": 100}),
     );
+    as_merchant(&mut req, 100);
     let response = sz_rust_sz300::controllers::device::bind(axum::extract::State(state), req).await;
     let json = read_json(response).await;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(1);
@@ -505,16 +520,18 @@ async fn e2e_device_trigger_ota_nonexistent_device_returns_error() {
     setup_device_table(&pool).await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(
+    let mut req = json_request(
         "POST",
         "/api/v1/device/ota",
         serde_json::json!({"device_id": 999999, "ota_version": "1.0.0"}),
     );
+    as_merchant(&mut req, 100);
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), req).await;
     let json = read_json(response).await;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(1);
-    assert_eq!(code, 0, "操作不存在设备应返回 code=0");
+    // IDOR 修复后，设备不存在与无权访问统一返回 403（防枚举），不再区分 code=0
+    assert_eq!(code, 403, "操作不存在设备应返回 code=403");
     let msg = json.get("msg").and_then(|v| v.as_str()).unwrap_or("");
     assert!(
         msg.contains("不存在"),
