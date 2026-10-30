@@ -1,0 +1,177 @@
+-- 商户表
+CREATE TABLE IF NOT EXISTS merchant (
+    merchant_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL DEFAULT '',
+    contact VARCHAR(50) NOT NULL DEFAULT '',
+    phone VARCHAR(20) NOT NULL DEFAULT '',
+    address VARCHAR(200) NOT NULL DEFAULT '',
+    status SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 市场表
+CREATE TABLE IF NOT EXISTS market (
+    market_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(100) NOT NULL DEFAULT '',
+    address VARCHAR(200) NOT NULL DEFAULT '',
+    status SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 商户用户表
+CREATE TABLE IF NOT EXISTS merchant_user (
+    user_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    username VARCHAR(50) NOT NULL DEFAULT '',
+    password_hash VARCHAR(255) NOT NULL DEFAULT '',
+    phone VARCHAR(20) NOT NULL DEFAULT '',
+    avatar VARCHAR(500) NOT NULL DEFAULT '',
+    role SMALLINT NOT NULL DEFAULT 1,
+    status SMALLINT NOT NULL DEFAULT 1,
+    last_login_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 商品分类表
+CREATE TABLE IF NOT EXISTS category (
+    cat_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(50) NOT NULL DEFAULT '',
+    parent_id INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    status SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 商品表
+CREATE TABLE IF NOT EXISTS good (
+    good_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    cat_id INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(200) NOT NULL DEFAULT '',
+    barcode VARCHAR(50) NOT NULL DEFAULT '',
+    price INTEGER NOT NULL DEFAULT 0,
+    unit VARCHAR(20) NOT NULL DEFAULT '斤',
+    stock INTEGER NOT NULL DEFAULT 0,
+    image VARCHAR(500) NOT NULL DEFAULT '',
+    description TEXT DEFAULT '',
+    status SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- AI 商品分类表
+CREATE TABLE IF NOT EXISTS ai_category (
+    ai_cat_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    name VARCHAR(50) NOT NULL DEFAULT '',
+    parent_id INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 设备表
+CREATE TABLE IF NOT EXISTS device (
+    device_id SERIAL PRIMARY KEY,
+    device_sn VARCHAR(50) NOT NULL DEFAULT '',
+    device_model VARCHAR(50) NOT NULL DEFAULT '',
+    fw_version VARCHAR(50) NOT NULL DEFAULT '',
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    status SMALLINT NOT NULL DEFAULT 0,
+    signal_strength INTEGER NOT NULL DEFAULT 0,
+    bind_at TIMESTAMP,
+    last_online_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 订单表
+CREATE TABLE IF NOT EXISTS "order" (
+    order_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    device_id INTEGER NOT NULL DEFAULT 0,
+    order_no VARCHAR(50) NOT NULL DEFAULT '',
+    total_amount INTEGER NOT NULL DEFAULT 0,
+    pay_amount INTEGER NOT NULL DEFAULT 0,
+    pay_method SMALLINT NOT NULL DEFAULT 0,
+    status SMALLINT NOT NULL DEFAULT 0,
+    remark TEXT DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 订单明细表
+CREATE TABLE IF NOT EXISTS order_item (
+    item_id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL DEFAULT 0,
+    good_id INTEGER NOT NULL DEFAULT 0,
+    good_name VARCHAR(200) NOT NULL DEFAULT '',
+    price INTEGER NOT NULL DEFAULT 0,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    subtotal INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 结算表
+CREATE TABLE IF NOT EXISTS settlement (
+    settlement_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    order_id INTEGER NOT NULL DEFAULT 0,
+    amount INTEGER NOT NULL DEFAULT 0,
+    status SMALLINT NOT NULL DEFAULT 0,
+    settled_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- OTA 版本表
+CREATE TABLE IF NOT EXISTS ota_version (
+    version_id SERIAL PRIMARY KEY,
+    device_model VARCHAR(50) NOT NULL DEFAULT '',
+    version VARCHAR(50) NOT NULL DEFAULT '',
+    url VARCHAR(500) NOT NULL DEFAULT '',
+    md5 VARCHAR(32) NOT NULL DEFAULT '',
+    changelog TEXT DEFAULT '',
+    status SMALLINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 操作日志表
+CREATE TABLE IF NOT EXISTS operate_log (
+    log_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    operator VARCHAR(50) NOT NULL DEFAULT '',
+    action VARCHAR(50) NOT NULL DEFAULT '',
+    target VARCHAR(50) NOT NULL DEFAULT '',
+    target_id INTEGER NOT NULL DEFAULT 0,
+    detail TEXT DEFAULT '',
+    ip VARCHAR(50) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 系统配置表
+CREATE TABLE IF NOT EXISTS system_config (
+    config_id SERIAL PRIMARY KEY,
+    merchant_id INTEGER NOT NULL DEFAULT 0,
+    config_key VARCHAR(100) NOT NULL DEFAULT '',
+    config_value TEXT DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 插入测试数据
+INSERT INTO merchant (name, contact, phone, address, status) VALUES ('测试商户', '张三', '13800138000', '测试地址', 1);
+
+INSERT INTO merchant_user (merchant_id, username, password_hash, phone, role, status)
+VALUES (1, 'admin', '$2b$12$hHM9H9x6k94v830IUejizOLV0OPQXGYXMb0vCVOMfFf6qoKpPrVM6', '13800138000', 1, 1);
+
+INSERT INTO good (merchant_id, name, price, unit, status) VALUES (1, '测试商品A', 500, '斤', 1), (1, '测试商品B', 1500, '个', 1);
+
+INSERT INTO device (device_sn, device_model, fw_version, status) VALUES ('SN20260722001', 'SZ-300', 'v1.0.0', 1);

@@ -1,0 +1,7 @@
+mqtt:
+  broker: "mqtts://iot.鲜视达.cn:8883"
+  client_id: "sz300-server"
+  topics:
+    device_status: "/sz/device/+/status"
+    order_sync: "/sz/device/+/order"
+    ota_cmd: "/sz/server/ota"

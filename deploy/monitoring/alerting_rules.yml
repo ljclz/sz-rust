@@ -1,0 +1,138 @@
+# sz300-server 告警规则（单机版，无 K8s 依赖）
+# 仅使用应用自身暴露的指标
+
+groups:
+  # ========== 可用性告警 ==========
+  - name: sz300-availability
+    rules:
+      # 服务宕机
+      - alert: Sz300ServiceDown
+        expr: up{job="sz300-server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: sz300-server
+          category: availability
+        annotations:
+          summary: "sz300-server 服务不可用"
+          description: "sz300-server 已停止响应超过 2 分钟。"
+
+  # ========== 资源告警 ==========
+  - name: sz300-resources
+    rules:
+      # CPU 使用率过高
+      - alert: Sz300HighCpuUsage
+        expr: rate(process_cpu_seconds_total{job="sz300-server"}[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: sz300-server
+          category: resource
+        annotations:
+          summary: "sz300-server CPU 使用率 > 80%"
+          description: "CPU 使用率持续 10 分钟超过 80%。当前值: {{ $value }}%"
+
+      # 内存使用率过高（RSS > 80% of limit）
+      - alert: Sz300HighMemoryUsage
+        expr: process_resident_memory_bytes{job="sz300-server"} > 1.5e9
+        for: 10m
+        labels:
+          severity: warning
+          service: sz300-server
+          category: resource
+        annotations:
+          summary: "sz300-server 内存使用 > 1.5GB"
+          description: "RSS 内存持续 10 分钟超过 1.5GB。当前值: {{ $value | humanize1024 }}"
+
+  # ========== 性能告警 ==========
+  - name: sz300-performance
+    rules:
+      # P99 延迟 > 1s
+      - alert: Sz300HighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(sz300_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: sz300-server
+          category: performance
+        annotations:
+          summary: "sz300-server P99 延迟 > 1s"
+          description: "P99 请求延迟持续 5 分钟超过 1s。当前值: {{ $value }}s"
+
+      # P95 延迟 > 500ms
+      - alert: Sz300HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(sz300_request_duration_seconds_bucket{job="sz300-server"}[5m])) by (le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: info
+          service: sz300-server
+          category: performance
+        annotations:
+          summary: "sz300-server P95 延迟 > 500ms"
+          description: "P95 请求延迟持续 10 分钟超过 500ms。当前值: {{ $value }}s"
+
+  # ========== 错误率告警 ==========
+  - name: sz300-errors
+    rules:
+      # 5xx 错误率 > 5%
+      - alert: Sz300HighErrorRate
+        expr: |
+          sum(rate(sz300_requests_total{job="sz300-server", status=~"5.."}[5m]))
+            / sum(rate(sz300_requests_total{job="sz300-server"}[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          service: sz300-server
+          category: error
+        annotations:
+          summary: "sz300-server 5xx 错误率 > 5%"
+          description: "5xx 错误率持续 5 分钟超过 5%。当前值: {{ $value }}%"
+
+      # 4xx 错误率 > 20%
+      - alert: Sz300High4xxRate
+        expr: |
+          sum(rate(sz300_requests_total{job="sz300-server", status=~"4.."}[5m]))
+            / sum(rate(sz300_requests_total{job="sz300-server"}[5m])) * 100 > 20
+        for: 15m
+        labels:
+          severity: info
+          service: sz300-server
+          category: error
+        annotations:
+          summary: "sz300-server 4xx 错误率 > 20%"
+          description: "4xx 错误率持续 15 分钟超过 20%。当前值: {{ $value }}%"
+
+  # ========== 业务告警 ==========
+  - name: sz300-business
+    rules:
+      # 数据库连接失败
+      - alert: Sz300DatabaseConnectionFailure
+        expr: sz300_db_connection_errors_total{job="sz300-server"} > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: sz300-server
+          category: business
+        annotations:
+          summary: "sz300-server 数据库连接失败"
+          description: "过去 1 分钟内数据库连接出现错误，错误计数: {{ $value }}"
+
+      # 缓存命中率 < 50%
+      - alert: Sz300LowCacheHitRate
+        expr: |
+          (sz300_cache_hits_total{job="sz300-server"}
+            / (sz300_cache_hits_total{job="sz300-server"} + sz300_cache_misses_total{job="sz300-server"})) * 100 < 50
+        for: 30m
+        labels:
+          severity: info
+          service: sz300-server
+          category: business
+        annotations:
+          summary: "sz300-server 缓存命中率 < 50%"
+          description: "缓存命中率持续 30 分钟低于 50%。当前值: {{ $value }}%"

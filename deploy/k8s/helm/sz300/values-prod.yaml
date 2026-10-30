@@ -1,0 +1,31 @@
+# 生产环境 overlay
+# 基于 v0.7.0 压测基线调优
+
+replicas: 5
+
+rustLog: "warn,sz_rust_sz300=info"
+
+# 生产环境给更多启动时间
+probe:
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  startup:
+    periodSeconds: 5
+    failureThreshold: 30
+
+# 生产环境资源加大
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"

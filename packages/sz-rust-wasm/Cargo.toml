@@ -1,0 +1,23 @@
+[package]
+name = "sz-rust-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust WASM 边缘计算运行时 — 基于 wasmi 提供 WASM 模块加载与执行"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["wasm", "edge-compute", "wasmi", "sz-rust"]
+categories = ["wasm"]
+
+[dependencies]
+wasmi = "0.31"
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+wat = "1"

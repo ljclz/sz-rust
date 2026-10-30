@@ -1,0 +1,16 @@
+{# TypeScript 类型定义模板 #}
+export interface {{ module | capitalize }} {
+  id: number
+  [key: string]: any
+}
+
+export interface {{ module | capitalize }}ListResponse {
+  list: {{ module | capitalize }}[]
+  total: number
+}
+
+{% for endpoint in endpoints %}
+export interface {{ module | capitalize }}{{ endpoint.method | capitalize }}Response {
+  data: any
+}
+{% endfor %}

@@ -1,0 +1,26 @@
+{# React 详情页模板 #}
+import React, { useState, useEffect } from 'react'
+import { Descriptions, Button } from 'antd'
+import { useParams, useNavigate } from 'react-router-dom'
+import { {{ module_name }}Show } from '@/api/{{ module_name }}'
+
+export default function {{ module_name | snake_to_pascal }}Show() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const [detail, setDetail] = useState<any>({{ "{}" }})
+
+  useEffect(() => {
+    {{ module_name }}Show(id!).then(res => setDetail(res.data))
+  }, [id])
+
+  return (
+    <div>
+      <Descriptions column={2} bordered>
+        {% for field in fields %}
+        <Descriptions.Item label="{{ field.name }}">{{ "{{ detail." ~ field.name ~ " }}" }}</Descriptions.Item>
+        {% endfor %}
+      </Descriptions>
+      <Button onClick={() => navigate(-1)}>返回</Button>
+    </div>
+  )
+}

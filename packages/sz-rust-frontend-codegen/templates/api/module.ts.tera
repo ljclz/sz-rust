@@ -1,0 +1,13 @@
+{# API 请求函数模板 #}
+import request from '@/utils/request'
+
+{% for endpoint in endpoints %}
+export function {{ module }}{{ endpoint.method | capitalize }}({% if endpoint.method == "GET" %}params: any{% endif %}{% if endpoint.method == "POST" or endpoint.method == "PUT" or endpoint.method == "PATCH" %}data: any{% endif %}) {
+  return request({
+    url: '{{ endpoint.path }}',
+    method: '{{ endpoint.method }}',
+    {% if endpoint.method == "GET" %}params,{% endif %}
+    {% if endpoint.method == "POST" or endpoint.method == "PUT" or endpoint.method == "PATCH" %}data,{% endif %}
+  })
+}
+{% endfor %}

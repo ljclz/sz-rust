@@ -1,0 +1,10 @@
+{# 权限码常量模板 #}
+{% for perm in permissions %}
+export const {{ perm | upper }} = '{{ perm }}'
+{% endfor %}
+
+export const PERMISSIONS = {
+  {% for perm in permissions %}
+  {{ perm | upper }}: '{{ perm }}',
+  {% endfor %}
+} as const

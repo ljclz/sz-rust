@@ -1,0 +1,9 @@
+{
+  "name": "redis-store-benchmark",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}

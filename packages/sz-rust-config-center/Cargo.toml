@@ -1,0 +1,38 @@
+[package]
+name = "sz-rust-config-center"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Config center for sz-rust — ConfigSource trait + Consul/Nacos + gray release + version rollback + AES-GCM encryption"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["config", "consul", "nacos", "gray", "thinkphp"]
+categories = ["config"]
+
+[features]
+consul = []
+nacos = []
+encryption = ["dep:aes-gcm"]
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+chrono = { workspace = true }
+ipnet = { workspace = true }
+reqwest = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+aes-gcm = { version = "0.10", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "sz-rust-key-rotation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust 密钥轮换"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+sz-rust-data-mask = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+# 密码学安全随机数（OsRng），用于生成 JWT 签名密钥（2026-10-28 安全修复）
+rand = { workspace = true }
