@@ -103,13 +103,9 @@ async fn test_migrate_online_applies_migrations() {
         url: Some(pg_url()),
     };
     let result = execute_migrate(&args).await;
-    // execute_with_params 在 AnyPool adapter 未实现，迁移 SQL 已执行但记录插入失败
-    assert!(result.is_err(), "应因 execute_with_params 未实现而失败");
-    let err = format!("{}", result.unwrap_err());
-    assert!(
-        err.contains("execute_with_params"),
-        "错误应含 execute_with_params: {err}"
-    );
+    // AnyPool adapter 的 execute_with_params 已落地：迁移 SQL 与 __migrations
+    // 记录都应写入成功（旧断言期望 err 已过期，run 41040631858 实测 migrate 成功）。
+    assert!(result.is_ok(), "migrate 应成功: {:?}", result.err());
 
     // 迁移 SQL 本身已执行（users 表已创建）
     let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
@@ -120,6 +116,12 @@ async fn test_migrate_online_applies_migrations() {
     .await
     .unwrap();
     assert!(exists.0, "users 表应已创建（SQL 已执行）");
+
+    let applied: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM __migrations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(applied.0, 2, "__migrations 应记录 2 条已应用版本");
 }
 
 #[tokio::test]
@@ -136,11 +138,16 @@ async fn test_migrate_online_no_pending() {
         show_sql: false,
         url: Some(pg_url()),
     };
-    // 第一次 migrate 会因 execute_with_params 未实现而失败
-    let _ = execute_migrate(&args).await;
-    // 第二次调用也应到达相同路径
+    // 第一次 migrate 应用全部迁移
+    let first = execute_migrate(&args).await;
+    assert!(first.is_ok(), "首次 migrate 应成功: {:?}", first.err());
+    // 第二次调用没有待应用迁移，也应正常返回
     let result = execute_migrate(&args).await;
-    assert!(result.is_err(), "应因 execute_with_params 未实现而失败");
+    assert!(
+        result.is_ok(),
+        "无待迁移时 migrate 应成功: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -157,8 +164,9 @@ async fn test_migrate_online_rollback() {
         show_sql: false,
         url: Some(pg_url()),
     };
-    // migrate 会因 execute_with_params 失败，但 SQL 已执行
-    let _ = execute_migrate(&args).await;
+    // migrate 成功应用全部迁移
+    let result = execute_migrate(&args).await;
+    assert!(result.is_ok(), "migrate 应成功: {:?}", result.err());
 
     let rollback_args = MigrateArgs {
         rollback: true,
@@ -168,11 +176,7 @@ async fn test_migrate_online_rollback() {
         url: Some(pg_url()),
     };
     let result = execute_migrate(&rollback_args).await;
-    // rollback 也使用 delete_migration_record（execute_with_params），预期失败
-    assert!(
-        result.is_err(),
-        "rollback 应因 execute_with_params 未实现而失败"
-    );
+    assert!(result.is_ok(), "rollback 应成功: {:?}", result.err());
 }
 
 #[tokio::test]
@@ -206,10 +210,11 @@ async fn test_migrate_status_online_after_apply() {
         show_sql: false,
         url: Some(pg_url()),
     };
-    // migrate 会因 execute_with_params 失败，但 SQL 已执行
-    let _ = execute_migrate(&args).await;
+    // 先应用全部迁移，status 才能比对出已应用版本
+    let applied = execute_migrate(&args).await;
+    assert!(applied.is_ok(), "migrate 应成功: {:?}", applied.err());
 
-    // status 在线模式应成功（不依赖 execute_with_params）
+    // status 在线模式应成功
     let result = execute_status_full(
         temp.path().to_str().unwrap(),
         "postgres",
@@ -405,13 +410,10 @@ fn test_migrate_online_with_show_sql() {
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
     assert!(
-        result.is_err(),
-        "insert_migration_record 应因 execute_with_params 未实现而失败"
+        result.is_ok(),
+        "show_sql 下 migrate 应成功: {:?}",
+        result.err()
     );
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("execute_with_params"));
 
     rt.block_on(async {
         let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
@@ -469,7 +471,7 @@ fn test_migrate_online_rollback_with_show_sql() {
         url: Some(pg_url()),
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
-    assert!(result.is_err(), "insert_migration_record 应失败");
+    assert!(result.is_ok(), "migrate 应成功: {:?}", result.err());
 
     let args = MigrateArgs {
         rollback: true,
@@ -479,7 +481,7 @@ fn test_migrate_online_rollback_with_show_sql() {
         url: Some(pg_url()),
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
-    assert!(result.is_err(), "rollback 也应因 execute_with_params 失败");
+    assert!(result.is_ok(), "rollback 应成功: {:?}", result.err());
 
     rt.block_on(async {
         let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
