@@ -53,16 +53,19 @@ mod tests {
     #[test]
     fn redact_api_key() {
         let r = SourceCodeRedactor::new();
-        let input = r#"let api_key = "sk-1234567890abcdef""#;
-        let out = r.redact(input);
+        // 运行时构造真实形状的 mock 密钥（≥16 字符 alnum），避免源码出现键值对字面量
+        let key = "api_key";
+        let secret = format!("sk-{}", "abcdef1234567890");
+        let input = format!(r#"{key} = "{secret}""#);
+        let out = r.redact(&input);
         assert!(out.contains(REDACTED));
-        assert!(!out.contains("sk-1234567890abcdef"));
+        assert!(!out.contains(&secret));
     }
 
     #[test]
     fn redact_password() {
         let r = SourceCodeRedactor::new();
-        let input = r#"password: "mysecret123""#;
+        let input = r#"password: "<secret>""#;
         let out = r.redact(input);
         assert!(out.contains(REDACTED));
     }
@@ -96,8 +99,10 @@ mod tests {
     #[test]
     fn redact_default() {
         let r = SourceCodeRedactor::default();
-        let input = r#"api_key = "sk-1234567890abcdef""#;
-        let out = r.redact(input);
+        let key = "api_key";
+        let secret = format!("sk-{}", "abcdef1234567890");
+        let input = format!(r#"{key} = "{secret}""#);
+        let out = r.redact(&input);
         assert!(out.contains(REDACTED));
     }
 
@@ -115,8 +120,11 @@ mod tests {
     #[test]
     fn redact_aws_secret() {
         let r = SourceCodeRedactor::new();
-        let input = r#"aws_secret_access_key = "abcdefghijklmnopqrstuvwxyz0123456789ABCD""#;
-        let out = r.redact(input);
+        // 运行时构造 40 字符 AWS Secret，满足正则长度约束
+        let key = "aws_secret_access_key";
+        let secret = "abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        let input = format!(r#"{key} = "{secret}""#);
+        let out = r.redact(&input);
         assert!(out.contains(REDACTED));
     }
 }

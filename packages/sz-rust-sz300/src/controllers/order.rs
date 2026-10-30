@@ -14,7 +14,10 @@
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::order::Order`] 与 [`crate::models::order_item::OrderItem`] 定义实体结构
 
-use crate::controllers::common::parse_pagination;
+use crate::controllers::common::{
+    can_access_merchant_resource_from_user, effective_merchant_scope_from_user, parse_pagination,
+};
+use crate::middleware::auth_middleware::CurrentUser;
 use crate::services::order_service::{OrderFilters, OrderService};
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -24,20 +27,27 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct OrderController;
 impl SzController for OrderController {}
 
 impl OrderController {
-    /// 分页查询订单列表，支持按 merchant_id/device_id/status/date_range 筛选
+    /// 分页查询订单列表（IDOR 修复：普通用户仅能查询自己商户的订单）
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 15);
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
                 let filters = OrderFilters {
-                    merchant_id: data.get("merchant_id").and_then(|v| v.as_i64()),
+                    merchant_id: scope_mid,
                     device_id: data.get("device_id").and_then(|v| v.as_i64()),
                     status: data.get("status").and_then(|v| v.as_i64()),
                     start_date: data
@@ -48,22 +58,36 @@ impl OrderController {
                         .get("end_date")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string()),
+                    // keyset 游标：上一页返回的 next_cursor（深度翻页时优先于 page）
+                    before_order_id: data
+                        .get("last_id")
+                        .and_then(|v| v.as_i64())
+                        .filter(|id| *id > 0),
                 };
 
-                info!("查询订单列表: page={}, page_size={}", page, page_size);
+                debug!("查询订单列表: page={}, page_size={}", page, page_size);
 
-                match OrderService::list(&state.db_pool, page, page_size, filters).await {
+                match OrderService::list(
+                    &state.db_pool,
+                    Some(&state.query_cache),
+                    page,
+                    page_size,
+                    filters,
+                )
+                .await
+                {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!("订单列表查询成功: total={}", page_data.total);
+                        debug!("订单列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
                             json!({
                                 "list": list,
                                 "total": page_data.total,
                                 "page": page,
-                                "page_size": page_size
+                                "page_size": page_size,
+                                "next_cursor": page_data.next_cursor
                             }),
                         )
                     }
@@ -77,9 +101,10 @@ impl OrderController {
         }
     }
 
-    /// 根据 order_id 查询订单详情（含订单项）
+    /// 根据 order_id 查询订单详情（IDOR 修复：非管理员仅能查自己商户）
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let order_id = match data.get("order_id").and_then(|v| v.as_i64()) {
@@ -100,14 +125,19 @@ impl OrderController {
                     }
                 };
 
-                info!("查询订单详情: order_id={}", order_id);
+                debug!("查询订单详情: order_id={}", order_id);
 
                 match OrderService::get_with_items(&state.db_pool, order_id).await {
                     Ok(Some(detail)) => {
+                        // IDOR 校验：非管理员只能访问自己商户的订单
+                        let row_mid = detail.order.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权访问该订单", json!({}), 403);
+                        }
                         let order = row_to_json(&detail.order);
                         let items: Vec<serde_json::Value> =
                             detail.items.iter().map(row_to_json).collect();
-                        info!(
+                        debug!(
                             "订单详情查询完成: order_id={}, items={}",
                             order_id,
                             items.len()
@@ -131,28 +161,36 @@ impl OrderController {
         }
     }
 
-    /// 创建订单（含订单项）
+    /// 创建订单（IDOR 修复：普通用户仅能为自己的商户下单）
     async fn create(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = OrderController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
-                let order_no = data
-                    .get("order_no")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if order_no.trim().is_empty() {
-                    return ctrl.render_error("订单号不能为空", json!({}), 0);
+                // 2026-10-28：订单号缺省时由服务端生成（毫秒级，避免秒级碰撞）
+                let device_id = data.get("device_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let order_no = match data.get("order_no").and_then(|v| v.as_str()) {
+                    Some(s) if !s.trim().is_empty() => s.to_string(),
+                    _ => crate::services::order_no::generate(device_id),
+                };
+
+                // IDOR 修复：非管理员创建订单时强制归属自己的商户
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
+                let merchant_id = scope_mid.unwrap_or(0);
+                if merchant_id <= 0 {
+                    return ctrl.render_error("无权下单（缺少商户归属）", json!({}), 403);
                 }
 
                 let order = crate::models::order::Order {
                     order_id: None,
                     order_no: order_no.clone(),
-                    merchant_id: data
-                        .get("merchant_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
-                    device_id: data.get("device_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                    merchant_id,
+                    device_id,
                     total_fen: data.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0),
                     total_weight_g: data
                         .get("total_weight_g")
@@ -219,7 +257,9 @@ impl OrderController {
                     order_no, order.merchant_id
                 );
 
-                match OrderService::create(&state.db_pool, &order, &items).await {
+                match OrderService::create(&state.db_pool, Some(&state.query_cache), &order, &items)
+                    .await
+                {
                     Ok(new_order_id) => {
                         info!(
                             "订单创建成功: order_id={}, order_no={}",

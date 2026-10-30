@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use tokio::sync::RwLock;
 
 /// 插件信息
@@ -178,8 +180,14 @@ impl PluginManager {
 
     /// Ed25519 签名校验（spec §5.10.1 规则 5）
     ///
-    /// 简化实现：验证签名非空且与公钥关联。
-    /// 生产环境应使用 `ed25519-dalek` 做完整签名验证。
+    /// 完整签名验证（2026-10-28 修复 AppSec P0-1 伪验签）：
+    /// 1. 将 `public_key`（Base64）解码为 32 字节 Ed25519 公钥；
+    /// 2. 将 `plugin.signature`（Base64）解码为 64 字节签名；
+    /// 3. 将 `plugin.package`（Base64 WASM）解码为原始字节；
+    /// 4. 用 `ed25519-dalek` 对 package 字节验签。
+    ///
+    /// 任一解码失败或验签不通过均返回 `false`（fail-closed），
+    /// 不再接受"长度 ≥ 64"的伪验签。
     fn verify_signature(&self, plugin: &PluginInfo) -> bool {
         if plugin.signature.is_empty() || plugin.package.is_empty() {
             return false;
@@ -187,13 +195,47 @@ impl PluginManager {
         if self.public_key.is_empty() {
             return false;
         }
-        !plugin.signature.is_empty() && plugin.signature.len() >= 64
+
+        // 公钥解码（Base64 → 32 字节）
+        let Ok(pk_bytes) = B64.decode(&self.public_key) else {
+            tracing::warn!("插件公钥 Base64 解码失败");
+            return false;
+        };
+        let Ok(pk_array): Result<[u8; 32], _> = pk_bytes.as_slice().try_into() else {
+            tracing::warn!("插件公钥长度非 32 字节");
+            return false;
+        };
+        let Ok(public_key) = VerifyingKey::from_bytes(&pk_array) else {
+            tracing::warn!("插件公钥无效");
+            return false;
+        };
+
+        // 签名解码（Base64 → 64 字节）
+        let Ok(sig_bytes) = B64.decode(&plugin.signature) else {
+            tracing::warn!("插件签名 Base64 解码失败");
+            return false;
+        };
+        let Ok(sig_array): Result<[u8; 64], _> = sig_bytes.as_slice().try_into() else {
+            tracing::warn!("插件签名长度非 64 字节");
+            return false;
+        };
+        let signature = Signature::from_bytes(&sig_array);
+
+        // 插件包内容解码（Base64 WASM）
+        let Ok(package) = B64.decode(&plugin.package) else {
+            tracing::warn!("插件包 Base64 解码失败");
+            return false;
+        };
+
+        public_key.verify(&package, &signature).is_ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    use ed25519_dalek::{Signer, SigningKey};
     use std::sync::Mutex;
 
     struct MockMarketplace {
@@ -232,18 +274,35 @@ mod tests {
         }
     }
 
+    /// 固定测试密钥对（确定性，避免每次测试生成随机密钥）
+    fn test_keypair() -> SigningKey {
+        let seed = [42u8; 32];
+        SigningKey::from_bytes(&seed)
+    }
+
+    /// 测试公钥（Base64 编码的 32 字节）
+    fn test_public_key_b64() -> String {
+        B64.encode(test_keypair().verifying_key().to_bytes())
+    }
+
+    /// 构造插件：valid_sig = true 时用测试私钥对 package 内容真实签名（Base64）
     fn make_plugin(id: &str, valid_sig: bool) -> PluginInfo {
+        let package = format!("wasm-bytes-{id}");
+        let package_b64 = B64.encode(package.as_bytes());
+        let signature = if valid_sig {
+            let sig = test_keypair().sign(package.as_bytes());
+            B64.encode(sig.to_bytes())
+        } else {
+            // 伪造签名：64 字节非 Base64 有效签名（历史上长度 ≥64 即放行）
+            B64.encode([7u8; 64])
+        };
         PluginInfo {
             id: id.to_string(),
             name: format!("plugin-{}", id),
             version: "1.0.0".to_string(),
             description: "test plugin".to_string(),
-            signature: if valid_sig {
-                "a".repeat(64)
-            } else {
-                "short".to_string()
-            },
-            package: "wasm_bytes_base64".to_string(),
+            signature,
+            package: package_b64,
         }
     }
 
@@ -252,7 +311,7 @@ mod tests {
         let mut plugins = HashMap::new();
         plugins.insert("p1".into(), make_plugin("p1", true));
         let market = Arc::new(MockMarketplace::new(plugins));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         let result = mgr.install("p1").await.unwrap();
         assert_eq!(result.id, "p1");
         assert_eq!(result.name, "plugin-p1");
@@ -263,15 +322,43 @@ mod tests {
         let mut plugins = HashMap::new();
         plugins.insert("p1".into(), make_plugin("p1", false));
         let market = Arc::new(MockMarketplace::new(plugins));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         let result = mgr.install("p1").await;
         assert!(matches!(result, Err(PluginError::SignatureInvalid)));
+    }
+
+    /// AppSec P0-1 负例：伪造 64 字节签名（Base64 合法但非真实 Ed25519 签名）必须被拒绝
+    #[tokio::test]
+    async fn test_install_forged_64byte_signature_rejected() {
+        let mut plugins = HashMap::new();
+        plugins.insert("p1".into(), make_plugin("p1", false));
+        let market = Arc::new(MockMarketplace::new(plugins));
+        let mgr = PluginManager::new(market, test_public_key_b64());
+        let result = mgr.install("p1").await;
+        assert!(
+            matches!(result, Err(PluginError::SignatureInvalid)),
+            "伪造 64 字节签名不得通过验签"
+        );
+    }
+
+    /// 无效公钥（非 Base64 的字符串）必须 fail-closed
+    #[tokio::test]
+    async fn test_install_invalid_public_key_rejected() {
+        let mut plugins = HashMap::new();
+        plugins.insert("p1".into(), make_plugin("p1", true));
+        let market = Arc::new(MockMarketplace::new(plugins));
+        let mgr = PluginManager::new(market, "not-a-base64-public-key".into());
+        let result = mgr.install("p1").await;
+        assert!(
+            matches!(result, Err(PluginError::SignatureInvalid)),
+            "无效公钥必须拒绝安装"
+        );
     }
 
     #[tokio::test]
     async fn test_install_market_unavailable() {
         let market = Arc::new(MockMarketplace::failing());
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         let result = mgr.install("p1").await;
         assert!(matches!(result, Err(PluginError::MarketUnavailable(_))));
     }
@@ -281,7 +368,7 @@ mod tests {
         let mut plugins = HashMap::new();
         plugins.insert("p1".into(), make_plugin("p1", true));
         let market = Arc::new(MockMarketplace::new(plugins));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         mgr.install("p1").await.unwrap();
         let result = mgr.install("p1").await;
         assert!(matches!(result, Err(PluginError::AlreadyInstalled(_))));
@@ -292,7 +379,7 @@ mod tests {
         let mut plugins = HashMap::new();
         plugins.insert("p1".into(), make_plugin("p1", true));
         let market = Arc::new(MockMarketplace::new(plugins));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         mgr.install("p1").await.unwrap();
         mgr.uninstall("p1").await.unwrap();
         assert!(mgr.list().await.is_empty());
@@ -301,7 +388,7 @@ mod tests {
     #[tokio::test]
     async fn test_uninstall_not_found() {
         let market = Arc::new(MockMarketplace::new(HashMap::new()));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         let result = mgr.uninstall("nonexistent").await;
         assert!(matches!(result, Err(PluginError::NotFound(_))));
     }
@@ -312,7 +399,7 @@ mod tests {
         plugins.insert("p1".into(), make_plugin("p1", true));
         plugins.insert("p2".into(), make_plugin("p2", true));
         let market = Arc::new(MockMarketplace::new(plugins));
-        let mgr = PluginManager::new(market, "pub_key".into());
+        let mgr = PluginManager::new(market, test_public_key_b64());
         mgr.install("p1").await.unwrap();
         mgr.install("p2").await.unwrap();
         let list = mgr.list().await;

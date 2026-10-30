@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
-//! 二维码生成模块 — 对齐 PHP `endroid/qr-code`
+//! 二维码生成与验证闭环模块 — 对齐 PHP `endroid/qr-code`
 //!
-//! 提供二维码生成功能，支持 PNG/SVG 输出和原始矩阵获取。
+//! 提供二维码生成（PNG/SVG/Unicode/原始矩阵）与「生成 → 解码 → 一致性校验」闭环验证能力。
 //!
 //! ## PHP 对齐
 //!
@@ -48,9 +48,28 @@
 //! let generator = QrCodeGenerator::with_config(config);
 //! let png_bytes = generator.generate_png("Hello").unwrap();
 //! ```
+//!
+//! ## 生成 → 解码 → 一致性校验闭环
+//!
+//! 参考实践：微信文章《qrcode-rs + rxing：Rust 二维码生成与验证的完整闭环实战》（2026-10-13）。
+//! 文章推荐 `qrcode-rs` + `rxing` 组合；本模块采用「既有 `qrcode` 生成 + `rqrr` 轻量解码」方案，
+//! 避免引入 rxing 的 Rust 1.85 MSRV 与 `image/exr → pulp/paste` 传递依赖链（详见 ADR-042）。
+//!
+//! ```rust,ignore
+//! use sz_rust_core::qr_code::{QrCodeGenerator, ErrorCorrectionLevel, QrCodeConfig};
+//!
+//! let generator = QrCodeGenerator::with_config(
+//!     QrCodeConfig::new().with_error_correction_level(ErrorCorrectionLevel::High),
+//! );
+//! // 生成 PNG 并立即解码回读，数据不一致时返回 Err(DataMismatch)
+//! let png = generator.generate_and_verify("https://example.com/pay/12345").unwrap();
+//! // 也可对已有 PNG 字节独立验证
+//! let text = generator.verify_png_bytes(&png).unwrap();
+//! ```
 
 use image::{DynamicImage, ImageBuffer, Rgba, RgbaImage};
 use qrcode::render::svg;
+use qrcode::render::unicode;
 use qrcode::types::Color as QrColor;
 use qrcode::{EcLevel, QrCode};
 use thiserror::Error;
@@ -73,6 +92,19 @@ pub enum QrCodeError {
     /// IO 错误（PNG 编码写入失败等）
     #[error("IO 错误: {0}")]
     Io(String),
+
+    /// 解码验证失败（图片解码失败、未检测到二维码、二维码解码失败等）
+    #[error("二维码解码验证失败: {0}")]
+    Decode(String),
+
+    /// 数据不一致：解码内容与原始数据不匹配
+    #[error("数据不一致！原始: {original}, 解码: {decoded}")]
+    DataMismatch {
+        /// 原始编码数据
+        original: String,
+        /// 解码回读的数据
+        decoded: String,
+    },
 }
 
 impl From<std::io::Error> for QrCodeError {
@@ -132,6 +164,38 @@ impl ErrorCorrectionLevel {
 impl std::fmt::Display for ErrorCorrectionLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
+// 二维码版本 — 对齐 PHP endroid\qr-code 的版本心智模型
+// ============================================================================
+
+/// 二维码版本 — 支持标准 QR 与 Micro QR 手动指定
+///
+/// 默认 `QrCodeGenerator` 自动选择最小可容纳数据的版本；当需要固定尺寸
+/// （如打印模板、批量生成结构相同的数据）时可手动指定版本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QrVersion {
+    /// 标准 QR 版本（1~40），模块数 = 17 + 4 × version
+    Normal(u16),
+    /// Micro QR 版本（1~4），模块数 = 9 + 2 × version（M1=11 至 M4=17）
+    Micro(u16),
+}
+
+impl QrVersion {
+    /// 转换为 `qrcode` crate 的 `Version`，并校验取值范围
+    fn to_qrcode_version(self) -> Result<qrcode::Version, QrCodeError> {
+        match self {
+            QrVersion::Normal(v) if (1..=40).contains(&v) => Ok(qrcode::Version::Normal(v as i16)),
+            QrVersion::Normal(v) => Err(QrCodeError::Encoding(format!(
+                "普通 QR 版本必须在 1~40 之间，收到: {v}"
+            ))),
+            QrVersion::Micro(v) if (1..=4).contains(&v) => Ok(qrcode::Version::Micro(v as i16)),
+            QrVersion::Micro(v) => Err(QrCodeError::Encoding(format!(
+                "Micro QR 版本必须在 1~4 之间，收到: {v}"
+            ))),
+        }
     }
 }
 
@@ -354,6 +418,131 @@ impl QrCodeGenerator {
             .build();
 
         Ok(svg_string)
+    }
+
+    /// 按指定版本生成原始矩阵 — 支持标准 QR 与 Micro QR
+    ///
+    /// 手动指定版本可跳过自动版本搜索，用于打印模板、批量生成等固定尺寸场景。
+    ///
+    /// # 参数
+    ///
+    /// - `data`: 待编码的数据（不能为空）
+    /// - `version`: 目标版本（[`QrVersion::Normal`] 1~40 / [`QrVersion::Micro`] 1~4）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 `N × N` 的 `bool` 矩阵（`true` = 深色模块），失败返回 [`QrCodeError`]。
+    pub fn generate_matrix_with_version(
+        &self,
+        data: &str,
+        version: QrVersion,
+    ) -> Result<Vec<Vec<bool>>, QrCodeError> {
+        if data.is_empty() {
+            return Err(QrCodeError::Encoding("数据不能为空".to_string()));
+        }
+
+        let qr_version = version.to_qrcode_version()?;
+        let code = QrCode::with_version(
+            data.as_bytes(),
+            qr_version,
+            self.config.error_correction_level.to_ec_level(),
+        )
+        .map_err(|e| QrCodeError::Generation(format!("二维码编码失败: {e}")))?;
+
+        let width = code.width();
+        Ok((0..width)
+            .map(|y| (0..width).map(|x| code[(x, y)] == QrColor::Dark).collect())
+            .collect())
+    }
+
+    /// 生成 Unicode 终端字符输出（零文件依赖，适合 CLI 与调试）
+    ///
+    /// 使用 `qrcode` crate 的 `render::unicode::Dense1x2` 渲染器，输出可直接
+    /// `println!` 到终端。
+    ///
+    /// # 参数
+    ///
+    /// - `data`: 待编码的数据（不能为空）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回多行 Unicode 字符串，失败返回 [`QrCodeError`]。
+    pub fn generate_unicode(&self, data: &str) -> Result<String, QrCodeError> {
+        if data.is_empty() {
+            return Err(QrCodeError::Encoding("数据不能为空".to_string()));
+        }
+
+        let code = QrCode::with_error_correction_level(
+            data.as_bytes(),
+            self.config.error_correction_level.to_ec_level(),
+        )
+        .map_err(|e| QrCodeError::Generation(format!("二维码编码失败: {e}")))?;
+
+        Ok(code
+            .render::<unicode::Dense1x2>()
+            .dark_color(unicode::Dense1x2::Dark)
+            .light_color(unicode::Dense1x2::Light)
+            .build())
+    }
+
+    /// 解码验证 PNG 字节中的二维码，返回解码内容
+    ///
+    /// 全程内存解码（`image::load_from_memory` + `rqrr`），不落盘，符合铁律 4
+    /// （禁止同步文件 IO，统一 `tokio::fs`）。数据一致性由调用方比对，或直接使用
+    /// [`Self::generate_and_verify`] 闭环。
+    ///
+    /// # 参数
+    ///
+    /// - `png_bytes`: PNG 图片字节流
+    ///
+    /// # 返回
+    ///
+    /// 成功返回解码出的文本内容，失败返回 [`QrCodeError::Decode`]。
+    pub fn verify_png_bytes(&self, png_bytes: &[u8]) -> Result<String, QrCodeError> {
+        let img = image::load_from_memory(png_bytes)
+            .map_err(|e| QrCodeError::Decode(format!("图片解码失败: {e}")))?;
+        let luma = img.into_luma8();
+
+        let mut prepared = rqrr::PreparedImage::prepare(luma);
+        let grids = prepared.detect_grids();
+        let grid = grids
+            .first()
+            .ok_or_else(|| QrCodeError::Decode("未检测到二维码".to_string()))?;
+        let (_, content) = grid
+            .decode()
+            .map_err(|e| QrCodeError::Decode(format!("二维码解码失败: {e}")))?;
+        Ok(content)
+    }
+
+    /// 生成 PNG 并立即解码回读校验，返回已验证的 PNG 字节流
+    ///
+    /// 闭环流程：业务数据 → 编码 → 渲染 PNG → 解码回读 → 数据一致性校验。
+    /// 解码内容与原始数据不一致时返回 [`QrCodeError::DataMismatch`]，可接入
+    /// CI/CD 可扫描性检查（确保生成的二维码可被正确扫描）。
+    ///
+    /// # 参数
+    ///
+    /// - `data`: 待编码的数据（不能为空）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回已验证的 PNG 字节流，失败返回 [`QrCodeError`]。
+    pub fn generate_and_verify(&self, data: &str) -> Result<Vec<u8>, QrCodeError> {
+        let png = self.generate_png(data)?;
+        let decoded = self.verify_png_bytes(&png)?;
+        Self::check_consistency(data, &decoded)?;
+        Ok(png)
+    }
+
+    /// 一致性校验：解码内容必须与原始数据完全一致
+    fn check_consistency(original: &str, decoded: &str) -> Result<(), QrCodeError> {
+        if original != decoded {
+            return Err(QrCodeError::DataMismatch {
+                original: original.to_string(),
+                decoded: decoded.to_string(),
+            });
+        }
+        Ok(())
     }
 
     /// 将矩阵渲染为 PNG 字节流
@@ -654,5 +843,142 @@ mod tests {
             generator.config().error_correction_level,
             ErrorCorrectionLevel::High
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // 版本矩阵 / Unicode 输出 / 解码验证闭环测试
+    // ------------------------------------------------------------------------
+
+    /// 测试 Unicode 终端输出基本功能
+    #[test]
+    fn test_generate_unicode_basic() {
+        let generator = QrCodeGenerator::new();
+        let output = generator.generate_unicode("Hello Unicode").unwrap();
+        assert!(!output.is_empty(), "Unicode 输出不应为空");
+        // Dense1x2 使用半块字符渲染，输出应包含空白或方块字符
+        assert!(
+            output.contains(' ') || output.contains('█'),
+            "Unicode 输出应包含终端渲染字符"
+        );
+        assert!(output.lines().count() > 1, "输出应为多行");
+    }
+
+    /// 测试 Unicode 输出空数据返回错误
+    #[test]
+    fn test_generate_unicode_empty_data() {
+        let generator = QrCodeGenerator::new();
+        let result = generator.generate_unicode("");
+        assert!(matches!(result, Err(QrCodeError::Encoding(_))));
+    }
+
+    /// 测试指定普通版本生成矩阵（Normal(5) = 37×37）
+    #[test]
+    fn test_generate_matrix_with_version_normal() {
+        let generator = QrCodeGenerator::new();
+        let matrix = generator
+            .generate_matrix_with_version("Version Pin", QrVersion::Normal(5))
+            .unwrap();
+        assert_eq!(matrix.len(), 37, "QR v5 应为 37×37 模块");
+        for row in &matrix {
+            assert_eq!(row.len(), 37, "矩阵必须是正方形");
+        }
+    }
+
+    /// 测试指定 Micro 版本生成矩阵（Micro(2) = 13×13）
+    #[test]
+    fn test_generate_matrix_with_version_micro() {
+        let generator = QrCodeGenerator::new();
+        let matrix = generator
+            .generate_matrix_with_version("12345", QrVersion::Micro(2))
+            .unwrap();
+        assert_eq!(matrix.len(), 13, "Micro QR v2 应为 13×13 模块");
+        for row in &matrix {
+            assert_eq!(row.len(), 13, "矩阵必须是正方形");
+        }
+    }
+
+    /// 测试非法版本返回错误
+    #[test]
+    fn test_generate_matrix_with_version_invalid() {
+        let generator = QrCodeGenerator::new();
+        assert!(matches!(
+            generator.generate_matrix_with_version("data", QrVersion::Normal(99)),
+            Err(QrCodeError::Encoding(_))
+        ));
+        assert!(matches!(
+            generator.generate_matrix_with_version("data", QrVersion::Micro(9)),
+            Err(QrCodeError::Encoding(_))
+        ));
+    }
+
+    /// 测试 PNG 解码回读与原始数据一致
+    #[test]
+    fn test_verify_png_bytes_roundtrip() {
+        let generator = QrCodeGenerator::new();
+        let png = generator
+            .generate_png("https://example.com/verify")
+            .unwrap();
+        let decoded = generator.verify_png_bytes(&png).unwrap();
+        assert_eq!(decoded, "https://example.com/verify");
+    }
+
+    /// 测试 generate_and_verify 闭环成功
+    #[test]
+    fn test_generate_and_verify_ok() {
+        let generator = QrCodeGenerator::new();
+        let png = generator
+            .generate_and_verify("https://example.com/order/99999")
+            .unwrap();
+        assert!(!png.is_empty(), "闭环 PNG 不应为空");
+        // 二次独立解码仍一致
+        let decoded = generator.verify_png_bytes(&png).unwrap();
+        assert_eq!(decoded, "https://example.com/order/99999");
+    }
+
+    /// 测试一致性校验不一致分支返回 DataMismatch
+    #[test]
+    fn test_check_consistency_mismatch() {
+        let err = QrCodeGenerator::check_consistency("original", "decoded-different").unwrap_err();
+        match err {
+            QrCodeError::DataMismatch { original, decoded } => {
+                assert_eq!(original, "original");
+                assert_eq!(decoded, "decoded-different");
+            }
+            other => panic!("期望 DataMismatch，得到: {other:?}"),
+        }
+    }
+
+    /// 测试一致性校验一致分支通过
+    #[test]
+    fn test_check_consistency_match() {
+        assert!(QrCodeGenerator::check_consistency("same", "same").is_ok());
+    }
+
+    /// 测试纯白图片（无二维码）返回 Decode 错误
+    #[test]
+    fn test_verify_png_bytes_no_qr() {
+        let generator = QrCodeGenerator::new();
+        let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 255, 255, 255]));
+        let mut bytes = Vec::new();
+        {
+            let mut cursor = std::io::Cursor::new(&mut bytes);
+            image::DynamicImage::ImageRgba8(img)
+                .write_to(&mut cursor, image::ImageFormat::Png)
+                .unwrap();
+        }
+        let err = generator.verify_png_bytes(&bytes).unwrap_err();
+        assert!(matches!(err, QrCodeError::Decode(_)));
+    }
+
+    /// 测试损坏的 PNG 字节返回 Decode 错误
+    #[test]
+    fn test_verify_png_bytes_corrupted() {
+        let generator = QrCodeGenerator::new();
+        // 仅有 PNG magic + 截断数据，image 解码必然失败
+        let bytes = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02,
+        ];
+        let err = generator.verify_png_bytes(&bytes).unwrap_err();
+        assert!(matches!(err, QrCodeError::Decode(_)));
     }
 }

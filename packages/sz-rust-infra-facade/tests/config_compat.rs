@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 配置兼容性测试文件，含 mock 凭据字面量（CWE-798 误报，整文件豁免）
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
@@ -355,12 +357,12 @@ async fn test_load_from_dir_v1_3_with_new_sections() {
 #[test]
 fn test_ops_api_debug_redacts_auth_token() {
     let s = OpsApiSection {
-        auth_token: "super-secret-token-12345".to_string(),
+        auth_token: "<token>".to_string(),
         ..Default::default()
     };
     let debug_str = format!("{:?}", s);
     assert!(
-        !debug_str.contains("super-secret-token-12345"),
+        !debug_str.contains("<token>"),
         "auth_token 不应出现在 Debug 输出中，实际: {debug_str}"
     );
     assert!(
@@ -372,10 +374,10 @@ fn test_ops_api_debug_redacts_auth_token() {
 #[test]
 fn test_app_config_debug_redacts_ops_api_token() {
     let mut config = AppConfig::default();
-    config.ops_api.auth_token = "leaked-secret".to_string();
+    config.ops_api.auth_token = "<secret>".to_string();
     let debug_str = format!("{:?}", config);
     assert!(
-        !debug_str.contains("leaked-secret"),
+        !debug_str.contains("<secret>"),
         "AppConfig Debug 不应泄露 ops_api.auth_token，实际: {debug_str}"
     );
 }

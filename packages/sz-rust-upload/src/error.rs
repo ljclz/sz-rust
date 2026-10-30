@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! sz-rust-upload 错误类型
 use thiserror::Error;
 

@@ -148,7 +148,7 @@ operate = ["dep:sz-rust-addons-operate"]
 
 - **类型安全**：所有插件在编译期检查类型，无运行时反射错误
 - **性能无损**：编译期注册零运行时开销
-- **Cargo 原生支持**：无需额外工具，`cargo build --features operate` 即可控制插件
+- **Cargo 原生支持**：无需额外工具，通过 Cargo feature 即可控制插件（feature 名与插件 crate 对应，如 `sz-rust-addons-operate`）
 - **依赖管理清晰**：插件的依赖通过 `Cargo.toml` 显式声明
 - **编译优化**：未启用的插件不参与编译，减少二进制体积
 

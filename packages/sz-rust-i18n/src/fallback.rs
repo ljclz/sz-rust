@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 缺失键降级策略（spec §5.4 规则 4）
 //!
 //! 降级链：当前语言缺失 → 默认语言 → 键名 → 占位符

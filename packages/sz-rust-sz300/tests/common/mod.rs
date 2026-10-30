@@ -21,7 +21,7 @@ use sz_rust_sz300::{config, db};
 pub mod assertions;
 pub mod fixtures;
 
-/// MySQL 测试配置（127.0.0.1:3306, root/test123, sz_orm_test）
+/// MySQL 测试配置（127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test）
 fn mysql_test_config() -> config::AppConfig {
     config::AppConfig {
         server: config::ServerConfig {
@@ -32,7 +32,7 @@ fn mysql_test_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -67,6 +67,7 @@ pub fn make_state(pool: Pool) -> AppState {
     let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
     AppState {
         db_pool,
+        query_cache: Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: metrics,
         #[cfg(feature = "v18-rbac")]
@@ -75,6 +76,13 @@ pub fn make_state(pool: Pool) -> AppState {
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            // 集成测试保持通道畅通但不落库（避免依赖测试 DB 的 operate_log 表）。
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -92,6 +100,8 @@ pub fn make_state(pool: Pool) -> AppState {
             Arc::new(sz_rust_sz300::services::plugin_manager::InMemoryMarketplace::new()),
             "test_pub_key".to_string(),
         )),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 
@@ -107,6 +117,7 @@ pub fn make_state_with_marketplace(
     let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
     AppState {
         db_pool,
+        query_cache: Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: metrics,
         #[cfg(feature = "v18-rbac")]
@@ -115,6 +126,13 @@ pub fn make_state_with_marketplace(
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            // 集成测试保持通道畅通但不落库（避免依赖测试 DB 的 operate_log 表）。
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -132,6 +150,8 @@ pub fn make_state_with_marketplace(
             marketplace,
             "test_pub_key".to_string(),
         )),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 
@@ -140,120 +160,276 @@ pub fn make_router(state: AppState) -> Router {
     sz_rust_sz300::router::create_router(state)
 }
 
-/// 建表：device（幂等，不 DROP）
-pub async fn setup_device_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS device (\
-         device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_sn VARCHAR(64) NOT NULL UNIQUE,\
-         device_model VARCHAR(64) NOT NULL DEFAULT '',\
-         fw_version VARCHAR(32) NOT NULL DEFAULT '',\
-         status INT NOT NULL DEFAULT 0,\
-         signal_strength INT NOT NULL DEFAULT 0,\
-         bind_at DATETIME NULL,\
-         last_online_at DATETIME NULL,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 device 表失败");
-    conn.execute("TRUNCATE TABLE device").await.ok();
+// ============================================================================
+// Schema 初始化 —— 直接执行生产迁移文件（2026-10-28 修复「测试手写 DDL 失真」）
+//
+// 旧夹具用 `CREATE TABLE` 手写了一套与生产无关的 Schema（merchant_name / product /
+// 瘦身版 order），导致 SQL 引用的真实列名（name / good / total_weight_g …）
+// 在测试里全都不存在，测试通过也证明不了生产可用。
+//
+// 现在改为：DROP 掉本 crate 的表 → 按版本顺序执行 migrations/*.sql（含 ALTER）。
+// SQL 内容用 include_str! 在编译期内嵌，测试与生产永远是同一份 DDL。
+// ============================================================================
+
+/// 迁移文件（顺序 = 生产执行顺序；仅 MySQL 版）
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("001_init", include_str!("../../migrations/001_init.sql")),
+    (
+        "002_order_status_check",
+        include_str!("../../migrations/002_order_status_check.sql"),
+    ),
+    (
+        "003_indexes",
+        include_str!("../../migrations/003_indexes.sql"),
+    ),
+    (
+        "004_good_stock",
+        include_str!("../../migrations/004_good_stock.sql"),
+    ),
+    (
+        "005_order_idempotency",
+        include_str!("../../migrations/005_order_idempotency.sql"),
+    ),
+    (
+        "006_outbox",
+        include_str!("../../migrations/006_outbox.sql"),
+    ),
+    (
+        "007_sz_dtx_log",
+        include_str!("../../migrations/007_sz_dtx_log.sql"),
+    ),
+    (
+        "add_ai_classification_override",
+        include_str!("../../migrations/add_ai_classification_override.sql"),
+    ),
+    (
+        "add_alert_history",
+        include_str!("../../migrations/add_alert_history.sql"),
+    ),
+    (
+        "add_config_version",
+        include_str!("../../migrations/add_config_version.sql"),
+    ),
+    (
+        "add_sz_dtx_log_manual_intervention",
+        include_str!("../../migrations/add_sz_dtx_log_manual_intervention.sql"),
+    ),
+];
+
+/// 本 crate 迁移创建的全部表（DROP/DELETE 用；无外键，顺序无关）
+const KNOWN_TABLES: &[&str] = &[
+    "market",
+    "merchant",
+    "category",
+    "good",
+    "ai_category",
+    "device",
+    "order",
+    "order_item",
+    "settlement",
+    "ota_version",
+    "operate_log",
+    "merchant_user",
+    "system_config",
+    "outbox_event",
+    "sz_dtx_log",
+    "ai_classification_override",
+    "alert_history",
+    "config_version",
+];
+
+/// 按版本执行全部迁移（每个测试进程只执行一次）
+pub async fn migrate_schema(pool: &Pool) {
+    static INIT: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    INIT.get_or_init(|| async {
+        assert_disposable_database(pool).await;
+        drop_known_tables(pool).await;
+        run_migrations(pool).await;
+    })
+    .await;
 }
 
-/// 建表：operate_log（幂等，不 DROP）
-pub async fn setup_operate_log_table(pool: &Pool) {
+/// 拒绝在非测试库上重建 schema（本函数会 DROP 表）
+async fn assert_disposable_database(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS operate_log (\
-         id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         operator VARCHAR(64) NOT NULL DEFAULT '',\
-         action VARCHAR(64) NOT NULL DEFAULT '',\
-         detail TEXT,\
-         ip VARCHAR(45) NOT NULL DEFAULT ''\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 operate_log 表失败");
-    conn.execute("TRUNCATE TABLE operate_log").await.ok();
+    let rows = conn
+        .query("SELECT DATABASE() AS db")
+        .await
+        .expect("查询当前数据库名失败");
+    let db = rows
+        .first()
+        .and_then(|r| r.get("db"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        db.to_ascii_lowercase().contains("test"),
+        "拒绝在非测试库 `{db}` 上重建 Schema（夹具会 DROP 表）；\
+         请把测试库名配置为包含 test 的独立实例"
+    );
 }
 
-/// 建表：merchant（幂等，不 DROP）
-pub async fn setup_merchant_table(pool: &Pool) {
+async fn drop_known_tables(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS merchant (\
-         merchant_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_name VARCHAR(128) NOT NULL DEFAULT '',\
-         contact_phone VARCHAR(32) NOT NULL DEFAULT '',\
-         status INT NOT NULL DEFAULT 0,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 merchant 表失败");
-    conn.execute("TRUNCATE TABLE merchant").await.ok();
+    for table in KNOWN_TABLES {
+        conn.execute(&format!("DROP TABLE IF EXISTS `{table}`"))
+            .await
+            .unwrap_or_else(|e| panic!("DROP TABLE {table} 失败: {e}"));
+    }
 }
 
-/// 建表：product（幂等，不 DROP）
-pub async fn setup_product_table(pool: &Pool) {
+async fn run_migrations(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS product (\
-         product_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         product_name VARCHAR(128) NOT NULL DEFAULT '',\
-         price_fen BIGINT NOT NULL DEFAULT 0,\
-         stock INT NOT NULL DEFAULT 0,\
-         status INT NOT NULL DEFAULT 0,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 product 表失败");
-    conn.execute("TRUNCATE TABLE product").await.ok();
+    for (version, sql) in MIGRATIONS {
+        for stmt in split_sql_statements(sql) {
+            conn.execute(&stmt).await.unwrap_or_else(|e| {
+                panic!("迁移 {version} 执行失败: {e}\nSQL: {stmt}");
+            });
+        }
+    }
 }
 
-/// 建表：order（幂等，不 DROP）
-pub async fn setup_order_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS `order` (\
-         order_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         order_no VARCHAR(64) NOT NULL DEFAULT '',\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_id BIGINT NOT NULL DEFAULT 0,\
-         total_fen BIGINT NOT NULL DEFAULT 0,\
-         offline_seq VARCHAR(64) NOT NULL DEFAULT '',\
-         item_count INT NOT NULL DEFAULT 0,\
-         status INT NOT NULL DEFAULT 0\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 order 表失败");
-    conn.execute("TRUNCATE TABLE `order`").await.ok();
+/// 按分号切分 SQL 语句（跳过 `--` 行注释、`/* */` 块注释与引号内内容）
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let (mut in_single, mut in_double) = (false, false);
+    let (mut line_comment, mut block_comment) = (false, false);
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+
+        if line_comment {
+            if c == '\n' {
+                line_comment = false;
+                cur.push(c);
+            }
+            i += 1;
+            continue;
+        }
+        if block_comment {
+            if c == '*' && next == Some('/') {
+                block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if in_single || in_double {
+            cur.push(c);
+            if c == '\\' {
+                if let Some(escaped) = next {
+                    cur.push(escaped);
+                    i += 2;
+                    continue;
+                }
+            } else if (in_single && c == '\'') || (in_double && c == '"') {
+                in_single = false;
+                in_double = false;
+            }
+            i += 1;
+            continue;
+        }
+        match (c, next) {
+            ('-', Some('-')) => {
+                line_comment = true;
+                i += 2;
+                continue;
+            }
+            ('/', Some('*')) => {
+                block_comment = true;
+                i += 2;
+                continue;
+            }
+            _ => {}
+        }
+        match c {
+            '\'' => {
+                in_single = true;
+                cur.push(c);
+            }
+            '"' => {
+                in_double = true;
+                cur.push(c);
+            }
+            ';' => {
+                let stmt = cur.trim();
+                if !stmt.is_empty() {
+                    out.push(stmt.to_string());
+                }
+                cur.clear();
+            }
+            _ => cur.push(c),
+        }
+        i += 1;
+    }
+
+    let tail = cur.trim();
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
 }
 
-/// 清理所有测试表数据（DELETE，安全忽略不存在表）
+/// 清空全部表数据（DELETE，安全忽略不存在的表）
 pub async fn teardown_all(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DELETE FROM device").await.ok();
-    conn.execute("DELETE FROM operate_log").await.ok();
-    conn.execute("DELETE FROM merchant").await.ok();
-    conn.execute("DELETE FROM product").await.ok();
-    conn.execute("DELETE FROM `order`").await.ok();
+    for table in KNOWN_TABLES {
+        conn.execute(&format!("DELETE FROM `{table}`")).await.ok();
+    }
 }
 
-/// 建表：全部
+async fn truncate_table(pool: &Pool, table: &str) {
+    let mut conn = pool.acquire().await.expect("获取连接失败");
+    conn.execute(&format!("TRUNCATE TABLE `{table}`"))
+        .await
+        .unwrap_or_else(|e| panic!("TRUNCATE {table} 失败: {e}"));
+}
+
+/// 初始化 Schema 并清空 device
+pub async fn setup_device_table(pool: &Pool) {
+    migrate_schema(pool).await;
+    truncate_table(pool, "device").await;
+}
+
+/// 初始化 Schema 并清空 operate_log
+pub async fn setup_operate_log_table(pool: &Pool) {
+    migrate_schema(pool).await;
+    truncate_table(pool, "operate_log").await;
+}
+
+/// 初始化 Schema 并清空 merchant
+pub async fn setup_merchant_table(pool: &Pool) {
+    migrate_schema(pool).await;
+    truncate_table(pool, "merchant").await;
+}
+
+/// 初始化 Schema 并清空 good（保留旧函数名兼容既有调用：生产表名是 `good`）
+pub async fn setup_product_table(pool: &Pool) {
+    migrate_schema(pool).await;
+    truncate_table(pool, "good").await;
+}
+
+/// 初始化 Schema 并清空 order
+pub async fn setup_order_table(pool: &Pool) {
+    migrate_schema(pool).await;
+    truncate_table(pool, "order").await;
+}
+
+/// 初始化全部表（执行生产迁移）
 pub async fn setup_all_tables(pool: &Pool) {
-    setup_merchant_table(pool).await;
-    setup_product_table(pool).await;
-    setup_device_table(pool).await;
-    setup_order_table(pool).await;
-    setup_operate_log_table(pool).await;
+    migrate_schema(pool).await;
+    teardown_all(pool).await;
+}
+
+/// 构造测试用审计缓冲（通道保持畅通但不落库），避免集成测试中的丢弃噪音。
+#[cfg(feature = "v18-audit-chain")]
+pub fn test_audit_sink() -> Arc<sz_rust_sz300::middleware::audit_chain::AuditSink> {
+    let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+    sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+    sink
 }

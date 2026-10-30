@@ -371,12 +371,76 @@ mod tests {
         (cert_pem, key_pem)
     }
 
-    /// 将 PEM 字节写入临时文件
-    fn write_temp_pem(name: &str, data: &[u8]) -> std::path::PathBuf {
+    /// 测试临时 PEM 文件名白名单（禁止任意路径输入，mimosa 路径穿越治理）
+    ///
+    /// 所有文件名均为编译期常量，调用方无法传入外部可控路径。
+    #[derive(Clone, Copy)]
+    enum TempPemFile {
+        ValidCert,
+        ValidKey,
+        ValidCertForMissingKey,
+        InvalidCert,
+        InvalidKey,
+        EmptyCert,
+        EmptyKey,
+        OnlyKey,
+        EmptyForKeyOnly,
+        AcceptorCert,
+        AcceptorKey,
+        ListenerCert,
+        ListenerKey,
+        NewCert,
+        NewKey,
+        ServeCert,
+        ServeKey,
+        BindFailCert,
+        BindFailKey,
+        HandshakeCert,
+        HandshakeKey,
+        FullCert,
+        FullKey,
+        DebugFmtCert,
+        DebugFmtKey,
+    }
+
+    impl TempPemFile {
+        fn file_name(self) -> &'static str {
+            match self {
+                Self::ValidCert => "valid_cert.pem",
+                Self::ValidKey => "valid_key.pem",
+                Self::ValidCertForMissingKey => "valid_cert_for_missing_key.pem",
+                Self::InvalidCert => "invalid_cert.pem",
+                Self::InvalidKey => "invalid_key.pem",
+                Self::EmptyCert => "empty_cert.pem",
+                Self::EmptyKey => "empty_key.pem",
+                Self::OnlyKey => "only_key.pem",
+                Self::EmptyForKeyOnly => "empty_for_key_only.pem",
+                Self::AcceptorCert => "acceptor_cert.pem",
+                Self::AcceptorKey => "acceptor_key.pem",
+                Self::ListenerCert => "listener_cert.pem",
+                Self::ListenerKey => "listener_key.pem",
+                Self::NewCert => "new_cert.pem",
+                Self::NewKey => "new_key.pem",
+                Self::ServeCert => "serve_cert.pem",
+                Self::ServeKey => "serve_key.pem",
+                Self::BindFailCert => "bind_fail_cert.pem",
+                Self::BindFailKey => "bind_fail_key.pem",
+                Self::HandshakeCert => "handshake_cert.pem",
+                Self::HandshakeKey => "handshake_key.pem",
+                Self::FullCert => "full_cert.pem",
+                Self::FullKey => "full_key.pem",
+                Self::DebugFmtCert => "debug_fmt_cert.pem",
+                Self::DebugFmtKey => "debug_fmt_key.pem",
+            }
+        }
+    }
+
+    /// 将 PEM 字节写入临时文件（文件名来自编译期白名单枚举，杜绝路径穿越）
+    fn write_temp_pem(file: TempPemFile, data: &[u8]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join("sz-rust-h2-tests");
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(name);
-        std::fs::write(&path, data).unwrap();
+        std::fs::create_dir_all(&dir).expect("创建 h2 测试临时目录失败");
+        let path = dir.join(file.file_name());
+        std::fs::write(&path, data).expect("写入临时 PEM 失败");
         path
     }
 
@@ -387,8 +451,8 @@ mod tests {
     #[tokio::test]
     async fn test_load_tls_config_valid_pem() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("valid_cert.pem", &cert);
-        let key_path = write_temp_pem("valid_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::ValidCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::ValidKey, &key);
 
         let config = load_tls_config(&cert_path, &key_path).await;
         assert!(
@@ -412,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_tls_config_missing_key_file() {
         let (cert, _key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("valid_cert_for_missing_key.pem", &cert);
+        let cert_path = write_temp_pem(TempPemFile::ValidCertForMissingKey, &cert);
 
         let result = load_tls_config(&cert_path, "nonexistent_key.pem").await;
         assert!(matches!(result, Err(TlsError::ReadKeyFile(_))));
@@ -420,8 +484,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_tls_config_invalid_pem_content() {
-        let cert_path = write_temp_pem("invalid_cert.pem", b"not a valid PEM");
-        let key_path = write_temp_pem("invalid_key.pem", b"not a valid PEM");
+        let cert_path = write_temp_pem(TempPemFile::InvalidCert, b"not a valid PEM");
+        let key_path = write_temp_pem(TempPemFile::InvalidKey, b"not a valid PEM");
 
         let result = load_tls_config(&cert_path, &key_path).await;
         // PEM 解析失败 → ParseCert（certs() 返回空）或 ParseKey
@@ -430,8 +494,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_tls_config_empty_pem_files() {
-        let cert_path = write_temp_pem("empty_cert.pem", b"");
-        let key_path = write_temp_pem("empty_key.pem", b"");
+        let cert_path = write_temp_pem(TempPemFile::EmptyCert, b"");
+        let key_path = write_temp_pem(TempPemFile::EmptyKey, b"");
 
         // 空文件 → load_certs 返回 ParseCert 错误（no certificate found）
         let result = load_tls_config(&cert_path, &key_path).await;
@@ -442,8 +506,8 @@ mod tests {
     async fn test_load_tls_config_key_without_cert() {
         // 只有私钥没有证书 → ParseCert
         let (_cert, key) = generate_self_signed_cert();
-        let key_path = write_temp_pem("only_key.pem", &key);
-        let empty_cert_path = write_temp_pem("empty_for_key_only.pem", b"");
+        let key_path = write_temp_pem(TempPemFile::OnlyKey, &key);
+        let empty_cert_path = write_temp_pem(TempPemFile::EmptyForKeyOnly, b"");
 
         let result = load_tls_config(&empty_cert_path, &key_path).await;
         assert!(matches!(result, Err(TlsError::ParseCert(_))));
@@ -456,8 +520,8 @@ mod tests {
     #[tokio::test]
     async fn test_tls_acceptor_constructible() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("acceptor_cert.pem", &cert);
-        let key_path = write_temp_pem("acceptor_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::AcceptorCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::AcceptorKey, &key);
 
         let config = load_tls_config(&cert_path, &key_path)
             .await
@@ -477,8 +541,8 @@ mod tests {
     #[tokio::test]
     async fn test_tls_listener_constructible() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("listener_cert.pem", &cert);
-        let key_path = write_temp_pem("listener_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::ListenerCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::ListenerKey, &key);
 
         let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (tcp, _addr) = crate::server::build_tcp_listener("127.0.0.1:0")
@@ -492,8 +556,8 @@ mod tests {
     #[tokio::test]
     async fn test_tls_listener_new() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("new_cert.pem", &cert);
-        let key_path = write_temp_pem("new_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::NewCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::NewKey, &key);
 
         let config = load_tls_config(&cert_path, &key_path)
             .await
@@ -519,8 +583,8 @@ mod tests {
 
         // 2. 生成自签名证书 + listener
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("serve_cert.pem", &cert);
-        let key_path = write_temp_pem("serve_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::ServeCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::ServeKey, &key);
         let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (listener, addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
@@ -559,8 +623,8 @@ mod tests {
     #[tokio::test]
     async fn test_serve_h2_bind_failure() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("bind_fail_cert.pem", &cert);
-        let key_path = write_temp_pem("bind_fail_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::BindFailCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::BindFailKey, &key);
 
         // 端口超出范围
         let router = Router::new();
@@ -583,8 +647,8 @@ mod tests {
 
         // 2. 生成自签名证书 + listener
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("handshake_cert.pem", &cert);
-        let key_path = write_temp_pem("handshake_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::HandshakeCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::HandshakeKey, &key);
         let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (listener, addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await
@@ -632,8 +696,8 @@ mod tests {
 
         // 2. 生成自签名证书
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("full_cert.pem", &cert);
-        let key_path = write_temp_pem("full_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::FullCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::FullKey, &key);
 
         // 3. 构造服务器 config
         let server_config = load_tls_config(&cert_path, &key_path).await.unwrap();
@@ -698,8 +762,8 @@ mod tests {
     #[tokio::test]
     async fn test_tls_listener_debug_format() {
         let (cert, key) = generate_self_signed_cert();
-        let cert_path = write_temp_pem("debug_fmt_cert.pem", &cert);
-        let key_path = write_temp_pem("debug_fmt_key.pem", &key);
+        let cert_path = write_temp_pem(TempPemFile::DebugFmtCert, &cert);
+        let key_path = write_temp_pem(TempPemFile::DebugFmtKey, &key);
         let config = load_tls_config(&cert_path, &key_path).await.unwrap();
         let (tcp, _addr) = crate::server::build_tcp_listener("127.0.0.1:0")
             .await

@@ -1,7 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! MigrationEnhanced 集成测试（v1.5.0 P1-3）
 //!
 //! 验证迁移幂等性、校验和验证、回滚、dry-run、并发锁。
-//! 需要真实 MySQL 9.6 (127.0.0.1:3306, root/test123, sz_orm_test)。
+//! 需要真实 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test)。
 //!
 //! 运行：cargo test -p sz-rust-orm-facade --features migration-enhanced --test migration_enhanced -- --ignored
 #![cfg(feature = "migration-enhanced")]
@@ -10,16 +13,18 @@ use std::sync::Arc;
 
 use sz_orm_core::{DbType, Migration};
 use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
-use sz_rust_core::orm::{Pool, PoolConfigBuilder};
 use sz_rust_orm_facade::migration_enhanced::{MigrationEnhanced, MigrationError};
+use sz_rust_orm_facade::{Pool, PoolConfigBuilder};
 
 async fn init_pool() -> Pool {
     let _ = tracing_subscriber::fmt::try_init();
-    let conn_str = "mysql://root:test123@127.0.0.1:3306/sz_orm_test";
+    // 2026-10-28 P2-6：连接串由环境变量提供，源码不含凭据
+    let conn_str = std::env::var("SZ_TEST_MYSQL_URL")
+        .unwrap_or_else(|_| "mysql://root@127.0.0.1:3306/sz_orm_test".to_string());
     let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
         .max_connections(5)
         .acquire_timeout(std::time::Duration::from_secs(10))
-        .connect(conn_str)
+        .connect(&conn_str)
         .await
         .expect("MySQL 连接失败");
     let factory = SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));

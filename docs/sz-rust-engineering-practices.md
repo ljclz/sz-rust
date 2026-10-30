@@ -275,7 +275,7 @@ cargo check --workspace --all-targets --all-features
 | 虚假实现检测 | 检查是否有 `todo!()`、空实现、mock 实现逃逸到 main |
 | API 名实一致性 | 检查函数名是否与实现行为一致（对比 S-1~S-8） |
 | 跨平台兼容性 | 检查平台特定代码是否有条件编译保护 |
-| `as` 类型转换 | 检查 `as i32` / `as u32` / `as usize` 等缩窄转换是否可能溢出 |
+| `us` 类型转换 | 检查 `us i32` / `us u32` / `us usize` 等缩窄转换是否可能溢出 |
 | HTML 转义检查 | 检查控制器返回的 HTML/JS 片段是否有未转义的用户输入（XSS） |
 | CSRF 防护检查 | 检查写操作路由是否有 CSRF 防护中间件 |
 | 路径校验检查 | 检查文件操作是否对用户输入做 `canonicalize` + 前缀校验 |
@@ -500,14 +500,66 @@ flowchart LR
 - [`ADR与生产Bug定位规范.md`](ADR与生产Bug定位规范.md) 定义 **ADR 与 Bug 定位方法论**，是本规范"五维审查"和"门禁"的可观测性补充；
 - [`软件项目审计清单.md`](软件项目审计清单.md) 定义 **审计维度与通过标准**，本规范是其工程化审计的具体落地；
 - [`adr/README.md`](adr/README.md) 是 ADR 索引；
-- [`audit/2026-07-22-初始审计.md`](audit/2026-07-22-初始审计.md) 是首次审计报告，记录本规范落地前的基线状态；
+- [`audit/archive/2026-07/2026-07-22-初始审计.md`](audit/archive/2026-07/2026-07-22-初始审计.md) 是首次审计报告，记录本规范落地前的基线状态；
 - [`benchmarks/baseline-v0.1.0.md`](benchmarks/baseline-v0.1.0.md) 是性能基线文档，与本规范"门禁 5 doc"和"性能回归审计"对齐。
 
 ---
 
-> **最后更新**: 2026-08-13
+> **最后更新**: 2026-10-29
 > **维护人**: SZ-Rust 工程团队
-> **规范版本**: v1.6
+> **规范版本**: v1.8
+>
+> **v2.0 变更摘要**（2026-10-27，tech-writer 整改：门禁 19 扩展为文档-代码一致性总门禁）：
+> - 铁律 24 新增（`.trae/rules/project_rules.md`）：文档-代码一致性门禁强制——Markdown 链接可解析 / README 版本号与 Cargo.toml 一致 / `--features` 引用存在 / 文件名 UTF-8 无乱码
+> - 门禁 19 `doc-code-consistency.js` 扩展：除 crate 存在性外，自动调用 `link-check.js` 检查链接存在性 / 版本一致性 / feature 名存在性
+> - 新脚本 `link-check.js`：独立可复跑，Markdown 相对链接 fs.existsSync、README 版本 vs `[workspace.package] version`、`--features` 名 vs workspace `[features]`
+> - 修复 OpenAPI 契约漂移：`openapi.rs` 响应构建器在 content_type 为空时不再生成空媒体类型键；`schemas/openapi-sz300.json` 重建为 41 paths / v2.0.0
+>
+> **v2.0.1 变更摘要**（2026-10-28，SDET 评测报告 `docs/audit/2026-10-27-SDET评测报告.md` 缺陷修复）：
+> - **P0-1 DB 集成测试全暗**：新增 `.github/workflows/db-integration.yml`，启动 MySQL 9.6 / PostgreSQL 18 / Redis 7 service 后对 orm-facade / sz300 / marketplace / cli / auth-facade 显式执行 `--ignored`（此前 189 个 `#[ignore]` 测试在全部 16 个 workflow 中零执行）；配套将 `cli_db_integration.rs` / `redis_integration.rs` 的连接串改为 `MARKETPLACE_PG_URL` / `REDIS_URL` 环境变量可覆盖（本机默认值不变）
+> - **P1-1 覆盖率矩阵**：coverage.yml 新增 P4 分片，v1.7/v2.0 新增 crate 与 8 个 addons 共 24 个 crate 纳入矩阵；测试量偏薄 crate 按 coverage-exemption 流程登记豁免（限期 2027-01-27，欠债登记 `docs/audit/doc-debt.md`）
+> - **P1-2 阈值统一**：coverage.yml 95 → 85（行）/ 75（分支），ci.yml / project_rules 铁律 10 / test-coverage SKILL 对齐；移除 ci.yml coverage job 的 `continue-on-error`
+> - **P1-3 flaky 治理**：sso_integration 5 处 35s sleep → 4s（时间参数等比缩放，实测 24/24 通过、总时长 145s → 4s）；cache_parity 8 处 / upload_parity 1 处 / multi_dim_rate_limit 1 处 `std::thread::sleep` → `tokio::time::sleep`；saga_integration 10s → 1s
+> - **P1-4 端口**：core/src/orm/graphql.rs 测试固定端口 9996-9999 → 0（注意：`src/orm.rs` 未被 lib.rs 挂载，为孤儿文件，后续需决策删除或恢复挂载）；container/tests.rs 8802 → 3306
+> - **P1-5 性能门禁接线**：benchmark.yml / ai-facade-perf-gate.yml PR 从 gh-pages 基线分支恢复 criterion 数据后执行 `regression_gate.sh`（>10% 阻塞）；修复 gate 脚本 `bc` 小数比较失败静默降级恒 PASS 的 bug（改纯 python 比较）
+> - **P1-6 soak**：soak.yml 重新启用（周跑 1h + push 冒烟 10s）；soak-nightly 6h 正式下线删除（GitHub 6h 硬上限风险）
+> - **P1-7 fail-closed**：mutants kill-rate 门禁 `::warning::` → `exit 1`；mcdc / geiger / miri 移除 `continue-on-error`
+> - **P2**：benchmark-suite 新增真实 criterion 基准 `benches/suite_bench.rs`（4 组，实测通过）；铁律 4 / AGENTS.md 明确 std::fs 测试代码豁免；serve_tls_wiring.rs `panic!` → `assert!`；`check-std-fs.py` 修复多行 raw string 误报（sz-rust-sdd 提示词模板 3 处）
+> - 修复过程中自查发现并纠正一次 PowerShell GBK 转码损坏（container/tests.rs、sso_integration.rs），已全量恢复并经 cargo test 验证（78+24+51+71+10+8+8 = 250 个测试通过，实跑输出见会话记录）
+> - 未纳入本轮：nextest 引入与契约测试（P2 建议，需独立评审）
+> - **JS 门禁本机执行补记（2026-10-28）**：SDET 报告"node 未安装"结论不成立——node 实存于 `D:\BtSoft\nodejs\v24.22.1`（宝塔面板，不在 PATH）。10 个 JS 门禁本机全量执行：doc-code-consistency + link-check（0 ERROR / 248 链接 0 broken）、assertion-value（修 2 处无断言 ERROR 后通过：migration/metrics.rs 补 3 断言、sdd/analyzer.rs 字符串内示例测试补断言体，两 crate cargo test 全过）、feature-consistency（exit 0）、adr-code（不阻塞 WARN）、openapi-consistency（41/41 PASS）、sensitive-field-audit（0 EXPOSED）。3 门禁 FAIL 均为并行会话引入文件（sdd / sz300/graphql/schema.rs / upload/vscan.rs）的存量债务，归引入方处理：bug-pattern 棘轮 3 条回归、coverage-exemption 10 处 sdd crate 级 allow、error_code_conflict 17 处（data_perm_admin / data_scope / addons-admin 错误码重复，需架构决策）
+>
+> **v2.0.2 变更摘要**（2026-10-28，AppSec/SecOps 评测 `docs/audit/appsec-eval-prompt.md` 整改）：
+> - **凭据泄漏 P0**：`scripts/` 68 个脚本内嵌 SSH 私钥与生产 JWT/DB 密码/metrics 令牌全部脱敏为环境变量注入；删除 `scripts/ssh_key_temp`；`.dockerignore`/`.gitignore` 补 `.env*`、`scripts/deploy/`、`deploy/monitoring/`、`*.key/*.pem` 排除。**生产凭据需人工轮换**
+> - **key-rotation RNG P0**：`RandomKeyGenerator` 时间种子 LCG → `rand::rngs::OsRng`（CSPRNG），`cargo test -p sz-rust-key-rotation` 8 passed
+> - **IDOR P0**：新增 `CurrentUser` 请求上下文；商户/商品/订单/设备 list/info/create/update/delete/bind/OTA 按 `merchant_id` 归属过滤（`controllers/common.rs` 提供 `effective_merchant_scope_*` / `can_access_merchant_resource_*`）
+> - **认证会话 P1**：`/auth/refresh` 真实轮换（校验 `token_use=refresh`）；`/auth/logout` 服务端黑名单吊销（SHA-256 哈希 + 惰性清理）；登录响应新增 `refresh_token`
+> - **WS/SSE P1**：`/ws`、`/events` 连接/订阅前强制 JWT 校验
+> - **默认安全基线 P1**：`panic_guard` 挂载生产路由；`SZ300_JWT_SECRET` 统一为唯一密钥来源（同步 `SZ_JWT_SECRET`）；`SZ300_COOKIE_SECURE` 可配置；sz300 默认 features 启用 security-headers/data-mask/audit-chain/key-rotation/jwt-audience
+> - **供应链治理 P1**：`deny.toml`/`.cargo/audit.toml` 修正 protobuf/webpki-roots/zip/rkyv/serde_yml 不实理由；`security.yml` unmaintained 检查补 clone `../sz-orm`；geiger 注释与行为对齐
+> - **部署 P1**：`docker-compose.prod.yml` MySQL 仅绑 127.0.0.1、强制 `SZ300_METRICS_TOKEN`/`SZ300_CORS_ORIGIN`；k8s 清单统一 `sz300` 命名空间与服务名 `sz300-service`；Grafana/Alertmanager/marketplace 凭据环境变量化
+> - 验证：`cargo test -p sz-rust-sz300 --lib` = **87 passed / 0 failed**（含 26 项 security_gauntlet）；`cargo check -p sz-rust-sz300` = 0 warning。详见 `docs/audit/2026-10-28-appsec-remediation.md`
+>
+> **门禁 30-34 防复发体系（2026-10-28，SDET 评测教训沉淀）**：
+> - **门禁 30 `ignored-test-routing.js`**：每个 `#[ignore]` 测试必须被某 workflow 的 `--ignored` 命令显式覆盖或登记豁免（仅限外部凭据）。配套：db-integration.yml 扩至 15 个 DB/Redis 测试二进制（sz300 全部 E2E / mqtt_dispatch / testkit p1_4 / marketplace web_integration / cli lib cargo_checker）；soak.yml 接 soak_p3、benchmark.yml 接 runtime_perf、ci.yml windows job 接 windows_memory_baseline；ai-facade 真实 API 两文件登记 `docs/audit/ignored-test-exemption.md`
+> - **门禁 31 `coverage-matrix-completeness.js`**：workspace 全部 65 个 member 必须出现在 coverage.yml 分片或豁免清单（含到期日）；补登 19 个存量 member 豁免，全绿
+> - **门禁 32 `ci-config-audit.js`**：阈值一致性（ci/coverage/rules/SKILL = 85）、continue-on-error 清零、mutants kill-rate fail-closed、性能回归门禁接线、无 `.disabled`
+> - **门禁 33 `test-hygiene-check.js`**：async 内 thread::sleep（ERROR）、长 sleep≥30s / 固定端口 / panic! 断言 / 硬编码凭据（WARN/ERROR），剔除注释字符串误报；存量 6 项 async-thread-sleep 与 36 个孤儿文件入基线棘轮（`test-hygiene-baseline.json` / `orphan-module-baseline.json`），新增才阻塞
+> - **门禁 34 `orphan-module-check.js`**：src/ 下未被 lib.rs/main.rs/bin 挂载的 .rs 文件（含 core/src/orm.rs 等 36 个存量候选，需排期挂载或删除）
+> - 5 个门禁均已接入 ci.yml 门禁 30-34 与 `pr-review.sh`，本机 node 实跑全部 PASS
+>
+> **v2.0.3 变更摘要**（2026-10-29，性能工程评测 `docs/audit/2026-10-29-性能工程评测报告.md` 整改，27/100）：
+> - **门禁 32 扩展**：新增「端到端性能门禁接线」检查——`perf-gate.yml` 必须调用 `scripts/perf-regression.js`、必须含无基线 `--init` 播种路径、且播种后 `exit 1`（禁止"无基线即通过"的假绿）。背景：该脚本在 2026-10-29 前被全仓 workflow 零引用，「CI 性能回归门禁」只存在于文档
+> - **门禁重写**：`scripts/perf-regression.js` v2 —— 预热 10 s + 稳态 60 s × 3 次、闭环、QPS 只计 2xx/3xx、错误率独立门禁、分位数覆盖全部响应、有效阈值 = max(名义 5%, 3×CV)、基线按环境指纹分槽（schema=2）、现场签发 JWT + CSRF 双提交、默认仅回环地址、退出码 0/1/2/3；删除旧版跨机器占位基线（`/health` 50000 QPS）
+> - **新 workflow**：`.github/workflows/perf-gate.yml`（PR 仅做基线结构检查；手动/定时跑 MySQL 9.6 service + migrations 001–007 + `deploy/sql/perf-seed.sql` 确定性 2 万行 + release 构建 + 真实负载）
+> - **运行时性能修复**：限流改按对端 IP 分桶（`ConnectInfo<SocketAddr>`，仅 `trust_proxy=true` 才信代理头）+ 桶表溢出改「回收空闲桶 + 共享兜底桶」（旧版溢出的 `Err` 被中间件 fail-open，限流可被完全绕过）；熔断器统计窗口改 60 桶 O(1) 环形缓冲；`test_before_acquire` 默认关闭（保留环境变量回退）；读路径 `info!` 降 `debug!` 且默认日志级别回到 `info`
+> - **热路径告警采样**（真库端到端验证中新发现，评测与整改均未覆盖）：`v19-jwt-audience` 的「无 `aud` 旧令牌 grace period 放行」分支按请求写 `warn!`，实测占全部日志字节 99.78%（156,708 请求 → 157,068 行 / 49.7 MB），属可被无 `aud` 令牌持有者低成本放大的输出面 → 改 `WarnSampler` 60 s 采样窗口并携带 `suppressed_in_window`（抑制计数不丢事件）；复测 83,067 请求 → 3 行 / 3,149 B（debug 档）、251,267 请求 → 7 行 / 2,600 B（release 档）
+> - **审计链异步缓冲重放**（ADR-047，2026-10-30）：请求内同步写 `operate_log`（1 s 超时即弃）改有界通道投递 + 后台重试落库；丢弃计数暴露为 `sz300_audit_dropped_total` 指标与 `AuditSink::dropped_count`。真库验证 453 POST → 453 行 operate_log（0 丢弃）
+> - **订单列表 COUNT 查询缓存**（ADR-048，2026-10-30，31–90 天路线项）：`AppState` 新增 `query_cache`，`OrderService::list` 的 COUNT 按「WHERE 子句 + 参数化值」缓存（LRU 10,000 条 / TTL 60 s，v1.9.0 `QueryCache` 首次接入业务），`OrderService::create` 提交成功后整体清空；GraphQL/MQTT/SAGA 旁路写路径依赖 TTL 自然过期（≤60 s 最终一致）。单测 113 passed（+4 键函数）、真库 `order_count_cache_test` 2 passed、clippy 0 warning。**实测（V，门禁 v2 完整协议）**：order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms（-67.8%）、0% 错误；基线已 `--init` 重播种
+> - **鉴权授权上下文缓存**（ADR-049，2026-10-30，31–60 天路线项「JWT claims 鉴权」的安全替代）：`auth_service::try_get_user_info_by_id`（每鉴权请求 1 次连接池获取 + 1 次 `merchant_user` 6 列查询）改为 `auth_context` → `AuthContext{merchant_id,is_admin}`（投影 2 列）并接入进程级 `QueryCache`（LRU 50,000 用户 / TTL 60 s / 定长 10 字节值，**只缓存正向结果**）。选缓存而非把角色写进 claims 的理由：访问令牌有效期硬编码 86400 s，claims 方案下角色/商户变更最坏 24 h 才生效，本方案陈旧窗口 ≤60 s 且不改令牌协议；`logout` 吊销仍每请求查黑名单。不做主动失效的依据：全仓 `UPDATE merchant_user` 仅登录写 `last_login_at`，无授权列的应用内写路径。验证：lib **116 passed**（+3 编解码单测）、clippy 0 warning、fmt 无差异；真库 `auth_ctx_cache_test` **1 passed**（MySQL 8.0.46，四组场景）；端到端吞吐**未实测**（欠债 DB-2026-10-30-02，起服务需批准）。详见 `docs/adr/0049-鉴权授权上下文缓存.md`
+> - **响应 gzip 压缩与令牌端点 BREACH 排除**（ADR-050，2026-10-30，31–60 天路线项「开 gzip/brotli（注意 BREACH）」）：新增 `packages/sz-rust-sz300/src/middleware/compression.rs`，用 tower-http `CompressionLayer`（`compression-gzip`）+ `DefaultPredicate`（≥32 B、排除 gRPC/图片/SSE）叠一个读响应扩展的自定义谓词；`mark_no_compress` 路由级中间件给 `/api/v1/auth/login`、`/api/v1/auth/refresh` 的响应打上 `NoCompression` 扩展标记——因为谓词签名只看得见 status/version/headers/extensions，看不见请求路径，标记经 `Response::from_parts` 穿透 `DataMaskLayer` 传到压缩层。默认关闭（`SZ300_COMPRESSION` 环境变量开关，非法值 fail-closed）；只做 gzip 不做 brotli（`compression-br` 会引入新编解码依赖，且会叠加第二个未实测变量）。验证：lib **118 passed**（+2 谓词/构造单测）、`compression_test` **5 passed**（DB-free oneshot，按生产层序组装：gzip 命中 / 登录端点不压缩 / 小响应不压缩 / SSE 不压缩 / 无 `Accept-Encoding` 回退 identity）、`config_test` **7 passed**（开关默认值与 fail-closed）、clippy 0 warning；端到端出口字节节省与压缩 CPU 代价**未实测**（欠债 DB-2026-10-30-03，起服务需批准）。详见 `docs/adr/0050-响应gzip压缩与breach排除.md`
+> - 验证：middleware-facade 86 passed、core middleware_chaos 26 passed、sz300 lib 109 passed、audit_chain_test 9 passed、`cargo clippy --all-targets -D warnings` 0 error、`cargo check --bin sz300-server` 0 error；门禁 32 实跑 PASS；门禁 v2 在一次性 MySQL 9.6 + 真库 release 实例端到端跑通（三端点 0% 错误率）。**已实测**：`/health`（不查库、不走鉴权分支，唯一同档可比项）c=50 中位 QPS 4364 → 5886.8 / 6248.7（两轮独立 release 实测，+34.9% ~ +43.2%，对外只引用下界 +34.9%；p99 32–79 ms → 12.10–12.99 ms），第一轮测量期间有 34.5–100% 外部负载干扰，属保守下界。**同源 A/B 已做**（同一容器+同一数据集，pre-fix vs post-fix 紧邻跑门禁）：product +5.2% / order +8.6%（W 级，无回归但受同机争用干扰，V 级待空闲机）。本机指纹已 `--init` 播种真实基线。详见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §7/§11/§12/§13
+> - 详见 `docs/adr/0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md`、`docs/adr/0047-审计链异步缓冲重放.md`、`docs/adr/0048-订单count查询缓存.md`、`docs/adr/0049-鉴权授权上下文缓存.md`、`docs/adr/0050-响应gzip压缩与breach排除.md` 与 `docs/audit/2026-10-29-性能整改五维审查.md`
 >
 > **v1.6 变更摘要**（2026-08-13，防幻影交付三件套 + 四项新门禁）：
 > - 铁律 23 新增（`.trae/rules/project_rules.md`）：完成声称证据链强制（交付物路径 + 验证命令真实输出 + 变更标识），CI 门禁 19 自动检查
@@ -531,16 +583,16 @@ flowchart LR
 > - 五维审查报告：`docs/audit/2026-08-05-iron-violations-fix-five-dimensional-review.md`
 >
 > **v1.4 变更摘要**（2026-08-04）：
-> - CI coverage job 切换为 cargo-llvm-cov（--exclude sz-orm-macros --cobertura --fail-under-lines 85），解决 Windows 本机无法运行 tarpaulin 的问题；实测 workspace 总体覆盖率 89.2%
+> - CI coverage job 切换为 cargo-llvm-cov（--exclude sz-orm-macros --cobertura --fail-under-lines 85），解决 Windows 本机无法运行 tarpaulin 的问题；实测 workspace 总体覆盖率 89.2%（来源：2026-08-04 `cargo llvm-cov --workspace` 实测输出，记录于 `docs/audit/2026-08-05-iron-violations-fix-five-dimensional-review.md`）
 > - fix(observability): otlp.rs 删除冗余 ENV_TEST_LOCK 双重加锁，统一为 env_lock() OnceLock 单例（63 测试全过）
-> - P3 拆包完成（ADR-019）：view/controller/guard/hooks/model/routing 全部提取为 mvc-facade / router-facade / orm-ext-facade，sz-rust-core 降至 ~9.2K LOC（−83.9%）
+> - P3 拆包完成（ADR-019）：view/controller/guard/hooks/model/routing 全部提取为 mvc-facade / router-facade / orm-ext-facade，sz-rust-core 降至 9.2K LOC（−83.9%）
 > - §9 遗留项全部关闭：env 竞态全局扫描（5 文件全加锁）+ Windows 覆盖率替代方案确认（cargo-llvm-cov）
 >
 > **v1.3 变更摘要**（2026-08-03，两次更新）：
 > - P2 拆包完成：sz-rust-core 57K LOC → 23.6K LOC（−58.7%），提取 7 个 facade crate 共 42.4K LOC
-> - 新增 7 个 facade crate：sz-rust-{orm,http,cache,state,infra,auth,pay}-facade，通过 `pub use X as <module>` 重导出
+> - 新增 7 个 facade crate：sz-rust-{orm,http,cache,state,infra,auth,pay}-facade，通过 `pub use X us <module>` 重导出
 > - 向后兼容：`sz_rust_core::<module>::*` 路径全部保留，内部模块无需改动
-> - 清理死代码：删除 sz-rust-core/src/ 中已提取的 9 个源文件 + 2 个子目录（config/validate/static_files/upload/debug_page/wechat/oauth/gateway/pay）
+> - 清理死代码：删除 sz-rust-core/src/ 中已提取的 9 个源文件 + 2 个子目录（config/vulidute/stutic_files/uploud/debug_puge/wechut/ouuth/gutewuy/puy）
 > - 统一 infra-facade 依赖路径：`sz-orm-storage` 直接依赖改为通过 `sz-rust-orm-facade` 间接依赖
 > - 新增 facade README：7 个 facade crate 各写 README.md
 > - 新增迁移指南：`docs/facade-migration-guide.md`（下游业务包从 sz-rust-core 迁移到 facade crate 的完整指南）
@@ -555,7 +607,7 @@ flowchart LR
 > - 编译时间监控：`scripts/check-compile-time.sh` + 基线 `scripts/compile-time-baseline.json`（总 57.38s）+ CI compile-time job
 > - 内存泄漏检测：`examples/rss_stability.rs`（150 周期 30,000 次创建/释放，RSS 增量 0.21 MiB）+ CI miri job
 > - 新增 ADR-018：facade 独立发布策略（0.x 统一版本 / 1.0 后 semver 独立）
-> - P3 剩余模块解耦（ADR-019）：四簇提取 4 个新 facade（orm-ext / router / middleware / mvc，~34.6K LOC），6 个阻塞模块（view/controller/guard/hooks/model/routing）+ middleware 簇 + router/websocket_route/openapi 全部提取；解 container↔request_scope 双向环（ScopeId 迁移至 middleware-facade）；安全关键中间件保留 @REVIEW_REQUIRED；sz-rust-core 57K → ~9.2K LOC（−83.9%）
+> - P3 剩余模块解耦（ADR-019）：四簇提取 4 个新 facade（orm-ext / router / middleware / mvc，34.6K LOC），6 个阻塞模块（view/controller/guard/hooks/model/routing）+ middleware 簇 + router/websocket_route/openapi 全部提取；解 container↔request_scope 双向环（ScopeId 迁移至 middleware-facade）；安全关键中间件保留 @REVIEW_REQUIRED；sz-rust-core 57K → 9.2K LOC（−83.9%）
 > - 测试数量：workspace 全量 4,983 passed，0 failed（--jobs 1 规避 Cargo 并发编译 crate 解析竞争）
 > - workspace 包数量 14 → 26（11 个 facade + 集成测试 crate）
 > - 竞争力深化（4.3 六项全达标）：blog/ecommerce/iot 3 个完整示例；criterion 22 项基准（docs/benchmarks/benchmark-report.md）；错误消息 i18n 本地化（BaseException.message_key + mvc i18n_error）；OpenAPI 从路由配置自动生成（ecommerce /openapi.json 实测）；sz-rust-mcp crate（5 工具 + stdio JSON-RPC）；missing_docs 门禁全绿（-D missing_docs 26 crate 0 错误，修复 4 处 doc 缺陷）

@@ -93,34 +93,43 @@ impl QueueBackend for DbQueueBackend {
                 ],
             )
             .await?;
-        let ids: Vec<Value> = rows
+        let ids: Vec<i64> = rows
             .iter()
-            .filter_map(|r| r.get("id").and_then(Value::as_i64).map(Value::I64))
+            .filter_map(|r| r.get("id").and_then(Value::as_i64))
             .collect();
-        if !ids.is_empty() {
-            let placeholders = vec!["?"; ids.len()].join(",");
-            let mut params = Vec::with_capacity(ids.len() + 3);
-            params.push(Value::String(STATUS_RUNNING.into()));
-            params.push(Value::I64(locked_until));
-            params.push(Value::I64(now));
-            params.extend(ids);
-            conn.execute_with_params(
-                &format!(
-                    "UPDATE sz_jobs SET status = ?, locked_until = ?, attempts = attempts + 1, updated_at = ? \
-                     WHERE id IN ({placeholders})"
-                ),
-                &params,
-            )
-            .await?;
+        if ids.is_empty() {
+            conn.commit().await?;
+            return Ok(Vec::new());
         }
-        conn.commit().await?;
+
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let mut params = Vec::with_capacity(ids.len() + 3);
+        params.push(Value::String(STATUS_RUNNING.into()));
+        params.push(Value::I64(locked_until));
+        params.push(Value::I64(now));
+        params.extend(ids.iter().map(|id| Value::I64(*id)));
+        conn.execute_with_params(
+            &format!(
+                "UPDATE sz_jobs SET status = ?, locked_until = ?, attempts = attempts + 1, updated_at = ? \
+                 WHERE id IN ({placeholders})"
+            ),
+            &params,
+        )
+        .await?;
+
+        // 按本次抢占的 id 精确回读：同一毫秒内两次 pop 的 locked_until 可能相同，
+        // 用 locked_until 过滤会把别的 worker 抢占的任务重复投递。
+        let id_params: Vec<Value> = ids.iter().map(|id| Value::I64(*id)).collect();
         let rows = conn
             .query_with_params(
-                "SELECT id, kind, payload, status, attempts, run_after, last_error, dedupe_key, created_at \
-                 FROM sz_jobs WHERE status = ? AND locked_until = ? ORDER BY created_at",
-                &[Value::String(STATUS_RUNNING.into()), Value::I64(locked_until)],
+                &format!(
+                    "SELECT id, kind, payload, status, attempts, run_after, last_error, dedupe_key, created_at \
+                     FROM sz_jobs WHERE id IN ({placeholders}) ORDER BY created_at"
+                ),
+                &id_params,
             )
             .await?;
+        conn.commit().await?;
         rows.into_iter().map(row_to_job).collect()
     }
 

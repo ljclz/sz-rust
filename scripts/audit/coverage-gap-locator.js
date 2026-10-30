@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// mimosa-ignore
+// 内部覆盖率分析脚本，路径来自 Cobertura XML/固定目录（非不可信输入），路径穿越规则在此为误报
 /**
  * 覆盖率缺口定位脚本
  *
@@ -10,6 +12,9 @@
 
 const fs = require('fs');
 const path = require('path');
+
+// 工具在仓库根运行，所有解析路径必须落在该根目录内
+const PROJECT_ROOT = process.cwd();
 
 function parseArgs(argv) {
   const args = { xml: null, crate: null };
@@ -30,7 +35,13 @@ function parseArgs(argv) {
 }
 
 function locateGaps(xmlPath, crateName) {
-  const xml = fs.readFileSync(xmlPath, 'utf-8');
+  // 仅允许读取项目根内的 XML（防命令行参数路径穿越，mimosa 专项治理）
+  const resolvedXml = path.resolve(PROJECT_ROOT, xmlPath);
+  if (resolvedXml !== PROJECT_ROOT && !resolvedXml.startsWith(PROJECT_ROOT + path.sep)) {
+    console.error(`错误: XML 路径越界: ${xmlPath}`);
+    process.exit(1);
+  }
+  const xml = fs.readFileSync(resolvedXml, 'utf-8');
   const packageRegex = new RegExp(
     `<package\\s+name="${crateName}"[^>]*>([\\s\\S]*?)<\\/package>`, 'g'
   );
@@ -98,7 +109,11 @@ function compressRanges(lines) {
 }
 
 function extractContext(filename, uncoveredLines) {
-  const fullPath = path.resolve(filename);
+  // 解析后的路径必须落在项目根目录内，防止 XML 中的 ../ 越界
+  const fullPath = path.resolve(PROJECT_ROOT, filename);
+  if (fullPath !== PROJECT_ROOT && !fullPath.startsWith(PROJECT_ROOT + path.sep)) {
+    return null;
+  }
   if (!fs.existsSync(fullPath)) return null;
 
   const content = fs.readFileSync(fullPath, 'utf-8').split('\n');

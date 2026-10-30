@@ -260,7 +260,7 @@ fn mysql_test_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -294,6 +294,7 @@ async fn ensure_mysql() -> Option<Pool> {
 fn make_upload_state(pool: Pool) -> AppState {
     AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -302,6 +303,12 @@ fn make_upload_state(pool: Pool) -> AppState {
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         upload_config: UploadConfig {
             backend: StorageBackend::local("./test_uploads"),
             max_size: 1024,
@@ -330,6 +337,8 @@ fn make_upload_state(pool: Pool) -> AppState {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 

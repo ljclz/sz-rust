@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 来源引用（v1.5.0 P2-3）
 //!
 //! 每个检索结果附来源引用，包含文档 ID、片段位置、置信度（spec 5.7.3）。

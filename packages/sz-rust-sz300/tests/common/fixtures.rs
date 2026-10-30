@@ -7,37 +7,45 @@
 use sz_rust_core::orm::{Pool, Value};
 
 /// 插入测试商户
+/// 2026-10-28 对齐生产 DDL：列名为 `name`（原 `merchant_name` 为测试自造 Schema），
+/// 且 `market_id` 为 NOT NULL 无默认值，必须显式给值
 pub async fn insert_merchant(pool: &Pool, merchant_id: i64, name: &str, phone: &str) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        format!(
-            "INSERT INTO merchant (merchant_id, merchant_name, contact_phone, status) \
-             VALUES ({}, '{}', '{}', 1)",
-            merchant_id, name, phone
-        )
-        .as_str(),
+    conn.execute_with_params(
+        "INSERT INTO merchant (merchant_id, market_id, name, contact_phone, status) \
+         VALUES (?, 0, ?, ?, 1)",
+        &[
+            Value::I64(merchant_id),
+            Value::String(name.to_string()),
+            Value::String(phone.to_string()),
+        ],
     )
     .await
     .expect("插入商户失败");
 }
 
 /// 插入测试商品
+/// 2026-10-28 对齐生产 DDL：表名 `good`、主键 `good_id`、列 `name`/`price`/`stock`
+/// （原 `product` / `product_name` / `price_fen` 是测试自造 Schema）
 pub async fn insert_product(
     pool: &Pool,
-    product_id: i64,
+    good_id: i64,
     merchant_id: i64,
     name: &str,
     price_fen: i64,
     stock: i32,
 ) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        format!(
-            "INSERT INTO product (product_id, merchant_id, product_name, price_fen, stock, status) \
-             VALUES ({}, {}, '{}', {}, {}, 1)",
-            product_id, merchant_id, name, price_fen, stock
-        )
-        .as_str(),
+    conn.execute_with_params(
+        "INSERT INTO good (good_id, merchant_id, name, price, stock, status) \
+         VALUES (?, ?, ?, ?, ?, 1)",
+        &[
+            Value::I64(good_id),
+            Value::I64(merchant_id),
+            Value::String(name.to_string()),
+            Value::I64(price_fen),
+            Value::I32(stock),
+        ],
     )
     .await
     .expect("插入商品失败");
@@ -46,13 +54,14 @@ pub async fn insert_product(
 /// 插入测试设备
 pub async fn insert_device(pool: &Pool, device_id: i64, merchant_id: i64, device_sn: &str) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        format!(
-            "INSERT INTO device (device_id, merchant_id, device_sn, device_model, fw_version, status) \
-             VALUES ({}, {}, '{}', 'TEST-MODEL', '1.0.0', 1)",
-            device_id, merchant_id, device_sn
-        )
-        .as_str(),
+    conn.execute_with_params(
+        "INSERT INTO device (device_id, merchant_id, device_sn, device_model, fw_version, status) \
+         VALUES (?, ?, ?, 'TEST-MODEL', '1.0.0', 1)",
+        &[
+            Value::I64(device_id),
+            Value::I64(merchant_id),
+            Value::String(device_sn.to_string()),
+        ],
     )
     .await
     .expect("插入设备失败");
@@ -68,13 +77,16 @@ pub async fn insert_order(
     status: i32,
 ) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute(
-        format!(
-            "INSERT INTO `order` (order_id, order_no, merchant_id, total_fen, item_count, status) \
-             VALUES ({}, '{}', {}, {}, 1, {})",
-            order_id, order_no, merchant_id, total_fen, status
-        )
-        .as_str(),
+    conn.execute_with_params(
+        "INSERT INTO `order` (order_id, order_no, merchant_id, total_fen, item_count, status) \
+         VALUES (?, ?, ?, ?, 1, ?)",
+        &[
+            Value::I64(order_id),
+            Value::String(order_no.to_string()),
+            Value::I64(merchant_id),
+            Value::I64(total_fen),
+            Value::I32(status),
+        ],
     )
     .await
     .expect("插入订单失败");

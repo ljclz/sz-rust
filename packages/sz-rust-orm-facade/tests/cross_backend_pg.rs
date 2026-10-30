@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! P1 跨后端集成测试（PostgreSQL 18.2 分支）
 //!
 //! 验证 AutoRollbackGuard / TransactionManager / MigrationEnhanced
@@ -15,19 +18,23 @@ use std::time::Duration;
 
 use sz_orm_core::{DbType, Migration};
 use sz_orm_sqlx::{PgPoolHandle, SqlxPgConnectionFactory};
-use sz_rust_core::orm::{Pool, PoolConfigBuilder};
 use sz_rust_orm_facade::auto_rollback::{AutoRollbackConfig, AutoRollbackGuard, TransactionState};
 use sz_rust_orm_facade::migration_enhanced::MigrationEnhanced;
 use sz_rust_orm_facade::transaction_manager::{TransactionError, TransactionManager};
+use sz_rust_orm_facade::{Pool, PoolConfigBuilder};
 
-const PG_CONN_STR: &str = "postgres://postgres:test123@127.0.0.1:5432/sz_orm_test";
+// 2026-10-28 P2-6：连接串由环境变量提供，源码不含凭据
+fn pg_conn_str() -> String {
+    std::env::var("SZ_TEST_PG_URL")
+        .unwrap_or_else(|_| "postgres://postgres@127.0.0.1:5432/sz_orm_test".to_string())
+}
 
 async fn init_pg_pool() -> Pool {
     let _ = tracing_subscriber::fmt::try_init();
     let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::Postgres>::new()
         .max_connections(5)
         .acquire_timeout(Duration::from_secs(10))
-        .connect(PG_CONN_STR)
+        .connect(&pg_conn_str())
         .await
         .expect("PostgreSQL 连接失败");
     let factory = SqlxPgConnectionFactory::new(Arc::new(PgPoolHandle::from_pool(sqlx_pool)));

@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::{Pool, Value};
 
 use crate::error::AdminError;
@@ -77,7 +78,7 @@ impl DashboardService {
     }
 
     pub async fn stats(&self, tenant_id: i64) -> Result<DashboardStats, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
 
         let user_count = conn
             .query_with_params(

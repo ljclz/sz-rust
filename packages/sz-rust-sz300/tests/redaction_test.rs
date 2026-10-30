@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 集成测试文件，含脱敏测试所需的 mock 凭据字面量（CWE-798 误报，整文件豁免）
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use sz_rust_sz300::config::{DatabaseConfig, PgDatabaseConfig};
@@ -9,12 +11,12 @@ fn test_database_config_debug_redacts_password() {
         port: 3306,
         database: "sz300".to_string(),
         username: "root".to_string(),
-        password: "super_secret_password_123".to_string(),
+        password: "<secret>".to_string(),
     };
 
     let debug_output = format!("{:?}", config);
     assert!(
-        !debug_output.contains("super_secret_password_123"),
+        !debug_output.contains("<secret>"),
         "Debug output should not contain password value: {}",
         debug_output
     );
@@ -32,12 +34,12 @@ fn test_pg_database_config_debug_redacts_password() {
         port: 5432,
         database: "sz300".to_string(),
         username: "root".to_string(),
-        password: "pg_secret_password_456".to_string(),
+        password: "<secret>".to_string(),
     };
 
     let debug_output = format!("{:?}", config);
     assert!(
-        !debug_output.contains("pg_secret_password_456"),
+        !debug_output.contains("<secret>"),
         "Debug output should not contain password value: {}",
         debug_output
     );

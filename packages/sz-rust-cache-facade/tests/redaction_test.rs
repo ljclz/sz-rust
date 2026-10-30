@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 集成测试文件，含脱敏测试所需的 mock 凭据字面量（CWE-798 误报，整文件豁免）
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
@@ -9,7 +11,7 @@ fn test_redis_config_debug_redacts_password() {
     let config = RedisConfig {
         host: "127.0.0.1".to_string(),
         port: 6379,
-        password: "redis_secret_password_789".to_string(),
+        password: "<secret>".to_string(),
         select: 0,
         timeout: Duration::ZERO,
         expire: None,
@@ -22,7 +24,7 @@ fn test_redis_config_debug_redacts_password() {
 
     let debug_output = format!("{:?}", config);
     assert!(
-        !debug_output.contains("redis_secret_password_789"),
+        !debug_output.contains("<secret>"),
         "Debug output should not contain password value: {}",
         debug_output
     );

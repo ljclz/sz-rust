@@ -15,7 +15,7 @@ alwaysApply: true
 
 ## 🔥 异步运行时（全模块通用）
 
-4. **禁止阻塞运行时**：全项目禁止 `std::thread::sleep` 和同步文件 IO，统一使用 `tokio::time::sleep` 和 `tokio::fs`。
+4. **禁止阻塞运行时**：生产代码禁止 `std::thread::sleep` 和同步文件 IO，统一使用 `tokio::time::sleep` 和 `tokio::fs`（2026-10-27 SDET 评测 P2-2 澄清：测试代码豁免——同步测试函数中的 `std::thread::sleep` 不阻塞任何异步运行时，允许使用；CI 门禁 `check-std-fs.py` 仅扫描生产代码）。
 5. **超时兜底强制**：任何外部 IO（HTTP 调用、DB 查询、连接池获取）必须包裹 `tokio::time::timeout`（默认 5s）。
 6. **禁止持锁跨 .await**：任何 `MutexGuard` 不得在持有状态下穿越 `.await` 点。
 
@@ -27,7 +27,7 @@ alwaysApply: true
 ## 📊 性能基线（跨模块统一）
 
 9. **启动内存 < 30MB**：空载 RSS 不得超过 30MB。
-10. **测试覆盖率 ≥ 85%**：核心模块行覆盖率必须达标，由 `cargo tarpaulin` 统一检查。
+10. **测试覆盖率 ≥ 85%（行）/ ≥ 75%（分支）**：核心模块行覆盖率必须达标，由 `cargo llvm-cov` 统一检查（2026-10-27 SDET 评测 P1-2 统一口径：ci.yml / coverage.yml / test-coverage SKILL 均对齐 85 行 / 75 分支）。
 
 ## 🚨 提交流程硬约束
 
@@ -71,13 +71,13 @@ alwaysApply: true
     - 本规则生效前已合入但缺少 ADR 的架构决策：限期 3 次会话内补写
     - 本规则生效前已合入但缺少五维审查的安全/并发变更：限期 3 次会话内补写
 
-## � 文档同步强制约束（v1.3 起强制执行）
+## 📄 文档同步强制约束（v1.3 起强制执行）
 
 > 以下规则确保代码变更后文档同步更新，杜绝文档与代码不一致。
 > 违反任一条即视为任务未完成，必须补齐后方可合入。
 
 19. **文档同步更新强制**：任何代码变更触以下维度之一时，必须在同一提交中同步更新所有受影响文档。
-    - 触发维度清单：pub API 变更 / 性能基线变更 / CI-CD 配置变更 / 架构决策变更 / 安全机制变更 / 并发模型变更 / unsafe 策略变更 / 新增/删除 crate / 测试数量变更
+    - 触发维度清单：pub API 变更 / 性能基线变更 / CI-CD 配置变更 / 架构决策变更 / 安全机制变更 / 并发模型变更 / unsafe 策略变更 / 新增/删除 crate / 测试数量变更 / Markdown 链接变更 / 文件重命名 / 版本声明变更 / feature 名引用
     - 受影响文档清单：`README.md` / `README.en.md` / `CHANGELOG.md` / `docs/audit/archive/2026-08/roadmap.md` / `docs/adr/*.md` / `docs/adr/README.md` / `docs/audit/*.md`（含项目深度评估与框架对比报告等） / `docs/benchmarks/*.md` / `docs/sz-rust-engineering-practices.md` / 各 crate 的 `README.md`
     - ❌ 禁止：代码已合入但文档未更新、文档中数字与实际不一致、仅在旧报告上打补丁而非重新生成
     - ✅ 必须：同一提交中更新所有受影响文档，文档数字基于实际命令统计
@@ -96,7 +96,7 @@ alwaysApply: true
     - 逾期未补齐触发回滚或强制补文档流程
     - 同一会话内发现 2 处以上文档欠债：必须立即补齐，禁止继续新任务
 
-## � 防幻影交付（v1.4 起强制执行）
+## 👻 防幻影交付（v1.4 起强制执行）
 
 > 以下规则杜绝"文档声称已实现、但代码不存在或生产零调用"的幻影交付。
 > 触发背景：2026-08-13 审计发现 4 个声称"全部完成"的 crate 在仓库中不存在
@@ -106,13 +106,22 @@ alwaysApply: true
     - ❌ 禁止：仅写"已完成"、转述未实际运行的测试数字、引用不存在的 crate/文件
     - ✅ 必须：交付物路径（crate/文件存在于本仓库 `packages/` + `Cargo.toml` members，或显式标注所属仓库如"企业版仓库"）+ 验证命令真实输出（`cargo test -p <crate>` 实际运行结果）+ 变更标识（commit SHA / PR 编号）
     - 文档状态（CHANGELOG / implementation-progress）只能由合入动作在同一提交内触发更新，禁止"先写完成、后补代码"
-    - CI 自动检查：门禁 19 `scripts/audit/doc-code-consistency.js`，文档声称的 `sz-rust-*` crate 必须存在于 workspace，否则构建失败
+    - CI 自动检查：门禁 19 `scripts/audit/doc-code-consistency.js` + `scripts/audit/link-check.js`（crate 存在性 / 链接 / 版本 / feature，见规则 24），任一不一致构建失败
     - 企业版/外部仓库交付必须显式标注"企业版仓库"，禁止写入开源版文档且不加注
     - 违反本条视为幻影交付，必须回退文档声称并补交证据后重新提交
 
-## �🚫 违规处理
+24. **文档-代码一致性门禁强制（v2.0 起扩展，2026-10-27 tech-writer 整改）**：文档与代码的一致性由 CI 门禁自动强制，除规则 23 的 crate 存在性外，还强制以下维度：
+    - Markdown 相对链接必须可解析（目标文件/目录必须存在于仓库；`http(s):`/`mailto:`/`tel:`/锚点 `#` 除外）
+    - README 版本声明必须与 `Cargo.toml` `[workspace.package] version` 一致（`当前版本：vX.Y.Z` / `Current version vX.Y.Z`）
+    - 文档中 `--features` 引用的 feature 名必须存在于 workspace 某个 `Cargo.toml` 的 `[features]` 段
+    - 仓库内文件名必须为 UTF-8 编码（禁止乱码/双重编码文件名；新增文件一律使用 ASCII 或规范 UTF-8 中文名，禁止在文件路径中混入 GBK 字节）
+    - ❌ 禁止：文档链接指向不存在的文件、版本号与 Cargo.toml 矛盾、引用不存在的 feature 名、提交乱码文件名
+    - ✅ 必须：门禁失败时修正文档或代码后重新提交；本机 node 位于 `D:\BtSoft\nodejs\v24.22.1\node.exe`（不在 PATH，用完整路径调用），即使 PATH 未配置也必须运行门禁脚本，禁止以"无 node"为由跳过
+    - CI 门禁：`scripts/audit/doc-code-consistency.js`（crate 存在性 + 链接/版本/feature 自动检查）+ `scripts/audit/link-check.js`（独立可复跑）；任一检查失败 → 构建失败
 
-违反上述 13-23 条任一条的处理流程：
+## 🚫 违规处理
+
+违反上述 13-24 条任一条的处理流程：
 1. 立即回滚本次变更（`git revert`）
 2. 补执行缺失步骤（ADR / 五维审查 / 文档更新 / 数字溯源）
 3. 重新提交并附带合规证据

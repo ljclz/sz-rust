@@ -1,0 +1,33 @@
+[package]
+name = "sz-rust-addons-ecommerce"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "SZ-Rust 电商模板插件 — 订单/订单项/购物车骨架"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["ecommerce", "sz-rust", "addons", "template"]
+categories.workspace = true
+exclude = ["docs/**"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+axum.workspace = true
+sz-rust-core.workspace = true
+sz-rust-capability.workspace = true
+sz-rust-addons-loader.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+
+[lib]
+name = "sz_rust_addons_ecommerce"
+path = "src/lib.rs"

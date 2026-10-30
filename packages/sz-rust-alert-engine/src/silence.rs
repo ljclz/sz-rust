@@ -49,7 +49,7 @@ impl SilenceManager {
 
     /// 检查规则是否应该告警（静默期内返回 false）
     pub fn should_alert(&self, rule_id: &str) -> bool {
-        let silences = self.silences.read().unwrap();
+        let silences = self.silences.read().expect("silences 读锁被污染");
         match silences.get(rule_id) {
             Some(entry) => {
                 let elapsed = entry.last_alert_at.elapsed();
@@ -61,7 +61,7 @@ impl SilenceManager {
 
     /// 记录告警触发（更新最后告警时间）
     pub fn record_alert(&self, rule_id: &str) {
-        let mut silences = self.silences.write().unwrap();
+        let mut silences = self.silences.write().expect("silences 写锁被污染");
         silences.insert(
             rule_id.to_string(),
             SilenceEntry {
@@ -74,7 +74,7 @@ impl SilenceManager {
 
     /// 记录告警触发（指定自定义静默期）
     pub fn record_alert_with_silence(&self, rule_id: &str, silence: Duration) {
-        let mut silences = self.silences.write().unwrap();
+        let mut silences = self.silences.write().expect("silences 写锁被污染");
         silences.insert(
             rule_id.to_string(),
             SilenceEntry {
@@ -87,19 +87,19 @@ impl SilenceManager {
 
     /// 清除指定规则的静默记录
     pub fn clear(&self, rule_id: &str) {
-        let mut silences = self.silences.write().unwrap();
+        let mut silences = self.silences.write().expect("silences 写锁被污染");
         silences.remove(rule_id);
     }
 
     /// 清除所有静默记录
     pub fn clear_all(&self) {
-        let mut silences = self.silences.write().unwrap();
+        let mut silences = self.silences.write().expect("silences 写锁被污染");
         silences.clear();
     }
 
     /// 获取当前静默中的规则数量
     pub fn silenced_count(&self) -> usize {
-        let silences = self.silences.read().unwrap();
+        let silences = self.silences.read().expect("silences 读锁被污染");
         silences
             .iter()
             .filter(|(_, entry)| entry.last_alert_at.elapsed() < entry.silence_duration)

@@ -1479,7 +1479,7 @@ mod tests {
     async fn test_user_update_capability_with_all_fields() {
         let pool = make_mock_pool();
         let cap = UserUpdateCapability::new(pool);
-        let args = serde_json::json!({"tenant_id": 1, "user_id": 1, "password": "newpass12", "email": "new@test.com", "phone": "99999"});
+        let args = serde_json::json!({"tenant_id": 1, "user_id": 1, "password": "<password>", "email": "new@test.com", "phone": "99999"});
         let result = cap.call(args).await;
         assert!(
             result.is_ok(),

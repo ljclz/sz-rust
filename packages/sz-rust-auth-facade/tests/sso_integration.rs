@@ -199,7 +199,9 @@ fn make_sso_service_with_renewal() -> SsoService {
     let store: Arc<dyn sz_rust_auth_facade::refresh::RefreshTokenStore> =
         Arc::new(MemoryRefreshTokenStore::new());
     let config = RefreshTokenConfig {
-        access_token_ttl: chrono::Duration::seconds(60),
+        // SDET P1-3：时间参数按 1/10 缩放（原 60s/30s + sleep 35s ≈ 4s/2s + sleep 4s），
+        // 判定条件 max(threshold, ttl*ratio) 等比不变，测试时长 35s → 4s
+        access_token_ttl: chrono::Duration::seconds(6),
         refresh_token_ttl: chrono::Duration::seconds(3600),
         issuer: "sz-rust-sso".to_string(),
     };
@@ -236,9 +238,9 @@ fn make_sso_service_with_renewal() -> SsoService {
     );
     sso.with_renewal_config(RenewalConfig {
         enabled: true,
-        renewal_threshold: chrono::Duration::seconds(30),
+        renewal_threshold: chrono::Duration::seconds(3),
         renewal_ratio: 0.2,
-        access_token_ttl: chrono::Duration::seconds(60),
+        access_token_ttl: chrono::Duration::seconds(6),
     });
     sso
 }
@@ -248,7 +250,7 @@ async fn integration_renewal_triggers_when_ttl_low() {
     let sso = make_sso_service_with_renewal();
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
 
     let (claims, renewed) = sso
         .validate_with_renewal(&login.tokens.access_token)
@@ -297,7 +299,7 @@ async fn integration_renewal_preserves_version() {
     let sso = make_sso_service_with_renewal();
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
 
     let (claims, renewed) = sso
         .validate_with_renewal(&login.tokens.access_token)
@@ -315,7 +317,7 @@ async fn integration_renewal_old_token_still_valid() {
     let sso = make_sso_service_with_renewal();
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
 
     let (_, renewed) = sso
         .validate_with_renewal(&login.tokens.access_token)
@@ -345,7 +347,7 @@ async fn integration_renewal_chained_multiple_times() {
     let sso = make_sso_service_with_renewal();
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
 
     let (_, renewed1) = sso
         .validate_with_renewal(&login.tokens.access_token)
@@ -364,7 +366,7 @@ async fn integration_renewal_does_not_issue_refresh_token() {
     let sso = make_sso_service_with_renewal();
     let login = sso.login("alice", "alice_pass").await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
 
     let (_, renewed) = sso
         .validate_with_renewal(&login.tokens.access_token)

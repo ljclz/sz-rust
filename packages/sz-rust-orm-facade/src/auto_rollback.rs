@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 连接池自动回滚守卫（v1.5.0 P1-1）
 //!
 //! 修复 v1.4.0 [high] 缺陷：PooledConnection drop 未提交事务时自动 rollback 释放锁。

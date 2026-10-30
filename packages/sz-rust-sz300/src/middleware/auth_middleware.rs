@@ -15,6 +15,29 @@ use axum::{
 static AUDIENCE_CONFIG: std::sync::OnceLock<auth_service::AudienceConfig> =
     std::sync::OnceLock::new();
 
+/// 当前登录用户上下文（2026-10-28 IDOR 修复新增）
+///
+/// 由 [`auth_middleware`] 在 JWT 校验通过后注入请求扩展，
+/// 供业务控制器做数据归属过滤（防止水平越权读取其他商户数据）。
+#[derive(Debug, Clone)]
+pub struct CurrentUser {
+    /// 用户 ID（merchant_user.user_id）
+    pub user_id: i64,
+    /// 用户名
+    pub username: String,
+    /// 所属商户 ID（DB 查询；测试/DB 不可用时为 None）
+    pub merchant_id: Option<i64>,
+    /// 是否管理员（merchant_user.role == 1）
+    pub is_admin: bool,
+}
+
+impl CurrentUser {
+    /// 从请求扩展读取当前用户（未认证请求返回 None）
+    pub fn from_request(req: &axum::http::Request<axum::body::Body>) -> Option<Self> {
+        req.extensions().get::<CurrentUser>().cloned()
+    }
+}
+
 /// v1.9.0 初始化 Audience 校验配置（启动时调用）
 #[cfg(feature = "v19-jwt-audience")]
 pub fn init_audience_config(config: auth_service::AudienceConfig) {
@@ -32,7 +55,7 @@ pub fn init_audience_config(config: auth_service::AudienceConfig) {
 ///
 /// v1.9.0 增强（feature `v19-jwt-audience`）：
 /// - 启用后额外校验 JWT `aud` 声明，aud 不匹配返回 401
-/// - 无 aud 旧令牌在 grace period 内放行 + WARN，超出后按 deny_no_audience 策略处理
+/// - 无 aud 旧令牌在 grace period 内放行 + WARN（每 60 s 采样一条，附被抑制条数），超出后按 deny_no_audience 策略处理
 /// - 未调用 `init_audience_config` 时回退为不校验 audience
 pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     let auth_header = req
@@ -58,7 +81,7 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     {
         match AUDIENCE_CONFIG.get() {
             Some(config) => match auth_service::verify_token_with_audience(token, config) {
-                Ok(_user) => next.run(req).await,
+                Ok(user) => run_with_user_context(req, next, user).await,
                 Err(auth_service::AudienceError::InvalidToken) => {
                     (StatusCode::UNAUTHORIZED, "令牌无效或已过期").into_response()
                 }
@@ -72,7 +95,7 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
             None => {
                 // 未初始化 audience 配置 — 回退为仅校验签名/过期
                 match auth_service::verify_token(token) {
-                    Ok(_user) => next.run(req).await,
+                    Ok(user) => run_with_user_context(req, next, user).await,
                     Err(_) => (StatusCode::UNAUTHORIZED, "令牌无效或已过期").into_response(),
                 }
             }
@@ -82,8 +105,33 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
     #[cfg(not(feature = "v19-jwt-audience"))]
     {
         match auth_service::verify_token(token) {
-            Ok(_user) => next.run(req).await,
+            Ok(user) => run_with_user_context(req, next, user).await,
             Err(_) => (StatusCode::UNAUTHORIZED, "令牌无效或已过期").into_response(),
         }
     }
+}
+
+/// 校验通过后将当前用户上下文注入请求扩展，再放行到业务 handler
+///
+/// IDOR 修复（2026-10-28）：业务控制器通过 [`CurrentUser::from_request`]
+/// 获取当前用户的 `merchant_id` 与管理员标记，对查询做数据归属过滤。
+/// DB 不可用/未初始化时降级为仅 JWT 声明（`merchant_id=None`），不阻断请求。
+///
+/// ADR-049（2026-10-30）：授权上下文经 LRU+TTL 缓存，命中时该请求不再查库；
+/// 外部直接改 `role`/`merchant_id` 后最长 60 s 生效。
+async fn run_with_user_context(
+    req: Request<Body>,
+    next: Next,
+    user: sz_rust_core::orm::auth::User,
+) -> Response {
+    let ctx = auth_service::auth_context(user.id).await;
+    let current = CurrentUser {
+        user_id: user.id,
+        username: user.username.clone(),
+        merchant_id: ctx.and_then(|c| c.merchant_id),
+        is_admin: ctx.map(|c| c.is_admin).unwrap_or(false),
+    };
+    let mut req = req;
+    req.extensions_mut().insert(current);
+    next.run(req).await
 }

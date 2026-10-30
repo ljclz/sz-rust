@@ -25,7 +25,13 @@ async fn test_integration_graphql_schema_db_buildable() {
         None => return,
     };
     let schema = graphql::build_schema_with_db(Arc::new(pool));
-    let _ = format!("{:p}", &schema);
+    // 空洞测试修复（铁律 10）：执行最小 introspection 查询验证 schema 可用
+    let res = schema.execute("{ __typename }").await;
+    assert!(
+        res.errors.is_empty(),
+        "DB-backed schema 最小查询应成功，错误: {:?}",
+        res.errors
+    );
 }
 
 // ============================================================================

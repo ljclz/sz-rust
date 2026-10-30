@@ -26,9 +26,21 @@ impl SzController for AuthController {}
 /// - `HttpOnly=false`：JS 需读取 token 以执行双重提交 Cookie 模式
 fn attach_csrf_cookie(response: &mut Response) {
     let token = generate_token();
+    // 2026-10-28 P1-11：生产环境强制 Secure，环境变量不可关闭（防止明文 HTTP 泄漏 CSRF token）
+    let secure = if crate::config::is_production() {
+        if crate::config::env_bool("SZ300_COOKIE_SECURE") == Some(false) {
+            tracing::warn!("生产环境忽略 SZ300_COOKIE_SECURE=false，CSRF Cookie 强制 Secure");
+        }
+        true
+    } else {
+        crate::config::env_bool("SZ300_COOKIE_SECURE").unwrap_or(true)
+    };
     let cookie_value = format!(
-        "{}={}; Path=/; Max-Age=86400; SameSite=Strict; Secure; HttpOnly=false",
-        CSRF_COOKIE_NAME, token
+        "{}={}; Path=/; Max-Age=86400; SameSite=Strict; {}{}HttpOnly=false",
+        CSRF_COOKIE_NAME,
+        token,
+        if secure { "Secure; " } else { "" },
+        ""
     );
     if let Ok(value) = cookie_value.parse() {
         response.headers_mut().append("set-cookie", value);
@@ -74,10 +86,11 @@ impl AuthController {
         }
 
         // 调用 service 层认证 — 控制器不接触 DB
-        let token = match auth_service::authenticate_async(username, password).await {
-            Ok(t) => t,
-            Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
-        };
+        let (token, refresh_token) =
+            match auth_service::authenticate_async(username, password).await {
+                Ok((t, r)) => (t, r),
+                Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+            };
 
         // 调用 service 层查询用户完整信息 — 控制器不接触 DB
         let user_info = auth_service::get_user_info_by_username(username).await;
@@ -88,6 +101,7 @@ impl AuthController {
                 "登录成功",
                 json!({
                     "token": token,
+                    "refresh_token": refresh_token,
                     "username": username,
                     "user_id": info.get("user_id"),
                     "merchant_id": info.get("merchant_id"),
@@ -103,6 +117,7 @@ impl AuthController {
                 "登录成功",
                 json!({
                     "token": token,
+                    "refresh_token": refresh_token,
                     "username": username,
                     "user_id": 0
                 }),
@@ -174,21 +189,58 @@ pub async fn me(State(state): State<AppState>, req: Request<Body>) -> Response {
     AuthController::me(&state, req).await
 }
 
-/// 刷新登录令牌（对齐 PHP AuthController::refresh）
+/// 刷新登录令牌（2026-10-28 安全修复：真实轮换 access token）
+///
+/// 请求体：`{ "refresh_token": "<token>" }`
+/// 响应：新 access_token；refresh token 无效/已注销返回 401 语义错误。
 #[tracing::instrument(skip(_state, req))]
 pub async fn refresh(State(_state): State<AppState>, req: Request<Body>) -> Response {
-    let _data = req;
     let ctrl = AuthController;
-    ctrl.render_success("ok", json!({}))
+    match fetch_post_data(req).await {
+        Ok(data) => {
+            let refresh_token = data
+                .get("refresh_token")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if refresh_token.is_empty() {
+                return ctrl.render_error("缺少 refresh_token 参数", json!({}), 0);
+            }
+            match auth_service::refresh_access_token(refresh_token) {
+                Ok(token) => ctrl.render_success(
+                    "ok",
+                    json!({
+                        "token": token,
+                        "token_type": "Bearer",
+                    }),
+                ),
+                Err(msg) => ctrl.render_error(&msg, json!({}), 0),
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "刷新令牌参数解析失败");
+            ctrl.render_error("参数解析失败", json!({}), 0)
+        }
+    }
 }
 
-/// 退出登录（对齐 PHP AuthController::logout）
+/// 退出登录（2026-10-28 安全修复：真实吊销 token）
 ///
-/// 清除客户端 CSRF Cookie，防止退出后 Cookie 残留。
+/// 从 Authorization 头提取 Bearer token 加入黑名单，并清除 CSRF Cookie。
 #[tracing::instrument(skip(_state, req))]
 pub async fn logout(State(_state): State<AppState>, req: Request<Body>) -> Response {
-    let _data = req;
     let ctrl = AuthController;
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .unwrap_or("")
+        .to_string();
+    if !token.is_empty() {
+        auth_service::revoke_token(&token);
+    }
     let mut resp = ctrl.render_success("已退出登录", json!({}));
     clear_csrf_cookie(&mut resp);
     resp

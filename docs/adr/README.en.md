@@ -10,8 +10,8 @@
 
 ## 1. ADR Directory
 
-> Current ADR count: **20** (P0×4 + P1×6 + P2×6 + P3×4, covering 20 key architectural decisions)
-> ADR density: 20 / 31 modules = **0.645** (exceeds ≥ 0.15 target, see "ADR and Production Bug Localization Spec" Section 4)
+> Current ADR count: **53** (ADR-001~023 + ADR-026~050 + ADR-AI-01~05; this English table below lists ADR-001~020 + latest ADRs, full list in the [Chinese index](README.md))
+> ADR density: 49 / 42 modules = **1.167** (exceeds ≥ 0.15 target, see "ADR and Production Bug Localization Spec" Section 4)
 
 | ID | Title | Status | Date | Decision Maker | File |
 |----|-------|--------|------|----------------|------|
@@ -33,8 +33,17 @@
 | ADR-016 | Addon hot-reload (libloading runtime dynamic load + unsafe_code policy change) | Accepted | 2026-08-02 | SZ-Rust Team | [0016-addon-hot-reload-libloading-unsafe.md](0016-addon-hot-reload-libloading-unsafe.md) |
 | ADR-017 | sz-rust-core splitting (Facade progressive extraction, 7 facades) | Accepted | 2026-08-03 | SZ-Rust Team | [0017-sz-rust-core拆包策略-Facade渐进提取.md](0017-sz-rust-core拆包策略-Facade渐进提取.md) |
 | ADR-018 | Facade crate independent publishing (0.x unified / 1.0+ semver independent) | Accepted | 2026-08-03 | SZ-Rust Team | [0018-facade-独立发布策略.md](0018-facade-独立发布策略.md) |
-| ADR-019 | P3 remaining module decoupling (four-cluster extraction: orm-ext / router / middleware / mvc) | Accepted | 2026-08-03 | SZ-Rust Team | [0019-P3剩余模块解耦-四簇提取.md](0019-P3剩余模块解耦-四簇提取.md) |
+| ADR-019 | P3 remaining module decoupling (four-cluster extraction: orm-ext / router / middleware / mvc) | Accepted | 2026-08-03 | SZ-Rust Team | [0019-P3剩余模块解决-四簇提取.md](0019-P3剩余模块解决-四簇提取.md) |
 | ADR-020 | Async file I/O migration (std::fs → tokio::fs, iron rule 4 compliance) | Accepted | 2026-08-05 | SZ-Rust Team | [0020-async-file-io-migration.md](0020-async-file-io-migration.md) |
+| ADR-023 | matchit integration decision (K1 stays with axum) | Decided | 2026-08-06 | SZ-Rust Team | [0023-matchit-K1-决策.md](0023-matchit-K1-决策.md) |
+| ADR-042 | QR code generation-verification closed loop (rqrr lightweight decode replacing rxing) | Accepted | 2026-10-20 | SZ-Rust Team | [ADR-042-qr-verify-rqrr-closed-loop.md](ADR-042-qr-verify-rqrr-closed-loop.md) |
+| ADR-046 | Performance engineering remediation (per-peer rate-limit buckets / 60-bucket O(1) breaker window / pool probe off / log level / gate v2 in CI) | Accepted | 2026-10-29 | SZ-Rust Team | [0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md](0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md) |
+| ADR-047 | Audit chain persistence via bounded async buffer + background replay | Accepted | 2026-10-30 | SZ-Rust Team | [0047-审计链异步缓冲重放.md](0047-审计链异步缓冲重放.md) |
+| ADR-048 | Order list COUNT query cache (LRU + 60 s TTL, wholesale invalidation on write) | Accepted | 2026-10-30 | SZ-Rust Team | [0048-订单count查询缓存.md](0048-订单count查询缓存.md) |
+| ADR-049 | Auth authorization-context cache (LRU + 60 s TTL, replaces per-request merchant_user query) | Accepted | 2026-10-30 | SZ-Rust Team | [0049-鉴权授权上下文缓存.md](0049-鉴权授权上下文缓存.md) |
+| ADR-050 | Response gzip compression (off by default pending A/B; token endpoints excluded against BREACH) | Accepted | 2026-10-30 | SZ-Rust Team | [0050-响应gzip压缩与breach排除.md](0050-响应gzip压缩与breach排除.md) |
+
+> **Note**: This English index was historically maintained up to ADR-020. The complete up-to-date index (ADR-001~023 + ADR-026~046 + ADR-AI-01~05, 49 decisions) is maintained in the [Chinese index](README.md).
 
 **Status definitions**:
 - `Proposed`: Submitted but not yet reviewed
@@ -175,7 +184,7 @@ Copy the following template to `adr/ADR-NNN-<short-title>.md`:
 
 ## 5. ADR Completion Status
 
-All identified ADRs have been completed (20/20):
+All identified ADRs have been completed (**47/47**). The table below lists the original ADR-001~020 priorities (full index in Section 1):
 
 | Priority | ID | Title | Status | Completion Date |
 |----------|----|-------|--------|-----------------|
@@ -207,4 +216,4 @@ All identified ADRs have been completed (20/20):
 - ["ADR and Production Bug Localization Spec"](../ADR与生产Bug定位规范.md) — ADR writing spec and bug localization flow
 - ["Software Project Audit Checklist"](../软件项目审计清单.md) — P0/P1/P2/P3 audit items
 - ["SZ-Rust Engineering Practices"](../sz-rust-engineering-practices.md) — 10 gates and five-dimensional review
-- [SZ-ORM ADR Index](../../sz-orm/docs/adr/README.md) — Related project ADR reference
+- [SZ-ORM ADR Index](../../../sz-orm/docs/adr/README.md) — Related project ADR reference

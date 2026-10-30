@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 资源泄漏扫描器（v1.5.0 P1-4）
 //!
 //! 测试结束后扫描连接池/锁/临时文件残留（spec 5.4.2 + 5.4.3 异常2）。

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 测试生成器（v1.5.0 P2-1）
 //!
 //! 为生成代码自动生成测试用例（正常/边界/异常，spec 5.5.4）。

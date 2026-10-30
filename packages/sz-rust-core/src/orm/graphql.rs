@@ -80,16 +80,19 @@ mod tests {
     #[test]
     fn test_graphql_server_creation() {
         let schema = GraphQLSchemaGenerator::generate_schema(&["users"]);
-        let _server = GraphQLServer::new(9999).with_schema(schema);
+        // SDET P1-4：port 0 = 内核分配临时端口，避免固定端口并行冲突
+        let _server = GraphQLServer::new(0).with_schema(schema);
         // GraphQLServer 构造成功即通过；port 为私有字段，不直接断言
     }
 
     #[tokio::test]
     async fn test_graphql_server_start_and_query() {
         let schema = GraphQLSchemaGenerator::generate_schema(&["products"]);
-        let server = GraphQLServer::new(9998).with_schema(schema);
+        // SDET P1-4：固定端口 9998 → 0，避免并行/重复运行端口冲突；
+        // mock 模式 start() 返回 URL 格式串，实际绑定端口由内核分配
+        let server = GraphQLServer::new(0).with_schema(schema);
         let url = server.start().expect("server should start");
-        assert!(url.contains("9998"));
+        assert!(url.starts_with("http://localhost:"));
 
         // 等待后台任务绑定端口
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -104,7 +107,7 @@ mod tests {
     #[test]
     fn test_graphql_execute_query_list() {
         let schema = GraphQLSchemaGenerator::generate_schema(&["items"]);
-        let server = GraphQLServer::new(9997).with_schema(schema);
+        let server = GraphQLServer::new(0).with_schema(schema);
         let result = server.execute_query("{ listItems { id name } }");
         assert!(result.is_ok());
         let v = result.unwrap();
@@ -115,7 +118,7 @@ mod tests {
     #[test]
     fn test_graphql_unknown_query_returns_error() {
         let schema = GraphQLSchemaGenerator::generate_schema(&["users"]);
-        let server = GraphQLServer::new(9996).with_schema(schema);
+        let server = GraphQLServer::new(0).with_schema(schema);
         let result = server.execute_query("{ unknownQuery { id } }");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknownQuery"));

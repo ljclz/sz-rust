@@ -443,19 +443,17 @@ impl OperationBuilder {
     /// - `desc`：响应描述
     /// - `content_type`：内容类型（如 `"application/json"`）
     pub fn response(&mut self, status: u16, desc: &str, content_type: &str) -> &mut Self {
-        self.responses.insert(
-            status.to_string(),
-            json!({
-                "description": desc,
-                "content": {
-                    content_type: {
-                        "schema": {
-                            "type": "object"
-                        }
+        let mut resp = json!({ "description": desc });
+        if !content_type.is_empty() {
+            resp["content"] = json!({
+                content_type: {
+                    "schema": {
+                        "type": "object"
                     }
                 }
-            }),
-        );
+            });
+        }
+        self.responses.insert(status.to_string(), resp);
         self
     }
 
@@ -474,19 +472,17 @@ impl OperationBuilder {
         content_type: &str,
         schema_ref: &str,
     ) -> &mut Self {
-        self.responses.insert(
-            status.to_string(),
-            json!({
-                "description": desc,
-                "content": {
-                    content_type: {
-                        "schema": {
-                            "$ref": schema_ref
-                        }
+        let mut resp = json!({ "description": desc });
+        if !content_type.is_empty() {
+            resp["content"] = json!({
+                content_type: {
+                    "schema": {
+                        "$ref": schema_ref
                     }
                 }
-            }),
-        );
+            });
+        }
+        self.responses.insert(status.to_string(), resp);
         self
     }
 

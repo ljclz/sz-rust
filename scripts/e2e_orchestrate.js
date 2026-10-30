@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// 内部 E2E 编排脚本，命令为静态 cargo 命令（参数数组 + 固定可执行文件），无不可信输入
 /**
  * sz-rust E2E 编排脚本（W5/W6 E2E-001~008）
  *
@@ -11,13 +12,12 @@
  *
  * 用法：
  *   node scripts/e2e_orchestrate.js \
- *     --requirement "示例需求" \
- *     --output docs/audit/2026-08-12-w5-w6-e2e-report.md
+ *     --requirement "示例需求"
  */
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 function parseArgs(argv) {
     const args = {};
@@ -28,23 +28,8 @@ function parseArgs(argv) {
     return args;
 }
 
-function getCargoPath() {
-    const home = process.env.USERPROFILE || process.env.HOME;
-    const cargo = path.join(home, '.cargo', 'bin', 'cargo.exe');
-    return fs.existsSync(cargo) ? cargo : 'cargo';
-}
-
-const CARGO = getCargoPath();
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-
-function runCmd(cmd, cwd = PROJECT_ROOT, timeout = 120000) {
-    try {
-        const stdout = execSync(cmd, { cwd, encoding: 'utf-8', timeout, stdio: ['pipe', 'pipe', 'pipe'] });
-        return { ok: true, stdout: stdout.trim(), stderr: '' };
-    } catch (e) {
-        return { ok: false, stdout: (e.stdout || '').trim(), stderr: (e.stderr || e.message || '').trim() };
-    }
-}
+const REPORT_PATH = path.join(PROJECT_ROOT, 'docs', 'audit', 'e2e-report.md');
 
 function timestamp() {
     return new Date().toISOString();
@@ -112,13 +97,26 @@ function phase4_coding() {
 function phase5_compile() {
     const start = Date.now();
     for (let attempt = 1; attempt <= 3; attempt++) {
-        const result = runCmd(`"${CARGO}" check --workspace 2>&1`);
-        if (result.ok) {
+        let ok = false;
+        let stdout = '';
+        let stderr = '';
+        try {
+            stdout = execFileSync('cargo', ['check', '--workspace'], {
+                cwd: PROJECT_ROOT,
+                encoding: 'utf-8',
+                timeout: 120000,
+                stdio: ['pipe', 'pipe', 'pipe'],
+            }).toString().trim();
+            ok = true;
+        } catch (e) {
+            stderr = ((e.stderr || e.message) || '').toString().trim();
+        }
+        if (ok) {
             recordPhase(5, 'cargo check', 'pass',
                 `编译通过（尝试 ${attempt} 次）`, Date.now() - start);
             return true;
         }
-        console.log(`[Phase 5] 编译失败 (尝试 ${attempt}/3): ${result.stderr.slice(0, 200)}`);
+        console.log(`[Phase 5] 编译失败 (尝试 ${attempt}/3): ${stderr.slice(0, 200)}`);
     }
     recordPhase(5, 'cargo check', 'fail', '编译失败（3 次重试均失败）', Date.now() - start);
     return false;
@@ -130,8 +128,21 @@ function phase6_test() {
     const results = {};
     let allPass = true;
     for (const pkg of packages) {
-        const r = runCmd(`"${CARGO}" test -p ${pkg} 2>&1`);
-        const passed = r.stdout.includes('0 failed');
+        let stdout = '';
+        let ok = false;
+        try {
+            stdout = execFileSync('cargo', ['test', '-p', pkg], {
+                cwd: PROJECT_ROOT,
+                encoding: 'utf-8',
+                timeout: 120000,
+                stdio: ['pipe', 'pipe', 'pipe'],
+            }).toString().trim();
+            ok = true;
+        } catch (e) {
+            // 测试失败时 e.stdout 通常包含测试输出
+            stdout = ((e.stdout || '') || '').toString().trim();
+        }
+        const passed = ok && stdout.includes('0 failed');
         results[pkg] = passed;
         if (!passed) allPass = false;
     }
@@ -155,13 +166,13 @@ function phase8_cleanup() {
     return true;
 }
 
-function generateReport(requirement, outputPath) {
+function generateReport(requirement) {
     const lines = [];
     lines.push('# sz-rust W5/W6 E2E 端到端验证报告');
     lines.push('');
     lines.push(`> **生成日期**：2026-08-12`);
     lines.push(`> **示例需求**：${requirement}`);
-    lines.push(`> **来源**：node scripts/e2e_orchestrate.js --requirement "${requirement}" --output ${outputPath}`);
+    lines.push(`> **来源**：node scripts/e2e_orchestrate.js --requirement "${requirement}"`);
     lines.push('');
     lines.push('---');
     lines.push('');
@@ -216,64 +227,40 @@ function generateReport(requirement, outputPath) {
     lines.push('| 项目 | 值 | 来源 |');
     lines.push('|------|-----|------|');
     lines.push('| 部署模式 | 本地验证（无远程服务器） | --requirement 参数未配置远程部署 |');
-    lines.push('| ssh2 合规 | ✅ scripts/e2e_deploy.js 使用 ssh2 包 | require("ssh2") |');
-    lines.push('| fuser -k 合规 | ✅ scripts/e2e_deploy.js 使用 fuser -k | grep "fuser -k" e2e_deploy.js |');
-    lines.push('| sshpass 禁令 | ✅ scripts/e2e_deploy.js 不含 sshpass | grep "sshpass" e2e_deploy.js = 0 |');
-    lines.push('| killall 禁令 | ✅ scripts/e2e_deploy.js 不含 killall | grep "killall" e2e_deploy.js = 0 |');
     lines.push('');
     lines.push('---');
     lines.push('');
-    lines.push('## 残留检查结果');
+    lines.push('## 结论');
     lines.push('');
-    lines.push('| 项目 | 结论 | 证据 |');
-    lines.push('|------|------|------|');
-    lines.push('| 进程残留 | 无残留 | 本地验证模式，无远程进程 |');
-    lines.push('| 端口残留 | 无残留 | 本地验证模式，无远程端口 |');
-    lines.push('| 临时文件残留 | 无残留 | 本地验证模式，无远程临时文件 |');
-    lines.push('');
-    lines.push('---');
-    lines.push('');
-    const allPass = phases.every(p => p.status === 'pass' || p.status === 'skip');
-    lines.push(`## 总结`);
-    lines.push('');
-    lines.push(`- 8 阶段全部执行: ✅`);
-    lines.push(`- 全部通过/跳过: ${allPass ? '✅' : '❌'}`);
-    lines.push(`- 无残留: ✅`);
-    lines.push('');
+    lines.push(`**E2E 结果：${phases.every(p => p.status === 'pass' || p.status === 'skip') ? '✅ 全部通过' : '❌ 存在失败'}`);
 
-    const report = lines.join('\n');
-    fs.writeFileSync(outputPath, report, 'utf-8');
-    console.log(`\n报告已生成: ${outputPath}`);
+    fs.writeFileSync(REPORT_PATH, lines.join('\n') + '\n', 'utf-8');
+    console.log(`E2E 报告已生成: ${REPORT_PATH}`);
 }
 
 function main() {
     const args = parseArgs(process.argv);
-    const requirement = args.requirement || '示例需求';
-    const outputPath = args.output || path.join(PROJECT_ROOT, 'docs', 'audit', '2026-08-12-w5-w6-e2e-report.md');
+    const requirement = args.requirement || '默认示例需求';
 
-    console.log('=' * 70);
-    console.log('sz-rust E2E 端到端验证');
-    console.log(`需求: ${requirement}`);
-    console.log('=' * 70);
+    console.log('sz-rust W5/W6 E2E 编排开始...');
+    recordPhase(0, 'Init', 'pass', `requirement=${requirement}`, 0);
 
-    phase1_spec(requirement);
-    phase2_design();
-    phase3_task();
-    phase4_coding();
-    const compileOk = phase5_compile();
-    if (compileOk) {
-        phase6_test();
-        phase7_deploy();
-        phase8_cleanup();
-    } else {
-        recordPhase(6, 'cargo test', 'skip', '编译失败，跳过测试', 0);
-        recordPhase(7, 'e2e_deploy', 'skip', '编译失败，跳过部署', 0);
-        recordPhase(8, '残留检查', 'skip', '编译失败，跳过残留检查', 0);
-    }
+    const start = Date.now();
 
-    generateReport(requirement, path.resolve(outputPath));
+    const phase1 = phase1_spec(requirement);
+    const phase2 = phase2_design();
+    const phase3 = phase3_task();
+    const phase4 = phase4_coding();
+    const phase5 = phase5_compile();
+    const phase6 = phase6_test();
+    const phase7 = phase7_deploy();
+    const phase8 = phase8_cleanup();
 
-    const allPass = phases.every(p => p.status === 'pass' || p.status === 'skip');
+    const allPass = phase1 && phase2 && phase3 && phase4 && phase5 && phase6 && phase7 && phase8;
+
+    generateReport(requirement);
+
+    console.log(`E2E 总耗时: ${Date.now() - start}ms`);
     process.exit(allPass ? 0 : 1);
 }
 

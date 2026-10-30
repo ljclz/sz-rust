@@ -1,7 +1,10 @@
-# sz-rust 技能触发命令速查
+# sz-rust AI 协作技能说明（供 AI Agent 触发）
 
 > **目录**：`.trae/skills/`
-> **项目根目录**：`e:\vue\test\鲜视达\rust\sz-rust`
+> **项目根目录**：`D:\www\test\鲜视达\rust\sz-rust`（2026-10-28 由旧路径 `e:\vue\...` 修正）
+>
+> ⚠️ **本文档面向 AI 协作场景**：说明如何在对话中触发各项 Skill 命令（AGENTS.md 的「Skills 索引」配套）。
+> 人类开发者请阅读 [开发者使用指南](developer-guide.md)。
 
 ---
 

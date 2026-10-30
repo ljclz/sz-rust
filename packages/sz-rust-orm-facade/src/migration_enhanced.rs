@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 数据库迁移健壮性（v1.5.0 P1-3）
 //!
 //! 增强迁移幂等性、校验和验证、回滚、dry-run、并发锁。

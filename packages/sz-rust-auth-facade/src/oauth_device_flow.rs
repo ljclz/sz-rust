@@ -290,14 +290,14 @@ mod tests {
         let flow = DeviceCodeFlow::new(DeviceCodeConfig::default());
         let resp = flow.issue("client1", &[]);
 
-        flow.authorize(&resp.device_code, "access123", Some("refresh456"))
+        flow.authorize(&resp.device_code, "<token>", Some("refresh456"))
             .unwrap();
 
         let result = flow.poll(&resp.device_code).unwrap();
         assert_eq!(
             result,
             PollResult::Token {
-                access_token: "access123".to_string(),
+                access_token: "<token>".to_string(),
                 refresh_token: Some("refresh456".to_string()),
             }
         );
@@ -308,8 +308,7 @@ mod tests {
         let flow = DeviceCodeFlow::new(DeviceCodeConfig::default());
         let resp = flow.issue("client1", &[]);
 
-        flow.authorize(&resp.device_code, "access123", None)
-            .unwrap();
+        flow.authorize(&resp.device_code, "<token>", None).unwrap();
 
         let _ = flow.poll(&resp.device_code).unwrap();
         let result = flow.poll(&resp.device_code);

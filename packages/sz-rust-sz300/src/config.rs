@@ -76,20 +76,63 @@ impl std::fmt::Debug for PgDatabaseConfig {
     }
 }
 
+/// 运行环境判定：`SZ300_ENV=production|prod` 视为生产环境。
+///
+/// 生产模式下若干"开发便利"默认值会被收紧（CORS 不回落 `*`、/metrics 必须鉴权、
+/// CSRF Cookie 不允许关闭 Secure），避免误配置导致降级。
+pub fn is_production() -> bool {
+    std::env::var("SZ300_ENV")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "production" | "prod"))
+        .unwrap_or(false)
+}
+
+/// 读取布尔型环境变量：`1/true/yes/on` 为真，`0/false/no/off` 为假，其余返回 None
+pub fn env_bool(key: &str) -> Option<bool> {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+}
+
+/// 响应 gzip 压缩开关（`SZ300_COMPRESSION`，未设置/非法值 = 关闭）
+///
+/// ADR-050：压缩减少出网字节但按响应消耗 CPU，默认值待同源 A/B 实测后确定；
+/// 做成开关也是该次 A/B 的前置条件（同一二进制跑两种配置）。
+pub fn compression_enabled() -> bool {
+    env_bool("SZ300_COMPRESSION").unwrap_or(false)
+}
+
 /// 从环境变量加载配置（生产安全要求：密钥不硬编码）
 ///
 /// 环境变量：
 /// - `SZ300_DB_HOST` (默认 127.0.0.1)
 /// - `SZ300_DB_PORT` (默认 3306)
 /// - `SZ300_DB_NAME` (默认 sz300)
-/// - `SZ300_DB_USER` (默认 root)
+/// - `SZ300_DB_USER` (默认 sz300_app；生产环境禁止 root)
 /// - `SZ300_DB_PASSWORD` (必填)
 /// - `SZ300_SERVER_HOST` (默认 0.0.0.0)
 /// - `SZ300_SERVER_PORT` (默认 8300)
+///
+/// # 最小权限（2026-10-28 安全修复）
+///
+/// 应用账号只需要目标库的 DML + 必要 DDL 权限，不应使用 root：
+/// root 一旦被注入或配置泄露，等同于整台 MySQL 实例失守。
+/// 生产模式（`SZ300_ENV=production`）下检测到 root 直接启动失败，
+/// 避免"默认值悄悄带进生产"。建库脚本见 `deploy/sql/create-app-user.sql`。
 pub fn load_config() -> anyhow::Result<AppConfig> {
     let db_password = std::env::var("SZ300_DB_PASSWORD").map_err(|_| {
         anyhow::anyhow!("SZ300_DB_PASSWORD 环境变量未设置 — 请在启动前设置数据库密码")
     })?;
+
+    let db_user = std::env::var("SZ300_DB_USER").unwrap_or_else(|_| "sz300_app".into());
+    if is_production() && db_user.eq_ignore_ascii_case("root") {
+        return Err(anyhow::anyhow!(
+            "生产环境禁止使用 root 连接数据库 — 请按 deploy/sql/create-app-user.sql 创建最小权限账号并设置 SZ300_DB_USER"
+        ));
+    }
 
     Ok(AppConfig {
         server: ServerConfig {
@@ -106,7 +149,7 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3306),
             database: std::env::var("SZ300_DB_NAME").unwrap_or_else(|_| "sz300".into()),
-            username: std::env::var("SZ300_DB_USER").unwrap_or_else(|_| "root".into()),
+            username: db_user,
             password: db_password,
         },
     })
@@ -350,5 +393,155 @@ pub fn upload_config() -> UploadConfig {
             "xlsx".to_string(),
             "txt".to_string(),
         ],
+    }
+}
+
+// ============================================================================
+// v2.0.0 合并企业版：限流 / 熔断生产配置（T5，自企业版 sz300 config.rs 移植）
+// ============================================================================
+
+/// 限流生产配置（令牌桶）
+#[derive(Debug, Clone)]
+pub struct RateLimitProductionConfig {
+    /// 令牌桶容量（默认 2000）
+    pub capacity: u64,
+    /// 每秒补充速率（默认 1000）
+    pub refill_per_second: f64,
+    /// 排除路径（健康检查 + metrics，不被限流）
+    pub exclude_paths: Vec<String>,
+    /// key 前缀
+    pub key_prefix: String,
+    /// 是否信任代理头（安全修复 M-2，默认 false）
+    ///
+    /// `true`：信任 `X-Forwarded-For`（仅限可信反向代理之后部署）；
+    /// `false`（默认）：不信任代理头，防客户端伪造绕过限流。
+    pub trust_proxy_headers: bool,
+}
+
+impl Default for RateLimitProductionConfig {
+    fn default() -> Self {
+        Self {
+            capacity: 2000,
+            refill_per_second: 1000.0,
+            exclude_paths: vec![
+                "/health".into(),
+                "/health/ready".into(),
+                "/health/startup".into(),
+                "/metrics".into(),
+            ],
+            key_prefix: "sz300:rl".into(),
+            trust_proxy_headers: false,
+        }
+    }
+}
+
+impl RateLimitProductionConfig {
+    /// 从环境变量读取
+    ///
+    /// - `SZ300_RATE_LIMIT_CAPACITY`：令牌桶容量（默认 2000）
+    /// - `SZ300_RATE_LIMIT_REFILL`：每秒补充速率（默认 1000）
+    /// - `SZ300_RATE_LIMIT_TRUST_PROXY`：是否信任代理头（默认 false，安全修复 M-2）
+    pub fn from_env() -> Self {
+        let capacity = std::env::var("SZ300_RATE_LIMIT_CAPACITY")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2000);
+
+        let refill_per_second = std::env::var("SZ300_RATE_LIMIT_REFILL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1000.0);
+
+        let trust_proxy_headers = std::env::var("SZ300_RATE_LIMIT_TRUST_PROXY")
+            .ok()
+            .map(|s| s.eq_ignore_ascii_case("true") || s == "1")
+            .unwrap_or(false);
+
+        if trust_proxy_headers {
+            tracing::warn!(
+                "RATE_LIMIT_TRUST_PROXY=true：信任 X-Forwarded-For（请确认部署在可信反向代理之后，否则限流可被伪造头绕过）"
+            );
+        }
+
+        Self {
+            capacity,
+            refill_per_second,
+            trust_proxy_headers,
+            ..Default::default()
+        }
+    }
+}
+
+/// 熔断生产配置
+#[derive(Debug, Clone)]
+pub struct CircuitBreakerProductionConfig {
+    /// 错误率阈值（0.0-1.0，默认 0.5）
+    pub error_threshold: f64,
+    /// 冷却时间（默认 10s）
+    pub cooldown: std::time::Duration,
+    /// 半开探测请求数（默认 5）
+    pub probe_requests: u32,
+    /// 统计窗口（默认 60s）
+    pub stat_window: std::time::Duration,
+}
+
+impl Default for CircuitBreakerProductionConfig {
+    fn default() -> Self {
+        Self {
+            error_threshold: 0.5,
+            cooldown: std::time::Duration::from_secs(10),
+            probe_requests: 5,
+            stat_window: std::time::Duration::from_secs(60),
+        }
+    }
+}
+
+impl CircuitBreakerProductionConfig {
+    /// 从环境变量读取
+    ///
+    /// - `SZ300_CIRCUIT_BREAKER_THRESHOLD`：错误率阈值（默认 0.5）
+    /// - `SZ300_CIRCUIT_BREAKER_COOLDOWN`：冷却秒数（默认 10）
+    /// - `SZ300_CIRCUIT_BREAKER_PROBE_REQUESTS`：半开探测请求数（默认 5）
+    /// - `SZ300_CIRCUIT_BREAKER_STAT_WINDOW`：统计窗口秒数（默认 60）
+    pub fn from_env() -> Self {
+        let error_threshold = std::env::var("SZ300_CIRCUIT_BREAKER_THRESHOLD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.5);
+
+        let cooldown = std::env::var("SZ300_CIRCUIT_BREAKER_COOLDOWN")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(std::time::Duration::from_secs(10));
+
+        let probe_requests = std::env::var("SZ300_CIRCUIT_BREAKER_PROBE_REQUESTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5);
+
+        let stat_window = std::env::var("SZ300_CIRCUIT_BREAKER_STAT_WINDOW")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .map(std::time::Duration::from_secs)
+            .unwrap_or(std::time::Duration::from_secs(60));
+
+        Self {
+            error_threshold,
+            cooldown,
+            probe_requests,
+            stat_window,
+        }
+    }
+
+    /// 校验配置合法性（阈值必须在 0.0-1.0 之间）
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.error_threshold) {
+            return Err(format!(
+                "error_threshold 必须在 0.0-1.0 之间，当前: {}",
+                self.error_threshold
+            ));
+        }
+        Ok(())
     }
 }

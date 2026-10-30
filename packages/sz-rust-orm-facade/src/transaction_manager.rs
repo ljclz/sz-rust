@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 事务超时治理（v1.5.0 P1-2）
 //!
 //! 为数据库事务提供可配置超时，超时后自动回滚并释放连接，防止长事务阻塞。

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
+/// v2.0.0 合并企业版：AI 控制器（LLM 聊天 / Embedding / 流式）
+pub mod ai;
 /// 认证相关控制器（对齐 PHP AuthController）
 pub mod auth;
 /// 控制器公共辅助函数（分页解析等）
@@ -21,3 +23,7 @@ pub mod order;
 pub mod plugin;
 /// 商品管理控制器（对齐 PHP ProductController）
 pub mod product;
+/// v2.0.0 合并企业版：视图模板渲染控制器
+pub mod view;
+/// v2.0.0 合并企业版：WASM 边缘计算控制器
+pub mod wasm_api;

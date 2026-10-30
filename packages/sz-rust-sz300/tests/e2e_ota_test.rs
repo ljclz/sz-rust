@@ -32,7 +32,7 @@ fn mysql_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -61,6 +61,7 @@ async fn ensure_mysql() -> Option<Pool> {
 async fn make_state(pool: Pool) -> AppState {
     AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -71,6 +72,8 @@ async fn make_state(pool: Pool) -> AppState {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -96,57 +99,24 @@ async fn make_state(pool: Pool) -> AppState {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 
+mod common;
+
+/// 建表：执行生产迁移（不再手写 DDL —— 手写 Schema 与生产分叉是测试失真的根因）
 async fn setup_device_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute(
-        "CREATE TABLE device (\
-         device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_sn VARCHAR(64) NOT NULL UNIQUE,\
-         device_model VARCHAR(64) NOT NULL DEFAULT '',\
-         fw_version VARCHAR(32) NOT NULL DEFAULT '',\
-         status INT NOT NULL DEFAULT 0,\
-         signal_strength INT NOT NULL DEFAULT 0,\
-         bind_at DATETIME NULL,\
-         last_online_at DATETIME NULL,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 device 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn setup_ota_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
-    conn.execute(
-        "CREATE TABLE ota_version (\
-         ota_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         version VARCHAR(32) NOT NULL,\
-         model VARCHAR(64) NOT NULL DEFAULT '',\
-         url VARCHAR(255) NOT NULL DEFAULT '',\
-         md5 VARCHAR(64) NOT NULL DEFAULT '',\
-         changelog TEXT,\
-         size BIGINT NOT NULL DEFAULT 0,\
-         force_update TINYINT NOT NULL DEFAULT 0,\
-         status TINYINT NOT NULL DEFAULT 0,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 ota_version 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn cleanup(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
+    common::teardown_all(pool).await;
 }
 
 async fn insert_device(pool: &Pool, device_sn: &str, merchant_id: i64) -> i64 {
@@ -177,7 +147,7 @@ async fn insert_device(pool: &Pool, device_sn: &str, merchant_id: i64) -> i64 {
 async fn insert_ota_version(pool: &Pool, version: &str, status: i8, url: &str) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
     conn.execute_with_params(
-        "INSERT INTO ota_version (version, model, url, md5, changelog, size, force_update, status) \
+        "INSERT INTO ota_version (version, device_model, url, md5, changelog, size, forced, status) \
          VALUES (?, 'M100', ?, '', 'test changelog', 1024, 0, ?)",
         &[
             Value::String(version.to_string()),
@@ -204,6 +174,17 @@ fn json_request(body: serde_json::Value) -> Request<Body> {
         .header("Content-Type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap()
+}
+
+/// 直接调用控制器会绕过 auth 中间件，需手动注入身份（对齐中间件注入的 CurrentUser）
+fn as_merchant(req: &mut Request<Body>, merchant_id: i64) {
+    req.extensions_mut()
+        .insert(sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+            user_id: 1,
+            username: "merchant_owner".to_string(),
+            merchant_id: Some(merchant_id),
+            is_admin: false,
+        });
 }
 
 // ============================================================================
@@ -277,10 +258,11 @@ async fn e2e_ota_trigger_valid_version_returns_success() {
     insert_ota_version(&pool, "1.5.0", 1, "http://ota.example.com/v1.5.0.bin").await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(serde_json::json!({
+    let mut req = json_request(serde_json::json!({
         "device_id": device_id,
         "ota_version": "1.5.0"
     }));
+    as_merchant(&mut req, 100);
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), req).await;
     let json = read_json(response).await;
@@ -316,10 +298,30 @@ async fn e2e_ota_trigger_unknown_version_returns_error() {
     let device_id = insert_device(&pool, "SN_OTA_UNKNOWN", 100).await;
     let state = make_state(pool.clone()).await;
 
-    let req = json_request(serde_json::json!({
+    // 跨商户 IDOR：其他商户操作本商户设备必须被拒绝
+    let mut foreign = json_request(serde_json::json!({
         "device_id": device_id,
         "ota_version": "99.99.99"
     }));
+    as_merchant(&mut foreign, 999);
+    let response = sz_rust_sz300::controllers::device::trigger_ota(
+        axum::extract::State(state.clone()),
+        foreign,
+    )
+    .await;
+    let foreign_json = read_json(response).await;
+    assert_eq!(
+        foreign_json.get("code").and_then(|v| v.as_i64()),
+        Some(403),
+        "跨商户触发 OTA 应被 IDOR 防护拒绝: {:?}",
+        foreign_json
+    );
+
+    let mut req = json_request(serde_json::json!({
+        "device_id": device_id,
+        "ota_version": "99.99.99"
+    }));
+    as_merchant(&mut req, 100);
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), req).await;
     let json = read_json(response).await;

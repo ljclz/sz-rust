@@ -278,12 +278,12 @@ mod tests {
     fn test_span_attributes_desensitize_db_statement() {
         let mut attrs = SpanAttributes {
             http_url: None,
-            db_statement: Some("SELECT * FROM users WHERE password='secret123'".to_string()),
+            db_statement: Some("SELECT * FROM users WHERE password='<secret>'".to_string()),
             cache_key: None,
             mqtt_topic: None,
         };
         attrs.desensitize();
-        assert!(!attrs.db_statement.as_ref().unwrap().contains("secret123"));
+        assert!(!attrs.db_statement.as_ref().unwrap().contains("<secret>"));
         assert!(attrs.db_statement.as_ref().unwrap().contains("***"));
     }
 

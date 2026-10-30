@@ -7,7 +7,20 @@
 //! wasmi 解释执行，无需 JIT 编译，启动快、内存占用低，适合服务端边缘计算。
 
 use thiserror::Error;
-use wasmi::{Engine, Error as WasmError, Extern, ExternType, Linker, Module, Store, Value};
+use wasmi::{Config, Engine, Error as WasmError, Extern, ExternType, Linker, Module, Store, StoreLimitsBuilder, Value};
+
+/// 单次 WASM 执行的默认燃料上限（wasmi 指令级计量）。
+///
+/// 燃料耗尽时执行立即返回 `OutOfFuel` 错误，防止无限循环/恶意模块
+/// 消耗服务端 CPU（2026-10-27 P0-1 安全修复：原公开白名单 + 无燃料限制可被
+/// 单请求永久占死 tokio worker，构成远程 DoS）。
+pub const DEFAULT_FUEL_LIMIT: u64 = 10_000_000;
+
+/// 单实例线性内存上限（256 MiB）。
+///
+/// 防止恶意 WASM 模块声明/增长超大线性内存（wasm 规范上限为 4 GiB）
+/// 导致宿主内存耗尽（2026-10-27 P0-1 安全修复配套）。
+pub const DEFAULT_MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
 
 /// WASM 运行时错误
 #[derive(Debug, Error)]
@@ -88,8 +101,11 @@ pub struct WasmRuntime {
 impl WasmRuntime {
     /// 创建新的 WASM 运行时
     pub fn new() -> Self {
+        let mut config = Config::default();
+        // 启用燃料计量：所有执行按指令扣减燃料，耗尽即报错，杜绝无限循环占死宿主线程
+        config.consume_fuel(true);
         Self {
-            engine: Engine::default(),
+            engine: Engine::new(&config),
         }
     }
 
@@ -122,7 +138,22 @@ impl WasmModule {
         func_name: &str,
         args: &[WasmValue],
     ) -> Result<Vec<WasmValue>, WasmRuntimeError> {
-        let mut store = Store::new(&self.engine, ());
+        // 线性内存上限：实例化/内存增长超过 256 MiB 时被拒绝，
+        // 防止 (memory 65536)（4 GiB）之类的模块直接吃光宿主内存。
+        // StoreLimits 作为 Store 的用户数据 T 存在，limiter 闭包从 &mut T 取用。
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(DEFAULT_MEMORY_LIMIT_BYTES)
+            .build();
+        let mut store = Store::new(&self.engine, limits);
+
+        // 燃料计量（需 Config::consume_fuel(true) 配合）：
+        // 无限循环/高消耗模块在燃料耗尽后立即返回 OutOfFuel，而非无限执行。
+        store
+            .add_fuel(DEFAULT_FUEL_LIMIT)
+            .map_err(WasmError::from)?;
+
+        store.limiter(|data| &mut *data);
+
         let linker = Linker::new(&self.engine);
         let instance = linker
             .instantiate(&mut store, &self.module)
@@ -360,15 +391,33 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "无限循环子线程会阻止进程退出，手动运行: cargo test -- --ignored"]
-    fn test_wasm_infinite_loop_not_finished_in_200ms() {
+    fn test_wasm_large_memory_instantiation_rejected() {
         let rt = WasmRuntime::new();
-        let wasm = wat::parse_str(r#"(module (func (export "loop") (loop (br 0))))"#).unwrap();
+        let wasm = wat::parse_str(r#"(module (memory 65536))"#).unwrap();
         let module = rt.compile(&wasm).unwrap();
-        let handle = std::thread::spawn(move || {
-            let _ = module.execute("loop", &[]);
-        });
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(!handle.is_finished(), "无限循环应仍在执行");
+        // 实例化（execute 内部）受 256 MiB 内存限制器拦截，应返回错误而非 OOM
+        let result = module.execute("missing_func", &[]);
+        assert!(
+            result.is_err(),
+            "4GiB 内存模块实例化应被内存限制器拒绝，实际: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_wasm_infinite_loop_fuel_exhausted() {
+        let rt = WasmRuntime::new();
+        let wasm =
+            wat::parse_str(r#"(module (func (export "loop") (loop (br 0))))"#).unwrap();
+        let module = rt.compile(&wasm).unwrap();
+        let start = std::time::Instant::now();
+        // 燃料计量应让无限循环快速返回 OutOfFuel 错误，而不是永久占住线程
+        let result = module.execute("loop", &[]);
+        assert!(result.is_err(), "无限循环应因燃料耗尽而失败，实际: {:?}", result);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "燃料耗尽应在 5 秒内返回，实际耗时 {:?}",
+            start.elapsed()
+        );
     }
 }

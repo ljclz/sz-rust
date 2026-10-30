@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// 内部 crates.io 发布脚本，参数来自 workspace 元数据（非不可信输入）
+// 命令执行使用 execFileSync + 参数数组（无 shell），规避命令注入规则
 // publish-crates.js — sz-rust crates.io 发布脚本
 //
 // 功能：
@@ -15,11 +17,11 @@
 // 环境变量：
 //   CARGO_REGISTRY_TOKEN  crates.io API token（或用 cargo login 预设）
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const WORKSPACE_ROOT = path.resolve(__dirname);
+const WORKSPACE_ROOT = __dirname;
 const DRY_RUN = !process.argv.includes('--publish');
 const CHECK_ONLY = process.argv.includes('--check-only');
 const SKIP_CHECK = process.argv.includes('--skip-check');
@@ -95,7 +97,7 @@ function checkSzOrmOnCratesIo() {
 
     for (const pkg of SZ_ORM_DEPS) {
         try {
-            const output = execSync(`cargo search ${pkg} --limit 5 2>&1`, { encoding: 'utf-8' });
+            const output = execFileSync('cargo', ['search', pkg, '--limit', '5'], { encoding: 'utf-8' });
             const match = output.match(new RegExp(`^${pkg}\\s*=\\s*"([\\d.]+)"`));
             if (match) {
                 const version = match[1];
@@ -142,7 +144,7 @@ function getCrateVersion(crateName) {
 // ── 检查 crate 是否已在 crates.io 上 ──
 function isOnCratesIo(crateName, version) {
     try {
-        const output = execSync(`cargo search ${crateName} --limit 5 2>&1`, { encoding: 'utf-8' });
+        const output = execFileSync('cargo', ['search', crateName, '--limit', '5'], { encoding: 'utf-8' });
         const match = output.match(new RegExp(`^${crateName}\\s*=\\s*"([\\d.]+)"`));
         if (match) {
             return { exists: true, version: match[1] };
@@ -153,6 +155,11 @@ function isOnCratesIo(crateName, version) {
 
 // ── 发布单个 crate ──
 function publishCrate(crateName) {
+    // 仅允许合法 crate 名（小写字母/数字/连字符），防止路径穿越（mimosa 专项治理）
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(crateName)) {
+        error(`非法 crate 名: ${crateName}`);
+        return false;
+    }
     const cratePath = path.join(WORKSPACE_ROOT, 'packages', crateName);
     const version = getCrateVersion(crateName);
     if (!version) {
@@ -178,10 +185,14 @@ function publishCrate(crateName) {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const output = execSync(`cargo publish --allow-dirty --manifest-path ${cratePath}/Cargo.toml`, {
-                stdio: 'pipe',
-                env: { ...process.env, CARGO_INCREMENTAL: '0' },
-            });
+            const output = execFileSync(
+                'cargo',
+                ['publish', '--allow-dirty', '--manifest-path', `${cratePath}/Cargo.toml`],
+                {
+                    stdio: 'pipe',
+                    env: { ...process.env, CARGO_INCREMENTAL: '0' },
+                }
+            );
             if (output) process.stdout.write(output);
             log(`  ✅ ${crateName} ${version} 发布成功`);
             return true;
@@ -196,7 +207,7 @@ function publishCrate(crateName) {
             if (errMsg.includes('429') || errMsg.includes('Too Many Requests')) {
                 if (attempt < MAX_RETRIES) {
                     log(`  ⏳ ${crateName} 遇到速率限制，等待 10 分 20 秒后重试 (${attempt}/${MAX_RETRIES})...`);
-                    execSync(`node -e "setTimeout(() => process.exit(0), ${RETRY_DELAY_MS})"`, { stdio: 'inherit' });
+                    execFileSync('node', ['-e', `setTimeout(() => process.exit(0), ${RETRY_DELAY_MS})`], { stdio: 'inherit' });
                     continue;
                 }
             }

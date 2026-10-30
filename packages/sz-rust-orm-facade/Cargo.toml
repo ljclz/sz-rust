@@ -84,10 +84,9 @@ workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 sqlx = { workspace = true }
 sz-orm-sqlx = { workspace = true }
-sz-rust-core = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [[bench]]

@@ -46,7 +46,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-deny
@@ -72,7 +74,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

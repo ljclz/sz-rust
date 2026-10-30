@@ -14,6 +14,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # 分支覆盖率下限（2026-10-28 P1-10：README 宣称分支覆盖，此前无任何执行点）
+  # 首次设 75% 与文档口径对齐；低于阈值即失败，后续只允许上调。
+  BRANCH_COVERAGE_THRESHOLD: 75
 
 jobs:
   mcdc:
@@ -23,16 +26,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install llvm-cov
         run: cargo install cargo-llvm-cov --locked
       - name: Run branch coverage
-        continue-on-error: true
+        # SDET P1-7：移除 step 级 continue-on-error，分支覆盖率采集失败即 fail-closed；
+        # 若 nightly 工具链兼容性破坏该命令，应修复工具链版本而非静默跳过
         run: |
           RUSTFLAGS="-Z instrument-coverage=branch" \
-          cargo +nightly llvm-cov --workspace --summary-only --branch
+          cargo +nightly llvm-cov --workspace --summary-only --branch | tee branch-coverage.txt
+      - name: Enforce branch coverage threshold
+        # 解析 `--summary-only` 表格的 TOTAL 行，取最后一列（Branches Cover）。
+        # 解析失败视为门禁失效 → 直接失败（不做静默降级）。
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          threshold = float(os.environ.get('BRANCH_COVERAGE_THRESHOLD', '75'))
+          path = 'branch-coverage.txt'
+          total_line = None
+          with open(path, encoding='utf-8', errors='replace') as f:
+              for line in f:
+                  if re.match(r'^\s*TOTAL\b', line):
+                      total_line = line.rstrip('\n')
+
+          if not total_line:
+              print('FAIL: 未在 llvm-cov 输出中找到 TOTAL 行，无法计算分支覆盖率')
+              sys.exit(1)
+
+          nums = re.findall(r'(\d+(?:\.\d+)?)%', total_line)
+          if not nums:
+              print('FAIL: TOTAL 行中没有百分比列: %s' % total_line)
+              sys.exit(1)
+
+          branch = float(nums[-1])
+          print('branch coverage = %.2f%% (threshold %.2f%%)' % (branch, threshold))
+          print('TOTAL: %s' % total_line)
+          if branch + 1e-9 < threshold:
+              print('::error::分支覆盖率 %.2f%% 低于阈值 %.2f%%' % (branch, threshold))
+              sys.exit(1)
+          print('PASS: 分支覆盖率达标')
+          PY
       - name: Upload branch coverage report
         if: always()
         uses: actions/upload-artifact@v4

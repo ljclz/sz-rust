@@ -2,13 +2,12 @@ const { Client } = require('ssh2');
 const fs = require('fs');
 const path = require('path');
 
-const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACDOrCHylYDXYOP0YBS+Ir7M5xnc1aPgf0dn7d3X9Gda3AAAAJjPWS0pz1kt
-KQAAAAtzc2gtZWQyNTUxOQAAACDOrCHylYDXYOP0YBS+Ir7M5xnc1aPgf0dn7d3X9Gda3A
-AAAEA4xgtubqt9HARi2/WKfFEtU8T3X5jPkusyG5SxCwgucc6sIfKVgNdg4/RgFL4ivszn
-GdzVo+B/R2ft3df0Z1rcAAAAE3Jvb3RAVk0tMTYtMy11YnVudHUBAg==
------END OPENSSH PRIVATE KEY-----`;
+// 安全修复（2026-10-28）：禁止在仓库内硬编码 SSH 私钥，改为从环境变量注入
+const privateKey = process.env.SSH_PRIVATE_KEY;
+if (!privateKey) {
+  console.error('缺少 SSH_PRIVATE_KEY 环境变量 — 拒绝连接生产服务器（防凭据泄漏）');
+  process.exit(1);
+}
 
 const conn = new Client();
 const sshExec = (cmd, timeout = 30000) => new Promise((resolve, reject) => {
@@ -44,15 +43,14 @@ conn.on('ready', async () => {
     log('## 2. 上传新启动脚本');
     const startScript = `#!/bin/bash
 cd /www/rust/sz-rust-new
-export SZ_JWT_SECRET=liujieclz_test_secret_key_2026_extra_secure_32bytes
-export SZ300_JWT_SECRET=liujieclz_test_secret_key_2026_extra_secure_32bytes
-export SZ300_DB_PASSWORD=2sJ8BcTdSxWNN4fp
+export SZ300_JWT_SECRET="\${SZ300_JWT_SECRET:?}"
+export SZ300_DB_PASSWORD="\${SZ300_DB_PASSWORD:?}"
 export SZ300_DB_HOST=127.0.0.1
 export SZ300_DB_PORT=8802
 export SZ300_DB_USER=test
 export SZ300_DB_NAME=test
 export RUST_LOG=info
-export SZ300_METRICS_BEARER_TOKEN=prometheus-scrape-token
+export SZ300_METRICS_BEARER_TOKEN="\${PROMETHEUS_SCRAPE_TOKEN:?}"
 export SZ300_METRICS_ALLOWED_IPS=127.0.0.1,172.16.0.0/12
 ./target/release/sz300-server > /tmp/sz300-server.log 2>&1
 `;
@@ -80,7 +78,7 @@ export SZ300_METRICS_ALLOWED_IPS=127.0.0.1,172.16.0.0/12
     log('## 4. 验证 metrics（bearer token）');
     const m1 = await sshExec('curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" http://127.0.0.1:8300/metrics');
     log(`- 无 token: HTTP ${m1.stdout.trim()}（预期 403）`);
-    const m2 = await sshExec('curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer prometheus-scrape-token" http://127.0.0.1:8300/metrics');
+    const m2 = await sshExec('curl -s --connect-timeout 5 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${PROMETHEUS_SCRAPE_TOKEN:?}" http://127.0.0.1:8300/metrics');
     log(`- 有 token: HTTP ${m2.stdout.trim()}（预期 200）`);
 
     // 5. 重启 Prometheus

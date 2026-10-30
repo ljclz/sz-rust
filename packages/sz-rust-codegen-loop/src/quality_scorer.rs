@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 质量评分器（v1.5.0 P2-1）
 //!
 //! 对生成代码进行多维度质量评分：可读性/复杂度/覆盖率/安全（spec 5.5.7）。

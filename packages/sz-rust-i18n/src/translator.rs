@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 翻译服务（spec §5.4 规则 2-3）
 //!
 //! 运行时语言切换 + 参数插值 + 缺失键降级 + 复数。

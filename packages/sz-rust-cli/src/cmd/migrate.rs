@@ -147,6 +147,24 @@ async fn execute_migrate_online(
 ) -> Result<(), CliError> {
     let mut conn = create_connection(url, db_type).await?;
 
+    // 确保 __migrations 表存在
+    ensure_migrations_table(&mut conn, db_type).await?;
+
+    // 方言级互斥锁：避免多个迁移进程并发执行导致重复应用
+    acquire_migration_lock(&mut conn, db_type).await?;
+    let outcome = run_migrations_locked(args, migrations, &mut conn, db_type).await;
+    let unlock = release_migration_lock(&mut conn, db_type).await;
+    outcome?;
+    unlock
+}
+
+/// 持锁期间执行迁移（正向或回滚）
+async fn run_migrations_locked(
+    args: &MigrateArgs,
+    migrations: &[Migration],
+    conn: &mut Box<dyn Connection>,
+    db_type: DbType,
+) -> Result<(), CliError> {
     if args.rollback {
         // 回滚最后一个迁移
         let last = migrations
@@ -156,52 +174,189 @@ async fn execute_migrate_online(
         if args.show_sql {
             println!("{}", print_sql_block("SQL DOWN", &last.sql_down));
         }
+        if supports_transactional_ddl(db_type) {
+            conn.begin_transaction()
+                .await
+                .map_err(|e| CliError::Migration(format!("Failed to begin transaction: {}", e)))?;
+        }
         if !last.sql_down.is_empty() {
             let sql = prepare_sql_for_db(&last.sql_down, db_type);
-            conn.execute(&sql)
-                .await
-                .map_err(|e| CliError::Migration(format!("Rollback failed: {}", e)))?;
+            if let Err(e) = conn.execute(&sql).await {
+                if supports_transactional_ddl(db_type) {
+                    let _ = conn.rollback().await;
+                }
+                return Err(CliError::Migration(format!(
+                    "Rollback {} failed: {}",
+                    last.version, e
+                )));
+            }
         }
         // 从 __migrations 表删除记录
-        delete_migration_record(&mut conn, &last.version, db_type).await?;
-        println!("Rollback completed: {} ({})", last.version, last.name);
-    } else {
-        // 确保 __migrations 表存在
-        ensure_migrations_table(&mut conn, db_type).await?;
-
-        // 查询已应用版本
-        let applied = fetch_applied_versions(&mut conn, db_type).await?;
-
-        // 过滤出待执行的迁移
-        let pending: Vec<&Migration> = migrations
-            .iter()
-            .filter(|m| !applied.contains(&m.version))
-            .collect();
-
-        if pending.is_empty() {
-            println!("No pending migrations. Database is up to date.");
-            return Ok(());
-        }
-
-        println!("Running {} pending migration(s):", pending.len());
-
-        let mut applied_count = 0;
-        for m in &pending {
-            if args.show_sql {
-                println!("{}", print_sql_block("SQL UP", &m.sql_up));
-            }
-            let sql = prepare_sql_for_db(&m.sql_up, db_type);
-
-            conn.execute(&sql).await.map_err(|e| {
-                CliError::Migration(format!("Migration {} failed: {}", m.version, e))
+        delete_migration_record(conn, &last.version, db_type).await?;
+        if supports_transactional_ddl(db_type) {
+            conn.commit().await.map_err(|e| {
+                CliError::Migration(format!("Failed to commit rollback {}: {}", last.version, e))
             })?;
-            insert_migration_record(&mut conn, &m.version, &m.name, db_type).await?;
-            println!("  Applied: {}", m.version);
-            applied_count += 1;
         }
-        println!("Migration completed: {} applied.", applied_count);
+        println!("Rollback completed: {} ({})", last.version, last.name);
+        return Ok(());
     }
 
+    // 查询已应用版本
+    let mut applied = fetch_applied_versions(conn, db_type).await?;
+    applied.extend(fetch_legacy_add_versions(conn, db_type).await?);
+
+    // 过滤出待执行的迁移
+    let pending: Vec<&Migration> = migrations
+        .iter()
+        .filter(|m| !applied.contains(&m.version))
+        .collect();
+
+    if pending.is_empty() {
+        println!("No pending migrations. Database is up to date.");
+        return Ok(());
+    }
+
+    println!("Running {} pending migration(s):", pending.len());
+
+    let mut applied_count = 0;
+    for m in &pending {
+        if args.show_sql {
+            println!("{}", print_sql_block("SQL UP", &m.sql_up));
+        }
+        let sql = prepare_sql_for_db(&m.sql_up, db_type);
+
+        // 事务性 DDL 方言：DDL + 迁移记录同事务提交，避免"DDL 已生效但无记录"
+        let transactional = supports_transactional_ddl(db_type);
+        if transactional {
+            conn.begin_transaction()
+                .await
+                .map_err(|e| CliError::Migration(format!("Failed to begin transaction: {}", e)))?;
+        }
+        if let Err(e) = conn.execute(&sql).await {
+            if transactional {
+                let _ = conn.rollback().await;
+            }
+            return Err(CliError::Migration(format!(
+                "Migration {} failed: {}（该方言 DDL 可能已生效，请人工核对后重试）",
+                m.version, e
+            )));
+        }
+        if let Err(e) = insert_migration_record(conn, &m.version, &m.name, db_type).await {
+            if transactional {
+                let _ = conn.rollback().await;
+            }
+            return Err(e);
+        }
+        if transactional {
+            conn.commit().await.map_err(|e| {
+                CliError::Migration(format!("Migration {} commit failed: {}", m.version, e))
+            })?;
+        }
+        println!("  Applied: {}", m.version);
+        applied_count += 1;
+    }
+    println!("Migration completed: {} applied.", applied_count);
+
+    Ok(())
+}
+
+/// 该方言是否支持事务性 DDL（DDL 可回滚且与迁移记录同事务）
+///
+/// MySQL / Oracle 的 DDL 会隐式提交，无法与迁移记录组成原子单元。
+fn supports_transactional_ddl(db_type: DbType) -> bool {
+    matches!(
+        db_type,
+        DbType::PostgreSQL | DbType::Sqlite | DbType::SqlServer
+    )
+}
+
+/// 迁移互斥锁 key（PostgreSQL advisory lock）
+const PG_MIGRATION_LOCK_KEY: i64 = 0x535A_4D49_4752; // "SZMIGR"
+/// 迁移互斥锁名称（MySQL GET_LOCK）
+const MYSQL_MIGRATION_LOCK_NAME: &str = "sz_rust_migrate";
+/// 获取迁移锁的最长等待时间（秒）
+const MIGRATION_LOCK_TIMEOUT_SECS: i64 = 30;
+
+/// 获取迁移互斥锁（MySQL `GET_LOCK` / PostgreSQL advisory lock）
+///
+/// 其他方言（SQLite / Oracle / MSSQL）返回 `Ok` 并打印提示，由部署侧保证单实例执行。
+async fn acquire_migration_lock(
+    conn: &mut Box<dyn Connection>,
+    db_type: DbType,
+) -> Result<(), CliError> {
+    use sz_rust_core::orm::Value;
+    match db_type {
+        DbType::MySQL => {
+            let sql = format!("SELECT GET_LOCK('{}', ?)", MYSQL_MIGRATION_LOCK_NAME);
+            let rows = conn
+                .query_with_params(&sql, &[Value::I64(MIGRATION_LOCK_TIMEOUT_SECS)])
+                .await
+                .map_err(|e| CliError::Migration(format!("Failed to acquire lock: {}", e)))?;
+            let acquired = rows
+                .first()
+                .and_then(|r| {
+                    r.values()
+                        .next()
+                        .and_then(|v| v.as_i64())
+                })
+                .unwrap_or(0);
+            if acquired != 1 {
+                return Err(CliError::Migration(format!(
+                    "Another migration is running (GET_LOCK timeout {}s)",
+                    MIGRATION_LOCK_TIMEOUT_SECS
+                )));
+            }
+        }
+        DbType::PostgreSQL => {
+            let sql = "SELECT pg_try_advisory_lock(?)";
+            let rows = conn
+                .query_with_params(sql, &[Value::I64(PG_MIGRATION_LOCK_KEY)])
+                .await
+                .map_err(|e| CliError::Migration(format!("Failed to acquire lock: {}", e)))?;
+            let acquired = rows
+                .first()
+                .and_then(|r| r.values().next().and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            if acquired != 1 {
+                return Err(CliError::Migration(
+                    "Another migration is running (pg_try_advisory_lock returned false)".to_string(),
+                ));
+            }
+        }
+        other => {
+            println!(
+                "Note: {:?} has no advisory lock; ensure only one migrate process runs at a time.",
+                other
+            );
+        }
+    }
+    Ok(())
+}
+
+/// 释放迁移互斥锁
+async fn release_migration_lock(
+    conn: &mut Box<dyn Connection>,
+    db_type: DbType,
+) -> Result<(), CliError> {
+    use sz_rust_core::orm::Value;
+    match db_type {
+        DbType::MySQL => {
+            let sql = format!("SELECT RELEASE_LOCK('{}')", MYSQL_MIGRATION_LOCK_NAME);
+            conn.query(&sql)
+                .await
+                .map_err(|e| CliError::Migration(format!("Failed to release lock: {}", e)))?;
+        }
+        DbType::PostgreSQL => {
+            conn.query_with_params(
+                "SELECT pg_advisory_unlock(?)",
+                &[Value::I64(PG_MIGRATION_LOCK_KEY)],
+            )
+            .await
+            .map_err(|e| CliError::Migration(format!("Failed to release lock: {}", e)))?;
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -259,7 +414,9 @@ pub async fn execute_status_full(
     let applied_versions = if let Some(url) = url {
         let mut conn = create_connection(url, db_type).await?;
         ensure_migrations_table(&mut conn, db_type).await?;
-        fetch_applied_versions(&mut conn, db_type).await?
+        let mut applied = fetch_applied_versions(&mut conn, db_type).await?;
+        applied.extend(fetch_legacy_add_versions(&mut conn, db_type).await?);
+        applied
     } else {
         std::collections::HashSet::new()
     };
@@ -311,8 +468,9 @@ pub async fn execute_status_full(
 /// `oracle://` / `mssql://`。`db_type` 仅用于错误诊断，实际后端由 DSN 决定。
 ///
 /// - MSSQL：绕过 AnyPool，直接用 MssqlPoolHandle 添加 TLS 配置
-/// - Oracle：绕过 AnyPool，用 `std::mem::forget` 阻止 OraclePoolHandle drop，
-///   避免 sz-orm-oracle 内部独立 tokio Runtime 在 async 上下文中 drop 时 panic
+///   （`SZ_MSSQL_ENCRYPT` 默认 true；`SZ_MSSQL_TRUST_SERVER_CERT` 默认 false）
+/// - Oracle：绕过 AnyPool，用 `OraclePoolHandle` 直连（连接对象持有池 Arc，
+///   池 Drop 时由独立线程回收内部 tokio Runtime，无需泄漏池对象）
 async fn create_connection(url: &str, db_type: DbType) -> Result<Box<dyn Connection>, CliError> {
     use std::sync::Arc;
     use sz_orm_sqlx::any_driver::AnyPool;
@@ -335,9 +493,12 @@ async fn create_connection(url: &str, db_type: DbType) -> Result<Box<dyn Connect
             .split_once('/')
             .ok_or_else(|| CliError::Migration("MSSQL DSN missing database".to_string()))?;
         let (host, port) = host_port.split_once(':').unwrap_or((host_port, "1433"));
+        let encrypt = std::env::var("SZ_MSSQL_ENCRYPT").unwrap_or_else(|_| "true".to_string());
+        let trust_cert =
+            std::env::var("SZ_MSSQL_TRUST_SERVER_CERT").unwrap_or_else(|_| "false".to_string());
         let ado = format!(
             "Server={host},{port};Database={database};User Id={username};Password={password};\
-             Encrypt=false;TrustServerCertificate=true;"
+             Encrypt={encrypt};TrustServerCertificate={trust_cert};"
         );
         let pool = MssqlPoolHandle::connect(&ado)
             .await
@@ -365,9 +526,7 @@ async fn create_connection(url: &str, db_type: DbType) -> Result<Box<dyn Connect
             .ok_or_else(|| CliError::Migration("Oracle DSN missing password".to_string()))?;
         let pool = OraclePoolHandle::connect(username, password, hostinfo)
             .map_err(|e| CliError::Migration(format!("Oracle connect failed: {e}")))?;
-        let pool_arc = Arc::new(pool);
-        let factory = OracleConnectionFactory::new(pool_arc.clone());
-        std::mem::forget(pool_arc);
+        let factory = OracleConnectionFactory::new(Arc::new(pool));
         let conn = factory
             .create()
             .await
@@ -510,11 +669,44 @@ async fn fetch_applied_versions(
     Ok(versions)
 }
 
-/// 删除 __migrations 表中的迁移记录
+/// 兼容旧版解析器折叠出的 `version = 'add'` 记录
 ///
-/// 参数化绑定防 SQL 注入（铁律 §1）：`version` 虽源自迁移文件名而非用户输入，
-/// 仍统一走 `execute_with_params` 参数化路径，杜绝任何拼接风险。
-/// 插入迁移记录到 __migrations 表
+/// 2026-10-28 之前的 `FileMigrationResolver` 把不含数字前缀的文件
+/// （如 `add_alert_history.sql`）一律解析成版本 `"add"`，多个文件在版本表里
+/// 互相覆盖，实际只执行了字典序第一个。修复后版本号变为完整文件名，
+/// 若不迁移历史记录，已执行过的那个文件会被当作待执行而重复执行
+/// （MySQL 的 `ADD COLUMN` 不支持 IF NOT EXISTS，会直接报 1060）。
+///
+/// 这里按记录里保存的 `name` 还原出真实版本号 `add_<name>`。
+async fn fetch_legacy_add_versions(
+    conn: &mut Box<dyn Connection>,
+    db_type: DbType,
+) -> Result<std::collections::HashSet<String>, CliError> {
+    let mut versions = std::collections::HashSet::new();
+    let table = migrations_table_name(db_type);
+    let sql = format!("SELECT name FROM {} WHERE version = 'add'", table);
+    let rows = match conn.query(&sql).await {
+        Ok(rows) => rows,
+        // 历史库不一定有该行/该列，查询失败不影响正常迁移流程
+        Err(_) => return Ok(versions),
+    };
+
+    for row in &rows {
+        use sz_rust_core::orm::Value;
+        if let Some(Value::String(name)) = row.get("name").or_else(|| row.get("NAME")) {
+            if !name.is_empty() {
+                println!("Note: 检测到旧版迁移记录 version='add'（name={name}），按 add_{name} 视为已应用。");
+                versions.insert(format!("add_{name}"));
+            }
+        }
+    }
+    Ok(versions)
+}
+
+/// 插入 __migrations 表中的迁移记录
+///
+/// 不在此处提交事务：由调用方决定是否与 DDL 同事务提交
+/// （MySQL 等 DDL 隐式提交的方言走自动提交）。
 async fn insert_migration_record(
     conn: &mut Box<dyn Connection>,
     version: &str,
@@ -542,12 +734,10 @@ async fn insert_migration_record(
     )
     .await
     .map_err(|e| CliError::Migration(format!("Failed to insert migration record: {}", e)))?;
-    conn.commit()
-        .await
-        .map_err(|e| CliError::Migration(format!("Failed to commit: {}", e)))?;
     Ok(())
 }
 
+/// 删除 __migrations 表中的迁移记录（不提交，由调用方控制事务）
 async fn delete_migration_record(
     conn: &mut Box<dyn Connection>,
     version: &str,
@@ -565,9 +755,6 @@ async fn delete_migration_record(
     conn.execute_with_params(&sql, &[Value::String(version.to_string())])
         .await
         .map_err(|e| CliError::Migration(format!("Failed to delete migration record: {}", e)))?;
-    conn.commit()
-        .await
-        .map_err(|e| CliError::Migration(format!("Failed to commit: {}", e)))?;
     Ok(())
 }
 

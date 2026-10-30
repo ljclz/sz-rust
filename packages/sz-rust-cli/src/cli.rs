@@ -248,14 +248,14 @@ pub enum Command {
         no_health: bool,
     },
 
-    /// 触发运行中的 serve 进程重载配置（Windows 替代 SIGUSR1/SIGHUP）
+    /// [WIP] 触发运行中的 serve 进程重载配置（Windows 替代 SIGUSR1/SIGHUP，暂未实现）
     ///
     /// Unix 平台建议使用 `kill -USR1 <pid>` 或 `kill -HUP <pid>`。
     /// 首版仅输出提示信息，完整实现需后续版本支持。
     #[command(name = "serve:reload")]
     ServeReload,
 
-    /// 触发运行中的 serve 进程切换日志级别（Windows 替代 SIGUSR2）
+    /// [WIP] 触发运行中的 serve 进程切换日志级别（Windows 替代 SIGUSR2，暂未实现）
     ///
     /// Unix 平台建议使用 `kill -USR2 <pid>`。
     /// 首版仅输出提示信息，完整实现需后续版本支持。

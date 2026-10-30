@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 多语言消息资源管理（spec §5.4 规则 1）
 //!
 //! 支持 TOML/JSON/YAML 格式，语言代码遵循 BCP 47。

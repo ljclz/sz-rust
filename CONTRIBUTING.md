@@ -149,4 +149,4 @@ SZ-Rust 对标 ThinkPHP 8，PHP 迁移需遵循：
 
 ## 许可证
 
-贡献的代码遵循 [MIT License](LICENSE)。
+贡献的代码遵循 [Apache-2.0 License](LICENSE-APACHE)。

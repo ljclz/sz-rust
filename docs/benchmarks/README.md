@@ -18,6 +18,7 @@
 | 4 | `benchmark-report.md` | — | sz-rust | — | 本地压测 | 基准测试综合报告 |
 | 5 | `bench-coverage-matrix.md` | — | sz-rust | — | 代码统计 | 基准测试覆盖矩阵 |
 | 6 | `2026-08-07-framework-comparison.md` | 2026-08-07 | sz-rust/actix/axum/poem | /hello, /json, /user/42 | 同条件实测（服务器 122.51.216.76，wrk 4.1.0，64 并发 10s） | 4 框架 × 3 路由性能对比 |
+| 7 | `2026-10-27-server-memory-baseline.md` | 2026-10-27 | sz300-server | — | 本机独立进程实测（release，Get-Process RSS） | 铁律 9 内存基线：空载 RSS ≈9.39MB PASS（<30MB），含回归脚本 |
 
 ## 注意
 

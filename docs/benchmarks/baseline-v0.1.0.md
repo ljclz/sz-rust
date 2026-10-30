@@ -286,5 +286,5 @@ jobs:
 ## 7. 引用
 
 - [《SZ-Rust 工程化实践规范》](../sz-rust-engineering-practices.md) — 测试金字塔 T6 soak 测试
-- [《SZ-Rust 初始审计报告》](../audit/2026-07-22-初始审计.md) — P1-6 性能回归审计
-- [SZ-ORM 性能回归基线 v1.0.0](../../sz-orm/docs/benchmarks/baseline-v1.0.0.md) — 关联项目基线参考
+- [《SZ-Rust 初始审计报告》](../audit/archive/2026-07/2026-07-22-初始审计.md) — P1-6 性能回归审计
+- SZ-ORM 性能回归基线 v1.0.0（关联项目参考，文件尚未在 sz-orm 仓库提供）

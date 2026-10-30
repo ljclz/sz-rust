@@ -1,14 +1,14 @@
 # Alertmanager 配置 - sz300-server 单机版
-# 占位符已替换为本地默认值（生产通过环境变量注入）：
-#   smtp_auth_password → alertmanager-local
-#   dingtalk token     → local-dev-token
+# 安全整改（2026-10-28）：所有敏感凭据通过环境变量注入，禁止硬编码。
+#   smtp_auth_password → ${ALERTMANAGER_SMTP_AUTH_PASSWORD}
+#   dingtalk token     → ${DINGTALK_ACCESS_TOKEN}
 #   alert email        → alertmanager@localhost
 
 global:
   smtp_smarthost: "smtp.example.com:587"
   smtp_from: "alertmanager@sz300.example.com"
   smtp_auth_username: "alertmanager@sz300.example.com"
-  smtp_auth_password: "alertmanager-local"
+  smtp_auth_password: "${ALERTMANAGER_SMTP_AUTH_PASSWORD}"
   smtp_require_tls: true
 
 route:
@@ -48,7 +48,7 @@ receivers:
       - to: "alertmanager@localhost"
         send_resolved: true
     webhook_configs:
-      - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
+      - url: "https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_ACCESS_TOKEN}"
         send_resolved: true
 
   - name: "warning-notifications"
@@ -56,10 +56,10 @@ receivers:
       - to: "alertmanager@localhost"
         send_resolved: true
     webhook_configs:
-      - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
+      - url: "https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_ACCESS_TOKEN}"
         send_resolved: true
 
   - name: "info-notifications"
     webhook_configs:
-      - url: "https://oapi.dingtalk.com/robot/send?access_token=local-dev-token"
+      - url: "https://oapi.dingtalk.com/robot/send?access_token=${DINGTALK_ACCESS_TOKEN}"
         send_resolved: true

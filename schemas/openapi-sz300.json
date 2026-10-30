@@ -1,0 +1,1315 @@
+{
+    "openapi":  "3.0.3",
+    "info":  {
+                 "title":  "SZ-300 业务 API",
+                 "version":  "2.0.0",
+                 "description":  "鲜视达 SZ-300 后端服务 API 文档 — 基于 sz-rust 框架"
+             },
+    "paths":  {
+                  "/health":  {
+                                  "get":  {
+                                              "summary":  "存活检查（liveness）",
+                                              "tags":  [
+                                                           "健康检查"
+                                                       ],
+                                              "responses":  {
+                                                                "200":  {
+                                                                            "description":  "服务存活",
+                                                                            "content":  {
+                                                                                            "application/json":  {
+                                                                                                                     "schema":  {
+                                                                                                                                    "type":  "object"
+                                                                                                                                }
+                                                                                                                 }
+                                                                                        }
+                                                                        }
+                                                            }
+                                          }
+                              },
+                  "/health/ready":  {
+                                        "get":  {
+                                                    "summary":  "就绪检查（readiness）",
+                                                    "description":  "检查数据库连接是否正常，失败返回 503",
+                                                    "tags":  [
+                                                                 "健康检查"
+                                                             ],
+                                                    "responses":  {
+                                                                      "200":  {
+                                                                                  "description":  "服务就绪",
+                                                                                  "content":  {
+                                                                                                  "application/json":  {
+                                                                                                                           "schema":  {
+                                                                                                                                          "type":  "object"
+                                                                                                                                      }
+                                                                                                                       }
+                                                                                              }
+                                                                              },
+                                                                      "503":  {
+                                                                                  "description":  "服务未就绪",
+                                                                                  "content":  {
+                                                                                                  "application/json":  {
+                                                                                                                           "schema":  {
+                                                                                                                                          "type":  "object"
+                                                                                                                                      }
+                                                                                                                       }
+                                                                                              }
+                                                                              }
+                                                                  }
+                                                }
+                                    },
+                  "/health/startup":  {
+                                          "get":  {
+                                                      "summary":  "启动检查（startup）",
+                                                      "description":  "验证应用启动初期的依赖可用性，不依赖 DB",
+                                                      "tags":  [
+                                                                   "健康检查"
+                                                               ],
+                                                      "responses":  {
+                                                                        "200":  {
+                                                                                    "description":  "已启动",
+                                                                                    "content":  {
+                                                                                                    "application/json":  {
+                                                                                                                             "schema":  {
+                                                                                                                                            "type":  "object"
+                                                                                                                                        }
+                                                                                                                         }
+                                                                                                }
+                                                                                },
+                                                                        "503":  {
+                                                                                    "description":  "启动中",
+                                                                                    "content":  {
+                                                                                                    "application/json":  {
+                                                                                                                             "schema":  {
+                                                                                                                                            "type":  "object"
+                                                                                                                                        }
+                                                                                                                         }
+                                                                                                }
+                                                                                }
+                                                                    }
+                                                  }
+                                      },
+                  "/metrics":  {
+                                   "get":  {
+                                               "summary":  "Prometheus 指标端点",
+                                               "description":  "输出 Prometheus 文本格式指标",
+                                               "tags":  [
+                                                            "健康检查"
+                                                        ],
+                                               "responses":  {
+                                                                 "200":  {
+                                                                             "description":  "Prometheus 文本格式",
+                                                                             "content":  {
+                                                                                             "text/plain":  {
+                                                                                                                "schema":  {
+                                                                                                                               "type":  "object"
+                                                                                                                           }
+                                                                                                            }
+                                                                                         }
+                                                                         }
+                                                             }
+                                           }
+                               },
+                  "/api/v1/auth/login":  {
+                                             "post":  {
+                                                          "summary":  "用户登录",
+                                                          "description":  "通过用户名密码获取 JWT Token，成功后下发 CSRF Cookie",
+                                                          "tags":  [
+                                                                       "认证"
+                                                                   ],
+                                                          "parameters":  [
+                                                                             {
+                                                                                 "name":  "username",
+                                                                                 "in":  "query",
+                                                                                 "description":  "用户名",
+                                                                                 "required":  true,
+                                                                                 "schema":  {
+                                                                                                "type":  "string"
+                                                                                            }
+                                                                             },
+                                                                             {
+                                                                                 "name":  "password",
+                                                                                 "in":  "query",
+                                                                                 "description":  "密码",
+                                                                                 "required":  true,
+                                                                                 "schema":  {
+                                                                                                "type":  "string"
+                                                                                            }
+                                                                             }
+                                                                         ],
+                                                          "responses":  {
+                                                                            "200":  {
+                                                                                        "description":  "登录成功，返回 token 与用户信息",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    },
+                                                                            "400":  {
+                                                                                        "description":  "参数错误（用户名或密码为空）",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    },
+                                                                            "401":  {
+                                                                                        "description":  "认证失败（用户名或密码错误）",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    }
+                                                                        }
+                                                      }
+                                         },
+                  "/api/v1/auth/refresh":  {
+                                               "post":  {
+                                                            "summary":  "刷新登录令牌",
+                                                            "tags":  [
+                                                                         "认证"
+                                                                     ],
+                                                            "responses":  {
+                                                                              "200":  {
+                                                                                          "description":  "刷新成功",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      }
+                                                                          }
+                                                        }
+                                           },
+                  "/api/v1/auth/me":  {
+                                          "post":  {
+                                                       "summary":  "获取当前登录用户信息",
+                                                       "description":  "通过 Authorization: Bearer \u003ctoken\u003e 解析当前用户",
+                                                       "tags":  [
+                                                                    "认证"
+                                                                ],
+                                                       "responses":  {
+                                                                         "200":  {
+                                                                                     "description":  "返回当前用户完整信息",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "type":  "object"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 },
+                                                                         "401":  {
+                                                                                     "description":  "未提供认证令牌或令牌无效",
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "type":  "object"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 }
+                                                                                 }
+                                                                     }
+                                                   }
+                                      },
+                  "/api/v1/auth/logout":  {
+                                              "post":  {
+                                                           "summary":  "退出登录",
+                                                           "description":  "清除客户端 CSRF Cookie",
+                                                           "tags":  [
+                                                                        "认证"
+                                                                    ],
+                                                           "responses":  {
+                                                                             "200":  {
+                                                                                         "description":  "已退出登录",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     }
+                                                                         }
+                                                       }
+                                          },
+                  "/api/v1/merchant/list":  {
+                                                "post":  {
+                                                             "summary":  "获取商户列表",
+                                                             "tags":  [
+                                                                          "商户管理"
+                                                                      ],
+                                                             "responses":  {
+                                                                               "200":  {
+                                                                                           "description":  "返回商户列表",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "type":  "object"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       }
+                                                                           }
+                                                         }
+                                            },
+                  "/api/v1/merchant/info":  {
+                                                "post":  {
+                                                             "summary":  "获取商户详情",
+                                                             "tags":  [
+                                                                          "商户管理"
+                                                                      ],
+                                                             "parameters":  [
+                                                                                {
+                                                                                    "name":  "merchant_id",
+                                                                                    "in":  "query",
+                                                                                    "description":  "商户 ID",
+                                                                                    "required":  true,
+                                                                                    "schema":  {
+                                                                                                   "type":  "integer"
+                                                                                               }
+                                                                                }
+                                                                            ],
+                                                             "responses":  {
+                                                                               "200":  {
+                                                                                           "description":  "返回商户详情",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "type":  "object"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       },
+                                                                               "404":  {
+                                                                                           "description":  "商户不存在",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "type":  "object"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       }
+                                                                           }
+                                                         }
+                                            },
+                  "/api/v1/merchant/create":  {
+                                                  "post":  {
+                                                               "summary":  "创建商户",
+                                                               "tags":  [
+                                                                            "商户管理"
+                                                                        ],
+                                                               "responses":  {
+                                                                                 "200":  {
+                                                                                             "description":  "创建成功",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         },
+                                                                                 "400":  {
+                                                                                             "description":  "参数错误",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         }
+                                                                             }
+                                                           }
+                                              },
+                  "/api/v1/merchant/update":  {
+                                                  "post":  {
+                                                               "summary":  "更新商户信息",
+                                                               "tags":  [
+                                                                            "商户管理"
+                                                                        ],
+                                                               "parameters":  [
+                                                                                  {
+                                                                                      "name":  "merchant_id",
+                                                                                      "in":  "query",
+                                                                                      "description":  "商户 ID",
+                                                                                      "required":  true,
+                                                                                      "schema":  {
+                                                                                                     "type":  "integer"
+                                                                                                 }
+                                                                                  }
+                                                                              ],
+                                                               "responses":  {
+                                                                                 "200":  {
+                                                                                             "description":  "更新成功",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         },
+                                                                                 "404":  {
+                                                                                             "description":  "商户不存在",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         }
+                                                                             }
+                                                           }
+                                              },
+                  "/api/v1/merchant/delete":  {
+                                                  "post":  {
+                                                               "summary":  "删除商户",
+                                                               "tags":  [
+                                                                            "商户管理"
+                                                                        ],
+                                                               "parameters":  [
+                                                                                  {
+                                                                                      "name":  "merchant_id",
+                                                                                      "in":  "query",
+                                                                                      "description":  "商户 ID",
+                                                                                      "required":  true,
+                                                                                      "schema":  {
+                                                                                                     "type":  "integer"
+                                                                                                 }
+                                                                                  }
+                                                                              ],
+                                                               "responses":  {
+                                                                                 "200":  {
+                                                                                             "description":  "删除成功",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         },
+                                                                                 "404":  {
+                                                                                             "description":  "商户不存在",
+                                                                                             "content":  {
+                                                                                                             "application/json":  {
+                                                                                                                                      "schema":  {
+                                                                                                                                                     "type":  "object"
+                                                                                                                                                 }
+                                                                                                                                  }
+                                                                                                         }
+                                                                                         }
+                                                                             }
+                                                           }
+                                              },
+                  "/api/v1/product/list":  {
+                                               "post":  {
+                                                            "summary":  "获取商品列表",
+                                                            "tags":  [
+                                                                         "商品管理"
+                                                                     ],
+                                                            "responses":  {
+                                                                              "200":  {
+                                                                                          "description":  "返回商品列表",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      }
+                                                                          }
+                                                        }
+                                           },
+                  "/api/v1/product/info":  {
+                                               "post":  {
+                                                            "summary":  "获取商品详情",
+                                                            "tags":  [
+                                                                         "商品管理"
+                                                                     ],
+                                                            "parameters":  [
+                                                                               {
+                                                                                   "name":  "product_id",
+                                                                                   "in":  "query",
+                                                                                   "description":  "商品 ID",
+                                                                                   "required":  true,
+                                                                                   "schema":  {
+                                                                                                  "type":  "integer"
+                                                                                              }
+                                                                               }
+                                                                           ],
+                                                            "responses":  {
+                                                                              "200":  {
+                                                                                          "description":  "返回商品详情",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      },
+                                                                              "404":  {
+                                                                                          "description":  "商品不存在",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      }
+                                                                          }
+                                                        }
+                                           },
+                  "/api/v1/product/create":  {
+                                                 "post":  {
+                                                              "summary":  "创建商品",
+                                                              "tags":  [
+                                                                           "商品管理"
+                                                                       ],
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "创建成功",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "400":  {
+                                                                                            "description":  "参数错误",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                             },
+                  "/api/v1/product/update":  {
+                                                 "post":  {
+                                                              "summary":  "更新商品信息",
+                                                              "tags":  [
+                                                                           "商品管理"
+                                                                       ],
+                                                              "parameters":  [
+                                                                                 {
+                                                                                     "name":  "product_id",
+                                                                                     "in":  "query",
+                                                                                     "description":  "商品 ID",
+                                                                                     "required":  true,
+                                                                                     "schema":  {
+                                                                                                    "type":  "integer"
+                                                                                                }
+                                                                                 }
+                                                                             ],
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "更新成功",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "404":  {
+                                                                                            "description":  "商品不存在",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                             },
+                  "/api/v1/product/delete":  {
+                                                 "post":  {
+                                                              "summary":  "删除商品",
+                                                              "tags":  [
+                                                                           "商品管理"
+                                                                       ],
+                                                              "parameters":  [
+                                                                                 {
+                                                                                     "name":  "product_id",
+                                                                                     "in":  "query",
+                                                                                     "description":  "商品 ID",
+                                                                                     "required":  true,
+                                                                                     "schema":  {
+                                                                                                    "type":  "integer"
+                                                                                                }
+                                                                                 }
+                                                                             ],
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "删除成功",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "404":  {
+                                                                                            "description":  "商品不存在",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                             },
+                  "/api/v1/device/list":  {
+                                              "post":  {
+                                                           "summary":  "获取设备列表",
+                                                           "tags":  [
+                                                                        "设备管理"
+                                                                    ],
+                                                           "responses":  {
+                                                                             "200":  {
+                                                                                         "description":  "返回设备列表",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     }
+                                                                         }
+                                                       }
+                                          },
+                  "/api/v1/device/info":  {
+                                              "post":  {
+                                                           "summary":  "获取设备详情",
+                                                           "tags":  [
+                                                                        "设备管理"
+                                                                    ],
+                                                           "parameters":  [
+                                                                              {
+                                                                                  "name":  "device_id",
+                                                                                  "in":  "query",
+                                                                                  "description":  "设备 ID",
+                                                                                  "required":  true,
+                                                                                  "schema":  {
+                                                                                                 "type":  "string"
+                                                                                             }
+                                                                              }
+                                                                          ],
+                                                           "responses":  {
+                                                                             "200":  {
+                                                                                         "description":  "返回设备详情",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     },
+                                                                             "404":  {
+                                                                                         "description":  "设备不存在",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     }
+                                                                         }
+                                                       }
+                                          },
+                  "/api/v1/device/bind":  {
+                                              "post":  {
+                                                           "summary":  "绑定设备到商户",
+                                                           "tags":  [
+                                                                        "设备管理"
+                                                                    ],
+                                                           "responses":  {
+                                                                             "200":  {
+                                                                                         "description":  "绑定成功",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     },
+                                                                             "400":  {
+                                                                                         "description":  "参数错误或设备已被绑定",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     }
+                                                                         }
+                                                       }
+                                          },
+                  "/api/v1/device/unbind":  {
+                                                "post":  {
+                                                             "summary":  "解绑设备",
+                                                             "tags":  [
+                                                                          "设备管理"
+                                                                      ],
+                                                             "responses":  {
+                                                                               "200":  {
+                                                                                           "description":  "解绑成功",
+                                                                                           "content":  {
+                                                                                                           "application/json":  {
+                                                                                                                                    "schema":  {
+                                                                                                                                                   "type":  "object"
+                                                                                                                                               }
+                                                                                                                                }
+                                                                                                       }
+                                                                                       }
+                                                                           }
+                                                         }
+                                            },
+                  "/api/v1/device/ota":  {
+                                             "post":  {
+                                                          "summary":  "触发设备 OTA 升级",
+                                                          "tags":  [
+                                                                       "设备管理"
+                                                                   ],
+                                                          "responses":  {
+                                                                            "200":  {
+                                                                                        "description":  "OTA 升级任务已触发",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    }
+                                                                        }
+                                                      }
+                                         },
+                  "/api/v1/device/status_report":  {
+                                                       "post":  {
+                                                                    "summary":  "设备状态上报",
+                                                                    "description":  "设备端上报运行状态，服务端记录并分析",
+                                                                    "tags":  [
+                                                                                 "设备管理"
+                                                                             ],
+                                                                    "responses":  {
+                                                                                      "200":  {
+                                                                                                  "description":  "上报成功",
+                                                                                                  "content":  {
+                                                                                                                  "application/json":  {
+                                                                                                                                           "schema":  {
+                                                                                                                                                          "type":  "object"
+                                                                                                                                                      }
+                                                                                                                                       }
+                                                                                                              }
+                                                                                              }
+                                                                                  }
+                                                                }
+                                                   },
+                  "/api/v1/order/list":  {
+                                             "post":  {
+                                                          "summary":  "获取订单列表",
+                                                          "tags":  [
+                                                                       "订单管理"
+                                                                   ],
+                                                          "responses":  {
+                                                                            "200":  {
+                                                                                        "description":  "返回订单列表",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    }
+                                                                        }
+                                                      }
+                                         },
+                  "/api/v1/order/info":  {
+                                             "post":  {
+                                                          "summary":  "获取订单详情",
+                                                          "tags":  [
+                                                                       "订单管理"
+                                                                   ],
+                                                          "parameters":  [
+                                                                             {
+                                                                                 "name":  "order_id",
+                                                                                 "in":  "query",
+                                                                                 "description":  "订单 ID",
+                                                                                 "required":  true,
+                                                                                 "schema":  {
+                                                                                                "type":  "integer"
+                                                                                            }
+                                                                             }
+                                                                         ],
+                                                          "responses":  {
+                                                                            "200":  {
+                                                                                        "description":  "返回订单详情",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    },
+                                                                            "404":  {
+                                                                                        "description":  "订单不存在",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    }
+                                                                        }
+                                                      }
+                                         },
+                  "/api/v1/order/create":  {
+                                               "post":  {
+                                                            "summary":  "创建订单",
+                                                            "tags":  [
+                                                                         "订单管理"
+                                                                     ],
+                                                            "responses":  {
+                                                                              "200":  {
+                                                                                          "description":  "创建成功",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      },
+                                                                              "400":  {
+                                                                                          "description":  "参数错误",
+                                                                                          "content":  {
+                                                                                                          "application/json":  {
+                                                                                                                                   "schema":  {
+                                                                                                                                                  "type":  "object"
+                                                                                                                                              }
+                                                                                                                               }
+                                                                                                      }
+                                                                                      }
+                                                                          }
+                                                        }
+                                           },
+                  "/api/v1/file/upload":  {
+                                              "post":  {
+                                                           "summary":  "文件上传（Base64）",
+                                                           "description":  "通过 Base64 编码上传文件",
+                                                           "tags":  [
+                                                                        "文件上传"
+                                                                    ],
+                                                           "responses":  {
+                                                                             "200":  {
+                                                                                         "description":  "上传成功，返回文件 URL",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     },
+                                                                             "400":  {
+                                                                                         "description":  "参数错误或文件类型不允许",
+                                                                                         "content":  {
+                                                                                                         "application/json":  {
+                                                                                                                                  "schema":  {
+                                                                                                                                                 "type":  "object"
+                                                                                                                                             }
+                                                                                                                              }
+                                                                                                     }
+                                                                                     }
+                                                                         }
+                                                       }
+                                          },
+                  "/api/v1/file/upload_multipart":  {
+                                                        "post":  {
+                                                                     "summary":  "文件上传（Multipart）",
+                                                                     "description":  "通过 multipart/form-data 上传文件",
+                                                                     "tags":  [
+                                                                                  "文件上传"
+                                                                              ],
+                                                                     "responses":  {
+                                                                                       "200":  {
+                                                                                                   "description":  "上传成功，返回文件 URL",
+                                                                                                   "content":  {
+                                                                                                                   "application/json":  {
+                                                                                                                                            "schema":  {
+                                                                                                                                                           "type":  "object"
+                                                                                                                                                       }
+                                                                                                                                        }
+                                                                                                               }
+                                                                                               },
+                                                                                       "400":  {
+                                                                                                   "description":  "参数错误或文件类型不允许",
+                                                                                                   "content":  {
+                                                                                                                   "application/json":  {
+                                                                                                                                            "schema":  {
+                                                                                                                                                           "type":  "object"
+                                                                                                                                                       }
+                                                                                                                                        }
+                                                                                                               }
+                                                                                               }
+                                                                                   }
+                                                                 }
+                                                    },
+                  "/api/v1/file/upload_enhanced":  {
+                                                       "post":  {
+                                                                    "summary":  "文件上传（增强）",
+                                                                    "description":  "v1.8.0 增强上传端点，支持大小限制校验与多存储后端",
+                                                                    "tags":  [
+                                                                                 "文件上传"
+                                                                             ],
+                                                                    "responses":  {
+                                                                                      "200":  {
+                                                                                                  "description":  "上传成功，返回文件 URL 与元信息",
+                                                                                                  "content":  {
+                                                                                                                  "application/json":  {
+                                                                                                                                           "schema":  {
+                                                                                                                                                          "type":  "object"
+                                                                                                                                                      }
+                                                                                                                                       }
+                                                                                                              }
+                                                                                              },
+                                                                                      "400":  {
+                                                                                                  "description":  "参数错误或文件类型不允许",
+                                                                                                  "content":  {
+                                                                                                                  "application/json":  {
+                                                                                                                                           "schema":  {
+                                                                                                                                                          "type":  "object"
+                                                                                                                                                      }
+                                                                                                                                       }
+                                                                                                              }
+                                                                                              },
+                                                                                      "413":  {
+                                                                                                  "description":  "文件超过大小限制",
+                                                                                                  "content":  {
+                                                                                                                  "application/json":  {
+                                                                                                                                           "schema":  {
+                                                                                                                                                          "type":  "object"
+                                                                                                                                                      }
+                                                                                                                                       }
+                                                                                                              }
+                                                                                              }
+                                                                                  }
+                                                                }
+                                                   },
+                  "/api/v1/plugin/install":  {
+                                                 "post":  {
+                                                              "summary":  "安装插件",
+                                                              "description":  "v1.9.0 插件市场：安装插件包",
+                                                              "tags":  [
+                                                                           "插件市场"
+                                                                       ],
+                                                              "responses":  {
+                                                                                "200":  {
+                                                                                            "description":  "插件安装成功",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        },
+                                                                                "400":  {
+                                                                                            "description":  "参数错误",
+                                                                                            "content":  {
+                                                                                                            "application/json":  {
+                                                                                                                                     "schema":  {
+                                                                                                                                                    "type":  "object"
+                                                                                                                                                }
+                                                                                                                                 }
+                                                                                                        }
+                                                                                        }
+                                                                            }
+                                                          }
+                                             },
+                  "/api/v1/plugin/uninstall":  {
+                                                   "post":  {
+                                                                "summary":  "卸载插件",
+                                                                "description":  "v1.9.0 插件市场：卸载插件",
+                                                                "tags":  [
+                                                                             "插件市场"
+                                                                         ],
+                                                                "responses":  {
+                                                                                  "200":  {
+                                                                                              "description":  "插件卸载成功",
+                                                                                              "content":  {
+                                                                                                              "application/json":  {
+                                                                                                                                       "schema":  {
+                                                                                                                                                      "type":  "object"
+                                                                                                                                                  }
+                                                                                                                                   }
+                                                                                                          }
+                                                                                          },
+                                                                                  "400":  {
+                                                                                              "description":  "参数错误",
+                                                                                              "content":  {
+                                                                                                              "application/json":  {
+                                                                                                                                       "schema":  {
+                                                                                                                                                      "type":  "object"
+                                                                                                                                                  }
+                                                                                                                                   }
+                                                                                                          }
+                                                                                          }
+                                                                              }
+                                                            }
+                                               },
+                  "/api/v1/plugin/list":  {
+                                              "get":  {
+                                                          "summary":  "插件列表",
+                                                          "description":  "v1.9.0 插件市场：列出已安装插件",
+                                                          "tags":  [
+                                                                       "插件市场"
+                                                                   ],
+                                                          "responses":  {
+                                                                            "200":  {
+                                                                                        "description":  "插件列表",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    },
+                                                                            "400":  {
+                                                                                        "description":  "参数错误",
+                                                                                        "content":  {
+                                                                                                        "application/json":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                    }
+                                                                                    }
+                                                                        }
+                                                      }
+                                          },
+                  "/graphql":  {
+                                   "post":  {
+                                                "summary":  "GraphQL 查询端点",
+                                                "description":  "v1.8.0 GraphQL 端点，支持 Query 和 Mutation",
+                                                "tags":  [
+                                                             "GraphQL"
+                                                         ],
+                                                "responses":  {
+                                                                  "200":  {
+                                                                              "description":  "GraphQL 响应",
+                                                                              "content":  {
+                                                                                              "application/json":  {
+                                                                                                                       "schema":  {
+                                                                                                                                      "type":  "object"
+                                                                                                                                  }
+                                                                                                                   }
+                                                                                          }
+                                                                          },
+                                                                  "400":  {
+                                                                              "description":  "GraphQL 语法错误",
+                                                                              "content":  {
+                                                                                              "application/json":  {
+                                                                                                                       "schema":  {
+                                                                                                                                      "type":  "object"
+                                                                                                                                  }
+                                                                                                                   }
+                                                                                          }
+                                                                          }
+                                                              }
+                                            }
+                               },
+                  "/ws":  {
+                              "get":  {
+                                          "summary":  "WebSocket 连接端点",
+                                          "description":  "v1.8.0 WebSocket 端点，用于设备实时通信与心跳",
+                                          "tags":  [
+                                                       "WebSocket"
+                                                   ],
+                                          "responses":  {
+                                                            "101":  {
+                                                                        "description":  "切换到 WebSocket 协议"
+                                                                    }
+                                                        }
+                                      }
+                          },
+                  "/events":  {
+                                  "get":  {
+                                              "summary":  "SSE 事件订阅端点",
+                                              "description":  "v1.8.0 Server-Sent Events 端点，支持 Last-Event-ID 恢复",
+                                              "tags":  [
+                                                           "SSE"
+                                                       ],
+                                              "responses":  {
+                                                                "200":  {
+                                                                            "description":  "SSE 事件流",
+                                                                            "content":  {
+                                                                                            "text/event-stream":  {
+                                                                                                                      "schema":  {
+                                                                                                                                     "type":  "object"
+                                                                                                                                 }
+                                                                                                                  }
+                                                                                        }
+                                                                        }
+                                                            }
+                                          }
+                              },
+                  "/api/v1/ai/chat":  {
+                                          "post":  {
+                                                       "summary":  "AI 对话端点",
+                                                       "description":  "v1.9.0 AI 对话端点（需配置 AI 服务密钥）",
+                                                       "tags":  [
+                                                                    "AI"
+                                                                ],
+                                                       "responses":  {
+                                                                         "200":  {
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "type":  "object"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 },
+                                                                                     "description":  "AI 对话响应"
+                                                                                 },
+                                                                         "400":  {
+                                                                                     "content":  {
+                                                                                                     "application/json":  {
+                                                                                                                              "schema":  {
+                                                                                                                                             "type":  "object"
+                                                                                                                                         }
+                                                                                                                          }
+                                                                                                 },
+                                                                                     "description":  "参数错误"
+                                                                                 }
+                                                                     }
+                                                   }
+                                      },
+                  "/api/v1/ai/embed":  {
+                                           "post":  {
+                                                        "summary":  "AI 向量化端点",
+                                                        "description":  "v1.9.0 AI Embedding 端点（需配置 AI 服务密钥）",
+                                                        "tags":  [
+                                                                     "AI"
+                                                                 ],
+                                                        "responses":  {
+                                                                          "200":  {
+                                                                                      "content":  {
+                                                                                                      "application/json":  {
+                                                                                                                               "schema":  {
+                                                                                                                                              "type":  "object"
+                                                                                                                                          }
+                                                                                                                           }
+                                                                                                  },
+                                                                                      "description":  "向量化响应"
+                                                                                  },
+                                                                          "400":  {
+                                                                                      "content":  {
+                                                                                                      "application/json":  {
+                                                                                                                               "schema":  {
+                                                                                                                                              "type":  "object"
+                                                                                                                                          }
+                                                                                                                           }
+                                                                                                  },
+                                                                                      "description":  "参数错误"
+                                                                                  }
+                                                                      }
+                                                    }
+                                       },
+                  "/api/v1/ai/stream":  {
+                                            "post":  {
+                                                         "summary":  "AI 流式对话端点",
+                                                         "description":  "v1.9.0 AI 流式对话端点（需配置 AI 服务密钥）",
+                                                         "tags":  [
+                                                                      "AI"
+                                                                  ],
+                                                         "responses":  {
+                                                                           "200":  {
+                                                                                       "content":  {
+                                                                                                       "text/event-stream":  {
+                                                                                                                                 "schema":  {
+                                                                                                                                                "type":  "object"
+                                                                                                                                            }
+                                                                                                                             }
+                                                                                                   },
+                                                                                       "description":  "SSE 事件流"
+                                                                                   },
+                                                                           "400":  {
+                                                                                       "content":  {
+                                                                                                       "application/json":  {
+                                                                                                                                "schema":  {
+                                                                                                                                               "type":  "object"
+                                                                                                                                           }
+                                                                                                                            }
+                                                                                                   },
+                                                                                       "description":  "参数错误"
+                                                                                   }
+                                                                       }
+                                                     }
+                                        },
+                  "/api/wasm/execute":  {
+                                            "post":  {
+                                                         "summary":  "WASM 模块执行端点",
+                                                         "description":  "v1.9.0 执行 WASM 模块函数",
+                                                         "tags":  [
+                                                                      "WASM"
+                                                                  ],
+                                                         "responses":  {
+                                                                           "200":  {
+                                                                                       "content":  {
+                                                                                                       "application/json":  {
+                                                                                                                                "schema":  {
+                                                                                                                                               "type":  "object"
+                                                                                                                                           }
+                                                                                                                            }
+                                                                                                   },
+                                                                                       "description":  "WASM 执行结果"
+                                                                                   },
+                                                                           "400":  {
+                                                                                       "content":  {
+                                                                                                       "application/json":  {
+                                                                                                                                "schema":  {
+                                                                                                                                               "type":  "object"
+                                                                                                                                           }
+                                                                                                                            }
+                                                                                                   },
+                                                                                       "description":  "参数错误"
+                                                                                   }
+                                                                       }
+                                                     }
+                                        },
+                  "/page/{template}":  {
+                                           "get":  {
+                                                       "summary":  "模板渲染端点",
+                                                       "description":  "v1.9.0 使用模板引擎渲染指定模板",
+                                                       "tags":  [
+                                                                    "视图模板"
+                                                                ],
+                                                       "responses":  {
+                                                                         "200":  {
+                                                                                     "content":  {
+                                                                                                     "text/html":  {
+                                                                                                                       "schema":  {
+                                                                                                                                      "type":  "object"
+                                                                                                                                  }
+                                                                                                                   }
+                                                                                                 },
+                                                                                     "description":  "渲染后的 HTML"
+                                                                                 },
+                                                                         "404":  {
+                                                                                     "content":  {
+                                                                                                     "text/html":  {
+                                                                                                                       "schema":  {
+                                                                                                                                      "type":  "object"
+                                                                                                                                  }
+                                                                                                                   }
+                                                                                                 },
+                                                                                     "description":  "模板不存在"
+                                                                                 }
+                                                                     }
+                                                   }
+                                       }
+              },
+    "components":  {
+                       "securitySchemes":  {
+                                               "BearerAuth":  {
+                                                                  "type":  "http",
+                                                                  "scheme":  "bearer",
+                                                                  "bearerFormat":  "JWT"
+                                                              }
+                                           }
+                   },
+    "tags":  [
+                 {
+                     "name":  "认证",
+                     "description":  "用户登录、令牌刷新、当前用户信息、退出登录"
+                 },
+                 {
+                     "name":  "商户管理",
+                     "description":  "商户的增删改查"
+                 },
+                 {
+                     "name":  "商品管理",
+                     "description":  "商品的增删改查"
+                 },
+                 {
+                     "name":  "设备管理",
+                     "description":  "设备绑定、解绑、OTA 升级、状态上报"
+                 },
+                 {
+                     "name":  "订单管理",
+                     "description":  "订单查询与创建"
+                 },
+                 {
+                     "name":  "文件上传",
+                     "description":  "文件与图片上传"
+                 },
+                 {
+                     "name":  "健康检查",
+                     "description":  "存活、就绪、启动探针与 Prometheus 指标"
+                 },
+                 {
+                     "name":  "GraphQL",
+                     "description":  "GraphQL 查询与变更端点"
+                 },
+                 {
+                     "name":  "WebSocket",
+                     "description":  "WebSocket 实时通信端点"
+                 },
+                 {
+                     "name":  "SSE",
+                     "description":  "Server-Sent Events 事件订阅端点"
+                 },
+                 {
+                     "name":  "AI",
+                     "description":  "AI 能力端点"
+                 },
+                 {
+                     "name":  "WASM",
+                     "description":  "WASM 执行端点"
+                 },
+                 {
+                     "name":  "视图模板",
+                     "description":  "模板渲染端点"
+                 }
+             ]
+}

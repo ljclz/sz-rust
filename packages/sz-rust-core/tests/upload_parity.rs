@@ -1798,14 +1798,15 @@ async fn test_r5_parity_hash_name_md5_substrate_split() {
 // 组 14：PHP 关键源码行为对齐（独立验证）
 // ============================================================================
 
-#[test]
-fn test_r5_parity_php_build_save_name_components_independence() {
+#[tokio::test]
+async fn test_r5_parity_php_build_save_name_components_independence() {
     // PHP buildSaveName 由 4 部分组成：Ymd / YmdHis / md5[5] / rand[4]
     // 验证：相同路径不同时间生成的 save_name 中 md5 一致但 Ymd/His 不同
     let path = Path::new("/tmp/independent.jpg");
 
     let name1 = build_save_name(path, "jpg");
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // SDET P1-3：std::thread::sleep → tokio::time::sleep（铁律 4）
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     let name2 = build_save_name(path, "jpg");
 
     let md5_1 = extract_md5_prefix(&name1).unwrap();

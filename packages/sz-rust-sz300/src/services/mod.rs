@@ -30,8 +30,12 @@ pub mod merchant_service;
 pub mod mqtt_listener;
 /// MQTT 业务服务模块
 pub mod mqtt_service;
+/// 订单号生成（2026-10-28 修复秒级订单号碰撞）
+pub mod order_no;
 /// 订单服务模块（封装订单 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod order_service;
+/// 事务性 Outbox 投递端（2026-10-28 修复订单/事件双写不一致）
+pub mod outbox;
 /// v1.9.0 插件管理器（spec §5.10）
 #[cfg(feature = "v19-plugin-flow")]
 pub mod plugin_manager;
@@ -140,4 +144,43 @@ fn value_to_json_ref(v: &Value) -> serde_json::Value {
         // non_exhaustive 通配符：未来新增变体回退为 Null（对齐 sz-orm-core 行为）
         _ => serde_json::Value::Null,
     }
+}
+
+/// 敏感信息脱敏（operate_log.detail 等自由文本落库前调用）
+///
+/// 掩码规则：中国大陆手机号（11 位数字）→ `138****5678`；
+/// 18 位身份证 → `110***********1234`。
+/// 2026-10-28 从 `mqtt_service` 提取到服务层公共位置，供审计中间件等复用。
+pub fn redact_sensitive(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        // 手机号：1[3-9] 开头共 11 位
+        if i + 11 <= chars.len()
+            && chars[i] == '1'
+            && chars.get(i + 1).is_some_and(|c| matches!(c, '3'..='9'))
+            && chars[i..i + 11].iter().all(|c| c.is_ascii_digit())
+        {
+            out.push_str(&chars[i..i + 3].iter().collect::<String>());
+            out.push_str("****");
+            out.push_str(&chars[i + 7..i + 11].iter().collect::<String>());
+            i += 11;
+            continue;
+        }
+        // 身份证：18 位（前 17 位数字 + 末位数字/X）
+        if i + 18 <= chars.len()
+            && chars[i..i + 17].iter().all(|c| c.is_ascii_digit())
+            && matches!(chars[i + 17], '0'..='9' | 'X' | 'x')
+        {
+            out.push_str(&chars[i..i + 3].iter().collect::<String>());
+            out.push_str("***********");
+            out.push_str(&chars[i + 14..i + 18].iter().collect::<String>());
+            i += 18;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }

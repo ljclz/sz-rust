@@ -111,7 +111,17 @@ impl TccOrchestrator {
         participants: Vec<TccParticipant>,
         payload: Value,
     ) -> Result<TccResult, DtxError> {
-        let tx_id = format!("tcc-{}", chrono::Utc::now().timestamp_millis());
+        let tx_id = crate::next_tx_id("tcc");
+        self.execute_with_tx_id(participants, payload, tx_id).await
+    }
+
+    /// 使用指定事务 ID 执行 TCC 事务
+    pub async fn execute_with_tx_id(
+        &self,
+        participants: Vec<TccParticipant>,
+        payload: Value,
+        tx_id: String,
+    ) -> Result<TccResult, DtxError> {
         let mut current_payload = payload;
         let mut results: Vec<ParticipantResult> = Vec::with_capacity(participants.len());
         let mut try_succeeded: Vec<usize> = Vec::new();
@@ -166,6 +176,7 @@ impl TccOrchestrator {
         results: &mut Vec<ParticipantResult>,
         payload: &mut Value,
     ) -> Result<TccResult, DtxError> {
+        let mut confirmed: Vec<usize> = Vec::new();
         for (idx, p) in participants.iter().enumerate() {
             match self
                 .run_with_timeout(p.confirm_action.as_ref(), payload)
@@ -174,16 +185,30 @@ impl TccOrchestrator {
                 Ok(output) => {
                     *payload = output;
                     results[idx].confirm_success = Some(true);
+                    confirmed.push(idx);
                 }
                 Err(e) => {
                     warn!(tx_id = %tx_id, participant = %p.participant_id, error = %e, "confirm failed");
                     results[idx].confirm_success = Some(false);
                     results[idx].error = Some(e.to_string());
 
-                    let succeeded: Vec<usize> = (0..=idx).collect();
-                    return self
-                        .execute_cancel(tx_id, participants, &succeeded, results, payload)
-                        .await;
+                    // 只回滚 Try 成功且 Confirm 尚未成功的参与者：
+                    // 已 Confirm 的参与者资源已提交，回滚会破坏一致性。
+                    let to_cancel: Vec<usize> = results
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| r.try_success && r.confirm_success != Some(true))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let mut outcome = self
+                        .execute_cancel(tx_id, participants, &to_cancel, results, payload)
+                        .await?;
+                    // 部分参与者已提交且无法回滚 → 需要人工介入，不能标记为已取消
+                    if !confirmed.is_empty() {
+                        outcome.phase = TccPhase::Failed;
+                        outcome.success = false;
+                    }
+                    return Ok(outcome);
                 }
             }
         }
@@ -367,7 +392,63 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
-        assert_eq!(result.phase, TccPhase::Cancelled);
+        // p1 已完成 Confirm（资源已提交），无法整体回滚 → 需人工介入
+        assert_eq!(result.phase, TccPhase::Failed);
+    }
+
+    #[tokio::test]
+    async fn test_tcc_confirm_fail_cancels_only_unconfirmed() {
+        let cancel1 = Arc::new(AtomicUsize::new(0));
+        let cancel2 = Arc::new(AtomicUsize::new(0));
+        let participants = vec![
+            TccParticipant::new(
+                "p1",
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(cancel1.clone(), false),
+            ),
+            TccParticipant::new(
+                "p2",
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(Arc::new(AtomicUsize::new(0)), true),
+                make_action(cancel2.clone(), false),
+            ),
+        ];
+
+        let result = TccOrchestrator::new()
+            .execute(participants, Value::Null)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert_eq!(
+            cancel1.load(Ordering::SeqCst),
+            0,
+            "已 Confirm 的参与者不得回滚"
+        );
+        assert_eq!(
+            cancel2.load(Ordering::SeqCst),
+            1,
+            "Confirm 失败的参与者需要回滚预留资源"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tcc_tx_id_unique_under_concurrency() {
+        let mut ids = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let ids_vec = vec![TccParticipant::new(
+                "p1",
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+            )];
+            let r = TccOrchestrator::new()
+                .execute(ids_vec, Value::Null)
+                .await
+                .unwrap();
+            assert!(ids.insert(r.tx_id));
+        }
     }
 
     #[tokio::test]

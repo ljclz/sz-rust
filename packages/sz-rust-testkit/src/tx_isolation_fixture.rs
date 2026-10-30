@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 事务隔离测试夹具（v1.5.0 P1-4）
 //!
 //! 每个测试在独立事务中执行，结束后自动回滚，确保测试间无状态共享（spec 5.4.5）。

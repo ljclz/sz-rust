@@ -73,6 +73,17 @@ members = [
     "packages/sz-rust-monitor-panel",
     "packages/sz-rust-codegen-ui",
 
+    # v2.0.0 合并企业版（AI 时代单一版本，2026-10-25）新增 crate
+    "packages/sz-rust-addons-cms",
+    "packages/sz-rust-addons-crm",
+    "packages/sz-rust-addons-ecommerce",
+    "packages/sz-rust-addons-erp",
+    "packages/sz-rust-addons-forum",
+    "packages/sz-rust-addons-im",
+    "packages/sz-rust-addons-operate",
+    "packages/sz-rust-sdd",
+    "packages/sz-rust-migration",
+
 ]
 
 [package]
@@ -92,7 +103,7 @@ categories.workspace = true
 workspace = true
 
 [workspace.package]
-version = "1.7.0"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -116,7 +127,7 @@ async-trait = "0.1"
 askama = "0.12"
 futures = "0.3"
 # tokio 工具集 + CPU 核数探测
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
 num_cpus = "1"
 
 # Web 框架（axum 0.8.9 + tower 0.5 + hyper 1.x）
@@ -212,6 +223,8 @@ ab_glyph = "0.2"
 
 # 二维码生成（对齐 PHP endroid/qr-code）
 qrcode = "0.14"
+# 二维码解码验证（生成→解码闭环；rqrr 0.10.x MSRV 1.64，兼容 workspace 1.81，无 exr 传递链，见 ADR-042）
+rqrr = "0.10"
 
 # Excel/PDF 处理（对齐 PHP phpspreadsheet + mikehaertl/php-pdftk）
 rust_xlsxwriter = "0.79"
@@ -232,81 +245,96 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，从 crates.io 拉取）
-# 2026-09-26 全量对齐 9.0.0（sz-orm v9.0.0 覆盖率战役交付）
-sz-orm-core = "9.4.0"
-sz-orm-auth = "9.4.0"
-sz-orm-storage = "9.4.0"
-sz-orm-queue = "9.4.0"
-sz-orm-mqtt = "9.4.0"
-sz-orm-websocket = "9.4.0"
-sz-orm-scheduler = "9.4.0"
-sz-orm-tracing = "9.4.0"
-sz-orm-logger = "9.4.0"
-sz-orm-limit = "9.4.0"
-sz-orm-config = "9.4.0"
-sz-orm-macros = "9.4.0"
-sz-orm-sql-validator = "9.4.0"
-sz-orm-sqlx = "9.4.0"
+# 内部依赖（SZ-ORM 全家桶，本地 path 10.12.0）
+# 2026-10-14 统一到本地 path（v10.3.0-fix 起）；2026-10-28 对齐 sz-orm 10.13.0。
+# 可复现性契约：兄弟仓库 HEAD 必须等于 .sz-orm-commit，由
+# scripts/audit/dependency-reproducibility.py 在 CI 中强制校验。
+sz-orm-core = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-core" }
+sz-orm-auth = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-auth" }
+sz-orm-storage = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-storage" }
+sz-orm-queue = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-queue" }
+sz-orm-mqtt = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-mqtt" }
+sz-orm-websocket = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-websocket" }
+sz-orm-scheduler = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-scheduler" }
+sz-orm-tracing = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-tracing" }
+sz-orm-logger = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-logger" }
+sz-orm-limit = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-limit" }
+sz-orm-config = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-config" }
+sz-orm-macros = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-macros" }
+sz-orm-sql-validator = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-sql-validator" }
+sz-orm-sqlx = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-sqlx" }
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
-sz-orm-query-builder = "9.4.0"
-sz-orm-graphql = "9.4.0"
-sz-orm-grpc = "9.4.0"
+sz-orm-query-builder = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-query-builder" }
+sz-orm-graphql = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-graphql" }
+sz-orm-grpc = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-grpc" }
+sz-orm-mssql = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-mssql" }
+sz-orm-oracle = { version = "10.13.0", path = "../sz-orm/packages/sz-orm-oracle" }
 
 # 内部依赖（SZ-Rust 自身）
-sz-rust-core = { version = "1.4.0", path = "packages/sz-rust-core" }
-sz-rust-orm-facade = { version = "1.4.0", path = "packages/sz-rust-orm-facade" }
-sz-rust-http-facade = { version = "1.4.0", path = "packages/sz-rust-http-facade" }
-sz-rust-cache-facade = { version = "1.4.0", path = "packages/sz-rust-cache-facade" }
-sz-rust-state-facade = { version = "1.4.0", path = "packages/sz-rust-state-facade" }
-sz-rust-infra-facade = { version = "1.4.0", path = "packages/sz-rust-infra-facade" }
-sz-rust-auth-facade = { version = "1.4.0", path = "packages/sz-rust-auth-facade" }
-sz-rust-pay-facade = { version = "1.4.0", path = "packages/sz-rust-pay-facade" }
-sz-rust-orm-ext-facade = { version = "1.4.0", path = "packages/sz-rust-orm-ext-facade" }
-sz-rust-router-facade = { version = "1.4.0", path = "packages/sz-rust-router-facade" }
-sz-rust-middleware-facade = { version = "1.4.0", path = "packages/sz-rust-middleware-facade" }
-sz-rust-mvc-facade = { version = "1.4.0", path = "packages/sz-rust-mvc-facade" }
-sz-rust-mcp = { version = "1.4.0", path = "packages/sz-rust-mcp" }
-sz-rust-macros = { version = "1.4.0", path = "packages/sz-rust-macros" }
-sz-rust-addons-loader = { version = "1.4.0", path = "packages/sz-rust-addons-loader" }
-sz-rust-observability = { version = "1.4.0", path = "packages/sz-rust-observability" }
-sz-rust-cli = { version = "1.4.0", path = "packages/sz-rust-cli" }
-sz-rust-ai-facade = { version = "1.4.0", path = "packages/sz-rust-ai-facade" }
-sz-rust-capability = { version = "1.4.0", path = "packages/sz-rust-capability" }
-sz-rust-rag = { version = "1.4.0", path = "packages/sz-rust-rag" }
-sz-rust-frontend-codegen = { version = "1.4.0", path = "packages/sz-rust-frontend-codegen" }
-sz-rust-tracing = { version = "1.4.0", path = "packages/sz-rust-tracing" }
-sz-rust-pdf = { version = "1.4.0", path = "packages/sz-rust-pdf" }
-sz-rust-workflow = { version = "1.4.0", path = "packages/sz-rust-workflow" }
-sz-rust-wasm = { version = "1.4.0", path = "packages/sz-rust-wasm" }
-sz-rust-vector-db = { version = "1.4.0", path = "packages/sz-rust-vector-db" }
-sz-rust-marketplace = { version = "1.4.0", path = "packages/sz-rust-marketplace" }
-sz-rust-visual = { version = "1.4.0", path = "packages/sz-rust-visual" }
-sz-rust-addons-admin = { version = "1.4.0", path = "packages/sz-rust-addons-admin" }
-sz-rust-facade = { version = "1.4.0", path = "packages/sz-rust-facade" }
-sz-rust-config-center = { version = "1.4.0", path = "packages/sz-rust-config-center" }
-sz-rust-service-registry = { version = "1.4.0", path = "packages/sz-rust-service-registry" }
-sz-rust-distributed-tx = { version = "1.4.0", path = "packages/sz-rust-distributed-tx" }
-sz-rust-api-gateway = { version = "1.4.0", path = "packages/sz-rust-api-gateway" }
-sz-rust-ops-api = { version = "1.4.0", path = "packages/sz-rust-ops-api" }
-sz-rust-sz300 = { version = "1.4.0", path = "packages/sz-rust-sz300" }
+sz-rust-core = { version = "2.0.0", path = "packages/sz-rust-core" }
+sz-rust-orm-facade = { version = "2.0.0", path = "packages/sz-rust-orm-facade" }
+sz-rust-http-facade = { version = "2.0.0", path = "packages/sz-rust-http-facade" }
+sz-rust-cache-facade = { version = "2.0.0", path = "packages/sz-rust-cache-facade" }
+sz-rust-state-facade = { version = "2.0.0", path = "packages/sz-rust-state-facade" }
+sz-rust-infra-facade = { version = "2.0.0", path = "packages/sz-rust-infra-facade" }
+sz-rust-auth-facade = { version = "2.0.0", path = "packages/sz-rust-auth-facade" }
+sz-rust-pay-facade = { version = "2.0.0", path = "packages/sz-rust-pay-facade" }
+sz-rust-orm-ext-facade = { version = "2.0.0", path = "packages/sz-rust-orm-ext-facade" }
+sz-rust-router-facade = { version = "2.0.0", path = "packages/sz-rust-router-facade" }
+sz-rust-middleware-facade = { version = "2.0.0", path = "packages/sz-rust-middleware-facade" }
+sz-rust-mvc-facade = { version = "2.0.0", path = "packages/sz-rust-mvc-facade" }
+sz-rust-mcp = { version = "2.0.0", path = "packages/sz-rust-mcp" }
+sz-rust-macros = { version = "2.0.0", path = "packages/sz-rust-macros" }
+sz-rust-addons-loader = { version = "2.0.0", path = "packages/sz-rust-addons-loader" }
+sz-rust-observability = { version = "2.0.0", path = "packages/sz-rust-observability" }
+sz-rust-cli = { version = "2.0.0", path = "packages/sz-rust-cli" }
+sz-rust-ai-facade = { version = "2.0.0", path = "packages/sz-rust-ai-facade" }
+sz-rust-capability = { version = "2.0.0", path = "packages/sz-rust-capability" }
+sz-rust-rag = { version = "2.0.0", path = "packages/sz-rust-rag" }
+sz-rust-frontend-codegen = { version = "2.0.0", path = "packages/sz-rust-frontend-codegen" }
+sz-rust-tracing = { version = "2.0.0", path = "packages/sz-rust-tracing" }
+sz-rust-pdf = { version = "2.0.0", path = "packages/sz-rust-pdf" }
+sz-rust-workflow = { version = "2.0.0", path = "packages/sz-rust-workflow" }
+sz-rust-wasm = { version = "2.0.0", path = "packages/sz-rust-wasm" }
+sz-rust-vector-db = { version = "2.0.0", path = "packages/sz-rust-vector-db" }
+sz-rust-marketplace = { version = "2.0.0", path = "packages/sz-rust-marketplace" }
+sz-rust-visual = { version = "2.0.0", path = "packages/sz-rust-visual" }
+sz-rust-addons-admin = { version = "2.0.0", path = "packages/sz-rust-addons-admin" }
+sz-rust-facade = { version = "2.0.0", path = "packages/sz-rust-facade" }
+sz-rust-config-center = { version = "2.0.0", path = "packages/sz-rust-config-center" }
+sz-rust-service-registry = { version = "2.0.0", path = "packages/sz-rust-service-registry" }
+sz-rust-distributed-tx = { version = "2.0.0", path = "packages/sz-rust-distributed-tx" }
+sz-rust-api-gateway = { version = "2.0.0", path = "packages/sz-rust-api-gateway" }
+sz-rust-ops-api = { version = "2.0.0", path = "packages/sz-rust-ops-api" }
+sz-rust-sz300 = { version = "2.0.0", path = "packages/sz-rust-sz300" }
 
 # v1.7.0 新增 crate
-sz-rust-i18n = { version = "1.7.0", path = "packages/sz-rust-i18n" }
-sz-rust-plugin-sdk = { version = "1.7.0", path = "packages/sz-rust-plugin-sdk" }
-sz-rust-pipeline = { version = "1.7.0", path = "packages/sz-rust-pipeline" }
-sz-rust-zerocopy = { version = "1.7.0", path = "packages/sz-rust-zerocopy" }
-sz-rust-benchmark-suite = { version = "1.7.0", path = "packages/sz-rust-benchmark-suite" }
-sz-rust-alert-engine = { version = "1.7.0", path = "packages/sz-rust-alert-engine" }
-sz-rust-log-aggregator = { version = "1.7.0", path = "packages/sz-rust-log-aggregator" }
-sz-rust-data-mask = { version = "1.7.0", path = "packages/sz-rust-data-mask" }
-sz-rust-key-rotation = { version = "1.7.0", path = "packages/sz-rust-key-rotation" }
-sz-rust-security-headers = { version = "1.7.0", path = "packages/sz-rust-security-headers" }
-sz-rust-websocket = { version = "1.7.0", path = "packages/sz-rust-websocket" }
-sz-rust-upload = { version = "1.7.0", path = "packages/sz-rust-upload" }
-sz-rust-admin-ui = { version = "1.7.0", path = "packages/sz-rust-admin-ui" }
-sz-rust-monitor-panel = { version = "1.7.0", path = "packages/sz-rust-monitor-panel" }
-sz-rust-codegen-ui = { version = "1.7.0", path = "packages/sz-rust-codegen-ui" }
+sz-rust-i18n = { version = "2.0.0", path = "packages/sz-rust-i18n" }
+sz-rust-plugin-sdk = { version = "2.0.0", path = "packages/sz-rust-plugin-sdk" }
+sz-rust-pipeline = { version = "2.0.0", path = "packages/sz-rust-pipeline" }
+sz-rust-zerocopy = { version = "2.0.0", path = "packages/sz-rust-zerocopy" }
+sz-rust-benchmark-suite = { version = "2.0.0", path = "packages/sz-rust-benchmark-suite" }
+sz-rust-alert-engine = { version = "2.0.0", path = "packages/sz-rust-alert-engine" }
+sz-rust-log-aggregator = { version = "2.0.0", path = "packages/sz-rust-log-aggregator" }
+sz-rust-data-mask = { version = "2.0.0", path = "packages/sz-rust-data-mask" }
+sz-rust-key-rotation = { version = "2.0.0", path = "packages/sz-rust-key-rotation" }
+sz-rust-security-headers = { version = "2.0.0", path = "packages/sz-rust-security-headers" }
+sz-rust-websocket = { version = "2.0.0", path = "packages/sz-rust-websocket" }
+sz-rust-upload = { version = "2.0.0", path = "packages/sz-rust-upload" }
+sz-rust-admin-ui = { version = "2.0.0", path = "packages/sz-rust-admin-ui" }
+sz-rust-monitor-panel = { version = "2.0.0", path = "packages/sz-rust-monitor-panel" }
+sz-rust-codegen-ui = { version = "2.0.0", path = "packages/sz-rust-codegen-ui" }
+
+# v2.0.0 合并企业版（AI 时代单一版本，2026-10-25）新增 crate
+sz-rust-addons-cms = { version = "2.0.0", path = "packages/sz-rust-addons-cms" }
+sz-rust-addons-crm = { version = "2.0.0", path = "packages/sz-rust-addons-crm" }
+sz-rust-addons-ecommerce = { version = "2.0.0", path = "packages/sz-rust-addons-ecommerce" }
+sz-rust-addons-erp = { version = "2.0.0", path = "packages/sz-rust-addons-erp" }
+sz-rust-addons-forum = { version = "2.0.0", path = "packages/sz-rust-addons-forum" }
+sz-rust-addons-im = { version = "2.0.0", path = "packages/sz-rust-addons-im" }
+sz-rust-addons-operate = { version = "2.0.0", path = "packages/sz-rust-addons-operate" }
+sz-rust-sdd = { version = "2.0.0", path = "packages/sz-rust-sdd" }
+sz-rust-migration = { version = "2.0.0", path = "packages/sz-rust-migration" }
 
 # 密码哈希（sz300 业务应用）
 bcrypt = "0.16"
@@ -346,8 +374,6 @@ tera = "1.20"
 dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 
 # ── v1.7.0 新增外部依赖 ──
-rkyv = "0.8"
-zerocopy = "0.8"
 dashmap = "6"
 
 # ── Feature Gate 细化（v1.4.0 T02）──
@@ -501,7 +527,9 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+# 2026-10-28 P1-1：panic 必须为 unwind，否则 panic_guard 的 catch_unwind 失效——
+# 单个请求中的 panic 会导致整个进程 abort（拒绝服务）。abort 仅省下少量 unwind 表体积。
+panic = "unwind"
 # 启用算术溢出检查（生产安全要求：溢出属于未定义行为，应 fail-fast 而非静默回绕）
 overflow-checks = true
 

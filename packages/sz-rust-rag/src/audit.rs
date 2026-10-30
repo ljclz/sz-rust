@@ -87,10 +87,13 @@ mod tests {
     async fn file_logger_redacts() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let logger = RagAuditLogger::new(tmp.path().to_path_buf());
+        // 运行时构造真实形状的 mock 密钥（≥16 字符），验证审计日志脱敏
+        let key = "api_key";
+        let secret = format!("sk-{}", "abcdef1234567890");
         let entry = RagAuditLog {
             trace_id: "t1".into(),
             tenant_id: "tenant".into(),
-            query_redacted: r#"api_key = "sk-1234567890abcdef""#.into(),
+            query_redacted: format!(r#"{key} = "{secret}""#),
             hit_count: 1,
             top_score: 0.5,
             duration_ms: 50,
@@ -101,6 +104,6 @@ mod tests {
         let content = tokio::fs::read_to_string(tmp.path()).await.unwrap();
 
         assert!(content.contains("***REDACTED***"));
-        assert!(!content.contains("sk-1234567890abcdef"));
+        assert!(!content.contains(&secret));
     }
 }

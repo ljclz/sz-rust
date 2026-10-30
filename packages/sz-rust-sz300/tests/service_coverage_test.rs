@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 服务层覆盖集成测试文件，含 mock 凭据字面量（CWE-798 误报，整文件豁免）
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! P1-TEST-03 服务层 & 控制器层覆盖集成测试
@@ -18,6 +20,8 @@ use sz_rust_sz300::state::AppState;
 use sz_rust_sz300::{config, db, services};
 use tokio::sync::Mutex;
 
+mod common;
+
 /// 全局序列化锁：所有 ignored 集成测试共享同一真实 MySQL，
 /// 并行 DROP/CREATE 同名表会冲突，故串行执行。
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -32,7 +36,7 @@ fn mysql_test_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -66,6 +70,7 @@ async fn ensure_mysql() -> Option<Pool> {
 async fn make_app_state(pool: Pool) -> AppState {
     AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -76,6 +81,8 @@ async fn make_app_state(pool: Pool) -> AppState {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -101,92 +108,30 @@ async fn make_app_state(pool: Pool) -> AppState {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 
+/// 建表：执行生产迁移（不再手写 DDL —— 手写 Schema 与生产分叉是测试失真的根因）
 async fn setup_device_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute(
-        "CREATE TABLE device (\
-         device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         device_sn VARCHAR(64) NOT NULL UNIQUE,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         status INT NOT NULL DEFAULT 0,\
-         signal_strength INT NOT NULL DEFAULT 0,\
-         fw_version VARCHAR(32) NOT NULL DEFAULT '',\
-         bind_at DATETIME NULL,\
-         last_online_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 device 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn setup_ota_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
-    conn.execute(
-        "CREATE TABLE ota_version (\
-         ota_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         version VARCHAR(32) NOT NULL,\
-         model VARCHAR(64) NOT NULL DEFAULT '',\
-         url VARCHAR(255) NOT NULL DEFAULT '',\
-         md5 VARCHAR(64) NOT NULL DEFAULT '',\
-         changelog TEXT,\
-         size BIGINT NOT NULL DEFAULT 0,\
-         force_update TINYINT NOT NULL DEFAULT 0,\
-         status TINYINT NOT NULL DEFAULT 0,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 ota_version 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn setup_operate_log_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
-    conn.execute(
-        "CREATE TABLE operate_log (\
-         id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         operator VARCHAR(64) NOT NULL DEFAULT '',\
-         action VARCHAR(64) NOT NULL DEFAULT '',\
-         detail TEXT,\
-         ip VARCHAR(45) NOT NULL DEFAULT ''\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 operate_log 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn setup_order_table(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
-    conn.execute(
-        "CREATE TABLE `order` (\
-         order_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         order_no VARCHAR(64) NOT NULL DEFAULT '',\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_id BIGINT NOT NULL DEFAULT 0,\
-         total_fen BIGINT NOT NULL DEFAULT 0,\
-         offline_seq VARCHAR(64) NOT NULL DEFAULT '',\
-         item_count INT NOT NULL DEFAULT 0,\
-         status INT NOT NULL DEFAULT 0\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 order 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn cleanup_tables(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute("DROP TABLE IF EXISTS ota_version").await.ok();
-    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
-    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
+    common::teardown_all(pool).await;
 }
 
 async fn insert_device(pool: &Pool, device_sn: &str, merchant_id: i64) -> i64 {
@@ -254,7 +199,7 @@ async fn test_ping_db_returns_false_when_db_unavailable() {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "wrong_password".to_string(),
+            password: "<secret>".to_string(),
             database: "nonexistent_db".to_string(),
         },
     };
@@ -323,7 +268,7 @@ async fn test_device_service_get_ota_version_returns_enabled() {
     {
         let mut conn = pool.acquire().await.expect("获取连接失败");
         conn.execute_with_params(
-            "INSERT INTO ota_version (version, model, url, md5, changelog, size, force_update, status) \
+            "INSERT INTO ota_version (version, device_model, url, md5, changelog, size, forced, status) \
              VALUES (?, 'M100', 'http://ota.example.com/v1.bin', '', '', 0, 0, 1)",
             &[Value::String("1.0.0".to_string())],
         )
@@ -355,7 +300,7 @@ async fn test_device_service_get_ota_version_disabled_returns_none() {
     {
         let mut conn = pool.acquire().await.expect("获取连接失败");
         conn.execute_with_params(
-            "INSERT INTO ota_version (version, model, url, md5, changelog, size, force_update, status) \
+            "INSERT INTO ota_version (version, device_model, url, md5, changelog, size, forced, status) \
              VALUES (?, 'M100', 'http://ota.example.com/v2.bin', '', '', 0, 0, 0)",
             &[Value::String("2.0.0".to_string())],
         )
@@ -571,6 +516,7 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
     registry.register_counter("sz300_requests_total", "Total requests");
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
         #[cfg(feature = "v18-rbac")]
@@ -581,6 +527,8 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -606,6 +554,8 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     };
 
     let response = sz_rust_sz300::controllers::health::startup(axum::extract::State(state)).await;
@@ -631,6 +581,7 @@ async fn test_health_metrics_returns_prometheus_format() {
     registry.register_counter("sz300_test_counter", "test counter");
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
         #[cfg(feature = "v18-rbac")]
@@ -641,6 +592,8 @@ async fn test_health_metrics_returns_prometheus_format() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -666,9 +619,16 @@ async fn test_health_metrics_returns_prometheus_format() {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     };
 
-    let response = sz_rust_sz300::controllers::health::metrics(axum::extract::State(state)).await;
+    let metrics_request = axum::http::Request::builder()
+        .body(axum::body::Body::empty())
+        .expect("构建请求失败");
+    let response =
+        sz_rust_sz300::controllers::health::metrics(axum::extract::State(state), metrics_request)
+            .await;
     let (parts, _body) = response.into_response().into_parts();
     let content_type = parts
         .headers
@@ -794,12 +754,43 @@ async fn test_device_trigger_ota_unknown_version_returns_error() {
         "ota_version": "99.99.99"
     })
     .to_string();
-    let request = axum::http::Request::builder()
+
+    // 直接调用控制器会绕过 auth 中间件：未注入 CurrentUser 时必须 403（IDOR 防护先于版本查询）
+    let unauth = axum::http::Request::builder()
+        .method("POST")
+        .uri("/device/trigger_ota")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body.clone()))
+        .unwrap();
+    let response = sz_rust_sz300::controllers::device::trigger_ota(
+        axum::extract::State(state.clone()),
+        unauth,
+    )
+    .await;
+    // 业务层统一返回 HTTP 200，错误通过 JSON code 传递（render_error 语义）
+    let unauth_json = read_json_body(response).await;
+    assert_eq!(
+        unauth_json.get("code").and_then(|v| v.as_i64()),
+        Some(403),
+        "未认证请求不得触发 OTA（IDOR 防护）: {}",
+        unauth_json
+    );
+
+    // 管理员身份：越过 IDOR 校验后，不存在的 OTA 版本返回 HTTP 200 + code=0 业务错误
+    let mut request = axum::http::Request::builder()
         .method("POST")
         .uri("/device/trigger_ota")
         .header("Content-Type", "application/json")
         .body(axum::body::Body::from(body))
         .unwrap();
+    request
+        .extensions_mut()
+        .insert(sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+            user_id: 1,
+            username: "admin".to_string(),
+            merchant_id: None,
+            is_admin: true,
+        });
     let response =
         sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), request).await;
     // ThinkPHP 风格：OTA 版本不存在返回 HTTP 200 + JSON {"code": 0, "msg": "OTA 版本不存在或未启用"}

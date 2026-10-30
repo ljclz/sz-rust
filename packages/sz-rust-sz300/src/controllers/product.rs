@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 商品控制器 — 仅负责 HTTP 请求/响应处理，SQL 逻辑下沉到 [`crate::services::product_service`]
 //!
@@ -14,7 +14,11 @@
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::product::Product`] 定义实体结构
 
-use crate::controllers::common::{extract_fields_by_whitelist, parse_pagination};
+use crate::controllers::common::{
+    can_access_merchant_resource_from_user, effective_merchant_scope_from_user,
+    extract_fields_by_whitelist, parse_pagination,
+};
+use crate::middleware::auth_middleware::CurrentUser;
 use crate::services::product_service::{ProductFilters, ProductService};
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -24,20 +28,27 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct ProductController;
 impl SzController for ProductController {}
 
 impl ProductController {
-    /// 分页查询商品列表，支持按 merchant_id/cat_id/keyword 筛选
+    /// 分页查询商品列表（IDOR 修复：普通用户仅能查询自己商户的商品）
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 15);
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
                 let filters = ProductFilters {
-                    merchant_id: data.get("merchant_id").and_then(|v| v.as_i64()),
+                    merchant_id: scope_mid,
                     cat_id: data.get("cat_id").and_then(|v| v.as_i64()),
                     keyword: data
                         .get("keyword")
@@ -45,13 +56,14 @@ impl ProductController {
                         .map(|s| s.to_string()),
                 };
 
-                info!("查询商品列表: page={}, page_size={}", page, page_size);
+                // 读路径按请求打印会放大日志 IO 开销（2026-10-29 性能评测整改：降为 debug）
+                debug!("查询商品列表: page={}, page_size={}", page, page_size);
 
                 match ProductService::list(&state.db_pool, page, page_size, filters).await {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!("商品列表查询成功: total={}", page_data.total);
+                        debug!("商品列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -72,9 +84,10 @@ impl ProductController {
         }
     }
 
-    /// 根据 good_id 查询单个商品信息
+    /// 根据 good_id 查询单个商品信息（IDOR 修复：非管理员仅能查自己商户）
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let good_id = match data.get("good_id").and_then(|v| v.as_i64()) {
@@ -82,12 +95,17 @@ impl ProductController {
                     _ => return ctrl.render_error("缺少有效的 good_id 参数", json!({}), 0),
                 };
 
-                info!("查询商品信息: good_id={}", good_id);
+                debug!("查询商品信息: good_id={}", good_id);
 
                 match ProductService::get(&state.db_pool, good_id).await {
                     Ok(Some(row)) => {
+                        // IDOR 校验：非管理员只能访问自己商户的商品
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权访问该商品", json!({}), 403);
+                        }
                         let product = row_to_json(&row);
-                        info!("商品查询完成: good_id={}", good_id);
+                        debug!("商品查询完成: good_id={}", good_id);
                         ctrl.render_success("success", json!({ "product": product }))
                     }
                     Ok(None) => ctrl.render_error("商品不存在", json!({}), 0),
@@ -101,9 +119,10 @@ impl ProductController {
         }
     }
 
-    /// 创建商品
+    /// 创建商品（IDOR 修复：普通用户仅能为自己的商户创建商品）
     async fn create(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let name = data
@@ -115,12 +134,21 @@ impl ProductController {
                     return ctrl.render_error("商品名称不能为空", json!({}), 0);
                 }
 
+                // IDOR 修复：非管理员创建商品时强制归属自己的商户
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
+                let merchant_id = scope_mid.unwrap_or(0);
+                if merchant_id <= 0 {
+                    return ctrl.render_error("无权创建商品（缺少商户归属）", json!({}), 403);
+                }
+
                 let product = crate::models::product::Product {
                     good_id: None,
-                    merchant_id: data
-                        .get("merchant_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
+                    merchant_id,
                     cat_id: data.get("cat_id").and_then(|v| v.as_i64()).unwrap_or(0),
                     name: name.clone(),
                     barcode: data
@@ -172,15 +200,28 @@ impl ProductController {
         }
     }
 
-    /// 更新商品信息 — 动态字段更新
+    /// 更新商品信息（IDOR 修复：非管理员仅能更新自己商户的商品）
     async fn update(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let good_id = match data.get("good_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
                     _ => return ctrl.render_error("缺少有效的 good_id 参数", json!({}), 0),
                 };
+
+                // IDOR 校验：先取商品当前归属，非管理员只能更新自己商户
+                match ProductService::get(&state.db_pool, good_id).await {
+                    Ok(Some(row)) => {
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权更新该商品", json!({}), 403);
+                        }
+                    }
+                    Ok(None) => return ctrl.render_error("商品不存在", json!({}), 0),
+                    Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+                }
 
                 info!("更新商品: good_id={}", good_id);
 
@@ -213,15 +254,28 @@ impl ProductController {
         }
     }
 
-    /// 删除商品（软删除）
+    /// 删除商品（IDOR 修复：非管理员仅能删除自己商户的商品）
     async fn delete(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = ProductController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let good_id = match data.get("good_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
                     _ => return ctrl.render_error("缺少有效的 good_id 参数", json!({}), 0),
                 };
+
+                // IDOR 校验：先取商品当前归属
+                match ProductService::get(&state.db_pool, good_id).await {
+                    Ok(Some(row)) => {
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权删除该商品", json!({}), 403);
+                        }
+                    }
+                    Ok(None) => return ctrl.render_error("商品不存在", json!({}), 0),
+                    Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+                }
 
                 info!("删除商品: good_id={}", good_id);
 

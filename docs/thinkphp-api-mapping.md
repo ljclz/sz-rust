@@ -22,6 +22,31 @@
 | `pool_ref()` | `getConnection()` | 获取连接池 |
 | `is_initialized()` | — | 是否已初始化 |
 
+### ⚠️ ORM 心智模型差异（UXR 2026-10-27 P1-2）
+
+> SZ-Rust 的 ORM 采用 **Data Mapper + Repository 模式**（`sz_rust_orm_facade::repository`），**不是** ThinkPHP 的 Active Record。
+> `Db::` 门面只负责连接池管理，**没有** `Db::name()->where()->select()` 这样的流畅查询 API。
+> 业务查询请使用 `sz_rust_orm_facade::repository::{Repository, WhereCondition, WhereOp}` + `Value`。
+
+等价示例（ThinkPHP Active Record → SZ-Rust Data Mapper）：
+
+| ThinkPHP（Active Record） | SZ-Rust（Data Mapper / Repository） |
+|---|---|
+| `Db::name('user')->where('status', 1)->select()` | `repo.find_by(&[WhereCondition::new("status", WhereOp::Eq, Value::I64(1))])` |
+| `Db::name('user')->where('id', 1)->find()` | `repo.find_by_id(&1)` / `repo.find_one_by(&[WhereCondition::new("id", WhereOp::Eq, Value::I64(1))])` |
+| `Db::name('user')->insert($data)` | `repo.save(entity)` |
+| `Db::name('user')->delete(1)` | `repo.delete_by_id(&1)` |
+
+```rust
+use sz_rust_orm_facade::repository::{Repository, WhereCondition, WhereOp};
+use sz_rust_orm_facade::Value;
+
+// 等价于 ThinkPHP：Db::name('user')->where('status', 1)->select()
+let active_users = repo.find_by(&[WhereCondition::new("status", WhereOp::Eq, Value::I64(1))])?;
+```
+
+> 📌 **快速上手**：`Repository` trait 提供 `find_by_id` / `find_all` / `find_by` / `find_one_by` / `save` / `save_many` / `delete` 等 CRUD 方法；`InMemoryRepository` 可用于单元测试与原型验证。生产环境请结合 QueryBuilder + `Pool::acquire()` 执行 SQL。
+
 ## Event 门面
 
 | SZ-Rust `Event::` | PHP `think\facade\Event::` | 说明 |

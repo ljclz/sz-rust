@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 设备控制器 — 仅负责 HTTP 请求/响应处理，SQL 逻辑下沉到 [`crate::services::device_service`]
 //!
@@ -14,7 +14,10 @@
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::device::Device`] 定义实体结构
 
-use crate::controllers::common::parse_pagination;
+use crate::controllers::common::{
+    can_access_merchant_resource_from_user, effective_merchant_scope_from_user, parse_pagination,
+};
+use crate::middleware::auth_middleware::CurrentUser;
 use crate::services::device_service::{DeviceFilters, DeviceService};
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -24,23 +27,30 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct DeviceController;
 impl SzController for DeviceController {}
 
 impl DeviceController {
-    /// 分页查询设备列表，支持按 merchant_id 筛选
+    /// 分页查询设备列表（IDOR 修复：普通用户仅能查询自己商户的设备）
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 20);
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
                 let filters = DeviceFilters {
-                    merchant_id: data.get("merchant_id").and_then(|v| v.as_i64()),
+                    merchant_id: scope_mid,
                 };
 
-                info!(
+                debug!(
                     "查询设备列表: page={}, page_size={}, merchant_id={:?}",
                     page, page_size, filters.merchant_id
                 );
@@ -49,7 +59,7 @@ impl DeviceController {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!(
+                        debug!(
                             "设备列表查询成功: page={}, page_size={}, total={}",
                             page, page_size, page_data.total
                         );
@@ -73,9 +83,10 @@ impl DeviceController {
         }
     }
 
-    /// 根据 device_id 查询单个设备详情
+    /// 根据 device_id 查询单个设备详情（IDOR 修复：非管理员仅能查自己商户）
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
@@ -83,12 +94,17 @@ impl DeviceController {
                     _ => return ctrl.render_error("缺少有效的 device_id 参数", json!({}), 0),
                 };
 
-                info!("查询设备详情: device_id={}", device_id);
+                debug!("查询设备详情: device_id={}", device_id);
 
                 match DeviceService::get(&state.db_pool, device_id).await {
                     Ok(Some(row)) => {
+                        // IDOR 校验：非管理员只能访问自己商户的设备
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权访问该设备", json!({}), 403);
+                        }
                         let device = row_to_json(&row);
-                        info!("设备查询完成: device_id={}", device_id);
+                        debug!("设备查询完成: device_id={}", device_id);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -110,18 +126,26 @@ impl DeviceController {
         }
     }
 
-    /// 绑定设备到商户
+    /// 绑定设备到商户（IDOR 修复：非管理员仅能将设备绑定到自己商户）
     async fn bind(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_sn = match data.get("device_sn").and_then(|v| v.as_str()) {
                     Some(sn) if !sn.trim().is_empty() => sn.trim().to_string(),
                     _ => return ctrl.render_error("缺少有效的 device_sn 参数", json!({}), 0),
                 };
-                let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
+                // IDOR 修复：非管理员只能将设备绑定到自己商户
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
+                let merchant_id = match scope_mid {
                     Some(id) if id > 0 => id,
-                    _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
+                    _ => return ctrl.render_error("无权绑定设备（缺少商户归属）", json!({}), 403),
                 };
 
                 info!(
@@ -153,15 +177,28 @@ impl DeviceController {
         }
     }
 
-    /// 解绑设备（将 merchant_id 置为 0，状态置为离线）
+    /// 解绑设备（将 merchant_id 置为 0，状态置为离线；IDOR 修复：非管理员仅能解绑自己商户）
     async fn unbind(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
                     _ => return ctrl.render_error("缺少有效的 device_id 参数", json!({}), 0),
                 };
+
+                // IDOR 校验：非管理员只能解绑自己商户的设备
+                match DeviceService::get(&state.db_pool, device_id).await {
+                    Ok(Some(row)) => {
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权解绑该设备", json!({}), 403);
+                        }
+                    }
+                    Ok(None) => return ctrl.render_error("设备不存在", json!({}), 0),
+                    Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+                }
 
                 info!("设备解绑请求: device_id={}", device_id);
 
@@ -185,9 +222,10 @@ impl DeviceController {
         }
     }
 
-    /// 触发 OTA 升级
+    /// 触发 OTA 升级（IDOR 修复：非管理员仅能对自己商户设备触发）
     async fn trigger_ota(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = DeviceController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let device_id = match data.get("device_id").and_then(|v| v.as_i64()) {
@@ -204,10 +242,17 @@ impl DeviceController {
                     device_id, ota_version
                 );
 
-                // 验证设备存在
-                match DeviceService::exists(&state.db_pool, device_id).await {
+                // IDOR 校验：非管理员只能对自己商户设备触发 OTA
+                match DeviceService::exists_with_merchant_scope(
+                    &state.db_pool,
+                    device_id,
+                    current_user.as_ref().and_then(|u| u.merchant_id),
+                    current_user.as_ref().map(|u| u.is_admin).unwrap_or(false),
+                )
+                .await
+                {
                     Ok(true) => {}
-                    Ok(false) => return ctrl.render_error("设备不存在", json!({}), 0),
+                    Ok(false) => return ctrl.render_error("设备不存在或无权访问", json!({}), 403),
                     Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
                 }
 

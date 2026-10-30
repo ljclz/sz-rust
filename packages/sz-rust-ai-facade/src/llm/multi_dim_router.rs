@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 多维度模型路由（v1.5.0 P2-2）
 //!
 //! 多维度加权路由 + 多级故障转移链 + 负载均衡 + 成本统计。

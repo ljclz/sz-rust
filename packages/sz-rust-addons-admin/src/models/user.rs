@@ -76,7 +76,7 @@ mod tests {
         let user = UserModel {
             id: 1,
             username: "admin".into(),
-            password: "secret_hash".into(),
+            password: "<secret>".into(),
             email: None,
             phone: None,
             status: UserStatus::Active,

@@ -11,7 +11,8 @@
 //! | `#[model]` | 属性宏 | 模型声明 | ✅ |
 //! | `compact!` | 函数式宏 | `compact()` | ✅ |
 //!
-//! `#[controller]` 自动实现 `SzController` trait。
+//! `#[controller]` 自动实现 `SzController` trait（不解析方法级路由属性：`#[get]`/`#[post]` 等
+//! 路由宏未实现，路由仍由 `router.rs` 手工注册）。
 //! `#[model]` 自动实现 `Model` + `ModelExt` trait（基于字段式结构体）。
 //! `compact!` 对齐 PHP `compact()`。
 

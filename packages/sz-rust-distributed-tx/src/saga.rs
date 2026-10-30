@@ -138,12 +138,28 @@ impl SagaOrchestrator {
     }
 
     /// 执行 Saga 事务
+    ///
+    /// 事务 ID 由时间戳生成；需要与事务日志（`sz_dtx_log`）关联时，
+    /// 请使用 [`Self::execute_with_tx_id`] 以便在事务开始前先落库。
     pub async fn execute(
         &self,
         steps: Vec<SagaStep>,
         payload: Value,
     ) -> Result<SagaResult, DtxError> {
-        let tx_id = format!("saga-{}", chrono::Utc::now().timestamp_millis());
+        let tx_id = crate::next_tx_id("saga");
+        self.execute_with_tx_id(steps, payload, tx_id).await
+    }
+
+    /// 使用指定事务 ID 执行 Saga 事务
+    ///
+    /// 调用方可以先生成 `tx_id` 并把 `running` 状态写入事务日志，
+    /// 再执行本方法，从而保证进程崩溃后可依据日志恢复。
+    pub async fn execute_with_tx_id(
+        &self,
+        steps: Vec<SagaStep>,
+        payload: Value,
+        tx_id: String,
+    ) -> Result<SagaResult, DtxError> {
         let mut current_payload = payload;
         let mut step_results: Vec<StepResult> = Vec::with_capacity(steps.len());
         let mut completed_indices: Vec<usize> = Vec::new();
@@ -232,6 +248,7 @@ impl SagaOrchestrator {
         results: &mut Vec<StepResult>,
         payload: &mut Value,
     ) -> Result<(), DtxError> {
+        let mut failed_steps: Vec<String> = Vec::new();
         for &idx in completed.iter().rev() {
             let step = &steps[idx];
             let mut last_err: Option<DtxError> = None;
@@ -272,11 +289,16 @@ impl SagaOrchestrator {
                     output: None,
                     error: Some(e.to_string()),
                 });
-                return Err(DtxError::CompensateRetryExhausted {
-                    step_id: step.step_id.clone(),
-                    retries: self.compensate_retries,
-                });
+                // 单步补偿失败不能中断后续补偿：继续回滚更早的步骤，
+                // 最后统一返回失败（调用方据此进入人工干预）。
+                failed_steps.push(step.step_id.clone());
             }
+        }
+        if let Some(first_failed) = failed_steps.first() {
+            return Err(DtxError::CompensateRetryExhausted {
+                step_id: first_failed.clone(),
+                retries: self.compensate_retries,
+            });
         }
         Ok(())
     }
@@ -399,6 +421,54 @@ mod tests {
             0,
             "step-2 compensate should NOT run (forward failed)"
         );
+    }
+
+    #[tokio::test]
+    async fn test_saga_compensate_continues_after_failure() {
+        let c1 = Arc::new(AtomicUsize::new(0));
+        let c2 = Arc::new(AtomicUsize::new(0));
+
+        let steps = vec![
+            SagaStep::new(
+                "step-1",
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                make_action(c1.clone(), false),
+            ),
+            SagaStep::new(
+                "step-2",
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+                // 补偿失败
+                make_action(c2.clone(), true),
+            ),
+            SagaStep::new(
+                "step-3",
+                make_action(Arc::new(AtomicUsize::new(0)), true),
+                make_action(Arc::new(AtomicUsize::new(0)), false),
+            ),
+        ];
+
+        let result = SagaOrchestrator::new()
+            .with_compensate_retries(2)
+            .with_retry_interval(std::time::Duration::from_millis(1))
+            .execute(steps, Value::Null)
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(c2.load(Ordering::SeqCst) >= 2, "step-2 补偿重试执行");
+        assert_eq!(
+            c1.load(Ordering::SeqCst),
+            1,
+            "step-2 补偿失败后仍需回滚 step-1"
+        );
+        assert!(result
+            .steps
+            .iter()
+            .any(|s| s.status == StepStatus::CompensateFailed));
+        assert!(result
+            .steps
+            .iter()
+            .any(|s| s.step_id == "step-1" && s.status == StepStatus::Compensated));
     }
 
     #[tokio::test]

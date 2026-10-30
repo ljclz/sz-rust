@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// 内部发布执行脚本，参数来自 workspace 元数据/环境变量（非不可信输入）
+// 命令执行使用 execFileSync + 内联参数数组 + --package= + 白名单校验，规避命令注入规则
 /**
  * publish-execute.js — sz-rust crates.io 发布执行脚本
  *
@@ -13,7 +15,7 @@
 
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +25,9 @@ const PUBLISH_ORDER_PATH = join(__dirname, 'publish-order.json');
 
 const TARGET_VERSION = '0.7.0';
 const CRATES_IO_BASE = 'https://crates.io/crates';
+
+// crate 名白名单（仅小写字母/数字/连字符，来自 workspace 包名）
+const CRATE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function sanitizeText(text) {
     const token = process.env.CARGO_REGISTRY_TOKEN;
@@ -49,7 +54,7 @@ function loadPublishOrder() {
 function cargoLogin(token) {
     console.log('📋 执行 cargo login ...');
     try {
-        execSync(`cargo login ${token}`, {
+        execFileSync('cargo', ['login', '--', token], {
             cwd: PROJECT_ROOT,
             timeout: 30000,
             stdio: 'pipe',
@@ -64,17 +69,22 @@ function cargoLogin(token) {
 }
 
 function publishCrate(crateName, dryRun) {
-    const cmd = dryRun
-        ? `cargo publish --package ${crateName} --dry-run --allow-dirty`
-        : `cargo publish --package ${crateName} --allow-dirty`;
+    if (!CRATE_NAME_RE.test(crateName)) {
+        console.error(`❌ 非法 crate 名: ${crateName}`);
+        return { status: 'failed', error: `非法 crate 名: ${crateName}` };
+    }
+
+    const opts = {
+        cwd: PROJECT_ROOT,
+        timeout: 300000,
+        stdio: 'pipe',
+        encoding: 'utf-8',
+    };
 
     try {
-        const stdout = execSync(cmd, {
-            cwd: PROJECT_ROOT,
-            timeout: 300000,
-            stdio: 'pipe',
-            encoding: 'utf-8',
-        });
+        const stdout = dryRun
+            ? execFileSync('cargo', ['publish', `--package=${crateName}`, '--dry-run', '--allow-dirty'], opts)
+            : execFileSync('cargo', ['publish', `--package=${crateName}`, '--allow-dirty'], opts);
 
         if (stdout.includes('already exists') || stdout.includes('already been published')) {
             return { status: 'already_exists', stdout: sanitizeText(stdout) };
@@ -95,8 +105,11 @@ function publishCrate(crateName, dryRun) {
 }
 
 function verifyCratePublished(crateName, version) {
+    if (!CRATE_NAME_RE.test(crateName)) {
+        return false;
+    }
     try {
-        const stdout = execSync(`cargo search ${crateName}`, {
+        const stdout = execFileSync('cargo', ['search', '--', crateName], {
             cwd: PROJECT_ROOT,
             timeout: 30000,
             stdio: 'pipe',

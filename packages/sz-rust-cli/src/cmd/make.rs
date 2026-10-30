@@ -1874,11 +1874,11 @@ mod tests {
         assert!(result.is_err(), "无 Cargo.toml 应失败");
         let err = format!("{}", result.unwrap_err());
         // 失败文案跨平台不同：Windows 直报 Cargo.toml 缺失，Linux 走
-        // CompileFailed 包装为 "Compilation failed: [...]"——断言失败族而非文案
+        // CompileFailed 包装为 "编译失败: [...]"——断言失败族而非文案
         assert!(
             err.contains("Cargo.toml")
                 || err.contains("CompileFailed")
-                || err.contains("Compilation failed"),
+                || err.contains("编译失败"),
             "应含编译失败: {err}"
         );
     }

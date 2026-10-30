@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 测试超时守护（v1.5.0 P1-4）
 //!
 //! 用 `tokio::time::timeout` 包裹测试，超时后强制失败并报告挂起位置与疑似原因（spec 5.4.3）。

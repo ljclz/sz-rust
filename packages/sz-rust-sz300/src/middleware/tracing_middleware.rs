@@ -114,7 +114,10 @@ impl SpanBuffer {
     /// 设置采样率（0.0-1.0，超出范围自动钳位）
     pub fn set_sampling_rate(&self, rate: f64) {
         let clamped = rate.clamp(0.0, 1.0);
-        *self.sampling_rate.write().unwrap_or_else(|e| e.into_inner()) = clamped;
+        *self
+            .sampling_rate
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = clamped;
     }
 
     /// 获取当前采样率
@@ -308,7 +311,7 @@ mod tests {
     fn test_mask_span_attributes() {
         let mut attrs = json!({
             "method": "POST",
-            "password": "secret123",
+            "password": "<secret>",
             "token": "bearer-xyz",
             "user_id": 42,
             "id_card": "110101199001011234",

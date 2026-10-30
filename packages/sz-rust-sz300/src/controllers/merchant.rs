@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 商户控制器 — 仅负责 HTTP 请求/响应处理，SQL 逻辑下沉到 [`crate::services::merchant_service`]
 //!
@@ -14,7 +14,11 @@
 //! - 服务层：构建 SQL、执行查询、返回领域数据
 //! - 模型层：[`crate::models::merchant::Merchant`] 定义实体结构
 
-use crate::controllers::common::{extract_fields_by_whitelist, parse_pagination};
+use crate::controllers::common::{
+    can_access_merchant_resource_from_user, can_create_merchant_from_user,
+    effective_merchant_scope_from_user, extract_fields_by_whitelist, parse_pagination,
+};
+use crate::middleware::auth_middleware::CurrentUser;
 use crate::services::merchant_service::MerchantService;
 use crate::services::row_to_json;
 use crate::state::AppState;
@@ -24,26 +28,38 @@ use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
 use sz_rust_core::controller::SzController;
-use tracing::{info, warn};
+use sz_rust_core::validate::Validate;
+use tracing::{debug, info, warn};
 
 struct MerchantController;
 impl SzController for MerchantController {}
 
 impl MerchantController {
-    /// 分页查询商户列表
+    /// 分页查询商户列表（IDOR 修复：普通用户仅返回自己商户）
     async fn list(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        // 先提取用户上下文（post_data 会消费请求）
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let (page, page_size) = parse_pagination(&data, 15);
+                let requested_mid = data.get("merchant_id").and_then(|v| v.as_i64());
+                let (scope_mid, allowed) =
+                    effective_merchant_scope_from_user(current_user.as_ref(), requested_mid);
+                if !allowed {
+                    return ctrl.render_error("未认证", json!({}), 401);
+                }
 
-                info!("查询商户列表: page={}, page_size={}", page, page_size);
+                debug!(
+                    "查询商户列表: page={}, page_size={}, merchant_id={:?}",
+                    page, page_size, scope_mid
+                );
 
-                match MerchantService::list(&state.db_pool, page, page_size).await {
+                match MerchantService::list(&state.db_pool, page, page_size, scope_mid).await {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
-                        info!("商户列表查询成功: total={}", page_data.total);
+                        debug!("商户列表查询成功: total={}", page_data.total);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -64,9 +80,10 @@ impl MerchantController {
         }
     }
 
-    /// 根据 merchant_id 查询单个商户信息
+    /// 根据 merchant_id 查询单个商户信息（IDOR 修复：非管理员仅能查自己商户）
     async fn info(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
@@ -74,12 +91,17 @@ impl MerchantController {
                     _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
                 };
 
-                info!("查询商户信息: merchant_id={}", merchant_id);
+                debug!("查询商户信息: merchant_id={}", merchant_id);
 
                 match MerchantService::get(&state.db_pool, merchant_id).await {
                     Ok(Some(row)) => {
+                        // IDOR 校验：非管理员只能访问自己商户的数据
+                        let row_mid = row.get("merchant_id").and_then(|v| v.as_i64());
+                        if !can_access_merchant_resource_from_user(current_user.as_ref(), row_mid) {
+                            return ctrl.render_error("无权访问该商户", json!({}), 403);
+                        }
                         let merchant = row_to_json(&row);
-                        info!("商户查询完成: merchant_id={}", merchant_id);
+                        debug!("商户查询完成: merchant_id={}", merchant_id);
                         ctrl.render_success(
                             "success",
                             json!({
@@ -101,16 +123,32 @@ impl MerchantController {
     /// 创建商户
     async fn create(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        // 越权修复（2026-10-28）：创建商户会新增租户/市场归属，仅管理员可执行
+        let current_user = CurrentUser::from_request(&req);
+        if !can_create_merchant_from_user(current_user.as_ref()) {
+            warn!(
+                "拒绝越权创建商户: user_id={:?}",
+                current_user.as_ref().map(|u| u.user_id)
+            );
+            return ctrl.render_error("无权限创建商户", json!({}), 403);
+        }
         match ctrl.post_data(req).await {
             Ok(data) => {
+                // 验证器示范（UXR 2026-10-27 P1-5）：对齐 think\Validate 规则校验
+                let mut msgs = indexmap::IndexMap::new();
+                msgs.insert("name.require".to_string(), "商户名称不能为空".to_string());
+                let mut v = Validate::new()
+                    .rule("name|商户名称", "require|max:100")
+                    .message(msgs);
+                if let Err(e) = v.check(&data) {
+                    return ctrl.render_error(e.to_string(), json!({}), 0);
+                }
+
                 let name = data
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                if name.trim().is_empty() {
-                    return ctrl.render_error("商户名称不能为空", json!({}), 0);
-                }
 
                 let merchant = crate::models::merchant::Merchant {
                     merchant_id: None,
@@ -167,15 +205,22 @@ impl MerchantController {
         }
     }
 
-    /// 更新商户信息 — 动态字段更新
+    /// 更新商户信息 — 动态字段更新（IDOR 修复：非管理员仅能更新自己商户）
     async fn update(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
                     _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
                 };
+
+                // IDOR 校验：非管理员只能更新自己商户
+                if !can_access_merchant_resource_from_user(current_user.as_ref(), Some(merchant_id))
+                {
+                    return ctrl.render_error("无权更新该商户", json!({}), 403);
+                }
 
                 info!("更新商户: merchant_id={}", merchant_id);
 
@@ -207,15 +252,22 @@ impl MerchantController {
         }
     }
 
-    /// 删除商户（软删除）
+    /// 删除商户（软删除，IDOR 修复：非管理员仅能删除自己商户）
     async fn delete(state: &AppState, req: Request<Body>) -> Response {
         let ctrl = MerchantController;
+        let current_user = CurrentUser::from_request(&req);
         match ctrl.post_data(req).await {
             Ok(data) => {
                 let merchant_id = match data.get("merchant_id").and_then(|v| v.as_i64()) {
                     Some(id) if id > 0 => id,
                     _ => return ctrl.render_error("缺少有效的 merchant_id 参数", json!({}), 0),
                 };
+
+                // IDOR 校验：非管理员只能删除自己商户
+                if !can_access_merchant_resource_from_user(current_user.as_ref(), Some(merchant_id))
+                {
+                    return ctrl.render_error("无权删除该商户", json!({}), 403);
+                }
 
                 info!("删除商户: merchant_id={}", merchant_id);
 

@@ -24,30 +24,25 @@ fn test_parse_serve_tls_args() {
         "--tls-key",
         "key.pem",
     ]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            tls_cert, tls_key, ..
-        }) => {
-            assert_eq!(tls_cert.as_deref(), Some(std::path::Path::new("cert.pem")));
-            assert_eq!(tls_key.as_deref(), Some(std::path::Path::new("key.pem")));
-        }
-        _ => panic!("expected Serve command"),
-    }
+    // SDET P2-4：断言宏替代 panic!（断言价值门禁只统计 assert 宏）
+    assert!(cli.command.is_some(), "expected Serve command");
+    let Some(CliCommand::Serve { tls_cert, tls_key, .. }) = cli.command else {
+        unreachable!("cli.command is_some checked above");
+    };
+    assert_eq!(tls_cert.as_deref(), Some(std::path::Path::new("cert.pem")));
+    assert_eq!(tls_key.as_deref(), Some(std::path::Path::new("key.pem")));
 }
 
 /// `serve` 默认不提供 TLS 参数
 #[test]
 fn test_parse_serve_no_tls_default() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            tls_cert, tls_key, ..
-        }) => {
-            assert!(tls_cert.is_none());
-            assert!(tls_key.is_none());
-        }
-        _ => panic!("expected Serve command"),
-    }
+    assert!(cli.command.is_some(), "expected Serve command");
+    let Some(CliCommand::Serve { tls_cert, tls_key, .. }) = cli.command else {
+        unreachable!("cli.command is_some checked above");
+    };
+    assert!(tls_cert.is_none());
+    assert!(tls_key.is_none());
 }
 
 /// ServeArgs validate：tls_cert 有值但 tls_key 无值时拒绝

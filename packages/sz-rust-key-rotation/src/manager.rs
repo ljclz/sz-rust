@@ -72,22 +72,17 @@ pub trait KeyGenerator: Send + Sync {
     fn generate(&self) -> Vec<u8>;
 }
 
-/// 随机密钥生成器（用于测试）
+/// 随机密钥生成器（基于操作系统密码学安全 RNG）
+///
+/// 2026-10-28 安全修复：原实现使用时间种子 LCG（线性同余），密钥可被预测/暴力枚举。
+/// 现改用 `rand::rngs::OsRng`（操作系统 CSPRNG），满足密码学安全强度要求。
 pub struct RandomKeyGenerator;
 
 impl KeyGenerator for RandomKeyGenerator {
     fn generate(&self) -> Vec<u8> {
-        let now = Utc::now().timestamp_nanos_opt().unwrap_or(0) as u64;
-        let mut key = Vec::with_capacity(32);
-        let mut state = now
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        for _ in 0..32 {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            key.push((state >> 33) as u8);
-        }
+        use rand::RngCore;
+        let mut key = vec![0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut key);
         key
     }
 }
@@ -291,5 +286,7 @@ mod tests {
         let key2 = gen.generate();
         assert_eq!(key1.len(), 32);
         assert_eq!(key2.len(), 32);
+        // 密码学安全 RNG：两次生成的密钥必须互不相同（原 LCG 时间种子可能相同）
+        assert_ne!(key1, key2, "两次生成的密钥不应相同");
     }
 }

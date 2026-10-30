@@ -15,7 +15,8 @@ services:
       - SZ300_DB_NAME=${SZ300_DB_NAME:-sz300}
       - SZ300_DB_USER=${SZ300_DB_USER:-root}
       - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库密码}
-      - RUST_LOG=info,sz_rust_sz300=debug
+      # 2026-10-29 性能修复：热路径读日志已降为 debug!，默认级别保持 info 避免 debug 全量落盘
+      - RUST_LOG=info
     depends_on:
       mysql:
         condition: service_healthy

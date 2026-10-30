@@ -1,6 +1,6 @@
 # sz-rust 项目 AI 工作指南
 
-- 语言：Rust 2024 Edition
+- 语言：Rust 2021 Edition（`workspace.package.edition = "2021"`，rust-version 1.81）
 - 架构：Cargo Workspace
   - `packages/sz-rust-core`：Web 框架核心（路由、中间件、DI 容器、模板、缓存等）
   - `packages/sz-rust-sz300`：sz300 业务应用
@@ -11,8 +11,9 @@
 ## 统一约束
 
 - 所有 `async fn` 必须 `Send + 'static`。
-- 禁止在任何 crate 中使用 `std::fs`，统一 `tokio::fs`。
+- 禁止在任何 crate 的**生产代码**（`src/`，不含 `#[cfg(test)]` 块）中使用 `std::fs`，统一 `tokio::fs`；测试代码（tests/ 目录、`#[cfg(test)]` 模块）豁免（2026-10-27 SDET 评测 P2-2 澄清：门禁 `check-std-fs.py` 仅扫描生产代码，同步 CLI 工具等豁免清单见该脚本 `EXEMPT_PREFIXES`）。
 - 敏感字段自动脱敏（`#[serde(skip_serializing)]`）。
+- 文档-代码一致性由门禁 19 自动强制（`doc-code-consistency.js` + `link-check.js`）：Markdown 相对链接必须可解析、README 版本号必须与 Cargo.toml 一致、`--features` 引用必须存在、文件名必须 UTF-8 无乱码（铁律 24，见 `.trae/rules/project_rules.md`）。
 
 ## 关键约束
 
@@ -50,11 +51,11 @@
 ## 强制铁律
 
 见 [.trae/rules/project_rules.md](.trae/rules/project_rules.md)（`alwaysApply: true`，自动注入）。
-共 23 条生死线，覆盖内存溢出、异步运行时、安全脱敏、性能基线、提交流程、文档同步、防幻影交付。
+共 24 条生死线，覆盖内存溢出、异步运行时、安全脱敏、性能基线、提交流程、文档同步、文档-代码一致性门禁、防幻影交付。
 
 ## 工作流约定
 
-1. **任务开始前**：先读 `.trae/rules/project_rules.md`，明确 23 条生死线。
+1. **任务开始前**：先读 `.trae/rules/project_rules.md`，明确 24 条生死线。
 2. **代码修改后**：根据修改范围触发对应 Skill（router 改 → routing；中间件改 → middleware；container 改 → di；config/static 改 → config；性能验证 → load）。
 3. **提交前**：`.trae/settings.json` 的 `preCommitCheck` 会自动触发 4 个 auto Skill，必须全部通过。
 4. **结果反馈**：Skill 失败时，Agent 必须输出「变异点 / 混沌失败 / 死锁」的具体证据，禁止仅说"已修复"。
@@ -63,13 +64,13 @@
    - **验证命令真实输出**：如 `cargo test -p <crate>` 实际运行结果，禁止转述未运行的数字
    - **变更标识**：commit SHA / PR 编号
    - 禁止在代码未合入时更新 CHANGELOG / implementation-progress 状态为「已完成」；文档状态只能由合入动作在同一提交内触发
-   - 提交前必须运行 `node scripts/audit/doc-code-consistency.js`（CI 门禁 19），文档声称的 `sz-rust-*` crate 必须存在于 workspace，否则构建失败
+   - 提交前必须运行 `node scripts/audit/doc-code-consistency.js` 与 `node scripts/audit/link-check.js`（CI 门禁 19，铁律 24）：crate 存在性 / Markdown 链接可解析 / 版本号一致 / feature 名存在，否则构建失败。node 在本机 `D:\BtSoft\nodejs\v24.22.1\node.exe`（不在 PATH，用 `"D:\BtSoft\nodejs\v24.22.1\node.exe" scripts/audit/link-check.js` 完整路径调用）
 
 ## 文档同步强制约束
 
 > 对应 project_rules.md 规则 19-22，v1.3 起强制执行。
 
-- **触发维度**：pub API 变更 / 性能基线变更 / CI-CD 配置变更 / 架构决策变更 / 安全机制变更 / 并发模型变更 / unsafe 策略变更 / 新增/删除 crate / 测试数量变更
+- **触发维度**：pub API 变更 / 性能基线变更 / CI-CD 配置变更 / 架构决策变更 / 安全机制变更 / 并发模型变更 / unsafe 策略变更 / 新增/删除 crate / 测试数量变更 / Markdown 链接变更 / 文件重命名 / 版本声明变更 / feature 名引用
 - **受影响文档集**：README.md / README.en.md / CHANGELOG.md / roadmap.md / ADR / 审计报告 / engineering-practices.md / framework-comparison 报告 / project-assessment 报告 / 各 crate README
 - **合入前义务**：同一提交中同步更新所有受影响文档，禁止"先提交后补文档"
 - **数字可溯源性**：所有数字必须附来源标注（命令输出/测试报告/文件行号），禁止"估算""约""大概"
@@ -80,4 +81,4 @@
 - [使用指南](docs/sz-rust-skills使用指南.md) — Skill 安装、触发、自定义扩展
 - [工程化实践](docs/sz-rust-engineering-practices.md) — CI/CD、Docker、K8s
 - [ADR 集合](docs/adr/) — 20 个架构决策记录
-- [审计报告](docs/audit/2026-07-25-综合深度审计报告.md) — v2 综合深度审计（89.4/100）
+- [审计报告](docs/audit/archive/2026-07/2026-07-25-综合深度审计报告.md) — v2 综合深度审计（89.4/100）

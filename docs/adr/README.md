@@ -10,8 +10,8 @@
 
 ## 1. ADR 目录
 
-> 当前 ADR 数量：**35**（P0×4 + P1×6 + P2×6 + P3×4 + AI×5 + Gaps×10，覆盖 35 项关键架构决策）
-> ADR 密度：35 / 42 模块 = **0.833**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
+> 当前 ADR 数量：**53**（ADR-001~023 + ADR-026~050 + ADR-AI-01~05，覆盖 53 项关键架构决策）
+> ADR 密度：53 / 42 模块 = **1.262**（超过 ≥ 0.15 目标，参见《ADR 与生产 Bug 定位规范》第 4 节）
 
 | 编号 | 标题 | 状态 | 日期 | 决策者 | 文件 |
 |------|------|------|------|--------|------|
@@ -31,6 +31,13 @@
 | ADR-014 | GraphQL 集成（sz-orm-graphql facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0014-graphql-integration-facade.md](0014-graphql-integration-facade.md) |
 | ADR-015 | gRPC 支持（sz-orm-grpc facade 透传） | 已接受 | 2026-08-02 | SZ-Rust Team | [0015-grpc-support-facade.md](0015-grpc-support-facade.md) |
 | ADR-016 | Addon 热加载探索（libloading 运行时动态加载 + unsafe_code 策略变更） | 已接受 | 2026-08-02 | SZ-Rust Team | [0016-addon-hot-reload-libloading-unsafe.md](0016-addon-hot-reload-libloading-unsafe.md) |
+| ADR-017 | sz-rust-core 拆包策略（Facade 渐进提取） | 已接受 | 2026-08-03 | SZ-Rust Team | [0017-sz-rust-core拆包策略-Facade渐进提取.md](0017-sz-rust-core拆包策略-Facade渐进提取.md) |
+| ADR-018 | Facade Crate 独立发布策略 | 已接受 | 2026-08-03 | SZ-Rust Team | [0018-facade-独立发布策略.md](0018-facade-独立发布策略.md) |
+| ADR-019 | P3 剩余模块解耦（四簇提取） | 已接受 | 2026-08-03 | SZ-Rust Team | [0019-P3剩余模块解决-四簇提取.md](0019-P3剩余模块解决-四簇提取.md) |
+| ADR-020 | 异步文件 I/O 迁移（std::fs → tokio::fs） | 已接受 | 2026-08-05 | SZ-Rust Team | [0020-async-file-io-migration.md](0020-async-file-io-migration.md) |
+| ADR-021 | serde_json preserve_order feature 评估 | 已决策 | 2026-09-22 | SZ-Rust Team | [0021-serde-json-preserve-order-evaluation.md](0021-serde-json-preserve-order-evaluation.md) |
+| ADR-022 | 框架层与业务层边界划分 | 已接受 | 2026-09-24 | SZ-Rust Team | [0022-framework-business-boundary.md](0022-framework-business-boundary.md) |
+| ADR-023 | matchit 集成决策（K1 维持现状） | 已决策 | 2026-08-06 | SZ-Rust Team | [0023-matchit-K1-决策.md](0023-matchit-K1-决策.md) |
 | ADR-AI-01 | MCP 工具桥接 — 进程内调用 vs stdio JSON-RPC | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-01-mcp-bridge-in-process.md](ADR-AI-01-mcp-bridge-in-process.md) |
 | ADR-AI-02 | LLM Provider 统一抽象 — 三家标准化 | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-02-llm-provider-unified-abstraction.md](ADR-AI-02-llm-provider-unified-abstraction.md) |
 | ADR-AI-03 | 模型路由 — ArcSwap 无锁热替换 | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-03-model-router-arcswap.md](ADR-AI-03-model-router-arcswap.md) |
@@ -38,7 +45,7 @@
 | ADR-AI-05 | Facade 静态 API — OnceLock 全局实例对齐 PHP think\facade | 已接受 | 2026-08-10 | SZ-Rust Team | [ADR-AI-05-facade-static-api-oncelock.md](ADR-AI-05-facade-static-api-oncelock.md) |
 | ADR-026 | Capability Registry 统一能力抽象 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-026-capability-registry-unified-abstraction.md](ADR-026-capability-registry-unified-abstraction.md) |
 | ADR-027 | SDD Agent 四阶段编排 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-027-sdd-agent-four-phase-orchestration.md](ADR-027-sdd-agent-four-phase-orchestration.md) |
-| ADR-028 | 开源版/企业版双仓库分离 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-028-opensource-enterprise-split.md](ADR-028-opensource-enterprise-split.md) |
+| ADR-028 | 开源版/企业版双仓库分离 | ~~已接受~~ **已废弃（被 ADR-043 取代）** | 2026-08-13 | SZ-Rust Team | [ADR-028-opensource-enterprise-split.md](ADR-028-opensource-enterprise-split.md) |
 | ADR-029 | 共享 Schema + 插件事件总线 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-029-shared-schema-event-bus.md](ADR-029-shared-schema-event-bus.md) |
 | ADR-030 | AI 辅助迁移工具 TP6→Rust | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-030-ai-migration-tp6-to-rust.md](ADR-030-ai-migration-tp6-to-rust.md) |
 | ADR-031 | 行业 RAG 知识库三段式管道 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-031-industry-rag-knowledge-base.md](ADR-031-industry-rag-knowledge-base.md) |
@@ -48,6 +55,19 @@
 | ADR-035 | 插件市场基础设施 | 已接受 | 2026-08-13 | SZ-Rust Team | [ADR-035-plugin-marketplace-infrastructure.md](ADR-035-plugin-marketplace-infrastructure.md) |
 | ADR-036 | 可靠任务队列（数据库持久化 Job 表） | 已接受 | 2026-08-15 | SZ-Rust Team | [ADR-036-reliable-job-queue.md](ADR-036-reliable-job-queue.md) |
 | ADR-037 | MemPool 区域分配器 unsafe fn 收紧 | 已接受 | 2026-08-16 | SZ-Rust Team | [ADR-037-mempool-unsafe-fn.md](ADR-037-mempool-unsafe-fn.md) |
+| ADR-038 | 移除 sz-rust-k8s-operator 孤儿 crate | 已决策 | 2026-08-21 | SZ-Rust Team | [ADR-038-remove-k8s-operator.md](ADR-038-remove-k8s-operator.md) |
+| ADR-039 | 租户上下文注入方式 — request extensions 而非 thread_local | 已接受 | 2026-09-10 | SZ-Rust Team | [ADR-039-tenant-context-request-extensions.md](ADR-039-tenant-context-request-extensions.md) |
+| ADR-040 | TenantScopeExt 以 DataScopeExt 为 supertrait | 已接受 | 2026-09-10 | SZ-Rust Team | [ADR-040-tenant-scope-ext-supertrait.md](ADR-040-tenant-scope-ext-supertrait.md) |
+| ADR-041 | v1.7.0 Feature Gate 隔离与 all-v1-7 聚合 | 已接受 | 2026-10-03 | SZ-Rust Team | [ADR-041-v1-7-0-feature-gate-isolation.md](ADR-041-v1-7-0-feature-gate-isolation.md) |
+| ADR-042 | 二维码生成验证闭环 — rqrr 轻量解码替代 rxing | 已接受 | 2026-10-20 | SZ-Rust Team | [ADR-042-qr-verify-rqrr-closed-loop.md](ADR-042-qr-verify-rqrr-closed-loop.md) |
+| ADR-043 | AI 时代单一版本合并 — 废除企业版，全部版本合并为单一开源版本（v2.0.0） | 已接受 | 2026-10-25 | SZ-Rust Team | [ADR-043-ai时代单一版本合并.md](ADR-043-ai时代单一版本合并.md) |
+| ADR-044 | WASM 执行资源限制 — 公开白名单移除 + 燃料计量 + 内存上限 + 执行超时 | 已接受 | 2026-10-27 | SZ-Rust Team | [ADR-044-wasm-execution-resource-limits.md](ADR-044-wasm-execution-resource-limits.md) |
+| ADR-045 | 数据归属过滤与令牌生命周期安全加固（IDOR / refresh 轮换 / logout 黑名单 / WS·SSE JWT / CSPRNG） | 已接受 | 2026-10-28 | SZ-Rust Team | [ADR-045-数据归属过滤与令牌生命周期安全加固.md](0045-数据归属过滤与令牌生命周期安全加固.md) |
+| ADR-046 | 性能工程整改（限流按对端 IP 分桶 / 熔断 60 桶 O(1) 窗口 / 池探活默认关闭 / 日志级别 / 门禁 v2 接 CI） | 已接受 | 2026-10-29 | SZ-Rust Team | [0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md](0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md) |
+| ADR-047 | 审计链落库改为有界异步缓冲重放（消除慢库对业务延迟的影响，丢弃可观测） | 已接受 | 2026-10-30 | SZ-Rust Team | [0047-审计链异步缓冲重放.md](0047-审计链异步缓冲重放.md) |
+| ADR-048 | 订单列表 COUNT 查询缓存（LRU + TTL 60 s，写路径整体失效） | 已接受 | 2026-10-30 | SZ-Rust Team | [0048-订单count查询缓存.md](0048-订单count查询缓存.md) |
+| ADR-049 | 鉴权授权上下文缓存（LRU + TTL 60 s，替代每请求 merchant_user 查询） | 已接受 | 2026-10-30 | SZ-Rust Team | [0049-鉴权授权上下文缓存.md](0049-鉴权授权上下文缓存.md) |
+| ADR-050 | 响应 gzip 压缩（默认关闭待实测 + 令牌端点 BREACH 排除） | 已接受 | 2026-10-30 | SZ-Rust Team | [0050-响应gzip压缩与breach排除.md](0050-响应gzip压缩与breach排除.md) |
 
 **状态说明**：
 - `提议`（Proposed）：已提交但尚未评审
@@ -208,7 +228,7 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，底层依赖 axum（Tow
 
 ## 5. ADR 完成状态
 
-所有已识别 ADR 均已完成编写（20/20）：
+所有已识别 ADR 均已完成编写（**47/47**）。下方为原始 ADR-001~020 的优先级划分（完整索引见第 1 节）：
 
 | 优先级 | 编号 | 标题 | 状态 | 完成日期 |
 |--------|------|------|------|---------|
@@ -240,5 +260,4 @@ SZ-Rust 是一个对标 ThinkPHP 8 的 Rust Web 框架，底层依赖 axum（Tow
 - [《ADR 与生产 Bug 定位规范》](../ADR与生产Bug定位规范.md) — ADR 写作规范与 Bug 定位流程
 - [《软件项目审计清单》](../软件项目审计清单.md) — P0/P1/P2/P3 审计项
 - [《SZ-Rust 工程化实践规范》](../sz-rust-engineering-practices.md) — 10 道门禁与五维审查
-- [《SZ-Rust 架构设计与经验教训》](../sz-rust架构设计与经验教训.md) — 预架构设计文档
-- [SZ-ORM ADR 索引](../../sz-orm/docs/adr/README.md) — 关联项目 ADR 参考
+- [SZ-ORM ADR 索引](../../../sz-orm/docs/adr/README.md) — 关联项目 ADR 参考

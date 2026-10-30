@@ -5,6 +5,7 @@
 //!
 //! 需要真实 Redis（通过 SSH 隧道连接服务器 Redis）。
 //! 默认连接 `redis://127.0.0.1:16379`（SSH 隧道端口）。
+//! SDET P0-1：地址可由 REDIS_URL 环境变量覆盖（CI 注入 6379 service）。
 
 #![cfg(feature = "redis-store")]
 
@@ -15,15 +16,19 @@ use sz_rust_auth_facade::refresh::{
     RefreshTokenStore, RefreshTokenVerifier, SsoJwtCodec, TokenBlacklist,
 };
 
-const REDIS_URL: &str = "redis://127.0.0.1:16379";
+fn redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:16379".to_string())
+}
 
 async fn make_redis_stores() -> (Arc<dyn RefreshTokenStore>, Arc<dyn TokenBlacklist>) {
-    let config = RedisConfig::from_url(REDIS_URL);
+    let url = redis_url();
+    let config = RedisConfig::from_url(&url);
     create_redis_stores(config).await.unwrap()
 }
 
 async fn cleanup_redis() {
-    let client = redis::Client::open(REDIS_URL).unwrap();
+    let url = redis_url();
+    let client = redis::Client::open(url).unwrap();
     let mut conn = client.get_connection_manager().await.unwrap();
     redis::cmd("FLUSHDB").exec_async(&mut conn).await.unwrap();
 }
@@ -182,7 +187,8 @@ use sz_rust_auth_facade::redis_store::create_redis_stores_with_devices;
 use sz_rust_auth_facade::refresh::{DeviceInfo, DeviceSessionStore};
 
 async fn make_redis_device_store() -> Arc<dyn DeviceSessionStore> {
-    let config = RedisConfig::from_url(REDIS_URL);
+    let url = redis_url();
+    let config = RedisConfig::from_url(&url);
     let (_, _, device_store) = create_redis_stores_with_devices(config).await.unwrap();
     device_store
 }
@@ -328,7 +334,8 @@ async fn redis_device_session_clear_user_sessions() {
 #[tokio::test]
 async fn redis_create_stores_with_devices_shared_connection() {
     cleanup_redis().await;
-    let config = RedisConfig::from_url(REDIS_URL);
+    let url = redis_url();
+    let config = RedisConfig::from_url(&url);
     let (store, blacklist, device_store) = create_redis_stores_with_devices(config).await.unwrap();
 
     store.increment_version(1).await.unwrap();

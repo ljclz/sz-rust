@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::{Pool, Value};
 
 use crate::error::AdminError;
@@ -66,7 +67,7 @@ impl RoleService {
     }
 
     pub async fn list(&self, tenant_id: i64) -> Result<Vec<RoleResponse>, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, name, code, description, is_builtin, tenant_id, created_at, updated_at \
@@ -88,7 +89,7 @@ impl RoleService {
         RoleModel::validate_code_format(&req.code)?;
         RoleModel::validate_name(&req.name)?;
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let exists = conn
             .query_with_params(
                 "SELECT id FROM roles WHERE code = ? AND tenant_id = ? LIMIT 1",
@@ -134,7 +135,7 @@ impl RoleService {
         req: UpdateRoleRequest,
         tenant_id: i64,
     ) -> Result<RoleResponse, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let exists = conn
             .query_with_params(
                 "SELECT id, is_builtin FROM roles WHERE id = ? AND tenant_id = ? LIMIT 1",
@@ -176,7 +177,7 @@ impl RoleService {
     }
 
     pub async fn delete(&self, role_id: i64, tenant_id: i64) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, is_builtin FROM roles WHERE id = ? AND tenant_id = ? LIMIT 1",
@@ -226,7 +227,7 @@ impl RoleService {
         permission_codes: Vec<String>,
         tenant_id: i64,
     ) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let role_exists = conn
             .query_with_params(
                 "SELECT id FROM roles WHERE id = ? AND tenant_id = ? LIMIT 1",
@@ -272,7 +273,7 @@ impl RoleService {
     }
 
     async fn get_by_id(&self, role_id: i64, tenant_id: i64) -> Result<RoleResponse, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, name, code, description, is_builtin, tenant_id, created_at, updated_at \

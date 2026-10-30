@@ -43,25 +43,27 @@ const SCAN_FILES = [
 // 已定性虚构的 crate（2026-08-14 核验：开源版与企业版仓库 git 历史中均从未存在，
 // 见 docs/audit/2026-08-13-文档已实现但生产零调用审计报告.md + doc-debt DB-2026-08-13-01）。
 // 清单内 crate 的"声称"视为虚构（ERROR）；但行内已标注「未完成/虚构/不存在」的引用豁免（WARN）。
+// 2026-10-27 更新：sz-rust-marketplace / sz-rust-visual / sz-rust-migration 已随 v2.0.0
+// 单一版本合并（ADR-043，2026-10-25）实际入库为 workspace member，从虚构清单移除。
 const KNOWN_FICTIONAL_CRATES = new Set([
-    'sz-rust-marketplace',
-    'sz-rust-visual',
+    // sz-rust-sdd-agent：仅存在于旧文档/脚本命名，实体 crate 名为 sz-rust-sdd（v2.0.0 已入库）
     'sz-rust-sdd-agent',
-    'sz-rust-migration',
 ]);
 
 // 已移除的 crate（2026-08-15 移除：非框架核心、零测试、零依赖方；
 // sz-rust-k8s-operator：ADR-038 决策移除孤儿 crate，2026-09-14 完成目录物理删除）
+// 2026-10-27 更新：sz-rust-wasm 已随 v2.0.0 合并重新入库，从移除清单剔除。
 // 历史文档/审计报告中的引用降级为 WARN，不阻塞 CI。
 const REMOVED_CRATES = new Set([
     'sz-rust-operator',
-    'sz-rust-wasm',
     'sz-rust-k8s-operator',
 ]);
 
 // 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件
 // addons-{cms,crm,ecommerce,erp,forum,im,operate}；sz-rust-sz300 业务包经 1614e84 移出开源版，
 // ci.yml 对应 job 已 if:false 并注明「已迁移至企业版仓库」）。
+// 2026-10-27 更新：v2.0.0 单一版本合并（ADR-043）后，本清单内 crate 均已在 packages/ 实体入库，
+// 该清单仅对历史文档中的跨版引用生效（存在即 member 的声称直接通过，不会命中本分支）。
 // 开源版文档/历史报告中的引用降级为 WARN（不阻塞）；可执行配置（.github/workflows）仍须显式修复。
 const ENTERPRISE_DELIVERED_CRATES = new Set([
     'sz-rust-sz300',
@@ -85,7 +87,8 @@ const NON_CRATE_NAMES = new Set([
     'sz-rust-soak',
     'sz-rust-skills',
     'sz-rust-engineering-practices',
-    'sz-rust-sdd',
+    // h2 测试临时目录名（AI 评审代码示例/测试中使用 sz-rust-h2-tests-{pid}，非 crate）
+    'sz-rust-h2-tests',
     ...lsDir(path.join(ROOT, '.trae', 'skills')),
 ]);
 
@@ -100,7 +103,7 @@ const IGNORE_END = '<!-- doc-code-consistency: ignore-end -->';
 // 「已完成 / 已实现 / 全部完成 / 已落地 / 测试通过」+ crate 名 = 完成声称，
 // 行内必须附证据标记：来源 / cargo test / commit / 路径 :行号 / 测试数。
 const COMPLETION_CLAIM_RE = /(?:已完成|全部完成|已实现|已落地|已交付|测试通过|tests? passed|全部通过)/;
-const EVIDENCE_RE = /(?:来源|source|cargo (?:test|check|clippy)|\d+\s*[+]?\s*(?:个)?(?:测试|tests?|passed)|\d+\s*(?:个)?测试|:\d+|commit|SHA|PR\s*#|企业版|enterprise|✅|测试数|生产接入状态|未挂载|未接入|已实现但)/;
+const EVIDENCE_RE = /(?:来源|source|cargo (?:test|check|clippy)|\d+\s*[+]?\s*(?:个)?(?:测试|tests?|passed)|\d+\s*(?:个)?测试|:\d+|commit|SHA|PR\s*#|企业版|enterprise|测试数|生产接入状态|未挂载|未接入|已实现但)/;
 
 function lsDir(dir) {
     if (!fs.existsSync(dir)) return [];
@@ -221,6 +224,10 @@ function main() {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（已定性虚构交付：crate 在开源/企业版仓库均不存在，禁止作为有效声称）`);
                 } else if (ENTERPRISE_DELIVERED_CRATES.has(name)) {
                     warnings.push(`${rel}:${firstRef.line} 引用 ${name}（企业版交付/已移出开源版，历史或跨版引用）`);
+                } else if (/应独立|建议|规划|未来|待新增|planned|proposed|roadmap/.test(firstRef.text)) {
+                    // 2026-10-28 UXR 整改补充：建议/规划性引用（如评测报告建议新增 crate）
+                    // 不是交付声称，降级为 WARN，避免误判幻影交付。
+                    warnings.push(`${rel}:${firstRef.line} 引用 ${name}（建议/规划性引用，非交付声称）`);
                 } else if (docExternal) {
                     errors.push(`${rel}:${firstRef.line} 声称 ${name}（幻影交付：packages/${name} 不存在——文档含企业版字样但 crate 不在已核验企业版交付清单，请核实或更新清单）`);
                 } else {
@@ -232,12 +239,50 @@ function main() {
         }
     }
 
+    // 门禁 19 扩展（2026-10-27 tech-writer 整改，规则见 project_rules.md 规则 24）：
+    // 除 crate 存在性外，自动检查 Markdown 链接存在性 / README 版本一致性 / feature 名存在性。
+    const linkCheck = require('./link-check');
+    const allMd = linkCheck.walkMd(ROOT);
+    const linkResult = linkCheck.checkLinks(allMd);
+    for (const e of linkResult.errors) errors.push(`[LINK] ${e}`);
+    for (const e of linkCheck.checkVersions(allMd)) errors.push(`[VERSION] ${e}`);
+    for (const e of linkCheck.checkFeatures(allMd)) errors.push(`[FEATURE] ${e}`);
+
+    // 门禁 19 扩展（2026-10-27 UXR P0-2）：中英文档安全声明一致性。
+    // 英文 README 一旦出现已被中文版修复的过期安全声明（如 WASM 端点 public whitelist），
+    // 必须同步后提交，防止安全评审读到错误的「公开未授权执行端点」描述。
+    const STALE_SECURITY_STATEMENTS = [
+        {
+            file: 'README.en.md',
+            pattern: /\(public whitelist\)/i,
+            hint: 'WASM 端点安全声明过期：英文版仍称 (public whitelist)，中文版已改为「受 JWT 保护」，请同步 README.en.md',
+        },
+    ];
+    // 允许参与安全声明一致性检查的文件白名单（防御路径穿越：只读根目录内这些文件）
+    const ALLOWED_SECURITY_SYNC_FILES = new Set(['README.en.md', 'README.md']);
+    const rootResolved = path.resolve(ROOT);
+    for (const rule of STALE_SECURITY_STATEMENTS) {
+        const target = path.resolve(ROOT, rule.file);
+        const insideRoot = target.startsWith(rootResolved + path.sep);
+        if (!insideRoot || !ALLOWED_SECURITY_SYNC_FILES.has(rule.file)) {
+            errors.push(`[SECURITY-SYNC] 非法检查路径: ${rule.file}`);
+            continue;
+        }
+        if (fs.existsSync(target)) {
+            const content = fs.readFileSync(target, 'utf8');
+            if (rule.pattern.test(content)) {
+                errors.push(`[SECURITY-SYNC] ${rule.file} 含过期安全声明：${rule.hint}`);
+            }
+        }
+    }
+
     console.log(`✅ 已扫描 ${SCAN_FILES.length} 个交付声称文档，发现 ${checked} 处需核验的 sz-rust-* 声称`);
+    console.log(`✅ 链接/版本/feature 一致性：${linkResult.totalLinks} 条相对链接，${linkResult.errors.length} 条 broken`);
     for (const w of warnings) console.log(`  [WARN] ${w}`);
     for (const e of errors) console.log(`  [ERROR] ${e}`);
 
     if (errors.length > 0) {
-        console.error(`\n❌ 发现 ${errors.length} 处幻影交付声称（违反铁律 23），请核实：crate 是否应存在、是否需标注企业版仓库`);
+        console.error(`\n❌ 发现 ${errors.length} 处文档-代码一致性错误（门禁 19：crate 存在性 / 链接 / 版本 / feature），请核实后重新提交`);
         process.exit(1);
     }
     if (warnings.length > 0) {

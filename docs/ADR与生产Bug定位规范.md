@@ -477,6 +477,6 @@ Bug 4 暴露后，SZ-Rust 应补：
 - [`sz-rust-engineering-practices.md`](sz-rust-engineering-practices.md) 定义 **工程化门禁与测试体系**；
 - [`软件项目审计清单.md`](软件项目审计清单.md) 定义 **审计维度与通过标准**；
 - [`adr/README.md`](adr/README.md) 是 ADR 索引；
-- [`audit/2026-07-22-初始审计.md`](audit/2026-07-22-初始审计.md) 是首次审计报告，记录本规范落地前的基线状态。
+- [`audit/archive/2026-07/2026-07-22-初始审计.md`](audit/archive/2026-07/2026-07-22-初始审计.md) 是首次审计报告，记录本规范落地前的基线状态。
 
 > **文档结束**

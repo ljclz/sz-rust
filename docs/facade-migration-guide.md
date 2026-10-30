@@ -9,13 +9,15 @@ v0.3.0 起，`sz-rust-core` 通过 **Facade 渐进提取**拆分为 7 个独立 
 
 | Facade | 职责 | LOC |
 |--------|------|-----|
-| `sz-rust-orm-facade` | ORM 全家桶统一入口（Repository、QueryBuilder、缓存等） | ~692 |
-| `sz-rust-http-facade` | HTTP 基础层（response / error / request） | ~3,047 |
-| `sz-rust-cache-facade` | 多级缓存（Memory / Redis / Memcached / MultiLevel） | ~7,068 |
-| `sz-rust-state-facade` | 应用状态（session / cookie / env / event / i18n / mail / notify） | ~7,468 |
-| `sz-rust-infra-facade` | 基础设施（config / validate / static_files / upload / debug_page） | ~18,382 |
-| `sz-rust-auth-facade` | 认证与网关（wechat / oauth / gateway） | ~4,221 |
-| `sz-rust-pay-facade` | 支付抽象（PayProvider / PayOrder / MemoryPayProvider） | ~1,506 |
+| `sz-rust-orm-facade` | ORM 全家桶统一入口（Repository、QueryBuilder、缓存等） | 692 |
+| `sz-rust-http-facade` | HTTP 基础层（response / error / request） | 3,047 |
+| `sz-rust-cache-facade` | 多级缓存（Memory / Redis / Memcached / MultiLevel） | 7,068 |
+| `sz-rust-state-facade` | 应用状态（session / cookie / env / event / i18n / mail / notify） | 7,468 |
+| `sz-rust-infra-facade` | 基础设施（config / validate / static_files / upload / debug_page） | 18,382 |
+| `sz-rust-auth-facade` | 认证与网关（wechat / oauth / gateway） | 4,221 |
+| `sz-rust-pay-facade` | 支付抽象（PayProvider / PayOrder / MemoryPayProvider） | 1,506 |
+
+> LOC 数值来源：2026-08-03 P2 拆包提交时的 `tokei` 统计（对应 CHANGELOG v1.3 条目与 ADR-017/018），后续版本可能随代码演进小幅变化。
 
 `sz-rust-core` 从 57K LOC 降至 23.6K LOC（**−58.7%**）。
 
@@ -144,11 +146,13 @@ sz-rust-orm-facade = { version = "0.3.0", features = ["graphql"] }
 
 取决于业务包实际使用的 facade 数量。粗略估算：
 
-| 场景 | 编译 LOC 减少 | 预期加速 |
+| 场景 | 编译 LOC 减少（估算） | 预期加速 |
 |------|-------------|---------|
-| 仅用 ORM | ~23K LOC | 30-50% |
-| 仅用 HTTP + Cache | ~10K LOC | 40-60% |
-| 全量使用 | ~0 LOC | 无变化（向后兼容路径） |
+| 仅用 ORM | 23K LOC | 30-50% |
+| 仅用 HTTP + Cache | 10K LOC | 40-60% |
+| 全量使用 | 0 LOC | 无变化（向后兼容路径） |
+
+> 上表为迁移成本定性估算（基于 v0.3.0 拆包时的 LOC 统计），非精确计量；实际收益以本仓库 `cargo build` 计时为准。
 
 ## 回滚方案
 

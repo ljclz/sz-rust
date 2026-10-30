@@ -39,7 +39,7 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     };
@@ -56,6 +56,7 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
 
     Some(sz_rust_sz300::state::AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -64,6 +65,13 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
         key_manager: sz_rust_sz300::services::auth_service::default_key_manager_for_tests(),
         #[cfg(feature = "v18-audit-chain")]
         chain_auditor: Arc::new(sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new()),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: {
+            // bench 不关心审计落库：保持通道畅通并丢弃，避免写库影响热路径测量。
+            let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+            sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
+            sink
+        },
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -85,6 +93,8 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     })
 }
 

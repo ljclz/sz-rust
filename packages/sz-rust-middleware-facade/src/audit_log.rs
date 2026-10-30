@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_redact_simple() {
-        let mut value = serde_json::json!({"password": "secret123", "name": "alice"});
+        let mut value = serde_json::json!({"password": "<secret>", "name": "alice"});
         redact_sensitive_fields(&mut value, &["password".to_string()]);
         assert_eq!(value["password"], "[REDACTED]");
         assert_eq!(value["name"], "alice");

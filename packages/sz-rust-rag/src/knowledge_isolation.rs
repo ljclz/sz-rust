@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 知识库隔离（v1.5.0 P2-3）
 //!
 //! 按 `knowledge_base_id` + `tenant_id` 隔离过滤（spec 5.7.7 + 5.7.10）。

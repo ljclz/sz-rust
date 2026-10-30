@@ -20,7 +20,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_SCAN_DIR = path.resolve(__dirname, '..', 'packages', 'sz-rust-sz300', 'src');
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_SCAN_DIR = path.resolve(PROJECT_ROOT, 'packages', 'sz-rust-sz300', 'src');
 const NPLUS1_PATTERNS = [
     'fetch_related',
     'query_with_params',
@@ -123,7 +124,13 @@ function detectNPlus1(filePath) {
 
 function main() {
     const args = parseArgs(process.argv);
-    const files = listRustFiles(args.dir);
+    // 仅允许扫描项目根内的目录（防命令行参数路径穿越，mimosa 专项治理）
+    const scanDir = path.resolve(PROJECT_ROOT, args.dir);
+    if (scanDir !== PROJECT_ROOT && !scanDir.startsWith(PROJECT_ROOT + path.sep)) {
+        console.error(`[nplus1-detect] FAIL: 扫描目录越界: ${args.dir}`);
+        process.exit(2);
+    }
+    const files = listRustFiles(scanDir);
 
     if (files.length === 0) {
         console.error(`[nplus1-detect] FAIL: 未找到 .rs 文件，扫描目录: ${args.dir}`);
@@ -139,7 +146,7 @@ function main() {
     if (args.json) {
         console.log(JSON.stringify({ violations: allViolations, count: allViolations.length, scanned_files: files.length }, null, 2));
     } else {
-        console.log(`[nplus1-detect] 扫描 ${files.length} 个 .rs 文件 (${args.dir})`);
+        console.log(`[nplus1-detect] 扫描 ${files.length} 个 .rs 文件 (${scanDir})`);
         if (allViolations.length === 0) {
             console.log('[nplus1-detect] PASS: 0 违规');
         } else {

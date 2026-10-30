@@ -31,17 +31,29 @@ sz-orm-sqlx.workspace = true
 sqlx = { workspace = true, features = ["mysql"] }
 serde.workspace = true
 serde_json.workspace = true
+# UXR 2026-10-27 P1-5：验证器示范（Validate::message 接受 IndexMap）
+indexmap.workspace = true
 tokio.workspace = true
+# 静态文件流式响应（ReaderStream），避免整文件读入内存
+tokio-util.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 axum.workspace = true
+tower-http = { workspace = true, features = ["cors", "compression-gzip"] }
 tracing-subscriber.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 once_cell.workspace = true
+# v2.0.0 合并企业版：AI 能力接线（LLM 聊天 / Embedding / 流式 / RAG）
+sz-rust-ai-facade = { workspace = true, features = ["openai"] }
+sz-rust-rag = { workspace = true }
+# v2.0.0 合并企业版：WASM 边缘计算
+sz-rust-wasm = { workspace = true }
+# v2.0.0 合并企业版：AI facade 初始化需要 HTTP 客户端（AuditHttpClient）
+reqwest.workspace = true
 # v1.9.0 JWT Audience 注入 aud 声明需 HMAC-SHA256 重签名（feature gate 控制）
 hmac = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
@@ -60,7 +72,7 @@ async-graphql = { workspace = true, optional = true, features = ["dataloader"] }
 async-graphql-axum = { workspace = true, optional = true }
 # v1.8.0 WebSocket 端点（feature gate 控制，默认不启用）
 sz-rust-websocket = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
+futures = { workspace = true }
 # v1.8.0 SSE 端点（feature gate 控制，默认不启用）
 # 使用 axum 内置 SSE 支持，无需额外依赖
 # v1.9.0 Saga 分布式事务（feature gate 控制，默认不启用）
@@ -68,10 +80,24 @@ sz-rust-distributed-tx = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 # v1.9.0 可观测性闭环（feature gate 控制，默认不启用）
 sz-rust-alert-engine = { workspace = true, optional = true }
+# v1.9.0 插件生态：Ed25519 真实验签（2026-10-28 修复 AppSec P0-1 伪验签）
+ed25519-dalek.workspace = true
 
 
 [features]
-default = []
+# 2026-10-28 安全修复：默认启用安全加固 feature（原 default=[] 导致安全能力全 opt-in）。
+# - v18-security-headers：CSP/HSTS/XFO 等安全头
+# - v18-data-mask：响应字段脱敏
+# - v18-audit-chain：写操作审计链式哈希
+# - v18-key-rotation：JWT 密钥轮换（RNG 已修复为密码学安全）
+# - v19-jwt-audience：JWT audience 校验（登录签发带 aud 令牌）
+default = [
+    "v18-security-headers",
+    "v18-data-mask",
+    "v18-audit-chain",
+    "v18-key-rotation",
+    "v19-jwt-audience",
+]
 # Addon 热加载：运行时动态加载 .dll/.so/.dylib 插件（libloading 后端）
 # 启用后，启动时自动扫描 addons/ 目录并加载所有共享库
 hot-reload = ["sz-rust-core/hot-reload"]
@@ -95,9 +121,9 @@ v18-upload = ["dep:sz-rust-upload"]
 # v1.8.0 GraphQL 端点接入
 v18-graphql = ["dep:async-graphql", "dep:async-graphql-axum"]
 # v1.8.0 WebSocket 端点接入
-v18-websocket = ["dep:sz-rust-websocket", "dep:futures"]
+v18-websocket = ["dep:sz-rust-websocket"]
 # v1.8.0 SSE 端点接入
-v18-sse = ["dep:futures"]
+v18-sse = []
 # v1.9.0 GraphQL 持久化（DB-backed schema）
 v19-graphql-persist = ["v18-graphql"]
 # v1.9.0 JWT Audience 安全增强
@@ -134,3 +160,9 @@ criterion = { workspace = true, features = ["html_reports"] }
 futures.workspace = true
 tower = { workspace = true }
 http-body-util = { workspace = true }
+# pool_cancel_safe_test 自定义 ConnectionFactory（trait 使用 #[async_trait]）
+async-trait.workspace = true
+# v2.0.0 合并企业版：WASM 测试编译 wat 模块
+wat = "1"
+# 2026-10-27 性能基线落地：windows_memory_baseline 用 sysinfo 实测进程 RSS
+sysinfo.workspace = true

@@ -96,3 +96,7 @@ path = "src/bin/wasm_sandbox.rs"
 [[bin]]
 name = "wasm_edge_deploy"
 path = "src/bin/wasm_edge_deploy.rs"
+
+[[bin]]
+name = "parse_path_demo"
+path = "src/bin/parse_path_demo.rs"

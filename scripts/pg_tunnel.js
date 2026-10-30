@@ -1,13 +1,7 @@
 const { Client } = require('ssh2');
 const net = require('net');
 const conn = new Client();
-const key = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACAZ7aSyL1OtDzpB6g9DOlXEkbW/8m7PoABKI6F+HPYClAAAAJDU+jBX1Pow
-VwAAAAtzc2gtZWQyNTUxOQAAACAZ7aSyL1OtDzpB6g9DOlXEkbW/8m7PoABKI6F+HPYClA
-AAAECTym3MgA4KhTkqlXmGdgDivtIyVsDqegfqguAUJhi9mxntpLIvU60POkHqD0M6VcSR
-tb/ybs+gAEojoX4c9gKUAAAADHJvb3RAUzI1My03NQE=
------END OPENSSH PRIVATE KEY-----`;
+const key = `process.env.SSH_PRIVATE_KEY`;
 
 const LOCAL_PORT = 5433;
 const REMOTE_HOST = '127.0.0.1';

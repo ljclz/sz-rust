@@ -13,7 +13,7 @@
 //! | 支付失败 | 充足 | 失败 | 成功 | Compensated, failed=initiate_payment, 库存恢复+订单删除 |
 //! | 补偿失败 | 充足 | 失败 | restore 失败 | ManualIntervention, failed=initiate_payment |
 //!
-//! 运行前确保 MySQL 9.6 运行于 127.0.0.1:3306，root/test123，sz_orm_test 数据库存在。
+//! 运行前确保 MySQL 9.6 运行于 127.0.0.1:3306，root/$SZ_TEST_DB_PASSWORD，sz_orm_test 数据库存在。
 //! 手动运行：`cargo test -p sz-rust-sz300 --test order_saga_e2e --features v19-saga -- --ignored`
 
 #![cfg(feature = "v19-saga")]
@@ -33,6 +33,8 @@ use sz_rust_sz300::{
     },
 };
 
+mod common;
+
 fn mysql_test_config() -> config::AppConfig {
     config::AppConfig {
         server: config::ServerConfig {
@@ -43,67 +45,24 @@ fn mysql_test_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
 }
 
 async fn setup_tables(pool: &Pool) -> anyhow::Result<()> {
-    let mut conn = pool.acquire().await?;
-    conn.query("DROP TABLE IF EXISTS `order_item`").await?;
-    conn.query("DROP TABLE IF EXISTS `order`").await?;
-    conn.query(
-        "CREATE TABLE `order` (\
-            `order_id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `order_no` VARCHAR(64) NOT NULL UNIQUE,\
-            `merchant_id` INT UNSIGNED NOT NULL,\
-            `device_id` INT UNSIGNED DEFAULT 0,\
-            `total_fen` INT UNSIGNED NOT NULL,\
-            `total_weight_g` INT UNSIGNED DEFAULT 0,\
-            `item_count` SMALLINT UNSIGNED DEFAULT 0,\
-            `status` TINYINT DEFAULT 0,\
-            `pay_method` TINYINT DEFAULT 0,\
-            `pay_at` DATETIME DEFAULT NULL,\
-            `offline_seq` VARCHAR(50) DEFAULT '',\
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,\
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await?;
-    conn.query(
-        "CREATE TABLE `order_item` (\
-            `item_id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `order_id` BIGINT UNSIGNED NOT NULL,\
-            `good_id` INT UNSIGNED NOT NULL,\
-            `good_name` VARCHAR(100) NOT NULL,\
-            `price_fen` INT UNSIGNED NOT NULL,\
-            `weight_g` INT UNSIGNED DEFAULT 0,\
-            `total_fen` INT UNSIGNED NOT NULL,\
-            `quantity` INT NOT NULL DEFAULT 1\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await?;
-    conn.query("DROP TABLE IF EXISTS `product`").await?;
-    conn.query(
-        "CREATE TABLE `product` (\
-            `product_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `name` VARCHAR(100) NOT NULL,\
-            `stock` INT NOT NULL DEFAULT 0,\
-            `price` INT UNSIGNED NOT NULL DEFAULT 0\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await?;
+    common::setup_all_tables(pool).await;
     Ok(())
 }
 
-async fn insert_product(pool: &Pool, product_id: i64, stock: i32) -> anyhow::Result<()> {
+async fn insert_product(pool: &Pool, good_id: i64, stock: i32) -> anyhow::Result<()> {
     let mut conn = pool.acquire().await?;
     conn.execute_with_params(
-        "INSERT INTO product (product_id, name, stock, price) VALUES (?, ?, ?, ?)",
+        "INSERT INTO good (good_id, merchant_id, name, stock, price) VALUES (?, 1, ?, ?, ?)",
         &[
-            DbValue::I64(product_id),
-            DbValue::String(format!("test-product-{}", product_id)),
+            DbValue::I64(good_id),
+            DbValue::String(format!("test-good-{}", good_id)),
             DbValue::I32(stock),
             DbValue::I64(100),
         ],
@@ -126,12 +85,12 @@ async fn get_order_status(pool: &Pool, order_id: i64) -> anyhow::Result<Option<i
         .and_then(|r| r.get("status").and_then(|v| v.as_i64()).map(|v| v as i8)))
 }
 
-async fn get_product_stock(pool: &Pool, product_id: i64) -> anyhow::Result<Option<i32>> {
+async fn get_product_stock(pool: &Pool, good_id: i64) -> anyhow::Result<Option<i32>> {
     let mut conn = pool.acquire().await?;
     let rows = conn
         .query_with_params(
-            "SELECT stock FROM product WHERE product_id = ?",
-            &[DbValue::I64(product_id)],
+            "SELECT stock FROM good WHERE good_id = ?",
+            &[DbValue::I64(good_id)],
         )
         .await?;
     Ok(rows
@@ -181,11 +140,17 @@ fn make_order_item(good_id: i64, quantity: i32, price_fen: i64) -> OrderItem {
 }
 
 fn unique_order_no(prefix: &str) -> String {
+    // order_no 为 VARCHAR(32)（001_init.sql），拼接纳秒时间戳会造成超长截断错误，
+    // 统一用 12 位尾号并把前缀裁剪到剩余长度内
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
-    format!("{}-{}", prefix, ts)
+        .as_nanos()
+        % 1_000_000_000_000;
+    let suffix = ts.to_string();
+    let room = 32usize.saturating_sub(suffix.len() + 1);
+    let head: String = prefix.chars().take(room).collect();
+    format!("{}-{}", head, suffix)
 }
 
 struct FailPaymentService;

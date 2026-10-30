@@ -6,15 +6,20 @@ const GITHUB_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
 const REPO = 'ljclz/sz-rust';
 const RUN_ID = process.argv[2] || '33484512301';
 const TAG = process.argv[3] || 'v1.2.0-prod-hardening.2';
+// 仅允许镜像 tag 合法字符（字母数字开头，后续仅字母数字/点/下划线/连字符），
+// 远程 docker 命令会拼接 IMAGE，必须先做白名单净化，防止命令行参数注入（mimosa command-injection 专项治理）
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(TAG)) {
+    console.error(`[ERROR] 非法 TAG: ${TAG}（仅允许字母数字、点、下划线、连字符）`);
+    process.exit(1);
+}
 const IMAGE = `ghcr.io/ljclz/sz300-server:${TAG}`;
 
-const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACDOrCHylYDXYOP0YBS+Ir7M5xnc1aPgf0dn7d3X9Gda3AAAAJjPWS0pz1kt
-KQAAAAtzc2gtZWQyNTUxOQAAACDOrCHylYDXYOP0YBS+Ir7M5xnc1aPgf0dn7d3X9Gda3A
-AAAEA4xgtubqt9HARi2/WKfFEtU8T3X5jPkusyG5SxCwgucc6sIfKVgNdg4/RgFL4ivszn
-GdzVo+B/R2ft3df0Z1rcAAAAE3Jvb3RAVk0tMTYtMy11YnVudHUBAg==
------END OPENSSH PRIVATE KEY-----`;
+// SSH 私钥从环境变量读取，禁止硬编码凭据（mimosa 凭据治理；历史硬编码私钥已废弃，须立即在服务器轮换）
+const privateKey = process.env.SSH_PRIVATE_KEY || '';
+if (!privateKey) {
+    console.error('[ERROR] 缺少 SSH_PRIVATE_KEY 环境变量，无法建立 SSH 连接');
+    process.exit(1);
+}
 
 const reportLines = [];
 const log = (s) => { reportLines.push(s); console.log(s); };

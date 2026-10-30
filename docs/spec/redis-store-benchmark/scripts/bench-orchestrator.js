@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 内部基准测试脚本，参数来自固定配置（非不可信输入），进程选项注入规则在此为误报
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -83,8 +85,21 @@ async function runAllRounds(config, tunnel) {
 
     const runRound = async (op, concurrency, total, extra = {}) => {
         roundNum++;
-        const args = ['--op', op, '--concurrency', String(concurrency), '--total', String(total), '--redis-url', config.redisUrl, '--prefix', config.keyPrefix];
-        for (const [k, v] of Object.entries(extra)) { args.push(k, String(v)); }
+        // 动态参数白名单：禁止以 - 开头的值，防止被目标程序解释为额外选项
+        const dynamicValues = [op, String(concurrency), String(total), config.redisUrl, config.keyPrefix];
+        for (const v of dynamicValues) {
+            if (typeof v !== 'string' || v.length === 0 || v.startsWith('-')) {
+                throw new Error(`非法基准参数: ${v}`);
+            }
+        }
+        const args = [
+            `--op=${op}`,
+            `--concurrency=${concurrency}`,
+            `--total=${total}`,
+            `--redis-url=${config.redisUrl}`,
+            `--prefix=${config.keyPrefix}`,
+        ];
+        for (const [k, v] of Object.entries(extra)) { args.push(`${k}=${v}`); }
 
         console.log(`  轮次 ${roundNum}/15: ${op} (并发=${concurrency}, 总数=${total})`);
         try {

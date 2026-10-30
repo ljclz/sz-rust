@@ -326,11 +326,11 @@ pub trait WechatHttpTransport: Send + Sync {
 /// use sz_rust_auth_facade::wechat::{MemoryWechatHttpTransport, WechatHttpTransport};
 ///
 /// let transport = MemoryWechatHttpTransport::new();
-/// transport.push_response(r#"{"access_token":"token123"}"#);
+/// transport.push_response(r#"{"access_token":"mocktoken"}"#);
 /// transport.push_response(r#"{"errcode":0}"#);
 ///
 /// let resp = transport.get("https://api.weixin.qq.com/token").unwrap();
-/// assert_eq!(resp, r#"{"access_token":"token123"}"#);
+/// assert_eq!(resp, r#"{"access_token":"mocktoken"}"#);
 /// ```
 #[derive(Debug, Default)]
 pub struct MemoryWechatHttpTransport {
@@ -1147,7 +1147,7 @@ mod tests {
         let transport = Arc::new(MemoryWechatHttpTransport::new());
         // 预置 mock 响应：token 响应 + 用户信息响应
         transport.push_response(
-            r#"{"access_token":"token123","expires_in":7200,"openid":"openid_abc"}"#,
+            r#"{"access_token":"mocktoken","expires_in":7200,"openid":"openid_abc"}"#,
         );
         transport.push_response(
             r#"{"openid":"openid_abc","nickname":"test_user","sex":1,"province":"广东","city":"深圳","country":"中国","headimgurl":"https://example.com/avatar.png","unionid":"unionid_xyz"}"#,
@@ -1295,7 +1295,7 @@ mod tests {
     fn test_wechat_sdk_send_template_message() {
         let transport = Arc::new(MemoryWechatHttpTransport::new());
         // 预置 mock 响应：access_token 响应 + 模板消息响应
-        transport.push_response(r#"{"access_token":"token123","expires_in":7200}"#);
+        transport.push_response(r#"{"access_token":"mocktoken","expires_in":7200}"#);
         transport.push_response(r#"{"errcode":0,"errmsg":"ok","msgid":123456789}"#);
 
         let config =
@@ -1322,7 +1322,7 @@ mod tests {
         // 第二次：POST cgi-bin/message/template/send
         assert_eq!(requests[1].0, "POST_JSON");
         assert!(requests[1].1.contains("cgi-bin/message/template/send"));
-        assert!(requests[1].1.contains("access_token=token123"));
+        assert!(requests[1].1.contains("access_token=mocktoken"));
         // body 包含 touser / template_id / data
         let body: serde_json::Value = serde_json::from_str(&requests[1].2).expect("body 应为 JSON");
         assert_eq!(body["touser"], "openid_user");
@@ -1377,7 +1377,7 @@ mod tests {
     #[test]
     fn test_wechat_sdk_send_template_message_api_failed() {
         let transport = MemoryWechatHttpTransport::new();
-        transport.push_response(r#"{"access_token":"token123","expires_in":7200}"#);
+        transport.push_response(r#"{"access_token":"mocktoken","expires_in":7200}"#);
         transport.push_response(r#"{"errcode":43004,"errmsg":"require subscribe"}"#);
 
         let config =
@@ -1399,7 +1399,7 @@ mod tests {
     fn test_wechat_sdk_get_qrcode_url() {
         let transport = Arc::new(MemoryWechatHttpTransport::new());
         // 预置 mock 响应：access_token 响应 + 二维码 ticket 响应
-        transport.push_response(r#"{"access_token":"token123","expires_in":7200}"#);
+        transport.push_response(r#"{"access_token":"mocktoken","expires_in":7200}"#);
         transport.push_response(
             r#"{"ticket":"ticket_abc_xyz","url":"http://weixin.qq.com/q/abc","expire_seconds":0}"#,
         );
@@ -1428,7 +1428,7 @@ mod tests {
         // 第二次：POST cgi-bin/qrcode/create
         assert_eq!(requests[1].0, "POST_JSON");
         assert!(requests[1].1.contains("cgi-bin/qrcode/create"));
-        assert!(requests[1].1.contains("access_token=token123"));
+        assert!(requests[1].1.contains("access_token=mocktoken"));
         // body 包含 action_name 和 scene_str
         let body: serde_json::Value = serde_json::from_str(&requests[1].2).expect("body 应为 JSON");
         assert_eq!(body["action_name"], "QR_LIMIT_STR_SCENE");

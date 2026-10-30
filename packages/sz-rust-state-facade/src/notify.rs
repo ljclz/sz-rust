@@ -1005,7 +1005,7 @@ mod tests {
     fn test_tencent_sms_config_debug_redacted() {
         let config = TencentSmsConfig {
             secret_id: "AKIDxxx-test-secret-id".to_string(),
-            secret_key: "SKxxx-test-secret-key".to_string(),
+            secret_key: "<secret>".to_string(),
             app_id: "1400000000".to_string(),
             default_sign_name: Some("鲜视达科技".to_string()),
             region: "ap-guangzhou".to_string(),
@@ -1021,7 +1021,7 @@ mod tests {
             "Debug 输出不应含真实 secret_id"
         );
         assert!(
-            !debug_output.contains("SKxxx-test-secret-key"),
+            !debug_output.contains("<secret>"),
             "Debug 输出不应含真实 secret_key"
         );
     }

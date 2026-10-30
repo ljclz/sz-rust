@@ -234,7 +234,7 @@ mod tests {
     async fn test_memory_token_store_set_get() {
         let store = MemoryOAuth2TokenStore::new();
         let token = TokenResponse {
-            access_token: "token123".into(),
+            access_token: "<token>".into(),
             token_type: Some("Bearer".into()),
             expires_in: Some(3600),
             scope: Some("read".into()),
@@ -252,7 +252,7 @@ mod tests {
             .expect("get_token 失败")
             .expect("应查到 token");
 
-        assert_eq!(retrieved.access_token, "token123");
+        assert_eq!(retrieved.access_token, "<token>");
         assert_eq!(retrieved.token_type.as_deref(), Some("Bearer"));
         assert_eq!(retrieved.expires_in, Some(3600));
     }
@@ -262,7 +262,7 @@ mod tests {
     async fn test_memory_token_store_delete() {
         let store = MemoryOAuth2TokenStore::new();
         let token = TokenResponse {
-            access_token: "token123".into(),
+            access_token: "<token>".into(),
             token_type: None,
             expires_in: Some(3600),
             scope: None,

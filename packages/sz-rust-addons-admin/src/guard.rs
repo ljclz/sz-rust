@@ -7,6 +7,7 @@ use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use sz_rust_middleware_facade::data_scope::DataScopeUserContext;
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::Value;
 
 use crate::error::{AdminError, AdminErrorResponse};
@@ -46,7 +47,7 @@ async fn check_user_permission(
     user: &DataScopeUserContext,
     permission_code: &str,
 ) -> Result<bool, AdminError> {
-    let mut conn = state.pool.acquire().await?;
+    let mut conn = acquire_cancel_safe(&state.pool).await?;
     let rows = conn
         .query_with_params(
             "SELECT rp.permission_code FROM user_roles ur \

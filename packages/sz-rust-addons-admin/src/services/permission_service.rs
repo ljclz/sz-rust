@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::{Pool, Value};
 
 use crate::error::AdminError;
@@ -45,7 +46,7 @@ impl PermissionService {
         &self,
         tenant_id: i64,
     ) -> Result<Vec<(String, String, String)>, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT code FROM permissions WHERE tenant_id = ? OR tenant_id = 0 ORDER BY code ASC",
@@ -71,7 +72,7 @@ impl PermissionService {
     }
 
     pub async fn tree(&self, tenant_id: i64) -> Result<PermissionTree, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT code, name FROM permissions WHERE tenant_id = ? OR tenant_id = 0 ORDER BY code ASC",

@@ -392,7 +392,7 @@ mod tests {
     fn test_token_store_and_validate() {
         let store = TokenStore::new(Duration::from_secs(3600));
         let token = TokenInfo {
-            access_token: "access123".to_string(),
+            access_token: "<token>".to_string(),
             refresh_token: Some("refresh456".to_string()),
             client_id: "client1".to_string(),
             scope: vec!["read".to_string()],
@@ -400,7 +400,7 @@ mod tests {
 
         store.store_token(token).unwrap();
 
-        let validated = store.validate("access123").unwrap();
+        let validated = store.validate("<token>").unwrap();
         assert_eq!(validated.client_id, "client1");
     }
 
@@ -408,7 +408,7 @@ mod tests {
     fn test_token_refresh() {
         let store = TokenStore::new(Duration::from_secs(3600));
         let token = TokenInfo {
-            access_token: "access123".to_string(),
+            access_token: "<token>".to_string(),
             refresh_token: Some("refresh456".to_string()),
             client_id: "client1".to_string(),
             scope: vec!["read".to_string()],
@@ -417,7 +417,7 @@ mod tests {
         store.store_token(token).unwrap();
 
         let refreshed = store.refresh("refresh456").unwrap();
-        assert_eq!(refreshed.access_token, "access123");
+        assert_eq!(refreshed.access_token, "<token>");
     }
 
     #[test]
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn test_token_info_debug_redacts_secrets() {
         let token = TokenInfo {
-            access_token: "access_secret_123".to_string(),
+            access_token: "<secret>".to_string(),
             refresh_token: Some("refresh_secret_456".to_string()),
             client_id: "client1".to_string(),
             scope: vec!["read".to_string()],
@@ -438,7 +438,7 @@ mod tests {
 
         let debug = format!("{token:?}");
         assert!(
-            !debug.contains("access_secret_123"),
+            !debug.contains("<secret>"),
             "Debug 输出不得包含访问令牌明文"
         );
         assert!(

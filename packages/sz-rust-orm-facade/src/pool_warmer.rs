@@ -200,8 +200,10 @@ mod tests {
         assert!(matches!(result, Err(WarmupError::ConnectionFailed(_))));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_pool_warmer_timeout() {
+        // 2026-10-28 P2-12：暂停时钟 + 自动推进，50ms 超时即时触发，
+        // 不再依赖真实 60s sleep（避免慢机器上的计时抖动与无谓等待）
         let warmer = PoolWarmer::new(1, || async {
             tokio::time::sleep(Duration::from_secs(60)).await;
             Ok(())

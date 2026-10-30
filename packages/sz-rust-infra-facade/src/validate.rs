@@ -329,6 +329,75 @@ pub static TYPE_MSG: Lazy<IndexMap<&'static str, &'static str>> = Lazy::new(|| {
     m
 });
 
+/// 默认中文语言包（UXR 2026-10-27 P1-5 新增）
+///
+/// 当 `Validate` 未注入外部 [`message::Lang`] 时使用，使默认错误消息输出中文，
+/// 对齐 ThinkPHP 中文默认语言包（think-orm `zh-cn.php` 的 `not conform to the rules`
+/// 翻译为「必须满足规则」）。调用方显式注入 `Lang` 后，仍以注入实例为准。
+pub static DEFAULT_ZH_LANG: Lazy<Arc<dyn message::Lang>> = Lazy::new(|| {
+    use message::SimpleLang;
+    Arc::new(
+        SimpleLang::new()
+            .set("not conform to the rules", "必须满足规则")
+            .set(":attribute require", ":attribute 为必填项")
+            .set(":attribute must", ":attribute 必须")
+            .set(":attribute must be numeric", ":attribute 必须为数字")
+            .set(":attribute must be integer", ":attribute 必须为整数")
+            .set(":attribute must be float", ":attribute 必须为浮点数")
+            .set(":attribute must be bool", ":attribute 必须为布尔值")
+            .set(":attribute not a valid email address", ":attribute 不是有效的邮箱地址")
+            .set(":attribute not a valid mobile", ":attribute 不是有效的手机号")
+            .set(":attribute must be a array", ":attribute 必须为数组")
+            .set(":attribute must be yes,on or 1", ":attribute 必须为 yes、on 或 1")
+            .set(":attribute not a valid datetime", ":attribute 不是有效的日期时间")
+            .set(":attribute not a valid file", ":attribute 不是有效的文件")
+            .set(":attribute not a valid image", ":attribute 不是有效的图片")
+            .set(":attribute must be alpha", ":attribute 必须为字母")
+            .set(":attribute must be alpha-numeric", ":attribute 必须为字母或数字")
+            .set(
+                ":attribute must be alpha-numeric, dash, underscore",
+                ":attribute 必须为字母、数字、短横线或下划线",
+            )
+            .set(":attribute not a valid domain or ip", ":attribute 不是有效的域名或 IP")
+            .set(":attribute must be chinese", ":attribute 必须为中文")
+            .set(":attribute must be chinese or alpha", ":attribute 必须为中文或字母")
+            .set(":attribute must be chinese,alpha-numeric", ":attribute 必须为中文、字母或数字")
+            .set(
+                ":attribute must be chinese,alpha-numeric,underscore, dash",
+                ":attribute 必须为中文、字母、数字、下划线或短横线",
+            )
+            .set(":attribute not a valid url", ":attribute 不是有效的 URL")
+            .set(":attribute not a valid ip", ":attribute 不是有效的 IP")
+            .set(":attribute must be dateFormat of :rule", ":attribute 必须符合格式 :rule")
+            .set(":attribute must be in :rule", ":attribute 必须在 :rule 中")
+            .set(":attribute be notin :rule", ":attribute 不能在 :rule 中")
+            .set(":attribute must between :1 - :2", ":attribute 必须在 :1 到 :2 之间")
+            .set(":attribute not between :1 - :2", ":attribute 不能在 :1 到 :2 之间")
+            .set("size of :attribute must be :rule", ":attribute 长度必须为 :rule")
+            .set("max size of :attribute must be :rule", ":attribute 长度不能超过 :rule")
+            .set("min size of :attribute must be :rule", ":attribute 长度不能小于 :rule")
+            .set(":attribute cannot be less than :rule", ":attribute 不能小于 :rule")
+            .set(":attribute cannot exceed :rule", ":attribute 不能超过 :rule")
+            .set(":attribute not within :rule", ":attribute 不在 :rule 范围内")
+            .set("access IP is not allowed", "访问 IP 不被允许")
+            .set("access IP denied", "访问 IP 被拒绝")
+            .set(":attribute out of accord with :2", ":attribute 与 :2 不一致")
+            .set(":attribute cannot be same with :2", ":attribute 不能与 :2 相同")
+            .set(":attribute must greater than or equal :rule", ":attribute 必须大于或等于 :rule")
+            .set(":attribute must greater than :rule", ":attribute 必须大于 :rule")
+            .set(":attribute must less than or equal :rule", ":attribute 必须小于或等于 :rule")
+            .set(":attribute must less than :rule", ":attribute 必须小于 :rule")
+            .set(":attribute must equal :rule", ":attribute 必须等于 :rule")
+            .set(":attribute has exists", ":attribute 已存在")
+            .set(":attribute not conform to the rules", ":attribute 不符合规则")
+            .set("invalid Request method", "无效的请求方法")
+            .set("invalid token", "无效的令牌")
+            .set("filesize not match", "文件大小不匹配")
+            .set("extensions to upload is not allowed", "不允许上传该扩展名")
+            .set("mimetype to upload is not allowed", "不允许上传该 MIME 类型"),
+    )
+});
+
 /// PHP `think\Validate::$alias` 验证类型别名
 ///
 /// 对齐 PHP `Validate.php` 第 36-38 行
@@ -1048,12 +1117,11 @@ impl Validate {
             }
         }
         // 5. 默认（对齐 PHP 第 1578 行：$title . $this->lang->get('not conform to the rules')）
-        // PHP Lang::get 找不到时返回 name 本身，所以无 Lang 时为 "not conform to the rules"
-        let suffix = if let Some(lang) = &self.lang {
-            lang.get("not conform to the rules")
-        } else {
-            "not conform to the rules".to_string()
-        };
+        // PHP Lang::get 找不到时返回 name 本身；未注入 Lang 时使用默认中文语言包（UXR P1-5）
+        let lang = self.lang.as_ref().or(Some(&*DEFAULT_ZH_LANG));
+        let suffix = lang
+            .map(|l| l.get("not conform to the rules"))
+            .unwrap_or_else(|| "必须满足规则".to_string());
         format!("{}{}", title, suffix)
     }
 
@@ -1078,7 +1146,9 @@ impl Validate {
     /// `parseErrorMsg` 会致命错误；Rust 使用 `Option` 提供更安全的降级）。
     pub fn parse_error_msg_with_lang(&self, msg: &str, rule: &str, title: &str) -> String {
         // 先 Lang 翻译，再占位符替换（对齐 PHP 第 1598-1602 行）
-        let translated = message::translate_msg(msg, self.lang.as_ref());
+        // 未注入 Lang 时使用默认中文语言包（UXR 2026-10-27 P1-5），默认错误消息输出中文
+        let lang = self.lang.as_ref().or(Some(&*DEFAULT_ZH_LANG));
+        let translated = message::translate_msg(msg, lang);
         Self::parse_error_msg(&translated, rule, title)
     }
 
@@ -1878,28 +1948,28 @@ mod tests {
 
     #[test]
     fn test_get_rule_msg_priority_type_msg() {
-        // 优先级 3：type_msg[type]
+        // 优先级 3：type_msg[type]（经默认中文语言包翻译，UXR P1-5）
         let v = Validate::new();
         let msg = v.get_rule_msg("email_field", "邮箱", "email", "");
-        assert_eq!(msg, "邮箱 not a valid email address");
+        assert_eq!(msg, "邮箱 不是有效的邮箱地址");
     }
 
     #[test]
     fn test_get_rule_msg_priority_require_prefix() {
-        // 优先级 4：require 前缀回退到 type_msg['require']
+        // 优先级 4：require 前缀回退到 type_msg['require']（经默认中文语言包翻译）
         let v = Validate::new();
         let msg = v.get_rule_msg("field", "字段", "requireIf", "");
-        assert_eq!(msg, "字段 require");
+        assert_eq!(msg, "字段 为必填项");
     }
 
     #[test]
     fn test_get_rule_msg_default_fallback() {
         // 优先级 5：默认消息
         // 对齐 PHP 第 1578 行：$title . $this->lang->get('not conform to the rules')
-        // PHP Lang::get 找不到时返回 name 本身，无 Lang 时为 "not conform to the rules"（无前导空格）
+        // 未注入 Lang 时使用默认中文语言包（UXR P1-5），输出 "必须满足规则"
         let v = Validate::new();
         let msg = v.get_rule_msg("field", "字段", "unknownType", "");
-        assert_eq!(msg, "字段not conform to the rules");
+        assert_eq!(msg, "字段必须满足规则");
     }
 
     // ========================================================================
@@ -2163,7 +2233,8 @@ mod tests {
         let result = v.check(&data);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ValidateError::Single(msg) => assert!(msg.contains("require")),
+            // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
+            ValidateError::Single(msg) => assert!(msg.contains("为必填项")),
             _ => panic!("expected Single error"),
         }
     }
@@ -2558,7 +2629,8 @@ mod tests {
         let _ = v.check(&data);
         let error = v.get_error();
         match error {
-            ValidateError::Single(msg) => assert!(msg.contains("require")),
+            // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
+            ValidateError::Single(msg) => assert!(msg.contains("为必填项")),
             _ => panic!("expected Single error"),
         }
     }
@@ -2666,24 +2738,24 @@ mod tests {
         let v = Validate::new().message(msgs);
         assert_eq!(v.get_rule_msg("name", "名称", "require", ""), "优先级2");
 
-        // 3. 仅 type_msg[type] 存在时
+        // 3. 仅 type_msg[type] 存在时（经默认中文语言包翻译，UXR P1-5）
         let v = Validate::new();
         assert_eq!(
             v.get_rule_msg("name", "名称", "email", ""),
-            "名称 not a valid email address"
+            "名称 不是有效的邮箱地址"
         );
 
-        // 4. require 前缀回退
+        // 4. require 前缀回退（经默认中文语言包翻译）
         assert_eq!(
             v.get_rule_msg("name", "名称", "requireIf", ""),
-            "名称 require"
+            "名称 为必填项"
         );
 
         // 5. 默认（对齐 PHP 第 1578 行：$title . lang->get('not conform to the rules')）
-        // 无 Lang 时 lang->get 返回 name 本身，无前导空格
+        // 未注入 Lang 时默认中文语言包输出 "必须满足规则"（UXR P1-5）
         assert_eq!(
             v.get_rule_msg("name", "名称", "unknownType", ""),
-            "名称not conform to the rules"
+            "名称必须满足规则"
         );
     }
 
@@ -3037,10 +3109,10 @@ mod tests {
 
     #[test]
     fn test_parse_error_msg_with_lang_no_lang_skips_translation() {
-        // 无 Lang 时跳过翻译，直接进行占位符替换
+        // 无 Lang 时使用默认中文语言包（UXR P1-5），然后进行占位符替换
         let v = Validate::new();
         let result = v.parse_error_msg_with_lang(":attribute require", "", "名称");
-        assert_eq!(result, "名称 require");
+        assert_eq!(result, "名称 为必填项");
     }
 
     #[test]

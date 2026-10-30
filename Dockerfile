@@ -7,9 +7,20 @@
 #   - 最终镜像仅包含二进制 + 配置文件，无 shell/包管理器，攻击面最小
 #   - 使用 nonroot 用户运行（distroless 内置 UID 65532）
 # =============================================================================
+#
+# 安全说明（2026-10-28 整改）：
+#   - 基础镜像使用浮动 tag，生产构建应固定为具体 digest（sha256:...），
+#     避免上游镜像更新导致构建不可复现 / 供应链漂移。具体 digest 需在发布时
+#     通过 `docker pull` 后 `docker inspect --format='{{index .RepoDigests 0}}'`
+#     或 registry API 确认，再替换下方 TODO。
+#   - 本文件使用 `COPY . /build/sz-rust/` 复制整个构建上下文，敏感文件
+#     （.env*、scripts/deploy/、scripts/ssh_key_temp、deploy/monitoring/ 等）
+#     依赖根目录 .dockerignore 过滤。请勿显式 COPY 这些敏感路径，并保持
+#     .dockerignore 与敏感路径清单同步（2026-10-28 已更新）。
 
 # ---- Stage 1: 构建阶段 ----
 # 使用 rust:1.98-slim 作为构建环境（slim 变体体积更小，仅需补充必要构建工具）
+# TODO: 固定为具体 digest，例如 rust:1.98-slim@sha256:<digest>
 FROM rust:1.98-slim AS builder
 
 # 安装构建所需系统依赖
@@ -33,11 +44,22 @@ RUN git clone https://github.com/ljclz/sz-orm.git /build/sz-orm
 
 WORKDIR /build/sz-rust
 
-# 编译 release 二进制（仅构建 sz300-server）
-RUN cargo build --release -p sz-rust-sz300
+# 生产安全 feature 构建参数（2026-10-25 架构评测修复）：
+# 默认构建不启用 v1.8+ 安全 feature（与 Cargo.toml default=[] 一致）；
+# 生产构建应传入 SZ300_FEATURES，例如：
+#   docker build --build-arg SZ300_FEATURES="v18-security-headers,v18-data-mask,v18-rbac,v18-key-rotation,v18-audit-chain" .
+ARG SZ300_FEATURES=""
+
+# 编译 release 二进制（仅构建 sz300-server；传入 SZ300_FEATURES 时启用安全 feature）
+RUN if [ -n "$SZ300_FEATURES" ]; then \
+        cargo build --release -p sz-rust-sz300 --features "$SZ300_FEATURES"; \
+    else \
+        cargo build --release -p sz-rust-sz300; \
+    fi
 
 # ---- Stage 2: 健康检查二进制构建 ----
 # 编译一个极简的 TCP 健康检查工具（distroless 无 curl/wget，需自带）
+# TODO: 固定为具体 digest，例如 rust:1.98-slim@sha256:<digest>
 FROM rust:1.98-slim AS healthcheck-builder
 WORKDIR /hc
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -59,6 +81,7 @@ RUN rustc --edition 2021 -O -o /hc/healthcheck /hc/main.rs
 # ---- Stage 3: 运行阶段 ----
 # 使用 distroless cc-debian12（含 glibc，适配动态链接的 Rust 二进制）
 # 不含 shell / 包管理器，镜像体积与攻击面最小化
+# TODO: 固定为具体 digest，例如 gcr.io/distroless/cc-debian12@sha256:<digest>
 FROM gcr.io/distroless/cc-debian12
 
 WORKDIR /app

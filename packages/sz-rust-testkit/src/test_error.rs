@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 测试错误类型（v1.5.0 P1-4）
 
 use std::time::Duration;

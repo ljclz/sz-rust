@@ -42,8 +42,8 @@ fn test_four_dimensions_independent_counting() {
     assert!(rl.check(&ctx_b).is_ok(), "ctx_b independent");
 }
 
-#[test]
-fn test_sliding_window_algorithm() {
+#[tokio::test]
+async fn test_sliding_window_algorithm() {
     let config = MultiDimRateLimitConfig {
         dimensions: RateLimitDimensions::USER,
         algorithm: RateLimitAlgorithm::SlidingWindow,
@@ -58,7 +58,8 @@ fn test_sliding_window_algorithm() {
     assert!(rl.check(&ctx).is_ok());
     assert!(rl.check(&ctx).is_err(), "4th should be rejected");
 
-    std::thread::sleep(Duration::from_millis(110));
+    // SDET P1-3：std::thread::sleep → tokio::time::sleep（铁律 4，不在测试线程阻塞）
+    tokio::time::sleep(Duration::from_millis(110)).await;
     assert!(rl.check(&ctx).is_ok(), "after window expiry, allow again");
 }
 

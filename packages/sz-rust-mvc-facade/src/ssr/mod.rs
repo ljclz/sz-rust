@@ -364,7 +364,7 @@ mod tests {
         // 模拟包含密钥的数据（spec 5.5.9：禁止泄露密钥到 hydration 数据）
         let data = serde_json::json!({
             "user": "alice",
-            "api_key": "secret123"
+            "api_key": "<secret>"
         });
         let result = middleware.render("/home", &data).await;
 

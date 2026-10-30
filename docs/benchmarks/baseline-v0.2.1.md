@@ -139,5 +139,5 @@
 ## 6. 引用
 
 - [v0.1.0 基线](../benchmarks/baseline-v0.1.0.md) — 首版基线
-- [v0.2.0 回归报告](../benchmarks/regression-report-v0.2.0.md)
+- v0.2.0 回归报告（历史文档，原文件已缺失）
 - [《SZ-Rust 工程化实践规范》](../sz-rust-engineering-practices.md)

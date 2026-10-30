@@ -12,7 +12,7 @@ fn make_mysql_conn() -> DatabaseConnection {
         database: "shop".to_string(),
         username: "shop".to_string(),
         password: String::new(),
-        hostport: 8802,
+        hostport: 3306,
         charset: "utf8mb4".to_string(),
         prefix: "sz_".to_string(),
         deploy: 0,
@@ -42,7 +42,7 @@ fn test_app_init_and_global() {
     assert!(std::ptr::eq(app, app3));
 }
 
-/// 测试数据库连接配置获取
+/// 测试数据库连接配置。
 #[test]
 fn test_db_connection() {
     let mut config = AppConfig::default();
@@ -56,7 +56,7 @@ fn test_db_connection() {
     assert!(conn.is_some());
     let conn = conn.unwrap();
     assert_eq!(conn.hostname, "172.17.16.14");
-    assert_eq!(conn.hostport, 8802);
+    assert_eq!(conn.hostport, 3306);
     assert_eq!(conn.prefix, "sz_");
 }
 
@@ -68,7 +68,7 @@ fn test_db_connection_not_found() {
     assert!(app.db_connection("nonexistent").is_none());
 }
 
-/// 测试默认数据库连接获取
+/// 测试默认数据库连接获取。
 #[test]
 fn test_default_db_connection() {
     let mut config = AppConfig::default();
@@ -84,7 +84,7 @@ fn test_default_db_connection() {
     assert_eq!(conn.unwrap().database, "shop");
 }
 
-/// 测试 Cache 单例设置和获取
+/// 测试 Cache 单例设置和获取。
 #[test]
 fn test_cache() {
     let config = AppConfig::default();
@@ -98,7 +98,7 @@ fn test_cache() {
     assert_eq!(app.cache(), Some("memory_cache".to_string()));
 }
 
-/// 测试 Log 单例设置和获取
+/// 测试 Log 单例设置和获取。
 #[test]
 fn test_log() {
     let config = AppConfig::default();
@@ -128,7 +128,7 @@ fn test_db_connection_names() {
             database: "njszjt".to_string(),
             username: "njszjt".to_string(),
             password: String::new(),
-            hostport: 8802,
+            hostport: 3306,
             charset: "utf8mb4".to_string(),
             prefix: "soci_".to_string(),
             deploy: 0,
@@ -146,7 +146,7 @@ fn test_db_connection_names() {
 
 /// 测试从实际配置文件加载 5 个数据库连接
 ///
-/// 直接验证 `AppConfig::load_from_dir()` 能加载 5 个连接配置，
+/// 直接验证 `AppConfig::load_from_dir()` 能加载 5 个连接配置。
 /// 不通过 `App::init()`（避免 OnceLock 全局状态污染）。
 #[tokio::test]
 async fn test_load_5_db_connections() {
@@ -195,8 +195,8 @@ async fn test_load_5_db_connections() {
     assert!(config.database.connections.contains_key("food"));
     assert!(config.database.connections.contains_key("oceanbase"));
 
-    // 验证默认连接（hostname 已改用 localhost，实际地址通过环境变量注入；
-    // hostport 默认 3306，与 config/database.yml 一致，环境变量 SZ_DB_MYSQL_HOSTPORT 未设置时生效）
+    // 验证默认连接（hostname 已改用 localhost，实际地址通过环境变量注入）
+    // hostport 默认 3306，与 config/database.yml 一致，环境变量 SZ_DB_MYSQL_HOSTPORT 未设置时生效
     assert_eq!(config.database.default, "mysql");
     let default_conn = config.database.connections.get("mysql").unwrap();
     assert_eq!(default_conn.hostname, "localhost");
@@ -208,7 +208,7 @@ async fn test_load_5_db_connections() {
 // DI 服务容器测试
 // ========================================================================
 
-/// 测试用服务类型
+/// 测试用服务类型。
 #[derive(Debug, PartialEq)]
 struct TestService {
     value: i32,
@@ -220,7 +220,7 @@ impl TestService {
     }
 }
 
-/// 测试瞬态服务：每次 make 返回新实例
+/// 测试瞬时服务：每次 make 返回新实例。
 #[test]
 fn test_container_bind_transient() {
     let container = Container::new();
@@ -229,13 +229,13 @@ fn test_container_bind_transient() {
     let s1 = container.make::<TestService>().expect("应能解析服务");
     let s2 = container.make::<TestService>().expect("应能解析服务");
 
-    // 瞬态：两个实例不同
+    // 瞬时：两个实例不同
     assert!(!Arc::ptr_eq(&s1, &s2));
     assert_eq!(s1.value, 42);
     assert_eq!(s2.value, 42);
 }
 
-/// 测试单例服务：多次 make 返回同一实例
+/// 测试单例服务：每次 make 返回同一实例
 #[test]
 fn test_container_singleton() {
     let container = Container::new();
@@ -266,7 +266,7 @@ fn test_container_has() {
     assert!(container.has::<TestService>());
 }
 
-/// 测试 forget 移除服务绑定与缓存
+/// 测试 forget 移除服务绑定与缓存。
 #[test]
 fn test_container_forget() {
     let container = Container::new();
@@ -281,7 +281,7 @@ fn test_container_forget() {
     assert!(container.make::<TestService>().is_none());
 }
 
-/// 测试 clear 清空所有绑定
+/// 测试 clear 清空所有绑定。
 #[test]
 fn test_container_clear() {
     let container = Container::new();
@@ -293,7 +293,7 @@ fn test_container_clear() {
     assert_eq!(container.count(), 0);
 }
 
-/// 测试 App 代理的 DI 方法（bind/make/singleton）
+/// 测试 App 代理的 DI 方法（bind/make/singleton）。
 #[test]
 fn test_app_di_proxy() {
     let config = AppConfig::default();
@@ -309,7 +309,7 @@ fn test_app_di_proxy() {
     assert!(Arc::ptr_eq(&s1, &s2));
 }
 
-/// 测试不同类型的服务共存
+/// 测试不同类型的服务共存。
 #[test]
 fn test_container_multiple_types() {
     let container = Container::new();
@@ -322,7 +322,7 @@ fn test_container_multiple_types() {
     assert_eq!(*container.make::<Vec<i32>>().unwrap(), vec![1, 2, 3]);
 }
 
-/// 测试 count 返回已注册数量
+/// 测试 count 返回已注册数量。
 #[test]
 fn test_container_count() {
     let container = Container::new();
@@ -339,9 +339,9 @@ fn test_container_count() {
 // Scoped 生命周期测试
 // ========================================================================
 
-/// 计数器服务，用于验证 scoped 服务的实例创建次数
+/// 计数器服务，用于验证 scoped 服务的实例创建次数。
 ///
-/// 使用 `AtomicU64` 记录实例化次数，可跨线程读取。
+/// 使用 `AtomicU64` 记录实例化次数，多线程读取。
 struct ScopedCounter {
     value: i64,
 }
@@ -388,7 +388,7 @@ fn test_container_scoped_different_scope() {
     assert_eq!(s2.value, 200);
 }
 
-/// 测试 clear_scope 清理作用域缓存
+/// 测试 clear_scope 清理作用域缓存。
 #[test]
 fn test_container_clear_scope() {
     let container = Container::new();
@@ -422,9 +422,9 @@ fn test_container_scoped_with_singleton() {
     let single_a = container.make_with_scope::<ScopedCounter>(1);
     let single_b = container.make_with_scope::<ScopedCounter>(2);
 
-    // 注：singleton 和 scoped 注册到同一个 TypeId，后注册的覆盖前者。
-    // 这里 singleton 先注册，scoped 后注册，所以 scoped 覆盖 singleton。
-    // 验证覆盖语义：scoped 行先生效
+    // 注意：singleton 与 scoped 注册到同一 TypeId，后注册的覆盖前者。
+    // 这里 singleton 先注册，scoped 后注册，最终 scoped 覆盖 singleton。
+    // 验证覆盖行为：scoped 行先生效
     let scoped_a = container
         .make_with_scope::<ScopedCounter>(1)
         .expect("应能解析");
@@ -439,7 +439,7 @@ fn test_container_scoped_with_singleton() {
     let _ = (single_a, single_b);
 }
 
-/// 测试 forget 清理 scoped 服务在所有作用域的缓存
+/// 测试 forget 清理 scoped 服务在所有作用域的缓存。
 #[test]
 fn test_container_forget_clears_scoped() {
     let container = Container::new();
@@ -451,14 +451,14 @@ fn test_container_forget_clears_scoped() {
     let _ = container.make_with_scope::<ScopedCounter>(3);
     assert_eq!(container.active_scope_count(), 3);
 
-    // forget 应清理所有作用域中该类型的缓存
+    // forget 应清理所有作用域内该类型的缓存
     container.forget::<ScopedCounter>();
     assert!(!container.has::<ScopedCounter>());
-    // 作用域映射本身仍存在（只是其中的 ScopedCounter 缓存被移除）
-    // 但因为 forget 是按 TypeId 清理，scope_map 中的条目数会减少
+    // 作用域映射本身仍存在（只是把该 ScopedCounter 缓存移除）
+    // 但因为 forget 按 TypeId 清理，scope_map 的条目数会减少
 }
 
-/// 测试 clear 清空所有缓存（含 scoped 和 aliases）
+/// 测试 clear 清空所有缓存（含 scoped 与 aliases）。
 #[test]
 fn test_container_clear_all() {
     let container = Container::new();
@@ -484,13 +484,13 @@ fn test_container_clear_all() {
 // instance() 直接绑定实例测试
 // ========================================================================
 
-/// 测试 instance() 直接绑定已创建实例
+/// 测试 instance() 直接绑定已创建实例。
 #[test]
 fn test_container_instance_direct_binding() {
     let container = Container::new();
     let original = Arc::new(TestService { value: 999 });
 
-    // 注意：instance 接收 T（非 Arc），内部转为 Arc
+    // 注意：instance 接收 T（非 Arc），内部包装 Arc
     // 这里通过 clone Arc 内部值来测试
     container.instance(TestService { value: 999 });
 
@@ -507,7 +507,7 @@ fn test_container_instance_direct_binding() {
     let _ = original;
 }
 
-/// 测试 instance() 后 has() 返回 true
+/// 测试 instance() 与 has() 返回 true
 #[test]
 fn test_container_instance_has() {
     let container = Container::new();
@@ -517,7 +517,7 @@ fn test_container_instance_has() {
     assert!(container.has::<TestService>());
 }
 
-/// 测试 instance() 后 forget() 清理
+/// 测试 instance() 与 forget() 清理
 #[test]
 fn test_container_instance_forget() {
     let container = Container::new();
@@ -565,7 +565,7 @@ fn test_app_instance_scoped_alias_proxy() {
 }
 
 // ========================================================================
-// alias 别名测试
+// alias 功能测试
 // ========================================================================
 
 /// 测试 alias 注册与 resolve_alias 查找
@@ -631,7 +631,7 @@ fn test_container_alias_does_not_affect_make() {
     let svc = container.make::<TestService>().expect("make 应正常工作");
     assert_eq!(svc.value, 42);
 
-    // 未注册 alias 但类型已注册的情况
+    // 注册了 alias 但对应类型未注册为服务的情况
     container.alias::<String>("my_str");
     // String 类型未注册为服务，make 应返回 None
     // 但 alias 仍可解析
@@ -640,10 +640,10 @@ fn test_container_alias_does_not_affect_make() {
 }
 
 // ========================================================================
-// 标签绑定测试（对齐 PHP `app()->tag()` / `app()->tagged()`）
-// ========================================================================
+// 标签绑定测试（对齐 PHP `app()->tag()` / `app()->tagged()`）。
+// ============================================================================
 
-/// 测试用：日志类型
+/// 测试用日志类型
 #[derive(Debug, PartialEq)]
 struct FileLogger {
     level: u8,
@@ -655,7 +655,7 @@ impl FileLogger {
     }
 }
 
-/// 测试用：邮件类型
+/// 测试用邮件类型
 #[derive(Debug, PartialEq)]
 struct MailLogger {
     level: u8,
@@ -667,7 +667,7 @@ impl MailLogger {
     }
 }
 
-/// 测试 tag 给类型打标签，tagged 返回该标签下的实例
+/// 测试 tag 给类型打标签，tagged 返回该标签下的实例。
 #[test]
 fn test_container_tag_and_tagged() {
     let container = Container::new();
@@ -694,7 +694,7 @@ fn test_container_tag_multiple_same_type() {
     container.tag::<FileLogger>("reporters");
 
     // tagged 会返回多个实例（每个 TypeId 调用一次 make）
-    // 但由于同一 TypeId 多次 push 到标签列表，且 singleton 每次返回同一实例
+    // 但由于同一 TypeId 多次 push 到标签列表，且为 singleton 每次返回同一实例
     let reporters = container.tagged::<FileLogger>("reporters");
     assert_eq!(reporters.len(), 3);
     // 全部为同一单例实例
@@ -702,7 +702,7 @@ fn test_container_tag_multiple_same_type() {
     assert!(Arc::ptr_eq(&reporters[1], &reporters[2]));
 }
 
-/// 测试不同标签独立工作
+/// 测试不同标签间工作
 #[test]
 fn test_container_tag_different_tags() {
     let container = Container::new();
@@ -720,7 +720,7 @@ fn test_container_tag_different_tags() {
     assert_eq!(container.tagged::<MailLogger>("file_reporters").len(), 0);
 }
 
-/// 测试 tagged 获取不存在的标签返回空向量
+/// 测试 tagged 获取不存在的标签返回空向量。
 #[test]
 fn test_container_tagged_nonexistent_tag() {
     let container = Container::new();
@@ -773,7 +773,7 @@ fn test_container_tag_names() {
     );
 }
 
-/// 测试 tagged_type_ids 返回标签下的所有 TypeId
+/// 测试 tagged_type_ids 返回标签下的全部 TypeId
 #[test]
 fn test_container_tagged_type_ids() {
     let container = Container::new();
@@ -805,7 +805,7 @@ fn test_container_forget_tag() {
     assert!(!container.tag_names().contains(&"reporters".to_string()));
 }
 
-/// 测试 clear 清空所有标签
+/// 测试 clear 清空所有标签。
 #[test]
 fn test_container_clear_clears_tags() {
     let container = Container::new();
@@ -822,23 +822,23 @@ fn test_container_clear_clears_tags() {
 }
 
 // ========================================================================
-// 上下文绑定测试（对齐 PHP `app()->when()->needs()->give()`）
-// ========================================================================
+// 上下文绑定测试（对齐 PHP `app()->when()->needs()->give()`）。
+// ============================================================================
 
-// 注：因 trait object 与泛型 T 的 downcast 冲突，上下文绑定测试用具体类型而非 trait
+// 注意：因 trait object 与泛型 T 在 downcast 冲突，上下文绑定测试用具体类型而非 trait
 
-/// 测试用：PhotoController 消费者
+/// 测试用 PhotoController 消费者。
 struct PhotoController;
 
-/// 测试用：VideoController 消费者
+/// 测试用 VideoController 消费者。
 struct VideoController;
 
-/// 测试 bind_contextual 注册上下文绑定
+/// 测试 bind_contextual 注册上下文绑定。
 #[test]
 fn test_container_bind_contextual() {
     let container = Container::new();
 
-    // 为 PhotoController 注册上下文绑定：返回 "s3" 字符串
+    // 给 PhotoController 注册上下文绑定：返回 "s3" 字符串
     container.bind_contextual::<PhotoController, String, _>(|| "s3".to_string());
 
     // 检查上下文绑定存在
@@ -857,7 +857,7 @@ fn test_container_bind_contextual() {
 fn test_container_make_for_fallback() {
     let container = Container::new();
 
-    // 注册普通单例
+    // 注册一个单例
     container.singleton(|| "default".to_string());
 
     // 无上下文绑定：回退到普通 make
@@ -876,7 +876,7 @@ fn test_container_make_for_no_binding() {
     assert!(result.is_none());
 }
 
-/// 测试不同消费者获得不同的上下文绑定
+/// 测试不同消费者获得不同的上下文绑定。
 #[test]
 fn test_container_contextual_different_consumers() {
     let container = Container::new();
@@ -897,7 +897,7 @@ fn test_container_contextual_different_consumers() {
     assert_eq!(&*video_fs, "local");
 }
 
-/// 测试 contextual_count 返回上下文绑定数量
+/// 测试 contextual_count 返回上下文绑定数量。
 #[test]
 fn test_container_contextual_count() {
     let container = Container::new();
@@ -914,7 +914,7 @@ fn test_container_contextual_count() {
     assert_eq!(container.contextual_count(), 2);
 }
 
-/// 测试 forget_contextual 移除指定上下文绑定
+/// 测试 forget_contextual 移除指定上下文绑定。
 #[test]
 fn test_container_forget_contextual() {
     let container = Container::new();
@@ -924,7 +924,7 @@ fn test_container_forget_contextual() {
     container.forget_contextual::<PhotoController, String>();
     assert!(!container.has_contextual::<PhotoController, String>());
 
-    // forget 后 make_for 回退到普通 make（无普通绑定则返回 None）
+    // forget 后 make_for 回退到普通 make（无该绑定则返回 None）
     assert!(container.make_for::<String, PhotoController>().is_none());
 }
 
@@ -966,10 +966,10 @@ fn test_container_tag_and_contextual_coexist() {
 }
 
 // ========================================================================
-// 方法调用 / 自动注入测试（对齐 PHP `app()->call()` / `app()->invoke()`）
-// ========================================================================
+// 方法调用 / 依赖注入测试（对齐 PHP `app()->call()` / `app()->invoke()`）。
+// ============================================================================
 
-/// 测试 call_method 基本方法调用（单依赖）
+/// 测试 call_method 基本方法调用（单依赖）。
 #[test]
 fn test_container_call_method_basic() {
     let container = Container::new();
@@ -1003,7 +1003,7 @@ fn test_container_call_method_with_dependencies() {
     assert_eq!(result, "file=1, mail=2");
 }
 
-/// 测试 call_method 返回值（不同类型）
+/// 测试 call_method 返回值（不同类型）。
 #[test]
 fn test_container_call_method_return_value() {
     let container = Container::new();
@@ -1028,7 +1028,7 @@ fn test_container_invoke_basic() {
     assert_eq!(result, 1);
 }
 
-/// 测试 invoke 带多个依赖
+/// 测试 invoke 带多个依赖。
 #[test]
 fn test_container_invoke_with_multiple_deps() {
     let container = Container::new();
@@ -1049,7 +1049,7 @@ fn test_container_invoke_with_multiple_deps() {
     assert_eq!(result, "file=1, mail=2, service=42");
 }
 
-/// 测试 make_or_panic 成功解析已注册服务
+/// 测试 make_or_panic 成功解析已注册服务。
 #[test]
 fn test_container_make_or_panic_success() {
     let container = Container::new();
@@ -1068,7 +1068,7 @@ fn test_container_make_or_panic_success() {
 #[should_panic(expected = "无法解析服务")]
 fn test_container_make_or_panic_panic() {
     let container = Container::new();
-    // TestService 未注册，应 panic
+    // TestService 未注册，会 panic
     let _ = container.make_or_panic::<TestService>();
 }
 
@@ -1083,8 +1083,8 @@ fn test_container_call_method_no_dependencies() {
 }
 
 // ========================================================================
-// 循环依赖检测测试（P0-ARCH-01）
-// ========================================================================
+// 循环依赖检测测试（P0-ARCH-01）。
+// ============================================================================
 
 /// 测试：构造栈在正常解析后应为空（无泄漏）
 #[test]
@@ -1099,7 +1099,7 @@ fn test_container_constructing_stack_cleared_after_make() {
 
 /// 测试：非循环依赖正常工作（A -> B，B 无依赖）
 ///
-/// 验证循环检测不误杀正常的依赖链。
+/// 验证循环检测不影响正常的依赖链。
 #[test]
 fn test_container_non_circular_dependency_works() {
     use std::sync::Arc;
@@ -1134,7 +1134,6 @@ fn test_container_non_circular_dependency_works() {
 
 /// 测试：间接循环依赖 A -> B -> A
 ///
-/// 场景：ServiceA 依赖 ServiceB，ServiceB 依赖 ServiceA，
 /// 形成 A -> B -> A 的间接循环。
 #[test]
 #[should_panic(expected = "DI 容器检测到循环依赖")]
@@ -1195,13 +1194,13 @@ fn test_container_circular_long_chain() {
     let _ = c.make::<NodeA>();
 }
 
-/// 测试：循环依赖错误信息包含完整依赖链
+/// 测试：循环依赖错误消息包含完整依赖链
 ///
 /// 通过 panic 的 expected 前缀验证错误消息格式。
-/// 注：type_name 返回模块全路径，故 expected 使用完整路径。
+/// 由于 type_name 返回模块全路径，故 expected 使用完整类型路径。
 #[test]
 #[should_panic(
-    expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX"
+    expected = "DI 容器检测到循环依赖: sz_rust_core::container::tests::test_container_circular_error_message_contains_chain::NodeX",
 )]
 fn test_container_circular_error_message_contains_chain() {
     use std::sync::Arc;
@@ -1226,10 +1225,10 @@ fn test_container_circular_error_message_contains_chain() {
 }
 
 // ============================================================================
-// P1-TEST-03：App 未测公共函数补充
+// P1-TEST-03：App 层便捷函数补充
 // ============================================================================
 
-/// App::has_service — 检查服务是否已注册
+/// App::has_service 用于检查服务是否已注册
 #[test]
 fn test_app_has_service_registered() {
     let app = App::new(AppConfig::default());
@@ -1243,7 +1242,7 @@ fn test_app_has_service_not_registered() {
     assert!(!app.has_service::<String>());
 }
 
-/// App::make_with_scope — 从指定作用域获取实例
+/// App::make_with_scope 用于从指定作用域获取实例
 #[test]
 fn test_app_make_with_scope_existing() {
     #[derive(Debug)]
@@ -1286,11 +1285,11 @@ fn test_app_make_with_scope_returns_cached() {
 }
 
 // ============================================================================
-// mutants 存活变异体补强（missed.txt 第 1-5 行）
+// mutants 存活变异体补强（missed.txt 前 1-5 行）
 // ============================================================================
 
 /// 捕获 constructing_depth -> 0 变异体（missed.txt 第 1 行）
-/// 空闲时 depth=0（语义等价），构造期间 depth>0 才能区分
+/// 空闲时 depth=0（语义等价），构造期时 depth>0 才能区分
 #[test]
 fn test_container_constructing_depth_zero_when_idle() {
     let c = Container::new();
@@ -1298,7 +1297,7 @@ fn test_container_constructing_depth_zero_when_idle() {
 }
 
 /// 捕获 constructing_depth -> 0 变异体（missed.txt 第 1 行）
-/// 在工厂执行期间观测 constructing_depth，真实值为 1，变异体返回 0 → 断言失败
+/// 在工厂执行期间读取 constructing_depth，真实值为 1，变异体返回 0 会导致失败
 #[test]
 fn test_container_constructing_depth_nonzero_during_construction() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1334,7 +1333,7 @@ fn test_container_debug_format() {
 }
 
 /// 捕获 App::config -> Box::leak(Default::default()) 变异体（missed.txt 第 3 行）
-/// 用非默认值 "custom_db"（默认为 "mysql"）使变异体返回的默认 config 与断言不符失败
+/// 用非默认值 "custom_db"（默认为 "mysql"）使变异体返回的默认 config 与断言不符而失败
 #[test]
 fn test_app_config_returns_constructed_value() {
     let mut config = AppConfig::default();
@@ -1361,21 +1360,21 @@ fn test_app_debug_format() {
     assert!(s.contains("config"), "debug={s}");
 }
 // ============================================================================
-// v1.4 并发修复回归：构造栈按线程隔离
+// v1.4 并发回归：构造栈按线程隔离
 // ============================================================================
 
 #[derive(Debug)]
 struct SlowSvc;
 #[derive(Debug)]
-#[allow(dead_code)] // 字段仅为让工厂制造真实解析路径，无需读取
+#[allow(dead_code)] // 字段仅用于让工厂制造真实解析路径，无需读取
 struct DepOnSlow(std::sync::Arc<()>);
 
-/// 回归测试：两线程并发首解析时不得跨线程误报“循环依赖”。
+/// 回归测试：两线程并发首解析时不得跨线程误报循环依赖。
 ///
-/// 修复前构造栈是容器级共享 `RwLock<Vec>`：线程 A 在 SlowSvc 工厂（慢 200ms）
-/// 执行期间留在栈中的条目，会被线程 B 的 `make::<SlowSvc>()` 看见，
+/// 修复前构造栈是进程级共享 `RwLock<Vec>`：线程 A 进入 SlowSvc 工厂（慢 200ms），
+/// 执行期间留在栈中的条目会被线程 B 的 `make::<SlowSvc>()` 看到，
 /// 直接 panic「DI 容器检测到循环依赖」——尽管根本无环。
-/// 修复后构造栈为 thread_local，线程 B 看不到线程 A 的在途条目。
+/// 修复后构造栈是 thread_local，线程 B 看不到线程 A 的在途条目。
 #[test]
 fn concurrent_first_resolve_no_cross_thread_false_cycle() {
     let container = Arc::new(Container::new());
@@ -1385,7 +1384,7 @@ fn concurrent_first_resolve_no_cross_thread_false_cycle() {
     });
     let c_inner = container.clone();
     container.singleton(move || {
-        // 工厂内解析 SlowSvc：老代码下会看到线程 A 留在共享栈上的在途条目而误报
+        // 工厂内解析 SlowSvc：旧代码下会看到线程 A 留在共享栈上的在途条目而误报
         let _dep = c_inner.make::<SlowSvc>().expect("SlowSvc 应可解析");
         DepOnSlow(std::sync::Arc::new(()))
     });
@@ -1395,7 +1394,7 @@ fn concurrent_first_resolve_no_cross_thread_false_cycle() {
         assert!(c_slow.make::<SlowSvc>().is_some());
     });
 
-    // 等线程 A 进入 SlowSvc 工厂（在途条目已在老代码共享栈上）
+    // 等线程 A 进入 SlowSvc 工厂（在途条目已在旧代码共享栈上）
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     let c_dep = container.clone();
@@ -1405,11 +1404,11 @@ fn concurrent_first_resolve_no_cross_thread_false_cycle() {
 
     t1.join().expect("线程 A 不得 panic");
     t2.join()
-        .expect("线程 B 不得 panic（老代码会误报循环依赖）");
+        .expect("线程 B 不得 panic（旧代码会误报循环依赖）");
 }
 
 /// 回归测试：工厂 panic 后同线程构造栈必须归零
-/// （tokio worker 会被复用，残留条目会让后续解析误报循环）。
+/// （tokio worker 会被复用，残留条目会让后续解析误报循环依赖）
 #[test]
 fn factory_panic_cleans_constructing_stack() {
     struct Boom;
@@ -1428,7 +1427,7 @@ fn factory_panic_cleans_constructing_stack() {
     assert_eq!(container.constructing_depth(), 0);
 }
 // ============================================================================
-// v1.4 并发修复事二：单例恰好一次构建槽
+// v1.4 并发故事二：单例恰好一次构建槽
 // ============================================================================
 
 /// 回归测试：N 线程并发首解析同一单例，工厂必须恰好执行一次。
@@ -1483,7 +1482,7 @@ fn singleton_slot_recovers_after_factory_panic() {
         Flaky
     });
 
-    // 第一次：工厂 panic（捕获，槽应复位）
+    // 首次：工厂 panic（捕获，槽应复位）
     let c1 = container.clone();
     let first = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let _ = c1.make::<Flaky>();
@@ -1497,7 +1496,7 @@ fn singleton_slot_recovers_after_factory_panic() {
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
-/// 回归测试：等待超时后冗余执行兼底，不永久挂起。
+/// 回归测试：等待超时后冗余执行兜底，不永久挂起。
 #[test]
 fn singleton_waiter_falls_back_after_timeout() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1516,7 +1515,7 @@ fn singleton_waiter_falls_back_after_timeout() {
     crate::container::set_resolution_wait_timeout_ms(100);
     let _guard = scopeguard_reset(0); // 无论如何都恢复全局超时
 
-    // 构建者先行入场
+    // 构建者先行进入
     let c1 = container.clone();
     let builder = std::thread::spawn(move || {
         assert!(c1.make::<Slow>().is_some());
@@ -1535,11 +1534,11 @@ fn singleton_waiter_falls_back_after_timeout() {
     );
     assert_eq!(
         total, 2,
-        "本测试场景（80ms 后进入 + 100ms 超时 + 600ms 工厂）应确定性走冗余路径"
+        "重试场景（80ms 后进入 + 100ms 超时 + 600ms 工厂）应确定性走冗余路径"
     );
 }
 
-/// 恢复全局超时的 RAII 小工具
+/// 恢复全局超时的 RAII 小工具。
 fn scopeguard_reset(_prev_ms: u64) -> impl Drop {
     struct Reset;
     impl Drop for Reset {

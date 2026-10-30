@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 检索缓存（v1.5.0 P2-3）
 //!
 //! 查询缓存（TTL 可配置，0 不缓存，spec 5.7.8）。

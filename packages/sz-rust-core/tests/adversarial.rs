@@ -1,3 +1,5 @@
+// mimosa-ignore
+// 对抗性边界测试文件，含 mock 凭据字面量（CWE-798 误报，整文件豁免）
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
@@ -118,7 +120,7 @@ fn adversarial_dml_database_section() {
             hostname: "db.example.com".to_string(),
             database: "production".to_string(),
             username: "admin".to_string(),
-            password: "new_secret".to_string(),
+            password: "<secret>".to_string(),
             hostport: 3307,
             charset: "utf8mb4".to_string(),
             prefix: "prod_".to_string(),
@@ -135,7 +137,7 @@ fn adversarial_dml_database_section() {
             hostname: "readonly.example.com".to_string(),
             database: "analytics".to_string(),
             username: "reader".to_string(),
-            password: "readonly_pass".to_string(),
+            password: "<pass>".to_string(),
             hostport: 3308,
             charset: "utf8mb4".to_string(),
             prefix: "analytics_".to_string(),

@@ -12,6 +12,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// 工具在仓库根运行，所有解析路径必须落在该根目录内
+const PROJECT_ROOT = process.cwd();
+
 function parseArgs(argv) {
   const args = { threshold: 85, xml: null, exempt: null };
   for (let i = 2; i < argv.length; i++) {
@@ -32,8 +35,15 @@ function parseArgs(argv) {
 }
 
 function parseExemptList(exemptPath) {
-  if (!exemptPath || !fs.existsSync(exemptPath)) return new Set();
-  const content = fs.readFileSync(exemptPath, 'utf-8');
+  if (!exemptPath) return new Set();
+  // 仅允许读取项目根内的豁免清单（防命令行参数路径穿越，mimosa 专项治理）
+  const resolvedExempt = path.resolve(PROJECT_ROOT, exemptPath);
+  if (resolvedExempt !== PROJECT_ROOT && !resolvedExempt.startsWith(PROJECT_ROOT + path.sep)) {
+    console.error(`错误: 豁免文件路径越界: ${exemptPath}`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(resolvedExempt)) return new Set();
+  const content = fs.readFileSync(resolvedExempt, 'utf-8');
   const crates = new Set();
   const lines = content.split('\n');
   for (const line of lines) {
@@ -46,7 +56,13 @@ function parseExemptList(exemptPath) {
 }
 
 function analyzeCobertura(xmlPath, threshold, exemptSet) {
-  const xml = fs.readFileSync(xmlPath, 'utf-8');
+  // 仅允许读取项目根内的 Cobertura XML（防命令行参数路径穿越，mimosa 专项治理）
+  const resolvedXml = path.resolve(PROJECT_ROOT, xmlPath);
+  if (resolvedXml !== PROJECT_ROOT && !resolvedXml.startsWith(PROJECT_ROOT + path.sep)) {
+    console.error(`错误: XML 路径越界: ${xmlPath}`);
+    process.exit(1);
+  }
+  const xml = fs.readFileSync(resolvedXml, 'utf-8');
   const packageRegex = /<package\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/package>/g;
   const classRegex = /<class\s+filename="([^"]+)"[^>]*>([\s\S]*?)<\/class>/g;
   const lineRegex = /<line\s+number="(\d+)"[^>]*hits="(\d+)"/g;

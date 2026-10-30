@@ -159,7 +159,7 @@ mod tests {
             user_id: Some(42),
             merchant_id: 7,
             username: "admin".to_string(),
-            password: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G.2I.2I.2I.2I".to_string(),
+            password: "<bcrypt-hash>".to_string(),
             phone: "13800138000".to_string(),
             role: 1,
             last_login_at: None,
@@ -191,13 +191,13 @@ mod tests {
             "user_id": 99,
             "merchant_id": 1,
             "username": "testuser",
-            "password": "bcrypt_hash_xyz",
+            "password": "<hash>",
             "phone": "13900139000",
             "role": 0
         });
 
         let user: MerchantUser = serde_json::from_value(json).expect("反序列化应成功");
-        assert_eq!(user.password, "bcrypt_hash_xyz");
+        assert_eq!(user.password, "<hash>");
         assert_eq!(user.username, "testuser");
         assert_eq!(user.user_id, Some(99));
     }

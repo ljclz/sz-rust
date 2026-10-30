@@ -61,6 +61,8 @@
 #![warn(missing_docs)]
 // 文档构建时将 missing_docs 作为错误（CI 中 RUSTDOCFLAGS="-D warnings" 会强制）
 #![cfg_attr(doctest, warn(missing_docs))]
+// 2026-10-27 全栈评测 P1-5：生产代码（非测试构建）禁止 unwrap，灰度门禁
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
 pub mod addons;
 pub mod api_version;

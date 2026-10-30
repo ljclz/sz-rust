@@ -1,10 +1,13 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use serde_json::Value;
 use sz_rust_core::orm::Value as OrmValue;
 use sz_rust_core::orm::{MqttConfig, MqttMessage, MqttTopic, QoS};
 
+use crate::db::acquire_cancel_safe;
 use crate::state::AppState;
+
+use super::redact_sensitive;
 
 /// SZ-300 MQTT Topic 定义
 pub struct SzMqttTopics;
@@ -52,7 +55,7 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -89,7 +92,7 @@ impl MqttMessageHandler {
             .unwrap_or(0);
         let items = payload.get("items").and_then(|v| v.as_array());
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -116,21 +119,59 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        // 插入订单 — CONCAT('O',UNIX_TIMESTAMP()) 为 SQL 函数无需参数化，其余字段参数化
-        let order_sql = "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, offline_seq, item_count, status) VALUES (CONCAT('O',UNIX_TIMESTAMP()), ?, ?, ?, ?, ?, 1)";
+        // 幂等：同一设备同一离线序列号只落一单（2026-10-28 修复设备重传重复下单）
+        if !offline_seq.is_empty() {
+            let dup_sql =
+                "SELECT order_id FROM `order` WHERE device_id = ? AND offline_seq = ? LIMIT 1";
+            let dup_rows = conn
+                .query_with_params(
+                    dup_sql,
+                    &[
+                        OrmValue::I64(device_id),
+                        OrmValue::String(offline_seq.to_string()),
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "MQTT 处理：幂等查询失败");
+                    "服务暂时不可用".to_string()
+                })?;
+            if !dup_rows.is_empty() {
+                tracing::info!(
+                    device_id,
+                    offline_seq,
+                    "MQTT 离线订单重复上报，按幂等处理跳过"
+                );
+                return Ok(());
+            }
+        }
+
+        // 订单号：毫秒级 + 设备段 + 进程序号
+        // 2026-10-28 修复 P0：原 CONCAT('O',UNIX_TIMESTAMP()) 为秒级，同秒多单必撞唯一键
+        let order_no = crate::services::order_no::generate(device_id);
+        let order_sql = "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, offline_seq, item_count, status) VALUES (?, ?, ?, ?, ?, ?, 1)";
         let order_params = [
+            OrmValue::String(order_no.clone()),
             OrmValue::I64(merchant_id),
             OrmValue::I64(device_id),
             OrmValue::I64(total_fen),
             OrmValue::String(offline_seq.to_string()),
             OrmValue::I64(items.map(|a| a.len() as i64).unwrap_or(0)),
         ];
-        conn.execute_with_params(order_sql, &order_params)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "MQTT 处理：SQL 执行失败");
-                "服务暂时不可用".to_string()
-            })?;
+        if let Err(e) = conn.execute_with_params(order_sql, &order_params).await {
+            let msg = e.to_string();
+            // 并发重传落在唯一键上：视为幂等成功
+            if msg.contains("Duplicate") || msg.contains("duplicate") {
+                tracing::info!(
+                    device_id,
+                    offline_seq,
+                    "MQTT 离线订单并发重复，按幂等处理跳过"
+                );
+                return Ok(());
+            }
+            tracing::error!(error = %msg, "MQTT 处理：SQL 执行失败");
+            return Err("服务暂时不可用".to_string());
+        }
 
         Ok(())
     }
@@ -151,7 +192,7 @@ impl MqttMessageHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let mut conn = state.db_pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(&state.db_pool).await.map_err(|e| {
             tracing::error!(error = %e, "MQTT 处理：获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -174,11 +215,12 @@ impl MqttMessageHandler {
             .unwrap_or(0);
 
         // 插入操作日志 — operator/action/detail 均参数化
+        // 2026-10-28 安全修复：detail 为自由文本，落库前脱敏（手机号/身份证/令牌等）
         let log_sql = "INSERT INTO operate_log (operator, action, detail) VALUES (?, ?, ?)";
         let log_params = [
             OrmValue::String(format!("device:{}", device_sn)),
             OrmValue::String(format!("[{}] {}", level, device_id)),
-            OrmValue::String(message.to_string()),
+            OrmValue::String(redact_sensitive(message)),
         ];
         conn.execute_with_params(log_sql, &log_params)
             .await

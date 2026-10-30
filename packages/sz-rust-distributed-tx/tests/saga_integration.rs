@@ -175,7 +175,9 @@ async fn test_transfer_saga_second_step_fail() {
 #[tokio::test]
 async fn test_timeout_triggers_compensate() {
     let slow = Arc::new(FnAction::new(|payload: Value| async move {
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        // SDET P1-3：原 10s 只需超过 orchestrator 超时（50ms）即可触发补偿，
+        // 缩短为 1s 降低 CI 等待与 flaky 风险（tokio sleep 会被 timeout 取消，不真实等待）
+        tokio::time::sleep(Duration::from_secs(1)).await;
         Ok(payload)
     }));
     let noop = Arc::new(FnAction::new(|p: Value| async move { Ok(p) }));

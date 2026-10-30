@@ -24,6 +24,11 @@ env:
   # .cargo/config.toml 的 rustc-wrapper=sccache 在未安装 sccache 的环境会导致
   # "could not execute process" 编译失败，CI 统一禁用（与 .githooks/pre-commit 的降级逻辑一致）
   RUSTC_WRAPPER: ""
+  # 2026-10-28 P2-6：DB 集成测试凭据只存在于 CI service 配置，源码通过环境变量读取
+  SZ_TEST_DB_PASSWORD: test123
+  SZ_TEST_PG_PASSWORD: test123
+  SZ_TEST_MYSQL_URL: mysql://root:test123@127.0.0.1:3306/sz_orm_test
+  SZ_TEST_PG_URL: postgres://postgres:test123@127.0.0.1:5432/sz_orm_test
 
 jobs:
   # 门禁 1：代码格式检查
@@ -44,10 +49,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets
+
+  # 门禁 2.1：依赖可复现性（sz-orm 提交固定 + 声明版本与实际解析一致）
+  repro-check:
+    name: Dependency reproducibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm at pinned commit
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify path dependencies
+        run: python3 scripts/audit/dependency-reproducibility.py
+      - name: Verify lockfile is complete
+        run: cargo metadata --locked --format-version 1 > /dev/null
 
   # 门禁 3：严格静态分析
   clippy:
@@ -56,7 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -70,7 +95,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # P3-3 修复：--jobs 1 规避 Cargo 在高并发编译时的 crate 解析竞争问题
@@ -86,7 +113,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --workspace
@@ -100,14 +129,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
       - name: Run security audit
-        run: cargo audit --ignore RUSTSEC-2026-0049 --ignore RUSTSEC-2026-0098 --ignore RUSTSEC-2026-0099 --ignore RUSTSEC-2026-0104 --ignore RUSTSEC-2025-0068 --ignore RUSTSEC-2025-0067 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134 --ignore RUSTSEC-2026-0192 --ignore RUSTSEC-2026-0235 --ignore RUSTSEC-2026-0258 --ignore RUSTSEC-2024-0437 --ignore RUSTSEC-2024-0370
+        # 忽略清单统一由 .cargo/audit.toml 管理（含 RUSTSEC-2026-0258 / RUSTSEC-2024-0370），
+        # 不再在 CLI 硬编码 --ignore，避免命令行与 audit.toml 漂移。
+        run: cargo audit
 
   # 门禁 6b：cargo-deny 依赖审计（许可证 + 安全 + 来源）
   deny:
@@ -116,7 +149,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
       - name: Check advisories (RUSTSEC)
@@ -150,7 +185,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-hack
@@ -167,7 +204,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@nightly
       - name: Install cargo-udeps
@@ -185,7 +224,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-outdated
         run: cargo install cargo-outdated --locked
@@ -200,7 +241,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-machete
         run: cargo install cargo-machete --locked
@@ -266,16 +309,16 @@ jobs:
           done
           echo "代码行号检查完成"
 
-  # 门禁 12：DB 集成测试（P1-TEST-02）—— 已移除
-  # sz-rust-sz300 业务包已迁移至企业版仓库（1614e84），db_integration_test 随迁；
-  # 完整 job 定义（含 MySQL/Postgres services）见 git 历史
+  # 门禁 12：DB 集成测试（P1-TEST-02）—— 已迁移至 db-integration.yml
+  # sz-rust-sz300 业务包仍为本 workspace member（Cargo.toml members）；
+  # DB-backed ignored 集成测试（MySQL/PG/Redis）由
+  # .github/workflows/db-integration.yml（SDET P0-1 新增）显式执行 --ignored。
 
-  # 门禁 14：行覆盖率 ≥ 85%（规则 10）
+  # 门禁 14：行覆盖率 ≥ 85%（规则 10；SDET P1-2 移除 continue-on-error，改为阻塞）
   coverage:
     name: Coverage (>= 85%)
     runs-on: ubuntu-latest
     needs: [assertion-value]
-    continue-on-error: true
     services:
       mysql:
         image: mysql:9.6
@@ -304,7 +347,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -332,7 +377,8 @@ jobs:
             --exclude sz-orm-macros --exclude sz-rust-macros \
             --cobertura --output-path cobertura.xml \
             --fail-under-lines ${{ steps.cov-stage.outputs.threshold }}
-      # 注：sz300 DB 集成覆盖率已随业务包迁移企业版仓库（1614e84），此处仅合并 workspace 报告
+      # 注：sz300 DB-backed ignored 集成测试由 db-integration.yml 执行；
+      # 此处 llvm-cov --workspace 合并全 workspace 行覆盖率报告。
       - name: Merge coverage reports
         run: |
           node scripts/audit/cobertura-merger.js \
@@ -358,7 +404,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Measure and compare compile time
@@ -370,15 +418,16 @@ jobs:
           path: target/cargo-timings/
 
   # 门禁 16：Miri 内存/UB 检测（规则支撑：内存泄漏盲区）
-  # 对纯逻辑 facade-tests 跑 miri；依赖不兼容时允许失败（continue-on-error）
+  # 对纯逻辑 facade-tests 跑 miri；SDET P1-7 移除 continue-on-error，UB/内存问题即 fail-closed
   miri:
     name: Miri (UB + memory)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - name: Install Rust toolchain (nightly)
         uses: dtolnay/rust-toolchain@nightly
         with:
@@ -402,13 +451,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
         shell: bash
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check workspace compiles (CARGO_INCREMENTAL=0)
         run: cargo check --workspace --all-targets
       - name: Run lib tests (no integration)
         run: cargo test --workspace --lib --jobs 1
+
+      # SDET 门禁 30 配套：Windows 内存基线测试（RSS 回归对比），
+      # 依赖 Windows + sysinfo，随 windows job 执行（默认 ignored）
+      - name: Run windows memory baseline (ignored)
+        run: cargo test -p sz-rust-sz300 --test windows_memory_baseline -- --ignored --nocapture
 
   # 门禁 18：AI Facade 专项检查（--features all-providers）
   ai-facade:
@@ -417,7 +473,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -429,16 +487,19 @@ jobs:
       - name: Doc with all-providers feature
         run: cargo doc -p sz-rust-ai-facade --features all-providers --no-deps
 
-  # 门禁 19：文档-代码一致性（规则 23 支撑，防幻影交付）
-  # 扫描 README/CHANGELOG/docs 声称的 sz-rust-* crate，必须存在于 workspace
-  # 历史幻影声称（企业版交付）降级 WARN，清单外新增声称 ERROR 构建失败
+  # 门禁 19：文档-代码一致性（规则 23 + 24 支撑，防幻影交付 + 链接/版本/feature/文件名一致性）
+  # 扫描 README/CHANGELOG/docs 声称的 sz-rust-* crate，必须存在于 workspace（铁律 23）
+  # 扩展（2026-10-27，铁律 24）：Markdown 相对链接可解析、README 版本号与 Cargo.toml 一致、
+  #   --features 引用存在于 workspace [features]；任一失败 ERROR 构建失败
   doc-code-consistency:
-    name: Doc-Code Consistency (no phantom delivery)
+    name: Doc-Code Consistency (crates + links + version + features)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check claimed crates exist in workspace
+      - name: Check claimed crates + links + version + features (gate 19)
         run: node scripts/audit/doc-code-consistency.js
+      - name: Standalone link/version/feature check (gate 19, rerunnable)
+        run: node scripts/audit/link-check.js
 
   # 门禁 20：ADR-代码对账（规则 14 支撑，ADR 引用代码必须存在）
   # 替换原 adr-coverage job 内嵌的"代码行号引用检查"步骤，独立为脚本
@@ -470,13 +531,9 @@ jobs:
       - name: Check feature declarations match source
         run: node scripts/audit/feature-consistency.js
 
-  # 门禁 23：仓库隔离检查（P0-3）
-  isolation:
-    name: Isolation Check (oss)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: python scripts/check_isolation.py --project-root . --repo-type oss
+  # 门禁 23：仓库隔离检查 — 已随 ADR-043（2026-10-25 单一版本合并）废止：
+  # 企业版已并入本仓库，OSS/Enterprise 物理隔离不复存在，该检查与新架构矛盾。
+  # 保留 scripts/check_isolation.py 供历史追溯，不再在 CI 执行。
 
   # 门禁 24：许可证合规检查（P0-3）
   license-compliance:
@@ -510,3 +567,142 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check no reverse dependencies
         run: bash scripts/check-boundary.sh
+
+  # 门禁 28：OpenAPI-路由一致性（2026-10-27 全栈评测 P1-1 落地）
+  # 校验 sz300 `router.rs` 定义的路由与 `openapi.rs` 注册的 OpenAPI 端点一致，
+  # 防止 API 文档与实现漂移（脚本: scripts/audit/openapi-consistency.js）
+  openapi-consistency:
+    name: OpenAPI Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check OpenAPI routes match router
+        run: node scripts/audit/openapi-consistency.js
+
+  # 门禁 29：生产 unwrap 门禁（2026-10-27 全栈评测 P1-5 落地）
+  # check-unwrap.py 剔除 #[cfg(test)] 模块 / #[test] 函数 / 字符串字面量与注释后，
+  # 统计生产代码中的 `.unwrap()` 数量；当前实测 0（2026-10-27），阈值设为 0，
+  # 防止生产路径新增 unwrap。core/sz300 另在 lib.rs 以
+  # `#![cfg_attr(not(test), deny(clippy::unwrap_used))]` 做编译期灰度门禁。
+  unwrap-gate:
+    name: Unwrap Gate (production unwrap = 0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run production unwrap gate
+        run: python scripts/check-unwrap.py --max 0
+
+  # ── SDET 评测防复发门禁 30-34（2026-10-28）──
+
+  # 门禁 30：ignored 测试路由（P0-1 防复发）
+  # 每个 #[ignore] 测试必须被某 workflow 的 --ignored 命令显式覆盖，
+  # 或登记 docs/audit/ignored-test-exemption.md 豁免（仅限外部凭据）。
+  ignored-test-routing:
+    name: Ignored Test Routing (P0-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ignored tests are routed to workflows
+        run: node scripts/audit/ignored-test-routing.js
+
+  # 门禁 31：覆盖率矩阵完整性（P1-1 防复发）
+  # 每个 workspace member 必须出现在 coverage.yml 分片或豁免清单（含到期日）。
+  coverage-matrix-completeness:
+    name: Coverage Matrix Completeness (P1-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check coverage matrix covers all members
+        run: node scripts/audit/coverage-matrix-completeness.js
+
+  # 门禁 32：CI 配置审计（P1-2/P1-5/P1-6/P1-7 防复发）
+  # 阈值一致 / continue-on-error 清零 / kill-rate fail-closed /
+  # 性能回归门禁接线 / 无 .disabled workflow。
+  ci-config-audit:
+    name: CI Config Audit (P1-2/5/6/7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit CI configuration invariants
+        run: node scripts/audit/ci-config-audit.js
+
+  # 门禁 33：测试卫生（P1-3/P1-4/P2-4 防复发）
+  # async 内 thread::sleep / 长 sleep / 固定端口 / 硬编码凭据 / panic! 断言。
+  test-hygiene-check:
+    name: Test Hygiene Check (P1-3/4, P2-4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan test hygiene anti-patterns
+        run: node scripts/audit/test-hygiene-check.js
+
+  # 门禁 34：孤儿源文件（防未编译模块）
+  # src/ 下未被 lib.rs/main.rs/bin 挂载的 .rs 文件不得新增。
+  orphan-module-check:
+    name: Orphan Module Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect orphan source files
+        run: node scripts/audit/orphan-module-check.js
+
+  # 门禁 35：性能静态检测器（2026-10-28 评测 P1-12）
+  # 4 个检测器（N+1 / 锁跨 await / async 阻塞调用 / 串行 await）此前未接入 CI，
+  # 铁律 3（性能基线）无执行点。本 job 为 warn 级：发现候选问题只标注告警，
+  # 不阻塞合入（检测器存在已知误报，需人工判断），但检测器崩溃/缺失会失败。
+  perf-static:
+    name: Perf Static Detectors (warn-level)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run performance static detectors
+        run: |
+          set -u
+          scan() {
+            label="$1"; script="$2"
+            if [ ! -f "$script" ]; then
+              echo "::error::missing detector $script"
+              exit 1
+            fi
+            out=$(python "$script" packages 2>&1); code=$?
+            echo "::group::$label (exit=$code)"
+            echo "$out"
+            echo "::endgroup::"
+            hits=$(printf '%s\n' "$out" | grep -cE '\[(N_PLUS_ONE|LOCK_ACROSS_AWAIT|BLOCKING_CALL|SERIAL_AWAIT)\]' || true)
+            echo "::warning title=$label::$hits candidate finding(s) — review log"
+            return 0
+          }
+          scan "N+1" scripts/perf/detect_n_plus_one.py
+          scan "LockAcrossAwait" scripts/perf/detect_lock_across_await.py
+          scan "BlockingCall" scripts/perf/detect_blocking_call.py
+          scan "SerialAwait" scripts/perf/detect_serial_await.py
+          exit 0
+
+  # 门禁 36：advisory ignore 复核期限（2026-10-28 评测 P1-6）
+  # deny.toml 中每条临时忽略的 RUSTSEC 公告必须带 review-by 到期日，过期即失败。
+  advisory-ignore-expiry:
+    name: Advisory Ignore Expiry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deny.toml ignore review-by dates
+        run: python scripts/audit/advisory-ignore-expiry.py
+
+  # 门禁 37：未接线 crate 清单（2026-10-28 评测 P1-8）
+  # workspace 内零入度成员（无 normal/build 依赖）必须登记角色与复核期限。
+  unwired-crates:
+    name: Unwired Crate Manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check unwired crate manifest
+        run: node scripts/audit/unwired-crates.js

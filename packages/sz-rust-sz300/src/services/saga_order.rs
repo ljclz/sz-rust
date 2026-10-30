@@ -21,6 +21,7 @@ use sz_rust_distributed_tx::{
     TxLogStore, TxState, TxType,
 };
 
+use crate::db::acquire_cancel_safe;
 use crate::models::order::Order;
 use crate::models::order_item::OrderItem;
 
@@ -32,9 +33,9 @@ use crate::models::order_item::OrderItem;
 #[async_trait]
 pub trait StockService: Send + Sync + 'static {
     /// 扣减库存（正向操作）
-    async fn deduct(&self, product_id: i64, quantity: i32) -> Result<(), DtxError>;
+    async fn deduct(&self, good_id: i64, quantity: i32) -> Result<(), DtxError>;
     /// 恢复库存（补偿操作）
-    async fn restore(&self, product_id: i64, quantity: i32) -> Result<(), DtxError>;
+    async fn restore(&self, good_id: i64, quantity: i32) -> Result<(), DtxError>;
 }
 
 /// 支付服务 trait（v1.9.0 Saga 发起/取消支付）
@@ -46,7 +47,7 @@ pub trait PaymentService: Send + Sync + 'static {
     async fn cancel(&self, payment_id: &str) -> Result<(), DtxError>;
 }
 
-/// DB 库存服务实现 — 操作 `product` 表的 `stock` 字段
+/// DB 库存服务实现 — 操作 `good` 表的 `stock` 字段
 pub struct DbStockService {
     pool: Arc<Pool>,
 }
@@ -60,16 +61,14 @@ impl DbStockService {
 
 #[async_trait]
 impl StockService for DbStockService {
-    async fn deduct(&self, product_id: i64, quantity: i32) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+    async fn deduct(&self, good_id: i64, quantity: i32) -> Result<(), DtxError> {
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
-        let sql = "UPDATE product SET stock = stock - ? WHERE product_id = ? AND stock >= ?";
+        let sql = "UPDATE good SET stock = stock - ? WHERE good_id = ? AND stock >= ?";
         let params = [
             DbValue::I32(quantity),
-            DbValue::I64(product_id),
+            DbValue::I64(good_id),
             DbValue::I32(quantity),
         ];
         let affected = conn
@@ -78,21 +77,19 @@ impl StockService for DbStockService {
             .map_err(|e| DtxError::Generic(format!("扣减库存失败: {}", e)))?;
         if affected == 0 {
             return Err(DtxError::Generic(format!(
-                "库存不足或商品不存在: product_id={}, need={}",
-                product_id, quantity
+                "库存不足或商品不存在: good_id={}, need={}",
+                good_id, quantity
             )));
         }
         Ok(())
     }
 
-    async fn restore(&self, product_id: i64, quantity: i32) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+    async fn restore(&self, good_id: i64, quantity: i32) -> Result<(), DtxError> {
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
-        let sql = "UPDATE product SET stock = stock + ? WHERE product_id = ?";
-        let params = [DbValue::I32(quantity), DbValue::I64(product_id)];
+        let sql = "UPDATE good SET stock = stock + ? WHERE good_id = ?";
+        let params = [DbValue::I32(quantity), DbValue::I64(good_id)];
         conn.execute_with_params(sql, &params)
             .await
             .map_err(|e| DtxError::Generic(format!("恢复库存失败: {}", e)))?;
@@ -115,9 +112,7 @@ impl DbPaymentService {
 #[async_trait]
 impl PaymentService for DbPaymentService {
     async fn initiate(&self, order_id: i64, amount_fen: i64) -> Result<String, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE `order` SET status = 2, pay_at = NOW(), updated_at = NOW() \
@@ -143,9 +138,7 @@ impl PaymentService for DbPaymentService {
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| DtxError::Generic(format!("无效的 payment_id: {}", payment_id)))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
         let sql = "UPDATE `order` SET status = 0, updated_at = NOW() WHERE order_id = ?";
@@ -191,9 +184,7 @@ impl SagaAction for CreateOrderAction {
         )
         .map_err(|e| DtxError::Serialization(format!("反序列化 items 失败: {}", e)))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
 
@@ -270,9 +261,7 @@ impl SagaAction for CancelOrderAction {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| DtxError::Generic("payload 缺少 order_id".into()))?;
 
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Generic(format!("获取连接失败: {}", e)))?;
 
@@ -436,23 +425,26 @@ impl DbTxLogStore {
     }
 }
 
+/// `sz_dtx_log.state` 持久化词表（与 `chk_dtx_state_v19` CHECK 约束一致）
+///
+/// 旧版本写入过 `completed` / `cancelled` / `failed`，读取时做兼容映射。
 fn state_to_str(state: TxState) -> &'static str {
     match state {
         TxState::Running => "running",
-        TxState::Completed => "completed",
+        TxState::Completed => "committed",
         TxState::Compensated => "compensated",
-        TxState::Cancelled => "cancelled",
-        TxState::Failed => "failed",
+        TxState::Cancelled => "aborted",
+        TxState::Failed => "manual_intervention",
         TxState::Timeout => "timeout",
     }
 }
 
 fn str_to_state(s: &str) -> TxState {
     match s {
-        "completed" => TxState::Completed,
-        "compensated" => TxState::Compensated,
-        "cancelled" => TxState::Cancelled,
-        "failed" => TxState::Failed,
+        "committed" | "completed" => TxState::Completed,
+        "compensated" | "compensating" => TxState::Compensated,
+        "aborted" | "cancelled" => TxState::Cancelled,
+        "manual_intervention" | "failed" => TxState::Failed,
         "timeout" => TxState::Timeout,
         _ => TxState::Running,
     }
@@ -461,9 +453,7 @@ fn str_to_state(s: &str) -> TxState {
 #[async_trait]
 impl TxLogStore for DbTxLogStore {
     async fn save(&self, entry: &TxLogEntry) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let steps_json = serde_json::to_string(&entry.steps)
@@ -477,17 +467,14 @@ impl TxLogStore for DbTxLogStore {
         let state = state_to_str(entry.state);
         let sql = "INSERT INTO sz_dtx_log (tx_id, tx_type, state, steps, payload, \
                    created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) \
-                   ON DUPLICATE KEY UPDATE state = ?, payload = ?, updated_at = ?";
+                   ON DUPLICATE KEY UPDATE tx_id = tx_id";
         let params = [
             DbValue::String(entry.tx_id.clone()),
             DbValue::String(tx_type.to_string()),
             DbValue::String(state.to_string()),
             DbValue::String(steps_json),
-            DbValue::String(payload_json.clone()),
-            DbValue::I64(entry.created_at),
-            DbValue::I64(entry.updated_at),
-            DbValue::String(state.to_string()),
             DbValue::String(payload_json),
+            DbValue::I64(entry.created_at),
             DbValue::I64(entry.updated_at),
         ];
         conn.execute_with_params(sql, &params)
@@ -496,22 +483,25 @@ impl TxLogStore for DbTxLogStore {
         Ok(())
     }
 
+    /// 状态迁移（CAS）：仅允许从 `running` 迁移到终态
+    ///
+    /// 并发补偿/恢复任务可能重复写入终态，`AND state = 'running'` 保证
+    /// 先到者生效、后到者为 no-op，不会把已提交事务改成已补偿。
     async fn update_state(
         &self,
         tx_id: &str,
         state: TxState,
         payload: &Value,
     ) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let state_str = state_to_str(state);
         let payload_json =
             serde_json::to_string(payload).map_err(|e| DtxError::Serialization(e.to_string()))?;
         let now = chrono::Utc::now().timestamp_millis();
-        let sql = "UPDATE sz_dtx_log SET state = ?, payload = ?, updated_at = ? WHERE tx_id = ?";
+        let sql = "UPDATE sz_dtx_log SET state = ?, payload = ?, updated_at = ? \
+                   WHERE tx_id = ? AND state IN ('running', 'init')";
         let params = [
             DbValue::String(state_str.to_string()),
             DbValue::String(payload_json),
@@ -525,9 +515,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn get(&self, tx_id: &str) -> Result<Option<TxLogEntry>, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let sql = "SELECT tx_id, tx_type, state, steps, payload, created_at, updated_at \
@@ -543,9 +531,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn list_running(&self) -> Result<Vec<TxLogEntry>, DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         let sql = "SELECT tx_id, tx_type, state, steps, payload, created_at, updated_at \
@@ -558,9 +544,7 @@ impl TxLogStore for DbTxLogStore {
     }
 
     async fn delete(&self, tx_id: &str) -> Result<(), DtxError> {
-        let mut conn = self
-            .pool
-            .acquire()
+        let mut conn = acquire_cancel_safe(&self.pool)
             .await
             .map_err(|e| DtxError::Persistence(format!("获取连接失败: {}", e)))?;
         conn.execute_with_params(
@@ -662,6 +646,22 @@ pub async fn create_with_saga(
 ) -> Result<OrderCreateResult, DtxError> {
     let orchestrator = SagaOrchestrator::new().with_compensate_retries(3);
     let payload = json!({ "order": order, "items": items });
+    let tx_id = sz_rust_distributed_tx::next_tx_id("saga");
+
+    // 先落库 running 状态：进程崩溃后可通过 list_running 发现未完成事务
+    if let Some(ref store) = tx_log {
+        let now = chrono::Utc::now().timestamp_millis();
+        let entry = TxLogEntry {
+            tx_id: tx_id.clone(),
+            tx_type: TxType::Saga,
+            state: TxState::Running,
+            steps: json!(["create_order", "deduct_stock", "initiate_payment"]),
+            payload: payload.clone(),
+            created_at: now,
+            updated_at: now,
+        };
+        store.save(&entry).await?;
+    }
 
     let steps = vec![
         SagaStep::new(
@@ -681,7 +681,9 @@ pub async fn create_with_saga(
         ),
     ];
 
-    let result = orchestrator.execute(steps, payload).await?;
+    let result = orchestrator
+        .execute_with_tx_id(steps, payload, tx_id)
+        .await?;
 
     // 持久化事务状态（若提供了 tx_log store）
     if let Some(ref store) = tx_log {
@@ -774,14 +776,14 @@ mod tests {
 
     #[async_trait]
     impl StockService for MockStockService {
-        async fn deduct(&self, _product_id: i64, _quantity: i32) -> Result<(), DtxError> {
+        async fn deduct(&self, _good_id: i64, _quantity: i32) -> Result<(), DtxError> {
             if self.fail {
                 Err(DtxError::Generic("mock 扣减库存失败".into()))
             } else {
                 Ok(())
             }
         }
-        async fn restore(&self, _product_id: i64, _quantity: i32) -> Result<(), DtxError> {
+        async fn restore(&self, _good_id: i64, _quantity: i32) -> Result<(), DtxError> {
             Ok(())
         }
     }

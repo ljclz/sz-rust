@@ -2,7 +2,107 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-10-07
+> **最后更新**：2026-10-30
+
+---
+
+## 2026-10-30 更新：响应 gzip 压缩与 BREACH 排除（ADR-050，31–60 天路线项）
+
+> **状态**：✅ 能力与排除策略落地 / ⏳ 默认关闭，收益与 CPU 代价未实测（待同源 A/B 决定默认值）
+> **决策**：`docs/adr/0050-响应gzip压缩与breach排除.md`
+> **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「响应 5,314 B 未压缩」；31–60 天路线项「开 gzip/brotli（注意 BREACH）」
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| gzip 压缩层（`DefaultPredicate` + 标记排除）与 `NoCompression` 响应扩展 | `packages/sz-rust-sz300/src/middleware/compression.rs` | `cargo check -p sz-rust-sz300 --all-targets` = 0 error；lib **118 passed**（+2） |
+| 开关 `SZ300_COMPRESSION`（默认关闭，非法值 fail-closed） | `packages/sz-rust-sz300/src/config.rs`（`compression_enabled`） | `config_test` = 7 passed（+1 开关解析：未设置/6 种真值/4 种假值/非法值） |
+| `create_router` 条件挂载（关闭时层不入栈）+ 压缩位于脱敏层之外 | `packages/sz-rust-sz300/src/router.rs` | `--features v18-rbac` / 8 feature 组合 `cargo check` = 0 error |
+| 令牌端点 BREACH 排除（login / refresh，RBAC 与非 RBAC 双分支） | 同上 | `compression_test` = 5 passed（标记穿过 `DataMaskLayer` 传播到压缩谓词） |
+| 离线同构栈集成测试（无需数据库） | `packages/sz-rust-sz300/tests/compression_test.rs` | 5 passed：业务 JSON 被 gzip（1f 8b 魔数 + 体积更小）/ 令牌路由跳过 / <32 B 跳过 / SSE 跳过 / 无 Accept-Encoding 原样 |
+| **顺带修复：`v18-sse` feature 从未被 CI 编译**（4 处编译错误） | `packages/sz-rust-sz300/src/router.rs`（`sse_handler`） | `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` = 0 error；运行时行为未验证（`sse_test` 无 MySQL 软跳过），已登记欠债 |
+| brotli 暂不启用（避免一轮测量叠加两个未测变量） | `packages/sz-rust-sz300/Cargo.toml`（仅 `compression-gzip`） | 决策理由见 ADR-050 替代方案 B |
+| 回归 | `cargo test -p sz-rust-sz300` | **244 passed / 0 failed / 62 ignored**；clippy 0 warning；fmt 无差异 |
+| 性能量化 | 需一次性 MySQL + release 实例 + 门禁 v2（c=50/10s/60s×3），且客户端需显式发 `Accept-Encoding: gzip` | **未实测（W）**，欠债 `DB-2026-10-30-03`，受「先问再起服务」约束待批准 |
+
+---
+
+## 2026-10-30 更新：鉴权授权上下文缓存（ADR-049，31–60 天路线项）
+
+> **状态**：✅ 代码与测试完成 / ⏳ 端到端吞吐未实测
+> **决策**：`docs/adr/0049-鉴权授权上下文缓存.md`
+> **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「鉴权每请求查库」；31–60 天路线项「JWT claims 鉴权」的安全替代
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| `try_get_user_info_by_id` → `auth_context` 返回 `AuthContext{merchant_id,is_admin}`，投影收窄为 2 列 | `packages/sz-rust-sz300/src/services/auth_service.rs` | `cargo check -p sz-rust-sz300 --all-targets` = 0 error |
+| 进程级授权上下文缓存（LRU 50k / TTL 60s / 定长 10 字节值；负结果不缓存） | 同上（`auth_ctx_cache` + `encode_auth_ctx`/`decode_auth_ctx`） | `cargo test -p sz-rust-sz300 --lib` = **116 passed**（+3 编解码单测） |
+| 中间件接线（`CurrentUser` 注入语义不变，DB 不可用仍降级） | `packages/sz-rust-sz300/src/middleware/auth_middleware.rs` | `cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning |
+| 真库集成测试（hit/miss 计数、删行后仍命中、role=2 非管理员、负结果不缓存 + 可达性对照） | `packages/sz-rust-sz300/tests/auth_ctx_cache_test.rs` | **V**：一次性 MySQL `sz300-authctx-mysql` @127.0.0.1:3306 / `sz_orm_test`，`-- --ignored` = **1 passed**（四组场景同一运行时内串行；拆成两个 `#[tokio::test]` 会因进程级池绑定首个运行时关闭而误判，已合并） |
+| ignored 测试接入 CI（含 ADR-048 与存量漏接） | `.github/workflows/db-integration.yml`（新增 4 个 sz300 `--ignored` 组） | 门禁 30 `ignored-test-routing.js` = 通过 |
+| 顺带修复存量门禁失败 | `docs/adr/ADR-043-ai时代单一版本合并.md` 补「日期」字段 | `scripts/check-adr-coverage.sh` = exit 0（此前恒 exit 1） |
+| 端到端吞吐量化 | — | **未实测**：需一次性 MySQL 9.6 + release 实例跑门禁 v2（起服务前须用户批准） |
+
+---
+
+## 2026-10-30 更新：订单列表 COUNT 查询缓存（ADR-048，31–90 天路线项）
+
+> **状态**：✅ 完成（用户 2026-10-30 选定「先做 COUNT 缓存（最高 ROI）」）
+> **决策**：`docs/adr/0048-订单count查询缓存.md`
+> **来源**：`docs/audit/2026-10-29-性能整改现场验证记录.md` §3.3（order/list COUNT 全扫描 + 高 p99）
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| `AppState` 新增 `query_cache: SharedQueryCache`（v1.9.0 QueryCache 首次接入业务） | `packages/sz-rust-sz300/src/state.rs` + `main.rs` + 全部测试/bench 构造点 | `cargo check -p sz-rust-sz300 --all-targets` = 0 error |
+| `OrderService::list` COUNT 按「WHERE 子句 + 参数化值」缓存（LRU 10k / TTL 60s） | `packages/sz-rust-sz300/src/services/order_service.rs` | `cargo test -p sz-rust-sz300 --lib` = 113 passed（+4 键单测） |
+| `OrderService::create` 提交成功后 `cache.clear()` 整体失效 | 同上 | 真库 `order_count_cache_test` = 2 passed（命中/清空/键隔离） |
+| COUNT 缓存集成测试 | `packages/sz-rust-sz300/tests/order_count_cache_test.rs` | 真库 MySQL `sz_orm_test`：2 passed |
+| 顺带修复预存陈旧断言（config 默认用户 sz300_app） | `packages/sz-rust-sz300/tests/config_test.rs` | `config_test` = 6 passed |
+| 回归验证 | 受影响的 `order_idempotency_test` / `outbox_webhook_test` | 3 passed / 4 passed；clippy 0 warning |
+| 性能量化 | 2026-10-30 用户批准补测：门禁 v2 完整协议（c=50/10s/60s×3，一次性 MySQL 9.6 + perf-seed） | **order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms（-67.8%）、0% 错误**；基线已 `--init` 重播种（health 6936.3 / product 1292.6 / order 2623.6） |
+
+---
+
+## 2026-10-25 更新：单一版本合并（ADR-043，废除企业版）
+
+> **状态**：✅ 合并完成（本会话执行）
+> **决策**：AI 时代企业版无存在意义，所有版本合并为单一开源版本（v2.0.0），全部 crate 统一 Apache-2.0。
+> **方案**：`docs/single-edition-merge-plan.md`；决策记录：`docs/adr/ADR-043-ai时代单一版本合并.md`
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| 9 个企业 crate 入库（7 addons + sdd + migration） | `packages/sz-rust-addons-{cms,crm,ecommerce,erp,forum,im,operate}` + `packages/sz-rust-{sdd,migration}` | `cargo check --workspace` 65 members 全过 |
+| members + workspace.dependencies 更新 | 根 `Cargo.toml` | 同上 |
+| sz300 生产能力移植（ai/wasm/view + 限流/熔断链 + AI init） | `packages/sz-rust-sz300/src/{controllers/ai.rs,controllers/wasm_api.rs,controllers/view.rs,router.rs,config.rs,main.rs}` | `cargo test -p sz-rust-sz300 --lib` = 87 passed（含 26 项安全 Gauntlet） |
+| 许可证统一 Apache-2.0 | 119 个企业来源文件 SPDX 头 | `python scripts/check_license_compliance.py --mode all --expected-license Apache-2.0`（企业来源文件 0 违规；既有 OSS 文件缺头另批补齐） |
+| 集成测试修复（metrics_token 12 处 + mock_app_state + hot_path bench） | `packages/sz-rust-sz300/tests/` + `src/state.rs` + `benches/hot_path.rs` | `cargo test -p sz-rust-sz300` 全绿 |
+| sdd visual_adapter 死代码移出编译（WIP 引用未实现 API） | `packages/sz-rust-sdd/src/lib.rs` | `cargo check -p sz-rust-sdd` 通过 |
+| CI isolation 隔离检查废止（与合并矛盾） | `.github/workflows/ci.yml` | job 已移除，注释说明 |
+| docker-compose.prod.yml 补 AI 环境变量 | `docker-compose.prod.yml` | — |
+
+---
+
+## 2026-10-20 更新：二维码生成验证闭环（吸收公众号文章实践）
+
+> **状态**：✅ 完成
+> **来源**：微信公众号《qrcode-rs + rxing：Rust 二维码生成与验证的完整闭环实战》（2026-10-13）
+> **方案**：采用文章「生成 → 解码 → 一致性校验」闭环模式；解码后端以 `rqrr 0.10.1` 替代 `rxing`（避免 workspace MSRV 1.81→1.85 升级与 `image/exr → pulp/paste` 依赖链）。决策记录：`docs/adr/ADR-042-qr-verify-rqrr-closed-loop.md`。
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| `QrCodeError::Decode` / `DataMismatch` | `packages/sz-rust-core/src/qr_code.rs:98,102` | `cargo test -p sz-rust-core --lib qr_code` = 24 passed |
+| `QrVersion` 枚举（Normal 1~40 / Micro 1~4） | `packages/sz-rust-core/src/qr_code.rs:179` | 同上 |
+| `generate_matrix_with_version` | `packages/sz-rust-core/src/qr_code.rs:435` | 同上 |
+| `generate_unicode`（Unicode 终端输出） | `packages/sz-rust-core/src/qr_code.rs:470` | 同上 |
+| `verify_png_bytes`（内存解码验证） | `packages/sz-rust-core/src/qr_code.rs:501` | 同上 |
+| `generate_and_verify`（生成→解码→一致性校验） | `packages/sz-rust-core/src/qr_code.rs:530` | 同上 |
+| 新增 11 个单测（qr_code 13 → 24） | `packages/sz-rust-core/src/qr_code.rs:854-957` | 24 passed / 0 failed |
+| 覆盖率门禁（铁律 10） | `qr_code.rs`（773 行 / 44 missed） | `cargo llvm-cov -p sz-rust-core --lib`：行覆盖 **94.31%**（≥ 85%），整体 96.17% |
+| 依赖登记 `rqrr = "0.10"` | 根 `Cargo.toml` + `packages/sz-rust-core/Cargo.toml` | `cargo check -p sz-rust-core --lib` 通过 |
+| ADR-042 + ADR 索引补录 017~022/038~041 | `docs/adr/ADR-042-qr-verify-rqrr-closed-loop.md` + `docs/adr/README.md` | — |
+| 五维审查报告 | `docs/audit/2026-10-20-qr-verify-five-dim-review.md` | 5 维无阻断项 |
+| `mutants.toml` 排除理由更新 | `.cargo/mutants.toml:11-13` | — |
+
+**后续建议**：多格式扫描（Aztec/DataMatrix/PDF417）需求出现时，另行评估 `rxing`（需 MSRV 升级决策，见 ADR-042 后果段）。
 
 ---
 
@@ -50,6 +150,8 @@
 - **Saga 分布式事务接入订单**（`v19-saga`）：6 个 Saga Action + `create_with_saga` + `OrderCreateResult` + DbTxLogStore 持久化 + 4 E2E 测试
 - **可观测性闭环**（`v19-obs-closure`）：tracing_middleware 全链路追踪 + TraceID + Span 本地缓冲 + SilenceManager 告警静默去重 + BusinessAlertRules 业务告警规则集 + 6 E2E 测试
 - **性能深化**：热路径基线（3 条）+ CI 性能回归门禁（`scripts/perf-regression.js`）+ N+1 检测门禁（`scripts/nplus1-detect.js`）+ 连接池调优（`PoolConfig` + `PoolExhaustedError`）+ 查询缓存（LRU + TTL + 命中率统计）
+  - 2026-10-29 更正：上述门禁在 2026-10-29 前**未被任何 workflow 引用**，且脚本用 5 s 短跑 + 失败计数 + 跨机器占位基线，不可作为性能证据。已重写为 v2 并接入 `.github/workflows/perf-gate.yml`，见 `docs/adr/0046-性能工程整改-限流分桶与熔断窗口与门禁重写.md`。
+  - 2026-10-29 真库端到端验证：一次性 MySQL 9.6 + migrations 001–007 + `deploy/sql/perf-seed.sql`（首跑暴露并修正 `merchant.market_id` NOT NULL 缺列）+ release 实例跑通门禁 v2，`/health` 实测 +34.9%（V）；**同源 A/B**（同一容器+同一数据集）product +5.2% / order +8.6%（W，无回归）；本机指纹已 `--init` 播种真实基线。期间新发现并修复「无 `aud` 令牌 grace-period 告警按请求落盘」（占日志字节 99.78% → `WarnSampler` 60 s 采样）；**审计链静默丢弃（c=50 下 397 条）**经用户决策于 2026-10-30 用**本地缓冲重放**修复（ADR-047，真库验证 453 POST → 453 行，0 丢弃）。证据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §7/§11/§12/§13。
 
 #### P2 功能开发
 
@@ -70,7 +172,7 @@
 - `cargo test --test plugin_flow_e2e --features all-v1-9` = 6 passed
 - `cargo clippy --all-targets --features all-v1-9 -- -D warnings` = 0 warning
 - `node scripts/nplus1-detect.js` = 0 违规
-- `node scripts/perf-regression.js --skip-bench` = PASS
+- `node scripts/perf-regression.js --skip-bench` = PASS（v1.9.0 时点旧脚本；v2 门禁在无指纹基线时输出 `GATE INACTIVE`，不能作为性能达标证据）
 
 ### 提交记录
 

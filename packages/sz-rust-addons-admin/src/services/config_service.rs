@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::{Pool, Value};
 
 use crate::error::AdminError;
@@ -74,7 +75,7 @@ impl ConfigService {
         }
         sql.push_str(" ORDER BY tenant_id DESC, `key` ASC");
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn.query_with_params(&sql, &params).await?;
         Ok(rows.iter().filter_map(row_to_config_response).collect())
     }
@@ -92,7 +93,7 @@ impl ConfigService {
         let type_str = config_type_to_str(req.value_type);
         let now = Utc::now();
 
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let exists = conn
             .query_with_params(
                 "SELECT id FROM configs WHERE `key` = ? AND tenant_id = ? LIMIT 1",
@@ -145,7 +146,7 @@ impl ConfigService {
     }
 
     pub async fn delete(&self, key: &str, tenant_id: i64) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let affected = conn
             .execute_with_params(
                 "DELETE FROM configs WHERE `key` = ? AND tenant_id = ?",
@@ -163,7 +164,7 @@ impl ConfigService {
         key: &str,
         tenant_id: i64,
     ) -> Result<Option<ConfigResponse>, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, `key`, value, value_type, `group`, description, tenant_id, created_at, updated_at \
@@ -176,7 +177,7 @@ impl ConfigService {
     }
 
     async fn get_by_key(&self, key: &str, tenant_id: i64) -> Result<ConfigResponse, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, `key`, value, value_type, `group`, description, tenant_id, created_at, updated_at \

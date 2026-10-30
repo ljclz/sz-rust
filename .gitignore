@@ -16,6 +16,8 @@ deploy_key.pub
 # SSH 私钥（服务器验证用，曾以无扩展名形式存于仓库根，禁止提交）
 ssh_key
 ssh_key.pub
+ssh_key_temp
+scripts/ssh_key_temp
 # Oracle 服务器验证脚本（硬编码服务器 IP/凭据，仅本地使用）
 install_oracle_client.js
 test_oracle_*.js
@@ -67,6 +69,10 @@ scripts/perf-compare/benchmarks/*/target/
 # 部署脚本（含 SSH 密钥，禁止提交）
 scripts/deploy/
 
+# SSH 部署辅助脚本（含服务器 IP / root 登录信息，2026-10-28 全量入库前补充排除）
+scripts/ssh-*.js
+docs/spec/*/scripts/ssh-*
+
 # Artifacts
 artifacts/
 *.tar.gz
@@ -77,3 +83,6 @@ artifacts/
 scripts/.server_key
 scripts/deploy-check.js
 scripts/deploy-upload.js
+
+# mimosa 安全扫描插件会话状态（每次会话自动重建，勿提交）
+.mimosa/

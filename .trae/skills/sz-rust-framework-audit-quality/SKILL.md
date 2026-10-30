@@ -153,5 +153,5 @@ agentMode: auto
 
 ## 参考
 
-- [sz-orm 审计质量事故报告](../sz-orm/docs/audit/审计质量事故报告.md) — 历史教训
-- [project_rules.md](../.trae/rules/project_rules.md) — 项目铁律
+- [sz-orm 审计质量事故报告](../../../sz-orm/docs/audit/审计质量事故报告.md) — 历史教训
+- [project_rules.md](../../../.trae/rules/project_rules.md) — 项目铁律

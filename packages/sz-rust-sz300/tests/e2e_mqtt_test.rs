@@ -21,6 +21,8 @@ use tokio::sync::Mutex;
 
 static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+mod common;
+
 fn mysql_config() -> config::AppConfig {
     config::AppConfig {
         server: config::ServerConfig {
@@ -31,7 +33,7 @@ fn mysql_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -60,6 +62,7 @@ async fn ensure_mysql() -> Option<Pool> {
 async fn make_state(pool: Pool) -> AppState {
     AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -70,6 +73,8 @@ async fn make_state(pool: Pool) -> AppState {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -95,64 +100,18 @@ async fn make_state(pool: Pool) -> AppState {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     }
 }
 
+/// 建表：执行生产迁移（不再手写 DDL —— 手写 Schema 与生产分叉是测试失真的根因）
 async fn setup_tables(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute(
-        "CREATE TABLE device (\
-         device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_sn VARCHAR(64) NOT NULL UNIQUE,\
-         device_model VARCHAR(64) NOT NULL DEFAULT '',\
-         fw_version VARCHAR(32) NOT NULL DEFAULT '',\
-         status INT NOT NULL DEFAULT 0,\
-         signal_strength INT NOT NULL DEFAULT 0,\
-         bind_at DATETIME NULL,\
-         last_online_at DATETIME NULL,\
-         created_at DATETIME NULL,\
-         updated_at DATETIME NULL\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 device 表失败");
-    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
-    conn.execute(
-        "CREATE TABLE operate_log (\
-         id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         operator VARCHAR(64) NOT NULL DEFAULT '',\
-         action VARCHAR(64) NOT NULL DEFAULT '',\
-         detail TEXT,\
-         ip VARCHAR(45) NOT NULL DEFAULT ''\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 operate_log 表失败");
-    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
-    conn.execute(
-        "CREATE TABLE `order` (\
-         order_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-         order_no VARCHAR(64) NOT NULL DEFAULT '',\
-         merchant_id BIGINT NOT NULL DEFAULT 0,\
-         device_id BIGINT NOT NULL DEFAULT 0,\
-         total_fen BIGINT NOT NULL DEFAULT 0,\
-         offline_seq VARCHAR(64) NOT NULL DEFAULT '',\
-         item_count INT NOT NULL DEFAULT 0,\
-         status INT NOT NULL DEFAULT 0\
-         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .expect("建 order 表失败");
+    common::setup_all_tables(pool).await;
 }
 
 async fn cleanup(pool: &Pool) {
-    let mut conn = pool.acquire().await.expect("获取连接失败");
-    conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    conn.execute("DROP TABLE IF EXISTS operate_log").await.ok();
-    conn.execute("DROP TABLE IF EXISTS `order`").await.ok();
+    common::teardown_all(pool).await;
 }
 
 async fn insert_device(pool: &Pool, device_sn: &str, merchant_id: i64) {

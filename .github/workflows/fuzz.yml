@@ -34,7 +34,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Checkout sz-orm dependency
-        run: git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable

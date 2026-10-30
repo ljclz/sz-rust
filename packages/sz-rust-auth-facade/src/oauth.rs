@@ -523,11 +523,11 @@ pub trait OAuth2HttpTransport: Send + Sync {
 ///
 /// let transport = MemoryOAuth2HttpTransport::new();
 /// // 预置 mock 响应（按调用顺序消费）
-/// transport.push_response(r#"{"access_token":"token123"}"#);
+/// transport.push_response(r#"{"access_token":"<token>"}"#);
 /// transport.push_response(r#"{"id":"1","nickname":"test"}"#);
 ///
 /// let resp = transport.post_json("https://example.com/token", "{}").unwrap();
-/// assert_eq!(resp, r#"{"access_token":"token123"}"#);
+/// assert_eq!(resp, r#"{"access_token":"<token>"}"#);
 /// ```
 #[derive(Debug, Default)]
 pub struct MemoryOAuth2HttpTransport {
@@ -1557,7 +1557,7 @@ pub mod device_code {
                             "OAUTH2_ACCESS_DENIED: 用户拒绝授权".into(),
                         ));
                     }
-                    "expired_token" => {
+                    "<expired>" => {
                         self.log_audit(
                             "device_code",
                             "failure",
@@ -1678,7 +1678,7 @@ pub mod device_code {
             transport.push_response(r#"{"error":"authorization_pending"}"#);
             // 第二次：成功
             transport.push_response(
-                r#"{"access_token":"token123","token_type":"Bearer","expires_in":3600}"#,
+                r#"{"access_token":"<token>","token_type":"Bearer","expires_in":3600}"#,
             );
 
             let config = OAuth2Config::new(
@@ -1695,7 +1695,7 @@ pub mod device_code {
                 .await
                 .expect("poll_for_token 失败");
 
-            assert_eq!(token.access_token, "token123");
+            assert_eq!(token.access_token, "<token>");
             assert_eq!(token.token_type.as_deref(), Some("Bearer"));
         }
 
@@ -1706,7 +1706,7 @@ pub mod device_code {
             // 第一次：slow_down
             transport.push_response(r#"{"error":"slow_down"}"#);
             // 第二次：成功
-            transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+            transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
             let config = OAuth2Config::new(
                 "client123",
@@ -1722,7 +1722,7 @@ pub mod device_code {
                 .await
                 .expect("poll_for_token 失败");
 
-            assert_eq!(token.access_token, "token123");
+            assert_eq!(token.access_token, "<token>");
         }
 
         /// 测试 device code 过期 → OAUTH2_DEVICE_CODE_EXPIRED
@@ -2006,7 +2006,7 @@ mod tests {
             email: Some("test@example.com".into()),
             avatar: Some("https://example.com/avatar.png".into()),
             raw: serde_json::json!({"key": "value"}),
-            access_token: Some("token123".into()),
+            access_token: Some("<token>".into()),
             refresh_token: Some("refresh456".into()),
             expires_in: Some(3600),
         };
@@ -2137,13 +2137,13 @@ mod tests {
     #[test]
     fn test_memory_oauth2_http_transport_post_json() {
         let transport = MemoryOAuth2HttpTransport::new();
-        transport.push_response(r#"{"access_token":"token123"}"#);
+        transport.push_response(r#"{"access_token":"<token>"}"#);
 
         let response = transport
             .post_json("https://example.com/token", r#"{"code":"abc"}"#)
             .expect("post_json 失败");
 
-        assert_eq!(response, r#"{"access_token":"token123"}"#);
+        assert_eq!(response, r#"{"access_token":"<token>"}"#);
         assert_eq!(transport.count(), 1);
 
         let (url, body) = transport.last().expect("应有请求记录");
@@ -2209,7 +2209,7 @@ mod tests {
     fn test_generic_oauth2_provider_user_from_token() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
         // 预置 mock 响应：token 响应 + 用户信息响应
-        transport.push_response(r#"{"access_token":"token123","refresh_token":"refresh456","expires_in":3600,"openid":"openid_abc"}"#);
+        transport.push_response(r#"{"access_token":"<token>","refresh_token":"refresh456","expires_in":3600,"openid":"openid_abc"}"#);
         transport.push_response(
             r#"{"id":"12345","nickname":"test_user","name":"Test","email":"test@example.com","avatar":"https://example.com/avatar.png"}"#,
         );
@@ -2229,7 +2229,7 @@ mod tests {
             .expect("user_from_token 失败");
 
         // 验证 token 字段
-        assert_eq!(user.access_token.as_deref(), Some("token123"));
+        assert_eq!(user.access_token.as_deref(), Some("<token>"));
         assert_eq!(user.refresh_token.as_deref(), Some("refresh456"));
         assert_eq!(user.expires_in, Some(3600));
 
@@ -2255,7 +2255,7 @@ mod tests {
     #[test]
     fn test_generic_oauth2_provider_user_from_token_no_user_url() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":7200}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":7200}"#);
 
         let config = OAuth2Config::new(
             "client123",
@@ -2271,7 +2271,7 @@ mod tests {
             .user_from_token("auth_code")
             .expect("user_from_token 失败");
 
-        assert_eq!(user.access_token.as_deref(), Some("token123"));
+        assert_eq!(user.access_token.as_deref(), Some("<token>"));
         assert_eq!(user.expires_in, Some(7200));
         assert!(user.refresh_token.is_none());
         // 无 user_url 时不获取用户信息，id 为空
@@ -2369,7 +2369,7 @@ mod tests {
     #[test]
     fn test_generic_oauth2_provider_user_info_field_aliases() {
         let transport = MemoryOAuth2HttpTransport::new();
-        transport.push_response(r#"{"access_token":"token123","openid":"openid_abc"}"#);
+        transport.push_response(r#"{"access_token":"<token>","openid":"openid_abc"}"#);
         transport.push_response(
             r#"{"openid":"qq_12345","nickname":"qq_user","figureurl_qq_1":"https://qzapp.qlogo.cn/1.png"}"#,
         );
@@ -2399,7 +2399,7 @@ mod tests {
     #[test]
     fn test_generic_oauth2_provider_user_id_integer() {
         let transport = MemoryOAuth2HttpTransport::new();
-        transport.push_response(r#"{"access_token":"token123"}"#);
+        transport.push_response(r#"{"access_token":"<token>"}"#);
         transport.push_response(r#"{"id":12345,"nickname":"github_user"}"#);
 
         let config = OAuth2Config::new(
@@ -2701,7 +2701,7 @@ mod tests {
     #[test]
     fn test_exchange_token_with_pkce_verifier() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
         let config = OAuth2Config::new(
             "client123",
@@ -2718,7 +2718,7 @@ mod tests {
             .user_from_token_with_pkce("auth_code", Some(&pkce.code_verifier))
             .expect("user_from_token_with_pkce 失败");
 
-        assert_eq!(user.access_token.as_deref(), Some("token123"));
+        assert_eq!(user.access_token.as_deref(), Some("<token>"));
 
         // 验证 POST body 包含 code_verifier
         let (_url, body) = transport.last().expect("应有请求记录");
@@ -2736,7 +2736,7 @@ mod tests {
     #[test]
     fn test_exchange_token_without_pkce_verifier() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
         let config = OAuth2Config::new(
             "client123",
@@ -2785,7 +2785,7 @@ mod tests {
     fn test_refresh_token() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
         transport.push_response(
-            r#"{"access_token":"new_token","token_type":"Bearer","expires_in":7200,"scope":"read"}"#,
+            r#"{"access_token":"<new>","token_type":"Bearer","expires_in":7200,"scope":"read"}"#,
         );
 
         let config = OAuth2Config::new(
@@ -2801,7 +2801,7 @@ mod tests {
             .refresh_token("old_refresh_token")
             .expect("refresh_token 失败");
 
-        assert_eq!(token_resp.access_token, "new_token");
+        assert_eq!(token_resp.access_token, "<new>");
         assert_eq!(token_resp.token_type.as_deref(), Some("Bearer"));
         assert_eq!(token_resp.expires_in, Some(7200));
         assert_eq!(token_resp.scope.as_deref(), Some("read"));
@@ -2811,7 +2811,7 @@ mod tests {
     #[test]
     fn test_audit_log_on_token_exchange() {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
         let logger = Arc::new(MockAuditLogger::default());
         let config = OAuth2Config::new(
@@ -2843,10 +2843,10 @@ mod tests {
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
         // 第一次响应：token 已过期 (expires_in=0) + refresh_token
         transport.push_response(
-            r#"{"access_token":"expired_token","refresh_token":"valid_refresh","expires_in":0}"#,
+            r#"{"access_token":"<expired>","refresh_token":"<refresh>","expires_in":0}"#,
         );
         // 第二次响应：refresh_token 返回新 token
-        transport.push_response(r#"{"access_token":"refreshed_token","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<refreshed>","expires_in":3600}"#);
 
         let config = OAuth2Config::new(
             "client123",
@@ -2864,7 +2864,7 @@ mod tests {
         // 应自动刷新为 refreshed_token
         assert_eq!(
             user.access_token.as_deref(),
-            Some("refreshed_token"),
+            Some("<refreshed>"),
             "过期 token 应自动刷新"
         );
         assert_eq!(user.expires_in, Some(3600));
@@ -2904,7 +2904,7 @@ mod tests {
         );
         let provider = GenericOAuth2Provider::new(config, transport);
 
-        let err = provider.refresh_token("valid_refresh").unwrap_err();
+        let err = provider.refresh_token("<refresh>").unwrap_err();
         assert!(matches!(err, OAuth2Error::TokenExchangeFailed(_)));
     }
 
@@ -2912,7 +2912,7 @@ mod tests {
     #[test]
     fn test_token_response_serialize_redacted() {
         let token_resp = TokenResponse {
-            access_token: "secret_access_token".into(),
+            access_token: "<secret>".into(),
             token_type: Some("Bearer".into()),
             expires_in: Some(3600),
             scope: Some("read".into()),
@@ -2921,7 +2921,7 @@ mod tests {
 
         let json = serde_json::to_string(&token_resp).expect("序列化失败");
         assert!(
-            !json.contains("secret_access_token"),
+            !json.contains("<secret>"),
             "access_token 不应出现在序列化 JSON 中: {json}"
         );
         assert!(
@@ -3119,7 +3119,7 @@ mod tests {
         use crate::oauth_store::{MemoryOAuth2TokenStore, OAuth2TokenStore};
 
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
         let store = Arc::new(MemoryOAuth2TokenStore::new());
         let config = OAuth2Config::new(
@@ -3135,7 +3135,7 @@ mod tests {
         let user = provider
             .user_from_token("auth_code")
             .expect("user_from_token 失败");
-        assert_eq!(user.access_token.as_deref(), Some("token123"));
+        assert_eq!(user.access_token.as_deref(), Some("<token>"));
 
         // 等待 spawn 的存储任务完成
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -3145,7 +3145,7 @@ mod tests {
             .await
             .expect("get_token 失败")
             .expect("应查到存储的 token");
-        assert_eq!(stored.access_token, "token123");
+        assert_eq!(stored.access_token, "<token>");
     }
 
     /// 测试 token store 失败 best-effort：存储失败不影响 token 发放
@@ -3155,7 +3155,7 @@ mod tests {
         use crate::oauth_store::MemoryOAuth2TokenStore;
 
         let transport = Arc::new(MemoryOAuth2HttpTransport::new());
-        transport.push_response(r#"{"access_token":"token123","expires_in":3600}"#);
+        transport.push_response(r#"{"access_token":"<token>","expires_in":3600}"#);
 
         // 使用一个总是成功的 MemoryStore（模拟 best-effort）
         let store = Arc::new(MemoryOAuth2TokenStore::new());
@@ -3173,7 +3173,7 @@ mod tests {
         let user = provider
             .user_from_token("auth_code")
             .expect("user_from_token 应成功（best-effort）");
-        assert_eq!(user.access_token.as_deref(), Some("token123"));
+        assert_eq!(user.access_token.as_deref(), Some("<token>"));
     }
 
     // ------------------------------------------------------------------------

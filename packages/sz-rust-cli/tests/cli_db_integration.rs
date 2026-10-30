@@ -11,8 +11,14 @@ use sz_rust_cli::cmd::seed::{execute_seed, SeedArgs};
 
 const PG_URL: &str = "postgres://lewuli:JkbC2jsaWAYDe2Gz@127.0.0.1:5433/marketplace_test";
 
+/// SDET P0-1/P1-4：连接串可由 MARKETPLACE_PG_URL 环境变量覆盖（CI 注入 5432 service），
+/// 未设置时保持本机 SSH 隧道 5433 默认值，行为与修复前一致
+fn pg_url() -> String {
+    std::env::var("MARKETPLACE_PG_URL").unwrap_or_else(|_| PG_URL.to_string())
+}
+
 async fn cleanup() {
-    let url = std::env::var("MARKETPLACE_PG_URL").unwrap_or_else(|_| PG_URL.to_string());
+    let url = pg_url();
     let pool = sqlx::PgPool::connect(&url).await.expect("PG 连接失败");
     let _ = sqlx::query("DROP TABLE IF EXISTS install_records CASCADE")
         .execute(&pool)
@@ -94,7 +100,7 @@ async fn test_migrate_online_applies_migrations() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     let result = execute_migrate(&args).await;
     // execute_with_params 在 AnyPool adapter 未实现，迁移 SQL 已执行但记录插入失败
@@ -106,7 +112,7 @@ async fn test_migrate_online_applies_migrations() {
     );
 
     // 迁移 SQL 本身已执行（users 表已创建）
-    let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+    let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
     let exists: (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')",
     )
@@ -128,7 +134,7 @@ async fn test_migrate_online_no_pending() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     // 第一次 migrate 会因 execute_with_params 未实现而失败
     let _ = execute_migrate(&args).await;
@@ -149,7 +155,7 @@ async fn test_migrate_online_rollback() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     // migrate 会因 execute_with_params 失败，但 SQL 已执行
     let _ = execute_migrate(&args).await;
@@ -159,7 +165,7 @@ async fn test_migrate_online_rollback() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     let result = execute_migrate(&rollback_args).await;
     // rollback 也使用 delete_migration_record（execute_with_params），预期失败
@@ -180,7 +186,7 @@ async fn test_migrate_status_online() {
         temp.path().to_str().unwrap(),
         "postgres",
         false,
-        Some(PG_URL),
+        Some(pg_url().as_str()),
     )
     .await;
     assert!(result.is_ok(), "status 在线模式应成功: {:?}", result.err());
@@ -198,7 +204,7 @@ async fn test_migrate_status_online_after_apply() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     // migrate 会因 execute_with_params 失败，但 SQL 已执行
     let _ = execute_migrate(&args).await;
@@ -208,7 +214,7 @@ async fn test_migrate_status_online_after_apply() {
         temp.path().to_str().unwrap(),
         "postgres",
         true,
-        Some(PG_URL),
+        Some(pg_url().as_str()),
     )
     .await;
     assert!(result.is_ok(), "status 在线模式应成功: {:?}", result.err());
@@ -228,14 +234,14 @@ async fn test_admin_migrate_online() {
         "sz-rust",
         "migrate",
         "--url",
-        PG_URL,
+        pg_url().as_str(),
         "--db-type",
         "postgres",
     ]);
     let result = sz_rust_cli::cmd::admin::execute(&cli.cmd).await;
     assert!(result.is_ok(), "admin migrate 应成功: {:?}", result.err());
 
-    let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+    let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
     let exists: (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'roles')",
     )
@@ -302,14 +308,14 @@ fn test_seed_online_executes_sql() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
         class: None,
     };
     let result = execute_seed(&args);
     assert!(result.is_ok(), "seed 在线模式应成功: {:?}", result.err());
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM seed_test")
             .fetch_one(&pool)
             .await
@@ -334,14 +340,14 @@ fn test_seed_online_with_show_sql() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: true,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
         class: None,
     };
     let result = execute_seed(&args);
     assert!(result.is_ok(), "seed 在线模式 show_sql 应成功");
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS seed_test CASCADE")
             .execute(&pool)
             .await;
@@ -361,14 +367,14 @@ fn test_seed_online_with_class_filter() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
         class: Some("001_create_test_table".to_string()),
     };
     let result = execute_seed(&args);
     assert!(result.is_ok(), "seed 在线模式 class filter 应成功");
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let exists: (bool,) = sqlx::query_as(
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'seed_test')",
         )
@@ -395,7 +401,7 @@ fn test_migrate_online_with_show_sql() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: true,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
     assert!(
@@ -408,7 +414,7 @@ fn test_migrate_online_with_show_sql() {
         .contains("execute_with_params"));
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS users CASCADE")
             .execute(&pool)
             .await;
@@ -432,14 +438,14 @@ fn test_migrate_status_online_with_show_sql() {
             temp.path().to_str().unwrap(),
             "postgres",
             true,
-            Some(PG_URL),
+            Some(pg_url().as_str()),
         )
         .await
     });
     assert!(result.is_ok(), "migrate:status 在线模式 show_sql 应成功");
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS __migrations CASCADE")
             .execute(&pool)
             .await;
@@ -460,7 +466,7 @@ fn test_migrate_online_rollback_with_show_sql() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: false,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
     assert!(result.is_err(), "insert_migration_record 应失败");
@@ -470,13 +476,13 @@ fn test_migrate_online_rollback_with_show_sql() {
         path: temp.path().to_str().unwrap().to_string(),
         db_type: "postgres".to_string(),
         show_sql: true,
-        url: Some(PG_URL.to_string()),
+        url: Some(pg_url()),
     };
     let result = rt.block_on(async { execute_migrate(&args).await });
     assert!(result.is_err(), "rollback 也应因 execute_with_params 失败");
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS users CASCADE")
             .execute(&pool)
             .await;
@@ -501,7 +507,7 @@ fn test_admin_migrate_online_with_show_sql() {
         "admin",
         "migrate",
         "--url",
-        PG_URL,
+        pg_url().as_str(),
         "--show-sql",
     ]);
     let result = rt.block_on(async { cli.execute().await });
@@ -513,7 +519,7 @@ fn test_admin_migrate_online_with_show_sql() {
     );
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS roles CASCADE")
             .execute(&pool)
             .await;
@@ -555,7 +561,7 @@ fn test_admin_init_online() {
         "admin",
         "init",
         "--url",
-        PG_URL,
+        pg_url().as_str(),
         "--username",
         "admin",
         "--password",
@@ -566,7 +572,7 @@ fn test_admin_init_online() {
     assert!(result.is_err(), "execute_with_params 未实现应失败");
 
     rt.block_on(async {
-        let pool = sqlx::PgPool::connect(PG_URL).await.unwrap();
+        let pool = sqlx::PgPool::connect(&pg_url()).await.unwrap();
         let _ = sqlx::query("DROP TABLE IF EXISTS roles CASCADE")
             .execute(&pool)
             .await;

@@ -1,8 +1,14 @@
-# sz-rust API 快速入门指南
+# sz-rust API 快速入门指南（已归档）
 
-> **适用版本**：sz-rust-core v0.2.1 + sz-orm v1.2.1  
-> **Rust Edition**：2021 | **MSRV**：1.81  
-> **生成日期**：2026-08-02
+> ⚠️ **本文档已归档（2026-10-27）**：内容基于 **sz-rust-core v0.2.1 + sz-orm v1.2.1**，与当前 **v2.0.0** API 存在大量差异（文中 `sz_rust_core::router::RouterBuilder`、`sz_rust_core::server::Server`、`sz_rust_core::state::AppState`、`render_success` 等在 v2.0.0 已不存在或已迁移/重命名）。
+> **请使用 v2.0.0 替代文档（UXR P2-2 整改）**：[API 快速参考](api-reference.md) 与 [开发者使用指南](developer-guide.md)。
+> **可编译的实际示例**：
+> - 可运行示例：`packages/sz-rust-examples/src/bin/quick_start.rs`（`cargo run -p sz-rust-examples --bin quick_start`）
+> - 框架总览：[README](../README.md) 与 [工程化实践规范](sz-rust-engineering-practices.md)
+> - 当前 API 以 `cargo doc -p sz-rust-core --open` 生成的文档为准
+>
+> **Rust Edition**：2021 | **MSRV**：1.81
+> **原生成日期**：2026-08-02 | **归档日期**：2026-10-27
 
 ---
 
@@ -861,16 +867,20 @@ CMD ["my-app"]
 
 ### 14.3 健康检查
 
+> 注意：`/health/db` 与 `/health/cache` **未在 sz300 中注册**（v2.0.0 router.rs 仅注册以下三个健康端点，详见 `packages/sz-rust-sz300/src/controllers/health.rs`）。
+
 ```bash
-# K8s liveness/readiness
+# liveness 探针
 GET /health
-# {"status":"ok","timestamp":1609459200}
+# {"code":1,"msg":"success","data":{"status":"ok","version":"2.0.0","service":"sz300-server","timestamp":...}}
 
-GET /health/db
-# {"status":"ok","latency_ms":2}
+# readiness 探针（DB 探活，失败返回 503）
+GET /health/ready
+# {"code":1,"msg":"success","data":{"status":"ready","checks":{"db":"ok"}}}
 
-GET /health/cache
-# {"status":"ok","driver":"redis"}
+# startup 探针（Metrics Registry 初始化检查，失败返回 503）
+GET /health/startup
+# {"code":1,"msg":"success","data":{"status":"started","checks":{"metrics":"ok"}}}
 ```
 
 ---

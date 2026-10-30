@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 复数形式（CLDR 规则，spec §5.4 规则 5、§6.4 规则 4）
 //!
 //! 按 count 选择 one/other/zero/many。

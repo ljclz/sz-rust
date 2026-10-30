@@ -62,7 +62,7 @@ async fn test_e2e_audit_merchant_create_recorded() {
                 .method("POST")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"merchant_name": "审计测试商户", "contact_phone": "13800138000"}"#,
+                    r#"{"name": "审计测试商户", "contact_phone": "13800138000"}"#,
                 ))
                 .unwrap(),
         )

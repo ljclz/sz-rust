@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
+use crate::db::acquire_cancel_safe;
+use crate::query_cache::{CacheStats, QueryCache};
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
@@ -10,6 +13,71 @@ use sz_rust_core::orm::{Authorizer, JwtAuthenticator, RbacAuthorizer};
 static AUTH: OnceLock<JwtAuthenticator> = OnceLock::new();
 static RBAC: OnceLock<RbacAuthorizer> = OnceLock::new();
 static DB_POOL: OnceLock<Arc<Pool>> = OnceLock::new();
+
+/// JWT 签名密钥（2026-10-28 新增：用于签发带 audience 的令牌）
+static JWT_SECRET: OnceLock<String> = OnceLock::new();
+
+/// 已注销 token 黑名单（2026-10-28 安全修复：logout 真实吊销）
+///
+/// 存储 `token 哈希 → 过期时间`。JWT 无状态，服务端必须维护黑名单才能实现注销。
+/// 用 `HashMap` 而非 `HashSet<(hash, exp)>`：校验路径 O(1)，避免每次请求全表扫描。
+/// 单实例部署有效；多实例需替换为 Redis 等共享存储（见 ADR/注释）。
+static TOKEN_BLACKLIST: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+
+fn blacklist() -> &'static Mutex<HashMap<String, i64>> {
+    TOKEN_BLACKLIST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 将 token 加入黑名单（按 token 哈希存储，防泄漏；定期清理已过期条目）
+pub fn revoke_token(token: &str) {
+    let exp = decode_token_exp(token).unwrap_or(0);
+    let hash = token_hash(token);
+    if let Ok(mut map) = blacklist().lock() {
+        // 惰性清理已过期条目
+        let now = chrono::Utc::now().timestamp();
+        map.retain(|_, e| *e > now);
+        map.insert(hash, exp);
+    }
+}
+
+/// 检查 token 是否已注销（O(1) 查找）
+pub fn is_token_revoked(token: &str) -> bool {
+    let hash = token_hash(token);
+    // 已过期条目会在 revoke 时被清理；过期 token 也会被 JWT 校验拒绝
+    matches!(blacklist().lock(), Ok(map) if map.contains_key(&hash))
+}
+
+/// 从 JWT 中解码过期时间（不校验签名，仅用于黑名单清理）
+fn decode_token_exp(token: &str) -> Option<i64> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    use base64::Engine;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[1])
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    v.get("exp").and_then(|e| e.as_i64())
+}
+
+/// token 哈希（SHA-256 十六进制，避免明文 token 常驻内存）
+fn token_hash(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex_encode(&hasher.finalize())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        // write! 到 String 不会失败（fmt::Write for String 为 infallible）
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
 
 /// v1.8.0 密钥轮换：JWT 签名密钥 ID
 #[cfg(feature = "v18-key-rotation")]
@@ -23,8 +91,11 @@ static KEY_MANAGER: OnceLock<Arc<sz_rust_key_rotation::KeyManager>> = OnceLock::
 ///
 /// 创建 KeyManager 并执行首次轮换生成活跃密钥。
 /// `rotation_interval` = 30 天，`keep_history` = 5（grace period 内旧 token 仍可验证）。
+///
+/// 注：2026-10-25 架构评测修复——移除未使用的 `initial_secret` 参数。
+/// 初始密钥由 `RandomKeyGenerator` 生成，调用方无需也不应传入种子。
 #[cfg(feature = "v18-key-rotation")]
-pub fn init_key_rotation(_initial_secret: &str) -> Arc<sz_rust_key_rotation::KeyManager> {
+pub fn init_key_rotation() -> Arc<sz_rust_key_rotation::KeyManager> {
     use sz_rust_key_rotation::{KeyId, KeyManager, RotationPolicy};
 
     let policy = RotationPolicy {
@@ -125,6 +196,7 @@ pub fn default_key_manager_for_tests() -> Arc<sz_rust_key_rotation::KeyManager> 
 /// 此设计避免了在同步 `PasswordVerifier` trait 中使用 `block_in_place` 调用异步 DB 查询。
 #[tracing::instrument(skip(secret, pool))]
 pub fn init_auth(secret: &str, issuer: &str, expiry: u64, pool: Arc<Pool>) {
+    let _ = JWT_SECRET.set(secret.to_string());
     let auth = JwtAuthenticator::new(secret, issuer, expiry);
     let _ = AUTH.set(auth);
     let _ = RBAC.set(RbacAuthorizer::new());
@@ -158,7 +230,7 @@ fn get_pool() -> &'static Arc<Pool> {
     DB_POOL.get().expect("db pool not initialized")
 }
 
-/// 异步用户名密码认证 — 成功返回 JWT access_token，失败返回错误描述
+/// 异步用户名密码认证 — 成功返回 (access_token, refresh_token)，失败返回错误描述
 ///
 /// ## 与旧版 `authenticate` 的差异
 ///
@@ -173,8 +245,12 @@ fn get_pool() -> &'static Arc<Pool> {
 /// - 密码哈希使用 `bcrypt::verify`，CPU 密集型操作通过 `tokio::task::spawn_blocking` 在专用阻塞线程池执行，
 ///   避免阻塞 tokio worker。
 /// - DB 错误信息不会返回客户端，仅记录日志。
+/// - 2026-10-28：返回 refresh_token 供 `/api/v1/auth/refresh` 真实轮换使用。
 #[tracing::instrument(skip(password))]
-pub async fn authenticate_async(username: &str, password: &str) -> Result<String, String> {
+pub async fn authenticate_async(
+    username: &str,
+    password: &str,
+) -> Result<(String, Option<String>), String> {
     if username.trim().is_empty() || password.is_empty() {
         return Err("用户名或密码不能为空".to_string());
     }
@@ -183,7 +259,7 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
 
     // P1-SEC-06: 外部 IO 超时保护（默认 5s）— 仅包裹 DB 查询
     let rows = sz_rust_core::runtime::spawn::with_timeout(async {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "认证时获取 DB 连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -235,7 +311,7 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
 
     // 更新最后登录时间 — 参数化，避免注入（P1-SEC-06: 超时保护）
     let _ = sz_rust_core::runtime::spawn::with_timeout(async {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "更新最后登录时间获取连接失败");
             "服务暂时不可用".to_string()
         })?;
@@ -262,7 +338,23 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
         tracing::error!(error = ?e, "JWT 编码失败");
         "认证失败".to_string()
     })?;
-    Ok(token.access_token)
+
+    // v1.9.0：启用 audience 校验时，为 access token 注入 aud 声明（服务 ID）
+    #[cfg(feature = "v19-jwt-audience")]
+    let access_token = {
+        use sz_rust_core::orm::jwt::JwtEncoder;
+        let secret = JWT_SECRET.get().cloned().unwrap_or_default();
+        let encoder = JwtEncoder::new(&secret);
+        match encoder.decode(&token.access_token) {
+            Ok(claims) => audience::encode_token_with_audience(&encoder, &claims, "sz300-api")
+                .unwrap_or_else(|_| token.access_token.clone()),
+            Err(_) => token.access_token.clone(),
+        }
+    };
+    #[cfg(not(feature = "v19-jwt-audience"))]
+    let access_token = token.access_token.clone();
+
+    Ok((access_token, token.refresh_token))
 }
 
 /// 根据用户名查询用户完整信息（登录后回查场景）
@@ -281,8 +373,7 @@ pub async fn authenticate_async(username: &str, password: &str) -> Result<String
 #[tracing::instrument]
 pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool
-        .acquire()
+    let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败");
@@ -325,8 +416,7 @@ pub async fn get_user_info_by_username(username: &str) -> Option<HashMap<String,
 #[tracing::instrument]
 pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
     let pool = get_pool();
-    let mut conn = pool
-        .acquire()
+    let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "查询用户信息：获取 DB 连接失败: user_id={}", user_id);
@@ -354,16 +444,136 @@ pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>>
     rows.into_iter().next()
 }
 
+/// 鉴权中间件所需的授权上下文（IDOR 数据归属过滤的依据）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthContext {
+    /// 所属商户 ID（`merchant_user.merchant_id` 为 NULL 时 None）
+    pub merchant_id: Option<i64>,
+    /// 是否管理员（`merchant_user.role == 1`）
+    pub is_admin: bool,
+}
+
+/// 授权上下文缓存的 TTL（ADR-049）
+const AUTH_CTX_TTL: Duration = Duration::from_secs(60);
+
+/// 授权上下文缓存（ADR-049）：进程内 LRU + TTL，上限 50,000 个用户。
+/// 多实例部署时每实例独立，陈旧窗口仍不超过 TTL。
+static AUTH_CTX_CACHE: OnceLock<QueryCache> = OnceLock::new();
+
+fn auth_ctx_cache() -> &'static QueryCache {
+    AUTH_CTX_CACHE.get_or_init(|| QueryCache::new(50_000, AUTH_CTX_TTL))
+}
+
+/// 授权上下文缓存的命中/未命中计数（集成测试与人工排查用；ADR-049 决定不接入 `/metrics`）
+pub fn auth_ctx_stats() -> &'static CacheStats {
+    auth_ctx_cache().stats()
+}
+
+/// `AuthContext` 定长编码：`[存在位 1B][merchant_id 8B LE][is_admin 1B]`
+///
+/// 存在位区分「NULL」与「0」，避免用哨兵值假设业务主键取值范围。
+fn encode_auth_ctx(ctx: AuthContext) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(10);
+    buf.push(u8::from(ctx.merchant_id.is_some()));
+    buf.extend_from_slice(&ctx.merchant_id.unwrap_or(0).to_le_bytes());
+    buf.push(u8::from(ctx.is_admin));
+    buf
+}
+
+/// 解码 [`encode_auth_ctx`] 的字节；长度或标志位不合法时返回 None（回源查库）
+fn decode_auth_ctx(bytes: &[u8]) -> Option<AuthContext> {
+    if bytes.len() != 10 || bytes[0] > 1 || bytes[9] > 1 {
+        return None;
+    }
+    let raw = i64::from_le_bytes(bytes[1..9].try_into().ok()?);
+    Some(AuthContext {
+        merchant_id: (bytes[0] == 1).then_some(raw),
+        is_admin: bytes[9] == 1,
+    })
+}
+
+/// 读取授权上下文（auth 中间件专用，ADR-049）
+///
+/// 语义与旧版逐请求查库一致，只是命中缓存时省掉一次 `merchant_user` 往返：
+/// - **不会 panic**：认证模块尚未初始化（测试环境）或 DB 不可用时返回 `None`，
+///   调用方降级为仅使用 JWT 声明（此时 `merchant_id` 为 None，不启用数据归属过滤）。
+/// - 失败与「用户不存在」**不缓存**：连接抖动不该被固化成 TTL 时长的降级。
+/// - 陈旧边界：外部改 `role` / `merchant_id` 后最长 TTL 秒内新值才生效；
+///   应用内唯一写 `merchant_user` 的路径是 `last_login_at`，不参与授权判断。
+#[tracing::instrument(skip_all)]
+pub async fn auth_context(user_id: i64) -> Option<AuthContext> {
+    let key = format!("auth:ctx:{}", user_id);
+    if let Some(ctx) = auth_ctx_cache().get(&key).and_then(|b| decode_auth_ctx(&b)) {
+        return Some(ctx);
+    }
+
+    let pool = DB_POOL.get()?;
+    let mut conn = acquire_cancel_safe(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询授权上下文：获取 DB 连接失败: user_id={}", user_id);
+            e
+        })
+        .ok()?;
+
+    let sql = "SELECT u.merchant_id, u.role FROM merchant_user u WHERE u.user_id = ?";
+    let params = [Value::I64(user_id)];
+    let rows = conn
+        .query_with_params(sql, &params)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "查询授权上下文失败: user_id={}", user_id);
+            e
+        })
+        .ok()?;
+
+    let row = rows.into_iter().next()?;
+    let ctx = AuthContext {
+        merchant_id: row.get("merchant_id").and_then(|v| v.as_i64()),
+        is_admin: row
+            .get("role")
+            .and_then(|v| v.as_i64())
+            .map(|r| r == 1)
+            .unwrap_or(false),
+    };
+    auth_ctx_cache().set(&key, encode_auth_ctx(ctx), None);
+    Some(ctx)
+}
+
 /// 校验 JWT 令牌 — 成功返回用户信息，失败返回错误描述
 ///
 /// 错误信息不泄露 JWT 内部解析细节，统一返回 "token 验证失败"。
 #[tracing::instrument(skip(token))]
 pub fn verify_token(token: &str) -> Result<User, String> {
+    // 2026-10-28 安全修复：logout 已注销的 token 立即失效
+    if is_token_revoked(token) {
+        return Err("token 已注销".to_string());
+    }
     let user = get_auth().verify_token(token).map_err(|e| {
         tracing::error!(error = ?e, "JWT token 验证失败");
         "token 验证失败".to_string()
     })?;
     Ok(user)
+}
+
+/// 刷新访问令牌（2026-10-28 安全修复：refresh 真实轮换）
+///
+/// 使用 refresh token 换发新的 access token：
+/// - 仅接受 `token_use=refresh` 的令牌（sz-orm 侧严格校验，防类型混淆）
+/// - 返回新 access token（旧 refresh token 保持有效，符合无状态 JWT 模型）
+#[tracing::instrument(skip(refresh_token))]
+pub fn refresh_access_token(refresh_token: &str) -> Result<String, String> {
+    if refresh_token.is_empty() {
+        return Err("缺少 refresh_token".to_string());
+    }
+    if is_token_revoked(refresh_token) {
+        return Err("refresh token 已注销".to_string());
+    }
+    let new_token = get_auth().refresh_token(refresh_token).map_err(|e| {
+        tracing::error!(error = ?e, "refresh token 轮换失败");
+        "refresh token 无效或已过期".to_string()
+    })?;
+    Ok(new_token.access_token)
 }
 
 // ============================================================================
@@ -391,6 +601,42 @@ mod audience {
         /// 无 aud 且 deny_no_audience = true 且超出 grace period
         NoAudienceDenied,
     }
+
+    /// 告警采样窗口（秒）：同一类按请求触发的告警最多每窗口输出一条
+    const WARN_SAMPLE_INTERVAL_SECS: i64 = 60;
+
+    /// 按时间窗采样输出告警的状态（窗口起点 + 被抑制条数）
+    ///
+    /// Why：「无 aud 旧令牌在 grace period 内放行」是**每个请求**都会命中的分支，
+    /// 逐条 WARN 会把日志 I/O 计费到业务热路径上（2026-10-29 现场验证：3 次 60 s 稳态
+    /// 内落盘 157,068 条），并且任何持无 aud 令牌的客户端都能用它灌满磁盘。
+    /// 安全信号本身要保留，因此改为采样输出并附带被抑制条数。
+    #[derive(Default)]
+    pub(crate) struct WarnSampler {
+        last_secs: std::sync::atomic::AtomicI64,
+        suppressed: std::sync::atomic::AtomicU64,
+    }
+
+    impl WarnSampler {
+        /// 返回 `(should_log, suppressed_since_last_log)`
+        pub(crate) fn sample(&self, now: i64) -> (bool, u64) {
+            use std::sync::atomic::Ordering::Relaxed;
+            let last = self.last_secs.load(Relaxed);
+            if now - last >= WARN_SAMPLE_INTERVAL_SECS
+                && self
+                    .last_secs
+                    .compare_exchange(last, now, Relaxed, Relaxed)
+                    .is_ok()
+            {
+                (true, self.suppressed.swap(0, Relaxed))
+            } else {
+                self.suppressed.fetch_add(1, Relaxed);
+                (false, 0)
+            }
+        }
+    }
+
+    static NO_AUDIENCE_WARN: std::sync::OnceLock<WarnSampler> = std::sync::OnceLock::new();
 
     /// Audience 校验配置
     ///
@@ -494,6 +740,10 @@ mod audience {
         token: &str,
         config: &AudienceConfig,
     ) -> Result<User, AudienceError> {
+        // 2026-10-28：logout 已注销的 token 立即失效（与 verify_token 一致）
+        if super::is_token_revoked(token) {
+            return Err(AudienceError::InvalidToken);
+        }
         let user = super::get_auth().verify_token(token).map_err(|e| {
             tracing::error!(error = ?e, "JWT token 签名/过期校验失败");
             AudienceError::InvalidToken
@@ -520,11 +770,17 @@ mod audience {
             // 无 aud — 检查 grace period
             let now = now_secs();
             if payload.iat + config.grace_period_secs > now {
-                tracing::warn!(
-                    iat = payload.iat,
-                    grace_period_secs = config.grace_period_secs,
-                    "无 aud 旧令牌在 grace period 内放行，建议轮换"
-                );
+                let sampler = NO_AUDIENCE_WARN.get_or_init(WarnSampler::default);
+                let (should_log, suppressed) = sampler.sample(now);
+                if should_log {
+                    tracing::warn!(
+                        iat = payload.iat,
+                        grace_period_secs = config.grace_period_secs,
+                        suppressed_in_window = suppressed,
+                        "无 aud 旧令牌在 grace period 内放行，建议轮换（每 {} s 采样一条）",
+                        WARN_SAMPLE_INTERVAL_SECS
+                    );
+                }
                 Ok(user)
             } else if config.deny_no_audience {
                 tracing::warn!("无 aud 旧令牌超出 grace period，拒绝");
@@ -616,5 +872,87 @@ mod tests {
             legacy_verifiers_removed(),
             "PasswordVerifier / DbPasswordVerifier 残留引用应已移除"
         );
+    }
+
+    /// grace-period 告警必须按窗口采样，且不能丢失被抑制条数
+    ///
+    /// 用独立的 `WarnSampler` 实例（而非进程级静态），避免与并行用例相互干扰。
+    #[cfg(feature = "v19-jwt-audience")]
+    #[test]
+    fn test_no_audience_warning_is_sampled_per_window() {
+        use super::audience::WarnSampler;
+
+        let sampler = WarnSampler::default();
+        let base = 1_700_000_000_i64;
+
+        // 窗口外首次命中：输出，抑制数为 0
+        assert_eq!(sampler.sample(base), (true, 0));
+        // 同窗口内后续命中：不输出
+        for _ in 0..9 {
+            assert!(!sampler.sample(base + 1).0);
+        }
+        // 下一个窗口：输出且携带上一窗口累计的 9 条抑制
+        assert_eq!(sampler.sample(base + 60), (true, 9));
+        // 窗口内未再次到期：仍不输出
+        assert!(!sampler.sample(base + 90).0);
+        assert_eq!(sampler.sample(base + 120), (true, 1));
+    }
+
+    #[test]
+    fn test_auth_ctx_encoding_round_trip() {
+        use super::{decode_auth_ctx, encode_auth_ctx, AuthContext};
+
+        let cases = [
+            AuthContext {
+                merchant_id: Some(7),
+                is_admin: true,
+            },
+            AuthContext {
+                merchant_id: Some(-3),
+                is_admin: false,
+            },
+            AuthContext {
+                merchant_id: None,
+                is_admin: true,
+            },
+            AuthContext {
+                merchant_id: None,
+                is_admin: false,
+            },
+        ];
+        for ctx in cases {
+            let bytes = encode_auth_ctx(ctx);
+            assert_eq!(bytes.len(), 10, "编码必须是定长 10 字节");
+            assert_eq!(decode_auth_ctx(&bytes), Some(ctx), "往返不相等: {:?}", ctx);
+        }
+    }
+
+    /// merchant_id 为 NULL 与 merchant_id = 0 必须编码成不同字节，
+    /// 否则缓存会把「未归属商户」误判成「归属 0 号商户」。
+    #[test]
+    fn test_auth_ctx_null_differs_from_zero() {
+        use super::{decode_auth_ctx, encode_auth_ctx, AuthContext};
+
+        let null_ctx = AuthContext {
+            merchant_id: None,
+            is_admin: false,
+        };
+        let zero_ctx = AuthContext {
+            merchant_id: Some(0),
+            is_admin: false,
+        };
+        assert_ne!(encode_auth_ctx(null_ctx), encode_auth_ctx(zero_ctx));
+        assert_eq!(decode_auth_ctx(&encode_auth_ctx(zero_ctx)), Some(zero_ctx));
+    }
+
+    #[test]
+    fn test_auth_ctx_decoder_rejects_corrupt_bytes() {
+        use super::decode_auth_ctx;
+
+        // 长度不足 / 标志位非 0|1 / 尾部标志位非法 → 一律回源，不能凭坏数据放行
+        assert_eq!(decode_auth_ctx(&[]), None);
+        assert_eq!(decode_auth_ctx(&[1; 9]), None);
+        assert_eq!(decode_auth_ctx(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 1]), None);
+        assert_eq!(decode_auth_ctx(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 2]), None);
     }
 }

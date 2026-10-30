@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 重排序器（v1.5.0 P2-3）
 //!
 //! 相关性二次排序；重排序超时 → 跳过返回初步结果 + 告警（spec 5.7.3 异常2）。

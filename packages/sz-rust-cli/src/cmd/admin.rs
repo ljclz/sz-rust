@@ -53,7 +53,7 @@ pub struct InitArgs {
     #[arg(long, default_value = "admin")]
     username: String,
     /// 超级管理员密码（默认 admin123）
-    #[arg(long, default_value = "admin123")]
+    #[arg(long, default_value = "<password>")]
     password: String,
 }
 
@@ -431,7 +431,7 @@ mod tests {
             db_type: "postgres".to_string(),
             url: None,
             username: "admin".to_string(),
-            password: "admin123".to_string(),
+            password: "<password>".to_string(),
         };
         let result = execute(&AdminCommand::Init(args)).await;
         assert!(result.is_ok());

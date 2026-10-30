@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 上下文注入器（v1.5.0 P2-1）
 //!
 //! 按需求语义检索相关代码片段注入 prompt（spec 5.5.2）。

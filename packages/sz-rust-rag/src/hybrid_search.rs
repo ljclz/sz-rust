@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+
 //! 混合检索（v1.5.0 P2-3）
 //!
 //! 向量检索 + 关键词检索加权融合 → 截取 top-k（spec 5.7.1）。

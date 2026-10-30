@@ -78,9 +78,17 @@ fn build_openapi_spec() -> Value {
         })
         .path("/metrics", HttpMethod::Get, |op| {
             op.summary("Prometheus 指标端点")
-                .description("输出 Prometheus 文本格式指标")
+                .description(
+                    "输出 Prometheus 文本格式指标。若服务配置了 SZ300_METRICS_TOKEN，\
+                     需携带 Authorization: Bearer <token>；未配置时公开访问。",
+                )
                 .tag("健康检查")
-                .response(200, "Prometheus 文本格式", "text/plain");
+                .response(200, "Prometheus 文本格式", "text/plain")
+                .response(
+                    401,
+                    "未提供或错误的 Bearer 令牌（仅当配置了 SZ300_METRICS_TOKEN 时）",
+                    "text/plain",
+                );
         })
         // ===== 认证 =====
         .path("/api/v1/auth/login", HttpMethod::Post, |op| {
@@ -263,6 +271,66 @@ fn build_openapi_spec() -> Value {
                 .response(200, "上传成功，返回文件 URL 与元信息", "application/json")
                 .response(400, "参数错误或文件类型不允许", "application/json")
                 .response(413, "文件超过大小限制", "application/json");
+        })
+        // ===== v1.9.0 插件市场 =====
+        .path("/api/v1/plugin/install", HttpMethod::Post, |op| {
+            op.summary("安装插件")
+                .description("v1.9.0 插件市场：安装插件包")
+                .tag("插件市场")
+                .response(200, "插件安装成功", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        .path("/api/v1/plugin/uninstall", HttpMethod::Post, |op| {
+            op.summary("卸载插件")
+                .description("v1.9.0 插件市场：卸载插件")
+                .tag("插件市场")
+                .response(200, "插件卸载成功", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        .path("/api/v1/plugin/list", HttpMethod::Get, |op| {
+            op.summary("插件列表")
+                .description("v1.9.0 插件市场：列出已安装插件")
+                .tag("插件市场")
+                .response(200, "插件列表", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        // ===== v1.9.0 AI 能力 =====
+        .path("/api/v1/ai/chat", HttpMethod::Post, |op| {
+            op.summary("AI 对话端点")
+                .description("v1.9.0 AI 对话端点（需配置 AI 服务密钥）")
+                .tag("AI")
+                .response(200, "AI 对话响应", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        .path("/api/v1/ai/embed", HttpMethod::Post, |op| {
+            op.summary("AI 向量化端点")
+                .description("v1.9.0 AI Embedding 端点（需配置 AI 服务密钥）")
+                .tag("AI")
+                .response(200, "向量化响应", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        .path("/api/v1/ai/stream", HttpMethod::Post, |op| {
+            op.summary("AI 流式对话端点")
+                .description("v1.9.0 AI 流式对话端点（需配置 AI 服务密钥）")
+                .tag("AI")
+                .response(200, "SSE 事件流", "text/event-stream")
+                .response(400, "参数错误", "application/json");
+        })
+        // ===== v1.9.0 WASM =====
+        .path("/api/wasm/execute", HttpMethod::Post, |op| {
+            op.summary("WASM 模块执行端点")
+                .description("v1.9.0 执行 WASM 模块函数")
+                .tag("WASM")
+                .response(200, "WASM 执行结果", "application/json")
+                .response(400, "参数错误", "application/json");
+        })
+        // ===== v1.9.0 视图模板 =====
+        .path("/page/{template}", HttpMethod::Get, |op| {
+            op.summary("模板渲染端点")
+                .description("v1.9.0 使用模板引擎渲染指定模板")
+                .tag("视图模板")
+                .response(200, "渲染后的 HTML", "text/html")
+                .response(404, "模板不存在", "text/html");
         })
         // ===== GraphQL =====
         .path("/graphql", HttpMethod::Post, |op| {
@@ -457,7 +525,8 @@ mod tests {
                 }
             }
         }
-        // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 3 + GraphQL 1 + WS 1 + SSE 1 = 33
-        assert_eq!(count, 33, "端点总数应为 33，实际: {}", count);
+        // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 3 + 插件市场 3
+        // + GraphQL 1 + WS 1 + SSE 1 + AI 3 + WASM 1 + 视图模板 1 = 41
+        assert_eq!(count, 41, "端点总数应为 41，实际: {}", count);
     }
 }

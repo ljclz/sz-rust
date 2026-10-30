@@ -273,7 +273,7 @@ mod tests {
 
         let props = serde_json::json!({
             "user": "alice",
-            "password": "secret123",
+            "password": "<secret>",
             "api_key": "key456",
             "token": "tok789"
         });

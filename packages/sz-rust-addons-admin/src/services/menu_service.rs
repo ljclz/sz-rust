@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::Deserialize;
+use sz_rust_orm_facade::acquire_cancel_safe;
 use sz_rust_orm_facade::{Pool, Value};
 
 use crate::error::AdminError;
@@ -44,7 +45,7 @@ impl MenuService {
     }
 
     pub async fn list_all(&self, tenant_id: i64) -> Result<Vec<MenuModel>, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, name, code, path, icon, parent_id, sort, is_visible, permission_code, tenant_id, created_at, updated_at \
@@ -69,7 +70,7 @@ impl MenuService {
         req: CreateMenuRequest,
         tenant_id: i64,
     ) -> Result<MenuModel, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
 
         let exists = conn
             .query_with_params(
@@ -198,14 +199,14 @@ impl MenuService {
             "UPDATE menus SET {} WHERE id = ? AND tenant_id = ?",
             parts.join(", ")
         );
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         conn.execute_with_params(&sql, &params).await?;
 
         self.get_by_id(menu_id, tenant_id).await
     }
 
     pub async fn delete(&self, menu_id: i64, tenant_id: i64) -> Result<(), AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
 
         let child_exists = conn
             .query_with_params(
@@ -230,7 +231,7 @@ impl MenuService {
     }
 
     async fn get_by_id(&self, menu_id: i64, tenant_id: i64) -> Result<MenuModel, AdminError> {
-        let mut conn = self.pool.acquire().await?;
+        let mut conn = acquire_cancel_safe(&self.pool).await?;
         let rows = conn
             .query_with_params(
                 "SELECT id, name, code, path, icon, parent_id, sort, is_visible, permission_code, tenant_id, created_at, updated_at \

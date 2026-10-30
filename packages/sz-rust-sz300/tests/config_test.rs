@@ -41,11 +41,11 @@ fn test_load_config_db_defaults() {
     let _env_guard = ENV_TEST_LOCK.lock().unwrap();
     std::env::set_var("SZ300_DB_PASSWORD", "pw");
     let cfg = config::load_config().unwrap();
-    // 验证默认值
+    // 默认值（安全加固：生产禁止 root，默认最小权限账号 sz300_app）
     assert_eq!(cfg.database.host, "127.0.0.1");
     assert_eq!(cfg.database.port, 3306);
     assert_eq!(cfg.database.database, "sz300");
-    assert_eq!(cfg.database.username, "root");
+    assert_eq!(cfg.database.username, "sz300_app");
     std::env::remove_var("SZ300_DB_PASSWORD");
 }
 
@@ -76,4 +76,31 @@ fn test_pg_config_defaults() {
     assert_eq!(cfg.database, "sz300");
     assert_eq!(cfg.username, "postgres");
     std::env::remove_var("SZ300_PG_PASSWORD");
+}
+
+/// 响应压缩开关（ADR-050）：未设置默认关闭，显式真值开启，非法值回落关闭
+#[test]
+fn test_compression_enabled_defaults_off() {
+    let _env_guard = ENV_TEST_LOCK.lock().unwrap();
+
+    std::env::remove_var("SZ300_COMPRESSION");
+    assert!(
+        !config::compression_enabled(),
+        "未设置 SZ300_COMPRESSION 时应默认关闭（收益待实测，不默认改变线上行为）"
+    );
+
+    for on in ["1", "true", "TRUE", "yes", "on", " on "] {
+        std::env::set_var("SZ300_COMPRESSION", on);
+        assert!(config::compression_enabled(), "{on} 应视为开启");
+    }
+
+    for off in ["0", "false", "no", "off"] {
+        std::env::set_var("SZ300_COMPRESSION", off);
+        assert!(!config::compression_enabled(), "{off} 应视为关闭");
+    }
+
+    // 非法值不得被当成开启（fail-closed）
+    std::env::set_var("SZ300_COMPRESSION", "maybe");
+    assert!(!config::compression_enabled(), "非法值应回落为关闭");
+    std::env::remove_var("SZ300_COMPRESSION");
 }

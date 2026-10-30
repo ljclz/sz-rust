@@ -53,6 +53,8 @@ image = { workspace = true }
 # P0-2: imageproc/ab_glyph 移至 sz-rust-infra-facade（实际使用方），core 不直接使用
 # 二维码生成（对齐 PHP endroid/qr-code）
 qrcode = { workspace = true }
+# 二维码解码验证（生成→解码闭环，纯内存解码，见 ADR-042）
+rqrr = { workspace = true }
 # Swoole/Worker 适配（tokio 替代）
 sz-orm-queue.workspace = true
 sz-orm-mqtt.workspace = true

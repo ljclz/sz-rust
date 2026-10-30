@@ -331,8 +331,8 @@ fn test_r5_p5_has_returns_false_for_nonexistent_key() {
     assert!(!cache.has("nonexistent").unwrap());
 }
 
-#[test]
-fn test_r5_p5_has_returns_false_after_ttl_expiration() {
+#[tokio::test]
+async fn test_r5_p5_has_returns_false_after_ttl_expiration() {
     // R5-P5: has 检查 TTL 过期
     //
     // PHP:
@@ -352,12 +352,12 @@ fn test_r5_p5_has_returns_false_after_ttl_expiration() {
         .unwrap();
     assert!(cache.has("key").unwrap());
 
-    std::thread::sleep(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(!cache.has("key").unwrap());
 }
 
-#[test]
-fn test_r5_p5_has_returns_true_for_no_ttl() {
+#[tokio::test]
+async fn test_r5_p5_has_returns_true_for_no_ttl() {
     // R5-P5: 无 TTL 的 key 永久存在，has 始终返回 true
     //
     // PHP:
@@ -366,7 +366,7 @@ fn test_r5_p5_has_returns_true_for_no_ttl() {
     //   Cache::has('key');  // true
     let cache = make_cache();
     cache.set("key", "value", None).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(cache.has("key").unwrap());
 }
 
@@ -683,8 +683,8 @@ fn test_r5_p10_pull_after_pull_returns_none() {
 // 组 11：TTL 过期后 get 返回 None（R5-P11）
 // ============================================================================
 
-#[test]
-fn test_r5_p11_ttl_expiration_get_returns_none() {
+#[tokio::test]
+async fn test_r5_p11_ttl_expiration_get_returns_none() {
     // R5-P11: TTL 过期后 get 返回 None
     //
     // PHP:
@@ -704,12 +704,12 @@ fn test_r5_p11_ttl_expiration_get_returns_none() {
         Some("value".to_string())
     );
 
-    std::thread::sleep(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(cache.get::<String>("key").unwrap(), None);
 }
 
-#[test]
-fn test_r5_p11_no_ttl_never_expires() {
+#[tokio::test]
+async fn test_r5_p11_no_ttl_never_expires() {
     // R5-P11: 无 TTL 的 key 永不过期
     //
     // PHP:
@@ -718,19 +718,19 @@ fn test_r5_p11_no_ttl_never_expires() {
     //   $val = Cache::get('key');  // 'value'
     let cache = make_cache();
     cache.set("key", "value", None).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    tokio::time::sleep(Duration::from_millis(50)).await;
     let val: String = cache.get("key").unwrap().unwrap();
     assert_eq!(val, "value");
 }
 
-#[test]
-fn test_r5_p11_long_ttl_still_valid() {
+#[tokio::test]
+async fn test_r5_p11_long_ttl_still_valid() {
     // R5-P11: 长 TTL 的 key 在 TTL 内仍然有效
     let cache = make_cache();
     cache
         .set("key", "value", Some(Duration::from_secs(60)))
         .unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    tokio::time::sleep(Duration::from_millis(50)).await;
     let val: String = cache.get("key").unwrap().unwrap();
     assert_eq!(val, "value");
 }
@@ -739,8 +739,8 @@ fn test_r5_p11_long_ttl_still_valid() {
 // 组 12：set 带 TTL（秒）（R5-P12）
 // ============================================================================
 
-#[test]
-fn test_r5_p12_set_with_ttl_expires() {
+#[tokio::test]
+async fn test_r5_p12_set_with_ttl_expires() {
     // R5-P12: set 带 TTL（秒）过期
     //
     // PHP:
@@ -754,12 +754,12 @@ fn test_r5_p12_set_with_ttl_expires() {
     cache
         .set("key", "value", Some(Duration::from_millis(50)))
         .unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(cache.get::<String>("key").unwrap(), None);
 }
 
-#[test]
-fn test_r5_p12_set_with_zero_ttl_permanent() {
+#[tokio::test]
+async fn test_r5_p12_set_with_zero_ttl_permanent() {
     // R5-P12: TTL=0 表示永久（对齐 PHP expire=0 语义）
     //
     // PHP:
@@ -772,13 +772,13 @@ fn test_r5_p12_set_with_zero_ttl_permanent() {
     let cache = make_cache();
     // Rust 端 None 等价 PHP TTL=0（永久）
     cache.set("key", "value", None).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    tokio::time::sleep(Duration::from_millis(50)).await;
     let val: String = cache.get("key").unwrap().unwrap();
     assert_eq!(val, "value");
 }
 
-#[test]
-fn test_r5_p12_set_with_various_ttls() {
+#[tokio::test]
+async fn test_r5_p12_set_with_various_ttls() {
     // R5-P12: 不同 TTL 值的行为
     let cache = make_cache();
     // 短 TTL
@@ -792,7 +792,7 @@ fn test_r5_p12_set_with_various_ttls() {
     // 无 TTL
     cache.set("permanent", "v3", None).unwrap();
 
-    std::thread::sleep(Duration::from_millis(60));
+    tokio::time::sleep(Duration::from_millis(60)).await;
 
     // 短 TTL 已过期
     assert_eq!(cache.get::<String>("short").unwrap(), None);

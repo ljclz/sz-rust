@@ -870,6 +870,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bigdecimal"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fa3f3d8cbf4dffcfe4991de61d012bef509a409ecbe9dd41049bfe32b4d4653"
+dependencies = [
+ "autocfg",
+ "libm",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1101,29 +1114,6 @@ name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
-
-[[package]]
-name = "bytecheck"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26333eeac754f0ad8a6bcd0eb0ac012156302e4e16b852b72ee399aea4f12c29"
-dependencies = [
- "bytecheck_derive",
- "ptr_meta",
- "rancor",
- "simdutf8",
-]
-
-[[package]]
-name = "bytecheck_derive"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46d07918caa9eeaaf06b7873925c53a61daac173539b4f7715090745e44e4e69"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
-]
 
 [[package]]
 name = "bytecount"
@@ -2059,6 +2049,24 @@ dependencies = [
  "libdbus-sys",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "deadpool"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
+dependencies = [
+ "deadpool-runtime",
+ "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 
 [[package]]
 name = "debug_unsafe"
@@ -2997,6 +3005,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "g2gen"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5a7e0eb46f83a20260b850117d204366674e85d3a908d90865c78df9a6b1dfc"
+dependencies = [
+ "g2poly",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "g2p"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "539e2644c030d3bf4cd208cb842d2ce2f80e82e6e8472390bcef83ceba0d80ad"
+dependencies = [
+ "g2gen",
+ "g2poly",
+]
+
+[[package]]
+name = "g2poly"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "312d2295c7302019c395cfb90dacd00a82a2eabd700429bba9c7a3f38dbbe11b"
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3730,6 +3766,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -4966,26 +5003,6 @@ name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
-
-[[package]]
-name = "munge"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e17401f259eba956ca16491461b6e8f72913a0a114e39736ce404410f915a0c"
-dependencies = [
- "munge_macro",
-]
-
-[[package]]
-name = "munge_macro"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4568f25ccbd45ab5d5603dc34318c1ec56b117531781260002151b8530a9f931"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
 
 [[package]]
 name = "nalgebra"
@@ -6365,26 +6382,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
-name = "ptr_meta"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "743da816b98c921cdbe8628ef7381b76f25ecf4da599fc80aca90eae7ef70cc0"
-dependencies = [
- "ptr_meta_derive",
-]
-
-[[package]]
-name = "ptr_meta_derive"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c8d9ca532f185d5d4db7a7c9d51420b452168ea1c2b913953281bd6fe1fcbd0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
-]
-
-[[package]]
 name = "publicsuffix"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6539,15 +6536,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rancor"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b534442d0fcdb55d66f373d9cac6d33b6293a2335bc2136dbd06ce0e87d2572"
-dependencies = [
- "ptr_meta",
-]
 
 [[package]]
 name = "rand"
@@ -6917,15 +6905,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "rend"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "663ba70707f96e871406fe10d68128412e619b06d1d47cb91c3a4c6501176240"
-dependencies = [
- "bytecheck",
-]
-
-[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6971,6 +6950,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -7038,33 +7018,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "rkyv"
-version = "0.8.18"
+name = "rqrr"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9776093b7ca170454ab1406954f7b7d97a57c51dc6c0642957fb2ef25c2d399"
+checksum = "ffbe87d9e8db95652c25ded2418150e00b08c2fde09e23ec15896d2c470c6631"
 dependencies = [
- "bytecheck",
- "bytes",
- "hashbrown 0.17.1",
- "indexmap 2.14.2",
- "munge",
- "ptr_meta",
- "rancor",
- "rend",
- "rkyv_derive",
- "tinyvec",
- "uuid",
-]
-
-[[package]]
-name = "rkyv_derive"
-version = "0.8.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c25ef604ac7dd839d44d64648952ea23c97866f124ff671b0ed2cf3ad9bb06e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.6",
+ "g2p",
+ "image",
+ "lru 0.16.4",
 ]
 
 [[package]]
@@ -7954,6 +7915,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05b44e85bf579a8eeb4ceaa77a3a523baf2bf0e9bac7e40f405d537b5d2d5ccb"
 dependencies = [
  "base64 0.22.1",
+ "bigdecimal",
  "bytes",
  "cfg-if",
  "chrono",
@@ -8031,6 +7993,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90b8020fe17c5f2c245bfa2505d7ef59c5604839527c740266ad2214acebea27"
 dependencies = [
+ "bigdecimal",
  "bitflags 2.13.2",
  "byteorder",
  "bytes",
@@ -8062,6 +8025,7 @@ checksum = "87a2bdd6e83f6b3ea525ca9fee568030508b58355a43d0b2c1674d5f79dcd65e"
 dependencies = [
  "atoi",
  "base64 0.22.1",
+ "bigdecimal",
  "bitflags 2.13.2",
  "byteorder",
  "chrono",
@@ -8078,6 +8042,7 @@ dependencies = [
  "log",
  "md-5 0.11.0",
  "memchr",
+ "num-bigint",
  "rand 0.10.3",
  "rust_decimal",
  "serde",
@@ -8326,9 +8291,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-auth"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0afbe27168467c8c52e75bfd131d9efccc8217a14739b9036cfa0446311ea4ab"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8346,9 +8309,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f096d2493e7814bffe824440513b44887ff31773c281385ea1a38a02dabaa393"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -8370,9 +8331,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-graphql"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "477c85efeff247632d54182cfd53960d35b8688833237eac921cd0d732314d00"
+version = "10.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -8381,9 +8340,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-grpc"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39dd20604168a3713a4ecadc1cbc26d5f05dbb205f0785dc475a601b3d5e11bf"
+version = "10.13.0"
 dependencies = [
  "parking_lot",
  "serde",
@@ -8393,9 +8350,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-limit"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec41101958f67f86df18e6764355099b26231cfde8abb0ba1841439bddabcdeb"
+version = "10.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -8403,9 +8358,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-logger"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9db5906c79ddce3b2ab6ae9df5aa4e097eb44ab2ed117e6b5e4e2bb4ec510bcb"
+version = "10.13.0"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8415,9 +8368,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-macros"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a54481a5784e4545aef4b82518d416702dc252b80796ba90231cfb8e35a25559"
+version = "10.13.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8426,9 +8377,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mqtt"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08852b297c4438d22fecfce7830f24e9da6fe94525719260723b50ec905b4f33"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -8440,9 +8389,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mssql"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff0d4056e8cf80981ef408ce738e759b65f531a547195ce9a9f4099672fddaf4"
+version = "10.13.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8459,9 +8406,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-oracle"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48ca4ca6d97f74e6ece68e98bc8c5396367909c3438fd2dd4bd450fae4f72cc7"
+version = "10.13.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8475,18 +8420,14 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-query-builder"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e9804345ca1780c976de0f83c61e65ab804a25eb72b1aef689646d6dd6e8a0b"
+version = "10.13.0"
 dependencies = [
  "sz-orm-core",
 ]
 
 [[package]]
 name = "sz-orm-queue"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dad14535fb7e9454e7736beb413e522c1e24a191db799da1cc3d12983cb7a83c"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -8498,9 +8439,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-scheduler"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1423a18d9e981eada078ecbb269aa80994932479f640a8e908cafba2cf5a72f4"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8512,9 +8451,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sql-validator"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "927636ed904eb7392715a32c981e248ac47e81d080ecaa7aa63ea4a5b37e941a"
+version = "10.13.0"
 dependencies = [
  "regex",
  "thiserror 2.0.21",
@@ -8522,12 +8459,11 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e67b3fba506128c8119f6cdd980c27f8260d03d6430024958202ba7896d71a2a"
+version = "10.13.0"
 dependencies = [
  "async-stream",
  "async-trait",
+ "bigdecimal",
  "futures",
  "parking_lot",
  "rust_decimal",
@@ -8542,9 +8478,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-storage"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775553b8ee1d2771ecf1dc82c1233eb169531c9940c852c2fef307f5f13f7ec1"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -8555,9 +8489,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b293883f16d778989488458e638d208db3f7066ff150e743dcab4061ae08837b"
+version = "10.13.0"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8567,9 +8499,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-websocket"
-version = "9.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "607aeb92fea076ba4541e09789ae246fc59a6eb5f93330c4190e3ea6369d5d8d"
+version = "10.13.0"
 dependencies = [
  "async-trait",
  "flate2",
@@ -8583,7 +8513,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "sz-rust-addons-loader",
  "sz-rust-admin-ui",
@@ -8627,7 +8557,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-addons-admin"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8650,8 +8580,91 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-addons-cms"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "http",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
+ "tokio",
+ "tower 0.5.3",
+]
+
+[[package]]
+name = "sz-rust-addons-crm"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
+ "tokio",
+]
+
+[[package]]
+name = "sz-rust-addons-ecommerce"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
+ "tokio",
+ "tower 0.5.3",
+]
+
+[[package]]
+name = "sz-rust-addons-erp"
+version = "2.0.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+]
+
+[[package]]
+name = "sz-rust-addons-forum"
+version = "2.0.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+]
+
+[[package]]
+name = "sz-rust-addons-im"
+version = "2.0.0"
+dependencies = [
+ "axum 0.8.9",
+ "serde",
+ "serde_json",
+ "sz-rust-core",
+ "tokio",
+]
+
+[[package]]
 name = "sz-rust-addons-loader"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "notify",
@@ -8667,8 +8680,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-addons-operate"
+version = "2.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "hex",
+ "http-body-util",
+ "md-5 0.10.6",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sz-rust-addons-loader",
+ "sz-rust-capability",
+ "sz-rust-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "sz-rust-admin-ui"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "parking_lot",
@@ -8681,7 +8714,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-ai-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -8709,7 +8742,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-alert-engine"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8724,7 +8757,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-api-gateway"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -8744,7 +8777,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-auth-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8775,8 +8808,9 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-benchmark-suite"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
+ "criterion",
  "serde",
  "serde_json",
  "sz-rust-core",
@@ -8787,7 +8821,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cache-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "futures",
  "hex",
@@ -8804,7 +8838,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-capability"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -8819,7 +8853,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-cli"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8860,7 +8894,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-codegen-loop"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8878,7 +8912,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-codegen-ui"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
@@ -8890,7 +8924,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-config-center"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -8909,7 +8943,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-core"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -8929,6 +8963,7 @@ dependencies = [
  "qrcode",
  "rcgen",
  "redis",
+ "rqrr",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -8978,7 +9013,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-data-mask"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "http",
@@ -8996,7 +9031,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-distributed-tx"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9012,7 +9047,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-examples"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9037,7 +9072,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -9058,7 +9093,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-facade-tests"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "hex",
  "serde_json",
@@ -9080,7 +9115,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-frontend-codegen"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "askama",
  "async-trait",
@@ -9101,7 +9136,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-http-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
@@ -9130,7 +9165,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-i18n"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "parking_lot",
  "serde",
@@ -9143,7 +9178,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-infra-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "ab_glyph",
  "async-trait",
@@ -9179,10 +9214,11 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-key-rotation"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "parking_lot",
+ "rand 0.8.8",
  "serde",
  "sz-rust-data-mask",
  "thiserror 2.0.21",
@@ -9191,7 +9227,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-log-aggregator"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -9205,7 +9241,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-macros"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9215,7 +9251,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-marketplace"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9251,7 +9287,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-mcp"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -9268,7 +9304,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-middleware-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "base64 0.22.1",
@@ -9301,8 +9337,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-migration"
+version = "2.0.0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "chrono",
+ "futures",
+ "mockall",
+ "parking_lot",
+ "prometheus",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sz-rust-ai-facade",
+ "sz-rust-capability",
+ "sz-rust-sdd",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "sz-rust-monitor-panel"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -9316,7 +9379,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-mvc-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9343,7 +9406,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-observability"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9366,7 +9429,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-ops-api"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
@@ -9379,7 +9442,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-ext-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -9389,7 +9452,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-orm-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -9421,7 +9484,6 @@ dependencies = [
  "sz-orm-storage",
  "sz-orm-tracing",
  "sz-orm-websocket",
- "sz-rust-core",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -9430,7 +9492,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pay-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "parking_lot",
  "serde",
@@ -9441,7 +9503,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pdf"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9463,7 +9525,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-pipeline"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -9478,7 +9540,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-plugin-sdk"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -9492,7 +9554,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-rag"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -9517,7 +9579,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-router-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
  "axum 0.8.9",
@@ -9532,8 +9594,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "sz-rust-sdd"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "similar",
+ "sz-rust-ai-facade",
+ "sz-rust-capability",
+ "sz-rust-mcp",
+ "sz-rust-rag",
+ "sz-rust-visual",
+ "tempfile",
+ "tera",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "sz-rust-security-headers"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "http",
@@ -9548,7 +9637,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-service-registry"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -9565,7 +9654,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-state-facade"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "chrono",
@@ -9583,7 +9672,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-sz300"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -9594,15 +9683,20 @@ dependencies = [
  "bcrypt 0.16.0",
  "chrono",
  "criterion",
+ "ed25519-dalek",
  "futures",
  "hmac 0.12.1",
  "http-body-util",
+ "indexmap 2.14.2",
  "once_cell",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "sysinfo",
  "sz-orm-sqlx",
+ "sz-rust-ai-facade",
  "sz-rust-alert-engine",
  "sz-rust-auth-facade",
  "sz-rust-core",
@@ -9613,21 +9707,26 @@ dependencies = [
  "sz-rust-middleware-facade",
  "sz-rust-mvc-facade",
  "sz-rust-observability",
+ "sz-rust-rag",
  "sz-rust-security-headers",
  "sz-rust-state-facade",
  "sz-rust-upload",
+ "sz-rust-wasm",
  "sz-rust-websocket",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tower 0.5.3",
+ "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wat",
 ]
 
 [[package]]
 name = "sz-rust-testkit"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -9646,7 +9745,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-tracing"
-version = "1.4.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9664,7 +9763,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-upload"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9678,7 +9777,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-vector-db"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -9694,7 +9793,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-visual"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9717,7 +9816,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-wasm"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -9727,7 +9826,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-websocket"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9743,7 +9842,7 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-workflow"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -9767,14 +9866,12 @@ dependencies = [
 
 [[package]]
 name = "sz-rust-zerocopy"
-version = "1.7.0"
+version = "2.0.0"
 dependencies = [
- "rkyv",
  "serde",
  "serde_json",
  "sz-rust-core",
  "thiserror 2.0.21",
- "zerocopy",
 ]
 
 [[package]]
@@ -10311,9 +10408,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -11993,6 +12090,29 @@ checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
 dependencies = [
  "cfg-if",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "wiremock"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
+dependencies = [
+ "assert-json-diff",
+ "base64 0.22.1",
+ "deadpool",
+ "futures",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

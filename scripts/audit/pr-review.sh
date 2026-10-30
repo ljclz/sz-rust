@@ -202,9 +202,18 @@ if [ $? -ne 0 ]; then
 fi
 
 # ---- 环节 3: 静态检查（fmt + clippy + unwrap） ----
-transition "static" "cargo fmt --all --check"
-if ! cargo fmt --all --check >/tmp/pr-review-fmt.log 2>&1; then
-  note_issue "medium" "workspace" "fmt" "格式不合格: $(head -2 /tmp/pr-review-fmt.log | tr '\n' ' ')"
+# cargo fmt --all 在 Windows 上会把本地 path 依赖（含 sz-orm 全家桶）的所有文件一次性
+# 传给 rustfmt，导致命令行超长（os error 206）。改为逐 workspace member 检查（同 .githooks/pre-commit）。
+transition "static" "cargo fmt --check（逐包执行）"
+FMT_PKG_LIST=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | python -c "import json,sys; print('\n'.join(p['name'] for p in json.load(sys.stdin)['packages']))" | tr -d '\r')
+FMT_FAILED=""
+for fmt_pkg in $FMT_PKG_LIST; do
+  if ! cargo fmt -p "$fmt_pkg" -- --check >/tmp/pr-review-fmt.log 2>&1; then
+    FMT_FAILED="$FMT_FAILED $fmt_pkg"
+  fi
+done
+if [ -n "$FMT_FAILED" ]; then
+  note_issue "medium" "workspace" "fmt" "格式不合格（${FMT_FAILED}）: $(head -2 /tmp/pr-review-fmt.log | tr '\n' ' ')"
 fi
 
 transition "static" "cargo clippy --workspace --all-targets -D warnings"
@@ -251,6 +260,12 @@ run_gate "feature-consistency" "high" scripts/audit/feature-consistency.js
 run_gate "assertion-value" "low" scripts/audit/assertion-value-check.js
 run_gate "adr-code-consistency" "low" scripts/audit/adr-code-consistency.js
 run_gate "openapi-consistency" "low" scripts/audit/openapi-consistency.js
+# SDET 评测防复发门禁 30-34（2026-10-28 新增）
+run_gate "ignored-test-routing" "high" scripts/audit/ignored-test-routing.js
+run_gate "coverage-matrix-completeness" "medium" scripts/audit/coverage-matrix-completeness.js
+run_gate "ci-config-audit" "medium" scripts/audit/ci-config-audit.js
+run_gate "test-hygiene-check" "medium" scripts/audit/test-hygiene-check.js
+run_gate "orphan-module-check" "medium" scripts/audit/orphan-module-check.js
 
 # ---- 环节 5: 单元测试 ----
 transition "test" "cargo test（facade lib + sz300）"

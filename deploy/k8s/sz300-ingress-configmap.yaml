@@ -1,11 +1,17 @@
 # K8s Ingress + ConfigMap — 对外暴露服务 + 框架配置挂载
 #
 # 修复 P2-8 / P2-9：
-# - Ingress：通过 nginx ingress controller 对外暴露 sz300-server 服务
+# - Ingress：通过 nginx ingress controller 对外暴露 sz300-service 服务
 # - ConfigMap：挂载框架 AppConfig 期望的 config/ 目录
+#
+# 安全整改（2026-10-28）：
+#   - Ingress 与 ConfigMap 位于 sz300 namespace，与 Deployment/Secret/Service
+#     所在 namespace 统一（见 sz300-deployment.yaml）。
+#   - backend service 统一指向 sz300-service（与 Deployment 清单中的 Service 名一致）。
+#   - TLS secret 命名为 sz300-service-tls，与 Service 命名对应。
 
 ---
-# ========== Ingress：对外暴露 sz300-server ==========
+# ========== Ingress：对外暴露 sz300-service ==========
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -33,7 +39,7 @@ spec:
   tls:
     - hosts:
         - api.shengzhuang.cn
-      secretName: sz300-server-tls
+      secretName: sz300-service-tls
   rules:
     - host: api.shengzhuang.cn
       http:
@@ -42,7 +48,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: sz300-server
+                name: sz300-service
                 port:
                   number: 80
 

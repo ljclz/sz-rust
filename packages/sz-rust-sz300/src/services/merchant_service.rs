@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use sz_rust_core::orm::ModelExt;
 use sz_rust_core::orm::{Pool, Value};
 
+use crate::db::acquire_cancel_safe;
 use crate::models::merchant::Merchant;
 
 /// 商户分页结果
@@ -41,27 +42,42 @@ impl MerchantService {
     /// - `pool`：数据库连接池
     /// - `page`：页码（从 1 开始）
     /// - `page_size`：每页条数（1..=100）
+    /// - `merchant_id`：数据归属过滤（2026-10-28 IDOR 修复）；`Some(id)` 时仅返回该商户
     ///
     /// # 返回
     ///
     /// 成功返回 [`MerchantPage`]，失败返回错误描述字符串（不泄露 DB 内部信息）。
     #[tracing::instrument(skip(pool))]
-    pub async fn list(pool: &Pool, page: i64, page_size: i64) -> Result<MerchantPage, String> {
+    pub async fn list(
+        pool: &Pool,
+        page: i64,
+        page_size: i64,
+        merchant_id: Option<i64>,
+    ) -> Result<MerchantPage, String> {
         let offset = (page - 1).max(0) * page_size;
 
         // P1-SEC-06: 外部 IO 超时保护（默认 5s）
         sz_rust_core::runtime::spawn::with_timeout(async {
-            let mut conn = pool.acquire().await.map_err(|e| {
+            let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
                 tracing::error!(error = %e, "商户列表获取 DB 连接失败");
                 "数据库连接失败".to_string()
             })?;
 
+            // 数据归属过滤：非管理员仅能查看自己商户（参数化 WHERE）
+            let (where_clause, params) = match merchant_id {
+                Some(mid) => (" WHERE merchant_id = ?".to_string(), vec![Value::I64(mid)]),
+                None => (String::new(), Vec::new()),
+            };
+
             // 总数查询
-            let count_sql = "SELECT COUNT(*) as total FROM merchant";
-            let count_rows = conn.query(count_sql).await.map_err(|e| {
-                tracing::error!(error = %e, "商户列表 COUNT 查询失败");
-                "查询失败".to_string()
-            })?;
+            let count_sql = format!("SELECT COUNT(*) as total FROM merchant{where_clause}");
+            let count_rows = conn
+                .query_with_params(&count_sql, &params)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "商户列表 COUNT 查询失败");
+                    "查询失败".to_string()
+                })?;
             let total: i64 = count_rows
                 .first()
                 .and_then(|row| row.get("total"))
@@ -69,10 +85,16 @@ impl MerchantService {
                 .unwrap_or(0);
 
             // 列表查询 — LIMIT/OFFSET 参数化
-            let list_sql = "SELECT merchant_id, merchant_name, status, created_at FROM merchant ORDER BY merchant_id DESC LIMIT ? OFFSET ?";
-            let list_params = [Value::I64(page_size), Value::I64(offset)];
+            // 2026-10-28 修复 P0：生产表列名为 `name`，不存在 `merchant_name`
+            // （历史测试夹具自造了 merchant_name，导致该缺陷长期未暴露）
+            let list_sql = format!(
+                "SELECT merchant_id, name AS merchant_name, status, created_at FROM merchant{where_clause} ORDER BY merchant_id DESC LIMIT ? OFFSET ?"
+            );
+            let mut list_params = params;
+            list_params.push(Value::I64(page_size));
+            list_params.push(Value::I64(offset));
             let rows = conn
-                .query_with_params(list_sql, &list_params)
+                .query_with_params(&list_sql, &list_params)
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "商户列表查询失败");
@@ -100,7 +122,7 @@ impl MerchantService {
         pool: &Pool,
         merchant_id: i64,
     ) -> Result<Option<HashMap<String, Value>>, String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "商户详情获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;
@@ -126,7 +148,7 @@ impl MerchantService {
     /// - `merchant`：商户实体（`merchant_id` 字段被忽略，由 DB 自增生成）
     #[tracing::instrument(skip(pool, merchant))]
     pub async fn create(pool: &Pool, merchant: &Merchant) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "创建商户获取 DB 连接失败: name={}", merchant.name);
             "数据库连接失败".to_string()
         })?;
@@ -173,7 +195,7 @@ impl MerchantService {
             return Err("未提供需要更新的字段".to_string());
         }
 
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "更新商户获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;
@@ -221,7 +243,7 @@ impl MerchantService {
     /// 删除商户（软删除 — 将 status 置为 0）
     #[tracing::instrument(skip(pool))]
     pub async fn delete(pool: &Pool, merchant_id: i64) -> Result<(), String> {
-        let mut conn = pool.acquire().await.map_err(|e| {
+        let mut conn = acquire_cancel_safe(pool).await.map_err(|e| {
             tracing::error!(error = %e, "删除商户获取 DB 连接失败: merchant_id={}", merchant_id);
             "数据库连接失败".to_string()
         })?;

@@ -3,7 +3,7 @@
 > **审查范围**：4 项铁律违规修复（铁律 1/10/7/4）
 > **审查日期**：2026-08-05
 > **审查人**：SZ-Rust 工程团队
-> **关联 ADR**：[ADR-020 异步文件 I/O 迁移](../adr/0020-async-file-io-migration.md)
+> **关联 ADR**：[ADR-020 异步文件 I/O 迁移](../../../adr/0020-async-file-io-migration.md)
 > **关联规格**：`.codeartsdoer/specs/fix_iron_violations/`
 
 ---

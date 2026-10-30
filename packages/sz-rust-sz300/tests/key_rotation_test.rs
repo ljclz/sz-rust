@@ -14,12 +14,10 @@
 use sz_rust_core::orm::jwt::JwtClaims;
 use sz_rust_sz300::services::auth_service;
 
-const TEST_SECRET: &str = "test-key-rotation-secret-2026";
-
 fn ensure_init() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| {
-        auth_service::init_key_rotation(TEST_SECRET);
+        auth_service::init_key_rotation();
     });
 }
 

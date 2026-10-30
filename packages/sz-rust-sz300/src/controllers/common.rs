@@ -1,13 +1,75 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 //! 控制器公共辅助函数（2026-07-26 新增）
 //!
 //! 提取控制器间重复的模板代码，减少 CRUD 重复（修复 Brooks-Lint R3 警告）。
-//! 当前提供：分页参数解析（page/page_size）。
+//! 当前提供：分页参数解析（page/page_size）、数据归属过滤（IDOR 修复）。
 
+use crate::middleware::auth_middleware::CurrentUser;
+use axum::body::Body;
+use axum::http::Request;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use sz_rust_core::orm::Value;
+
+/// 数据归属过滤（2026-10-28 IDOR 修复）
+///
+/// 返回 `(允许查询的 merchant_id, 是否放行)`：
+/// - 管理员：返回请求参数中的 merchant_id（可查看全部/指定商户）
+/// - 普通用户：返回自己的 merchant_id（忽略请求参数，防止水平越权）
+/// - 无法获取用户上下文：返回 `(None, false)`，调用方应拒绝请求
+pub fn effective_merchant_scope(
+    req: &Request<Body>,
+    requested: Option<i64>,
+) -> (Option<i64>, bool) {
+    effective_merchant_scope_from_user(CurrentUser::from_request(req).as_ref(), requested)
+}
+
+/// 数据归属过滤（基于已提取的用户上下文；供控制器在消费请求前调用）
+pub fn effective_merchant_scope_from_user(
+    user: Option<&CurrentUser>,
+    requested: Option<i64>,
+) -> (Option<i64>, bool) {
+    match user {
+        Some(u) if u.is_admin => (requested, true),
+        Some(u) => (u.merchant_id, true),
+        None => (None, false),
+    }
+}
+
+/// 校验单个资源是否属于当前用户（IDOR 修复）
+///
+/// 管理员可访问任意资源；普通用户仅允许访问自己商户的资源。
+/// `resource_merchant_id` 为资源行中的 merchant_id（可能为 None）。
+pub fn can_access_merchant_resource(
+    req: &Request<Body>,
+    resource_merchant_id: Option<i64>,
+) -> bool {
+    can_access_merchant_resource_from_user(
+        CurrentUser::from_request(req).as_ref(),
+        resource_merchant_id,
+    )
+}
+
+/// 资源归属校验（基于已提取的用户上下文）
+pub fn can_access_merchant_resource_from_user(
+    user: Option<&CurrentUser>,
+    resource_merchant_id: Option<i64>,
+) -> bool {
+    match user {
+        Some(u) if u.is_admin => true,
+        Some(u) => u.merchant_id.is_some() && u.merchant_id == resource_merchant_id,
+        None => false,
+    }
+}
+
+/// 是否允许创建商户（2026-10-28 越权修复）
+///
+/// 创建商户会新增租户与市场归属，属于管理动作，仅管理员可执行。
+/// 普通用户只能维护自己已有商户的数据（见 [`can_access_merchant_resource_from_user`]）。
+pub fn can_create_merchant_from_user(user: Option<&CurrentUser>) -> bool {
+    matches!(user, Some(u) if u.is_admin)
+}
 
 /// 解析分页参数（page/page_size），返回 (page, page_size)
 ///
@@ -191,5 +253,47 @@ mod tests {
         } else {
             panic!("weight should be F64");
         }
+    }
+
+    fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {
+        CurrentUser {
+            user_id: 1,
+            username: "tester".to_string(),
+            merchant_id,
+            is_admin,
+        }
+    }
+
+    #[test]
+    fn test_create_merchant_requires_admin() {
+        assert!(can_create_merchant_from_user(Some(&user(true, None))));
+        assert!(!can_create_merchant_from_user(Some(&user(false, Some(9)))));
+        assert!(!can_create_merchant_from_user(None));
+    }
+
+    #[test]
+    fn test_access_scope_admin_vs_user() {
+        let admin = user(true, None);
+        let normal = user(false, Some(9));
+        assert_eq!(
+            effective_merchant_scope_from_user(Some(&admin), Some(42)),
+            (Some(42), true)
+        );
+        assert_eq!(
+            effective_merchant_scope_from_user(Some(&normal), Some(42)),
+            (Some(9), true)
+        );
+        assert_eq!(
+            effective_merchant_scope_from_user(None, Some(42)),
+            (None, false)
+        );
+        assert!(!can_access_merchant_resource_from_user(
+            Some(&normal),
+            Some(42)
+        ));
+        assert!(can_access_merchant_resource_from_user(
+            Some(&normal),
+            Some(9)
+        ));
     }
 }

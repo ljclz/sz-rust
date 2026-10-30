@@ -45,8 +45,26 @@ def scan(path):
     mod_depth = 0
     fn_stack = []  # (is_test_fn, brace_depth)
     pending_test = False
+    # 多行 raw string 状态（如 `const T: &str = r#"..."#`）：strip_scl 只剥单行
+    # 字符串/注释，无法剥多行 raw string，提示词模板中的"std::fs"字样会被误报
+    # （2026-10-27 SDET 修复：sz-rust-sdd/src/prompt.rs 3 处误报）
+    raw_end = None
+    raw_open_re = re.compile(r'[=(]\s*r(#*)"')
     for i, raw in enumerate(lines):
-        line = strip_scl(raw).strip()
+        if raw_end is not None:
+            idx = raw.find(raw_end)
+            if idx == -1:
+                continue
+            skip = len(raw_end)
+            raw_end = None
+            line = strip_scl(raw[idx + skip:]).strip()
+        else:
+            m = raw_open_re.search(raw)
+            if m:
+                raw_end = '"' + m.group(1)
+                line = strip_scl(raw[:m.start()]).strip()
+            else:
+                line = strip_scl(raw).strip()
         if not line:
             continue
         # 测试模块块（mod tests / mod xxx_tests / #[cfg(test)]）

@@ -50,7 +50,9 @@ for bench_group in $(find "$CRITERION_DIR" -maxdepth 1 -type d ! -path "$CRITERI
         change=$(python3 -c "print(round(($post_mean - $pre_mean) / $pre_mean * 100, 1))" 2>/dev/null || echo "0")
 
         status="PASS"
-        if (( $(echo "$change > $THRESHOLD" | bc -l 2>/dev/null || echo 0) )); then
+        # SDET P1-5 修正：原 bc -l 小数比较在 bash 算术展开下失败时静默降级为 0（恒 PASS），
+        # 改为纯 python 浮点比较，bc 不存在或异常时 fail-closed
+        if python3 -c "import sys; sys.exit(0 if float('$change') > float('$THRESHOLD') else 1)" 2>/dev/null; then
             status="REGRESSION"
             REGRESSIONS=$((REGRESSIONS + 1))
         fi

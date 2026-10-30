@@ -8,13 +8,15 @@
 //! 3. DB-backed Mutation：createProduct/updateProduct/createOrder/updateOrderStatus
 //! 4. 数据持久化验证（写入后可查询回）
 //!
-//! 运行前确保 MySQL 9.6 运行于 127.0.0.1:3306，root/test123，sz_orm_test 数据库存在。
+//! 运行前确保 MySQL 9.6 运行于 127.0.0.1:3306，root/$SZ_TEST_DB_PASSWORD，sz_orm_test 数据库存在。
 //! 手动运行：`cargo test -p sz-rust-sz300 --test graphql_persist_test --features v19-graphql-persist -- --ignored`
 
 #![cfg(feature = "v19-graphql-persist")]
 
 use std::sync::Arc;
 use sz_rust_sz300::{config, db, graphql::build_schema_with_db};
+
+mod common;
 
 fn mysql_test_config() -> config::AppConfig {
     config::AppConfig {
@@ -26,7 +28,7 @@ fn mysql_test_config() -> config::AppConfig {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     }
@@ -37,62 +39,9 @@ async fn try_build_db_schema() -> Option<sz_rust_sz300::graphql::GraphQLSchemaDb
     let pool = db::init_pool(&cfg).await.ok()?;
     let mut conn = pool.acquire().await.ok()?;
     conn.query("SELECT 1").await.ok()?;
+    drop(conn);
 
-    conn.query(
-        "CREATE TABLE IF NOT EXISTS `merchant` (\
-            `merchant_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `market_id` INT UNSIGNED NOT NULL,\
-            `name` VARCHAR(100) NOT NULL,\
-            `stall_no` VARCHAR(50) DEFAULT '',\
-            `contact_phone` VARCHAR(20) DEFAULT '',\
-            `category` VARCHAR(50) DEFAULT '',\
-            `status` TINYINT DEFAULT 1,\
-            `bank_account` VARCHAR(50) DEFAULT '',\
-            `bank_name` VARCHAR(100) DEFAULT '',\
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,\
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .ok()?;
-    conn.query(
-        "CREATE TABLE IF NOT EXISTS `good` (\
-            `good_id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `merchant_id` INT UNSIGNED NOT NULL,\
-            `cat_id` INT UNSIGNED DEFAULT 0,\
-            `name` VARCHAR(100) NOT NULL,\
-            `barcode` VARCHAR(50) DEFAULT '',\
-            `price` INT UNSIGNED NOT NULL,\
-            `unit` VARCHAR(10) DEFAULT '斤',\
-            `ai_class_id` INT UNSIGNED DEFAULT 0,\
-            `image` VARCHAR(255) DEFAULT '',\
-            `status` TINYINT DEFAULT 1,\
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,\
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .ok()?;
-    conn.query("DROP TABLE IF EXISTS `order`").await.ok()?;
-    conn.query(
-        "CREATE TABLE `order` (\
-            `order_id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,\
-            `order_no` VARCHAR(32) NOT NULL UNIQUE,\
-            `merchant_id` INT UNSIGNED NOT NULL,\
-            `device_id` INT UNSIGNED DEFAULT 0,\
-            `total_fen` INT UNSIGNED NOT NULL,\
-            `total_weight_g` INT UNSIGNED DEFAULT 0,\
-            `item_count` SMALLINT UNSIGNED DEFAULT 0,\
-            `status` TINYINT DEFAULT 0,\
-            `pay_method` TINYINT DEFAULT 0,\
-            `pay_at` DATETIME DEFAULT NULL,\
-            `offline_seq` VARCHAR(50) DEFAULT '',\
-            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,\
-            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    )
-    .await
-    .ok()?;
+    common::setup_all_tables(&pool).await;
 
     Some(build_schema_with_db(Arc::new(pool)))
 }

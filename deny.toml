@@ -9,22 +9,50 @@ all-features = true
 # 已知安全漏洞 advisory 检查
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # 忽略的 advisory（需注明理由）
+#
+# 复核约定（2026-10-28 P1-6）：每条 ignore 行尾必须带 `# review-by=YYYY-MM-DD`，
+# 由 scripts/audit/advisory-ignore-expiry.py 在 CI 中校验；过期即失败，
+# 强制在到期前升级上游依赖或给出新的复核结论，避免"永久静音"。
 ignore = [
     # === rustls-webpki 0.101.7 / 0.102.8 系列漏洞（同步自 sz-orm）===
     # 来源: rumqttc 0.25 / elasticsearch 8.5.0-alpha.1 → reqwest 0.11 → rustls 0.21 → rustls-webpki 0.101.7/0.102.8
     # 影响: CRL 验证在默认编译中不参与；上游 rustls-webpki 0.103 为不兼容大版本
     # 跟踪: 待 rumqttc / elasticsearch 升级至依赖 rustls-webpki 0.103+ 后自动移除
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8/0.101.7 传递依赖，上游 0.103 为不兼容大版本；CRL 验证默认不参与" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8/0.101.7 URI name constraints 漏洞；上游 0.103 为不兼容大版本" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8/0.101.7 wildcard name constraints 漏洞；上游 0.103 为不兼容大版本" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },
-    # RUSTSEC-2024-0437: sz-orm 路径依赖传递引入的 Cargo.lock 残留条目
-    { id = "RUSTSEC-2024-0437", reason = "sz-orm 路径依赖传递引入的 Cargo.lock 残留；不在本仓编译产物中" },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102.8/0.101.7 传递依赖，上游 0.103 为不兼容大版本；CRL 验证默认不参与" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102.8/0.101.7 URI name constraints 漏洞；上游 0.103 为不兼容大版本" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102.8/0.101.7 wildcard name constraints 漏洞；上游 0.103 为不兼容大版本" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.102.8/0.101.7 CRL parsing panic 漏洞；上游 0.103 为不兼容大版本" },  # review-by=2027-01-31
+    # RUSTSEC-2024-0437: protobuf 2.28.0 经 prometheus 0.13.4 → sz-rust-rag / sz-rust-migration 真实引入（非可选）
+    # 暴露面: 仅用于 Prometheus 指标编码（protobuf 编码），无不可信输入解析面；无已知利用路径，低风险
+    { id = "RUSTSEC-2024-0437", reason = "protobuf 2.28.0 由 prometheus 0.13.4（sz-rust-rag / sz-rust-migration 直接依赖）非可选引入；仅用于 Prometheus 指标编码，无不可信输入解析面，低风险" },  # review-by=2027-01-31
     # tokio-tar 0.3.1 PAX 扩展头解析漏洞（RUSTSEC-2025-0111 / CVE-2025-62518）
     # 来源: testcontainers v0.23.3 dev-dependency → tokio-tar（仅测试用，不在生产编译产物中）
     # 影响: tokio-tar 已 archived/unmaintained，无补丁版本；仅 dev-dependency 引入，不影响生产安全
     # 跟踪: 待 testcontainers 迁移至 astral-tokio-tar 后自动移除
-    { id = "RUSTSEC-2025-0111", reason = "tokio-tar 通过 testcontainers dev-dependency 引入（仅测试用）；tokio-tar 已 archived 无补丁版本；待 testcontainers 迁移至 astral-tokio-tar 后移除" },
+    { id = "RUSTSEC-2025-0111", reason = "tokio-tar 通过 testcontainers dev-dependency 引入（仅测试用）；tokio-tar 已 archived 无补丁版本；待 testcontainers 迁移至 astral-tokio-tar 后移除" },  # review-by=2027-01-31
+    # === 2026-10-25 架构评测新增（详见 .cargo/audit.toml）===
+    # rustls-webpki 0.103.15 中间证书信任（0.104 为不兼容版本，无稳定补丁）
+    { id = "RUSTSEC-2026-0382", reason = "rustls-webpki 0.102.8/0.103.15 传递依赖；上游 0.104 为不兼容版本；项目使用 native-roots 且默认编译不涉及该校验路径" },  # review-by=2027-01-31
+    # rustls 0.23.45 系列（0.23.x 已是最新，0.24 尚为 dev；漏洞依赖未启用 feature/场景）
+    { id = "RUSTSEC-2026-0346", reason = "rustls 0.23.45 Debug impl 泄露 TLS 秘密；需本地 Debug 访问权限，项目不打印会话 Debug" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0347", reason = "rustls 0.23.45 ECH 拒绝后缓冲数据；项目未启用 ECH" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0348", reason = "rustls 0.23.45 Brotli 证书解压放大；rustls 未启用 brotli feature" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0349", reason = "rustls 0.23.45 ServerHello 降级；项目未启用 ECH/后量子场景" },  # review-by=2027-01-31
+    # zip 2.4.2 解压权限位/符号链接（rust_xlsxwriter 写 xlsx + utoipa-swagger-ui 构建期嵌入，无运行时 extract）
+    # 注：Cargo.lock 中 zip 8.6.0 已由 calamine（sz-rust-pdf 引入）真实存在；本公告针对 zip 2.4.2 解压路径，
+    #     workspace 的 zip 2.4.2 仅用于写 xlsx 与构建期嵌入自有 dist，无 extract() 攻击面
+    { id = "RUSTSEC-2026-0367", reason = "zip 2.4.2 解压保留 SUID；workspace 仅用 zip 2.4.2 写 xlsx 与构建期嵌入自有 dist，无 extract() 攻击面；zip 8.6.0 已由 calamine 引入" },  # review-by=2027-03-31
+    { id = "RUSTSEC-2026-0368", reason = "zip 2.4.2 解压创建符号链接；workspace 无运行时解压攻击面（zip 2.4.2 仅写 xlsx）；zip 8.6.0 已由 calamine 引入" },  # review-by=2027-03-31
+    { id = "RUSTSEC-2026-0369", reason = "zip 2.4.2 ZipStreamReader::extract 权限位；workspace 无运行时解压攻击面；zip 8.6.0 已由 calamine 引入" },  # review-by=2027-03-31
+    # rsa 0.9.10 Marvin Attack 及其传递依赖（jsonwebtoken rust_crypto 仅公钥签名验证）
+    { id = "RUSTSEC-2023-0071", reason = "rsa 0.9.10 私钥解密时序侧信道；jsonwebtoken 仅使用 RSA 公钥签名验证；0.10 为 RC 无稳定补丁" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 常量时间操作时序波动；rsa 传递依赖，仅签名验证路径" },  # review-by=2027-01-31
+    { id = "RUSTSEC-2026-0385", reason = "ctutils 0.4.2 非常量时间掩码；rsa 传递依赖，仅签名验证路径" },  # review-by=2027-01-31
+    # lru / rand / webpki-roots（未启用或非适用场景）
+    { id = "RUSTSEC-2026-0002", reason = "lru 0.12.5 IterMut 违反 Stacked Borrows；cache-facade lru-cache 为可选 feature，生产默认不启用" },  # review-by=2027-03-31
+    { id = "RUSTSEC-2026-0253", reason = "lru 0.12.5 pop() panic 安全；cache-facade lru-cache 为可选 feature，生产默认不启用" },  # review-by=2027-03-31
+    { id = "RUSTSEC-2026-0097", reason = "rand 0.7.3 自定义 logger 场景 unsound；旧版传递依赖，项目未使用 rand::rng() 自定义 logger" },  # review-by=2027-03-31
+    { id = "RUSTSEC-2026-0381", reason = "webpki-roots 1.0.9 经 hyper-rustls/reqwest/sqlx-core 传递依赖在树中；项目使用 rustls-tls-native-roots（native-roots 缓解），webpki-roots 不参与默认证书校验路径" },  # review-by=2027-03-31
 ]
 # 未维护的依赖仅警告（避免 CI 因传递依赖 unmaintained 而失败）
 unmaintained = "none"

@@ -8,6 +8,8 @@
 
 use async_graphql::{Context, Object, SimpleObject};
 
+use crate::db::acquire_cancel_safe;
+
 /// 商户 GraphQL 类型
 #[derive(Debug, Clone, SimpleObject)]
 pub struct MerchantGql {
@@ -344,7 +346,7 @@ mod db_backed {
         /// 按 ID 查询商户（DB-backed）
         async fn merchant(&self, ctx: &Context<'_>, id: i64) -> Option<MerchantGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "SELECT merchant_id, market_id, name, stall_no, contact_phone, category, status FROM merchant WHERE merchant_id = ?";
             let params = [Value::I64(id)];
             let rows = conn.query_with_params(sql, &params).await.ok()?;
@@ -355,7 +357,7 @@ mod db_backed {
         async fn merchants(&self, ctx: &Context<'_>) -> Vec<MerchantGql> {
             let pool = ctx.data_opt::<Arc<Pool>>();
             let Some(pool) = pool else { return Vec::new() };
-            let Ok(mut conn) = pool.acquire().await else {
+            let Ok(mut conn) = acquire_cancel_safe(pool).await else {
                 return Vec::new();
             };
             let sql = "SELECT merchant_id, market_id, name, stall_no, contact_phone, category, status FROM merchant ORDER BY merchant_id DESC LIMIT 100";
@@ -370,7 +372,7 @@ mod db_backed {
         /// 按 ID 查询商品（DB-backed）
         async fn product(&self, ctx: &Context<'_>, id: i64) -> Option<ProductGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "SELECT good_id, merchant_id, cat_id, name, barcode, price, unit, status FROM good WHERE good_id = ?";
             let params = [Value::I64(id)];
             let rows = conn.query_with_params(sql, &params).await.ok()?;
@@ -381,7 +383,7 @@ mod db_backed {
         async fn products(&self, ctx: &Context<'_>) -> Vec<ProductGql> {
             let pool = ctx.data_opt::<Arc<Pool>>();
             let Some(pool) = pool else { return Vec::new() };
-            let Ok(mut conn) = pool.acquire().await else {
+            let Ok(mut conn) = acquire_cancel_safe(pool).await else {
                 return Vec::new();
             };
             let sql = "SELECT good_id, merchant_id, cat_id, name, barcode, price, unit, status FROM good ORDER BY good_id DESC LIMIT 100";
@@ -396,7 +398,7 @@ mod db_backed {
         /// 按 ID 查询订单（DB-backed）
         async fn order(&self, ctx: &Context<'_>, id: i64) -> Option<OrderGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "SELECT order_id, order_no, merchant_id, device_id, total_fen, item_count, status, pay_method FROM `order` WHERE order_id = ?";
             let params = [Value::I64(id)];
             let rows = conn.query_with_params(sql, &params).await.ok()?;
@@ -407,7 +409,7 @@ mod db_backed {
         async fn orders(&self, ctx: &Context<'_>) -> Vec<OrderGql> {
             let pool = ctx.data_opt::<Arc<Pool>>();
             let Some(pool) = pool else { return Vec::new() };
-            let Ok(mut conn) = pool.acquire().await else {
+            let Ok(mut conn) = acquire_cancel_safe(pool).await else {
                 return Vec::new();
             };
             let sql = "SELECT order_id, order_no, merchant_id, device_id, total_fen, item_count, status, pay_method FROM `order` ORDER BY order_id DESC LIMIT 100";
@@ -433,7 +435,7 @@ mod db_backed {
             unit: String,
         ) -> Option<ProductGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "INSERT INTO good (merchant_id, cat_id, name, barcode, price, unit, ai_class_id, image, status, created_at, updated_at) \
                        VALUES (?, ?, ?, ?, ?, ?, 0, '', 1, NOW(), NOW())";
             let params = [
@@ -470,7 +472,7 @@ mod db_backed {
             status: i8,
         ) -> Option<ProductGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "UPDATE good SET status = ?, updated_at = NOW() WHERE good_id = ?";
             let params = [Value::I8(status), Value::I64(id)];
             conn.execute_with_params(sql, &params).await.ok()?;
@@ -491,7 +493,7 @@ mod db_backed {
             item_count: i32,
         ) -> Option<OrderGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "INSERT INTO `order` (order_no, merchant_id, device_id, total_fen, item_count, status, pay_method, offline_seq, created_at, updated_at) \
                        VALUES (?, ?, ?, ?, ?, 1, 0, '', NOW(), NOW())";
             let params = [
@@ -528,7 +530,7 @@ mod db_backed {
             pay_method: i8,
         ) -> Option<OrderGql> {
             let pool = ctx.data_opt::<Arc<Pool>>()?;
-            let mut conn = pool.acquire().await.ok()?;
+            let mut conn = acquire_cancel_safe(pool).await.ok()?;
             let sql = "UPDATE `order` SET status = ?, pay_method = ?, updated_at = NOW() WHERE order_id = ?";
             let params = [Value::I8(status), Value::I8(pay_method), Value::I64(id)];
             conn.execute_with_params(sql, &params).await.ok()?;

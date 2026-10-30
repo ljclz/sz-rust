@@ -7,6 +7,8 @@
 
 use sz_rust_sz300::services::mqtt_service;
 
+mod common;
+
 #[test]
 fn test_get_mqtt_config() {
     let config = mqtt_service::get_mqtt_config();
@@ -81,7 +83,7 @@ async fn test_dispatch_topic_routing_integration() {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     };
@@ -106,21 +108,10 @@ async fn test_dispatch_topic_routing_integration() {
             pool.close_all().await;
             return;
         }
-        conn.execute("DROP TABLE IF EXISTS device").await.ok();
-        conn.execute(
-            "CREATE TABLE device (\
-             device_id BIGINT AUTO_INCREMENT PRIMARY KEY,\
-             device_sn VARCHAR(64) NOT NULL UNIQUE,\
-             merchant_id BIGINT NOT NULL DEFAULT 0,\
-             status INT NOT NULL DEFAULT 0,\
-             signal_strength INT NOT NULL DEFAULT 0,\
-             fw_version VARCHAR(32) NOT NULL DEFAULT '',\
-             bind_at DATETIME NULL,\
-             last_online_at DATETIME NULL\
-             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        )
-        .await
-        .expect("建 device 表失败");
+    }
+    common::setup_all_tables(&pool).await;
+    {
+        let mut conn = pool.acquire().await.expect("获取连接失败");
         conn.execute_with_params(
             "INSERT INTO device (device_sn, merchant_id, status) VALUES (?, 100, 1)",
             &[OrmValue::String("SN_DISPATCH_001".to_string())],
@@ -131,6 +122,7 @@ async fn test_dispatch_topic_routing_integration() {
 
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -141,6 +133,8 @@ async fn test_dispatch_topic_routing_integration() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -166,6 +160,8 @@ async fn test_dispatch_topic_routing_integration() {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     };
 
     let payload = serde_json::json!({
@@ -205,10 +201,7 @@ async fn test_dispatch_topic_routing_integration() {
         assert_eq!(fw, "1.2.0", "dispatch 应将 fw_version 更新为 1.2.0");
     }
 
-    {
-        let mut conn = pool.acquire().await.expect("获取连接失败");
-        conn.execute("DROP TABLE IF EXISTS device").await.ok();
-    }
+    common::teardown_all(&pool).await;
     pool.close_all().await;
 }
 
@@ -232,7 +225,7 @@ async fn test_start_consumer_graceful_shutdown_integration() {
             host: "127.0.0.1".to_string(),
             port: 3306,
             username: "root".to_string(),
-            password: "test123".to_string(),
+            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
             database: "sz_orm_test".to_string(),
         },
     };
@@ -245,6 +238,7 @@ async fn test_start_consumer_graceful_shutdown_integration() {
     };
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -255,6 +249,8 @@ async fn test_start_consumer_graceful_shutdown_integration() {
         chain_auditor: std::sync::Arc::new(
             sz_rust_middleware_facade::audit_chain::ChainHashAuditor::new(),
         ),
+        #[cfg(feature = "v18-audit-chain")]
+        audit_sink: common::test_audit_sink(),
         #[cfg(feature = "v18-upload")]
         upload_config: sz_rust_sz300::config::upload_config(),
         #[cfg(feature = "v18-graphql")]
@@ -280,6 +276,8 @@ async fn test_start_consumer_graceful_shutdown_integration() {
                 "test_pub_key".to_string(),
             ),
         ),
+        metrics_token: None,
+        metrics_public: true,
     };
 
     let (tx, rx) = watch::channel(false);

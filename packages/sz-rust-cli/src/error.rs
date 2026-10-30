@@ -6,6 +6,8 @@
 //! 对齐 PHP `think\console\Command` 的错误处理模式：
 //! - PHP 通过返回 `false` 或抛出异常
 //! - Rust 使用 `Result<T, CliError>` 统一错误处理
+//!
+//! 2026-10-27 UXR P1-3 整改：错误消息统一为中文，与 CLI 帮助（clap 中文 about）一致。
 
 use std::path::PathBuf;
 use thiserror::Error;
@@ -14,31 +16,31 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum CliError {
     /// 文件 IO 错误（创建文件、读取模板等）
-    #[error("IO error: {0}")]
+    #[error("IO 错误: {0}")]
     Io(#[from] std::io::Error),
 
     /// 文件已存在（对齐 PHP `Make::execute` 中 `already exists!` 提示）
-    #[error("File already exists: {0}")]
+    #[error("文件已存在: {0}")]
     FileExists(String),
 
     /// clap 参数解析错误（对齐 PHP `console\Input` 验证失败）
-    #[error("Clap error: {0}")]
+    #[error("参数解析错误: {0}")]
     Clap(String),
 
     /// 代码生成错误（模板替换失败等）
-    #[error("Generation error: {0}")]
+    #[error("代码生成错误: {0}")]
     Generation(String),
 
     /// 数据库迁移错误
-    #[error("Migration error: {0}")]
+    #[error("数据库迁移错误: {0}")]
     Migration(String),
 
     /// 缓存清理错误
-    #[error("Cache error: {0}")]
+    #[error("缓存清理错误: {0}")]
     Cache(String),
 
     /// 调度器错误
-    #[error("Scheduler error: {0}")]
+    #[error("调度器错误: {0}")]
     Scheduler(String),
 
     /// 通用错误
@@ -46,11 +48,11 @@ pub enum CliError {
     Generic(String),
 
     /// P1-T3: 非法插件名称（不符合 Rust crate 命名规范）
-    #[error("Invalid plugin name: {0} (must be lowercase letters, digits, underscores or hyphens, not starting with a digit)")]
+    #[error("非法插件名称: {0}（必须为小写字母、数字、下划线或连字符，且不能以数字开头）")]
     InvalidPluginName(String),
 
     /// P1-T3: 未知模板类型（附带用户请求的模板名与可用模板列表）
-    #[error("Unknown template: '{requested}'. Available templates: {available:?}")]
+    #[error("未知模板: '{requested}'。可用模板: {available:?}")]
     UnknownTemplate {
         /// 用户请求的模板类型名
         requested: String,
@@ -59,19 +61,19 @@ pub enum CliError {
     },
 
     /// P1-T3: 字段定义解析错误
-    #[error("Field parse error: {0}")]
+    #[error("字段解析错误: {0}")]
     FieldParseError(String),
 
     /// P1-T3: 目标目录已存在（需 --force 覆盖）
-    #[error("Directory already exists: {0} (use --force to overwrite)")]
+    #[error("目录已存在: {0}（使用 --force 覆盖）")]
     DirExists(PathBuf),
 
     /// P1-T3: 模板文件缺失（附带缺失文件列表）
-    #[error("Template files missing: {0:?}")]
+    #[error("模板文件缺失: {0:?}")]
     TemplateMissing(Vec<String>),
 
     /// P1-T3: 模板语法错误（含文件名/行号/列号/错误消息）
-    #[error("Template syntax error in {file}:{line}:{col}: {msg}")]
+    #[error("模板语法错误 {file}:{line}:{col}: {msg}")]
     TemplateSyntaxError {
         /// 模板文件名
         file: String,
@@ -84,7 +86,7 @@ pub enum CliError {
     },
 
     /// P1-T3: 模板变量未找到（含变量名/引用文件/行号）
-    #[error("Variable not found: '{var}' referenced in {file}:{line}")]
+    #[error("变量未找到: '{var}'，引用位置 {file}:{line}")]
     VarNotFound {
         /// 缺失的变量名
         var: String,
@@ -95,31 +97,31 @@ pub enum CliError {
     },
 
     /// P1-T3: cargo check 编译失败（含编译错误列表）
-    #[error("Compilation failed: {0:?}")]
+    #[error("编译失败: {0:?}")]
     CompileFailed(Vec<String>),
 
     /// P1-T3: 外键字段不存在于从表字段定义中
-    #[error("Foreign key not found: '{0}' is not a field in the slave table")]
+    #[error("外键未找到: '{0}' 不是从表字段")]
     ForeignKeyNotFound(String),
 
     /// P1-T3: 主表与从表同名
-    #[error("Master table and slave table must be different")]
+    #[error("主表与从表不能同名")]
     MasterSlaveSame,
 
     /// P2-2: 插件市场错误
-    #[error("Marketplace error: {0}")]
+    #[error("插件市场错误: {0}")]
     Marketplace(String),
 
     /// P2-2: HTTP 请求错误
-    #[error("HTTP error: {0}")]
+    #[error("HTTP 错误: {0}")]
     Http(String),
 
     /// P2-2: TOML 序列化错误
-    #[error("TOML error: {0}")]
+    #[error("TOML 序列化错误: {0}")]
     Toml(String),
 
     /// P2-2: JSON 序列化错误
-    #[error("JSON error: {0}")]
+    #[error("JSON 序列化错误: {0}")]
     Json(String),
 }
 
@@ -139,14 +141,14 @@ mod tests {
             std::io::ErrorKind::NotFound,
             "file not found",
         ));
-        assert!(err.to_string().contains("IO error"));
+        assert!(err.to_string().contains("IO 错误"));
         assert!(err.to_string().contains("file not found"));
     }
 
     #[test]
     fn test_file_exists_error_display() {
         let err = CliError::FileExists("/path/to/file".to_string());
-        assert!(err.to_string().contains("File already exists"));
+        assert!(err.to_string().contains("文件已存在"));
         assert!(err.to_string().contains("/path/to/file"));
     }
 
@@ -160,31 +162,31 @@ mod tests {
     #[test]
     fn test_generation_error_display() {
         let err = CliError::Generation("template substitution failed".to_string());
-        assert!(err.to_string().contains("Generation error"));
+        assert!(err.to_string().contains("代码生成错误"));
     }
 
     #[test]
     fn test_migration_error_display() {
         let err = CliError::Migration("database connection failed".to_string());
-        assert!(err.to_string().contains("Migration error"));
+        assert!(err.to_string().contains("数据库迁移错误"));
     }
 
     #[test]
     fn test_cache_error_display() {
         let err = CliError::Cache("redis connection failed".to_string());
-        assert!(err.to_string().contains("Cache error"));
+        assert!(err.to_string().contains("缓存清理错误"));
     }
 
     #[test]
     fn test_scheduler_error_display() {
         let err = CliError::Scheduler("cron parse failed".to_string());
-        assert!(err.to_string().contains("Scheduler error"));
+        assert!(err.to_string().contains("调度器错误"));
     }
 
     #[test]
     fn test_invalid_plugin_name_display() {
         let err = CliError::InvalidPluginName("my plugin".to_string());
-        assert!(err.to_string().contains("Invalid plugin name"));
+        assert!(err.to_string().contains("非法插件名称"));
         assert!(err.to_string().contains("my plugin"));
     }
 
@@ -194,7 +196,7 @@ mod tests {
             requested: "nonexistent".to_string(),
             available: vec!["crud".to_string(), "master-slave".to_string()],
         };
-        assert!(err.to_string().contains("Unknown template"));
+        assert!(err.to_string().contains("未知模板"));
         assert!(err.to_string().contains("nonexistent"));
         assert!(err.to_string().contains("crud"));
     }
@@ -202,20 +204,20 @@ mod tests {
     #[test]
     fn test_field_parse_error_display() {
         let err = CliError::FieldParseError("unexpected ',' at position 5".to_string());
-        assert!(err.to_string().contains("Field parse error"));
+        assert!(err.to_string().contains("字段解析错误"));
     }
 
     #[test]
     fn test_dir_exists_display() {
         let err = CliError::DirExists(PathBuf::from("/path/to/plugin"));
-        assert!(err.to_string().contains("Directory already exists"));
+        assert!(err.to_string().contains("目录已存在"));
         assert!(err.to_string().contains("--force"));
     }
 
     #[test]
     fn test_template_missing_display() {
         let err = CliError::TemplateMissing(vec!["model.rs.tera".to_string()]);
-        assert!(err.to_string().contains("Template files missing"));
+        assert!(err.to_string().contains("模板文件缺失"));
         assert!(err.to_string().contains("model.rs.tera"));
     }
 
@@ -250,13 +252,13 @@ mod tests {
     fn test_compile_failed_display() {
         let err =
             CliError::CompileFailed(vec!["error[E0277]: trait bound not satisfied".to_string()]);
-        assert!(err.to_string().contains("Compilation failed"));
+        assert!(err.to_string().contains("编译失败"));
     }
 
     #[test]
     fn test_foreign_key_not_found_display() {
         let err = CliError::ForeignKeyNotFound("user_id".to_string());
-        assert!(err.to_string().contains("Foreign key not found"));
+        assert!(err.to_string().contains("外键未找到"));
         assert!(err.to_string().contains("user_id"));
     }
 
@@ -265,6 +267,6 @@ mod tests {
         let err = CliError::MasterSlaveSame;
         assert!(err
             .to_string()
-            .contains("Master table and slave table must be different"));
+            .contains("主表与从表不能同名"));
     }
 }

@@ -11,8 +11,8 @@ pub struct OtaVersion {
     pub ota_id: Option<i64>,
     /// 版本号
     pub version: String,
-    /// 适用的设备型号
-    pub model: String,
+    /// 适用的设备型号（生产列名 `device_model`）
+    pub device_model: String,
     /// 固件下载地址
     pub url: String,
     /// 固件 MD5 校验值
@@ -21,14 +21,12 @@ pub struct OtaVersion {
     pub changelog: String,
     /// 固件大小（单位：字节）
     pub size: i64,
-    /// 是否强制更新（0=否，1=是）
-    pub force_update: i8,
+    /// 是否强制更新（0=否，1=是；生产列名 `forced`）
+    pub forced: i8,
     /// 状态（0=禁用，1=启用）
     pub status: i8,
     /// 创建时间
     pub created_at: Option<String>,
-    /// 更新时间
-    pub updated_at: Option<String>,
 }
 
 impl Model for OtaVersion {
@@ -51,7 +49,8 @@ impl Model for OtaVersion {
     }
 
     fn timestamp_fields() -> Option<TimestampFields> {
-        Some(TimestampFields::with_both("created_at", "updated_at"))
+        // 生产表 ota_version 只有 created_at，没有 updated_at
+        Some(TimestampFields::new(Some("created_at"), None))
     }
 }
 
@@ -60,27 +59,26 @@ impl ModelExt for OtaVersion {
         vec![
             "ota_id",
             "version",
-            "model",
+            "device_model",
             "url",
             "md5",
             "changelog",
             "size",
-            "force_update",
+            "forced",
             "status",
             "created_at",
-            "updated_at",
         ]
     }
 
     fn fillable() -> Vec<&'static str> {
         vec![
             "version",
-            "model",
+            "device_model",
             "url",
             "md5",
             "changelog",
             "size",
-            "force_update",
+            "forced",
             "status",
         ]
     }
@@ -93,15 +91,14 @@ impl ModelExt for OtaVersion {
         match column {
             "ota_id" => self.ota_id.map(Value::I64),
             "version" => Some(Value::String(self.version.clone())),
-            "model" => Some(Value::String(self.model.clone())),
+            "device_model" => Some(Value::String(self.device_model.clone())),
             "url" => Some(Value::String(self.url.clone())),
             "md5" => Some(Value::String(self.md5.clone())),
             "changelog" => Some(Value::String(self.changelog.clone())),
             "size" => Some(Value::I64(self.size)),
-            "force_update" => Some(Value::I32(self.force_update as i32)),
+            "forced" => Some(Value::I32(self.forced as i32)),
             "status" => Some(Value::I32(self.status as i32)),
             "created_at" => self.created_at.as_ref().map(|s| Value::String(s.clone())),
-            "updated_at" => self.updated_at.as_ref().map(|s| Value::String(s.clone())),
             _ => None,
         }
     }
@@ -113,8 +110,8 @@ impl ModelExt for OtaVersion {
         if let Some(v) = map.get("version").and_then(|v| v.as_str()) {
             self.version = v.to_string();
         }
-        if let Some(v) = map.get("model").and_then(|v| v.as_str()) {
-            self.model = v.to_string();
+        if let Some(v) = map.get("device_model").and_then(|v| v.as_str()) {
+            self.device_model = v.to_string();
         }
         if let Some(v) = map.get("url").and_then(|v| v.as_str()) {
             self.url = v.to_string();
@@ -128,17 +125,14 @@ impl ModelExt for OtaVersion {
         if let Some(v) = map.get("size").and_then(|v| v.as_i64()) {
             self.size = v;
         }
-        if let Some(v) = map.get("force_update").and_then(|v| v.as_i64()) {
-            self.force_update = v as i8;
+        if let Some(v) = map.get("forced").and_then(|v| v.as_i64()) {
+            self.forced = v as i8;
         }
         if let Some(v) = map.get("status").and_then(|v| v.as_i64()) {
             self.status = v as i8;
         }
         if let Some(v) = map.get("created_at").and_then(|v| v.as_str()) {
             self.created_at = Some(v.to_string());
-        }
-        if let Some(v) = map.get("updated_at").and_then(|v| v.as_str()) {
-            self.updated_at = Some(v.to_string());
         }
     }
 }

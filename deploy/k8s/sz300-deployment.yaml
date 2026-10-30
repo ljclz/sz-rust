@@ -8,12 +8,18 @@
 # 6. 新增 topologySpreadConstraints：跨可用区打散
 # 7. 新增 ServiceAccount：最小权限
 # 8. 新增 PVC：日志/临时数据持久化
+#
+# 安全整改（2026-10-28）：
+#   - 全部资源统一放入 sz300 namespace（与 Ingress/ConfigMap 一致），
+#     避免跨 namespace 引用失效。
+#   - Service 统一命名为 sz300-service（Ingress backend 同步指向该名称）。
+#   - 显式设置 SZ300_COOKIE_SECURE=true，强制会话 Cookie 仅经 HTTPS 传输。
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sz300-server
-  namespace: default
+  namespace: sz300
   labels:
     app: sz300-server
 automountServiceAccountToken: false
@@ -22,6 +28,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sz300-server
+  namespace: sz300
   labels:
     app: sz300-server
     version: v0.2.0
@@ -86,6 +93,10 @@ spec:
           value: "mysql-service"
         - name: RUST_LOG
           value: "warn,sz_rust_sz300=info"
+        # 安全整改（2026-10-28）：显式要求会话 Cookie 仅经 HTTPS 传输
+        # （代码默认 true，这里显式声明；TLS 由 Ingress/前置代理终止）
+        - name: SZ300_COOKIE_SECURE
+          value: "true"
         # 安全上下文：禁止提权 + 只读根文件系统 + drop ALL capabilities
         securityContext:
           allowPrivilegeEscalation: false
@@ -148,6 +159,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sz300-service
+  namespace: sz300
   labels:
     app: sz300-server
 spec:
@@ -161,14 +173,15 @@ spec:
   type: ClusterIP
 ---
 # Secret 必须通过 kubectl create secret 手动创建，不要在 YAML 中硬编码
-# 创建命令：
-#   kubectl create secret generic sz300-secrets \
+# 创建命令（注意 namespace 为 sz300）：
+#   kubectl -n sz300 create secret generic sz300-secrets \
 #     --from-literal=jwt-secret=<your-jwt-secret> \
 #     --from-literal=db-password=<your-db-password>
 apiVersion: v1
 kind: Secret
 metadata:
   name: sz300-secrets
+  namespace: sz300
   labels:
     app: sz300-server
 type: Opaque
@@ -177,6 +190,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: sz300-logs
+  namespace: sz300
   labels:
     app: sz300-server
 spec:
@@ -192,6 +206,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: sz300-server
+  namespace: sz300
   labels:
     app: sz300-server
 spec:
@@ -233,6 +248,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: sz300-server
+  namespace: sz300
   labels:
     app: sz300-server
 spec:
@@ -246,6 +262,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: sz300-server
+  namespace: sz300
   labels:
     app: sz300-server
 spec:
@@ -256,11 +273,11 @@ spec:
   - Ingress
   - Egress
   ingress:
-  # 仅允许同 namespace 内任何 Pod 访问 8300 端口
+  # 仅允许同 namespace（sz300）内任何 Pod 访问 8300 端口
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: default
+          kubernetes.io/metadata.name: sz300
     ports:
     - protocol: TCP
       port: 8300

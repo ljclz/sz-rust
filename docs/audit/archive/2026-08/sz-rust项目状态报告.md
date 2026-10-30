@@ -289,7 +289,7 @@
 - **基准测试基线**：v0.2.1 共 **6 组 16 项**（2026-08-01 实测）
   - 既有 4 组 12 项：route_matching / handler_ref_parse / route_config / json_serialization
   - **新增 2 组 10 项**：middleware_chain（6 项）+ di_container（4 项）
-  - 基线详情见 [baseline-v0.2.1.md](../benchmarks/baseline-v0.2.1.md)
+  - 基线详情见 [baseline-v0.2.1.md](../../../benchmarks/baseline-v0.2.1.md)
 
 ---
 

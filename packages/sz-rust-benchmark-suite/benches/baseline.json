@@ -1,45 +1,242 @@
 {
-  "version": "v1.9.0-initial",
-  "measured_at": "2026-10-07T00:00:00Z",
-  "note": "初始基线，需通过 scripts/perf-regression.js --init 在目标环境实际压测后校准",
-  "hardware_spec": "待校准（首次 CI 运行时自动填充）",
-  "regression_threshold_pct": 5.0,
-  "hot_paths": [
-    {
-      "path": "/health",
-      "method": "GET",
-      "concurrency": 100,
-      "duration_s": 30,
-      "qps": 50000.0,
-      "p50_ms": 0.5,
-      "p95_ms": 1.0,
-      "p99_ms": 2.0,
-      "error_rate_pct": 0.0,
-      "total_requests": 1500000
-    },
-    {
-      "path": "/api/v1/product/list",
-      "method": "POST",
+  "schema": 2,
+  "note": "schema 2：按环境指纹分槽存放实测基线。历史 v1.9.0 内容为跨机器硬编码占位值（/health=50000 QPS，从未实测），已于 2026-10-29 移除。首个真实基线（指纹 a17a08aab11946f1，一次性 MySQL 9.6 + perf-seed 2 万行 + release 二进制 + c=50/10s/60s×3）于 2026-10-29 由 `node scripts/perf-regression.js --init` 写入，三端点 0% 错误。2026-10-30 订单 COUNT 缓存（ADR-048）落地后重播种：order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms；health/product 同步重测（同机负载变化致 product 上升）。",
+  "regression_threshold_pct": 5,
+  "p99_threshold_pct": 25,
+  "fingerprints": {
+    "a17a08aab11946f1": {
+      "fingerprint": {
+        "platform": "win32",
+        "arch": "x64",
+        "cpu_model": "Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz",
+        "logical_cpus": 40,
+        "mem_gib": 64,
+        "os_release": "10.0.19045",
+        "node_major": "24"
+      },
+      "measured_at": "2026-10-30T03:18:31.738Z",
       "concurrency": 50,
-      "duration_s": 30,
-      "qps": 8000.0,
-      "p50_ms": 3.0,
-      "p95_ms": 8.0,
-      "p99_ms": 15.0,
-      "error_rate_pct": 0.0,
-      "total_requests": 240000
-    },
-    {
-      "path": "/api/v1/order/list",
-      "method": "POST",
-      "concurrency": 50,
-      "duration_s": 30,
-      "qps": 7000.0,
-      "p50_ms": 4.0,
-      "p95_ms": 10.0,
-      "p99_ms": 20.0,
-      "error_rate_pct": 0.0,
-      "total_requests": 210000
+      "warmup_s": 10,
+      "duration_s": 60,
+      "reps": 3,
+      "endpoints": {
+        "health": {
+          "warmup": {
+            "attempts": 56867,
+            "error_rate_pct": 0
+          },
+          "concurrency": 50,
+          "duration_s": 60,
+          "reps": [
+            {
+              "elapsed_s": 60,
+              "attempts": 402235,
+              "completed": 402235,
+              "ok": 402235,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 402235
+              },
+              "qps_ok": 6703.7,
+              "error_rate_pct": 0,
+              "p50_ms": 7.291,
+              "p90_ms": 8.09,
+              "p95_ms": 8.484,
+              "p99_ms": 9.649,
+              "p999_ms": 12.185,
+              "max_ms": 14.847
+            },
+            {
+              "elapsed_s": 60,
+              "attempts": 416199,
+              "completed": 416199,
+              "ok": 416199,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 416199
+              },
+              "qps_ok": 6936.3,
+              "error_rate_pct": 0,
+              "p50_ms": 7.077,
+              "p90_ms": 7.663,
+              "p95_ms": 7.995,
+              "p99_ms": 8.882,
+              "p999_ms": 10.883,
+              "max_ms": 14.408
+            },
+            {
+              "elapsed_s": 60,
+              "attempts": 418920,
+              "completed": 418920,
+              "ok": 418920,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 418920
+              },
+              "qps_ok": 6981.8,
+              "error_rate_pct": 0,
+              "p50_ms": 6.99,
+              "p90_ms": 7.649,
+              "p95_ms": 8.06,
+              "p99_ms": 9.243,
+              "p999_ms": 12.428,
+              "max_ms": 15.584
+            }
+          ],
+          "qps_median": 6936.3,
+          "qps_cv_pct": 1.77,
+          "p50_median_ms": 7.077,
+          "p90_median_ms": 7.663,
+          "p95_median_ms": 8.06,
+          "p99_median_ms": 9.243,
+          "p999_median_ms": 12.185,
+          "max_error_rate_pct": 0
+        },
+        "product_list": {
+          "warmup": {
+            "attempts": 12807,
+            "error_rate_pct": 0
+          },
+          "concurrency": 50,
+          "duration_s": 60,
+          "reps": [
+            {
+              "elapsed_s": 60.03,
+              "attempts": 77917,
+              "completed": 77917,
+              "ok": 77917,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 77917
+              },
+              "qps_ok": 1297.9,
+              "error_rate_pct": 0,
+              "p50_ms": 37.453,
+              "p90_ms": 48.704,
+              "p95_ms": 53.868,
+              "p99_ms": 63.86,
+              "p999_ms": 79.883,
+              "max_ms": 108.59
+            },
+            {
+              "elapsed_s": 60.03,
+              "attempts": 77595,
+              "completed": 77595,
+              "ok": 77595,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 77595
+              },
+              "qps_ok": 1292.6,
+              "error_rate_pct": 0,
+              "p50_ms": 37.62,
+              "p90_ms": 48.858,
+              "p95_ms": 54.111,
+              "p99_ms": 64.79,
+              "p999_ms": 80.089,
+              "max_ms": 123.727
+            },
+            {
+              "elapsed_s": 60.04,
+              "attempts": 77155,
+              "completed": 77155,
+              "ok": 77155,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 77155
+              },
+              "qps_ok": 1285.1,
+              "error_rate_pct": 0,
+              "p50_ms": 37.825,
+              "p90_ms": 49.283,
+              "p95_ms": 54.465,
+              "p99_ms": 65.388,
+              "p999_ms": 81.018,
+              "max_ms": 115.952
+            }
+          ],
+          "qps_median": 1292.6,
+          "qps_cv_pct": 0.41,
+          "p50_median_ms": 37.62,
+          "p90_median_ms": 48.858,
+          "p95_median_ms": 54.111,
+          "p99_median_ms": 64.79,
+          "p999_median_ms": 80.089,
+          "max_error_rate_pct": 0
+        },
+        "order_list": {
+          "warmup": {
+            "attempts": 26159,
+            "error_rate_pct": 0
+          },
+          "concurrency": 50,
+          "duration_s": 60,
+          "reps": [
+            {
+              "elapsed_s": 60.01,
+              "attempts": 157452,
+              "completed": 157452,
+              "ok": 157452,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 157452
+              },
+              "qps_ok": 2623.6,
+              "error_rate_pct": 0,
+              "p50_ms": 18.795,
+              "p90_ms": 24.331,
+              "p95_ms": 27.391,
+              "p99_ms": 32.477,
+              "p999_ms": 40.636,
+              "max_ms": 63.026
+            },
+            {
+              "elapsed_s": 60.02,
+              "attempts": 159899,
+              "completed": 159899,
+              "ok": 159899,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 159899
+              },
+              "qps_ok": 2664.2,
+              "error_rate_pct": 0,
+              "p50_ms": 18.385,
+              "p90_ms": 23.916,
+              "p95_ms": 26.888,
+              "p99_ms": 31.799,
+              "p999_ms": 39.273,
+              "max_ms": 58.288
+            },
+            {
+              "elapsed_s": 60.01,
+              "attempts": 155811,
+              "completed": 155811,
+              "ok": 155811,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 155811
+              },
+              "qps_ok": 2596.2,
+              "error_rate_pct": 0,
+              "p50_ms": 19.012,
+              "p90_ms": 24.74,
+              "p95_ms": 27.896,
+              "p99_ms": 33.072,
+              "p999_ms": 41.285,
+              "max_ms": 65.063
+            }
+          ],
+          "qps_median": 2623.6,
+          "qps_cv_pct": 1.06,
+          "p50_median_ms": 18.795,
+          "p90_median_ms": 24.331,
+          "p95_median_ms": 27.391,
+          "p99_median_ms": 32.477,
+          "p999_median_ms": 40.636,
+          "max_error_rate_pct": 0
+        }
+      }
     }
-  ]
+  }
 }
