@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-10-30 更新：响应 gzip 压缩与 BREACH 排除（ADR-050，31–60 天路线项）
+
+> **状态**：✅ 能力与排除策略落地 / ⏳ 默认关闭，收益与 CPU 代价未实测（待同源 A/B 决定默认值）
+> **决策**：`docs/adr/0050-响应gzip压缩与breach排除.md`
+> **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「响应 5,314 B 未压缩」；31–60 天路线项「开 gzip/brotli（注意 BREACH）」
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| gzip 压缩层（`DefaultPredicate` + 标记排除）与 `NoCompression` 响应扩展 | `packages/sz-rust-sz300/src/middleware/compression.rs` | `cargo check -p sz-rust-sz300 --all-targets` = 0 error；lib **118 passed**（+2） |
+| 开关 `SZ300_COMPRESSION`（默认关闭，非法值 fail-closed） | `packages/sz-rust-sz300/src/config.rs`（`compression_enabled`） | `config_test` = 7 passed（+1 开关解析：未设置/6 种真值/4 种假值/非法值） |
+| `create_router` 条件挂载（关闭时层不入栈）+ 压缩位于脱敏层之外 | `packages/sz-rust-sz300/src/router.rs` | `--features v18-rbac` / 8 feature 组合 `cargo check` = 0 error |
+| 令牌端点 BREACH 排除（login / refresh，RBAC 与非 RBAC 双分支） | 同上 | `compression_test` = 5 passed（标记穿过 `DataMaskLayer` 传播到压缩谓词） |
+| 离线同构栈集成测试（无需数据库） | `packages/sz-rust-sz300/tests/compression_test.rs` | 5 passed：业务 JSON 被 gzip（1f 8b 魔数 + 体积更小）/ 令牌路由跳过 / <32 B 跳过 / SSE 跳过 / 无 Accept-Encoding 原样 |
+| **顺带修复：`v18-sse` feature 从未被 CI 编译**（4 处编译错误） | `packages/sz-rust-sz300/src/router.rs`（`sse_handler`） | `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` = 0 error；运行时行为未验证（`sse_test` 无 MySQL 软跳过），已登记欠债 |
+| brotli 暂不启用（避免一轮测量叠加两个未测变量） | `packages/sz-rust-sz300/Cargo.toml`（仅 `compression-gzip`） | 决策理由见 ADR-050 替代方案 B |
+| 回归 | `cargo test -p sz-rust-sz300` | **244 passed / 0 failed / 62 ignored**；clippy 0 warning；fmt 无差异 |
+| 性能量化 | 需一次性 MySQL + release 实例 + 门禁 v2（c=50/10s/60s×3），且客户端需显式发 `Accept-Encoding: gzip` | **未实测（W）**，欠债 `DB-2026-10-30-03`，受「先问再起服务」约束待批准 |
+
+---
+
 ## 2026-10-30 更新：鉴权授权上下文缓存（ADR-049，31–60 天路线项）
 
 > **状态**：✅ 代码与测试完成 / ⏳ 端到端吞吐未实测

@@ -130,8 +130,21 @@ pub fn create_router(state: AppState) -> Router {
     #[cfg(not(feature = "v18-rbac"))]
     let api_routes = Router::new()
         // 认证（公开接口）
-        .route("/api/v1/auth/login", post(auth::login))
-        .route("/api/v1/auth/refresh", post(auth::refresh))
+        // ADR-050：登录/刷新响应把请求里的 username 原样回显，又同时下发本次生成的
+        // token / refresh_token —— 明文可控 + 密钥在同一条响应内，正是 BREACH 的成立条件，
+        // 因此给这两条路由打上「不压缩」标记。
+        .route(
+            "/api/v1/auth/login",
+            post(auth::login).layer(middleware::from_fn(
+                crate::middleware::compression::mark_no_compress,
+            )),
+        )
+        .route(
+            "/api/v1/auth/refresh",
+            post(auth::refresh).layer(middleware::from_fn(
+                crate::middleware::compression::mark_no_compress,
+            )),
+        )
         .route("/api/v1/auth/me", post(auth::me))
         .route("/api/v1/auth/logout", post(auth::logout))
         // 商户管理
@@ -205,9 +218,17 @@ pub fn create_router(state: AppState) -> Router {
         let engine = state.rbac_engine.clone();
 
         // 认证路由（无 RBAC）
+        // ADR-050：令牌签发响应排除压缩（BREACH，理由见非 RBAC 分支同位置注释）
+        let no_compress = middleware::from_fn(crate::middleware::compression::mark_no_compress);
         let auth_routes = Router::new()
-            .route("/api/v1/auth/login", post(auth::login))
-            .route("/api/v1/auth/refresh", post(auth::refresh))
+            .route(
+                "/api/v1/auth/login",
+                post(auth::login).layer(no_compress.clone()),
+            )
+            .route(
+                "/api/v1/auth/refresh",
+                post(auth::refresh).layer(no_compress),
+            )
             .route("/api/v1/auth/me", post(auth::me))
             .route("/api/v1/auth/logout", post(auth::logout));
 
@@ -455,6 +476,17 @@ pub fn create_router(state: AppState) -> Router {
         ))
         .with_state(state);
 
+    // v2.0.0 ADR-050：响应 gzip 压缩（`SZ300_COMPRESSION=1` 启用，默认关闭）
+    //
+    // 位置：脱敏/审计层之后（压缩的是脱敏完成后的最终字节，且 `NoCompression` 标记能向外传播到
+    // 压缩谓词）、安全头之前（头仍逐条注入）。仅在客户端带 `Accept-Encoding: gzip` 时才实际压缩。
+    // 关闭时该层根本不进入服务栈，业务热路径零额外开销。
+    let router = if crate::config::compression_enabled() {
+        router.layer(crate::middleware::compression::compression_layer())
+    } else {
+        router
+    };
+
     // v1.9.0 全链路追踪中间件（feature gate 控制，默认不启用）
     // 为每个请求生成 TraceID + Root Span，注入 X-Trace-Id 响应头
     #[cfg(feature = "v19-obs-closure")]
@@ -597,7 +629,8 @@ async fn sse_handler(
     headers: axum::http::HeaderMap,
     req: axum::http::Request<axum::body::Body>,
 ) -> axum::response::Response {
-    use axum::response::sse::Sse;
+    use axum::response::sse::{Event, Sse};
+    use axum::response::IntoResponse;
     use futures::stream::{self, StreamExt};
 
     // 安全修复：未认证不得订阅事件流
@@ -614,30 +647,36 @@ async fn sse_handler(
     let (receiver, missed) = state.sse_service.subscribe(last_event_id).await;
 
     let missed_stream = stream::iter(missed.into_iter().map(|e| {
-        Ok(Event::default()
-            .id(e.id.to_string())
-            .event(e.event_type)
-            .data(e.data))
+        Ok::<_, std::convert::Infallible>(
+            Event::default()
+                .id(e.id.to_string())
+                .event(e.event_type)
+                .data(e.data),
+        )
     }));
 
     let live_stream = stream::unfold(receiver, |mut rx| async move {
         match rx.recv().await {
             Ok(event) => Some((
-                Ok(Event::default()
-                    .id(event.id.to_string())
-                    .event(event.event_type)
-                    .data(event.data)),
+                Ok::<_, std::convert::Infallible>(
+                    Event::default()
+                        .id(event.id.to_string())
+                        .event(event.event_type)
+                        .data(event.data),
+                ),
                 rx,
             )),
             Err(_) => None,
         }
     });
 
-    Sse::new(missed_stream.chain(live_stream)).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(std::time::Duration::from_secs(15))
-            .text("ping"),
-    )
+    Sse::new(missed_stream.chain(live_stream))
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("ping"),
+        )
+        .into_response()
 }
 
 #[cfg(test)]

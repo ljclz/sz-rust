@@ -53,8 +53,8 @@ async fn delete_user(pool: &Pool, user_id: i64) {
 
 /// 取连接池并写入认证模块的进程级静态（`auth_context` 只认这个池）
 ///
-/// 池不在用例结束时 `close_all`：`DB_POOL` 是 `OnceLock`，两个用例共用同一进程内先写入的那个池，
-/// 关闭它会让后跑用例的「用户不存在」与「池已死」不可区分。
+/// 池不在用例结束时 `close_all`：`DB_POOL` 是 `OnceLock`，同一进程内后续调用只会拿到先写入的那个池，
+/// 关闭它会让「用户不存在」与「池已死」不可区分。
 async fn init_auth_pool(pool: Pool) -> Arc<Pool> {
     let pool = Arc::new(pool);
     auth_service::init_auth("test-secret-key", "sz300-test", 86400, pool.clone());

@@ -97,6 +97,14 @@ pub fn env_bool(key: &str) -> Option<bool> {
         })
 }
 
+/// 响应 gzip 压缩开关（`SZ300_COMPRESSION`，未设置/非法值 = 关闭）
+///
+/// ADR-050：压缩减少出网字节但按响应消耗 CPU，默认值待同源 A/B 实测后确定；
+/// 做成开关也是该次 A/B 的前置条件（同一二进制跑两种配置）。
+pub fn compression_enabled() -> bool {
+    env_bool("SZ300_COMPRESSION").unwrap_or(false)
+}
+
 /// 从环境变量加载配置（生产安全要求：密钥不硬编码）
 ///
 /// 环境变量：

@@ -464,7 +464,7 @@ fn auth_ctx_cache() -> &'static QueryCache {
     AUTH_CTX_CACHE.get_or_init(|| QueryCache::new(50_000, AUTH_CTX_TTL))
 }
 
-/// 授权上下文缓存的命中/未命中计数（指标与集成测试断言用）
+/// 授权上下文缓存的命中/未命中计数（集成测试与人工排查用；ADR-049 决定不接入 `/metrics`）
 pub fn auth_ctx_stats() -> &'static CacheStats {
     auth_ctx_cache().stats()
 }

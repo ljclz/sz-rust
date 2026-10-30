@@ -10,7 +10,7 @@
 
 ## 1. ADR Directory
 
-> Current ADR count: **52** (ADR-001~023 + ADR-026~049 + ADR-AI-01~05; this English table below lists ADR-001~020 + latest ADRs, full list in the [Chinese index](README.md))
+> Current ADR count: **53** (ADR-001~023 + ADR-026~050 + ADR-AI-01~05; this English table below lists ADR-001~020 + latest ADRs, full list in the [Chinese index](README.md))
 > ADR density: 49 / 42 modules = **1.167** (exceeds ≥ 0.15 target, see "ADR and Production Bug Localization Spec" Section 4)
 
 | ID | Title | Status | Date | Decision Maker | File |
@@ -41,6 +41,7 @@
 | ADR-047 | Audit chain persistence via bounded async buffer + background replay | Accepted | 2026-10-30 | SZ-Rust Team | [0047-审计链异步缓冲重放.md](0047-审计链异步缓冲重放.md) |
 | ADR-048 | Order list COUNT query cache (LRU + 60 s TTL, wholesale invalidation on write) | Accepted | 2026-10-30 | SZ-Rust Team | [0048-订单count查询缓存.md](0048-订单count查询缓存.md) |
 | ADR-049 | Auth authorization-context cache (LRU + 60 s TTL, replaces per-request merchant_user query) | Accepted | 2026-10-30 | SZ-Rust Team | [0049-鉴权授权上下文缓存.md](0049-鉴权授权上下文缓存.md) |
+| ADR-050 | Response gzip compression (off by default pending A/B; token endpoints excluded against BREACH) | Accepted | 2026-10-30 | SZ-Rust Team | [0050-响应gzip压缩与breach排除.md](0050-响应gzip压缩与breach排除.md) |
 
 > **Note**: This English index was historically maintained up to ADR-020. The complete up-to-date index (ADR-001~023 + ADR-026~046 + ADR-AI-01~05, 49 decisions) is maintained in the [Chinese index](README.md).
 

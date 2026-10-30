@@ -182,7 +182,7 @@ sz-rust/                          # workspace root (single source of truth)
 
 Detailed docs in `docs/` directory:
 
-- [ADR Index](docs/adr/README.en.md) — 52 Architecture Decision Records (counted from `docs/adr/*.md` on 2026-10-30)
+- [ADR Index](docs/adr/README.en.md) — 53 Architecture Decision Records (counted from `docs/adr/*.md` on 2026-10-30)
 - [ADR-011 Observability](docs/adr/0011-可观测性模块-MetricsRegistry-SLO多窗口燃烧率.md) — MetricsRegistry design, SLO multi-window burn rate, four-layer observability model (v0.2.0)
 - [ADR-012 Distributed Tracing](docs/adr/0012-分布式追踪-W3C-TraceContext-OTLP-exporter.md) — W3C TraceContext standard, OTLP exporter path (v0.2.0)
 - [ThinkPHP API Mapping](docs/thinkphp-api-mapping.md) — SZ-Rust facade vs ThinkPHP API reference

@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Added — 响应 gzip 压缩与令牌端点 BREACH 排除（2026-10-30）
+
+> 来源：31–60 天性能路线项「开 gzip/brotli（注意 BREACH）」（用户指示按顺序执行路线项）。
+> 决策记录：`docs/adr/0050-响应gzip压缩与breach排除.md`。
+
+- 新增 `packages/sz-rust-sz300/src/middleware/compression.rs`：`compression_layer()`（tower-http `CompressionLayer` + `DefaultPredicate.and(not_marked)`）、`NoCompression` 响应扩展标记、`mark_no_compress()` 路由级标记中间件。`DefaultPredicate` 自动跳过 <32 B 响应、`application/grpc`、`image/*`、`text/event-stream`（SSE 是分块长驻流，压缩会缓冲掉事件即时性与 15 s keep-alive）。
+- `create_router` 按 `config::compression_enabled()`（环境变量 `SZ300_COMPRESSION`，`1/true/yes/on` 为真，未设置或非法值 fail-closed）决定是否挂载该层；**关闭时该层不进入服务栈**，现网默认行为与门禁基线均不变。压缩层挂在脱敏层之外，保证压缩的是脱敏后的最终字节且 `NoCompression` 标记可传播到压缩谓词。
+- **默认关闭而非默认开启**：压缩是「出网字节 ↓ / CPU ↑」的交换，评测报告的「出网 −70~80%」是估算值（W 级），本机同源 A/B 未跑；在拿到 c=50 / 60 s × 3 的 QPS、p99 与响应字节数据前不改变线上默认。开关同时是 A/B 的前置条件（同一二进制跑两种配置）。
+- **只做 gzip，暂不做 brotli**：`compression-br` 会把 brotli 编解码拉进依赖图（当前 `compression-codecs` 只编到 `flate2`），且 brotli 默认质量档 CPU 明显高于 gzip —— 一轮测量里不叠加两个未测变量。
+- **BREACH 防线（依据实测代码）**：`controllers/auth.rs` 登录成功响应把请求里的 `username` 原样回显，同一条响应内还有本次生成的 `token` / `refresh_token`（可控明文 + 变化密钥同处一份被压缩明文）。`/api/v1/auth/login`、`/api/v1/auth/refresh` 两条路由（RBAC 与非 RBAC 两个分支均覆盖）挂 `mark_no_compress`，压缩谓词读到标记即原样放行；标记只在这两条路由产生，业务读接口热路径不经过它。
+- 新增 2 个单测（谓词仅排除带标记响应、压缩层可构造）+ 5 个离线集成测试（`tests/compression_test.rs`，用与生产同构的「handler → 路由级标记 → 脱敏层 → 压缩层」最小栈，无需数据库）：业务 JSON 被 gzip（校验 `content-encoding` 与 gzip 魔数 1f 8b 且体积小于原文）、令牌路由跳过（证明标记穿过脱敏层）、<32 B 跳过、SSE 跳过、无 `Accept-Encoding` 时原样返回。
+- **顺带修复：`v18-sse` feature 从未被 CI 编译**（`.github/workflows/` 无启用该 feature 的 job），打开它验证 SSE 排除时暴露 4 处编译错误（`Event` 未导入、`IntoResponse` 未导入、`Sse` 未按返回类型 `into_response()`、`stream::iter` 闭包 `Ok(_)` 缺错误类型注解），已在本次提交内修复使 `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` 通过；其运行时行为仍未验证（`tests/sse_test.rs` 无 MySQL 时软跳过）。
+- 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo check --features v18-rbac` 与 `--features v18-rbac,v18-sse,v18-websocket,v18-upload,v18-security-headers,v19-obs-closure,v18-audit-chain,v18-data-mask` = 0 error；`cargo check --features v18-sse --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo fmt -p sz-rust-sz300 -- --check` = 无差异；`cargo test -p sz-rust-sz300` = 全绿（**244 passed / 0 failed / 62 ignored**，其中 lib **118 passed**（+2）、`compression_test` **5 passed**、`config_test` **7 passed**（+1 开关解析））。
+- **性能收益：未实测（W）**——启用后的 QPS/p99 代价与出网字节下降幅度均需门禁 v2 协议实测；注意 `scripts/perf-regression.js` 默认不发 `Accept-Encoding`，直接复跑会得出「压缩毫无影响」的假结论，A/B 必须显式带该头并记录响应字节数。欠债见 `docs/audit/doc-debt.md` DB-2026-10-30-03。
+
 ### Changed — 鉴权授权上下文缓存（2026-10-30）
 
 > 来源：31–60 天性能路线项「JWT claims 鉴权」的安全替代（用户 2026-10-30 指示按顺序执行路线项）。
