@@ -56,7 +56,9 @@ sz-rust-wasm = { workspace = true }
 reqwest.workspace = true
 # v1.9.0 JWT Audience 注入 aud 声明需 HMAC-SHA256 重签名（feature gate 控制）
 hmac = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
+# token 哈希（注销黑名单，auth_service::token_hash）无条件使用，不能 optional：
+# 否则 --no-default-features 下 E0432 unresolved import `sha2`（run 41034901700）。
+sha2 = { workspace = true }
 # v1.8.0 安全头中间件（feature gate 控制，默认不启用）
 sz-rust-security-headers = { workspace = true, optional = true }
 # v1.8.0 数据脱敏中间件（feature gate 控制，默认不启用）
@@ -127,7 +129,7 @@ v18-sse = []
 # v1.9.0 GraphQL 持久化（DB-backed schema）
 v19-graphql-persist = ["v18-graphql"]
 # v1.9.0 JWT Audience 安全增强
-v19-jwt-audience = ["dep:hmac", "dep:sha2"]
+v19-jwt-audience = ["dep:hmac"]
 # v1.9.0 Saga 分布式事务接入订单
 v19-saga = ["dep:sz-rust-distributed-tx", "dep:async-trait"]
 # v1.9.0 AI 智能分类接入商品管理

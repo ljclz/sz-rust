@@ -412,10 +412,14 @@ jobs:
           node-version: '20'
       - name: Parse coverage stage from commit message
         id: cov-stage
+        # 提交信息经 env 传入，禁止直接内插进 run 脚本：消息里的双引号/反引号/
+        # 分号会被 bash 解释（run 41034901700 的 `"must call Bencher::iter"`
+        # 提前闭合字符串，脚本执行 `call` 命令 → exit 127），同时也是注入面。
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           THRESHOLD=${COVERAGE_THRESHOLD:-85}
-          MSG="${{ github.event.head_commit.message }}"
-          case "$MSG" in
+          case "$COMMIT_MSG" in
             *"[coverage-stage:S1]"*) THRESHOLD=30 ;;
             *"[coverage-stage:S2]"*) THRESHOLD=50 ;;
             *"[coverage-stage:S3]"*) THRESHOLD=70 ;;
