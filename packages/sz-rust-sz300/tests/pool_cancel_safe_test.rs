@@ -51,7 +51,9 @@ impl Connection for StubConn {
         Box::pin(async { Ok(()) })
     }
 
-    fn rollback<'a>(&'a mut self) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
+    fn rollback<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), DbError>> + Send + 'a>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -82,7 +84,13 @@ fn build_pool(max_size: u32, create_delay: Duration) -> Pool {
         .min_idle(0)
         .build()
         .expect("构造 PoolConfig 失败");
-    Pool::new(cfg, Arc::new(SlowFactory { delay: create_delay })).expect("构造 Pool 失败")
+    Pool::new(
+        cfg,
+        Arc::new(SlowFactory {
+            delay: create_delay,
+        }),
+    )
+    .expect("构造 Pool 失败")
 }
 
 /// 连续取消 `max_size` 次建连中的 acquire 后，池必须仍可服务
@@ -94,7 +102,10 @@ async fn cancelled_acquire_does_not_wedge_pool() {
     // 两个并发 acquire 在「建连中」被取消：恰好占满 max_size 个槽位
     let a = tokio::time::timeout(Duration::from_millis(20), acquire_cancel_safe(&pool)).await;
     let b = tokio::time::timeout(Duration::from_millis(20), acquire_cancel_safe(&pool)).await;
-    assert!(a.is_err() && b.is_err(), "建连期间不应完成（否则用例未覆盖泄漏路径）");
+    assert!(
+        a.is_err() && b.is_err(),
+        "建连期间不应完成（否则用例未覆盖泄漏路径）"
+    );
 
     // 等后台任务建连完成并归还被丢弃的连接
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -102,7 +113,11 @@ async fn cancelled_acquire_does_not_wedge_pool() {
     let conn = tokio::time::timeout(Duration::from_secs(1), acquire_cancel_safe(&pool))
         .await
         .expect("取消 2 次后连接池已卡死——槽位泄漏回归");
-    assert!(conn.is_ok(), "取消后 acquire 应成功，实际错误: {:?}", conn.err());
+    assert!(
+        conn.is_ok(),
+        "取消后 acquire 应成功，实际错误: {:?}",
+        conn.err()
+    );
 }
 
 /// 未取消的获取路径不受包装影响：连接可正常取得并归还

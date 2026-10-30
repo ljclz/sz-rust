@@ -405,10 +405,7 @@ pub fn create_router(state: AppState) -> Router {
     // 2026-10-29：落库改为有界异步缓冲（AuditSink），后台任务持连接池写入。
     #[cfg(feature = "v18-audit-chain")]
     let api_routes = api_routes.layer(middleware::from_fn_with_state(
-        (
-            state.chain_auditor.clone(),
-            Some(state.audit_sink.clone()),
-        ),
+        (state.chain_auditor.clone(), Some(state.audit_sink.clone())),
         crate::middleware::audit_chain::audit_chain_middleware,
     ));
 

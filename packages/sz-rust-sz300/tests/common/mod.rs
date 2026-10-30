@@ -67,6 +67,7 @@ pub fn make_state(pool: Pool) -> AppState {
     let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
     AppState {
         db_pool,
+        query_cache: Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: metrics,
         #[cfg(feature = "v18-rbac")]
@@ -116,6 +117,7 @@ pub fn make_state_with_marketplace(
     let graphql_schema_db = sz_rust_sz300::graphql::build_schema_with_db(db_pool.clone());
     AppState {
         db_pool,
+        query_cache: Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: metrics,
         #[cfg(feature = "v18-rbac")]

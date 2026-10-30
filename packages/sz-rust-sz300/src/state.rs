@@ -9,6 +9,8 @@ use sz_rust_observability::MetricsRegistry;
 pub struct AppState {
     /// MySQL 主数据库连接池
     pub db_pool: Arc<Pool>,
+    /// v1.9.0 查询缓存（order/list COUNT 结果缓存；订单写路径整体失效）
+    pub query_cache: crate::query_cache::SharedQueryCache,
     /// PostgreSQL 连接池（可选，未配置时为 None）
     pub pg_pool: Option<Arc<Pool>>,
     /// Prometheus 指标注册中心
@@ -88,6 +90,7 @@ impl AppState {
 
         AppState {
             db_pool: Arc::new(pool),
+            query_cache: Arc::new(crate::query_cache::QueryCache::with_defaults()),
             pg_pool: None,
             metrics_registry: Arc::new(MetricsRegistry::default()),
             #[cfg(feature = "v18-rbac")]

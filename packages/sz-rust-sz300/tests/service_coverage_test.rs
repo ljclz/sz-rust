@@ -70,6 +70,7 @@ async fn ensure_mysql() -> Option<Pool> {
 async fn make_app_state(pool: Pool) -> AppState {
     AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(sz_rust_observability::MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]
@@ -515,6 +516,7 @@ async fn test_health_startup_returns_ok_when_metrics_ready() {
     registry.register_counter("sz300_requests_total", "Total requests");
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
         #[cfg(feature = "v18-rbac")]
@@ -579,6 +581,7 @@ async fn test_health_metrics_returns_prometheus_format() {
     registry.register_counter("sz300_test_counter", "test counter");
     let state = AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(registry),
         #[cfg(feature = "v18-rbac")]
@@ -780,19 +783,16 @@ async fn test_device_trigger_ota_unknown_version_returns_error() {
         .header("Content-Type", "application/json")
         .body(axum::body::Body::from(body))
         .unwrap();
-    request.extensions_mut().insert(
-        sz_rust_sz300::middleware::auth_middleware::CurrentUser {
+    request
+        .extensions_mut()
+        .insert(sz_rust_sz300::middleware::auth_middleware::CurrentUser {
             user_id: 1,
             username: "admin".to_string(),
             merchant_id: None,
             is_admin: true,
-        },
-    );
-    let response = sz_rust_sz300::controllers::device::trigger_ota(
-        axum::extract::State(state),
-        request,
-    )
-    .await;
+        });
+    let response =
+        sz_rust_sz300::controllers::device::trigger_ota(axum::extract::State(state), request).await;
     // ThinkPHP 风格：OTA 版本不存在返回 HTTP 200 + JSON {"code": 0, "msg": "OTA 版本不存在或未启用"}
     let json = read_json_body(response).await;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(1);

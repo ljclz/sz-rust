@@ -254,6 +254,9 @@ mod http_endpoint {
         let metrics = Arc::new(MetricsRegistry::new());
         AppState {
             db_pool: Arc::new(pool.clone()),
+            query_cache: std::sync::Arc::new(
+                sz_rust_sz300::query_cache::QueryCache::with_defaults(),
+            ),
             pg_pool: None,
             metrics_registry: metrics,
             #[cfg(feature = "v18-rbac")]
@@ -266,8 +269,7 @@ mod http_endpoint {
             ),
             #[cfg(feature = "v18-audit-chain")]
             audit_sink: {
-                let (sink, rx) =
-                    sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
+                let (sink, rx) = sz_rust_sz300::middleware::audit_chain::AuditSink::new(None);
                 sz_rust_sz300::middleware::audit_chain::spawn_audit_drain(rx);
                 sink
             },

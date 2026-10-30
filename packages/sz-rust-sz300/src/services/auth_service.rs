@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
+use crate::db::acquire_cancel_safe;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use crate::db::acquire_cancel_safe;
 use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;

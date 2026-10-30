@@ -41,11 +41,11 @@ fn test_load_config_db_defaults() {
     let _env_guard = ENV_TEST_LOCK.lock().unwrap();
     std::env::set_var("SZ300_DB_PASSWORD", "pw");
     let cfg = config::load_config().unwrap();
-    // 验证默认值
+    // 默认值（安全加固：生产禁止 root，默认最小权限账号 sz300_app）
     assert_eq!(cfg.database.host, "127.0.0.1");
     assert_eq!(cfg.database.port, 3306);
     assert_eq!(cfg.database.database, "sz300");
-    assert_eq!(cfg.database.username, "root");
+    assert_eq!(cfg.database.username, "sz300_app");
     std::env::remove_var("SZ300_DB_PASSWORD");
 }
 

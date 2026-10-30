@@ -282,8 +282,12 @@ async fn main() -> anyhow::Result<()> {
         db_pool.clone(),
     );
 
+    // v1.9.0 查询缓存（order/list COUNT 结果缓存；订单写路径整体失效）
+    let query_cache = Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults());
+
     let app_state = AppState {
         db_pool,
+        query_cache,
         pg_pool,
         metrics_registry: metrics_registry.clone(),
         metrics_token,
@@ -375,37 +379,37 @@ async fn main() -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-        .with_graceful_shutdown(async move {
-            let ctrl_c = async {
-                signal::ctrl_c()
-                    .await
-                    .expect("failed to install Ctrl+C handler");
-            };
+    .with_graceful_shutdown(async move {
+        let ctrl_c = async {
+            signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+        };
 
-            #[cfg(unix)]
-            let terminate = async {
-                signal::unix::signal(signal::unix::SignalKind::terminate())
-                    .expect("failed to install signal handler")
-                    .recv()
-                    .await;
-            };
+        #[cfg(unix)]
+        let terminate = async {
+            signal::unix::signal(signal::unix::SignalKind::terminate())
+                .expect("failed to install signal handler")
+                .recv()
+                .await;
+        };
 
-            #[cfg(not(unix))]
-            let terminate = std::future::pending::<()>();
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
 
-            tokio::select! {
-                _ = ctrl_c => {},
-                _ = terminate => {},
-            }
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = terminate => {},
+        }
 
-            tracing::info!("收到关闭信号，正在优雅关闭...");
-            // 通知 MQTT 消费者退出
-            let _ = shutdown_tx.send(true);
-            // 等待 MQTT 任务完成（最多 5 秒）
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
-            tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
-        })
-        .await?;
+        tracing::info!("收到关闭信号，正在优雅关闭...");
+        // 通知 MQTT 消费者退出
+        let _ = shutdown_tx.send(true);
+        // 等待 MQTT 任务完成（最多 5 秒）
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
+        tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
+    })
+    .await?;
 
     Ok(())
 }

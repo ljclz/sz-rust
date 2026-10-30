@@ -67,7 +67,15 @@ impl OrderController {
 
                 debug!("查询订单列表: page={}, page_size={}", page, page_size);
 
-                match OrderService::list(&state.db_pool, page, page_size, filters).await {
+                match OrderService::list(
+                    &state.db_pool,
+                    Some(&state.query_cache),
+                    page,
+                    page_size,
+                    filters,
+                )
+                .await
+                {
                     Ok(page_data) => {
                         let list: Vec<serde_json::Value> =
                             page_data.list.iter().map(row_to_json).collect();
@@ -249,7 +257,9 @@ impl OrderController {
                     order_no, order.merchant_id
                 );
 
-                match OrderService::create(&state.db_pool, &order, &items).await {
+                match OrderService::create(&state.db_pool, Some(&state.query_cache), &order, &items)
+                    .await
+                {
                     Ok(new_order_id) => {
                         info!(
                             "订单创建成功: order_id={}, order_no={}",

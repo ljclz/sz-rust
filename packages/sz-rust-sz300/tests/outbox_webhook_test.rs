@@ -189,7 +189,7 @@ async fn test_order_created_event_reaches_webhook() {
         total_fen: 500,
         quantity: 1,
     }];
-    let order_id = OrderService::create(&pool, &order, &items)
+    let order_id = OrderService::create(&pool, None, &order, &items)
         .await
         .expect("下单应成功");
 

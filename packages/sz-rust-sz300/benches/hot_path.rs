@@ -56,6 +56,7 @@ async fn build_app_state() -> Option<sz_rust_sz300::state::AppState> {
 
     Some(sz_rust_sz300::state::AppState {
         db_pool: Arc::new(pool.clone()),
+        query_cache: std::sync::Arc::new(sz_rust_sz300::query_cache::QueryCache::with_defaults()),
         pg_pool: None,
         metrics_registry: Arc::new(MetricsRegistry::new()),
         #[cfg(feature = "v18-rbac")]

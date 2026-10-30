@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### Added — 订单列表 COUNT 查询缓存（2026-10-30）
+
+> 来源：31–90 天性能路线项（用户 2026-10-30 选定「先做 COUNT 缓存（最高 ROI）」）。
+> 决策记录：`docs/adr/0048-订单count查询缓存.md`。
+
+- `AppState` 新增 `query_cache: SharedQueryCache`（v1.9.0 `QueryCache` 首次接入业务）；`OrderService::list(pool, cache, ...)` 的 COUNT 查询按「WHERE 子句 + 参数化值」缓存（键 `order:count:<where>|<params_json>`，LRU 10,000 条 / TTL 60 s，值 = `i64` 小端 8 字节），同一筛选条件所有分页共享一次 COUNT。
+- `OrderService::create(pool, cache, ...)` 提交成功后 `cache.clear()` 整体失效，保证 list 的 total 不残留过期值；GraphQL/MQTT/SAGA 旁路写路径依赖 TTL 自然过期（≤60 s 最终一致，见 ADR-048）。
+- 新增 4 个 `count_cache_key` 单测（同条件稳定 / 不同值不同键 / 不同列不同键 / 空 WHERE）+ 2 个真库集成测试（`tests/order_count_cache_test.rs`：命中/未命中统计、create 后清空重查、不同筛选互不串用）。
+- 修复预存陈旧断言：`tests/config_test.rs` 期望 `database.username == "root"`，与 `config.rs` 安全加固后的默认 `sz300_app`（生产禁止 root）不一致 → 改期望值并加注释。
+- 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo test -p sz-rust-sz300 --lib` = **113 passed**；真库 `order_count_cache_test` = **2 passed**；`order_idempotency_test` = **3 passed**；`outbox_webhook_test` = **4 passed**；全量非 ignored 测试全绿。
+- **已实测收益（V，2026-10-30 门禁 v2 完整协议 c=50/10s/60s×3，一次性 MySQL 9.6 + perf-seed 2 万行）**：`order/list` 中位 QPS **872.4 → 2623.6（+200.7%）**、p99 **100.72 → 32.477ms（-67.8%）**、CV 1.06%、0% 错误；同机未改代码的 `product/list` +41.3%（环境负载减轻），order 增幅远超环境因素。本机指纹基线已 `--init` 重播种（health 6936.3 / product 1292.6 / order 2623.6，三端点 0% 错误）。详见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §14。
+
 ### Fixed — 连接池取消泄漏（2026-10-29）
 
 > 来源：`docs/audit/2026-10-28-数据库层路线图修复记录.md` §2「61-90.4」与 §5 命令 26–31。

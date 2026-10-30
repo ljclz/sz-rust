@@ -36,17 +36,11 @@
 //!     ));
 //! ```
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
-use axum::{
-    body::Body,
-    extract::State,
-    http::Request,
-    middleware::Next,
-    response::Response,
-};
+use axum::{body::Body, extract::State, http::Request, middleware::Next, response::Response};
 use sz_rust_core::orm::{Pool, Value};
 use sz_rust_middleware_facade::audit_chain::{AuditRecord, ChainHashAuditor};
 use sz_rust_observability::Counter;
@@ -143,21 +137,31 @@ impl AuditSink {
 }
 
 /// 后台审计落库任务：从有界缓冲取记录，失败按固定间隔重试，超过上限后丢弃并计数。
-pub fn spawn_audit_worker(
-    sink: Arc<AuditSink>,
-    mut rx: mpsc::Receiver<AuditJob>,
-    pool: Arc<Pool>,
-) {
+pub fn spawn_audit_worker(sink: Arc<AuditSink>, mut rx: mpsc::Receiver<AuditJob>, pool: Arc<Pool>) {
     tokio::spawn(async move {
         while let Some(job) = rx.recv().await {
-            if persist_record(&pool, &job.record, job.merchant_id, &job.ip, job.status_code).await {
+            if persist_record(
+                &pool,
+                &job.record,
+                job.merchant_id,
+                &job.ip,
+                job.status_code,
+            )
+            .await
+            {
                 continue;
             }
             let mut retries = 0u32;
             loop {
                 tokio::time::sleep(AUDIT_RETRY_DELAY).await;
-                if persist_record(&pool, &job.record, job.merchant_id, &job.ip, job.status_code)
-                    .await
+                if persist_record(
+                    &pool,
+                    &job.record,
+                    job.merchant_id,
+                    &job.ip,
+                    job.status_code,
+                )
+                .await
                 {
                     break;
                 }

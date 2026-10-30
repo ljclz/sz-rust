@@ -81,14 +81,14 @@ async fn test_offline_replay_returns_existing_order() {
     let order = make_order("IDEM-OFFLINE-001", 9001, "SEQ-001");
     let items = make_items();
 
-    let first_id = OrderService::create(&pool, &order, &items)
+    let first_id = OrderService::create(&pool, None, &order, &items)
         .await
         .expect("首次下单应成功");
     assert!(first_id > 0, "首次下单应返回有效 order_id");
 
     // 设备断网重传：同一 (device_id, offline_seq)，order_no 由服务端重新生成也不同
     let replay = make_order("IDEM-OFFLINE-002", 9001, "SEQ-001");
-    let second_id = OrderService::create(&pool, &replay, &items)
+    let second_id = OrderService::create(&pool, None, &replay, &items)
         .await
         .expect("重放应被识别为幂等并成功");
     assert_eq!(second_id, first_id, "重放必须返回原订单 ID");
@@ -132,12 +132,22 @@ async fn test_online_orders_without_seq_do_not_collide() {
     common::setup_all_tables(&pool).await;
 
     let items = make_items();
-    let first_id = OrderService::create(&pool, &make_order("IDEM-ONLINE-001", 9002, ""), &items)
-        .await
-        .expect("在线订单一应成功");
-    let second_id = OrderService::create(&pool, &make_order("IDEM-ONLINE-002", 9002, ""), &items)
-        .await
-        .expect("同设备在线订单二也不应被唯一键误伤");
+    let first_id = OrderService::create(
+        &pool,
+        None,
+        &make_order("IDEM-ONLINE-001", 9002, ""),
+        &items,
+    )
+    .await
+    .expect("在线订单一应成功");
+    let second_id = OrderService::create(
+        &pool,
+        None,
+        &make_order("IDEM-ONLINE-002", 9002, ""),
+        &items,
+    )
+    .await
+    .expect("同设备在线订单二也不应被唯一键误伤");
     assert_ne!(first_id, second_id, "空 offline_seq 的两张订单不得被合并");
 
     let stored = count_where(
@@ -163,12 +173,22 @@ async fn test_same_seq_on_different_devices_is_independent() {
     common::setup_all_tables(&pool).await;
 
     let items = make_items();
-    let device_a = OrderService::create(&pool, &make_order("IDEM-DEV-A", 9003, "SEQ-X"), &items)
-        .await
-        .expect("设备 A 下单应成功");
-    let device_b = OrderService::create(&pool, &make_order("IDEM-DEV-B", 9004, "SEQ-X"), &items)
-        .await
-        .expect("设备 B 使用相同序列号不应冲突");
+    let device_a = OrderService::create(
+        &pool,
+        None,
+        &make_order("IDEM-DEV-A", 9003, "SEQ-X"),
+        &items,
+    )
+    .await
+    .expect("设备 A 下单应成功");
+    let device_b = OrderService::create(
+        &pool,
+        None,
+        &make_order("IDEM-DEV-B", 9004, "SEQ-X"),
+        &items,
+    )
+    .await
+    .expect("设备 B 使用相同序列号不应冲突");
     assert_ne!(
         device_a, device_b,
         "幂等键是 (device_id, offline_seq)，跨设备必须独立"

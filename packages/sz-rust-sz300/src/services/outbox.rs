@@ -272,7 +272,11 @@ pub fn webhook_handler(url: String) -> DeliverFn {
                 Ok(())
             } else {
                 let status = response.status();
-                tracing::warn!(event_id = event.id, status = status.as_u16(), "outbox webhook 返回非 2xx");
+                tracing::warn!(
+                    event_id = event.id,
+                    status = status.as_u16(),
+                    "outbox webhook 返回非 2xx"
+                );
                 Err(format!("webhook 返回 HTTP {}", status.as_u16()))
             }
         })

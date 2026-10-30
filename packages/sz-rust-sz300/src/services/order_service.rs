@@ -23,6 +23,7 @@ use sz_rust_core::orm::{Pool, Value};
 use crate::db::acquire_cancel_safe;
 use crate::models::order::Order;
 use crate::models::order_item::OrderItem;
+use crate::query_cache::QueryCache;
 
 /// 订单列表筛选条件
 #[derive(Debug)]
@@ -73,6 +74,15 @@ pub struct OrderDetail {
     pub items: Vec<HashMap<String, Value>>,
 }
 
+/// 订单 COUNT 缓存键：WHERE 子句 + 参数化值（serde_json 确定性序列化）。
+///
+/// 同一筛选条件必须命中同一键；参数化值参与键构造，避免不同筛选值
+/// （同一 where_clause 下 merchant_id 不同）共享同一缓存项。
+fn count_cache_key(where_clause: &str, params: &[Value]) -> String {
+    let params_json = serde_json::to_string(params).unwrap_or_default();
+    format!("order:count:{}|{}", where_clause, params_json)
+}
+
 /// 订单服务 — 封装订单相关 DB 操作
 pub struct OrderService;
 
@@ -84,6 +94,7 @@ impl OrderService {
     /// # 参数
     ///
     /// - `pool`：数据库连接池
+    /// - `cache`：查询缓存（`None` 时总是执行 COUNT；`Some` 时 COUNT 结果按筛选键缓存）
     /// - `page`：页码（从 1 开始）
     /// - `page_size`：每页条数（1..=100）
     /// - `filters`：筛选条件
@@ -91,9 +102,10 @@ impl OrderService {
     /// # 返回
     ///
     /// 成功返回 [`OrderPage`]，失败返回错误描述字符串（不泄露 DB 内部信息）。
-    #[tracing::instrument(skip(pool))]
+    #[tracing::instrument(skip(pool, cache))]
     pub async fn list(
         pool: &Pool,
+        cache: Option<&QueryCache>,
         page: i64,
         page_size: i64,
         filters: OrderFilters,
@@ -164,20 +176,43 @@ impl OrderService {
             "数据库连接失败".to_string()
         })?;
 
-        // 总数查询
-        let count_sql = format!("SELECT COUNT(*) as total FROM `order` {}", where_clause);
-        let count_rows = conn
-            .query_with_params(&count_sql, &params)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "订单列表 COUNT 查询失败");
-                "查询失败".to_string()
-            })?;
-        let total: i64 = count_rows
-            .first()
-            .and_then(|row| row.get("total"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        // 总数查询 — COUNT 结果缓存（LRU+TTL 60s）。
+        //
+        // 订单写路径（OrderService::create 提交成功）会清空整个查询缓存，保证
+        // list 的 COUNT 不残留过期值。GraphQL/MQTT/SAGA 等旁路写路径不经过本
+        // 服务，依赖 TTL 自然过期（≤60s 最终一致），见 ADR-048。
+        let total: i64 = {
+            let count_sql = format!("SELECT COUNT(*) as total FROM `order` {}", where_clause);
+            let run_count = async {
+                let rows = conn
+                    .query_with_params(&count_sql, &params)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(error = %e, "订单列表 COUNT 查询失败");
+                        "查询失败".to_string()
+                    })?;
+                Ok::<i64, String>(
+                    rows.first()
+                        .and_then(|row| row.get("total"))
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0),
+                )
+            };
+
+            if let Some(c) = cache {
+                let key = count_cache_key(&where_clause, &params);
+                match c.get(&key).and_then(|b| b.as_slice().try_into().ok()) {
+                    Some(bytes) => i64::from_le_bytes(bytes),
+                    None => {
+                        let total = run_count.await?;
+                        c.set(&key, total.to_le_bytes().to_vec(), None);
+                        total
+                    }
+                }
+            } else {
+                run_count.await?
+            }
+        };
 
         // 列表查询 — 追加分页参数（keyset 模式不生成 OFFSET 子句）
         //
@@ -304,8 +339,13 @@ impl OrderService {
     /// `offline_seq` 非空时受 `uk_device_offline_seq (device_id, offline_seq)` 约束保护
     /// （`005_order_idempotency.sql`）。设备断网重传命中该唯一键时，回滚本次事务并
     /// 返回**已存在订单的 order_id**，而不是报"订单号冲突"——重放对设备是成功，不是失败。
-    #[tracing::instrument(skip(pool, order, items))]
-    pub async fn create(pool: &Pool, order: &Order, items: &[OrderItem]) -> Result<i64, String> {
+    #[tracing::instrument(skip(pool, cache, order, items))]
+    pub async fn create(
+        pool: &Pool,
+        cache: Option<&QueryCache>,
+        order: &Order,
+        items: &[OrderItem],
+    ) -> Result<i64, String> {
         enum CreateOutcome {
             Created(i64),
             DuplicateOfflineSeq,
@@ -436,6 +476,11 @@ impl OrderService {
                     tracing::error!(error = %e, "提交订单事务失败: order_id={}", order_id);
                     "创建失败".to_string()
                 })?;
+                // 新订单会改变所有筛选口径下的 COUNT：整体清空最安全。
+                // QueryCache 不支持前缀批量失效；旁路写路径依赖 TTL，见模块注释。
+                if let Some(c) = cache {
+                    c.clear();
+                }
                 Ok(order_id)
             }
             // 离线重放：本次事务未提交任何数据，回滚后按幂等键查回原单
@@ -486,6 +531,42 @@ impl OrderService {
                 Err(msg)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_cache_key_is_stable_for_same_filters() {
+        let where_clause = "WHERE merchant_id = ? AND status = ?";
+        let params = [Value::I64(1), Value::I64(2)];
+        let k1 = count_cache_key(where_clause, &params);
+        let k2 = count_cache_key(where_clause, &params);
+        assert_eq!(k1, k2, "相同筛选条件必须生成相同缓存键");
+        assert!(k1.starts_with("order:count:"), "缓存键应带领域前缀");
+    }
+
+    #[test]
+    fn count_cache_key_differs_by_param_value() {
+        let where_clause = "WHERE merchant_id = ?";
+        let k1 = count_cache_key(where_clause, &[Value::I64(1)]);
+        let k2 = count_cache_key(where_clause, &[Value::I64(2)]);
+        assert_ne!(k1, k2, "不同商户必须使用不同缓存键");
+    }
+
+    #[test]
+    fn count_cache_key_differs_by_where_clause() {
+        let k1 = count_cache_key("WHERE merchant_id = ?", &[Value::I64(1)]);
+        let k2 = count_cache_key("WHERE device_id = ?", &[Value::I64(1)]);
+        assert_ne!(k1, k2, "不同筛选列必须使用不同缓存键");
+    }
+
+    #[test]
+    fn count_cache_key_handles_empty_where() {
+        let key = count_cache_key("", &[]);
+        assert_eq!(key, "order:count:|[]");
     }
 }
 

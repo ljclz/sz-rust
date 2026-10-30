@@ -2,7 +2,25 @@
 
 > **关联文档**：`docs/product-technical-plan.md`（权威规划）
 > **更新规则**：每完成一个任务或子任务，必须同步更新本文档
-> **最后更新**：2026-10-25
+> **最后更新**：2026-10-30
+
+---
+
+## 2026-10-30 更新：订单列表 COUNT 查询缓存（ADR-048，31–90 天路线项）
+
+> **状态**：✅ 完成（用户 2026-10-30 选定「先做 COUNT 缓存（最高 ROI）」）
+> **决策**：`docs/adr/0048-订单count查询缓存.md`
+> **来源**：`docs/audit/2026-10-29-性能整改现场验证记录.md` §3.3（order/list COUNT 全扫描 + 高 p99）
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| `AppState` 新增 `query_cache: SharedQueryCache`（v1.9.0 QueryCache 首次接入业务） | `packages/sz-rust-sz300/src/state.rs` + `main.rs` + 全部测试/bench 构造点 | `cargo check -p sz-rust-sz300 --all-targets` = 0 error |
+| `OrderService::list` COUNT 按「WHERE 子句 + 参数化值」缓存（LRU 10k / TTL 60s） | `packages/sz-rust-sz300/src/services/order_service.rs` | `cargo test -p sz-rust-sz300 --lib` = 113 passed（+4 键单测） |
+| `OrderService::create` 提交成功后 `cache.clear()` 整体失效 | 同上 | 真库 `order_count_cache_test` = 2 passed（命中/清空/键隔离） |
+| COUNT 缓存集成测试 | `packages/sz-rust-sz300/tests/order_count_cache_test.rs` | 真库 MySQL `sz_orm_test`：2 passed |
+| 顺带修复预存陈旧断言（config 默认用户 sz300_app） | `packages/sz-rust-sz300/tests/config_test.rs` | `config_test` = 6 passed |
+| 回归验证 | 受影响的 `order_idempotency_test` / `outbox_webhook_test` | 3 passed / 4 passed；clippy 0 warning |
+| 性能量化 | 2026-10-30 用户批准补测：门禁 v2 完整协议（c=50/10s/60s×3，一次性 MySQL 9.6 + perf-seed） | **order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms（-67.8%）、0% 错误**；基线已 `--init` 重播种（health 6936.3 / product 1292.6 / order 2623.6） |
 
 ---
 
