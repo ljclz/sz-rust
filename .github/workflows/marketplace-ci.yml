@@ -1,5 +1,7 @@
-# 已定性虚构（2026-08-14）：sz-rust-marketplace 在开源/企业版仓库 git 历史中均不存在，
-# 本 workflow 永不触发，保留仅作审计记录。
+# 2026-08-14 曾记录「sz-rust-marketplace 不存在、本 workflow 永不触发」，该判断已过时：
+# packages/sz-rust-marketplace 在 v2.0.0 树中存在（64 个 packages 之一），push 到 main 即会触发。
+# 2026-10-30：工作区通过 path = "../sz-orm/..." 引用兄弟仓库，缺 sz-orm 时 cargo check 直接失败，
+# 故在 checkout 后补 ./.github/actions/checkout-sz-orm。
 name: Marketplace CI
 
 on:
@@ -20,6 +22,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/checkout-sz-orm
       - uses: dtolnay/rust-toolchain@stable
       - name: Check
         run: cargo check -p sz-rust-marketplace

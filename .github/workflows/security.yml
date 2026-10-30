@@ -125,6 +125,7 @@ jobs:
     if: github.event.inputs.full_audit == 'true' || github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/checkout-sz-orm
 
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
