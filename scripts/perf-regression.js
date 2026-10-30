@@ -102,6 +102,9 @@ function parseArgs(argv) {
         jwt: process.env.SZ300_PERF_JWT || '',
         jwtSecret: process.env.SZ300_JWT_SECRET || '',
         csrfToken: process.env.SZ300_PERF_CSRF || '',
+        // ADR-050：压缩只在客户端声明支持时生效。默认不发 Accept-Encoding，
+        // 保持与既有基线同口径；测 gzip 时必须显式带上，否则两腿都不走压缩路径。
+        acceptEncoding: '',
         ...DEFAULTS,
     };
     for (let i = 2; i < argv.length; i++) {
@@ -124,6 +127,7 @@ function parseArgs(argv) {
             case '--jwt': args.jwt = argv[++i]; break;
             case '--jwt-secret': args.jwtSecret = argv[++i]; break;
             case '--user-id': args.jwtUserId = parseInt(argv[++i], 10); break;
+            case '--accept-encoding': args.acceptEncoding = argv[++i]; break;
             case '--help':
             case '-h':
                 printUsage();
@@ -152,6 +156,8 @@ function printUsage() {
   --warmup <s>            预热秒数（默认 10）
   --duration <s>          稳态秒数（默认 60）
   --reps <n>              重复次数（默认 3）
+  --accept-encoding <v>   请求头 Accept-Encoding（默认不下发，与既有基线同口径）；
+                          测响应压缩时传 gzip，脚本会记录 content-encoding 与每请求字节数
   --concurrency <n>       闭环并发（默认 50）
   --qps-threshold <pct>   QPS 回归阈值名义值（默认 5；实际取 max(该值, 3×CV)，上限 30）
   --p99-threshold <pct>   P99 退化阈值（默认 25）
@@ -230,8 +236,9 @@ function buildAuthContext(args) {
     return { token, csrf };
 }
 
-function headersFor(ep, auth) {
+function headersFor(ep, auth, acceptEncoding) {
     const headers = { 'Content-Type': 'application/json' };
+    if (acceptEncoding) headers['Accept-Encoding'] = acceptEncoding;
     if (ep.auth && auth.token) {
         headers.Authorization = `Bearer ${auth.token}`;
         // CSRF 双提交：Cookie 与 Header 必须一致（sz-rust-middleware-facade/csrf.rs）
@@ -253,12 +260,16 @@ function sendOnce(agent, args, ep, headers) {
     return new Promise((resolve) => {
         const startedAt = process.hrtime.bigint();
         let settled = false;
+        let bytes = 0;
+        let encoding = '';
         const finish = (status) => {
             if (settled) return;
             settled = true;
             resolve({
                 status,
                 ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+                bytes,
+                encoding,
             });
         };
         const req = http.request(
@@ -272,7 +283,10 @@ function sendOnce(agent, args, ep, headers) {
                 timeout: args.requestTimeoutMs,
             },
             (res) => {
-                res.resume();
+                encoding = res.headers['content-encoding'] || 'identity';
+                res.on('data', (chunk) => {
+                    bytes += chunk.length;
+                });
                 res.on('end', () => finish(res.statusCode));
                 res.on('error', () => finish(0));
             }
@@ -290,7 +304,9 @@ function sendOnce(agent, args, ep, headers) {
 async function runLoad(agent, args, ep, headers, durationMs, concurrency) {
     const latencies = [];
     const statuses = new Map();
+    const encodings = new Map();
     let transportErrors = 0;
+    let bytesTotal = 0;
     const deadline = Date.now() + durationMs;
     const startedAt = Date.now();
 
@@ -301,6 +317,8 @@ async function runLoad(agent, args, ep, headers, durationMs, concurrency) {
                 transportErrors += 1;
             } else {
                 latencies.push(r.ms);
+                bytesTotal += r.bytes;
+                encodings.set(r.encoding, (encodings.get(r.encoding) || 0) + 1);
                 statuses.set(r.status, (statuses.get(r.status) || 0) + 1);
             }
         }
@@ -323,6 +341,9 @@ async function runLoad(agent, args, ep, headers, durationMs, concurrency) {
         ok,
         transport_errors: transportErrors,
         status_distribution: Object.fromEntries([...statuses.entries()].sort((a, b) => a[0] - b[0])),
+        content_encoding_distribution: Object.fromEntries(encodings.entries()),
+        bytes_total: bytesTotal,
+        bytes_per_req: round(completed > 0 ? bytesTotal / completed : 0, 1),
         qps_ok: round(elapsedSec > 0 ? ok / elapsedSec : 0, 1),
         error_rate_pct: round(attempts > 0 ? ((attempts - ok) / attempts) * 100 : 100, 3),
         p50_ms: round(percentile(latencies, 0.5), 3),
@@ -375,7 +396,7 @@ function cvPct(values) {
 
 async function measureEndpoint(args, ep, auth) {
     const agent = createAgent(args.concurrency);
-    const headers = headersFor(ep, auth);
+    const headers = headersFor(ep, auth, args.acceptEncoding);
 
     process.stdout.write(
         `  [${ep.id}] 预热 ${args.warmupMs / 1000}s @ c=${args.concurrency} ... `
@@ -392,15 +413,25 @@ async function measureEndpoint(args, ep, auth) {
         delete r.latencies;
         reps.push(r);
         console.log(
-            `QPS=${r.qps_ok} P50=${r.p50_ms} P90=${r.p90_ms} P95=${r.p95_ms} P99=${r.p99_ms} P99.9=${r.p999_ms} err=${r.error_rate_pct}% (${r.attempts} req)`
+            `QPS=${r.qps_ok} P50=${r.p50_ms} P90=${r.p90_ms} P95=${r.p95_ms} P99=${r.p99_ms} P99.9=${r.p999_ms} err=${r.error_rate_pct}% (${r.attempts} req) ${r.bytes_per_req}B/req enc=${JSON.stringify(r.content_encoding_distribution)}`
         );
     }
     agent.destroy();
+
+    const encodingTotals = {};
+    for (const r of reps) {
+        for (const [enc, n] of Object.entries(r.content_encoding_distribution)) {
+            encodingTotals[enc] = (encodingTotals[enc] || 0) + n;
+        }
+    }
 
     const summary = {
         warmup: { attempts: warm.attempts, error_rate_pct: warm.error_rate_pct },
         concurrency: args.concurrency,
         duration_s: args.durationMs / 1000,
+        accept_encoding_sent: args.acceptEncoding || null,
+        content_encoding_received: encodingTotals,
+        bytes_per_req_median: round(median(reps.map((r) => r.bytes_per_req)), 1),
         reps,
         qps_median: round(median(reps.map((r) => r.qps_ok)), 1),
         qps_cv_pct: round(cvPct(reps.map((r) => r.qps_ok)), 2),

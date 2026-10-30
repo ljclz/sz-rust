@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Added — 性能门禁客户端支持 Accept-Encoding 与响应字节统计（2026-10-30）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-30-03 ② 与 `docs/adr/0050-响应gzip压缩与breach排除.md`「注意事项」——
+> 客户端不发 `Accept-Encoding` 时复测压缩会得出「毫无影响」的假结论，做 A/B 必须显式带该头并统计响应字节。
+
+- `scripts/perf-regression.js` 新增 `--accept-encoding <v>`：**默认仍不下发该头**（与既有基线同口径，不悄悄改变基线含义），传 `gzip` 时才在请求里带 `Accept-Encoding: gzip`。
+- 每个响应记录 `content-encoding` 与实际响应体字节数；每轮新增 `content_encoding_distribution` / `bytes_total` / `bytes_per_req`，端点汇总新增 `accept_encoding_sent` / `content_encoding_received` / `bytes_per_req_median`，供同一 release 二进制按 `SZ300_COMPRESSION` 开/关做同源 A/B（QPS 与出网字节是两个方向的指标）。
+- 基线格式不变（`schema=2`），`validateBaselineShape` 只校验必填字段，新增字段向后兼容：`node scripts/perf-regression.js --skip-bench` = PASS（1 个环境指纹 `a17a08aab11946f1`）；`node --check scripts/perf-regression.js` = 通过。
+- **收益仍为未实测（W）**：A/B 需起服务（受「先问再起服务」约束），本项只补齐测量能力，`docs/audit/doc-debt.md` DB-2026-10-30-03 ① 保持 PENDING。
+
 ### Added — 响应 gzip 压缩与令牌端点 BREACH 排除（2026-10-30）
 
 > 来源：31–60 天性能路线项「开 gzip/brotli（注意 BREACH）」（用户指示按顺序执行路线项）。
@@ -52,7 +62,7 @@
 ### Fixed — 连接池取消泄漏（2026-10-29）
 
 > 来源：`docs/audit/2026-10-28-数据库层路线图修复记录.md` §2「61-90.4」与 §5 命令 26–31。
-> 上游同源缺陷：`../sz-orm` 提交 `c72d90a1`（`SlotGuard`）。本轮改动**尚未提交**（无 SHA）。
+> 上游同源缺陷：`../sz-orm` 提交 `c72d90a1`（`SlotGuard`）。本仓库改动已合入 `019e92e`（`fix(db): 连接池取连接改为取消安全（acquire_cancel_safe）`），后续 `77af413` 再次修改该测试文件。
 
 - **新增 pub API**：`sz_rust_orm_facade::acquire_cancel_safe(&Pool)` 与 `sz_rust_sz300::db::acquire_cancel_safe(&Pool)`
   —— 把 `pool.acquire()` 放进独立 `tokio::spawn` 并以 `oneshot` 回传，调用方 future 被取消时

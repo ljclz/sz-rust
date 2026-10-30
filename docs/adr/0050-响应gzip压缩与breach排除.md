@@ -56,7 +56,7 @@
 
 ## 注意事项
 
-- **压测客户端默认不发 `Accept-Encoding`**：`scripts/perf-regression.js` 的 `headersFor()` 只带 Content-Type / Authorization / Cookie。因此当前基线数字**不含压缩路径**，若直接复跑门禁会得出「开压缩毫无影响」的假结论。做 A/B 必须显式带上 `Accept-Encoding: gzip`，并同时记录响应字节数（QPS 与出网是两个方向的指标）。
+- **压测客户端默认不发 `Accept-Encoding`**：`scripts/perf-regression.js` 的 `headersFor()` 只带 Content-Type / Authorization / Cookie；2026-10-30 起可用 `--accept-encoding gzip` 显式开启该头，并在结果里记录 `content_encoding_received` 与 `bytes_per_req`（默认仍不下发，保持与既有基线同口径）。因此当前基线数字**不含压缩路径**，若直接复跑门禁会得出「开压缩毫无影响」的假结论。做 A/B 必须显式带上 `Accept-Encoding: gzip`，并同时记录响应字节数（QPS 与出网是两个方向的指标）。
 - **`v18-sse` feature 此前从未被 CI 编译**（`.github/workflows/` 中没有启用该 feature 的 job），2026-10-30 为验证 SSE 排除而打开它，暴露 4 处编译错误：`Event` 未导入、`IntoResponse` 未导入、`Sse` 未按返回类型 `into_response()`、`stream::iter` 闭包的 `Ok(_)` 缺错误类型注解。已在本次提交内修复，使 `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` 通过；其**运行时行为仍未验证**（`tests/sse_test.rs` 在无 MySQL 时软跳过，且默认 feature 组合不含 `v18-sse`）。后续要么把该 feature 纳入某条 CI job，要么登记为已知未编译面。
 - 若将来改为默认开启，必须同步：门禁基线重播种（压缩改变了被测配置）、`docs/audit/2026-10-29-性能整改现场验证记录.md` 的结论、以及本 ADR 状态行。
 - 新增令牌签发类端点时，若响应里回显任何请求可控文本，必须一并挂 `mark_no_compress`。
