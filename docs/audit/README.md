@@ -29,7 +29,7 @@
 | [2026-10-25-security-gauntlet.md](2026-10-25-security-gauntlet.md) | 2026-10-25 | **专家级深度安全审查**：26 项安全 Gauntlet 全过，鉴权绕过/路径遍历/敏感泄露/畸形输入/panic 恢复实测，含 OpenAPI 契约与可复现脚本 |
 | [2026-08-19-项目状态与后续开发参照.md](2026-08-19-项目状态与后续开发参照.md) | 2026-08-19 | **当前权威状态**：7 crate 复活+接线完成，R001-R007 复核完成，全部提交已 push |
 | [2026-08-15-真实能力评估报告.md](2026-08-15-真实能力评估报告.md) | 2026-08-15 | **基线评估**：9 问题逐项复核，成熟度 7 维度评估 |
-| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（14 RESOLVED + 1 PENDING） |
+| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（18 RESOLVED + 2 PARTIAL + 4 PENDING，2026-10-30 口径） |
 | [coverage-priority.json](coverage-priority.json) | 持续更新 | 覆盖率优先级状态 |
 
 ---

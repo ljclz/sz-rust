@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "note": "schema 2：按环境指纹分槽存放实测基线。历史 v1.9.0 内容为跨机器硬编码占位值（/health=50000 QPS，从未实测），已于 2026-10-29 移除。首个真实基线（指纹 a17a08aab11946f1，一次性 MySQL 9.6 + perf-seed 2 万行 + release 二进制 + c=50/10s/60s×3）于 2026-10-29 由 `node scripts/perf-regression.js --init` 写入，三端点 0% 错误。2026-10-30 订单 COUNT 缓存（ADR-048）落地后重播种：order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms；health/product 同步重测（同机负载变化致 product 上升）。",
+  "note": "schema 2：按环境指纹分槽存放实测基线。历史 v1.9.0 内容为跨机器硬编码占位值（/health=50000 QPS，从未实测），已于 2026-10-29 移除。首个真实基线（指纹 a17a08aab11946f1，一次性 MySQL 9.6 + perf-seed 2 万行 + release 二进制 + c=50/10s/60s×3）于 2026-10-29 由 `node scripts/perf-regression.js --init` 写入，三端点 0% 错误。2026-10-30 订单 COUNT 缓存（ADR-048）落地后重播种：order/list 872.4 → 2623.6 QPS（+200.7%）、p99 100.72 → 32.477ms；health/product 同步重测（同机负载变化致 product 上升）。 2026-10-30 鉴权上下文缓存（ADR-049）落地后重播种：来源=静默窗口腿 B2（默认协议、未下发 Accept-Encoding、0% 错误、CV 0.34/3.90/1.25%），health 6936.3→6748.2 / product 1292.6→1621.3 / order 2623.6→3693.5；选择同配置两腿（B2 与 C2）中较低的 B2 作为下限，避免正常抖动触发误报。",
   "regression_threshold_pct": 5,
   "p99_threshold_pct": 25,
   "fingerprints": {
@@ -14,7 +14,7 @@
         "os_release": "10.0.19045",
         "node_major": "24"
       },
-      "measured_at": "2026-10-30T03:18:31.738Z",
+      "measured_at": "2026-10-30T08:19:26.812Z",
       "concurrency": 50,
       "warmup_s": 10,
       "duration_s": 60,
@@ -22,218 +22,278 @@
       "endpoints": {
         "health": {
           "warmup": {
-            "attempts": 56867,
+            "attempts": 62383,
             "error_rate_pct": 0
           },
           "concurrency": 50,
           "duration_s": 60,
+          "accept_encoding_sent": null,
+          "content_encoding_received": {
+            "identity": 1216680
+          },
+          "bytes_per_req_median": 115,
           "reps": [
             {
               "elapsed_s": 60,
-              "attempts": 402235,
-              "completed": 402235,
-              "ok": 402235,
+              "attempts": 407483,
+              "completed": 407483,
+              "ok": 407483,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 402235
+                "200": 407483
               },
-              "qps_ok": 6703.7,
+              "content_encoding_distribution": {
+                "identity": 407483
+              },
+              "bytes_total": 46860545,
+              "bytes_per_req": 115,
+              "qps_ok": 6791.2,
+              "error_rate_pct": 0,
+              "p50_ms": 7.258,
+              "p90_ms": 7.714,
+              "p95_ms": 7.997,
+              "p99_ms": 8.463,
+              "p999_ms": 9.981,
+              "max_ms": 12.806
+            },
+            {
+              "elapsed_s": 60,
+              "attempts": 404289,
+              "completed": 404289,
+              "ok": 404289,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 404289
+              },
+              "content_encoding_distribution": {
+                "identity": 404289
+              },
+              "bytes_total": 46493235,
+              "bytes_per_req": 115,
+              "qps_ok": 6737.9,
+              "error_rate_pct": 0,
+              "p50_ms": 7.297,
+              "p90_ms": 7.801,
+              "p95_ms": 8.139,
+              "p99_ms": 8.911,
+              "p999_ms": 10.469,
+              "max_ms": 16.022
+            },
+            {
+              "elapsed_s": 60,
+              "attempts": 404908,
+              "completed": 404908,
+              "ok": 404908,
+              "transport_errors": 0,
+              "status_distribution": {
+                "200": 404908
+              },
+              "content_encoding_distribution": {
+                "identity": 404908
+              },
+              "bytes_total": 46564420,
+              "bytes_per_req": 115,
+              "qps_ok": 6748.2,
               "error_rate_pct": 0,
               "p50_ms": 7.291,
-              "p90_ms": 8.09,
-              "p95_ms": 8.484,
-              "p99_ms": 9.649,
-              "p999_ms": 12.185,
-              "max_ms": 14.847
-            },
-            {
-              "elapsed_s": 60,
-              "attempts": 416199,
-              "completed": 416199,
-              "ok": 416199,
-              "transport_errors": 0,
-              "status_distribution": {
-                "200": 416199
-              },
-              "qps_ok": 6936.3,
-              "error_rate_pct": 0,
-              "p50_ms": 7.077,
-              "p90_ms": 7.663,
-              "p95_ms": 7.995,
-              "p99_ms": 8.882,
-              "p999_ms": 10.883,
-              "max_ms": 14.408
-            },
-            {
-              "elapsed_s": 60,
-              "attempts": 418920,
-              "completed": 418920,
-              "ok": 418920,
-              "transport_errors": 0,
-              "status_distribution": {
-                "200": 418920
-              },
-              "qps_ok": 6981.8,
-              "error_rate_pct": 0,
-              "p50_ms": 6.99,
-              "p90_ms": 7.649,
-              "p95_ms": 8.06,
-              "p99_ms": 9.243,
-              "p999_ms": 12.428,
-              "max_ms": 15.584
+              "p90_ms": 7.775,
+              "p95_ms": 8.117,
+              "p99_ms": 8.951,
+              "p999_ms": 10.328,
+              "max_ms": 23.377
             }
           ],
-          "qps_median": 6936.3,
-          "qps_cv_pct": 1.77,
-          "p50_median_ms": 7.077,
-          "p90_median_ms": 7.663,
-          "p95_median_ms": 8.06,
-          "p99_median_ms": 9.243,
-          "p999_median_ms": 12.185,
+          "qps_median": 6748.2,
+          "qps_cv_pct": 0.34,
+          "p50_median_ms": 7.291,
+          "p90_median_ms": 7.775,
+          "p95_median_ms": 8.117,
+          "p99_median_ms": 8.911,
+          "p999_median_ms": 10.328,
           "max_error_rate_pct": 0
         },
         "product_list": {
           "warmup": {
-            "attempts": 12807,
+            "attempts": 17307,
             "error_rate_pct": 0
           },
           "concurrency": 50,
           "duration_s": 60,
+          "accept_encoding_sent": null,
+          "content_encoding_received": {
+            "identity": 288446
+          },
+          "bytes_per_req_median": 4692,
           "reps": [
             {
               "elapsed_s": 60.03,
-              "attempts": 77917,
-              "completed": 77917,
-              "ok": 77917,
+              "attempts": 100046,
+              "completed": 100046,
+              "ok": 100046,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 77917
+                "200": 100046
               },
-              "qps_ok": 1297.9,
+              "content_encoding_distribution": {
+                "identity": 100046
+              },
+              "bytes_total": 469415832,
+              "bytes_per_req": 4692,
+              "qps_ok": 1666.7,
               "error_rate_pct": 0,
-              "p50_ms": 37.453,
-              "p90_ms": 48.704,
-              "p95_ms": 53.868,
-              "p99_ms": 63.86,
-              "p999_ms": 79.883,
-              "max_ms": 108.59
+              "p50_ms": 28.37,
+              "p90_ms": 39.345,
+              "p95_ms": 44.75,
+              "p99_ms": 57.47,
+              "p999_ms": 74.973,
+              "max_ms": 99.246
             },
             {
               "elapsed_s": 60.03,
-              "attempts": 77595,
-              "completed": 77595,
-              "ok": 77595,
+              "attempts": 97321,
+              "completed": 97321,
+              "ok": 97321,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 77595
+                "200": 97321
               },
-              "qps_ok": 1292.6,
+              "content_encoding_distribution": {
+                "identity": 97321
+              },
+              "bytes_total": 456630132,
+              "bytes_per_req": 4692,
+              "qps_ok": 1621.3,
               "error_rate_pct": 0,
-              "p50_ms": 37.62,
-              "p90_ms": 48.858,
-              "p95_ms": 54.111,
-              "p99_ms": 64.79,
-              "p999_ms": 80.089,
-              "max_ms": 123.727
+              "p50_ms": 29.022,
+              "p90_ms": 40.405,
+              "p95_ms": 45.625,
+              "p99_ms": 59.468,
+              "p999_ms": 78.854,
+              "max_ms": 115.13
             },
             {
-              "elapsed_s": 60.04,
-              "attempts": 77155,
-              "completed": 77155,
-              "ok": 77155,
+              "elapsed_s": 60.03,
+              "attempts": 91079,
+              "completed": 91079,
+              "ok": 91079,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 77155
+                "200": 91079
               },
-              "qps_ok": 1285.1,
+              "content_encoding_distribution": {
+                "identity": 91079
+              },
+              "bytes_total": 427342668,
+              "bytes_per_req": 4692,
+              "qps_ok": 1517.3,
               "error_rate_pct": 0,
-              "p50_ms": 37.825,
-              "p90_ms": 49.283,
-              "p95_ms": 54.465,
-              "p99_ms": 65.388,
-              "p999_ms": 81.018,
-              "max_ms": 115.952
+              "p50_ms": 30.431,
+              "p90_ms": 43.871,
+              "p95_ms": 48.999,
+              "p99_ms": 65.799,
+              "p999_ms": 87.839,
+              "max_ms": 132.008
             }
           ],
-          "qps_median": 1292.6,
-          "qps_cv_pct": 0.41,
-          "p50_median_ms": 37.62,
-          "p90_median_ms": 48.858,
-          "p95_median_ms": 54.111,
-          "p99_median_ms": 64.79,
-          "p999_median_ms": 80.089,
+          "qps_median": 1621.3,
+          "qps_cv_pct": 3.9,
+          "p50_median_ms": 29.022,
+          "p90_median_ms": 40.405,
+          "p95_median_ms": 45.625,
+          "p99_median_ms": 59.468,
+          "p999_median_ms": 78.854,
           "max_error_rate_pct": 0
         },
         "order_list": {
           "warmup": {
-            "attempts": 26159,
+            "attempts": 36310,
             "error_rate_pct": 0
           },
           "concurrency": 50,
           "duration_s": 60,
+          "accept_encoding_sent": null,
+          "content_encoding_received": {
+            "identity": 667694
+          },
+          "bytes_per_req_median": 5518,
           "reps": [
             {
-              "elapsed_s": 60.01,
-              "attempts": 157452,
-              "completed": 157452,
-              "ok": 157452,
+              "elapsed_s": 60,
+              "attempts": 221620,
+              "completed": 221620,
+              "ok": 221620,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 157452
+                "200": 221620
               },
-              "qps_ok": 2623.6,
+              "content_encoding_distribution": {
+                "identity": 221620
+              },
+              "bytes_total": 1222899160,
+              "bytes_per_req": 5518,
+              "qps_ok": 3693.5,
               "error_rate_pct": 0,
-              "p50_ms": 18.795,
-              "p90_ms": 24.331,
-              "p95_ms": 27.391,
-              "p99_ms": 32.477,
-              "p999_ms": 40.636,
-              "max_ms": 63.026
+              "p50_ms": 13.351,
+              "p90_ms": 15.266,
+              "p95_ms": 16.01,
+              "p99_ms": 17.785,
+              "p999_ms": 27.489,
+              "max_ms": 164.976
             },
             {
-              "elapsed_s": 60.02,
-              "attempts": 159899,
-              "completed": 159899,
-              "ok": 159899,
+              "elapsed_s": 60,
+              "attempts": 226334,
+              "completed": 226334,
+              "ok": 226334,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 159899
+                "200": 226334
               },
-              "qps_ok": 2664.2,
+              "content_encoding_distribution": {
+                "identity": 226334
+              },
+              "bytes_total": 1248911012,
+              "bytes_per_req": 5518,
+              "qps_ok": 3772,
               "error_rate_pct": 0,
-              "p50_ms": 18.385,
-              "p90_ms": 23.916,
-              "p95_ms": 26.888,
-              "p99_ms": 31.799,
-              "p999_ms": 39.273,
-              "max_ms": 58.288
+              "p50_ms": 13.088,
+              "p90_ms": 14.883,
+              "p95_ms": 15.641,
+              "p99_ms": 17.521,
+              "p999_ms": 20.147,
+              "max_ms": 34.56
             },
             {
-              "elapsed_s": 60.01,
-              "attempts": 155811,
-              "completed": 155811,
-              "ok": 155811,
+              "elapsed_s": 60,
+              "attempts": 219740,
+              "completed": 219740,
+              "ok": 219740,
               "transport_errors": 0,
               "status_distribution": {
-                "200": 155811
+                "200": 219740
               },
-              "qps_ok": 2596.2,
+              "content_encoding_distribution": {
+                "identity": 219740
+              },
+              "bytes_total": 1212525320,
+              "bytes_per_req": 5518,
+              "qps_ok": 3662.1,
               "error_rate_pct": 0,
-              "p50_ms": 19.012,
-              "p90_ms": 24.74,
-              "p95_ms": 27.896,
-              "p99_ms": 33.072,
-              "p999_ms": 41.285,
-              "max_ms": 65.063
+              "p50_ms": 13.462,
+              "p90_ms": 15.372,
+              "p95_ms": 16.144,
+              "p99_ms": 18.235,
+              "p999_ms": 21.403,
+              "max_ms": 43.012
             }
           ],
-          "qps_median": 2623.6,
-          "qps_cv_pct": 1.06,
-          "p50_median_ms": 18.795,
-          "p90_median_ms": 24.331,
-          "p95_median_ms": 27.391,
-          "p99_median_ms": 32.477,
-          "p999_median_ms": 40.636,
+          "qps_median": 3693.5,
+          "qps_cv_pct": 1.25,
+          "p50_median_ms": 13.351,
+          "p90_median_ms": 15.266,
+          "p95_median_ms": 16.01,
+          "p99_median_ms": 17.785,
+          "p999_median_ms": 21.403,
           "max_error_rate_pct": 0
         }
       }

@@ -15,7 +15,7 @@
 - `scripts/perf-regression.js` 新增 `--accept-encoding <v>`：**默认仍不下发该头**（与既有基线同口径，不悄悄改变基线含义），传 `gzip` 时才在请求里带 `Accept-Encoding: gzip`。
 - 每个响应记录 `content-encoding` 与实际响应体字节数；每轮新增 `content_encoding_distribution` / `bytes_total` / `bytes_per_req`，端点汇总新增 `accept_encoding_sent` / `content_encoding_received` / `bytes_per_req_median`，供同一 release 二进制按 `SZ300_COMPRESSION` 开/关做同源 A/B（QPS 与出网字节是两个方向的指标）。
 - 基线格式不变（`schema=2`），`validateBaselineShape` 只校验必填字段，新增字段向后兼容：`node scripts/perf-regression.js --skip-bench` = PASS（1 个环境指纹 `a17a08aab11946f1`）；`node --check scripts/perf-regression.js` = 通过。
-- **收益仍为未实测（W）**：A/B 需起服务（受「先问再起服务」约束），本项只补齐测量能力，`docs/audit/doc-debt.md` DB-2026-10-30-03 ① 保持 PENDING。
+- **收益实测（V，2026-10-30 补齐后同源 A/B 用到）**：该能力已在静默窗口六腿批次里实际使用——`SZ300_COMPRESSION=0` 腿（C2，2,317,702 响应）实测 `content-encoding` 全为 identity，`=1` 腿（D2，2,351,362 响应）全为 gzip，两腿 `--accept-encoding gzip` 相同，证明开关有效且默认关闭不依赖客户端不发头。数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §17。
 
 ### Added — 响应 gzip 压缩与令牌端点 BREACH 排除（2026-10-30）
 
@@ -24,13 +24,17 @@
 
 - 新增 `packages/sz-rust-sz300/src/middleware/compression.rs`：`compression_layer()`（tower-http `CompressionLayer` + `DefaultPredicate.and(not_marked)`）、`NoCompression` 响应扩展标记、`mark_no_compress()` 路由级标记中间件。`DefaultPredicate` 自动跳过 <32 B 响应、`application/grpc`、`image/*`、`text/event-stream`（SSE 是分块长驻流，压缩会缓冲掉事件即时性与 15 s keep-alive）。
 - `create_router` 按 `config::compression_enabled()`（环境变量 `SZ300_COMPRESSION`，`1/true/yes/on` 为真，未设置或非法值 fail-closed）决定是否挂载该层；**关闭时该层不进入服务栈**，现网默认行为与门禁基线均不变。压缩层挂在脱敏层之外，保证压缩的是脱敏后的最终字节且 `NoCompression` 标记可传播到压缩谓词。
-- **默认关闭而非默认开启**：压缩是「出网字节 ↓ / CPU ↑」的交换，评测报告的「出网 −70~80%」是估算值（W 级），本机同源 A/B 未跑；在拿到 c=50 / 60 s × 3 的 QPS、p99 与响应字节数据前不改变线上默认。开关同时是 A/B 的前置条件（同一二进制跑两种配置）。
+- **默认关闭而非默认开启**：压缩是「出网字节 ↓ / CPU ↑」的交换，决策时评测报告的「出网 −70~80%」只是估算（W 级）、本机同源 A/B 未跑，不拿未实测的交换比去改线上默认；同日静默窗口 A/B 已把该交换比测出（见下文「性能收益：已实测」），默认值仍保持关闭，翻转需单独批准。开关同时是 A/B 的前置条件（同一二进制跑两种配置）。
 - **只做 gzip，暂不做 brotli**：`compression-br` 会把 brotli 编解码拉进依赖图（当前 `compression-codecs` 只编到 `flate2`），且 brotli 默认质量档 CPU 明显高于 gzip —— 一轮测量里不叠加两个未测变量。
 - **BREACH 防线（依据实测代码）**：`controllers/auth.rs` 登录成功响应把请求里的 `username` 原样回显，同一条响应内还有本次生成的 `token` / `refresh_token`（可控明文 + 变化密钥同处一份被压缩明文）。`/api/v1/auth/login`、`/api/v1/auth/refresh` 两条路由（RBAC 与非 RBAC 两个分支均覆盖）挂 `mark_no_compress`，压缩谓词读到标记即原样放行；标记只在这两条路由产生，业务读接口热路径不经过它。
 - 新增 2 个单测（谓词仅排除带标记响应、压缩层可构造）+ 5 个离线集成测试（`tests/compression_test.rs`，用与生产同构的「handler → 路由级标记 → 脱敏层 → 压缩层」最小栈，无需数据库）：业务 JSON 被 gzip（校验 `content-encoding` 与 gzip 魔数 1f 8b 且体积小于原文）、令牌路由跳过（证明标记穿过脱敏层）、<32 B 跳过、SSE 跳过、无 `Accept-Encoding` 时原样返回。
 - **顺带修复：`v18-sse` feature 从未被 CI 编译**（`.github/workflows/` 无启用该 feature 的 job），打开它验证 SSE 排除时暴露 4 处编译错误（`Event` 未导入、`IntoResponse` 未导入、`Sse` 未按返回类型 `into_response()`、`stream::iter` 闭包 `Ok(_)` 缺错误类型注解），已在本次提交内修复使 `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` 通过；其运行时行为仍未验证（`tests/sse_test.rs` 无 MySQL 时软跳过）。
 - 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo check --features v18-rbac` 与 `--features v18-rbac,v18-sse,v18-websocket,v18-upload,v18-security-headers,v19-obs-closure,v18-audit-chain,v18-data-mask` = 0 error；`cargo check --features v18-sse --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo fmt -p sz-rust-sz300 -- --check` = 无差异；`cargo test -p sz-rust-sz300` = 全绿（**244 passed / 0 failed / 62 ignored**，其中 lib **118 passed**（+2）、`compression_test` **5 passed**、`config_test` **7 passed**（+1 开关解析））。
-- **性能收益：未实测（W）**——启用后的 QPS/p99 代价与出网字节下降幅度均需门禁 v2 协议实测；注意 `scripts/perf-regression.js` 默认不发 `Accept-Encoding`，直接复跑会得出「压缩毫无影响」的假结论，A/B 必须显式带该头并记录响应字节数。欠债见 `docs/audit/doc-debt.md` DB-2026-10-30-03。
+- **性能收益：已实测（V，2026-10-30 静默窗口同源 A/B，`docs/audit/2026-10-29-性能整改现场验证记录.md` §17）**——同一 `sz300-server-post049.exe` 仅切 `SZ300_COMPRESSION`，闭环 c=50 / 预热 10 s / 稳态 60 s × 3，0% 错误：
+  - **出网字节**：`product/list` 4,692 → 800.8 B/req（**−82.93%**）、`order/list` 5,518 → 878.5（**−84.08%**）、`/health` 115 → 113.4（−1.39%）；整腿归一 2,444.9 → 445.2 B/req（−81.79%），线上传输 5,404.0 MB → 998.3 MB。路线项估算的「出网 −70~80%」由 W 升为 V 并略超。
+  - **吞吐/p99 代价**：`/health` +1.73% / p99 +4.57%、`product/list` −0.19% / +1.65%、`order/list` +2.11% / −1.44%，全部落在**同配置重复腿实测散布**（`/health` ≤5.60%、`product` ≤8.35%、`order` ≤11.97%）之内 → 该口径下**测不出代价**，但不等于零 CPU 代价（服务端进程 CPU 秒/千请求未采集，W）。
+  - **节省发生在 HTTP 出口而非 DB**：两腿服务端→MySQL 的 `Bytes_sent` 2,514.4 vs 2,518.8 MB（差 0.2%）、每业务请求 `Questions` 2.503 vs 2.487（差 0.6%）。
+  - **默认值仍保持关闭**：翻转默认属于协议行为变更，且 CPU 直接度量与边缘代理重复压缩两项前置未闭环，需单独批准。欠债 `docs/audit/doc-debt.md` DB-2026-10-30-03 的量化部分闭环。
 
 ### Changed — 鉴权授权上下文缓存（2026-10-30）
 
@@ -45,7 +49,7 @@
 - **ignored 测试接入 CI（门禁 30）**：`.github/workflows/db-integration.yml` 新增 4 个 sz300 `--ignored` 测试组（`auth_ctx_cache_test` / `order_count_cache_test` / `order_idempotency_test` / `outbox_webhook_test`）。此前这 4 个文件的 ignored 测试未被任何 workflow 路由，门禁 30 处于失败状态（3 个为存量，`order_count_cache_test` 由 ADR-048 引入）。
 - **顺带修复存量门禁失败**：`docs/adr/ADR-043-ai时代单一版本合并.md` 缺「日期」必填字段，使 `scripts/check-adr-coverage.sh`（CI job `adr-coverage`）自初始基线提交起恒 exit 1 → 补 `**日期**：2026-10-25`（与同文件「已接受（2026-10-25）」一致），门禁现错误数 0。
 - 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo fmt -p sz-rust-sz300 -- --check` = 无差异；`cargo test -p sz-rust-sz300` = 全绿无失败（lib **116 passed**，+3 编解码单测；`auth_ctx_cache_test` 1 个用例登记为 ignored）；**真库 MySQL 8.0.46：`cargo test -p sz-rust-sz300 --test auth_ctx_cache_test -- --ignored` = 1 passed**（四组场景同一运行时内串行执行）；`ignored-test-routing.js` = 门禁 30 通过；`check-adr-coverage.sh` = exit 0；`ci-config-audit.js` = 门禁 32 通过；`link-check.js` / `doc-code-consistency.js` / `adr-code-consistency.js` = exit 0。
-- **性能收益：未实测（W）**——本项消除的是每个鉴权请求固定 1 次连接池获取 + 1 次 `merchant_user` 主键查询，端到端吞吐提升需按门禁 v2 协议（c=50 / 预热 10 s / 稳态 60 s × 3）在一次性 MySQL + release 实例上复测并回填 `docs/audit/2026-10-29-性能整改现场验证记录.md` §15；起服务前需用户批准（受「先问再起服务」约束）。
+- **性能收益：已实测（V，2026-10-30 静默窗口同源六腿 A/B，数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §17）**——本项消除的「每个鉴权请求固定 1 次连接池获取 + 1 次 `merchant_user` 主键查询」被全局计数器直接证实：每业务请求 `Com_select` **2.49 → 1.38（−44.4%）**、`Questions` **4.69 → 2.51（−46.3%）**，pre 两腿（4.677 / 4.693）与 post 四腿（2.487–2.627）区间无重叠。端到端吞吐（同一容器、同一数据集、release 二进制、闭环 c=50 / 预热 10 s / 稳态 60 s × 3、0% 错误）：`order/list` **2,576.8 → 3,693.5 QPS（+43.3%）**、p50 19.286 → 13.351 ms、p99 33.175 → 17.785 ms（**−46.4%**）、p99.9 41.189 → 21.403 ms；`product/list` **+16.41%（A→B）/ +23.34%（A2→B2）**、p50 −17.3% / −21.6%。内部对照 `/health`（不查库、不经鉴权缓存）在 post 腿反而 −5.32% / −2.57%，排除「post 腿赶上更空的窗口」；同配置重复腿散布为 `order` ±12%、`product` ±8%，上述增益超出该下界 2–3.6 倍。本机指纹 `a17a08aab11946f1` 基线由腿 B2 重播种（health 6748.2 / product 1621.3 / order 3693.5）。**未归因余量（W）**：`Questions` 降幅比 `Com_select` 多 ≈1.04 条/请求，落在非 SELECT 类语句上，无法由本项代码差异解释——本批只采样 `Questions`/`Com_select`/`Bytes_sent`，未采 `Com_insert`/`Com_update`/`Com_begin`，故不做归因。
 
 ### Added — 订单列表 COUNT 查询缓存（2026-10-30）
 

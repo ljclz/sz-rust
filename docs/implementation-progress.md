@@ -8,7 +8,7 @@
 
 ## 2026-10-30 更新：响应 gzip 压缩与 BREACH 排除（ADR-050，31–60 天路线项）
 
-> **状态**：✅ 能力与排除策略落地 / ⏳ 默认关闭，收益与 CPU 代价未实测（待同源 A/B 决定默认值）
+> **状态**：✅ 能力与排除策略落地 / ✅ 收益与代价同源 A/B 已实测（V，默认值仍关闭，翻转需单独批准）
 > **决策**：`docs/adr/0050-响应gzip压缩与breach排除.md`
 > **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「响应 5,314 B 未压缩」；31–60 天路线项「开 gzip/brotli（注意 BREACH）」
 
@@ -22,13 +22,13 @@
 | **顺带修复：`v18-sse` feature 从未被 CI 编译**（4 处编译错误） | `packages/sz-rust-sz300/src/router.rs`（`sse_handler`） | `cargo check -p sz-rust-sz300 --features v18-sse --all-targets` = 0 error；运行时行为未验证（`sse_test` 无 MySQL 软跳过），已登记欠债 |
 | brotli 暂不启用（避免一轮测量叠加两个未测变量） | `packages/sz-rust-sz300/Cargo.toml`（仅 `compression-gzip`） | 决策理由见 ADR-050 替代方案 B |
 | 回归 | `cargo test -p sz-rust-sz300` | **244 passed / 0 failed / 62 ignored**；clippy 0 warning；fmt 无差异 |
-| 性能量化 | 需一次性 MySQL + release 实例 + 门禁 v2（c=50/10s/60s×3），且客户端需显式发 `Accept-Encoding: gzip` | **未实测（W）**，欠债 `DB-2026-10-30-03`，受「先问再起服务」约束待批准 |
+| 性能量化（同源 A/B：同一二进制切 `SZ300_COMPRESSION`，客户端带 `Accept-Encoding: gzip`） | 一次性 MySQL 9.6（`sz300-gzip-mysql` @127.0.0.1:3308）+ `sz300-server-post049.exe` + 门禁 v2（c=50/10s/60s×3） | **V**（§17 静默窗口腿 C2/D2）：出网 `product/list` 4,692→800.8 B/req（**−82.93%**）、`order/list` 5,518→878.5（**−84.08%**）、`/health` 115→113.4（−1.39%）；QPS 差 +1.73%/−0.19%/+2.11% 全部**小于同配置重复腿散布**（≤5.60%/≤8.35%/≤11.97%）→ 测不出代价（CPU 直接度量仍为 W，欠债 DB-2026-10-30-03 保留该子项）；开关证据：C2 2,317,702 响应全 identity，D2 2,351,362 全 gzip |
 
 ---
 
 ## 2026-10-30 更新：鉴权授权上下文缓存（ADR-049，31–60 天路线项）
 
-> **状态**：✅ 代码与测试完成 / ⏳ 端到端吞吐未实测
+> **状态**：✅ 代码与测试完成 / ✅ 端到端吞吐已实测（V，静默窗口同源六腿 A/B）
 > **决策**：`docs/adr/0049-鉴权授权上下文缓存.md`
 > **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「鉴权每请求查库」；31–60 天路线项「JWT claims 鉴权」的安全替代
 
@@ -40,7 +40,7 @@
 | 真库集成测试（hit/miss 计数、删行后仍命中、role=2 非管理员、负结果不缓存 + 可达性对照） | `packages/sz-rust-sz300/tests/auth_ctx_cache_test.rs` | **V**：一次性 MySQL `sz300-authctx-mysql` @127.0.0.1:3306 / `sz_orm_test`，`-- --ignored` = **1 passed**（四组场景同一运行时内串行；拆成两个 `#[tokio::test]` 会因进程级池绑定首个运行时关闭而误判，已合并） |
 | ignored 测试接入 CI（含 ADR-048 与存量漏接） | `.github/workflows/db-integration.yml`（新增 4 个 sz300 `--ignored` 组） | 门禁 30 `ignored-test-routing.js` = 通过 |
 | 顺带修复存量门禁失败 | `docs/adr/ADR-043-ai时代单一版本合并.md` 补「日期」字段 | `scripts/check-adr-coverage.sh` = exit 0（此前恒 exit 1） |
-| 端到端吞吐量化 | — | **未实测**：需一次性 MySQL 9.6 + release 实例跑门禁 v2（起服务前须用户批准） |
+| 端到端吞吐量化 | 一次性 MySQL 9.6 + `sz300-server-pre049.exe` / `sz300-server-post049.exe` + 门禁 v2（c=50/10s/60s×3），静默窗口准入（连续 3 次 `busy_cores ≤1.5/40`，等待 810 s） | **V**（§17 腿 A/A2 vs B/B2/C2/D2）：每业务请求 `Com_select` 2.49→1.38（−44.4%）、`Questions` 4.69→2.51（−46.3%），pre/post 区间无重叠；`order/list` 2,576.8→3,693.5 QPS（**+43.3%**）、p99 33.175→17.785 ms（−46.4%）；`product/list` +16.41%/+23.34%；对照端点 `/health` −5.32%/−2.57%（排除窗口运气）；同配置重复腿散布 ±8~12% 为可归因下界；基线由腿 B2 重播种。未归因余量 ≈1.04 条非 SELECT/请求（W，本批未采 `Com_insert` 等计数器） |
 
 ---
 
