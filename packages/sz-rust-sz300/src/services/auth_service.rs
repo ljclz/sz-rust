@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use crate::db::acquire_cancel_safe;
+use crate::query_cache::{CacheStats, QueryCache};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use sz_rust_core::orm::auth::{Credentials, User};
 use sz_rust_core::orm::Pool;
 use sz_rust_core::orm::Value;
@@ -442,37 +444,100 @@ pub async fn get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>>
     rows.into_iter().next()
 }
 
-/// 根据 user_id 查询用户上下文（IDOR 修复专用，2026-10-28）
+/// 鉴权中间件所需的授权上下文（IDOR 数据归属过滤的依据）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthContext {
+    /// 所属商户 ID（`merchant_user.merchant_id` 为 NULL 时 None）
+    pub merchant_id: Option<i64>,
+    /// 是否管理员（`merchant_user.role == 1`）
+    pub is_admin: bool,
+}
+
+/// 授权上下文缓存的 TTL（ADR-049）
+const AUTH_CTX_TTL: Duration = Duration::from_secs(60);
+
+/// 授权上下文缓存（ADR-049）：进程内 LRU + TTL，上限 50,000 个用户。
+/// 多实例部署时每实例独立，陈旧窗口仍不超过 TTL。
+static AUTH_CTX_CACHE: OnceLock<QueryCache> = OnceLock::new();
+
+fn auth_ctx_cache() -> &'static QueryCache {
+    AUTH_CTX_CACHE.get_or_init(|| QueryCache::new(50_000, AUTH_CTX_TTL))
+}
+
+/// 授权上下文缓存的命中/未命中计数（指标与集成测试断言用）
+pub fn auth_ctx_stats() -> &'static CacheStats {
+    auth_ctx_cache().stats()
+}
+
+/// `AuthContext` 定长编码：`[存在位 1B][merchant_id 8B LE][is_admin 1B]`
 ///
-/// 与 [`get_user_info_by_id`] 的差异：
+/// 存在位区分「NULL」与「0」，避免用哨兵值假设业务主键取值范围。
+fn encode_auth_ctx(ctx: AuthContext) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(10);
+    buf.push(u8::from(ctx.merchant_id.is_some()));
+    buf.extend_from_slice(&ctx.merchant_id.unwrap_or(0).to_le_bytes());
+    buf.push(u8::from(ctx.is_admin));
+    buf
+}
+
+/// 解码 [`encode_auth_ctx`] 的字节；长度或标志位不合法时返回 None（回源查库）
+fn decode_auth_ctx(bytes: &[u8]) -> Option<AuthContext> {
+    if bytes.len() != 10 || bytes[0] > 1 || bytes[9] > 1 {
+        return None;
+    }
+    let raw = i64::from_le_bytes(bytes[1..9].try_into().ok()?);
+    Some(AuthContext {
+        merchant_id: (bytes[0] == 1).then_some(raw),
+        is_admin: bytes[9] == 1,
+    })
+}
+
+/// 读取授权上下文（auth 中间件专用，ADR-049）
+///
+/// 语义与旧版逐请求查库一致，只是命中缓存时省掉一次 `merchant_user` 往返：
 /// - **不会 panic**：认证模块尚未初始化（测试环境）或 DB 不可用时返回 `None`，
 ///   调用方降级为仅使用 JWT 声明（此时 `merchant_id` 为 None，不启用数据归属过滤）。
-/// - 用途：auth 中间件在 JWT 校验通过后提取当前用户的 merchant_id / 管理员标记。
+/// - 失败与「用户不存在」**不缓存**：连接抖动不该被固化成 TTL 时长的降级。
+/// - 陈旧边界：外部改 `role` / `merchant_id` 后最长 TTL 秒内新值才生效；
+///   应用内唯一写 `merchant_user` 的路径是 `last_login_at`，不参与授权判断。
 #[tracing::instrument(skip_all)]
-pub async fn try_get_user_info_by_id(user_id: i64) -> Option<HashMap<String, Value>> {
+pub async fn auth_context(user_id: i64) -> Option<AuthContext> {
+    let key = format!("auth:ctx:{}", user_id);
+    if let Some(ctx) = auth_ctx_cache().get(&key).and_then(|b| decode_auth_ctx(&b)) {
+        return Some(ctx);
+    }
+
     let pool = DB_POOL.get()?;
     let mut conn = acquire_cancel_safe(pool)
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, "查询用户上下文：获取 DB 连接失败: user_id={}", user_id);
+            tracing::error!(error = %e, "查询授权上下文：获取 DB 连接失败: user_id={}", user_id);
             e
         })
         .ok()?;
 
-    let sql =
-        "SELECT u.user_id, u.username, u.merchant_id, u.phone as contact_phone, u.role, u.status \
-         FROM merchant_user u WHERE u.user_id = ?";
+    let sql = "SELECT u.merchant_id, u.role FROM merchant_user u WHERE u.user_id = ?";
     let params = [Value::I64(user_id)];
     let rows = conn
         .query_with_params(sql, &params)
         .await
         .map_err(|e| {
-            tracing::error!(error = %e, "查询用户上下文失败: user_id={}", user_id);
+            tracing::error!(error = %e, "查询授权上下文失败: user_id={}", user_id);
             e
         })
         .ok()?;
 
-    rows.into_iter().next()
+    let row = rows.into_iter().next()?;
+    let ctx = AuthContext {
+        merchant_id: row.get("merchant_id").and_then(|v| v.as_i64()),
+        is_admin: row
+            .get("role")
+            .and_then(|v| v.as_i64())
+            .map(|r| r == 1)
+            .unwrap_or(false),
+    };
+    auth_ctx_cache().set(&key, encode_auth_ctx(ctx), None);
+    Some(ctx)
 }
 
 /// 校验 JWT 令牌 — 成功返回用户信息，失败返回错误描述
@@ -831,5 +896,63 @@ mod tests {
         // 窗口内未再次到期：仍不输出
         assert!(!sampler.sample(base + 90).0);
         assert_eq!(sampler.sample(base + 120), (true, 1));
+    }
+
+    #[test]
+    fn test_auth_ctx_encoding_round_trip() {
+        use super::{decode_auth_ctx, encode_auth_ctx, AuthContext};
+
+        let cases = [
+            AuthContext {
+                merchant_id: Some(7),
+                is_admin: true,
+            },
+            AuthContext {
+                merchant_id: Some(-3),
+                is_admin: false,
+            },
+            AuthContext {
+                merchant_id: None,
+                is_admin: true,
+            },
+            AuthContext {
+                merchant_id: None,
+                is_admin: false,
+            },
+        ];
+        for ctx in cases {
+            let bytes = encode_auth_ctx(ctx);
+            assert_eq!(bytes.len(), 10, "编码必须是定长 10 字节");
+            assert_eq!(decode_auth_ctx(&bytes), Some(ctx), "往返不相等: {:?}", ctx);
+        }
+    }
+
+    /// merchant_id 为 NULL 与 merchant_id = 0 必须编码成不同字节，
+    /// 否则缓存会把「未归属商户」误判成「归属 0 号商户」。
+    #[test]
+    fn test_auth_ctx_null_differs_from_zero() {
+        use super::{decode_auth_ctx, encode_auth_ctx, AuthContext};
+
+        let null_ctx = AuthContext {
+            merchant_id: None,
+            is_admin: false,
+        };
+        let zero_ctx = AuthContext {
+            merchant_id: Some(0),
+            is_admin: false,
+        };
+        assert_ne!(encode_auth_ctx(null_ctx), encode_auth_ctx(zero_ctx));
+        assert_eq!(decode_auth_ctx(&encode_auth_ctx(zero_ctx)), Some(zero_ctx));
+    }
+
+    #[test]
+    fn test_auth_ctx_decoder_rejects_corrupt_bytes() {
+        use super::decode_auth_ctx;
+
+        // 长度不足 / 标志位非 0|1 / 尾部标志位非法 → 一律回源，不能凭坏数据放行
+        assert_eq!(decode_auth_ctx(&[]), None);
+        assert_eq!(decode_auth_ctx(&[1; 9]), None);
+        assert_eq!(decode_auth_ctx(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 1]), None);
+        assert_eq!(decode_auth_ctx(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 2]), None);
     }
 }

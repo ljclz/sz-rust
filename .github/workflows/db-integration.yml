@@ -10,7 +10,8 @@
 #                  cross_backend_pg（PostgreSQL）
 #   - sz300：db_integration_test / service_coverage_test / graphql_persist_test /
 #            order_saga_e2e / e2e_ota_test / e2e_device_test / e2e_mqtt_test /
-#            mqtt_dispatch_test（均真实 MySQL 9.6，无 MQTT broker 依赖）
+#            mqtt_dispatch_test / order_count_cache_test / auth_ctx_cache_test /
+#            order_idempotency_test / outbox_webhook_test（均真实 MySQL 9.6，无 MQTT broker 依赖）
 #   - marketplace：repository_integration / service_integration（PostgreSQL）
 #   - cli：cli_db_integration（PostgreSQL，MARKETPLACE_PG_URL 覆盖）
 #          + lib 级 ignored（cargo_checker，无外部服务）
@@ -145,6 +146,22 @@ jobs:
 
           echo "::group::sz300 mqtt_dispatch_test (MySQL)"
           cargo test -p sz-rust-sz300 --test mqtt_dispatch_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          echo "::group::sz300 order_count_cache_test (MySQL, ADR-048)"
+          cargo test -p sz-rust-sz300 --test order_count_cache_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          echo "::group::sz300 auth_ctx_cache_test (MySQL, ADR-049)"
+          cargo test -p sz-rust-sz300 --test auth_ctx_cache_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          echo "::group::sz300 order_idempotency_test (MySQL)"
+          cargo test -p sz-rust-sz300 --test order_idempotency_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          echo "::group::sz300 outbox_webhook_test (MySQL)"
+          cargo test -p sz-rust-sz300 --test outbox_webhook_test -- --ignored --test-threads=1
           echo "::endgroup::"
 
           echo "::group::testkit p1_4_testkit (MySQL)"

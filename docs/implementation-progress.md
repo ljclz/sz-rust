@@ -6,6 +6,24 @@
 
 ---
 
+## 2026-10-30 更新：鉴权授权上下文缓存（ADR-049，31–60 天路线项）
+
+> **状态**：✅ 代码与测试完成 / ⏳ 端到端吞吐未实测
+> **决策**：`docs/adr/0049-鉴权授权上下文缓存.md`
+> **来源**：`docs/audit/2026-10-29-性能工程评测报告.md` §6 瓶颈 3「鉴权每请求查库」；31–60 天路线项「JWT claims 鉴权」的安全替代
+
+| 交付项 | 位置 | 验证 |
+|--------|------|------|
+| `try_get_user_info_by_id` → `auth_context` 返回 `AuthContext{merchant_id,is_admin}`，投影收窄为 2 列 | `packages/sz-rust-sz300/src/services/auth_service.rs` | `cargo check -p sz-rust-sz300 --all-targets` = 0 error |
+| 进程级授权上下文缓存（LRU 50k / TTL 60s / 定长 10 字节值；负结果不缓存） | 同上（`auth_ctx_cache` + `encode_auth_ctx`/`decode_auth_ctx`） | `cargo test -p sz-rust-sz300 --lib` = **116 passed**（+3 编解码单测） |
+| 中间件接线（`CurrentUser` 注入语义不变，DB 不可用仍降级） | `packages/sz-rust-sz300/src/middleware/auth_middleware.rs` | `cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning |
+| 真库集成测试（hit/miss 计数、删行后仍命中、role=2 非管理员、负结果不缓存 + 可达性对照） | `packages/sz-rust-sz300/tests/auth_ctx_cache_test.rs` | **V**：一次性 MySQL `sz300-authctx-mysql` @127.0.0.1:3306 / `sz_orm_test`，`-- --ignored` = **1 passed**（四组场景同一运行时内串行；拆成两个 `#[tokio::test]` 会因进程级池绑定首个运行时关闭而误判，已合并） |
+| ignored 测试接入 CI（含 ADR-048 与存量漏接） | `.github/workflows/db-integration.yml`（新增 4 个 sz300 `--ignored` 组） | 门禁 30 `ignored-test-routing.js` = 通过 |
+| 顺带修复存量门禁失败 | `docs/adr/ADR-043-ai时代单一版本合并.md` 补「日期」字段 | `scripts/check-adr-coverage.sh` = exit 0（此前恒 exit 1） |
+| 端到端吞吐量化 | — | **未实测**：需一次性 MySQL 9.6 + release 实例跑门禁 v2（起服务前须用户批准） |
+
+---
+
 ## 2026-10-30 更新：订单列表 COUNT 查询缓存（ADR-048，31–90 天路线项）
 
 > **状态**：✅ 完成（用户 2026-10-30 选定「先做 COUNT 缓存（最高 ROI）」）

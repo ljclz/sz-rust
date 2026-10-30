@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Changed — 鉴权授权上下文缓存（2026-10-30）
+
+> 来源：31–60 天性能路线项「JWT claims 鉴权」的安全替代（用户 2026-10-30 指示按顺序执行路线项）。
+> 决策记录：`docs/adr/0049-鉴权授权上下文缓存.md`。
+
+- `auth_service::try_get_user_info_by_id(user_id) -> Option<HashMap<String, Value>>` 改为 `auth_service::auth_context(user_id) -> Option<AuthContext>`（`AuthContext { merchant_id: Option<i64>, is_admin: bool }`），SQL 投影由 6 列收窄为 `SELECT u.merchant_id, u.role`（参数化绑定不变）；`status`/`phone` 两列旧实现取而未用，本次不再查询。`/auth/me` 仍走未缓存的 `get_user_info_by_id`（完整档案，非热路径）。
+- 新增进程级授权上下文缓存（复用 v1.9.0 `QueryCache`：LRU 50,000 用户 / TTL 60 s，键 `auth:ctx:<user_id>`，值 = 定长 10 字节 `[存在位][merchant_id LE][is_admin]`）。**只缓存正向结果**：DB 失败、连接获取失败、用户不存在一律返回 `None` 且不写缓存。命中计数经 `auth_ctx_stats()` 可读（不入 `/metrics`，避免每请求 registry 查找抵销收益）。
+- 与路线原文「写进 JWT claims」的差异与理由：访问令牌有效期在 `main.rs` 硬编码 86400 s，claims 方案下角色/商户变更最坏 24 h 才生效且需重新登录；缓存把陈旧窗口压到 ≤60 s 且不改令牌协议。令牌吊销不受影响（`verify_token` 每请求仍查 `TOKEN_BLACKLIST`）。
+- `middleware/auth_middleware.rs::run_with_user_context` 改用新接口，`CurrentUser` 注入语义（降级为 `merchant_id=None` / 非管理员）逐请求保持一致。
+- 新增 3 个单测（`encode/decode` 往返、NULL 与 0 编码不同、坏字节拒绝回源）+ 1 个真库集成测试（`tests/auth_ctx_cache_test.rs`，四组场景：首次 miss→第二次 hit、删库行后仍命中证明 hit 不查库、`role=2` 不算管理员、负结果不缓存且带可达性对照）。
+- **ignored 测试接入 CI（门禁 30）**：`.github/workflows/db-integration.yml` 新增 4 个 sz300 `--ignored` 测试组（`auth_ctx_cache_test` / `order_count_cache_test` / `order_idempotency_test` / `outbox_webhook_test`）。此前这 4 个文件的 ignored 测试未被任何 workflow 路由，门禁 30 处于失败状态（3 个为存量，`order_count_cache_test` 由 ADR-048 引入）。
+- **顺带修复存量门禁失败**：`docs/adr/ADR-043-ai时代单一版本合并.md` 缺「日期」必填字段，使 `scripts/check-adr-coverage.sh`（CI job `adr-coverage`）自初始基线提交起恒 exit 1 → 补 `**日期**：2026-10-25`（与同文件「已接受（2026-10-25）」一致），门禁现错误数 0。
+- 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo fmt -p sz-rust-sz300 -- --check` = 无差异；`cargo test -p sz-rust-sz300` = 全绿无失败（lib **116 passed**，+3 编解码单测；`auth_ctx_cache_test` 1 个用例登记为 ignored）；**真库 MySQL 8.0.46：`cargo test -p sz-rust-sz300 --test auth_ctx_cache_test -- --ignored` = 1 passed**（四组场景同一运行时内串行执行）；`ignored-test-routing.js` = 门禁 30 通过；`check-adr-coverage.sh` = exit 0；`ci-config-audit.js` = 门禁 32 通过；`link-check.js` / `doc-code-consistency.js` / `adr-code-consistency.js` = exit 0。
+- **性能收益：未实测（W）**——本项消除的是每个鉴权请求固定 1 次连接池获取 + 1 次 `merchant_user` 主键查询，端到端吞吐提升需按门禁 v2 协议（c=50 / 预热 10 s / 稳态 60 s × 3）在一次性 MySQL + release 实例上复测并回填 `docs/audit/2026-10-29-性能整改现场验证记录.md` §15；起服务前需用户批准（受「先问再起服务」约束）。
+
 ### Added — 订单列表 COUNT 查询缓存（2026-10-30）
 
 > 来源：31–90 天性能路线项（用户 2026-10-30 选定「先做 COUNT 缓存（最高 ROI）」）。

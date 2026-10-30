@@ -116,25 +116,20 @@ pub async fn auth_middleware(req: Request<Body>, next: Next) -> Response {
 /// IDOR 修复（2026-10-28）：业务控制器通过 [`CurrentUser::from_request`]
 /// 获取当前用户的 `merchant_id` 与管理员标记，对查询做数据归属过滤。
 /// DB 不可用/未初始化时降级为仅 JWT 声明（`merchant_id=None`），不阻断请求。
+///
+/// ADR-049（2026-10-30）：授权上下文经 LRU+TTL 缓存，命中时该请求不再查库；
+/// 外部直接改 `role`/`merchant_id` 后最长 60 s 生效。
 async fn run_with_user_context(
     req: Request<Body>,
     next: Next,
     user: sz_rust_core::orm::auth::User,
 ) -> Response {
-    let info = auth_service::try_get_user_info_by_id(user.id).await;
+    let ctx = auth_service::auth_context(user.id).await;
     let current = CurrentUser {
         user_id: user.id,
         username: user.username.clone(),
-        merchant_id: info
-            .as_ref()
-            .and_then(|r| r.get("merchant_id"))
-            .and_then(|v| v.as_i64()),
-        is_admin: info
-            .as_ref()
-            .and_then(|r| r.get("role"))
-            .and_then(|v| v.as_i64())
-            .map(|r| r == 1)
-            .unwrap_or(false),
+        merchant_id: ctx.and_then(|c| c.merchant_id),
+        is_admin: ctx.map(|c| c.is_admin).unwrap_or(false),
     };
     let mut req = req;
     req.extensions_mut().insert(current);
