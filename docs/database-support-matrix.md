@@ -25,6 +25,7 @@ PostgreSQL 的 `migrations/001_init_pg.sql` 是历史草稿，与 MySQL 版本�
 | sz300 代码使用 MySQL 专有语法 | `order_service.rs` 的 `LAST_INSERT_ID()`；`saga_order.rs` 的 `ON DUPLICATE KEY UPDATE`；`scale_task_store` 类语句的 `FOR UPDATE SKIP LOCKED`；迁移锁 `GET_LOCK`（`packages/sz-rust-cli/src/cmd/migrate.rs`） |
 | PG 版 DDL 已分叉 | `001_init_pg.sql` 仅 13 张表，无对应的 002–007 |
 | sz-orm PG 占位符已修 | `../sz-orm/packages/sz-orm-sqlx/src/any.rs` 中 `pg_rewrite_placeholders` + `bind_pg_value` |
+| PG 池/事务链路已真库跑通（2026-10-30） | `cargo test -p sz-rust-sz300 --test db_integration_test -- --ignored test_pg_` → `2 passed; 0 failed`（本机 PG 18，`127.0.0.1:5432`；见修复记录命令 33）。仅覆盖池初始化、`SELECT 1`、事务提交/回滚；未跑业务迁移与 DML，矩阵行状态不变 |
 | Oracle / MSSQL 仅代码路径 | `packages/sz-rust-cli/src/cmd/migrate.rs` 的 `create_connection` 分支；无 CI 实例验证 |
 
 ## 3. 若要新增方言，必须同时满足
