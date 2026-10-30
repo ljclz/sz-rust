@@ -1,6 +1,6 @@
 # ADR-050：响应 gzip 压缩（含令牌端点 BREACH 排除）
 
-> **状态**：已接受（能力落地，**默认关闭**，默认值待同源 A/B 实测后确定）
+> **状态**：已接受（能力落地，**默认关闭**；2026-10-30 同源 A/B 已实测，见 §17，默认值翻转为开启待单独批准）
 > **日期**：2026-10-30
 > **决策者**：SZ-Rust Team
 > **相关代码**：`packages/sz-rust-sz300/src/middleware/compression.rs`、`packages/sz-rust-sz300/src/router.rs`、`packages/sz-rust-sz300/src/config.rs`、`packages/sz-rust-sz300/Cargo.toml`、`packages/sz-rust-sz300/tests/compression_test.rs`
