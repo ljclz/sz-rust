@@ -18,8 +18,6 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
 
 # 复用 sz-rust-ai-facade 的 VectorStore trait + AiError

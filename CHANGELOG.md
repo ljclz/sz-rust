@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### Changed — 未使用依赖首轮清偿 68 条：machete 全仓 109 → 41（2026-11-04）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-30-04；分类方法与余量清单见该条目。
+
+- **方法**：cargo-machete 全仓报告 109 条逐条用「src / tests / benches / examples 四目录 token 检索」分类：根包 `sz-rust` 31 条为 feature 聚合转发 optional 依赖（`src/lib.rs` 仅 feature gate 聚合点，设计内误报）、`api-gateway` 的 prost/tonic 为 optional 转发误报，其余 **68 条真未用项删除**（src 与全部测试目标零 token 命中 → 不可能被任何 feature 组合引用）。
+- **验证**：`cargo check --workspace --all-targets` = 0 error；`cargo clippy --workspace --all-targets -- -D warnings` = 0 warning；`cargo test --workspace --lib` = **7881 passed / 0 failed**。
+- **余量 41 条**：根包 31 + optional 2 + 待逐 feature 验证 8（api-gateway http / cache-facade lru / core backtrace / frontend-codegen askama / sdd anyhow / testkit tracing / tracing tracing / upload axum）；门禁 9/11 维持 advisory，待 8 条逐 crate `cargo hack check --each-feature` 验证后恢复硬门禁。
+
+### 部署 — docker compose 模板配置冒烟（2026-11-04）
+
+- `docker-compose.prod.yml` 与开发模板（`--env-file .env.example`）`docker compose config --quiet` 均通过；prod 模板缺 `MYSQL_PASSWORD`/`SZ300_JWT_SECRET`/`SZ300_DB_PASSWORD`/`SZ300_METRICS_TOKEN`/`SZ300_CORS_ORIGIN` 任一时拒绝插值（fail-closed，符合 README 安全基线承诺）。§17 遗留容器 `sz300-gzip-mysql` 已确认不存在（daemon 恢复后核实，无需清理）。staging 真机部署 / 外部渗透测试 / k6 压测仍受环境限制未执行（服务器凭据按约束不可读取、外部目标不可从本机发起）。
+
 ### Changed — 升级 sz-orm 10.13.1：连接归还按脏标记跳过会话复位，每业务请求 −2.007 条语句（2026-11-04）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-31-01 ①；上游修复 sz-orm commit `717120450463ec90b2068469ff290184f4a00af8`（已推 origin/main），端到端 A/B 见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §21。

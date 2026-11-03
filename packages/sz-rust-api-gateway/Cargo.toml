@@ -21,11 +21,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
-tracing = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true }
 http = "1"
-matchit = "0.8"
 tonic = { version = "0.12", optional = true }
 prost = { version = "0.13", optional = true }
 

@@ -92,9 +92,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
- "getrandom 0.3.4",
  "once_cell",
- "serde",
  "version_check",
  "zerocopy",
 ]
@@ -2646,17 +2644,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fancy-regex"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
-dependencies = [
- "bit-set 0.5.3",
- "regex-automata",
- "regex-syntax",
-]
-
-[[package]]
 name = "fast-float2"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2850,16 +2837,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fraction"
-version = "0.15.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e076045bb43dac435333ed5f04caf35c7463631d0dae2deb2638d94dd0a5b872"
-dependencies = [
- "lazy_static",
- "num",
 ]
 
 [[package]]
@@ -4171,15 +4148,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "iso8601"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ffd3254cf2b0fc53e38414bdba99719f3e269db8a6519731b68a3a90040c41b"
-dependencies = [
- "nom 8.0.0",
-]
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4374,36 +4342,6 @@ checksum = "5dea2b27dd239b2556ed7a25ba842fe47fd602e7fc7433c2a8d6106d4d9edd70"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "jsonschema"
-version = "0.18.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa0f4bea31643be4c6a678e9aa4ae44f0db9e5609d5ca9dc9083d06eb3e9a27a"
-dependencies = [
- "ahash",
- "anyhow",
- "base64 0.22.1",
- "bytecount",
- "clap",
- "fancy-regex 0.13.0",
- "fraction",
- "getrandom 0.2.17",
- "iso8601",
- "itoa",
- "memchr",
- "num-cmp",
- "once_cell",
- "parking_lot",
- "percent-encoding",
- "regex",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "time",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -5147,7 +5085,6 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
 dependencies = [
- "num-bigint",
  "num-complex",
  "num-integer",
  "num-iter",
@@ -5180,12 +5117,6 @@ dependencies = [
  "smallvec",
  "zeroize",
 ]
-
-[[package]]
-name = "num-cmp"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63335b2e2c34fae2fb0aa2cecfd9f0832a1e24b3b32ecec612c3426d46dc8aaa"
 
 [[package]]
 name = "num-complex"
@@ -6915,7 +6846,6 @@ dependencies = [
  "cookie",
  "cookie_store",
  "encoding_rs",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -8570,7 +8500,6 @@ dependencies = [
  "sysinfo",
  "sz-rust-addons-loader",
  "sz-rust-capability",
- "sz-rust-core",
  "sz-rust-middleware-facade",
  "sz-rust-orm-facade",
  "thiserror 2.0.21",
@@ -8703,12 +8632,9 @@ dependencies = [
 name = "sz-rust-admin-ui"
 version = "2.0.0"
 dependencies = [
- "axum 0.8.9",
  "parking_lot",
  "serde",
  "serde_json",
- "sz-rust-auth-facade",
- "sz-rust-core",
  "thiserror 2.0.21",
 ]
 
@@ -8744,13 +8670,9 @@ dependencies = [
 name = "sz-rust-alert-engine"
 version = "2.0.0"
 dependencies = [
- "async-trait",
  "chrono",
  "parking_lot",
- "reqwest 0.12.28",
  "serde",
- "serde_json",
- "sz-rust-observability",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -8762,7 +8684,6 @@ dependencies = [
  "async-trait",
  "criterion",
  "http",
- "matchit 0.8.4",
  "mockito",
  "parking_lot",
  "prost",
@@ -8772,7 +8693,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tonic",
- "tracing",
 ]
 
 [[package]]
@@ -8813,8 +8733,6 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
- "sz-rust-core",
- "sz-rust-orm-facade",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -8866,7 +8784,6 @@ dependencies = [
  "indicatif",
  "mockito",
  "notify",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -8896,7 +8813,6 @@ dependencies = [
 name = "sz-rust-codegen-loop"
 version = "2.0.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "regex",
  "serde",
@@ -8914,10 +8830,8 @@ dependencies = [
 name = "sz-rust-codegen-ui"
 version = "2.0.0"
 dependencies = [
- "axum 0.8.9",
  "serde",
  "serde_json",
- "sz-rust-frontend-codegen",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -8938,7 +8852,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -9018,11 +8931,8 @@ dependencies = [
  "axum 0.8.9",
  "http",
  "http-body-util",
- "regex",
  "serde",
  "serde_json",
- "sha2 0.10.9",
- "sz-rust-core",
  "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
@@ -9077,7 +8987,6 @@ dependencies = [
  "arc-swap",
  "axum 0.8.9",
  "criterion",
- "http-body-util",
  "hyper",
  "serde",
  "serde_json",
@@ -9171,7 +9080,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sz-rust-core",
  "thiserror 2.0.21",
  "toml 0.8.23",
 ]
@@ -9220,9 +9128,7 @@ dependencies = [
  "parking_lot",
  "rand 0.8.8",
  "serde",
- "sz-rust-data-mask",
  "thiserror 2.0.21",
- "tokio",
 ]
 
 [[package]]
@@ -9233,10 +9139,8 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "sz-rust-observability",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -9261,7 +9165,6 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "http-body-util",
- "jsonschema",
  "jsonwebtoken",
  "mockito",
  "reqwest 0.12.28",
@@ -9271,8 +9174,6 @@ dependencies = [
  "sha2 0.10.9",
  "sqlx",
  "sz-rust-addons-loader",
- "sz-rust-capability",
- "sz-rust-core",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -9281,8 +9182,6 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
- "utoipa",
- "uuid",
 ]
 
 [[package]]
@@ -9340,19 +9239,13 @@ dependencies = [
 name = "sz-rust-migration"
 version = "2.0.0"
 dependencies = [
- "arc-swap",
- "async-trait",
- "chrono",
- "futures",
  "mockall",
- "parking_lot",
  "prometheus",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sz-rust-ai-facade",
- "sz-rust-capability",
  "sz-rust-sdd",
  "tempfile",
  "thiserror 2.0.21",
@@ -9367,13 +9260,9 @@ dependencies = [
 name = "sz-rust-monitor-panel"
 version = "2.0.0"
 dependencies = [
- "axum 0.8.9",
  "chrono",
  "parking_lot",
  "serde",
- "serde_json",
- "sz-rust-alert-engine",
- "sz-rust-observability",
  "thiserror 2.0.21",
 ]
 
@@ -9433,7 +9322,6 @@ version = "2.0.0"
 dependencies = [
  "axum 0.8.9",
  "serde",
- "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
@@ -9520,7 +9408,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -9528,14 +9415,10 @@ name = "sz-rust-pipeline"
 version = "2.0.0"
 dependencies = [
  "async-trait",
- "futures",
  "parking_lot",
  "serde",
- "serde_json",
- "sz-rust-core",
  "thiserror 2.0.21",
  "tokio",
- "tower 0.5.3",
 ]
 
 [[package]]
@@ -9547,7 +9430,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sz-rust-addons-loader",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -9605,18 +9487,14 @@ dependencies = [
  "serde",
  "serde_json",
  "similar",
- "sz-rust-ai-facade",
  "sz-rust-capability",
- "sz-rust-mcp",
  "sz-rust-rag",
  "sz-rust-visual",
  "tempfile",
  "tera",
  "thiserror 2.0.21",
  "tokio",
- "tokio-util",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -9628,11 +9506,9 @@ dependencies = [
  "http",
  "http-body-util",
  "serde",
- "sz-rust-http-facade",
  "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",
- "tower-http 0.7.1",
 ]
 
 [[package]]
@@ -9640,7 +9516,6 @@ name = "sz-rust-service-registry"
 version = "2.0.0"
 dependencies = [
  "async-trait",
- "chrono",
  "mockito",
  "parking_lot",
  "rand 0.8.8",
@@ -9649,7 +9524,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -9749,7 +9623,6 @@ version = "2.0.0"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
- "chrono",
  "http-body-util",
  "serde",
  "serde_json",
@@ -9769,7 +9642,6 @@ dependencies = [
  "axum 0.8.9",
  "serde",
  "sha2 0.10.9",
- "sz-rust-http-facade",
  "sz-rust-infra-facade",
  "thiserror 2.0.21",
  "tokio",
@@ -9785,9 +9657,7 @@ dependencies = [
  "serde_json",
  "sz-rust-ai-facade",
  "testcontainers",
- "thiserror 2.0.21",
  "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -9798,7 +9668,6 @@ dependencies = [
  "async-trait",
  "axum 0.8.9",
  "chrono",
- "mime_guess",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -9810,7 +9679,6 @@ dependencies = [
  "tokio",
  "tower-http 0.7.1",
  "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -9829,12 +9697,8 @@ name = "sz-rust-websocket"
 version = "2.0.0"
 dependencies = [
  "async-trait",
- "axum 0.8.9",
  "dashmap",
- "parking_lot",
  "serde",
- "sz-rust-auth-facade",
- "sz-rust-http-facade",
  "thiserror 2.0.21",
  "tokio",
  "uuid",
@@ -9870,7 +9734,6 @@ version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
- "sz-rust-core",
  "thiserror 2.0.21",
 ]
 
@@ -10344,7 +10207,7 @@ dependencies = [
  "anyhow",
  "base64 0.21.7",
  "bstr",
- "fancy-regex 0.12.0",
+ "fancy-regex",
  "lazy_static",
  "parking_lot",
  "rustc-hash 1.1.0",

@@ -11,9 +11,7 @@ homepage.workspace = true
 workspace = true
 
 [dependencies]
-tokio = { workspace = true }
 serde = { workspace = true }
-sz-rust-data-mask = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }

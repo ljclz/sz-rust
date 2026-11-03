@@ -34,15 +34,12 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 # Web 框架（预览服务静态文件）
 axum = { workspace = true }
 tower-http = { workspace = true }
 # MIME 类型推断
-mime_guess = { workspace = true }
 # Tauri 桌面应用框架
 tauri = { workspace = true, features = ["unstable"] }
-tauri-build = { workspace = true }
 
 [build-dependencies]
 tauri-build = { workspace = true }

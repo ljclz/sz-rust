@@ -11,8 +11,6 @@ homepage.workspace = true
 workspace = true
 
 [dependencies]
-sz-rust-core = { workspace = true }
-sz-rust-orm-facade = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

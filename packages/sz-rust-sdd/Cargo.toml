@@ -12,8 +12,6 @@ keywords = ["sdd", "agent", "ai", "code-generation", "specification"]
 categories.workspace = true
 
 [dependencies]
-sz-rust-ai-facade = { workspace = true, features = ["all-providers", "tiktoken", "reranker", "hybrid", "local-model"] }
-sz-rust-mcp = { workspace = true }
 sz-rust-capability = { workspace = true }
 sz-rust-rag = { workspace = true }
 sz-rust-visual = { workspace = true }
@@ -25,12 +23,10 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
 similar = "2"
 anyhow = { workspace = true }
-tokio-util = { workspace = true }
 parking_lot = { workspace = true }
 
 [lints]

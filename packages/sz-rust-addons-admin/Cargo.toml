@@ -12,7 +12,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-sz-rust-core = { workspace = true }
 sz-rust-orm-facade = { workspace = true }
 sz-rust-middleware-facade = { workspace = true }
 sz-rust-capability = { workspace = true }
