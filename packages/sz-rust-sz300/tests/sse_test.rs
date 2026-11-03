@@ -206,6 +206,7 @@ mod http_endpoint {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use futures::StreamExt;
     use std::sync::Arc;
     use sz_rust_core::orm::Pool;
     use sz_rust_observability::MetricsRegistry;
@@ -222,12 +223,42 @@ mod http_endpoint {
             },
             database: config::DatabaseConfig {
                 host: "127.0.0.1".to_string(),
-                port: 3306,
+                // 本机可用 SZ_TEST_DB_PORT 覆盖（默认 3306，CI 不受影响）
+                port: std::env::var("SZ_TEST_DB_PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(3306),
                 username: "root".to_string(),
                 password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
                 database: "sz_orm_test".to_string(),
             },
         }
+    }
+
+    // 2026-10-28 安全修复后契约：/events 订阅前强制 JWT 校验（router.rs sse_handler）。
+    // 测试令牌铸造模式与 rbac_test.rs 一致（init_auth_test_only + JwtEncoder）。
+    const TEST_SECRET: &str = "test-sse-secret-2026";
+
+    fn init_test_auth() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            sz_rust_sz300::services::auth_service::init_auth_test_only(TEST_SECRET);
+        });
+    }
+
+    fn issue_token(username: &str, user_id: i64) -> String {
+        init_test_auth();
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 3600;
+        let claims = sz_rust_core::orm::jwt::JwtClaims::new(username, exp)
+            .with_issuer("sz300-test")
+            .with_user_id(user_id);
+        sz_rust_core::orm::jwt::JwtEncoder::new(TEST_SECRET)
+            .encode(&claims)
+            .unwrap()
     }
 
     async fn ensure_mysql() -> Option<Pool> {
@@ -292,12 +323,40 @@ mod http_endpoint {
         }
     }
 
+    /// 在总限时内读取 SSE 响应的前 `min_events` 个事件帧（以空行 `\n\n` 分隔）
+    async fn read_sse_frames(body: Body, min_events: usize, total: Duration) -> String {
+        let mut buf = String::new();
+        let deadline = tokio::time::Instant::now() + total;
+        let mut stream = body.into_data_stream();
+        while buf.matches("\n\n").count() < min_events {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, stream.next()).await {
+                Ok(Some(Ok(chunk))) => buf.push_str(&String::from_utf8_lossy(&chunk)),
+                _ => break,
+            }
+        }
+        buf
+    }
+
+    async fn content_type_of(response: &axum::response::Response) -> String {
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// 2026-10-28 安全契约：未携带令牌不得订阅事件流（旧断言期望 200 是安全修复前的失真）
     #[tokio::test]
-    async fn test_sse_endpoint_returns_event_stream() {
+    async fn test_sse_endpoint_unauthorized_without_token() {
         let pool = match ensure_mysql().await {
             Some(p) => p,
             None => {
-                eprintln!("⚠️ MySQL 不可达，跳过 SSE 端点测试");
+                eprintln!("⚠️ MySQL 不可达，跳过 SSE 端点鉴权测试");
                 return;
             }
         };
@@ -314,35 +373,114 @@ mod http_endpoint {
             .await
             .unwrap();
 
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 伪造/畸形令牌同样 401（fail-closed）
+    #[tokio::test]
+    async fn test_sse_endpoint_rejects_invalid_token() {
+        let pool = match ensure_mysql().await {
+            Some(p) => p,
+            None => {
+                eprintln!("⚠️ MySQL 不可达，跳过 SSE 畸形令牌测试");
+                return;
+            }
+        };
+        let state = make_state(pool);
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/events")
+                    .header("Authorization", "Bearer not-a-real-jwt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 有效令牌：200 + text/event-stream，且流打开后发布的事件经 live 路径推送
+    #[tokio::test]
+    async fn test_sse_endpoint_live_push_with_valid_token() {
+        let pool = match ensure_mysql().await {
+            Some(p) => p,
+            None => {
+                eprintln!("⚠️ MySQL 不可达，跳过 SSE live 推送测试");
+                return;
+            }
+        };
+        let state = make_state(pool);
+        let sse = state.sse_service.clone();
+        let app = create_router(state);
+        let token = issue_token("sse-live", 1);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/events")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Accept", "text/event-stream")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
         assert_eq!(response.status(), StatusCode::OK);
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
+        let content_type = content_type_of(&response).await;
         assert!(
             content_type.contains("text/event-stream"),
             "content-type 应为 text/event-stream, 实际: {content_type}"
         );
+
+        // 流已打开，再发布事件 → live 推送路径
+        let _ = sse
+            .publish("order_status", r#"{"order_no":"LIVE-1"}"#)
+            .await;
+        let body = read_sse_frames(response.into_body(), 1, Duration::from_secs(10)).await;
+        assert!(
+            body.contains("event: order_status"),
+            "live 事件未推送到流，实际: {body}"
+        );
+        assert!(
+            body.contains(r#"data:{"order_no":"LIVE-1"}"#)
+                || body.contains(r#"data: {"order_no":"LIVE-1"}"#),
+            "data 行缺失或内容不符, 实际: {body}"
+        );
+        assert!(
+            body.contains("id: "),
+            "SSE 事件应带自增 id 行, 实际: {body}"
+        );
     }
 
+    /// Last-Event-ID 断线重连：补发 id 大于游标的历史事件，且不重复游标本身
     #[tokio::test]
-    async fn test_sse_endpoint_with_last_event_id_header() {
+    async fn test_sse_endpoint_last_event_id_replay() {
         let pool = match ensure_mysql().await {
             Some(p) => p,
             None => {
-                eprintln!("⚠️ MySQL 不可达，跳过 SSE Last-Event-ID 测试");
+                eprintln!("⚠️ MySQL 不可达，跳过 SSE Last-Event-ID 重放测试");
                 return;
             }
         };
         let state = make_state(pool);
+        let sse = state.sse_service.clone();
+        let id1 = sse.publish("replay", "e1").await;
+        let id2 = sse.publish("replay", "e2").await;
+        let id3 = sse.publish("replay", "e3").await;
         let app = create_router(state);
+        let token = issue_token("sse-replay", 2);
 
         let response = app
             .oneshot(
                 Request::builder()
                     .uri("/events")
-                    .header("Last-Event-ID", "5")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Last-Event-ID", id1.to_string())
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -350,5 +488,14 @@ mod http_endpoint {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+        let body = read_sse_frames(response.into_body(), 2, Duration::from_secs(10)).await;
+        assert!(
+            body.contains(&format!("id: {id2}")) && body.contains(&format!("id: {id3}")),
+            "应补发 id {id2}/{id3} 两个历史事件, 实际: {body}"
+        );
+        assert!(
+            !body.contains(&format!("id: {id1}")),
+            "游标事件本身不应重放, 实际: {body}"
+        );
     }
 }

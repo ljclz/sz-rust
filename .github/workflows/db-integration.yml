@@ -12,6 +12,7 @@
 #            order_saga_e2e / e2e_ota_test / e2e_device_test / e2e_mqtt_test /
 #            mqtt_dispatch_test / order_count_cache_test / auth_ctx_cache_test /
 #            order_idempotency_test / outbox_webhook_test（均真实 MySQL 9.6，无 MQTT broker 依赖）
+#            + sse_test（v18-sse 运行时验证，DB-2026-10-30-03③；端点用例内部软跳过）
 #   - marketplace：repository_integration / service_integration（PostgreSQL）
 #   - cli：cli_db_integration（PostgreSQL，MARKETPLACE_PG_URL 覆盖）
 #          + lib 级 ignored（cargo_checker，无外部服务）
@@ -162,6 +163,12 @@ jobs:
 
           echo "::group::sz300 outbox_webhook_test (MySQL)"
           cargo test -p sz-rust-sz300 --test outbox_webhook_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          # v18-sse 运行时验证（DB-2026-10-30-03③）：端点用例内部 ensure_mysql 真连，
+          # 验证订阅强制 JWT（401/200）、live 推送与 Last-Event-ID 重放
+          echo "::group::sz300 sse_test (MySQL, v18-sse)"
+          cargo test -p sz-rust-sz300 --features v18-sse --test sse_test -- --test-threads=1
           echo "::endgroup::"
 
           echo "::group::testkit p1_4_testkit (MySQL)"
