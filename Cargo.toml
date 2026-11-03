@@ -545,3 +545,89 @@ incremental = false          # CI fresh checkout 无需增量
 debug = 0                    # CI 最小化 debuginfo
 
 # 2026-09-26：曾用 [patch.crates-io] 指向本地 sz-orm 9.0.0（发布前过渡），9.0.0 已上 crates.io 后移除
+
+# cargo-machete 白名单（DB-2026-10-30-04 收口，2026-11-04）：machete 0.9.2 的
+# 字符串匹配不识别 `dep:x` 特性转发语法。以下依赖均满足 `optional = true` 且在
+# [features] 中以 `dep:<name>` 引用（根包为 feature 聚合点，成员依赖全部转发）。
+# 门禁 11（machete）恢复硬门禁时以本清单为基准；新增条目须附理由。
+[workspace.metadata.cargo-machete]
+ignored = [
+    # sz-rust-api-gateway：`grpc = ["dep:prost","dep:tonic"]`，feature 门控 gRPC 后端
+    "prost",
+    "tonic",
+    # sz-rust-cache-facade：`lru-cache = ["dep:lru"]`，feature 门控 LRU 后端
+    "lru",
+    # sz-rust-core：`alloc-backtrace = ["dep:backtrace"]`，feature 门控分配栈记录
+    "backtrace",
+    # sz-rust-frontend-codegen：`askama = ["dep:askama"]`，feature 门控模板渲染
+    "askama",
+    # 根包 sz-rust：feature 聚合点（src/lib.rs 无代码，31 个成员依赖 optional 转发）
+    "sz-rust-addons-loader",
+    "sz-rust-admin-ui",
+    "sz-rust-ai-facade",
+    "sz-rust-alert-engine",
+    "sz-rust-api-gateway",
+    "sz-rust-auth-facade",
+    "sz-rust-benchmark-suite",
+    "sz-rust-codegen-ui",
+    "sz-rust-config-center",
+    "sz-rust-data-mask",
+    "sz-rust-distributed-tx",
+    "sz-rust-frontend-codegen",
+    "sz-rust-http-facade",
+    "sz-rust-i18n",
+    "sz-rust-key-rotation",
+    "sz-rust-log-aggregator",
+    "sz-rust-marketplace",
+    "sz-rust-monitor-panel",
+    "sz-rust-observability",
+    "sz-rust-orm-facade",
+    "sz-rust-pipeline",
+    "sz-rust-plugin-sdk",
+    "sz-rust-rag",
+    "sz-rust-security-headers",
+    "sz-rust-service-registry",
+    "sz-rust-tracing",
+    "sz-rust-upload",
+    "sz-rust-visual",
+    "sz-rust-wasm",
+    "sz-rust-websocket",
+    "sz-rust-zerocopy",
+]
+
+# 同上白名单的 package 级副本：machete 对根包自身分析时不读 workspace 级
+# （向上搜索 workspace 清单不含根目录），根包 31 条转发依赖必须在此豁免。
+[package.metadata.cargo-machete]
+ignored = [
+    "sz-rust-addons-loader",
+    "sz-rust-admin-ui",
+    "sz-rust-ai-facade",
+    "sz-rust-alert-engine",
+    "sz-rust-api-gateway",
+    "sz-rust-auth-facade",
+    "sz-rust-benchmark-suite",
+    "sz-rust-codegen-ui",
+    "sz-rust-config-center",
+    "sz-rust-data-mask",
+    "sz-rust-distributed-tx",
+    "sz-rust-frontend-codegen",
+    "sz-rust-http-facade",
+    "sz-rust-i18n",
+    "sz-rust-key-rotation",
+    "sz-rust-log-aggregator",
+    "sz-rust-marketplace",
+    "sz-rust-monitor-panel",
+    "sz-rust-observability",
+    "sz-rust-orm-facade",
+    "sz-rust-pipeline",
+    "sz-rust-plugin-sdk",
+    "sz-rust-rag",
+    "sz-rust-security-headers",
+    "sz-rust-service-registry",
+    "sz-rust-tracing",
+    "sz-rust-upload",
+    "sz-rust-visual",
+    "sz-rust-wasm",
+    "sz-rust-websocket",
+    "sz-rust-zerocopy",
+]

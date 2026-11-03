@@ -23,7 +23,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 parking_lot = { workspace = true }
 reqwest = { workspace = true }
-http = "1"
 tonic = { version = "0.12", optional = true }
 prost = { version = "0.13", optional = true }
 

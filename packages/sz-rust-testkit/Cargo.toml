@@ -21,7 +21,6 @@ serde_json = { workspace = true, optional = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true, optional = true }
 sz-rust-orm-facade = { workspace = true, optional = true, features = ["auto-rollback", "tx-timeout"] }

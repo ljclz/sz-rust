@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed — 未使用依赖收口：余量 8 条全部定性，machete 全仓清零，门禁 11 恢复硬门禁（2026-11-04）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-30-04（本条目后转 RESOLVED）。
+
+- **真未用再删 5 条**（零 crate API 引用，仅字符串/注释/子串探测命中）：`api-gateway::http`（仅 `"http://"` 字面量）、`sdd::anyhow`（仅 `content.contains("anyhow")` 旧代码探测）、`testkit::tracing`、`sz-rust-tracing::tracing`（仅注释与路由字符串）、`upload::axum`（仅文档注释）。验证：`cargo check --all-targets` 5 crate 0 error + `cargo hack check --each-feature --no-dev-deps` 5 crate 全 feature 组合 0 error。
+- **白名单落位**：`dep:x` 特性转发误报（cache-facade lru / core backtrace / frontend-codegen askama）+ 根包 31 条 feature 聚合转发 + api-gateway prost/tonic（grpc feature 转发）写入根 `Cargo.toml` 的 `[workspace.metadata.cargo-machete]` 与 `[package.metadata.cargo-machete]`——machete 0.9.2 不识别 `dep:` 语法，且对根包自身分析不读 workspace 级 metadata（源码 `get_full_manifest` 向上搜索不含根目录）。
+- **门禁 11（machete）恢复硬门禁**：本机 `cargo machete` 全仓 **exit 0**；ci.yml 移除 `set +e`/`exit 0` 吞码。门禁 9（cargo-udeps，nightly）保持 advisory 并登记由门禁 11 承担硬拦截。
+
 ### Changed — 未使用依赖首轮清偿 68 条：machete 全仓 109 → 41（2026-11-04）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-30-04；分类方法与余量清单见该条目。

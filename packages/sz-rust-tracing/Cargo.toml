@@ -24,7 +24,6 @@ sz-rust-capability.workspace = true
 sz-rust-addons-loader.workspace = true
 async-trait.workspace = true
 tokio.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 tower = { workspace = true }

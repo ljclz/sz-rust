@@ -8683,7 +8683,6 @@ version = "2.0.0"
 dependencies = [
  "async-trait",
  "criterion",
- "http",
  "mockito",
  "parking_lot",
  "prost",
@@ -9479,7 +9478,6 @@ dependencies = [
 name = "sz-rust-sdd"
 version = "2.0.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "clap",
@@ -9613,7 +9611,6 @@ dependencies = [
  "sz-rust-orm-facade",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -9631,7 +9628,6 @@ dependencies = [
  "sz-rust-core",
  "tokio",
  "tower 0.5.3",
- "tracing",
 ]
 
 [[package]]
@@ -9639,7 +9635,6 @@ name = "sz-rust-upload"
 version = "2.0.0"
 dependencies = [
  "async-trait",
- "axum 0.8.9",
  "serde",
  "sha2 0.10.9",
  "sz-rust-infra-facade",
