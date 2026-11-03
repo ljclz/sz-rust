@@ -194,6 +194,69 @@ Detailed docs in `docs/` directory:
 
 ---
 
+## Production Deployment Security Baseline (added 2026-10-25, updated 2026-10-28; English section added 2026-11-04)
+
+> Since 2026-10-28, the `default` features of `sz-rust-sz300` already include `v18-security-headers` / `v18-data-mask` / `v18-audit-chain` / `v18-key-rotation` / `v19-jwt-audience`. Production builds **no longer need to enable these five manually**; `v18-rbac` and `v18-upload` remain optional.
+
+### 1. Security features enabled by default
+
+The default build includes:
+- `v18-security-headers`: CSP / HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy
+- `v18-data-mask`: sensitive-field masking on responses
+- `v18-audit-chain`: hash-chained audit log for write operations
+- `v18-key-rotation`: JWT key rotation (30 days, CSPRNG)
+- `v19-jwt-audience`: JWT audience validation (login issues tokens carrying `aud`)
+
+To additionally enable RBAC and enhanced upload:
+
+```bash
+# Local production build (default security features included; append RBAC/upload)
+cargo build --release -p sz-rust-sz300 --features \
+  v18-rbac,v18-upload
+
+# Docker production build (passed via build arg)
+docker build --build-arg SZ300_FEATURES="v18-rbac,v18-upload" .
+```
+
+The Docker production template is `docker-compose.prod.yml`:
+
+```bash
+export SZ300_JWT_SECRET="$(openssl rand -hex 32)"
+export SZ300_DB_PASSWORD="$(openssl rand -hex 16)"
+export SZ300_METRICS_TOKEN="$(openssl rand -hex 32)"
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+**One-command dev environment** (UXR 2026-10-27 P2-3 fix): loads `.env.example` placeholder values automatically, no manual export needed:
+
+```bash
+docker compose --env-file .env.example up -d --build
+```
+
+### 2. Protect the `/metrics` endpoint
+
+Once `SZ300_METRICS_TOKEN` is set, `/metrics` requires `Authorization: Bearer <token>` and returns 401 otherwise. **The production compose template enforces this variable**; when unset the endpoint stays public and a startup WARN is emitted (recommended for internal networks only).
+
+### 3. Configure trusted CORS origins
+
+The default CORS policy is `Allow-Origin: *` (no credentials; fine for development). In production set `SZ300_CORS_ORIGIN` to the single trusted frontend origin (exact match; all other cross-origin requests are rejected):
+
+```bash
+export SZ300_CORS_ORIGIN="https://admin.example.com"
+```
+
+### 4. Post-start self-check
+
+The security baseline is active when the startup log contains:
+
+```
+可观测性 /metrics 端点已启用 Bearer 令牌鉴权
+```
+
+If you build with `--no-default-features`, startup emits a `未启用任何 v1.8.0 安全/协议 feature` WARN — in that case append the security features explicitly.
+
+---
+
 ## CI Gates & Quality Assurance
 
 Project implements its gate system via GitHub Actions (`ci.yml` actually has 37 jobs, re-verified on 2026-10-28 by parsing the direct children of `jobs:` — the old README claimed 23 jobs with "no continue-on-error", a stale description; `machete` runs with `continue-on-error: true` and is non-blocking; `coverage` and `miri` are blocking gates — `miri` fails closed on UB/memory issues):
