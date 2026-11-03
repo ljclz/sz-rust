@@ -15,8 +15,10 @@
 //!
 //! - 请求路径只把记录投递到有界内存通道（`AUDIT_BUFFER_CAPACITY`）后立即返回，
 //!   不再同步等待数据库写入 —— 消除慢库对业务延迟的影响（旧实现每写请求最长等 1 s）。
-//! - 后台任务从通道取记录并写入 `operate_log`；失败按 `AUDIT_RETRY_DELAY` 间隔重试，
-//!   超过 `AUDIT_MAX_RETRIES` 后丢弃并计数。
+//! - 后台任务从通道收拢批次（最多 [`AUDIT_BATCH_SIZE`] 条，只取已就绪记录、不等待凑批）
+//!   合并为一条 multi-value INSERT 写入 `operate_log`（2026-11-04 批量化，消除
+//!   单条串行 INSERT 在 c=50 下 10k 缓冲打满丢弃 16,375 条/腿的吞吐瓶颈）；
+//!   失败按 `AUDIT_RETRY_DELAY` 间隔整批重试，超过 `AUDIT_MAX_RETRIES` 后丢弃并计数。
 //! - 通道满（数据库持续不可写）时新记录被丢弃并计数，保证内存有界。
 //! - 丢弃计数暴露为 Prometheus Counter（`sz300_audit_dropped_total`）与
 //!   [`AuditSink::dropped_count`]。
@@ -61,6 +63,12 @@ const AUDIT_BUFFER_CAPACITY: usize = 10_000;
 
 /// 单条记录最大重试次数（超过后丢弃并计数）
 const AUDIT_MAX_RETRIES: u32 = 5;
+
+/// 批量落库上限：单条 multi-value INSERT 的最大行数。
+/// 2026-11-04（DB-2026-10-31-01②）：单条串行 INSERT 的落库吞吐（实测 ≈700 行/s）
+/// 低于 c=50 压测的入队速率（≈1.2k 条/s），10k 缓冲打满后单腿丢弃 16,375 条。
+/// 200 行 × 5 列 = 1000 参数，远低于 MySQL 65535 占位符上限。
+const AUDIT_BATCH_SIZE: usize = 200;
 
 /// 落库失败后的重试间隔
 const AUDIT_RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -136,38 +144,36 @@ impl AuditSink {
     }
 }
 
-/// 后台审计落库任务：从有界缓冲取记录，失败按固定间隔重试，超过上限后丢弃并计数。
+/// 后台审计落库任务：从有界缓冲收拢批次写入，失败按固定间隔重试，超过上限后整批丢弃并计数。
+///
+/// 批量策略（2026-11-04，DB-2026-10-31-01②）：阻塞等首条 → `try_recv` 收拢缓冲中
+/// 已就绪的最多 [`AUDIT_BATCH_SIZE`] 条合并为一条 multi-value INSERT。
+/// 只取已入队记录、不主动等待凑批，低负载时批大小为 1，不增加落库延迟。
 pub fn spawn_audit_worker(sink: Arc<AuditSink>, mut rx: mpsc::Receiver<AuditJob>, pool: Arc<Pool>) {
     tokio::spawn(async move {
-        while let Some(job) = rx.recv().await {
-            if persist_record(
-                &pool,
-                &job.record,
-                job.merchant_id,
-                &job.ip,
-                job.status_code,
-            )
-            .await
-            {
+        while let Some(first) = rx.recv().await {
+            let mut batch = Vec::with_capacity(AUDIT_BATCH_SIZE);
+            batch.push(first);
+            while batch.len() < AUDIT_BATCH_SIZE {
+                match rx.try_recv() {
+                    Ok(job) => batch.push(job),
+                    Err(_) => break,
+                }
+            }
+            if persist_batch(&pool, &batch).await {
                 continue;
             }
             let mut retries = 0u32;
             loop {
                 tokio::time::sleep(AUDIT_RETRY_DELAY).await;
-                if persist_record(
-                    &pool,
-                    &job.record,
-                    job.merchant_id,
-                    &job.ip,
-                    job.status_code,
-                )
-                .await
-                {
+                if persist_batch(&pool, &batch).await {
                     break;
                 }
                 retries += 1;
                 if retries >= AUDIT_MAX_RETRIES {
-                    sink.note_dropped(&job.record.target);
+                    for job in &batch {
+                        sink.note_dropped(&job.record.target);
+                    }
                     break;
                 }
             }
@@ -262,32 +268,52 @@ pub async fn audit_chain_middleware(
 /// 将审计记录写入 `operate_log`；成功返回 `true`。
 ///
 /// 失败/超时只记 error 日志并返回 `false`（由后台任务重试）：审计是旁路，不能因为库抖动让写请求失败。
-async fn persist_record(
-    pool: &Pool,
-    record: &AuditRecord,
-    merchant_id: Option<i64>,
-    ip: &str,
-    status_code: u16,
-) -> bool {
-    let detail = serde_json::json!({
-        "method": record.action,
-        "path": record.target,
-        "result": record.result,
-        "status_code": status_code,
-        "chain_hash": record.chain_hash,
-        "timestamp": record.timestamp.to_rfc3339(),
-    })
-    .to_string();
+async fn persist_batch(pool: &Pool, batch: &[AuditJob]) -> bool {
+    if batch.is_empty() {
+        return true;
+    }
 
-    let sql =
-        "INSERT INTO operate_log (merchant_id, operator, action, detail, ip) VALUES (?, ?, ?, ?, ?)";
-    let params = [
-        Value::I64(merchant_id.unwrap_or(0)),
-        Value::String(truncate_chars(&record.actor, 50)),
-        Value::String(truncate_chars(&record.action, 50)),
-        Value::String(redact_sensitive(&detail)),
-        Value::String(truncate_chars(ip, 45)),
-    ];
+    // detail 构造与逐条版完全一致（含 chain_hash 与脱敏）
+    let rows: Vec<(Option<i64>, String, String, String, String)> = batch
+        .iter()
+        .map(|job| {
+            let record = &job.record;
+            let detail = serde_json::json!({
+                "method": record.action,
+                "path": record.target,
+                "result": record.result,
+                "status_code": job.status_code,
+                "chain_hash": record.chain_hash,
+                "timestamp": record.timestamp.to_rfc3339(),
+            })
+            .to_string();
+            (
+                job.merchant_id,
+                truncate_chars(&record.actor, 50),
+                truncate_chars(&record.action, 50),
+                redact_sensitive(&detail),
+                truncate_chars(&job.ip, 45),
+            )
+        })
+        .collect();
+
+    let mut sql = String::with_capacity(batch.len() * 48 + 72);
+    sql.push_str("INSERT INTO operate_log (merchant_id, operator, action, detail, ip) VALUES ");
+    for i in 0..batch.len() {
+        if i > 0 {
+            sql.push_str(", ");
+        }
+        sql.push_str("(?, ?, ?, ?, ?)");
+    }
+
+    let mut params = Vec::with_capacity(batch.len() * 5);
+    for (merchant_id, operator, action, detail, ip) in &rows {
+        params.push(Value::I64(merchant_id.unwrap_or(0)));
+        params.push(Value::String(operator.clone()));
+        params.push(Value::String(action.clone()));
+        params.push(Value::String(detail.clone()));
+        params.push(Value::String(ip.clone()));
+    }
 
     let write = async {
         // sz-orm 10.13 的 Pool::acquire 返回独立 PoolError，未提供 From<PoolError> for DbError，
@@ -295,7 +321,7 @@ async fn persist_record(
         let mut conn = acquire_cancel_safe(pool)
             .await
             .map_err(sz_rust_core::orm::DbError::PoolError)?;
-        conn.execute_with_params(sql, &params).await
+        conn.execute_with_params(&sql, &params).await
     };
 
     match tokio::time::timeout(PERSIST_TIMEOUT, write).await {
@@ -303,15 +329,17 @@ async fn persist_record(
         Ok(Err(e)) => {
             tracing::error!(
                 error = %e,
-                path = %record.target,
-                "审计记录落库失败（将重试）"
+                path = %batch[0].record.target,
+                batch_size = batch.len(),
+                "审计记录批量落库失败（将整批重试）"
             );
             false
         }
         Err(_) => {
             tracing::error!(
-                path = %record.target,
-                "审计记录落库超时（{}s），将重试",
+                path = %batch[0].record.target,
+                batch_size = batch.len(),
+                "审计记录批量落库超时（{}s），将整批重试",
                 PERSIST_TIMEOUT.as_secs()
             );
             false

@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed — 审计链批量落库：c=50 下 10k 缓冲打满丢 16,375 条/腿 → 同参数腿丢弃归零（2026-11-04）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-31-01 ②；数据与复现见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §19。
+
+- **缺陷（实测证实）**：ADR-047 本地缓冲重放的单 worker 逐条 INSERT（每条 ≈1 次池借用 + 1 条 INSERT + 1 条归还复位）落库吞吐 ≈700–850 行/s，低于 c=50 压测的入队速率 ≈1.2k 条/s → 10k 有界缓冲打满后丢弃。真库 A/B 腿实测：入队 142,296 = 落库 125,919 + `sz300_audit_dropped_total` **16,375**（对账差 2 条为采样时序）；§18.4 的 0.241 条/请求差额同步归因（单条吞吐不足 + general_log 采样窗口未等排空的复合）。
+- **修复**：`packages/sz-rust-sz300/src/middleware/audit_chain.rs` worker 改批量收拢（`AUDIT_BATCH_SIZE=200`，阻塞等首条 + `try_recv` 取已就绪记录、不等待凑批，低负载批大小=1 无新增延迟），合并为一条 multi-value INSERT（1,000 参数）；失败按原间隔整批重试。链式哈希在入队时计算、批量不改 FIFO 顺序，链连续性不受影响。
+- **验证（同参数腿）**：入队 142,258 = 落库 **142,258** + 丢弃 **0**（精确相等）；丢弃 ERROR 日志 16,375 条 → **0 条**（RUST_LOG=warn 全程服务日志 3.8 MB → 1,385 B，顺带兑现 DB-2026-10-30-05 ③ 的日志量治理方向）；`cargo test -p sz-rust-sz300 --test audit_chain_test` = 9 passed、`--lib` = 118 passed、clippy 0 warning、fmt 无差异。
+
 ### 验证 — 语句类型分解探针（general_log）与 §17.5 非 SELECT 残差归因闭合（2026-10-31）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-30-05 ①；数据与复现见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §18。
