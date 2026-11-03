@@ -8291,7 +8291,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-auth"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8309,7 +8309,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-core"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -8331,7 +8331,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-graphql"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -8340,7 +8340,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-grpc"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "parking_lot",
  "serde",
@@ -8350,7 +8350,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-limit"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -8358,7 +8358,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-logger"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8368,7 +8368,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-macros"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8377,7 +8377,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mqtt"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "rumqttc",
@@ -8389,7 +8389,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-mssql"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8406,7 +8406,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-oracle"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8420,14 +8420,14 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-query-builder"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "sz-orm-core",
 ]
 
 [[package]]
 name = "sz-orm-queue"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -8439,7 +8439,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-scheduler"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8451,7 +8451,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sql-validator"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "regex",
  "thiserror 2.0.21",
@@ -8459,7 +8459,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-sqlx"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -8478,7 +8478,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-storage"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -8489,7 +8489,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-tracing"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -8499,7 +8499,7 @@ dependencies = [
 
 [[package]]
 name = "sz-orm-websocket"
-version = "10.13.0"
+version = "10.13.1"
 dependencies = [
  "async-trait",
  "flate2",

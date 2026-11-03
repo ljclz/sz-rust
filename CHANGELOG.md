@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed — 升级 sz-orm 10.13.1：连接归还按脏标记跳过会话复位，每业务请求 −2.007 条语句（2026-11-04）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-31-01 ①；上游修复 sz-orm commit `717120450463ec90b2068469ff290184f4a00af8`（已推 origin/main），端到端 A/B 见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §21。
+
+- **上游（sz-orm 10.13.1）**：`Connection` trait 新增 `take_session_dirty()`（默认 `true` 保守）/`mark_session_clean()`；`SqlxMySqlConnection` 在 `SET`（除 `SET TRANSACTION`）与 `USE` 成功执行后置脏，只读/事务语句不置脏；`MetricsConn` 透传；池 `release`/`return_raw` 两处 R5 复位点按脏标记跳过。
+- **本仓接线**：根 `Cargo.toml` 19 个 sz-orm 依赖钉住 `10.13.0 → 10.13.1`，`Cargo.lock` 同步，`.sz-orm-commit` 钉住上游修复 commit（CI 可复现契约维持）。
+- **验证（V，c=1 同协议 A/B）**：每业务请求 `Questions` 4.241 → 2.234（**−2.007，与 §18.2 预测 −2.0 吻合**）、`Com_select` 两腿差 0.003（≈0，省的纯是复位语句）；sz-orm 侧 `sz-orm-sqlx` 212 passed（+5 脏标记单测）/`sz-orm-core` 3270 passed、clippy 0 warning；本仓 `sz300 --lib` 118 passed / `orm-facade --lib pool` 30 passed。
+
 ### 验证 — 压缩 CPU 绝对代价进程级直接采样：+104.1 ms/千成功响应（+13.5%），出网 −71.4%（2026-11-04）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-30-05 ②；数据与复现见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §20。
