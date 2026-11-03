@@ -40,7 +40,8 @@
 | 真库集成测试（hit/miss 计数、删行后仍命中、role=2 非管理员、负结果不缓存 + 可达性对照） | `packages/sz-rust-sz300/tests/auth_ctx_cache_test.rs` | **V**：一次性 MySQL `sz300-authctx-mysql` @127.0.0.1:3306 / `sz_orm_test`，`-- --ignored` = **1 passed**（四组场景同一运行时内串行；拆成两个 `#[tokio::test]` 会因进程级池绑定首个运行时关闭而误判，已合并） |
 | ignored 测试接入 CI（含 ADR-048 与存量漏接） | `.github/workflows/db-integration.yml`（新增 4 个 sz300 `--ignored` 组） | 门禁 30 `ignored-test-routing.js` = 通过 |
 | 顺带修复存量门禁失败 | `docs/adr/ADR-043-ai时代单一版本合并.md` 补「日期」字段 | `scripts/check-adr-coverage.sh` = exit 0（此前恒 exit 1） |
-| 端到端吞吐量化 | 一次性 MySQL 9.6 + `sz300-server-pre049.exe` / `sz300-server-post049.exe` + 门禁 v2（c=50/10s/60s×3），静默窗口准入（连续 3 次 `busy_cores ≤1.5/40`，等待 810 s） | **V**（§17 腿 A/A2 vs B/B2/C2/D2）：每业务请求 `Com_select` 2.49→1.38（−44.4%）、`Questions` 4.69→2.51（−46.3%），pre/post 区间无重叠；`order/list` 2,576.8→3,693.5 QPS（**+43.3%**）、p99 33.175→17.785 ms（−46.4%）；`product/list` +16.41%/+23.34%；对照端点 `/health` −5.32%/−2.57%（排除窗口运气）；同配置重复腿散布 ±8~12% 为可归因下界；基线由腿 B2 重播种。未归因余量 ≈1.04 条非 SELECT/请求（W，本批未采 `Com_insert` 等计数器） |
+| 端到端吞吐量化 | 一次性 MySQL 9.6 + `sz300-server-pre049.exe` / `sz300-server-post049.exe` + 门禁 v2（c=50/10s/60s×3），静默窗口准入（连续 3 次 `busy_cores ≤1.5/40`，等待 810 s） | **V**（§17 腿 A/A2 vs B/B2/C2/D2）：每业务请求 `Com_select` 2.49→1.38（−44.4%）、`Questions` 4.69→2.51（−46.3%），pre/post 区间无重叠；`order/list` 2,576.8→3,693.5 QPS（**+43.3%**）、p99 33.175→17.785 ms（−46.4%）；`product/list` +16.41%/+23.34%；对照端点 `/health` −5.32%/−2.57%（排除窗口运气）；同配置重复腿散布 ±8~12% 为可归因下界；基线由腿 B2 重播种 |
+| 语句类型分解（残差归因，2026-10-31 补测） | 一次性本地 mysqld 8.0.29 @127.0.0.1:3311（库 `sz300_decomp_test`）+ `general_log`（`log_output='TABLE'`）按 `command_type` 枚举 + 门禁 `c=1 --warmup 2 --duration 15 --reps 1`（记录 §18） | **V**：pre 腿 6.280 条/请求（`SET SESSION` 3.000 + 鉴权 SELECT 1.000 + `operate_log` INSERT 1.000 + 分页/COUNT），post 腿 2.698 条/请求（鉴权 SELECT **0**）；pre 腿 `SET SESSION` = `Execute` 计数（23,568 = 23,568）→ §17 未归因的 ≈1.04 条/请求即连接归还时的会话复位，本项实际省 **2 条语句 + 2 往返**；该口径为语句计数，**未取任何吞吐数字**（与 c=50 六腿不可比） |
 
 ---
 

@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### 验证 — 语句类型分解探针（general_log）与 §17.5 非 SELECT 残差归因闭合（2026-10-31）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-10-30-05 ①；数据与复现见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §18。
+> 本条目为**测量与归因**，未改动任何产品代码；未做任何吞吐声称。
+
+- **换方法而非换环境**：原计划补采样 `Com_insert`/`Com_update`/`Com_begin` 后重跑短腿，但本机 Docker daemon 无响应（`docker version` 25 s 超时 exit 124，一次性容器 `sz300-gzip-mysql` 无法 `docker rm`），且静默窗口准入连续不过（`BUSY_CORES` 31.99–54.57 / 40 逻辑处理器，来源 `vmmem`、`MsMpEng` 与并行会话 `rustc`）。改为在**一次性本地 mysqld 8.0.29**（`127.0.0.1:3311`，库名 `sz300_decomp_test`，空口令）上开 `general_log`（`log_output='TABLE'`）按 `command_type` 逐条枚举，配合门禁 `--concurrency 1 --warmup 2 --duration 15 --reps 1`：**语句条数是逻辑量**，不受当时机器争用影响；该口径下的 QPS/延迟与 §17 的 c=50 六腿**不可比**，本轮不取任何吞吐数字。
+- **pre/post 每业务请求语句构成（V）**：pre 二进制 7,856 请求 → 49,336 条语句 = **6.280 条/请求**，其中 `SET SESSION` 23,568（**3.000/请求**）、鉴权 `merchant_user` SELECT 7,856（1.000/请求）、`operate_log` INSERT 7,856（1.000/请求）、`order` 分页 5,657、`good` 分页 2,199、`product` COUNT 2,199、`order` COUNT **1**（ADR-048 命中：5,657 次列表只有 1 次 COUNT）。post 二进制 10,432 请求 → 28,146 条 = **2.698 条/请求**，鉴权 SELECT **0**、`SET SESSION` 12,946（1.241/请求）、`operate_log` INSERT 2,515（0.241/请求）。
+- **§17.5 的 ≈1.04 条/请求残差归因闭合（V）**：pre 腿 `SET SESSION` 计数与 `Execute` 计数**严格相等（23,568 = 23,568）**，证实它是连接归还时的会话复位，与被删除的鉴权查询 1:1 绑定 → ADR-049 的真实收益是**每鉴权请求省 2 条语句 + 2 个往返**（预测 Δ`Questions` −2.0 / Δ`Com_select` −1.0，与容器批实测 −2.17 / −1.11 同向吻合）。
+- **新发现（V，转为欠债 DB-2026-10-31-01 ①）**：`sz-orm-sqlx` 的 `SqlxMySqlConnection::session_reset_sql()`（`any.rs:1037-1046`）由 `sz-orm-core` 连接池在 `release`/`return_raw`（`pool.rs:2326`、`:2444`）**无条件执行**，构成当前每请求语句量的最大单项——pre 腿占 `Questions` 的 **47.8%**、post 腿 **46.0%**。该开销在 ADR-049 前后同时存在，不影响 §17 的 A/B 差值结论；**修复归属跨仓 sz-orm v10.13.0**（本仓由 `.sz-orm-commit` 钉住），本仓无法单侧改动，本轮只登记实测占比、不做收益声称。
+- **审计链观测（W，只记账不判定）**：POST 腿审计 INSERT 实测 2,515 条（0.241/请求），而 PRE 腿严格 1.000/请求（7,856 = 业务请求数），**差额 7,917 条未归因**；该腿服务端日志只有 9 条 WARN + 1 条 ERROR（1 s 落库超时），不足以解释差额。本轮未抓 `sz300_audit_dropped_total`（`/metrics` 需 `SZ300_METRICS_TOKEN`，探针未设）→ 转为欠债 DB-2026-10-31-01 ②，需在大并发腿同时采样该计数器与 `operate_log` 行数才能判定 ADR-047 的本地缓冲重放是否高负载零丢弃。
+- **口径修正（§18.5）**：§17.5 的「每业务请求 `Questions`」是**混合计数**（含会话复位语句与审计 INSERT），不是「鉴权查库被消除」的纯计数；作为同源两腿的直接计数差 −46.3% 仍然成立，机制表述修正为「每请求少 1 条 SELECT + 1 条归还复位」。探针腿把 `RUST_LOG` 设为 `warn`，日志量显著低于 §17.7 的 `info`（25 MB/min），DB-2026-10-30-05 ③ 仍未闭环。
+- 欠债状态：`DB-2026-10-30-05` → **PARTIAL**（① 闭合，② ③ 未闭环）；新增 `DB-2026-10-31-01`。同步更新 `docs/adr/0049-鉴权授权上下文缓存.md`「正面后果」、验证记录 §15/§17.5/§17.8、性能工程评测报告 31–60 天段。
+- 清理状态：本地 mysqld 用完需 `mysqladmin --port 3311 -uroot shutdown`（`data-decomp` 可删）；容器 `sz300-gzip-mysql` 因 daemon 无响应仍未移除（端口仅绑 `127.0.0.1:3308`）；测量工装全部在仓外 `D:/rust-target/perf-eval/`，不入库。
+
 ### Added — 性能门禁客户端支持 Accept-Encoding 与响应字节统计（2026-10-30）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-30-03 ② 与 `docs/adr/0050-响应gzip压缩与breach排除.md`「注意事项」——
@@ -49,7 +63,7 @@
 - **ignored 测试接入 CI（门禁 30）**：`.github/workflows/db-integration.yml` 新增 4 个 sz300 `--ignored` 测试组（`auth_ctx_cache_test` / `order_count_cache_test` / `order_idempotency_test` / `outbox_webhook_test`）。此前这 4 个文件的 ignored 测试未被任何 workflow 路由，门禁 30 处于失败状态（3 个为存量，`order_count_cache_test` 由 ADR-048 引入）。
 - **顺带修复存量门禁失败**：`docs/adr/ADR-043-ai时代单一版本合并.md` 缺「日期」必填字段，使 `scripts/check-adr-coverage.sh`（CI job `adr-coverage`）自初始基线提交起恒 exit 1 → 补 `**日期**：2026-10-25`（与同文件「已接受（2026-10-25）」一致），门禁现错误数 0。
 - 验证：`cargo check -p sz-rust-sz300 --all-targets` = 0 error；`cargo clippy -p sz-rust-sz300 --all-targets` = 0 warning；`cargo fmt -p sz-rust-sz300 -- --check` = 无差异；`cargo test -p sz-rust-sz300` = 全绿无失败（lib **116 passed**，+3 编解码单测；`auth_ctx_cache_test` 1 个用例登记为 ignored）；**真库 MySQL 8.0.46：`cargo test -p sz-rust-sz300 --test auth_ctx_cache_test -- --ignored` = 1 passed**（四组场景同一运行时内串行执行）；`ignored-test-routing.js` = 门禁 30 通过；`check-adr-coverage.sh` = exit 0；`ci-config-audit.js` = 门禁 32 通过；`link-check.js` / `doc-code-consistency.js` / `adr-code-consistency.js` = exit 0。
-- **性能收益：已实测（V，2026-10-30 静默窗口同源六腿 A/B，数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §17）**——本项消除的「每个鉴权请求固定 1 次连接池获取 + 1 次 `merchant_user` 主键查询」被全局计数器直接证实：每业务请求 `Com_select` **2.49 → 1.38（−44.4%）**、`Questions` **4.69 → 2.51（−46.3%）**，pre 两腿（4.677 / 4.693）与 post 四腿（2.487–2.627）区间无重叠。端到端吞吐（同一容器、同一数据集、release 二进制、闭环 c=50 / 预热 10 s / 稳态 60 s × 3、0% 错误）：`order/list` **2,576.8 → 3,693.5 QPS（+43.3%）**、p50 19.286 → 13.351 ms、p99 33.175 → 17.785 ms（**−46.4%**）、p99.9 41.189 → 21.403 ms；`product/list` **+16.41%（A→B）/ +23.34%（A2→B2）**、p50 −17.3% / −21.6%。内部对照 `/health`（不查库、不经鉴权缓存）在 post 腿反而 −5.32% / −2.57%，排除「post 腿赶上更空的窗口」；同配置重复腿散布为 `order` ±12%、`product` ±8%，上述增益超出该下界 2–3.6 倍。本机指纹 `a17a08aab11946f1` 基线由腿 B2 重播种（health 6748.2 / product 1621.3 / order 3693.5）。**未归因余量（W）**：`Questions` 降幅比 `Com_select` 多 ≈1.04 条/请求，落在非 SELECT 类语句上，无法由本项代码差异解释——本批只采样 `Questions`/`Com_select`/`Bytes_sent`，未采 `Com_insert`/`Com_update`/`Com_begin`，故不做归因。
+- **性能收益：已实测（V，2026-10-30 静默窗口同源六腿 A/B，数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §17）**——本项消除的「每个鉴权请求固定 1 次连接池获取 + 1 次 `merchant_user` 主键查询」被全局计数器直接证实：每业务请求 `Com_select` **2.49 → 1.38（−44.4%）**、`Questions` **4.69 → 2.51（−46.3%）**，pre 两腿（4.677 / 4.693）与 post 四腿（2.487–2.627）区间无重叠。端到端吞吐（同一容器、同一数据集、release 二进制、闭环 c=50 / 预热 10 s / 稳态 60 s × 3、0% 错误）：`order/list` **2,576.8 → 3,693.5 QPS（+43.3%）**、p50 19.286 → 13.351 ms、p99 33.175 → 17.785 ms（**−46.4%**）、p99.9 41.189 → 21.403 ms；`product/list` **+16.41%（A→B）/ +23.34%（A2→B2）**、p50 −17.3% / −21.6%。内部对照 `/health`（不查库、不经鉴权缓存）在 post 腿反而 −5.32% / −2.57%，排除「post 腿赶上更空的窗口」；同配置重复腿散布为 `order` ±12%、`product` ±8%，上述增益超出该下界 2–3.6 倍。本机指纹 `a17a08aab11946f1` 基线由腿 B2 重播种（health 6748.2 / product 1621.3 / order 3693.5）。~~**未归因余量（W）**~~ **已于 2026-10-31 闭合（V，见下方「语句类型分解探针」条目）**：多出的 ≈1.04 条/请求是连接归还时 sz-orm 无条件执行的 `SET SESSION` 会话复位，与被删除的鉴权查询 1:1 绑定 → 本项实际每鉴权请求省 **2** 条语句 + 2 个往返（预测 Δ`Questions` −2.0 / Δ`Com_select` −1.0，容器批实测 −2.17 / −1.11）。
 
 ### Added — 订单列表 COUNT 查询缓存（2026-10-30）
 
@@ -112,7 +126,7 @@
 - **门禁修复**：`check-unwrap.py` 重写作用域判定（注释/字符串/生命周期/嵌套 `#[cfg(test)]` 深度栈），`AUTHORITATIVE_PROD_UNWRAP: 0`；`cargo fmt` 与 `link-check`/`doc-code-consistency`/`ci-config-audit`/`orphan-module`/`test-hygiene` 全绿。
 - **文档与仓库卫生**：README 数字对齐（CI job 37 / ADR 48 / 11 门面）；ADR-0001 修正「`#[get]`/`#[post]` 属性宏已实现」的不实描述；新增 `addons/`（ABI 边界说明）与 `scripts/legacy/`（13 个一次性脚本归档）。
 - **测试与静态检查**：`pool_warmer` 超时用例改暂停时钟（0.00s，原真实 60s sleep）；测试/bench 连接串改环境变量优先，源码不含口令；DB 集成测试接 MySQL/Redis service container；`AppState` 增加编译期 `Send + Sync + 'static` 断言；并发会话遗留的 `outbox.rs`/`mqtt_service.rs`/`merchant.rs` lint 问题清理完毕。
-- 验证：`cargo test -p sz-rust-sz300 --lib` = **104 passed / 0 failed**；`cargo clippy -p sz-rust-sz300 --all-targets -- -D warnings` = 0 error；`cargo clippy -p sz-rust-orm-facade --all-targets -- -D warnings` = 0 error；8 个静态门禁全绿（依赖可复现门禁因 `../sz-orm` 本地未推送提交而在本机 FAIL，详见执行报告 §6）。
+- 验证（2026-10-31 复跑）：`cargo test -p sz-rust-sz300 --lib` = **118 passed / 0 failed**；`cargo check --lib` = 0 warning；`cargo clippy -p sz-rust-sz300 --all-targets -- -D warnings` = 0 error；`cargo clippy -p sz-rust-orm-facade --all-targets -- -D warnings` = 0 error；`cargo fmt --check` = 0；静态门禁全绿（依赖可复现门禁因 `../sz-orm` 本地 HEAD 领先 pin 19 个未推送提交而在本机 FAIL，CI 不受影响，详见执行报告 §6）。
 
 ### Fixed — 系统架构师评测整改执行（2026-10-28）
 
