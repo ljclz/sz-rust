@@ -1,0 +1,33 @@
+{# Vue Router 路由模板 #}
+import { RouteRecordRaw } from 'vue-router'
+
+const routes: RouteRecordRaw[] = [
+  {% for route in routes %}
+  {
+    path: '{{ route.path }}',
+    name: '{{ route.name }}',
+    {% if lazy_load %}
+    component: () => import('@/views/{{ route.component }}'),
+    {% else %}
+    component: () => import('@/views/{{ route.component }}'),
+    {% endif %}
+    meta: {
+      {% if route.meta.title %}title: '{{ route.meta.title }}',{% endif %}
+      {% if route.meta.permission %}permission: '{{ route.meta.permission }}',{% endif %}
+    },
+    {% if route.children | length > 0 %}
+    children: [
+      {% for child in route.children %}
+      {
+        path: '{{ child.path }}',
+        name: '{{ child.name }}',
+        component: () => import('@/views/{{ child.component }}'),
+      },
+      {% endfor %}
+    ],
+    {% endif %}
+  },
+  {% endfor %}
+]
+
+export default routes

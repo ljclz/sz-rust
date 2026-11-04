@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Install Tauri Linux system dependencies
+description: >-
+  安装 sz-rust-visual（Tauri 2）在 Linux 上编译所需的 glib/gtk/webkit 系统库。
+  sz-rust-visual 是 workspace 成员，任何 `cargo check/test/clippy/doc --workspace`
+  都会构建它；缺系统库时 glib-sys 构建脚本报
+  "The system library `glib-2.0` required by crate `glib-sys` was not found"。
+  清单与 visual-build.yml / publish-oss.yml 保持一致。
+
+inputs:
+  packages:
+    description: 覆盖 apt 包清单（空格分隔）
+    required: false
+    default: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+runs:
+  using: composite
+  steps:
+    - name: apt-get install Tauri deps
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        APT_PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        # shellcheck disable=SC2086
+        sudo apt-get install -y $APT_PACKAGES

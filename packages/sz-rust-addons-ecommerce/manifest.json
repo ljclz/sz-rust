@@ -1,0 +1,210 @@
+{
+    "name": "sz-rust-addons-ecommerce",
+    "version": "1.1.0",
+    "title": "电商模板插件",
+    "description": "订单/订单项/购物车骨架，提供电商基础 CRUD、购物车同用户同商品数量累加与订单正向流转状态机",
+    "author": "SZ-Rust Team",
+    "license": "Apache-2.0",
+    "sz_rust_version": ">=1.1.0",
+    "capabilities": [
+        {
+            "name": "ecommerce.create_order",
+            "description": "创建订单，校验 items 非空，自动生成订单号，计算总金额",
+            "tags": [
+                "ecommerce",
+                "order",
+                "create",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "ecommerce.search_order",
+            "description": "搜索订单列表，支持状态过滤与分页",
+            "tags": [
+                "ecommerce",
+                "order",
+                "search",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "ecommerce.cancel_order",
+            "description": "取消订单，仅 pending/paid 状态可取消",
+            "tags": [
+                "ecommerce",
+                "order",
+                "cancel",
+                "write"
+            ],
+            "requires_confirmation": true
+        },
+        {
+            "name": "ecommerce.query_cart",
+            "description": "查询指定用户购物车列表",
+            "tags": [
+                "ecommerce",
+                "cart",
+                "query",
+                "read"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "ecommerce.add_to_cart",
+            "description": "添加商品到购物车，同用户同商品数量累加",
+            "tags": [
+                "ecommerce",
+                "cart",
+                "add",
+                "write"
+            ],
+            "requires_confirmation": false
+        },
+        {
+            "name": "ecommerce.clear_cart",
+            "description": "清空指定用户全部购物车项",
+            "tags": [
+                "ecommerce",
+                "cart",
+                "clear",
+                "write"
+            ],
+            "requires_confirmation": true
+        }
+    ],
+    "dependencies": {
+        "plugins": [],
+        "shared_schemas": [
+            "sys_users"
+        ]
+    },
+    "routes": [
+        {
+            "method": "GET",
+            "path": "/api/ecommerce/orders",
+            "handler": "OrderController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/orders",
+            "handler": "OrderController::create"
+        },
+        {
+            "method": "GET",
+            "path": "/api/ecommerce/orders/:id",
+            "handler": "OrderController::get"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/ecommerce/orders/:id",
+            "handler": "OrderController::update"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/ecommerce/orders/:id",
+            "handler": "OrderController::delete"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/orders/:id/cancel",
+            "handler": "OrderController::cancel"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/orders/:id/pay",
+            "handler": "OrderController::pay"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/orders/:id/ship",
+            "handler": "OrderController::ship"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/orders/:id/complete",
+            "handler": "OrderController::complete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/ecommerce/order_items",
+            "handler": "OrderItemController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/order_items",
+            "handler": "OrderItemController::create"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/ecommerce/order_items/:id",
+            "handler": "OrderItemController::delete"
+        },
+        {
+            "method": "GET",
+            "path": "/api/ecommerce/cart",
+            "handler": "CartController::list"
+        },
+        {
+            "method": "POST",
+            "path": "/api/ecommerce/cart",
+            "handler": "CartController::add"
+        },
+        {
+            "method": "PUT",
+            "path": "/api/ecommerce/cart/:id",
+            "handler": "CartController::update_qty"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/ecommerce/cart/:id",
+            "handler": "CartController::delete"
+        },
+        {
+            "method": "DELETE",
+            "path": "/api/ecommerce/cart/clear/:user_id",
+            "handler": "CartController::clear"
+        }
+    ],
+    "migrations": [],
+    "events_published": [
+        {
+            "name": "ecommerce.order.status_changed",
+            "description": "订单状态变更事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "integer"
+                    },
+                    "old_status": {
+                        "type": "string"
+                    },
+                    "new_status": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        {
+            "name": "ecommerce.cart.item_added",
+            "description": "购物车项添加事件",
+            "payload_schema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "integer"
+                    },
+                    "product_id": {
+                        "type": "integer"
+                    },
+                    "quantity": {
+                        "type": "integer"
+                    }
+                }
+            }
+        }
+    ],
+    "events_subscribed": []
+}

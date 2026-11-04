@@ -1,0 +1,25 @@
+# v1.9.0 sz300 error messages — English (spec §5.5.1)
+
+[error]
+invalid_credentials = "Invalid username or password"
+unauthorized = "Unauthorized, please login first"
+token_expired = "Token expired, please login again"
+audience_mismatch = "Token audience mismatch"
+no_audience = "Token missing audience claim"
+order_not_found = "Order not found"
+stock_insufficient = "Stock insufficient"
+validation_failed = "Validation failed"
+service_busy = "Service busy, please retry later"
+
+[order_status]
+pending = "Pending"
+paid = "Paid"
+shipped = "Shipped"
+completed = "Completed"
+cancelled = "Cancelled"
+manual_intervention = "Manual Intervention Required"
+
+[device_status]
+online = "Online"
+offline = "Offline"
+ota_upgrading = "OTA Upgrading"

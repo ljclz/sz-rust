@@ -1,0 +1,10 @@
+{# Vue 列表页测试骨架 #}
+import { mount } from '@vue/test-utils'
+import Index from '../Index.vue'
+
+describe('{{ module_name }} Index', () => {
+  it('renders', () => {
+    const wrapper = mount(Index)
+    expect(wrapper.exists()).toBe(true)
+  })
+})

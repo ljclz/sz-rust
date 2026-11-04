@@ -1,0 +1,244 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://sz-rust.dev/schemas/plugin-manifest.schema.json",
+    "title": "SZ-Rust Plugin Manifest",
+    "description": "SZ-Rust 插件清单 JSON Schema，对齐产品技术方案 9.5 节规范",
+    "type": "object",
+    "required": [
+        "name",
+        "version",
+        "title",
+        "description",
+        "author",
+        "license",
+        "sz_rust_version",
+        "capabilities",
+        "dependencies",
+        "routes",
+        "migrations",
+        "events_published",
+        "events_subscribed"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "插件名称，小写字母开头，仅含小写字母/数字/连字符"
+        },
+        "version": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+$",
+            "description": "语义化版本号"
+        },
+        "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "人类可读的插件标题"
+        },
+        "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "插件功能描述"
+        },
+        "author": {
+            "type": "string",
+            "minLength": 1,
+            "description": "作者名称"
+        },
+        "license": {
+            "type": "string",
+            "enum": [
+                "Apache-2.0",
+                "MIT",
+                "commercial"
+            ],
+            "description": "开源许可证或商业许可"
+        },
+        "sz_rust_version": {
+            "type": "string",
+            "pattern": "^>=?\\d+\\.\\d+\\.\\d+$",
+            "description": "兼容的 SZ-Rust 版本范围"
+        },
+        "capabilities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "description",
+                    "tags",
+                    "requires_confirmation"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z]+\\.[a-z_]+$",
+                        "description": "能力名称，格式 {plugin}.{capability}"
+                    },
+                    "description": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "能力描述"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "minItems": 2,
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "能力标签，至少 2 个"
+                    },
+                    "requires_confirmation": {
+                        "type": "boolean",
+                        "description": "是否需要人工确认（HITL）"
+                    }
+                }
+            },
+            "description": "插件提供的能力列表"
+        },
+        "dependencies": {
+            "type": "object",
+            "required": [
+                "plugins",
+                "shared_schemas"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "plugins": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "依赖的其他插件名称列表"
+                },
+                "shared_schemas": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "依赖的共享数据库 schema 列表"
+                }
+            },
+            "description": "插件依赖声明"
+        },
+        "routes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "method",
+                    "path",
+                    "handler"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "method": {
+                        "type": "string",
+                        "enum": [
+                            "GET",
+                            "POST",
+                            "PUT",
+                            "DELETE",
+                            "PATCH"
+                        ],
+                        "description": "HTTP 方法"
+                    },
+                    "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "路由路径"
+                    },
+                    "handler": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "处理函数标识"
+                    }
+                }
+            },
+            "description": "插件路由声明"
+        },
+        "migrations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "version",
+                    "description",
+                    "sql"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "version": {
+                        "type": "string",
+                        "pattern": "^\\d+\\.\\d+\\.\\d+$",
+                        "description": "迁移版本号"
+                    },
+                    "description": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "迁移描述"
+                    },
+                    "sql": {
+                        "type": "string",
+                        "description": "SQL 迁移脚本"
+                    }
+                }
+            },
+            "description": "数据库迁移脚本列表"
+        },
+        "events_published": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "description"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z]+\\.[a-z_.]+$",
+                        "description": "事件名称"
+                    },
+                    "description": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "事件描述"
+                    },
+                    "payload_schema": {
+                        "type": "object",
+                        "description": "事件负载 JSON Schema"
+                    }
+                }
+            },
+            "description": "插件发布的事件列表"
+        },
+        "events_subscribed": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "handler"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z]+\\.[a-z_.]+$",
+                        "description": "订阅的事件名称"
+                    },
+                    "handler": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "事件处理函数标识"
+                    }
+                }
+            },
+            "description": "插件订阅的事件列表"
+        }
+    }
+}

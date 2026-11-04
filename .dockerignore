@@ -1,0 +1,21 @@
+target/
+.git/
+*.md
+docs/
+coverage/
+benches/
+fuzz/
+# 安全修复（2026-10-28）：禁止将凭据/私钥/部署脚本带入构建上下文
+.env
+.env.*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+secrets.json
+credentials.json
+scripts/deploy/
+scripts/ssh_key_temp
+deploy/monitoring/
+test_oracle_*.js
+tmp_*.js

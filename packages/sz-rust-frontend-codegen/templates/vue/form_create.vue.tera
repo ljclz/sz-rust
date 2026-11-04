@@ -1,0 +1,37 @@
+{# Vue 新建表单模板 #}
+<template>
+  <div class="{{ module_name }}-create">
+    <{{ ui_tags.form }} :model="form" :rules="rules" ref="formRef" label-width="120px">
+      {% for field in writable_fields %}
+      <{{ ui_tags.form_item }} label="{{ field.name }}" prop="{{ field.name }}">
+        {% if field.is_sensitive %}
+        <{{ ui_tags.input }} v-model="form.{{ field.name }}" type="password" show-password />
+        {% elif field.ts_type == "number" %}
+        <{{ ui_tags.input }} v-model.number="form.{{ field.name }}" type="number" />
+        {% else %}
+        <{{ ui_tags.input }} v-model="form.{{ field.name }}" />
+        {% endif %}
+      </{{ ui_tags.form_item }}>
+      {% endfor %}
+      <{{ ui_tags.form_item }}>
+        <{{ ui_tags.button }} type="primary" @click="handleSubmit">提交</{{ ui_tags.button }}>
+        <{{ ui_tags.button }} @click="handleReset">重置</{{ ui_tags.button }}>
+      </{{ ui_tags.form_item }}>
+    </{{ ui_tags.form }}>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive } from 'vue'
+import { {{ module_name }}Create } from '@/api/{{ module_name }}'
+
+const formRef = ref()
+const form = reactive({})
+const rules = {}
+
+const handleSubmit = async () => {
+  await formRef.value.validate()
+  await {{ module_name }}Create(form)
+}
+const handleReset = () => formRef.value.resetFields()
+</script>

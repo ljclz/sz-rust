@@ -1,0 +1,19 @@
+[package]
+name = "sz-rust-websocket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SZ-Rust WebSocket 长连接"
+repository.workspace = true
+homepage.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["sync", "time"] }
+dashmap = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }

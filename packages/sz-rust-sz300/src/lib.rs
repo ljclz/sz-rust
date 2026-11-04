@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 SZ-Rust Team
+//! 鲜视达 SZ-300 后端服务 — 端到端集成示例
+//!
+//! 基于 sz-rust-core 框架实现的完整业务应用，对齐 PHP `鲜视达` 项目后端。
+//!
+//! ## 模块结构
+//!
+//! | 模块 | 职责 |
+//! |------|------|
+//! | [`config`] | 环境变量驱动的配置加载 |
+//! | [`controllers`] | HTTP 路由处理器（对齐 PHP controller） |
+//! | [`db`] | 数据库连接池初始化（MySQL + PostgreSQL） |
+//! | [`middleware`] | 应用中间件（JWT 认证、日志等） |
+//! | [`models`] | 数据模型（对齐 PHP model） |
+//! | [`router`] | 路由注册 |
+//! | [`services`] | 业务服务层（MQTT、认证、文件等） |
+//! | [`state`] | 应用共享状态 |
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+#![allow(clippy::items_after_test_module)]
+// 2026-10-27 全栈评测 P1-5：生产代码（非测试构建）禁止 unwrap，灰度门禁
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
+/// v1.9.0 业务告警规则集
+#[cfg(feature = "v19-obs-closure")]
+pub mod alert_rules;
+/// 环境变量驱动的配置加载
+pub mod config;
+/// HTTP 路由处理器（对齐 PHP controller）
+pub mod controllers;
+/// 数据库连接池初始化（MySQL + PostgreSQL）
+pub mod db;
+/// v1.9.0 配置中心动态配置（spec §5.6）
+#[cfg(feature = "v19-config-center")]
+pub mod dynamic_config;
+/// v1.8.0 GraphQL 端点
+#[cfg(feature = "v18-graphql")]
+pub mod graphql;
+pub mod i18n_error;
+/// v1.9.0 国际化语言提取器（spec §5.5.1 规则 1）
+#[cfg(feature = "v19-i18n")]
+pub mod i18n_extractor;
+/// 应用中间件（JWT 认证、日志等）
+pub mod middleware;
+/// 数据模型（对齐 PHP model）
+pub mod models;
+/// OpenAPI 规范构建与 API 文档端点
+pub mod openapi;
+/// v1.9.0 查询缓存（spec §5.8.1 规则 3）
+pub mod query_cache;
+/// v1.8.0 RBAC 细粒度权限
+#[cfg(feature = "v18-rbac")]
+pub mod rbac;
+/// 路由注册
+pub mod router;
+/// 业务服务层（MQTT、认证、文件等）
+pub mod services;
+/// 应用共享状态
+pub mod state;
+
+/// 安全 Gauntlet 测试（仅测试构建）
+#[cfg(test)]
+mod security_gauntlet_tests;
+
+/// 编译期约束检查（2026-10-28 P2-10）
+///
+/// 项目铁律要求所有跨 await 的状态必须 `Send + Sync + 'static`；
+/// 此前只靠代码评审保证。这里把共享状态与服务单例固化为编译期断言，
+/// 任何字段变更破坏约束都会直接编译失败，而不是在运行期变成
+/// "future is not Send" 的隐晦报错。
+const _: fn() = || {
+    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    assert_send_sync_static::<crate::state::AppState>();
+};

@@ -1,0 +1,49 @@
+# SZ-Rust AI 辅助迁移工具配置文件
+# 用于将 TP6（ThinkPHP 6）项目迁移到 sz-rust 框架
+
+version = "1.0.0"
+
+# LLM 模型配置
+[model]
+analysis_model = "deepseek-chat"        # 分析阶段使用的模型
+generation_model = "deepseek-coder"     # 代码生成阶段使用的模型
+validation_model = "deepseek-chat"      # 验证阶段使用的模型
+fallback_model = "gpt-4"               # 主模型失败时的备用模型
+
+# TP6 → sz-rust 映射规则
+[mapping]
+# 路由映射：TP6 路由 → sz-rust 路由
+[mapping.route_mapping]
+"user/info" = "/api/v1/user/info"
+"user/create" = "/api/v1/user/create"
+
+# Model 映射：TP6 Model → sz-rust Entity
+[mapping.model_mapping]
+"User" = "UserEntity"
+"Order" = "OrderEntity"
+
+# 中间件映射：TP6 Middleware → sz-rust Middleware
+[mapping.middleware_mapping]
+"AuthMiddleware" = "AuthMiddleware"
+"LogMiddleware" = "LogMiddleware"
+
+# 排除路径（不分析的目录/文件）
+exclude_paths = ["runtime", "vendor", "node_modules"]
+
+# 目标 crate 配置
+[target_crate]
+path = "packages/sz-rust-sz300"  # 生成的代码写入的目标 crate 路径
+allow_overwrite = false          # 是否允许覆盖已有文件
+
+# 增量验证配置
+[validation]
+tp6_service_url = "http://localhost:8000"     # TP6 服务地址
+sz_rust_service_url = "http://localhost:3000" # sz-rust 服务地址
+timeout_secs = 10                              # 请求超时秒数
+max_retries = 3                                # 失败重试次数
+
+# Agent 配置
+[agent]
+max_retries = 5              # Compile-Fix 最大重试次数
+compile_timeout_secs = 120   # 编译超时
+test_timeout_secs = 300      # 测试超时

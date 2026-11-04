@@ -1,0 +1,13 @@
+{
+  "trae.agent.preCommitCheck": [
+    "sz-rust-framework-routing",
+    "sz-rust-framework-middleware",
+    "sz-rust-framework-di",
+    "sz-rust-framework-load"
+  ],
+  "trae.rules.rustStrictMode": true,
+  "trae.skills.autoDiscovery": true,
+  "trae.agent.defaultModel": "claude-3.7-sonnet",
+  "trae.agent.temperature": 0.1,
+  "rust-analyzer.cargo.targetDir": "F:\\cargo-target-ra"
+}

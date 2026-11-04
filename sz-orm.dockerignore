@@ -1,0 +1,4 @@
+# additional context `sz-orm` 的忽略清单（BuildKit 按上下文名匹配此文件）
+# 只需 workspace 源码；.git 数百 MB 且与钉住契约无关
+.git
+target

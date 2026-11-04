@@ -1,0 +1,113 @@
+{
+  "_comment": "未接线 crate 清单（scripts/audit/unwired-crates.js 门禁）。未接线 = workspace 内无任何成员以 normal/build 依赖引用。role: entry=入口/示例，internal=仅测试或内部工具，planned=计划接入，feature-gated=仅 feature 暴露。review_by 到期后必须重新评估：接线 / 删除 / 续期并写明原因。",
+  "crates": [
+    {
+      "name": "sz-rust",
+      "role": "entry",
+      "reason": "workspace 根 facade crate，供外部使用者按包名依赖；仓库内无反向依赖属预期",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-sz300",
+      "role": "entry",
+      "reason": "业务应用入口（bin），部署产物本身即根节点",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-examples",
+      "role": "entry",
+      "reason": "示例集合，供使用者参考，不进入依赖图",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-addon-example",
+      "role": "entry",
+      "reason": "热加载插件示例，按 cdylib 独立构建后投放到 addons/",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-testkit",
+      "role": "internal",
+      "reason": "测试工具库，仅通过 dev-dependencies 使用（本门禁不计 dev 依赖）",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-facade-tests",
+      "role": "internal",
+      "reason": "facade 迁移专用测试 crate，只包含自身集成测试",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-codegen-loop",
+      "role": "planned",
+      "reason": "代码生成实验 crate，尚未接入构建/CLI 主流程",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-migration",
+      "role": "planned",
+      "reason": "迁移工具库，计划由 sz-rust-cli 的 migrate 子命令接入",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-pdf",
+      "role": "planned",
+      "reason": "PDF 生成能力，计划由文档/报表服务接入",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-vector-db",
+      "role": "planned",
+      "reason": "向量库抽象，计划由 RAG 检索链路接入",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-workflow",
+      "role": "planned",
+      "reason": "工作流引擎，计划由 sz300 审批流场景接入",
+      "review_by": "2027-03-31"
+    },
+    {
+      "name": "sz-rust-addons-cms",
+      "role": "planned",
+      "reason": "参考业务插件（CMS），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-crm",
+      "role": "planned",
+      "reason": "参考业务插件（CRM），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-ecommerce",
+      "role": "planned",
+      "reason": "参考业务插件（电商），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-erp",
+      "role": "planned",
+      "reason": "参考业务插件（ERP），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-forum",
+      "role": "planned",
+      "reason": "参考业务插件（论坛），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-im",
+      "role": "planned",
+      "reason": "参考业务插件（IM），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    },
+    {
+      "name": "sz-rust-addons-operate",
+      "role": "planned",
+      "reason": "参考业务插件（运营），未接入 sz300 路由，保留作插件模板",
+      "review_by": "2027-06-30"
+    }
+  ]
+}

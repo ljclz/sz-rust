@@ -1,0 +1,10 @@
+{
+  "items": [
+    "packages\\sz-rust-infra-facade\\src\\config.rs:1566:async-thread-sleep",
+    "packages\\sz-rust-sz300\\tests\\websocket_test.rs:69:async-thread-sleep",
+    "packages\\sz-rust-sz300\\tests\\websocket_test.rs:80:async-thread-sleep",
+    "packages\\sz-rust-websocket\\src\\heartbeat.rs:68:async-thread-sleep",
+    "packages\\sz-rust-websocket\\src\\manager.rs:275:async-thread-sleep",
+    "packages\\sz-rust-websocket\\src\\manager.rs:343:async-thread-sleep"
+  ]
+}

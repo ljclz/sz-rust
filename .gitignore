@@ -1,0 +1,88 @@
+/target
+*.log
+*.tmp
+
+# 敏感信息预防性排除
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+deploy_key
+deploy_key.pub
+# SSH 私钥（服务器验证用，曾以无扩展名形式存于仓库根，禁止提交）
+ssh_key
+ssh_key.pub
+ssh_key_temp
+scripts/ssh_key_temp
+# Oracle 服务器验证脚本（硬编码服务器 IP/凭据，仅本地使用）
+install_oracle_client.js
+test_oracle_*.js
+tmp_*.js
+# Windows 保留名误创建文件
+nul
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时编译错误日志
+errors*.txt
+errors*.log
+
+# 测试覆盖率输出（开发临时文件）
+coverage/
+
+
+# cargo-mutants 输出（变异测试产物）
+mutants.out/
+mutants.out.old/
+# CodeGraph 索引（本地工具产物）
+.codegraph/
+# 临时测试脚本
+_*.py
+
+# ZCode agent
+.zcode/
+# Coverage raw data（llvm-cov 运行时产物，含 visual 包实测产生的 default_*.profraw）
+*.profraw
+# Python 缓存（scripts/perf 工具）
+__pycache__/
+# Inscode IDE 本地目录
+.inscode/
+
+# WASM build artifacts
+packages/sz-rust-wasm/target/
+
+# Benchmark comparison build artifacts (4 frameworks × ~300MB)
+scripts/perf-compare/benchmarks/*/target/
+
+# 部署脚本（含 SSH 密钥，禁止提交）
+scripts/deploy/
+
+# SSH 部署辅助脚本（含服务器 IP / root 登录信息，2026-10-28 全量入库前补充排除）
+scripts/ssh-*.js
+docs/spec/*/scripts/ssh-*
+
+# Artifacts
+artifacts/
+*.tar.gz
+*.bundle
+
+# CodeArts Doer 本地产物（规划文档、中间产物）
+.codeartsdoer/
+scripts/.server_key
+scripts/deploy-check.js
+scripts/deploy-upload.js
+
+# mimosa 安全扫描插件会话状态（每次会话自动重建，勿提交）
+.mimosa/

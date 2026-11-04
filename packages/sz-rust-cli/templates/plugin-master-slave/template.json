@@ -1,0 +1,21 @@
+{
+    "name": "master-slave",
+    "version": "1.0.0",
+    "description": "Master-slave relationship plugin template with cascade operations and foreign key support",
+    "required_variables": [
+        "plugin_name",
+        "master_table",
+        "slave_table",
+        "master_class_name",
+        "slave_class_name",
+        "master_fields",
+        "slave_fields",
+        "foreign_key",
+        "module_path",
+        "template_type",
+        "template_version",
+        "generated_at",
+        "primary_key_name",
+        "primary_key_type"
+    ]
+}

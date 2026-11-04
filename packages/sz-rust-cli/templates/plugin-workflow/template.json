@@ -1,0 +1,20 @@
+{
+    "name": "workflow",
+    "version": "1.0.0",
+    "description": "State machine driven workflow plugin template with state transitions, approval logic, and event publishing",
+    "required_variables": [
+        "plugin_name",
+        "table_name",
+        "class_name",
+        "fields",
+        "module_path",
+        "template_type",
+        "template_version",
+        "generated_at",
+        "primary_key_name",
+        "primary_key_type",
+        "states",
+        "initial_state",
+        "transitions"
+    ]
+}

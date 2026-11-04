@@ -1,0 +1,62 @@
+{
+    "app": {
+        "title": "SZ-Rust Canvas",
+        "menu": {
+            "file": "File",
+            "edit": "Edit",
+            "view": "View",
+            "help": "Help"
+        }
+    },
+    "panel": {
+        "requirement": "Requirement",
+        "spec": "Specification",
+        "design": "Design",
+        "tasks": "Task Board",
+        "log": "Live Log",
+        "preview": "Preview",
+        "plugin": "Plugins"
+    },
+    "sdd": {
+        "start": "Start Orchestration",
+        "cancel": "Cancel",
+        "approve": "Approve",
+        "reject": "Reject",
+        "comment": "Review Comment",
+        "phase": {
+            "requirement": "Requirement Phase",
+            "spec": "Spec Phase",
+            "design": "Design Phase",
+            "task": "Task Phase"
+        },
+        "status": {
+            "idle": "Idle",
+            "running": "Running",
+            "awaiting_review": "Awaiting Review",
+            "completed": "Completed",
+            "cancelled": "Cancelled",
+            "failed": "Failed"
+        }
+    },
+    "capability": {
+        "title": "Capabilities",
+        "call": "Call",
+        "args": "Arguments",
+        "result": "Result"
+    },
+    "plugin": {
+        "enable": "Enable",
+        "disable": "Disable",
+        "configure": "Configure",
+        "version": "Version"
+    },
+    "preview": {
+        "start": "Start Preview",
+        "stop": "Stop Preview",
+        "device": {
+            "desktop": "Desktop",
+            "tablet": "Tablet",
+            "mobile": "Mobile"
+        }
+    }
+}

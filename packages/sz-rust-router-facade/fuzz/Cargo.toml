@@ -1,0 +1,19 @@
+[package]
+name = "sz-rust-router-facade-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sz-rust-router-facade = { path = ".." }
+
+[[bin]]
+name = "parse_path"
+path = "fuzz_targets/parse_path.rs"
+test = false
+doc = false
+bench = false

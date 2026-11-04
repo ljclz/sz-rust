@@ -1,0 +1,86 @@
+{
+    "version": "1.0.0",
+    "description": "生鲜零售业务规则库",
+    "rules": [
+        {
+            "name": "摊位租赁先缴押金",
+            "description": "商户签订摊位租赁合同前必须缴纳押金，押金金额不少于月租的2倍",
+            "source_project": "sz-market-admin",
+            "source_location": "src/service/LeaseService.php:45",
+            "severity": "critical",
+            "condition": "lease.status == 'pending' AND lease.deposit_paid == false"
+        },
+        {
+            "name": "订单退款需审批",
+            "description": "退款金额超过500元需经市场经理审批，超过5000元需经区域经理审批",
+            "source_project": "sz-retail-pos",
+            "source_location": "src/service/RefundService.php:78",
+            "severity": "high",
+            "condition": "refund.amount > 500 AND refund.approved == false"
+        },
+        {
+            "name": "库存不足禁止销售",
+            "description": "商品库存数量低于安全库存时禁止继续销售，需触发补货提醒",
+            "source_project": "sz-inventory",
+            "source_location": "src/service/SalesService.php:120",
+            "severity": "critical",
+            "condition": "product.stock < product.safety_stock AND sale.status == 'pending'"
+        },
+        {
+            "name": "生鲜过期下架",
+            "description": "商品超过保质期必须立即下架，禁止销售过期商品",
+            "source_project": "sz-fresh-mgmt",
+            "source_location": "src/service/ExpiryService.php:56",
+            "severity": "critical",
+            "condition": "product.expiry_date < now() AND product.status == 'on_shelf'"
+        },
+        {
+            "name": "冷链温度监控",
+            "description": "冷链设备温度超出设定范围时触发告警，连续超温30分钟自动报修",
+            "source_project": "sz-cold-chain",
+            "source_location": "src/service/TempMonitorService.php:92",
+            "severity": "high",
+            "condition": "device.temp > device.temp_max OR device.temp < device.temp_min"
+        },
+        {
+            "name": "批次溯源记录",
+            "description": "所有生鲜商品入库必须记录批次号，销售时关联批次便于溯源",
+            "source_project": "sz-fresh-mgmt",
+            "source_location": "src/service/BatchService.php:34",
+            "severity": "medium",
+            "condition": "inbound.batch_id == null"
+        },
+        {
+            "name": "会员积分规则",
+            "description": "消费1元积1分，100分抵1元，积分有效期12个月",
+            "source_project": "sz-retail-pos",
+            "source_location": "src/service/MemberService.php:65",
+            "severity": "low",
+            "condition": "member.points_expired > 0"
+        },
+        {
+            "name": "促销互斥",
+            "description": "同一商品同一时间只能参与一个促销活动，不允许叠加",
+            "source_project": "sz-retail-pos",
+            "source_location": "src/service/PromotionService.php:88",
+            "severity": "medium",
+            "condition": "product.active_promotions.count > 1"
+        },
+        {
+            "name": "日终对账",
+            "description": "每日营业结束后必须进行收银对账，现金/电子/赊账分别核对",
+            "source_project": "sz-retail-pos",
+            "source_location": "src/service/ReconciliationService.php:45",
+            "severity": "high",
+            "condition": "daily_reconciliation.status == 'pending' AND now() > close_time"
+        },
+        {
+            "name": "权限分级",
+            "description": "市场管理员/商户/收银员三级权限，不同角色可访问的功能模块不同",
+            "source_project": "sz-market-admin",
+            "source_location": "src/middleware/AuthMiddleware.php:30",
+            "severity": "high",
+            "condition": "user.role NOT IN ['admin', 'merchant', 'cashier']"
+        }
+    ]
+}

@@ -1,0 +1,26 @@
+{
+  "ReportName": "sz300-server standalone process memory baseline",
+  "GeneratedAt": "2026-10-27T21:10:33+08:00",
+  "Binary": "D:\\rust-target\\release\\sz300-server.exe",
+  "BuildProfile": "release",
+  "CargoTargetDir": "D:\\rust-target",
+  "IronRule": "Rule 9: startup RSS < 30MB (empty load)",
+  "ThresholdMB": 30.0,
+  "Pass": true,
+  "RssSamplesMB": [9.4, 9.39, 9.39, 9.39, 9.39, 9.39],
+  "RssMinMB": 9.39,
+  "RssMaxMB": 9.4,
+  "RssAvgMB": 9.39,
+  "HealthProbe": {"path": "/health", "status": 200, "body": "{\"code\":1,\"msg\":\"success\",\"data\":{\"status\":\"ok\",\"version\":\"2.0.0\",\"service\":\"sz300-server\"}}"},
+  "ReadinessProbe": {"path": "/health/ready", "status": 200, "body": "{\"code\":1,\"msg\":\"success\",\"data\":{\"status\":\"ready\",\"checks\":{\"db\":\"ok\"}}}"},
+  "Database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "shop",
+    "database": "shop",
+    "mode": "read-only smoke (SELECT via health ping)"
+  },
+  "Methodology": "Built release sz300-server, started as independent process with SZ300_DB_*/SZ300_JWT_SECRET env vars, sampled WorkingSet64 via Get-Process 6 times at 2s intervals after 8s warmup, probed /health and /health/ready, then stopped the process.",
+  "RegressionScript": "scripts/server_memory_baseline.ps1",
+  "Conclusion": "Release empty-load RSS ~9.4MB, well below the 30MB iron-rule threshold."
+}

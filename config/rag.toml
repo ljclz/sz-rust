@@ -1,0 +1,44 @@
+# RAG 知识库配置
+# 对应 packages/sz-rust-rag/src/config.rs::RagConfig
+
+# 配置版本号
+version = "1.0"
+
+# Embedding 模型名称
+embedding_model = "text-embedding-3-small"
+
+# 向量维度（须与 Embedding 模型一致）
+vector_dimensions = 1536
+
+# 相似度度量：cosine / dot / l2
+similarity_metric = "cosine"
+
+# 默认检索 top-k
+default_topk = 10
+
+# 最大 top-k 上限
+max_topk = 50
+
+# 默认 token 预算（检索结果组装后截断）
+default_token_budget = 4096
+
+# 低召回分数阈值（低于此值触发 low_recall_score 警告）
+low_recall_threshold = 0.3
+
+# Embedding API 并发数
+embedding_concurrency = 10
+
+# 语义分块最大字符数
+chunk_max_chars = 512
+
+# Embedding API 最大重试次数
+embedding_max_retries = 3
+
+# 知识库数据目录
+knowledge_dir = "knowledge"
+
+# 审计日志路径
+audit_log_path = "knowledge/audit.jsonl"
+
+# 向量化断点续跑日志路径
+vectorization_journal_path = "knowledge/vectorization.journal.jsonl"

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Checkout sibling sz-orm
+description: >-
+  把公开仓库 ljclz/sz-orm 按 .sz-orm-commit 钉住的提交检出到工作区相邻目录 ../sz-orm。
+  Cargo.toml 以 path = "../sz-orm/packages/*" 引用该兄弟仓库，CI 只 checkout 本仓库时
+  会因读不到 ../sz-orm/packages/sz-orm-auth/Cargo.toml 直接失败。
+
+inputs:
+  sha:
+    description: 覆盖仓库根 .sz-orm-commit 钉住的提交
+    required: false
+    default: ''
+  repository:
+    description: sz-orm 仓库地址
+    required: false
+    default: https://github.com/ljclz/sz-orm.git
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch sz-orm at pinned commit
+      shell: bash
+      env:
+        INPUT_SHA: ${{ inputs.sha }}
+        SZ_ORM_REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+        pin="${INPUT_SHA:-$(tr -d '[:space:]' < .sz-orm-commit)}"
+        if [ -z "$pin" ]; then
+          echo "::error::.sz-orm-commit 为空，无法确定 sz-orm 版本"
+          exit 1
+        fi
+        dest="$(cd "$GITHUB_WORKSPACE/.." && pwd)/sz-orm"
+        if [ -f "$dest/.sz-orm-pin" ] && [ "$(cat "$dest/.sz-orm-pin")" = "$pin" ]; then
+          echo "sz-orm 已就绪（$pin），跳过拉取"
+          exit 0
+        fi
+        rm -rf "$dest"
+        mkdir -p "$dest"
+        git -C "$dest" init -q
+        git -C "$dest" remote add origin "$SZ_ORM_REPOSITORY"
+        if ! git -C "$dest" fetch -q --depth=1 origin "$pin"; then
+          echo "::error::无法从 $SZ_ORM_REPOSITORY 拉取提交 $pin"
+          exit 1
+        fi
+        git -C "$dest" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+        echo "$pin" > "$dest/.sz-orm-pin"
+        echo "sz-orm checked out at $(git -C "$dest" rev-parse HEAD)"

@@ -1,0 +1,34 @@
+# SZ-Rust 代码格式化配置
+#
+# 与 rustfmt 默认行为一致，仅显式声明项目规范。
+# CI 通过 `cargo fmt --all --check` 验证。
+
+# Rust 版本（影响格式化特性，如闭包语法）
+edition = "2021"
+
+# 最大行宽（默认 100）
+max_width = 100
+
+# 缩进空格数（默认 4）
+tab_spaces = 4
+
+# 使用空格而非制表符（默认 true）
+hard_tabs = false
+
+# 链式调用换行阈值（默认 60，超过则换行）
+chain_width = 60
+
+# 数组/元组字面量换行阈值（默认 60）
+array_width = 60
+
+# 单行 if/else 宽度阈值（默认 50）
+single_line_if_else_max_width = 50
+
+# 函数参数换行阈值（默认 60）
+fn_call_width = 60
+
+# 导入排序（对齐 PHP PSR-12 风格，保持可读性）
+reorder_imports = true
+
+# 模块排序
+reorder_modules = true

@@ -1,0 +1,198 @@
+# 端到端性能回归门禁（scripts/perf-regression.js v2）
+#
+# 为什么单独开一个 workflow：
+#   - 已有 benchmark.yml 只跑 criterion 微基准（进程内函数级），从不启动真实服务；
+#   - 旧版 scripts/perf-regression.js 也从未被任何 workflow 引用（全仓 grep 零命中），
+#     "CI 性能回归门禁" 长期只存在于文档里。
+#
+# 本 workflow 做的事：
+#   MySQL 9.6 service → 应用 migrations/001..007 → 灌 perf-seed.sql（确定性 2 万行数据集）
+#   → release 构建 sz300-server → 启动实例 → 用 v2 门禁测 /health + 两个业务端点
+#
+# 测量口径（与 scripts/perf-regression.js 头部注释一致）：
+#   闭环、warmup 10s、稳态 60s × 3 次重复、QPS 取成功请求、分位数覆盖全部已完成响应、
+#   基线按环境指纹分槽。阈值：QPS 中位数回归 > 5%（且 ≥2 次重复同时回归）、
+#   P99 中位数退化 > 25%、错误率 > 0.5%。
+#
+# 关于基线（重要，防"假绿"）：
+#   - 基线必须由 `--init` 在目标机器实测生成后提交入库，本仓库不内置任何占位数字；
+#   - 当前指纹无基线时，门禁退出码 3 → 本 workflow 播种一份真实基线并 **判定失败**，
+#     提示把 artifact 中的 baseline.json 提交入库。基线缺失不等于通过。
+#
+# 已知局限：
+#   - GitHub 托管 runner 的 CPU 型号可能随镜像升级变化，指纹变化即视为"无基线"（重新播种）；
+#   - 限流器在本 workflow 中被显式放大（见 SZ300_RATE_LIMIT_*），因此**不覆盖**限流器本身的性能。
+
+name: Perf Gate (E2E)
+
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: '稳态重复次数（默认 3）'
+        required: false
+        default: '3'
+      duration:
+        description: '单次稳态秒数（默认 60）'
+        required: false
+        default: '60'
+  schedule:
+    - cron: '0 4 * * 0'  # 每周日 04:00 UTC
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTC_WRAPPER: ""
+
+jobs:
+  # 基线文件结构检查：无需服务，秒级完成，防止基线被删空或写坏
+  baseline-shape:
+    name: Baseline shape check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate baseline schema
+        run: node scripts/perf-regression.js --skip-bench
+
+  # 真实负载门禁：只在手动触发/定时任务运行（PR 上跑 10 分钟压测噪声大且拖慢评审）
+  gate:
+    name: E2E perf gate (sz300 + MySQL)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:9.6
+        env:
+          MYSQL_ROOT_PASSWORD: test123
+          MYSQL_DATABASE: sz300
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -ptest123"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SZ300_DB_HOST: 127.0.0.1
+      SZ300_DB_PORT: '3306'
+      SZ300_DB_NAME: sz300
+      SZ300_DB_USER: root
+      SZ300_DB_PASSWORD: test123
+      SZ300_SERVER_HOST: 127.0.0.1
+      SZ300_SERVER_PORT: '8300'
+      # 门禁现场用同一密钥签发 JWT（与 scripts/perf-regression.js --jwt-secret 一致）
+      SZ300_JWT_SECRET: perf_gate_secret_0123456789abcdef0123456789abcdef
+      # 默认 info：热路径读日志已降为 debug!，这里显式确认压测不掺日志 I/O
+      RUST_LOG: info
+      # 限流器放大：所有压测流量来自 127.0.0.1，默认 2000/1000 会直接 429，
+      # 测到的是限流器而不是应用（本 workflow 不评估限流器性能，见文件头局限说明）
+      SZ300_RATE_LIMIT_CAPACITY: '100000000'
+      SZ300_RATE_LIMIT_REFILL: '100000000'
+      GATE_REPS: ${{ github.event.inputs.reps || '3' }}
+      GATE_DURATION: ${{ github.event.inputs.duration || '60' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # sz300 无自动迁移：按序应用 schema，再灌确定性数据集
+      - name: Apply schema and deterministic dataset
+        run: |
+          set -euo pipefail
+          for f in 001_init 002_order_status_check 003_indexes 004_good_stock \
+                   005_order_idempotency 006_outbox 007_sz_dtx_log; do
+            echo "::group::migrations/$f.sql"
+            mysql -h 127.0.0.1 -u root -ptest123 sz300 < "packages/sz-rust-sz300/migrations/$f.sql"
+            echo "::endgroup::"
+          done
+          echo "::group::perf-seed.sql"
+          mysql -h 127.0.0.1 -u root -ptest123 sz300 < deploy/sql/perf-seed.sql
+          echo "::endgroup::"
+          mysql -h 127.0.0.1 -u root -ptest123 -N -B sz300 \
+            -e "SELECT CONCAT('goods=', (SELECT COUNT(*) FROM good), ' orders=', (SELECT COUNT(*) FROM \`order\`))"
+
+      - name: Build release server
+        run: cargo build --release -p sz-rust-sz300 --bin sz300-server
+
+      - name: Start sz300
+        run: |
+          set -euo pipefail
+          nohup ./target/release/sz300-server > sz300.log 2>&1 &
+          echo $! > sz300.pid
+          for i in $(seq 1 120); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8300/health || true)
+            if [ "$code" = "200" ]; then
+              echo "sz300 ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::sz300 未在 120s 内就绪"
+          tail -n 100 sz300.log
+          exit 1
+
+      - name: Run perf gate
+        run: |
+          set +e
+          node scripts/perf-regression.js \
+            --jwt-secret "$SZ300_JWT_SECRET" \
+            --reps "$GATE_REPS" \
+            --duration "$GATE_DURATION" \
+            --json perf-gate-result.json
+          code=$?
+          set -e
+
+          if [ "$code" -eq 3 ]; then
+            echo "::warning::当前环境指纹无基线，先播种一份实测基线（不判定通过）"
+            node scripts/perf-regression.js \
+              --jwt-secret "$SZ300_JWT_SECRET" \
+              --reps "$GATE_REPS" \
+              --duration "$GATE_DURATION" \
+              --init
+            {
+              echo "## Perf gate: BASELINE MISSING (seeded)"
+              echo ""
+              echo "本机指纹无基线，已用本次实测结果播种。"
+              echo "请下载本次 run 的 artifact（含 baseline.json）覆盖"
+              echo "\`packages/sz-rust-benchmark-suite/benches/baseline.json\` 并提交，之后门禁才会真正生效。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::基线缺失——已播种，提交 baseline.json 后重跑"
+            exit 1
+          fi
+
+          exit "$code"
+
+      - name: Server log tail (on failure)
+        if: failure()
+        run: tail -n 200 sz300.log
+
+      - name: Stop sz300
+        if: always()
+        run: |
+          if [ -f sz300.pid ]; then kill "$(cat sz300.pid)" 2>/dev/null || true; fi
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-gate-${{ github.run_id }}
+          path: |
+            perf-gate-result.json
+            sz300.log
+            packages/sz-rust-benchmark-suite/benches/baseline.json
+          retention-days: 30

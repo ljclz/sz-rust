@@ -1,0 +1,16 @@
+[package]
+name = "bench-poem"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bench-poem"
+path = "src/main.rs"
+
+[dependencies]
+poem = "2"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+redis = { version = "0.27", features = ["tokio-comp"] }
+
+[workspace]

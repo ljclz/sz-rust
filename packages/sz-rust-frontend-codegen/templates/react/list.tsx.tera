@@ -1,0 +1,51 @@
+{# React 列表页模板 #}
+import React, { useState, useEffect } from 'react'
+import { Table, Button, Input, Space, Pagination } from 'antd'
+import { {{ module_name }}List, {{ module_name }}Delete } from '@/api/{{ module_name }}'
+
+export default function {{ module_name | snake_to_pascal }}Index() {
+  const [data, setData] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+
+  const fetchData = async () => {
+    setLoading(true)
+    try {
+      const res = await {{ module_name }}List({ page })
+      setData(res.data.list)
+      setTotal(res.data.total)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchData() }, [page])
+
+  const columns = [
+    {% for field in fields %}{% if not field.is_sensitive %}
+    { title: '{{ field.name }}', dataIndex: '{{ field.name }}' },
+    {% endif %}{% endfor %}
+    {
+      title: '操作',
+      render: (_: any, row: any) => (
+        <Space>
+          <Button size="small" onClick={() => handleShow(row)}>查看</Button>
+          <Button size="small" type="primary" onClick={() => handleEdit(row)}>编辑</Button>
+          <Button size="small" danger onClick={() => handleDelete(row)}>删除</Button>
+        </Space>
+      ),
+    },
+  ]
+
+  const handleShow = (row: any) => { /* 跳转详情 */ }
+  const handleEdit = (row: any) => { /* 跳转编辑 */ }
+  const handleDelete = async (row: any) => { await {{ module_name }}Delete(row.id); fetchData() }
+
+  return (
+    <div>
+      <Table columns={columns} dataSource={data} loading={loading} rowKey="id" pagination={false} />
+      <Pagination current={page} total={total} onChange={setPage} />
+    </div>
+  )
+}

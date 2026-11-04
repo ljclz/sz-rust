@@ -1,0 +1,164 @@
+{
+  "version": "1.0.0",
+  "description": "生鲜零售数据模型模板库",
+  "templates": [
+    {
+      "entity_name": "Stall",
+      "description": "摊位",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "market_id", "type": "i64", "nullable": false, "comment": "所属市场"},
+        {"name": "stall_no", "type": "String", "nullable": false, "comment": "摊位编号"},
+        {"name": "area", "type": "f64", "nullable": false, "comment": "面积(平方米)"},
+        {"name": "monthly_rent", "type": "f64", "nullable": false, "comment": "月租金"},
+        {"name": "deposit", "type": "f64", "nullable": false, "comment": "押金"},
+        {"name": "status", "type": "String", "nullable": false, "comment": "空闲/租赁中/维修中"},
+        {"name": "created_at", "type": "DateTime", "nullable": false},
+        {"name": "updated_at", "type": "DateTime", "nullable": false}
+      ],
+      "relations": [
+        {"type": "belongsTo", "target": "Market", "foreign_key": "market_id"},
+        {"type": "hasMany", "target": "LeaseContract", "foreign_key": "stall_id"}
+      ],
+      "indexes": [
+        {"fields": ["market_id", "stall_no"], "unique": true},
+        {"fields": ["status"]}
+      ]
+    },
+    {
+      "entity_name": "Merchant",
+      "description": "商户",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "name", "type": "String", "nullable": false, "comment": "商户姓名"},
+        {"name": "phone", "type": "String", "nullable": false, "comment": "联系电话"},
+        {"name": "id_card", "type": "String", "nullable": false, "comment": "身份证号"},
+        {"name": "business_license", "type": "String", "nullable": true, "comment": "营业执照"},
+        {"name": "status", "type": "String", "nullable": false, "comment": "活跃/停业/黑名单"},
+        {"name": "created_at", "type": "DateTime", "nullable": false},
+        {"name": "updated_at", "type": "DateTime", "nullable": false}
+      ],
+      "relations": [
+        {"type": "hasMany", "target": "LeaseContract", "foreign_key": "merchant_id"},
+        {"type": "hasMany", "target": "Order", "foreign_key": "merchant_id"}
+      ],
+      "indexes": [
+        {"fields": ["phone"], "unique": true},
+        {"fields": ["id_card"], "unique": true}
+      ]
+    },
+    {
+      "entity_name": "Order",
+      "description": "订单",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "order_no", "type": "String", "nullable": false, "comment": "订单编号"},
+        {"name": "merchant_id", "type": "i64", "nullable": false},
+        {"name": "member_id", "type": "i64", "nullable": true, "comment": "会员ID(可空)"},
+        {"name": "total_amount", "type": "f64", "nullable": false, "comment": "订单总额"},
+        {"name": "discount_amount", "type": "f64", "nullable": false, "default": 0},
+        {"name": "pay_amount", "type": "f64", "nullable": false, "comment": "实付金额"},
+        {"name": "pay_method", "type": "String", "nullable": false, "comment": "现金/微信/支付宝/赊账"},
+        {"name": "status", "type": "String", "nullable": false, "comment": "待付/已付/已退款/已取消"},
+        {"name": "created_at", "type": "DateTime", "nullable": false},
+        {"name": "updated_at", "type": "DateTime", "nullable": false}
+      ],
+      "relations": [
+        {"type": "belongsTo", "target": "Merchant", "foreign_key": "merchant_id"},
+        {"type": "belongsTo", "target": "Member", "foreign_key": "member_id"},
+        {"type": "hasMany", "target": "OrderItem", "foreign_key": "order_id"}
+      ],
+      "indexes": [
+        {"fields": ["order_no"], "unique": true},
+        {"fields": ["merchant_id", "created_at"]},
+        {"fields": ["status"]}
+      ]
+    },
+    {
+      "entity_name": "Inventory",
+      "description": "库存",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "product_id", "type": "i64", "nullable": false},
+        {"name": "batch_no", "type": "String", "nullable": false, "comment": "批次号"},
+        {"name": "quantity", "type": "f64", "nullable": false, "comment": "库存数量"},
+        {"name": "unit", "type": "String", "nullable": false, "comment": "kg/个/箱"},
+        {"name": "safety_stock", "type": "f64", "nullable": false, "comment": "安全库存"},
+        {"name": "expiry_date", "type": "DateTime", "nullable": true, "comment": "保质期"},
+        {"name": "storage_zone", "type": "String", "nullable": false, "comment": "冷冻/冷藏/常温"},
+        {"name": "created_at", "type": "DateTime", "nullable": false},
+        {"name": "updated_at", "type": "DateTime", "nullable": false}
+      ],
+      "relations": [
+        {"type": "belongsTo", "target": "Product", "foreign_key": "product_id"}
+      ],
+      "indexes": [
+        {"fields": ["product_id", "batch_no"], "unique": true},
+        {"fields": ["expiry_date"]},
+        {"fields": ["storage_zone"]}
+      ]
+    },
+    {
+      "entity_name": "Delivery",
+      "description": "配送",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "delivery_no", "type": "String", "nullable": false},
+        {"name": "order_id", "type": "i64", "nullable": false},
+        {"name": "driver_name", "type": "String", "nullable": false},
+        {"name": "vehicle_plate", "type": "String", "nullable": false},
+        {"name": "temp_min", "type": "f64", "nullable": false, "comment": "温区下限"},
+        {"name": "temp_max", "type": "f64", "nullable": false, "comment": "温区上限"},
+        {"name": "depart_at", "type": "DateTime", "nullable": false},
+        {"name": "arrive_at", "type": "DateTime", "nullable": true},
+        {"name": "status", "type": "String", "nullable": false, "comment": "待发/运输中/已送达/异常"}
+      ],
+      "relations": [
+        {"type": "belongsTo", "target": "Order", "foreign_key": "order_id"}
+      ],
+      "indexes": [
+        {"fields": ["delivery_no"], "unique": true},
+        {"fields": ["status"]}
+      ]
+    },
+    {
+      "entity_name": "Member",
+      "description": "会员",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "phone", "type": "String", "nullable": false},
+        {"name": "name", "type": "String", "nullable": true},
+        {"name": "points", "type": "i32", "nullable": false, "default": 0},
+        {"name": "total_spent", "type": "f64", "nullable": false, "default": 0},
+        {"name": "level", "type": "String", "nullable": false, "default": "normal", "comment": "normal/silver/gold/vip"},
+        {"name": "created_at", "type": "DateTime", "nullable": false}
+      ],
+      "relations": [
+        {"type": "hasMany", "target": "Order", "foreign_key": "member_id"}
+      ],
+      "indexes": [
+        {"fields": ["phone"], "unique": true},
+        {"fields": ["level"]}
+      ]
+    },
+    {
+      "entity_name": "Promotion",
+      "description": "促销",
+      "fields": [
+        {"name": "id", "type": "i64", "nullable": false, "primary_key": true},
+        {"name": "name", "type": "String", "nullable": false},
+        {"name": "type", "type": "String", "nullable": false, "comment": "discount/gift/bundle"},
+        {"name": "value", "type": "f64", "nullable": false, "comment": "折扣率/减免额/赠品ID"},
+        {"name": "start_at", "type": "DateTime", "nullable": false},
+        {"name": "end_at", "type": "DateTime", "nullable": false},
+        {"name": "min_amount", "type": "f64", "nullable": false, "default": 0, "comment": "满减门槛"},
+        {"name": "status", "type": "String", "nullable": false, "comment": "draft/active/ended/cancelled"}
+      ],
+      "relations": [],
+      "indexes": [
+        {"fields": ["start_at", "end_at"]},
+        {"fields": ["status"]}
+      ]
+    }
+  ]
+}
