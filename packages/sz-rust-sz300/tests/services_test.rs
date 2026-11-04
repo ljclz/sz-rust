@@ -9,6 +9,9 @@
 //! P2 补充（2026-08-04）：row_to_json 边界类型全覆盖 + auth_service 空凭证校验（不依赖 DB）。
 
 use std::collections::HashMap;
+
+mod common;
+
 use sz_rust_core::orm::{Model, ModelExt, Value as OrmValue};
 use sz_rust_sz300::models::order::Order;
 use sz_rust_sz300::models::order_item::OrderItem;
@@ -463,14 +466,32 @@ async fn authenticate_async_empty_password_returns_error() {
 }
 
 /// F-2 契约锚点（2026-11-05，DB-2026-11-05-02）：登录控制器按错误文本映射
-/// HTTP 状态码（401/503），此处锁定两条关键消息文本防漂移——
+/// HTTP 状态码（401/503），此处锁定 401 路径文本防漂移——
 /// auth_service 侧修改这些字符串必须同步 controllers/auth.rs 的 match。
+/// 注意：authenticate_async 在 DB_POOL 未初始化时会 panic（get_pool().expect），
+/// 故本用例需真实连接池（与 auth_ctx_cache_test 同模式）；503 文本来自池存在
+/// 但查询失败路径，由 login_contract_test 的容器环境覆盖。
 #[tokio::test]
 async fn auth_error_message_contract_anchors() {
-    // 无效凭据路径：不存在的用户 → 固定文案（401）
-    // 无 DB 时 authenticate_async 走 "服务暂时不可用"（503），两条文本都必须稳定
-    let no_db = sz_rust_sz300::services::auth_service::authenticate_async("contract-probe", "x")
+    let Some(pool) = common::ensure_mysql().await else {
+        eprintln!("⚠️ MySQL 不可达，跳过登录错误契约锚点");
+        return;
+    };
+    static INIT: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    INIT.get_or_init(|| async {
+        sz_rust_sz300::services::auth_service::init_auth(
+            "test-secret-key",
+            "sz300-test",
+            86400,
+            pool.into(),
+        );
+    })
+    .await;
+    let msg = sz_rust_sz300::services::auth_service::authenticate_async("contract-probe", "x")
         .await
         .unwrap_err();
-    assert_eq!(no_db, "服务暂时不可用");
+    assert_eq!(
+        msg, "用户名或密码错误",
+        "登录错误契约文本漂移，需同步 controllers/auth.rs 状态映射"
+    );
 }
