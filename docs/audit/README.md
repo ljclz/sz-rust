@@ -18,6 +18,7 @@
 | [tech-writer-fixup-prompt.md](tech-writer-fixup-prompt.md) | 2026-10-27 | **TW 整改执行提示词模板**：新会话一键执行 tech-writer 评测发现的全部 P0/P1/P2 文档缺陷整改（含乱码文件名恢复、版本号统一、OpenAPI 契约同步、门禁扩展） |
 | [tech-writer-rerun-prompt.md](tech-writer-rerun-prompt.md) | 2026-11-04 | **TW 整改复跑验证提示词模板**：新会话一键复跑 2026-10-27 整改——门禁 19 双脚本 + cargo 回归三条命令 + 17 项成果逐项抽验（附 node/cargo 环境现值与 2026-11-04 实测基线） |
 | [fullstack-engineer-rerun-prompt.md](fullstack-engineer-rerun-prompt.md) | 2026-11-04 | **全栈复跑验证提示词模板**：新会话一键对全仓做独立复跑——编译/测试/clippy/unwrap+node 门禁/server 内存基线（MySQL 已迁 8802）/三库连通/DB 集成测试/历史声称抽验（数据层三阻断、README.en WASM、AppSec 插件伪验签、sz300 覆盖率） |
+| [2026-11-04-全栈复跑报告.md](2026-11-04-全栈复跑报告.md) | 2026-11-05 | **全栈复跑报告**：HEAD 9a6779a，编译 0 error/0 warning，workspace lib 7881 passed/0 failed/1 ignored，clippy/unwrap 0 违规，server 内存 10.5 MB PASS（<30MB），MySQL/Redis 连通，PG/Oracle/DB 集成测试阻塞（凭据不可得），历史声称抽验全部成立无回退，4 项文档欠债待补登记 |
 | [system-architect-eval-prompt.md](system-architect-eval-prompt.md) | 2026-10-27 (v2) | **架构师评测提示词模板（生产就绪路线图版）**：新会话一键让顶级系统架构师回答「下一步做加法还是先解决问题、怎么尽快生产就绪」（含当前修复状态与环境） |
 | [2026-10-27-系统架构师评测报告.md](2026-10-27-系统架构师评测报告.md) | 2026-10-27 | **系统架构师评测报告**：架构成熟度 6.9/10；判断「先收口再做加法」；生产就绪路线图分三阶段；并转述数据层审计（40/100 D 级）为最高优先级整改项 |
 | [sdet-eval-prompt.md](sdet-eval-prompt.md) | 2026-10-27 | **SDET 评测提示词模板**：新会话一键让顶级自动化测试工程师对 sz-rust 做只读测试体系评测（测试策略/覆盖率/CI 门禁/DB 集成可执行性/变异/模糊/性能稳定） |

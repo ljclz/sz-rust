@@ -9286,6 +9286,7 @@ dependencies = [
  "sz-rust-middleware-facade",
  "sz-rust-orm-facade",
  "sz-rust-state-facade",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tower 0.5.3",

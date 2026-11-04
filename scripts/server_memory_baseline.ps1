@@ -42,12 +42,15 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
 # ---- resolve binary ----
+# When CARGO_TARGET_DIR is set, cargo always emits artifacts under
+# $CARGO_TARGET_DIR\release\ (even after a fresh build). We must lock that path
+# regardless of whether the binary currently exists, so a subsequent cargo build
+# (triggered below) produces the binary exactly where $ServerExe points.
+# Only when CARGO_TARGET_DIR is unset do we fall back to <repo>\target\release\.
 if (-not $ServerExe) {
     if ($env:CARGO_TARGET_DIR) {
-        $candidate = Join-Path $env:CARGO_TARGET_DIR 'release\sz300-server.exe'
-        if (Test-Path $candidate) { $ServerExe = $candidate }
-    }
-    if (-not $ServerExe) {
+        $ServerExe = Join-Path $env:CARGO_TARGET_DIR 'release\sz300-server.exe'
+    } else {
         $ServerExe = Join-Path $ProjectRoot 'target\release\sz300-server.exe'
     }
 }

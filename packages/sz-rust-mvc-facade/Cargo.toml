@@ -40,5 +40,8 @@ async-trait = { workspace = true, optional = true }
 ssr = ["async-trait"]
 inertia = ["ssr"]
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

@@ -2914,19 +2914,23 @@ mod tests {
 
     #[test]
     fn test_compiled_cache_invalidation_on_parent_change() {
-        let dir = make_temp_dir();
+        // 使用 tempfile::tempdir() 创建进程内唯一临时目录，避免与其它并发测试
+        // 共享 std::env::temp_dir() + 时间戳命名导致的路径竞争（flaky Os NotFound）。
+        // TempDir 在 drop 时自动递归清理，无需手动 cleanup_dir。
+        let tmp = tempfile::tempdir().expect("创建独立临时目录失败");
+        let dir = tmp.path();
         write_template(
-            &dir,
+            dir,
             "base",
             "<html>{block name=\"content\"}AAA{/block}</html>",
         );
         let engine = SimpleTemplateEngine::new(ViewConfig {
-            view_path: dir.clone(),
+            view_path: dir.to_path_buf(),
             ..Default::default()
         });
 
         write_template(
-            &dir,
+            dir,
             "child",
             r#"{extend name="base"}{block name="content"}hello{/block}"#,
         );
@@ -2936,7 +2940,7 @@ mod tests {
 
         // 只改父模板（长度刻意不同保证 size 校验命中）→ 子模板缓存必须失效
         write_template(
-            &dir,
+            dir,
             "base",
             "<html>{block name=\"content\"}BBBBBBB{/block}</html>",
         );
@@ -2950,13 +2954,14 @@ mod tests {
 
         // 子模板删除 block 覆盖后，输出应跟随父模板新默认值
         // （PHP 语义：extend 子模板 block 外的内容被丢弃）
-        write_template(&dir, "child", r#"{extend name="base"}<p>tail</p>"#);
+        write_template(dir, "child", r#"{extend name="base"}<p>tail</p>"#);
         let r3 = engine.fetch("child", &ViewData::new()).unwrap();
         assert_eq!(
             r3, "<html>BBBBBBB</html>",
             "未覆盖 block 使用父模板新默认值"
         );
 
-        cleanup_dir(&dir);
+        // tmp drop 时自动清理目录，显式 drop 以早释放（非必须，保留语义清晰）
+        drop(tmp);
     }
 }
