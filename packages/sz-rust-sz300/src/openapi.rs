@@ -19,7 +19,7 @@
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
 use once_cell::sync::Lazy;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sz_rust_core::openapi::{redoc_html, swagger_ui_html, HttpMethod, OpenApiBuilder};
 
 /// OpenAPI 规范（全局静态，启动时构建一次）
@@ -93,13 +93,21 @@ fn build_openapi_spec() -> Value {
         // ===== 认证 =====
         .path("/api/v1/auth/login", HttpMethod::Post, |op| {
             op.summary("用户登录")
-                .description("通过用户名密码获取 JWT Token，成功后下发 CSRF Cookie")
+                .description("通过用户名密码获取 JWT Token，成功后下发 CSRF Cookie。凭据必须经 JSON 请求体提交，禁止 query string（F-2 修复，2026-11-05：URL 会进 access log/代理日志）")
                 .tag("认证")
-                .parameter("username", "query", "用户名", true, "string")
-                .parameter("password", "query", "密码", true, "string")
+                .request_body(
+                    "登录凭据",
+                    "application/json",
+                    true,
+                    json!({
+                        "username": {"type": "string", "description": "用户名"},
+                        "password": {"type": "string", "description": "密码"}
+                    }),
+                )
                 .response(200, "登录成功，返回 token 与用户信息", "application/json")
-                .response(400, "参数错误（用户名或密码为空）", "application/json")
-                .response(401, "认证失败（用户名或密码错误）", "application/json");
+                .response(400, "参数错误或凭据经 URL 提交", "application/json")
+                .response(401, "认证失败（用户名或密码错误）", "application/json")
+                .response(503, "服务暂时不可用（DB 不可达）", "application/json");
         })
         .path("/api/v1/auth/refresh", HttpMethod::Post, |op| {
             op.summary("刷新登录令牌")
@@ -411,6 +419,31 @@ mod tests {
         assert!(spec["paths"]["/api/v1/auth/me"]["post"].is_object());
         assert!(spec["paths"]["/api/v1/auth/refresh"]["post"].is_object());
         assert!(spec["paths"]["/api/v1/auth/logout"]["post"].is_object());
+    }
+
+    /// F-2 契约（2026-11-05）：登录凭据必须文档化为 requestBody，禁止 query 参数
+    #[test]
+    fn test_spec_login_credentials_via_request_body() {
+        let spec = &*OPENAPI_SPEC;
+        let login = &spec["paths"]["/api/v1/auth/login"]["post"];
+        assert!(
+            login["parameters"]
+                .as_array()
+                .map(|a| a.is_empty())
+                .unwrap_or(true),
+            "login 不应再声明 query 凭据参数"
+        );
+        assert_eq!(login["requestBody"]["required"], true);
+        assert!(
+            login["requestBody"]["content"]["application/json"]["schema"]["properties"]["username"]
+                .is_object()
+        );
+        assert!(
+            login["requestBody"]["content"]["application/json"]["schema"]["properties"]["password"]
+                .is_object()
+        );
+        assert!(login["responses"]["401"].is_object());
+        assert!(login["responses"]["503"].is_object());
     }
 
     #[test]

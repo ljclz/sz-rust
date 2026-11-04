@@ -67,14 +67,40 @@ impl AuthController {
     /// - 移除控制器内嵌 SQL，下沉到 `auth_service::get_user_info_by_username`
     /// - 控制器不再直接 `state.db_pool.acquire()`，符合分层架构
     /// - 参数解析错误不返回内部细节，统一返回 "参数解析失败"
+    ///
+    /// # HTTP 状态码（F-2 修复，2026-11-05，doc-debt DB-2026-11-05-02）
+    ///
+    /// - 200：登录成功（信封 `code:1`）
+    /// - 400：参数缺失/解析失败/**凭据经 URL 查询参数提交**（禁止——URL 进
+    ///   access log / 代理日志 / 浏览器历史，构成泄密面）
+    /// - 401：用户名或密码错误（RFC 7235；此前为 HTTP 200 + 失败信封）
+    /// - 503：DB 不可用等暂时性故障（"服务暂时不可用"）
+    ///
+    /// 信封体保持 `code:1=成功 / code:0=失败`（PHP 对齐约定，mvc-facade
+    /// controller.rs 文档），仅 HTTP 状态对齐 RFC 语义。
     pub async fn login(_state: &AppState, req: Request<Body>) -> Response {
         let ctrl = AuthController;
+
+        // 凭据禁止经 query 提交：框架层 fetch_post_data 为业务端点保留
+        // query+body 合并（ThinkPHP 对齐），认证端点例外，body-only
+        let query_keys = sz_rust_http_facade::request::parse_query(req.uri().query().unwrap_or(""));
+        if query_keys.contains_key("username") || query_keys.contains_key("password") {
+            let mut resp = ctrl.render_error(
+                "登录凭据不得经 URL 查询参数提交（安全要求），请改用 JSON 请求体",
+                json!({}),
+                0,
+            );
+            *resp.status_mut() = axum::http::StatusCode::BAD_REQUEST;
+            return resp;
+        }
 
         let data = match fetch_post_data(req).await {
             Ok(d) => d,
             Err(e) => {
                 tracing::error!(error = %e, "登录参数解析失败");
-                return ctrl.render_error("参数解析失败", json!({}), 0);
+                let mut resp = ctrl.render_error("参数解析失败", json!({}), 0);
+                *resp.status_mut() = axum::http::StatusCode::BAD_REQUEST;
+                return resp;
             }
         };
 
@@ -82,14 +108,27 @@ impl AuthController {
         let password = data.get("password").and_then(|v| v.as_str()).unwrap_or("");
 
         if !credentials_non_empty(username, password) {
-            return ctrl.render_error("用户名和密码不能为空", json!({}), 0);
+            let mut resp = ctrl.render_error("用户名和密码不能为空", json!({}), 0);
+            *resp.status_mut() = axum::http::StatusCode::BAD_REQUEST;
+            return resp;
         }
 
         // 调用 service 层认证 — 控制器不接触 DB
         let (token, refresh_token) =
             match auth_service::authenticate_async(username, password).await {
                 Ok((t, r)) => (t, r),
-                Err(msg) => return ctrl.render_error(&msg, json!({}), 0),
+                Err(msg) => {
+                    // 状态映射（与 auth_service 错误字符串一一对应，services_test
+                    // 断言消息文本防漂移）：凭据错误 401，DB 不可用 503，其余 500
+                    let status = match msg.as_str() {
+                        "用户名或密码错误" => axum::http::StatusCode::UNAUTHORIZED,
+                        "服务暂时不可用" => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    let mut resp = ctrl.render_error(&msg, json!({}), 0);
+                    *resp.status_mut() = status;
+                    return resp;
+                }
             };
 
         // 调用 service 层查询用户完整信息 — 控制器不接触 DB

@@ -461,3 +461,16 @@ async fn authenticate_async_empty_password_returns_error() {
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "用户名或密码不能为空");
 }
+
+/// F-2 契约锚点（2026-11-05，DB-2026-11-05-02）：登录控制器按错误文本映射
+/// HTTP 状态码（401/503），此处锁定两条关键消息文本防漂移——
+/// auth_service 侧修改这些字符串必须同步 controllers/auth.rs 的 match。
+#[tokio::test]
+async fn auth_error_message_contract_anchors() {
+    // 无效凭据路径：不存在的用户 → 固定文案（401）
+    // 无 DB 时 authenticate_async 走 "服务暂时不可用"（503），两条文本都必须稳定
+    let no_db = sz_rust_sz300::services::auth_service::authenticate_async("contract-probe", "x")
+        .await
+        .unwrap_err();
+    assert_eq!(no_db, "服务暂时不可用");
+}

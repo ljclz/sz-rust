@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Changed — 登录契约收紧：凭据禁止 query string + HTTP 状态码对齐 RFC 7235（2026-11-05，**breaking**）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-11-05-02；复现与数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §22.6。同批：DB-2026-11-05-01（F-1）复核不成立撤销。
+
+- **`POST /api/v1/auth/login` 契约变更（breaking）**：
+  1. 凭据**必须经 JSON 请求体**（`{"username":...,"password":...}`）；query string 提交 → HTTP 400（URL 会进 access log/代理日志/浏览器历史）。框架层 `fetch_post_data` 对业务端点保留 query+body 合并（ThinkPHP 对齐），认证端点例外；
+  2. 认证失败 → **HTTP 401**（此前 HTTP 200 + 失败信封）；DB 不可用 → **503**；参数缺失 → **400**。信封体不变（`code:1=成功 / code:0=失败`，PHP 对齐约定）；
+  3. OpenAPI：router-facade `OperationBuilder` 新增 `request_body` DSL，login 规格由 query 参数改为 requestBody（含 400/401/503 响应），静态契约 `schemas/openapi-sz300.json` 重生成（41 paths 不变）。
+- **回归**：新增 `login_contract_test`（staging 容器真库）= **3 passed**（400×2 + 401 信封 + 「失败响应不得含 token」）；sz300 lib **119 passed**（+错误文本契约锚点防漂移测试）；router-facade lib **173 passed**；clippy 0 warning；fmt 无差异。
+- **DB-2026-11-05-01（F-1）撤销**：黑盒复核确认缺凭据实为 CSRF 层先拒（403 合理），合法 CSRF 对下 401 语义正确——登记时误判，探测脚本断言已更正。
+
 ### Fixed — staging 部署实测暴露并修复两个启动级缺陷 + 登记两项 API 契约缺陷（2026-11-05）
 
 > 来源：`docs/audit/2026-10-29-性能整改现场验证记录.md` §22（本机 Docker prod 模板全链路：部署 → 建库 → 黑盒探测 15/15 → k6 78,885 请求 checks 100%）。
@@ -15,6 +26,16 @@
 - **D-2（构建不可复现）**：Dockerfile 容器内 `git clone sz-orm` 依赖 GitHub 直连且不受 `.sz-orm-commit` 约束 → 改 BuildKit additional context（`additional_contexts: sz-orm: ../sz-orm`）+ `sz-orm.dockerignore`（剔除 .git）；宿主检出由 dependency-reproducibility.py 门禁校验。
 - **F-3（P0，k6 首跑 checks 33% 暴露）**：`rbac_guard` 按 user_id 判定但生产代码从未 `assign_role`——`v18-rbac` 开启时所有认证用户一律 403。修复：guard 内按 DB 角色（`merchant_user.role==1 → admin`，否则 `merchant:read`）在用户进程内首次可见时自动指派（ADR-049 缓存路径）；已指派用户尊重既有指派。局限（如实登记）：DB 侧降级需重启生效。回归 `cargo test --features v18-rbac --test rbac_test` = **14 passed**（+2 F-3 回归）。
 - **登记（不混入本轮修复）**：F-1（P2，缺凭据 403 应为 401，RFC 7235）与 F-2（P1，login 凭据走 query string 且失败返回 HTTP 200 + `code:0` 自相矛盾信封）→ doc-debt DB-2026-11-05-01/02。
+
+### Changed — 补登记 4 项文档欠债到 doc-debt.md（2026-11-05）
+
+> 来源：全栈复跑验证发现 4 项文档欠债未登记。doc-debt.md 此前 25 RESOLVED + 2 PENDING（DB-2026-11-05-01/02，staging 黑盒安全探测），本轮新增 4 条 PENDING，限期 2026-11-12（3 次会话内补齐，按 AGENTS.md 文档同步强制约束）。
+
+- **DB-2026-11-05-03**：`docs/audit/2026-10-28-数据库层独立审计报告.md` 原 40/100 D 级评级过时（路线图 15 项中 14 项 V 级已修），建议重新评分（预计 70-80 区间）。
+- **DB-2026-11-05-04**：`docs/audit/2026-10-27-AppSec评测报告.md` §10 遗留项 1 未标注 P0-1 已闭环（`plugin_manager.rs:230` 真实 Ed25519 验签 + `:330-342` 负例测试 `test_install_forged_64byte_signature_rejected`）。
+- **DB-2026-11-05-05**：`docs/audit/coverage-priority.json` sz300 `current_coverage=85.20, status=fixed`（`:61`/`:66`，commit `8d9cc19` 2026-08-17）与 `coverage-exemption.md:49`/`:102` 两次豁免登记矛盾。
+- **DB-2026-11-05-06**：`README.en.md:104` WASM 段仅提 fuel/memory/timeout triple limits，未提 `controllers/wasm_api.rs:15-33` 并发限流（`WASM_LIMITER: OnceLock<Arc<Semaphore>>`，第四重防护）。
+- ID 编号说明：DB-2026-11-05-01/02 已被 staging 黑盒安全探测（F-1/F-2）占用，本轮顺延为 03-06 避免冲突。doc-debt.md 当前条目总数 31（27 既有 + 4 新增）。
 
 ### Added — TW 整改复跑验证提示词模板（2026-11-04）
 

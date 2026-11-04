@@ -372,6 +372,7 @@ pub struct OperationBuilder {
     tags: Vec<String>,
     parameters: Vec<Value>,
     responses: Map<String, Value>,
+    request_body: Option<Value>,
     deprecated: bool,
 }
 
@@ -384,6 +385,7 @@ impl OperationBuilder {
             tags: Vec::new(),
             parameters: Vec::new(),
             responses: Map::new(),
+            request_body: None,
             deprecated: false,
         }
     }
@@ -457,6 +459,38 @@ impl OperationBuilder {
         self
     }
 
+    /// 添加请求体（F-2 修复配套，2026-11-05：登录等端点的凭据必须文档化为
+    /// requestBody 而非 query 参数——query 凭据会进 access log/代理日志）
+    ///
+    /// # 参数
+    ///
+    /// - `desc`：请求体描述
+    /// - `content_type`：内容类型（如 `"application/json"`）
+    /// - `required`：是否必填
+    /// - `props`：请求体 schema 的属性定义（`{ "字段名": {"type": "..."} }` 形式）
+    pub fn request_body(
+        &mut self,
+        desc: &str,
+        content_type: &str,
+        required: bool,
+        props: serde_json::Value,
+    ) -> &mut Self {
+        self.request_body = Some(json!({
+            "description": desc,
+            "required": required,
+            "content": {
+                content_type: {
+                    "schema": {
+                        "type": "object",
+                        "properties": props,
+                        "required": props.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()
+                    }
+                }
+            }
+        }));
+        self
+    }
+
     /// 添加响应（带 schema 引用）
     ///
     /// # 参数
@@ -506,6 +540,9 @@ impl OperationBuilder {
         }
         if !self.parameters.is_empty() {
             op.insert("parameters".to_string(), json!(self.parameters));
+        }
+        if let Some(rb) = self.request_body {
+            op.insert("requestBody".to_string(), rb);
         }
         if !self.responses.is_empty() {
             op.insert("responses".to_string(), Value::Object(self.responses));
