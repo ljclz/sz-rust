@@ -57,6 +57,10 @@ const KNOWN_FICTIONAL_CRATES = new Set([
 const REMOVED_CRATES = new Set([
     'sz-rust-operator',
     'sz-rust-k8s-operator',
+    // sz-rust-capi：仅见于评测文档的历史/规划性引用（2026-10-28 独立评测报告、
+    // UXR 整改执行报告、2026-11-04 全栈复跑报告），packages/ 无实体且从未入
+    // workspace（2026-11-05 核验）；与 operator/k8s-operator 同类降级 WARN
+    'sz-rust-capi',
 ]);
 
 // 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件

@@ -32,7 +32,9 @@ function walkMd(dir) {
     let out = [];
     if (!fs.existsSync(dir)) return out;
     for (const entry of fs.readdirSync(dir)) {
-        if (entry === 'target' || entry === 'node_modules' || entry === '.git' || entry === '.trae' || entry === 'archive') continue;
+        // 2026-11-05：临时/草稿目录不入门禁（会话工作产物，非交付文档）——
+        // docs/audit/.rerun-temp（复跑门禁原始输出）、.codeartsdoer/temp（编辑器会话暂存）
+        if (entry === 'target' || entry === 'node_modules' || entry === '.git' || entry === '.trae' || entry === 'archive' || entry === '.rerun-temp' || entry === 'temp') continue;
         const full = path.join(dir, entry);
         let st;
         try { st = fs.statSync(full); } catch (_) { continue; }
@@ -190,6 +192,10 @@ function checkFeatures(files) {
                 raw = raw.trim();
                 if (!raw || raw === 'all' || raw === 'default') continue;
                 // skip obviously-placeholder tokens
+                // 2026-11-05：`--features X` 的 X 为示例占位符（.codeartsdoer SKILL.md
+                // 示例文案，2026-11-04 全栈复跑报告 §false-positive 段登记）——单字母
+                // 大写 token 与真实 feature 命名（snake_case/连字符）不符，跳过
+                if (raw === 'X' || raw === 'Y' || raw === 'N') continue;
                 if (/[{}]/.test(raw)) continue;
                 if (seen.has(raw)) continue;
                 seen.add(raw);

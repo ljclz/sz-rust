@@ -348,3 +348,31 @@ async fn test_guard_admin_allow_all() {
     let resp = router.oneshot(bearer_request(&token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+// ============================================================================
+// F-3 修复回归（2026-11-05，staging 实测：生产代码从未 assign_role，
+// RBAC 模式下所有认证用户一律 403）：无预指派时 guard 按 DB 角色自动同步
+// ============================================================================
+
+#[tokio::test]
+async fn test_guard_syncs_role_when_unassigned() {
+    // 测试进程无 DB：auth_context → None → is_admin=false → merchant:read。
+    // merchant("read") 应放行（merchant:read 角色直接授权 product/order/merchant/device 读）。
+    let engine = Arc::new(roles::init_rbac_engine());
+    let token = issue_token("fresh_user", 200, vec!["admin"]);
+    let router = build_router(engine, roles::perm::merchant("read"));
+
+    let resp = router.oneshot(bearer_request(&token)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_guard_unassigned_non_admin_cannot_write() {
+    // 同上：非管理员角色（merchant:read）不得获得 merchant("create") 写权限。
+    let engine = Arc::new(roles::init_rbac_engine());
+    let token = issue_token("fresh_writer", 201, vec!["admin"]);
+    let router = build_router(engine, roles::perm::merchant("create"));
+
+    let resp = router.oneshot(bearer_request(&token)).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}

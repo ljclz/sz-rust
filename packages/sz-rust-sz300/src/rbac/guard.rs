@@ -64,6 +64,24 @@ pub async fn rbac_guard(
     };
 
     let user_id = user.id.to_string();
+
+    // 2026-11-05 修复（staging 实测 F-3，审计记录 §22）：生产代码此前从未调用
+    // assign_role——RBAC 模式下所有认证用户一律 Deny，业务端点全量 403。
+    // 按 DB 角色（merchant_user.role == 1 → admin，否则 merchant:read）在
+    // 该用户进程内首次可见时指派；已指派用户尊重既有指派（rbac_test 预指派
+    // 契约不变）。局限：DB 侧角色降级需重启生效（auth_context 经 ADR-049
+    // 缓存只影响 is_admin 读取，此处指派为进程生命周期内一次性建立）。
+    if engine.get_user_roles(&user_id).is_empty() {
+        let ctx = auth_service::auth_context(user.id).await;
+        let is_admin = ctx.map(|c| c.is_admin).unwrap_or(false);
+        let role = if is_admin {
+            crate::rbac::roles::role::admin()
+        } else {
+            crate::rbac::roles::role::merchant_read()
+        };
+        engine.assign_role(&user_id, role);
+    }
+
     match engine.check(&user_id, &resource).await {
         Ok(PermissionDecision::Allow) => next.run(req).await,
         Ok(PermissionDecision::Deny) => (

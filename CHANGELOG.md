@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Fixed — staging 部署实测暴露并修复两个启动级缺陷 + 登记两项 API 契约缺陷（2026-11-05）
+
+> 来源：`docs/audit/2026-10-29-性能整改现场验证记录.md` §22（本机 Docker prod 模板全链路：部署 → 建库 → 黑盒探测 15/15 → k6 78,885 请求 checks 100%）。
+
+- **D-1（启动即崩，prod 模板此前从未真正启动过）**：distroless nonroot(65532) 无法在 root 属主的 `/app` 下 `create_dir_all("./uploads")` → EACCES 崩溃循环。修复：Dockerfile 构建阶段预建目录 + `COPY --chown=65532:65532`；compose 挂 `uploads_data` 命名卷（首挂载继承属主）。
+- **D-2（构建不可复现）**：Dockerfile 容器内 `git clone sz-orm` 依赖 GitHub 直连且不受 `.sz-orm-commit` 约束 → 改 BuildKit additional context（`additional_contexts: sz-orm: ../sz-orm`）+ `sz-orm.dockerignore`（剔除 .git）；宿主检出由 dependency-reproducibility.py 门禁校验。
+- **F-3（P0，k6 首跑 checks 33% 暴露）**：`rbac_guard` 按 user_id 判定但生产代码从未 `assign_role`——`v18-rbac` 开启时所有认证用户一律 403。修复：guard 内按 DB 角色（`merchant_user.role==1 → admin`，否则 `merchant:read`）在用户进程内首次可见时自动指派（ADR-049 缓存路径）；已指派用户尊重既有指派。局限（如实登记）：DB 侧降级需重启生效。回归 `cargo test --features v18-rbac --test rbac_test` = **14 passed**（+2 F-3 回归）。
+- **登记（不混入本轮修复）**：F-1（P2，缺凭据 403 应为 401，RFC 7235）与 F-2（P1，login 凭据走 query string 且失败返回 HTTP 200 + `code:0` 自相矛盾信封）→ doc-debt DB-2026-11-05-01/02。
+
 ### Added — TW 整改复跑验证提示词模板（2026-11-04）
 
 - 新增 `docs/audit/tech-writer-rerun-prompt.md`：可复制到新会话的「整改复跑验证」提示词——门禁 19 双脚本（node 真实运行）+ cargo 回归三条命令（dump_openapi 权威重导出 / check --workspace / security_gauntlet）+ 2026-10-27 整改 17 项成果逐项抽验。

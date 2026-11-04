@@ -38,12 +38,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # sz-orm 兄弟仓经 additional context 引入（.sz-orm-commit 钉住契约，
+      # dependency-reproducibility.py 校验宿主机检出）；sz-orm.dockerignore 剔除其 .git
+      additional_contexts:
+        sz-orm: ../sz-orm
       args:
         SZ300_FEATURES: "${SZ300_FEATURES:-v18-security-headers,v18-data-mask,v18-rbac,v18-key-rotation,v18-audit-chain,v18-upload}"
     ports:
       # 生产必须置于 HTTPS 反向代理之后；如需直连调试，建议仅绑定 127.0.0.1，
       # 例如 "127.0.0.1:${SZ300_PORT:-8300}:8300"
       - "${SZ300_PORT:-8300}:8300"
+    volumes:
+      # 2026-11-05（staging 实测修复）：上传目录持久化；镜像内 /app/uploads
+      # 已归 nonroot(65532) 所有（见 Dockerfile），命名卷首挂载继承属主
+      - uploads_data:/app/uploads
     environment:
       - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:?必须设置 JWT 密钥}
       - SZ300_DB_HOST=${SZ300_DB_HOST:-mysql}
@@ -84,3 +92,4 @@ services:
 
 volumes:
   mysql_data:
+  uploads_data:
