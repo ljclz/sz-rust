@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Added — TW 整改复跑验证提示词模板（2026-11-04）
+
+- 新增 `docs/audit/tech-writer-rerun-prompt.md`：可复制到新会话的「整改复跑验证」提示词——门禁 19 双脚本（node 真实运行）+ cargo 回归三条命令（dump_openapi 权威重导出 / check --workspace / security_gauntlet）+ 2026-10-27 整改 17 项成果逐项抽验。
+- 附 2026-11-04 实测基线与环境现值：369 条相对链接 0 broken、gauntlet 26 个 `#[test]`、doc-debt 25 RESOLVED + 0 PENDING（commit `bed9543`）、node 在 `D:\BtSoft\nodejs\v24.22.1\node.exe`（不在 PATH）、`CARGO_TARGET_DIR=D:\cargo-target`（2026-11-04 起，旧 `D:\rust-target` 弃用）。
+- 同步修正 `docs/audit/README.md` doc-debt 计数口径：18 RESOLVED + 3 PARTIAL + 4 PENDING（2026-10-31）→ 25 RESOLVED + 0 PARTIAL + 0 PENDING（2026-11-04 实测，按 `grep -E '^\| DB-' docs/audit/doc-debt.md` 状态列统计）。
+
 ### Changed — 未使用依赖收口：余量 8 条全部定性，machete 全仓清零，门禁 11 恢复硬门禁（2026-11-04）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-10-30-04（本条目后转 RESOLVED）。

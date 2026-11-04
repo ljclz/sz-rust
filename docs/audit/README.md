@@ -16,6 +16,8 @@
 | [2026-10-25-架构评测修复记录.md](2026-10-25-架构评测修复记录.md) | 2026-10-25 | **架构评测缺陷跟踪**：cargo audit 35 公告 / /metrics 鉴权 / CI audit non-blocking 等 P1-P2 项（部分已随合并修复：metrics_token、CORS、prod 模板） |
 | [product-manager-eval-prompt.md](product-manager-eval-prompt.md) | 2026-10-25 | **产品经理评测提示词模板**：新会话一键让顶级产品经理对 sz-rust 做只读产品评测（定位/市场/竞品/DX/商业化/生态/路线图） |
 | [tech-writer-fixup-prompt.md](tech-writer-fixup-prompt.md) | 2026-10-27 | **TW 整改执行提示词模板**：新会话一键执行 tech-writer 评测发现的全部 P0/P1/P2 文档缺陷整改（含乱码文件名恢复、版本号统一、OpenAPI 契约同步、门禁扩展） |
+| [tech-writer-rerun-prompt.md](tech-writer-rerun-prompt.md) | 2026-11-04 | **TW 整改复跑验证提示词模板**：新会话一键复跑 2026-10-27 整改——门禁 19 双脚本 + cargo 回归三条命令 + 17 项成果逐项抽验（附 node/cargo 环境现值与 2026-11-04 实测基线） |
+| [fullstack-engineer-rerun-prompt.md](fullstack-engineer-rerun-prompt.md) | 2026-11-04 | **全栈复跑验证提示词模板**：新会话一键对全仓做独立复跑——编译/测试/clippy/unwrap+node 门禁/server 内存基线（MySQL 已迁 8802）/三库连通/DB 集成测试/历史声称抽验（数据层三阻断、README.en WASM、AppSec 插件伪验签、sz300 覆盖率） |
 | [system-architect-eval-prompt.md](system-architect-eval-prompt.md) | 2026-10-27 (v2) | **架构师评测提示词模板（生产就绪路线图版）**：新会话一键让顶级系统架构师回答「下一步做加法还是先解决问题、怎么尽快生产就绪」（含当前修复状态与环境） |
 | [2026-10-27-系统架构师评测报告.md](2026-10-27-系统架构师评测报告.md) | 2026-10-27 | **系统架构师评测报告**：架构成熟度 6.9/10；判断「先收口再做加法」；生产就绪路线图分三阶段；并转述数据层审计（40/100 D 级）为最高优先级整改项 |
 | [sdet-eval-prompt.md](sdet-eval-prompt.md) | 2026-10-27 | **SDET 评测提示词模板**：新会话一键让顶级自动化测试工程师对 sz-rust 做只读测试体系评测（测试策略/覆盖率/CI 门禁/DB 集成可执行性/变异/模糊/性能稳定） |
@@ -29,7 +31,7 @@
 | [2026-10-25-security-gauntlet.md](2026-10-25-security-gauntlet.md) | 2026-10-25 | **专家级深度安全审查**：26 项安全 Gauntlet 全过，鉴权绕过/路径遍历/敏感泄露/畸形输入/panic 恢复实测，含 OpenAPI 契约与可复现脚本 |
 | [2026-08-19-项目状态与后续开发参照.md](2026-08-19-项目状态与后续开发参照.md) | 2026-08-19 | **当前权威状态**：7 crate 复活+接线完成，R001-R007 复核完成，全部提交已 push |
 | [2026-08-15-真实能力评估报告.md](2026-08-15-真实能力评估报告.md) | 2026-08-15 | **基线评估**：9 问题逐项复核，成熟度 7 维度评估 |
-| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（18 RESOLVED + 3 PARTIAL + 4 PENDING，2026-10-31 口径） |
+| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（25 RESOLVED + 0 PARTIAL + 0 PENDING，2026-11-04 实测口径） |
 | [coverage-priority.json](coverage-priority.json) | 持续更新 | 覆盖率优先级状态 |
 
 ---
