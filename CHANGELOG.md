@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Added — 系统架构师复评报告 + 红队复核回执登记入档（2026-11-05）
+
+> 来源：六环闭环第 6 环（登记）。复评报告 `docs/audit/2026-11-04-系统架构师复评报告.md` + 红队复核回执 `docs/audit/2026-11-04-系统架构师复评-红队复核回执.md` 已落盘，红队确认实质发现成立、2 条 P1 管术错误已修正，三件齐备方可视为评测批次闭环。
+
+- 新增 `docs/audit/2026-11-04-系统架构师复评报告.md`：架构成熟度 6.9→7.4/10（74/100，净 +7 分），V1-V10 全 V 级证据通过；发现 P1 N1 验签负例测试被 `v19-plugin-flow` feature gate（默认 `cargo test -p sz-rust-sz300 --lib` = 118 passed 不含 plugin_manager，CI `coverage.yml` 不跑该 feature，安全回归盲区，修复 0.5 人日）+ P2 N2（根 Cargo.toml:248 注释滞后，写 10.12.0 实际 10.13.1）/ N3（saga_order 同被 `v19-saga` feature gate，已知原型风险低）/ N5（整改报告 §4.1 "99 passed 含负例"声称与实际不符）文档订正项。
+- 新增 `docs/audit/2026-11-04-系统架构师复评-红队复核回执.md`：独立复核（复核员 session ≠ 复评报告作者 session ≠ 2026-10-28 整改实施者）确认复评报告实质发现全部成立（V1-V10 file:line 真实存在、N1 feature-gated 盲区四要素坐实），2 条 P1 管术错误已修正（十维度合计 76→74、平均 7.6→7.4，升降总结净 +4→+7），4 条 P2 数字漂移/表述不严谨已标注，结论可登记入档。
+- 同步登记 `docs/audit/README.md` 索引两条目 + `docs/audit/doc-debt.md` 新增 4 条 PENDING 欠债（DB-2026-11-05-07 N1 验签盲区 / DB-2026-11-05-08 N2 注释滞后 / DB-2026-11-05-09 N3 saga gate / DB-2026-11-05-10 N5 文档订正），限期 2026-11-12（1 周内）。门禁 `link-check.js` + `doc-code-consistency.js` 复跑 0 ERROR（WARN 不阻塞）。
+
 ### Changed — 登录契约收紧：凭据禁止 query string + HTTP 状态码对齐 RFC 7235（2026-11-05，**breaking**）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-11-05-02；复现与数据见 `docs/audit/2026-10-29-性能整改现场验证记录.md` §22.6。同批：DB-2026-11-05-01（F-1）复核不成立撤销。
@@ -380,7 +388,7 @@
 - `node scripts/nplus1-detect.js` = 0 违规
 - `node scripts/perf-regression.js --skip-bench` = PASS（v1.9.0 时点旧脚本语义；2026-10-29 门禁 v2 后，无指纹基线时输出 `GATE INACTIVE` 告警，见 ADR-046）
 
-## [Unreleased]
+### [开发记录] — 2026-10-05~10-07（v1.9.0 发布前收尾）
 
 ### Fixed — 测试隔离加固（2026-10-07）
 
@@ -698,7 +706,7 @@
 - 全 workspace 编译通过，clippy 无警告
 - v1.2.0 pub API 保持不变，新增 API 仅追加不修改
 
-## [Unreleased] - 2026-09-22（性能优化 SDD 执行）
+### [开发记录] - 2026-09-22（性能优化 SDD 执行）
 
 ### Added
 
@@ -722,7 +730,7 @@
 - `cargo fmt --all` → OK
 - 所有门禁脚本语法验证通过（`python -m py_compile` + `bash -n`）
 
-## [Unreleased] - 2026-09-21
+### [开发记录] - 2026-09-21
 
 ### Fixed
 
@@ -738,7 +746,7 @@
 - 新增回归测试：`test_key_rotation_zero_interval_clamped_to_default`、`test_key_rotation_old_token_verifiable_after_rotation`（轮换后旧密钥 token 在 grace period 内可验证）
 - 验证：`cargo test -p sz-rust-mvc-facade` → **414 lib + 12 integration + 8 doctest 全部通过**；`cargo test -p sz-rust-http-facade` → **168 全部通过**；fmt/clippy 0 error
 
-## [Unreleased] - 2026-09-20（审计链修正）
+### [开发记录] - 2026-09-20（审计链修正）
 
 ### Fixed
 
@@ -748,13 +756,13 @@
 - **implementation-progress**：P4-T2 工作流引擎验证行补证据链（136 测试 + 28 错误码实数复核）
 - **OpenCodeReview 接入冒烟**（docs/audit/2026-09-20-opencodereview-冒烟报告.md）：委托模式管道 4/4 验证（**Rust 一等支持实证**：.rs 全入选 + Rust 原生规则组）；漏洞态回放标定——种子缺陷漏抓 2/2（规则无资源耗尽/密钥强度类别，官方低召回实证）、子代理 9 发现抽验 4/4 属实 **0 误报**、**顺手抓到 2 个现行缺陷**（SZ_JWT_AUDIENCE 配置 no-op / strip_bearer_prefix 字节切片 panic，待裁定）；`--ocr` 实验性开关入 runbook + 双 SKILL，企业版代码禁送外部端点
 
-## [Unreleased] - 2026-09-19（sz-orm 7.6.0 全量升级）
+### [开发记录] - 2026-09-19（sz-orm 7.6.0 全量升级）
 
 ### Changed
 
 - **sz-orm 全家桶升级 6.x → 7.6.0**（三步合入，均 2026-09-19）：`e0c5cbe` 6.x→7.3.0 + 五维审计问题修复 → `908ce3b` 升级修正（core/config/sqlx/tracing 升 7.6.0，其余保持 7.3.0）→ `07a080d` **全包统一 7.6.0**（crates.io 68 包已发布，来源：07a080d 提交说明）。当前 workspace 依赖锚定 `sz-orm-* = "7.6.0"`（根 Cargo.toml `[workspace.dependencies]`，2026-09-20 复核实查）。
 
-## [Unreleased] - 2026-09-14
+### [开发记录] - 2026-09-14
 
 ### Added
 
@@ -792,7 +800,7 @@
 
 - `sz-rust-k8s-operator`：孤儿 crate（无消费者、无生产入口、无 CI 集成），按 ADR-038 移除
 
-## [Unreleased] - 2026-09-13
+### [开发记录] - 2026-09-13
 
 ### Added
 
@@ -816,7 +824,7 @@
   - 验证：`cargo test -p sz-rust-cli` → 377 passed (358 lib + 19 integration); `cargo clippy` 0 warnings
   - 服务器验证（2026-09-13）：PostgreSQL ✅、MySQL ✅、SQLite ✅、MSSQL ✅、Oracle ✅ — 5 种后端 migrate + migrate:status 全部成功
 
-## [Unreleased] - 2026-09-11
+### [开发记录] - 2026-09-11
 
 ### Added
 
@@ -849,7 +857,7 @@
   - **数据权限中间件**：`DataScopeMiddleware` 从 request extensions 提取 `DataScopeUserContext`，转换为 `DataScopeContext` 注入，安全降级（无 UserContext 时注入默认值）
   - 验证：orm-facade 230 passed（184 lib + 46 e2e）；middleware-facade 580 passed（551 lib + 25 api + 4 e2e）；clippy 0 warnings；CI 门禁（std::fs/dead_code/unsafe）全部通过
 
-## [Unreleased] - 2026-09-08
+### [开发记录] - 2026-09-08
 
 ### Added
 
@@ -898,7 +906,7 @@
 - **P2-2 axum 0.8 路由语法修复**（2026-09-08，`d9caa4e`）：
   - `web.rs`：路由参数语法从 `:name` 修复为 `{name}`（axum 0.8 breaking change）
 
-## [Unreleased] - 2026-09-05
+### [开发记录] - 2026-09-05
 
 ### Added
 
@@ -1027,7 +1035,7 @@
 - 从开源仓库移除 8 个企业版 crate：sz-rust-sz300、sz-rust-addons-{crm,ecommerce,cms,operate,erp,forum,im}
 - 旧 `LICENSE`（MIT 文本）
 
-## [Unreleased] - 2026-09-02
+### [开发记录] - 2026-09-02
 
 ### Added
 
@@ -1183,7 +1191,7 @@
 - 18/18 crate 在 crates.io 验证通过
 - sz-rust-core 450 + mcp 52 + sz300 477 = 979 passed, 0 failed
 
-## [Unreleased] - 2026-08-21（sz-orm 5.0.0 统一升级）
+### [开发记录] - 2026-08-21（sz-orm 5.0.0 统一升级）
 
 ### Changed
 
@@ -1197,7 +1205,7 @@
 - 编译验证：sz-rust-orm-facade / sz-rust-core / sz-rust-mcp / sz-rust-sz300 / sz-rust-cli 全部 `cargo check` 通过
 - 测试验证（零回归）：orm-facade 111 + core 835 + mcp 101 + sz300 477 + facade-tests 16 + cli 364 = 1904 passed, 0 failed
 
-## [Unreleased] - 2026-08-20（边界测试补齐 + 性能压测基线）
+### [开发记录] - 2026-08-20（边界测试补齐 + 性能压测基线）
 
 ### Added
 
@@ -1225,7 +1233,7 @@
 
 - doc-debt 新增 reconcile 测试缺口记录（DB-2026-08-20-05）
 
-## [Unreleased] - 2026-08-19（7 P1 死 crate 复活 + 生产接线 + R001-R007 安全复核）
+### [开发记录] - 2026-08-19（7 P1 死 crate 复活 + 生产接线 + R001-R007 安全复核）
 
 ### Added
 
@@ -1257,7 +1265,7 @@
 - workspace crate 数 28 → 35（新增 7 个 member）
 - 全部提交已 push 到 origin/main（`c371148`）
 
-## [Unreleased] - 2026-08-19（CI-001~007 覆盖率 CI 集成增强）
+### [开发记录] - 2026-08-19（CI-001~007 覆盖率 CI 集成增强）
 
 ### Added
 
@@ -1265,7 +1273,7 @@
   - ci.yml 门禁 14: 拆分 llvm-cov 为常规+DB 两步 + per-crate-coverage.js 分 crate 门槛校验 + needs:[assertion-value] 联动 + COVERAGE_THRESHOLD 环境变量
   - coverage.yml: 4 并行分片 job (p0/p1/p2/p3) + coverage-merge job + sz300 --fail-under 85 + COVERAGE_THRESHOLD
 
-## [Unreleased] - 2026-08-16（PR 审查编排 Skill：状态机 + 5 环节 + 严重度模型）
+### [开发记录] - 2026-08-16（PR 审查编排 Skill：状态机 + 5 环节 + 严重度模型）
 
 ### Added
 
@@ -1279,7 +1287,7 @@
   - **快手 Provider 实测通过（2026-08-16）**：`https://wanqing.streamlakeapi.com/api/gateway/coding/v1` + `KAT-Coder-Pro-V2.5`，全量审查 EXIT=0，AI 评审给出 3 条有效建议（错误脱敏/临时文件 mktemp/python 版本保护，采纳 2 条）；编码 bug 修复（Windows python 管道 GBK → 强制 UTF-8）；错误信息增强（输出 Provider 原始 error 详情）
   - 说明：`sz-rust-ai-facade::llm::OpenAiProvider`（llm/openai.rs）为同协议库实现（早已存在，非本次新增），可配置 CSDN base_url/model 供 Rust 应用接线（如 sz300 /api/v1/ai/chat 真实化）
 
-## [Unreleased] - 2026-08-16（AI 交叉审查修复：stdout 版本保护 + 死变量清理 + 报告标注）
+### [开发记录] - 2026-08-16（AI 交叉审查修复：stdout 版本保护 + 死变量清理 + 报告标注）
 
 ### Fixed
 
@@ -1291,7 +1299,7 @@
 
 > 教训：批量代码替换必须逐项验证落地（本次静默失败源于 python str.replace 无匹配返回原串且未 assert）
 
-## [Unreleased] - 2026-08-16（pr-review 升级为全量 15 项门禁）
+### [开发记录] - 2026-08-16（pr-review 升级为全量 15 项门禁）
 
 ### Added
 
@@ -1302,7 +1310,7 @@
 - **首次全量运行暴露既有债务**：生产代码 51 处裸 unwrap（铁律 2）——pre-commit 钩子此前仅警告，现以 high 阻塞；已登记 doc-debt（DB-2026-08-16-04，限期 08-19）
 - 验证（真实输出）：全量 15 项门禁 EXIT=1（unwrap 51 处正确阻塞；此前 EXIT=0 为管道干扰误读）；check/clippy/test/integration/AI 各环节通过
 
-## [Unreleased] - 2026-08-16（unwrap 专项清偿：51 处生产裸 unwrap → 0）
+### [开发记录] - 2026-08-16（unwrap 专项清偿：51 处生产裸 unwrap → 0）
 
 ### Fixed
 
@@ -1315,7 +1323,7 @@
 - **附带修复**：core container 测试预存漂移（hostport 断言 8802→3306，与 config/database.yml 一致）
 - 验证（真实输出）：AUTHORITATIVE_PROD_UNWRAP=0；cargo check 0 errors；受影响 crate 测试 1597 passed / 0 failed；clippy --workspace --all-targets -D warnings 0 警告；fmt 干净
 
-## [Unreleased] - 2026-08-16（AI 评审意见 P2-P4 采纳：可观测性改进）
+### [开发记录] - 2026-08-16（AI 评审意见 P2-P4 采纳：可观测性改进）
 
 ### Changed
 
@@ -1326,7 +1334,7 @@
   - P1/P5 不采纳（记录理由）：`into_inner()` 为标准库推荐的锁中毒恢复；mem_pool 分配器无中间状态数据；mem_pool 生产 0 调用 + feature 默认关闭（ADR-037）；examples 为演示代码
 - 验证（真实输出）：check 0 errors；capability/sz300 测试通过；clippy -D warnings 0 警告；unwrap=0；全量审查 EXIT=0
 
-## [Unreleased] - 2026-08-16（铁律 4 门禁 + 生产 std::fs 修复 + 安全审计清单）
+### [开发记录] - 2026-08-16（铁律 4 门禁 + 生产 std::fs 修复 + 安全审计清单）
 
 ### Fixed
 
@@ -1337,7 +1345,7 @@
   - 剩余 std::fs 30 处：infra-facade upload（同步公共 API，待专项 async 化）、mvc-facade view（同步渲染链）、pdf（第三方库接口要求，建议豁免）、cli（同步工具无 runtime，建议铁律 4 增豁免条款）
 - 验证（真实输出）：addons-loader + 消费者 0 FAILED（231 passed）；workspace check 0 errors；clippy 0 警告；fmt 干净
 
-## [Unreleased] - 2026-08-16（铁律 4 专项：infra upload 全链 async 化 + 门禁豁免裁定）
+### [开发记录] - 2026-08-16（铁律 4 专项：infra upload 全链 async 化 + 门禁豁免裁定）
 
 ### Fixed
 
@@ -1347,13 +1355,13 @@
   - 门禁 check-std-fs.py：**用户裁定豁免** pdf（umya 第三方库）/ cli（同步工具无 runtime）/ mvc view（引擎级 async 化单独排期，债务跟踪）
 - 验证（真实输出）：std-fs 门禁 EXIT=0；clippy workspace all-targets 0 警告；infra 670+8+1、core 835、addons-loader 231 全部通过
 
-## [Unreleased] - 2026-08-16（unsafe API 收紧）
+### [开发记录] - 2026-08-16（unsafe API 收紧）
 
 ### Fixed
 
 - **MemPool unsafe fn 收紧（外部审查 HIGH 项，ADR-037）**：`MemPool::alloc_str`/`alloc_bytes` 从 safe fn 改为 **unsafe fn**（mem_pool.rs:61,70）——原 API 为 safe fn 却依赖"reset 前引用有效"的 unsafe 不变量，Safe Rust 调用方可触发 use-after-free 而无需 unsafe 块（unsound API）。trait Safety 文档强化（并发 reset 需调用方同步）。13 个 mem_pool 测试 + bumpalo-pool feature 462 测试通过。注：MemPool 生产 0 调用 + feature 默认关闭，无实际暴露
 
-## [Unreleased] - 2026-08-15（幻影交付审计修复）
+### [开发记录] - 2026-08-15（幻影交付审计修复）
 
 > 审计报告：`docs/audit/2026-08-15-幻影交付审计报告.md`
 
@@ -1390,7 +1398,7 @@
 
 - `cargo test -p sz-rust-sz300 --test db_integration_test -- --ignored --test-threads=1` → 26 passed, 0 failed（真实 MySQL 9.6 + PostgreSQL 18，含 16 个新增服务层/MQTT/控制器级测试）
 
-## [Unreleased] - 2026-08-15（任务队列 gauntlet 验证：并发缺陷修复 + 并发/自愈测试）
+### [开发记录] - 2026-08-15（任务队列 gauntlet 验证：并发缺陷修复 + 并发/自愈测试）
 
 ### Fixed
 
@@ -1402,7 +1410,7 @@
 - gauntlet 验证体系：`scripts/audit/jobs-gauntlet.sh`（8 层可复现入口）+ 验证报告 `docs/audit/2026-08-15-任务队列gauntlet验证报告.md`
 - 验证结果（真实输出）：手动变异 4/4 杀死；工具变异 249（139 caught / 96 missed / 14 unviable）；jobs.rs 覆盖 line 75% / branch 80%；集成测试 7/7 ×2 次确定性通过
 
-## [Unreleased] - 2026-08-15（可靠任务队列：持久化 Job 表 + 状态机 + 退避重试 + 死信）
+### [开发记录] - 2026-08-15（可靠任务队列：持久化 Job 表 + 状态机 + 退避重试 + 死信）
 
 ### Added
 
@@ -1418,7 +1426,7 @@
 - **sz300 接线**（`main.rs`）：JobQueue 初始化 + 幂等建表 + 示例 handler `order.expire_check`（订单超时未支付检查，演示延迟任务）+ worker 启动（复用优雅关闭信号）
 - 文档：ADR-036 + 五维审查报告 `docs/audit/2026-08-15-可靠任务队列五维审查报告.md` + 本 CHANGELOG
 
-## [Unreleased] - 2026-08-15（连接池调优接线：L2 配置 + 预热 + 动态扩缩容 + 池指标）
+### [开发记录] - 2026-08-15（连接池调优接线：L2 配置 + 预热 + 动态扩缩容 + 池指标）
 
 ### Added
 
@@ -1430,7 +1438,7 @@
   - /metrics 实时输出池指标：`sz300_db_pool_active/idle/waiters/max/acquire_total/acquire_failed_total`（PG 池为 `sz300_pg_pool_*`），O(1) 原子读取；移除注册后无人更新的恒 0 gauge `sz300_active_connections`（`controllers/health.rs:112-146`）
 - 五维审查报告：`docs/audit/2026-08-15-连接池调优接线五维审查报告.md`（5 维度无阻断项）
 
-## [Unreleased] - 2026-08-15（sz300 首次真实运行 + metrics 鉴权接线）
+### [开发记录] - 2026-08-15（sz300 首次真实运行 + metrics 鉴权接线）
 
 ### Fixed
 
@@ -1447,7 +1455,7 @@
   - 客户端真实 IP 注入：`into_make_service_with_connect_info`（`main.rs:262`）
   - 新增集成测试 `tests/metrics_auth_router_test.rs`（7 用例）+ CIDR 单测 3 用例（来源: `cargo test -p sz-rust-sz300` 真实输出）
 
-## [Unreleased] - 2026-08-13（P0/P1/P2 能力完善）
+### [开发记录] - 2026-08-13（P0/P1/P2 能力完善）
 
 > **文档降级声明**（2026-08-13 审计核实）：以下部分声称经独立验证存在跨仓库混淆或测试编译失败，已标注真实状态。
 > 审计报告：`docs/audit/2026-08-13-文档已实现但生产零调用审计报告.md`
@@ -1469,7 +1477,7 @@
 - **10 个 ADR**（ADR-026~035）+ **4 个五维审查报告**
 - 关键数字（经审计核实）：开源仓库 462 tests ✅ + 企业版旧 4 crate 172 tests ✅ + 企业版新 6 插件 119 tests ✅ = 753 tests passed；`cargo test --workspace` 有 workspace 级依赖冲突待修复（来源: 各 crate `cargo test -p <crate>` 输出）
 
-## [Unreleased] - 2026-08-12（W5/W6 质量交付）
+### [开发记录] - 2026-08-12（W5/W6 质量交付）
 
 ### Added
 
@@ -1481,7 +1489,7 @@
   - 新增文件 16 个，修改文件 10 个（来源: design.md §2.7 文件清单）
   - 关键数字：171 passed 0 failed / 45 bench case / 22 铁律全通过 / 8 阶段全执行（来源: 各任务域验证命令输出）
 
-## [Unreleased] - 2026-08-12（P4-T2 工作流引擎）
+### [开发记录] - 2026-08-12（P4-T2 工作流引擎）
 
 ### Added
 
@@ -1513,7 +1521,7 @@
   - `WorkflowEngine`：统一门面，委托所有子模块
   - 131 个测试全部通过（121 单元 + 10 集成），clippy 零警告
 
-## [Unreleased] - 2026-08-12（P4-T1 前端代码生成）
+### [开发记录] - 2026-08-12（P4-T1 前端代码生成）
 
 ### Added
 
@@ -1539,7 +1547,7 @@
   - `sz-rust make:frontend` 子命令（--model/--framework/--ui/--output/--override/--with-tests 等 11 参数）
   - 275 个 CLI 测试全部通过
 
-## [Previous] - 2026-08-12（P3-T2 插件市场 MVP）
+### [开发记录] - 2026-08-12（P3-T2 插件市场 MVP）
 
 ### Added
 
@@ -1566,7 +1574,7 @@
 
 - **开发者文档**：`docs/developer/guide.md`（插件开发指南）
 
-## [Unreleased] - 2026-08-11（P1-T4 完善现有业务插件）
+### [开发记录] - 2026-08-11（P1-T4 完善现有业务插件）
 
 ### Added
 
@@ -2062,7 +2070,7 @@
 - fmt：`cargo fmt --all -- --check` 通过
 - bench：22 个 benchmark 全部编译通过，`capitalize_first` ~38ns
 
-## [Unreleased]
+### [开发记录] — 2026-08-07 前后（v0.6.0 发布前收尾）
 
 ### 新增
 - **sz-rust-addons-crm**：CRM 模板插件（联系人/线索/商机管理，15 个 REST 端点）
