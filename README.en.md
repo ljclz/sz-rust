@@ -273,7 +273,7 @@ Project implements its gate system via GitHub Actions (`ci.yml` actually has 37 
 | `publish-oss.yml` / `release.yml` | Release flow | crates.io publishing / release build |
 | `marketplace-ci.yml` | Marketplace path changes | ✅ references `sz-rust-marketplace` (concretely delivered: 130 tests + CLI wiring; the former "fictional delivery" characterization is outdated) |
 
-> Note: `soak.yml` / `soak-nightly.yml` are disabled (renamed to `.disabled`), 6h soak is handled by the self-hosted toolkit `scripts/soak-self-hosted/` (see `docs/soak-toolkit-guide.md`).
+> Note: `soak.yml` is enabled (SDET P1-6 decision, 2026-10-27: weekly 1h + push/PR 10s smoke); `soak-nightly.yml` is removed (GitHub hosted runner 6h hard limit); 6h long soak is handled by the self-hosted toolkit `scripts/soak-self-hosted/` (see `docs/soak-toolkit-guide.md`).
 
 **cargo-deny audit dimensions** (`deny.toml`):
 - License whitelist: MIT / Apache-2.0 / BSD / ISC / Zlib

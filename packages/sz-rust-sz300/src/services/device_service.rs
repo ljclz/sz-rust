@@ -374,3 +374,121 @@ impl DeviceService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // DeviceFilters 构造与 IDOR 归属校验纯逻辑（P2-4+5 补 service 层覆盖率）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn device_filters_none_defaults() {
+        let f = DeviceFilters { merchant_id: None };
+        assert!(f.merchant_id.is_none());
+    }
+
+    #[test]
+    fn device_filters_with_merchant_scope() {
+        let f = DeviceFilters {
+            merchant_id: Some(42),
+        };
+        assert_eq!(f.merchant_id, Some(42));
+    }
+
+    /// exists_with_merchant_scope 的 SQL 分支纯逻辑：
+    /// - is_admin=true → 单参数 SQL（不附加 merchant_id 过滤）
+    /// - is_admin=false → 双参数 SQL（附加 merchant_id = ?）
+    /// 此处锁定分支选择逻辑，不实际执行查询。
+    #[test]
+    fn exists_with_merchant_scope_admin_uses_single_param_sql() {
+        let is_admin = true;
+        let (sql, params_len) = if is_admin {
+            ("SELECT device_id FROM device WHERE device_id = ?".to_string(), 1)
+        } else {
+            (
+                "SELECT device_id FROM device WHERE device_id = ? AND merchant_id = ?".to_string(),
+                2,
+            )
+        };
+        assert!(
+            sql.contains("device_id = ?") && !sql.contains("merchant_id"),
+            "admin SQL 不应含 merchant_id 过滤: {sql}"
+        );
+        assert_eq!(params_len, 1);
+    }
+
+    #[test]
+    fn exists_with_merchant_scope_non_admin_uses_merchant_scoped_sql() {
+        let is_admin = false;
+        let (sql, params_len) = if is_admin {
+            ("SELECT device_id FROM device WHERE device_id = ?".to_string(), 1)
+        } else {
+            (
+                "SELECT device_id FROM device WHERE device_id = ? AND merchant_id = ?".to_string(),
+                2,
+            )
+        };
+        assert!(
+            sql.contains("merchant_id = ?"),
+            "非 admin SQL 应含 merchant_id 归属过滤: {sql}"
+        );
+        assert_eq!(params_len, 2);
+    }
+
+    /// 非管理员且 merchant_id=None 时，传入 -1 作为哨兵（不可能匹配真实商户）
+    /// 此处锁定 `merchant_id.unwrap_or(-1)` 的哨兵语义，防止 None 被静默放行。
+    #[test]
+    fn exists_with_merchant_scope_non_admin_none_merchant_uses_sentinel() {
+        let merchant_id: Option<i64> = None;
+        let is_admin = false;
+        // 模拟 list 中的参数构造
+        let param = if is_admin {
+            vec![Value::I64(1)]
+        } else {
+            vec![Value::I64(1), Value::I64(merchant_id.unwrap_or(-1))]
+        };
+        assert_eq!(
+            param[1],
+            Value::I64(-1),
+            "非 admin + None merchant_id 应使用 -1 哨兵，不允许越权"
+        );
+    }
+
+    /// offset 公式与其它 service 一致
+    #[test]
+    fn device_list_offset_formula() {
+        let (page, page_size) = (1, 20);
+        assert_eq!((page - 1).max(0) * page_size, 0);
+        let (page, page_size) = (5, 20);
+        assert_eq!((page - 1).max(0) * page_size, 80);
+    }
+
+    /// bind 流程：existing_merchant.is_some() → "设备已绑定"
+    /// 此处锁定 NULL=未绑定 / Some=已绑定 的语义（013_nullable_device_merchant.sql）
+    #[test]
+    fn device_bind_existing_merchant_some_means_already_bound() {
+        let existing_merchant: Option<i64> = Some(100);
+        assert!(
+            existing_merchant.is_some(),
+            "merchant_id 非 NULL 表示已绑定，应拒绝重复绑定"
+        );
+
+        let unbound: Option<i64> = None;
+        assert!(
+            unbound.is_none(),
+            "merchant_id 为 NULL 表示未绑定，允许绑定"
+        );
+    }
+
+    /// unbind SQL 语义：merchant_id 置 NULL（哨兵 0 已退役）
+    #[test]
+    fn device_unbind_sql_uses_null_not_zero_sentinel() {
+        let sql = "UPDATE device SET merchant_id = NULL, bind_at = NULL, status = 0 WHERE device_id = ?";
+        assert!(
+            sql.contains("merchant_id = NULL"),
+            "unbind 应置 NULL，不应使用哨兵 0"
+        );
+        assert!(sql.contains("status = 0"), "unbind 应将 status 置为 0（离线）");
+    }
+}

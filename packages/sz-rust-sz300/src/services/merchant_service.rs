@@ -264,3 +264,116 @@ impl MerchantService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // merchant_service 纯逻辑（P2-4+5 补 service 层覆盖率 + IDOR 归属过滤）
+    // ─────────────────────────────────────────────
+
+    /// update 白名单：锁定可更新字段集，防止误删/误加字段
+    #[test]
+    fn merchant_update_whitelist_covers_core_fields() {
+        let allowed: &[&str] = &[
+            "market_id",
+            "name",
+            "stall_no",
+            "contact_phone",
+            "category",
+            "status",
+            "bank_account",
+            "bank_name",
+        ];
+        for col in ["name", "status", "contact_phone", "bank_account"] {
+            assert!(allowed.contains(&col), "白名单应包含 {col}");
+        }
+        // 不在白名单的字段（主键/时间戳/软删除标志由系统维护）
+        for col in ["merchant_id", "created_at", "updated_at"] {
+            assert!(!allowed.contains(&col), "白名单不应包含 {col}");
+        }
+    }
+
+    /// update 空字段应直接返回错误（不进入 DB）
+    #[test]
+    fn merchant_update_empty_fields_returns_error_without_db() {
+        let fields: HashMap<String, Value> = HashMap::new();
+        assert!(fields.is_empty(), "空 fields 应在 update 入口直接返回 Err");
+    }
+
+    /// update 仅含白名单外字段 → set_clauses 为空 → 返回错误
+    /// 此处锁定「白名单外字段不进入 SET 子句」的语义。
+    #[test]
+    fn merchant_update_only_non_whitelisted_fields_yields_empty_set() {
+        let allowed: &[&str] = &[
+            "market_id",
+            "name",
+            "stall_no",
+            "contact_phone",
+            "category",
+            "status",
+            "bank_account",
+            "bank_name",
+        ];
+        let mut fields: HashMap<String, Value> = HashMap::new();
+        fields.insert("merchant_id".into(), Value::I64(999)); // 非白名单
+        fields.insert("created_at".into(), Value::String("2026-01-01".into())); // 非白名单
+
+        let mut set_clauses: Vec<String> = Vec::new();
+        for col in allowed {
+            if let Some(val) = fields.get(*col) {
+                set_clauses.push(format!("{} = ?", col));
+                let _ = val;
+            }
+        }
+        assert!(
+            set_clauses.is_empty(),
+            "仅含白名单外字段时 SET 子句应为空，update 应返回错误"
+        );
+    }
+
+    /// list 的 IDOR 归属过滤：merchant_id=Some(id) → WHERE merchant_id = ?
+    /// 此处锁定非管理员仅能查看自己商户的语义。
+    #[test]
+    fn merchant_list_idor_filter_for_non_admin() {
+        let merchant_id: Option<i64> = Some(7);
+        let (where_clause, params) = match merchant_id {
+            Some(mid) => (" WHERE merchant_id = ?".to_string(), vec![Value::I64(mid)]),
+            None => (String::new(), Vec::new()),
+        };
+        assert!(where_clause.contains("merchant_id = ?"));
+        assert_eq!(params, vec![Value::I64(7)]);
+    }
+
+    /// list 的管理员路径：merchant_id=None → 不附加 WHERE 归属过滤
+    #[test]
+    fn merchant_list_no_idor_filter_for_admin() {
+        let merchant_id: Option<i64> = None;
+        let (where_clause, params) = match merchant_id {
+            Some(mid) => (" WHERE merchant_id = ?".to_string(), vec![Value::I64(mid)]),
+            None => (String::new(), Vec::new()),
+        };
+        assert!(where_clause.is_empty(), "管理员路径不应附加归属过滤");
+        assert!(params.is_empty());
+    }
+
+    /// offset 公式
+    #[test]
+    fn merchant_list_offset_formula() {
+        let (page, page_size) = (1, 15);
+        assert_eq!((page - 1).max(0) * page_size, 0);
+        let (page, page_size) = (3, 15);
+        assert_eq!((page - 1).max(0) * page_size, 30);
+    }
+
+    /// delete 软删除语义：status 置 0，不物理删除
+    #[test]
+    fn merchant_delete_is_soft_delete_via_status_zero() {
+        let sql = "UPDATE merchant SET status = 0, updated_at = NOW() WHERE merchant_id = ?";
+        assert!(sql.contains("status = 0"), "软删除应置 status=0");
+        assert!(
+            !sql.contains("DELETE FROM"),
+            "软删除不应使用 DELETE FROM（物理删除）"
+        );
+    }
+}

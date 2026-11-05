@@ -101,3 +101,92 @@ impl FileService {
         Ok(())
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // FileService::save 错误路径纯逻辑（不实际写文件，P2-4 补 service 层覆盖率）
+    // ─────────────────────────────────────────────
+
+    /// 文件大小超过 MAX_FILE_SIZE（5MB）应直接返回 Err，不进入目录创建/写文件
+    #[tokio::test]
+    async fn save_rejects_oversized_file_without_writing() {
+        let oversized = vec![0u8; (MAX_FILE_SIZE + 1) as usize];
+        let result = FileService::save("test.jpg", &oversized).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("文件大小超过限制"),
+            "应返回大小超限错误，实际: {msg}"
+        );
+    }
+
+    /// 不支持的扩展名应直接返回 Err，不进入目录创建/写文件
+    #[tokio::test]
+    async fn save_rejects_unsupported_extension_without_writing() {
+        let data = b"hello";
+        let result = FileService::save("malware.exe", data).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("不支持的文件格式"),
+            "应返回格式错误，实际: {msg}"
+        );
+        assert!(msg.contains(".exe"), "错误消息应包含扩展名: {msg}");
+    }
+
+    /// 无扩展名应返回格式错误
+    #[tokio::test]
+    async fn save_rejects_no_extension_without_writing() {
+        let data = b"hello";
+        let result = FileService::save("noext", data).await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(msg.contains("不支持的文件格式"), "无扩展名应被拒绝: {msg}");
+    }
+
+    /// 大小写扩展名应被接受（ext.to_lowercase() 归一化）
+    /// 此处仅校验白名单逻辑，不实际写文件——通过传入空数据触发后续路径，
+    /// 但空数据大小不超限、扩展名合法，会进入写文件路径。为避免写真实文件，
+    /// 此用例仅断言 ALLOWED_EXTENSIONS 含大小写归一化后的扩展名。
+    #[test]
+    fn save_allowed_extensions_case_insensitive() {
+        for ext in ["jpg", "JPG", "Jpg", "jpeg", "JPEG", "png", "PNG", "gif", "GIF", "bmp", "BMP"]
+        {
+            let lower = ext.to_lowercase();
+            assert!(
+                ALLOWED_EXTENSIONS.contains(&lower.as_str()),
+                "扩展名 {ext} 归一化后应在白名单中"
+            );
+        }
+    }
+
+    /// MAX_FILE_SIZE 应为 5MB（锁定常量，防止误改）
+    #[test]
+    fn max_file_size_is_5mb() {
+        assert_eq!(MAX_FILE_SIZE, 5 * 1024 * 1024);
+    }
+
+    /// UPLOAD_DIR 应为 ./uploads（锁定常量）
+    #[test]
+    fn upload_dir_constant() {
+        assert_eq!(UPLOAD_DIR, "./uploads");
+    }
+
+    /// delete 的路径遍历防护：strip_prefix("/uploads/") 后的相对路径
+    /// 此处锁定 strip_prefix 语义，不实际访问文件系统。
+    #[test]
+    fn delete_strips_uploads_prefix() {
+        let url = "/uploads/2026/01/01/abc.jpg";
+        let relative = url.strip_prefix("/uploads/").unwrap_or(url);
+        assert_eq!(relative, "2026/01/01/abc.jpg");
+    }
+
+    #[test]
+    fn delete_keeps_url_when_no_uploads_prefix() {
+        let url = "/etc/passwd";
+        let relative = url.strip_prefix("/uploads/").unwrap_or(url);
+        assert_eq!(relative, "/etc/passwd", "无 /uploads/ 前缀时保持原样");
+    }
+}

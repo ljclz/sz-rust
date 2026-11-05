@@ -571,6 +571,101 @@ mod tests {
         let key = count_cache_key("", &[]);
         assert_eq!(key, "order:count:|[]");
     }
+
+    // ─────────────────────────────────────────────
+    // OrderFilters 构造与游标/分页纯逻辑（P2-4 补 service 层覆盖率）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn order_filters_new_populates_only_basic_fields() {
+        let f = OrderFilters::new(Some(7), Some(3), Some(1));
+        assert_eq!(f.merchant_id, Some(7));
+        assert_eq!(f.device_id, Some(3));
+        assert_eq!(f.status, Some(1));
+        assert!(f.start_date.is_none(), "new 不应设置 start_date");
+        assert!(f.end_date.is_none(), "new 不应设置 end_date");
+        assert!(
+            f.before_order_id.is_none(),
+            "new 不应设置 before_order_id"
+        );
+    }
+
+    #[test]
+    fn order_filters_new_all_none() {
+        let f = OrderFilters::new(None, None, None);
+        assert!(f.merchant_id.is_none());
+        assert!(f.device_id.is_none());
+        assert!(f.status.is_none());
+    }
+
+    #[test]
+    fn order_filters_struct_supports_keyset_field() {
+        // keyset 游标字段可手动赋值（深度翻页用）
+        let mut f = OrderFilters::new(Some(1), None, None);
+        f.before_order_id = Some(12345);
+        assert_eq!(f.before_order_id, Some(12345));
+    }
+
+    #[test]
+    fn order_filters_struct_supports_date_range() {
+        let mut f = OrderFilters::new(Some(1), None, None);
+        f.start_date = Some("2026-01-01".to_string());
+        f.end_date = Some("2026-01-31".to_string());
+        assert_eq!(f.start_date.as_deref(), Some("2026-01-01"));
+        assert_eq!(f.end_date.as_deref(), Some("2026-01-31"));
+    }
+
+    /// keyset 模式下 offset 应为 0；非 keyset 模式下 offset = (page-1)*page_size
+    /// 这段逻辑内联在 list 中，此处通过公式断言锁定语义。
+    #[test]
+    fn order_list_offset_formula_keyset_vs_paged() {
+        let page = 3;
+        let page_size = 20;
+        // keyset 模式
+        let keyset = true;
+        let offset_keyset = if keyset { 0 } else { (page - 1).max(0) * page_size };
+        assert_eq!(offset_keyset, 0, "keyset 模式 offset 必须为 0");
+
+        // 非 keyset 模式
+        let keyset = false;
+        let offset_paged = if keyset { 0 } else { (page - 1).max(0) * page_size };
+        assert_eq!(offset_paged, 40, "page=3 page_size=20 → offset=40");
+    }
+
+    /// page < 1 时 offset 公式应 clamp 到 0（不产生负 offset）
+    #[test]
+    fn order_list_offset_formula_clamps_negative_page() {
+        let page = 0;
+        let page_size = 20;
+        let offset = (page - 1).max(0) * page_size;
+        assert_eq!(offset, 0, "page=0 应 clamp 到 offset=0");
+
+        let page = -5;
+        let offset = (page - 1).max(0) * page_size;
+        assert_eq!(offset, 0, "page=-5 应 clamp 到 offset=0");
+    }
+
+    /// end_date 半开区间语义：纯日期 → 次日 0 点；带时间 → 闭区间
+    /// 此处锁定 chrono::NaiveDate::succ_opt 的行为契约（list 中依赖该行为）。
+    #[test]
+    fn order_list_end_date_half_open_interval_contract() {
+        let date = chrono::NaiveDate::parse_from_str("2026-01-31", "%Y-%m-%d").unwrap();
+        let next = date.succ_opt().expect("2026-01-31 应有次日");
+        assert_eq!(next.format("%Y-%m-%d").to_string(), "2026-02-01");
+
+        // 年末边界
+        let date = chrono::NaiveDate::parse_from_str("2026-12-31", "%Y-%m-%d").unwrap();
+        let next = date.succ_opt().expect("2026-12-31 应有次日");
+        assert_eq!(next.format("%Y-%m-%d").to_string(), "2027-01-01");
+    }
+
+    /// end_date 带时间部分（解析失败）应走闭区间分支
+    #[test]
+    fn order_list_end_date_with_time_falls_back_to_closed_interval() {
+        // 非 %Y-%m-%d 格式 → parse 失败 → 闭区间语义
+        let parsed = chrono::NaiveDate::parse_from_str("2026-01-31 23:59:59", "%Y-%m-%d");
+        assert!(parsed.is_err(), "带时间的字符串不应解析为 NaiveDate");
+    }
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）

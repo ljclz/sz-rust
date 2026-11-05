@@ -22,10 +22,18 @@
 # 已知局限：
 #   - GitHub 托管 runner 的 CPU 型号可能随镜像升级变化，指纹变化即视为"无基线"（重新播种）；
 #   - 限流器在本 workflow 中被显式放大（见 SZ300_RATE_LIMIT_*），因此**不覆盖**限流器本身的性能。
+#
+# soak 状态（2026-11-05 P2-3 确认）：
+#   - soak.yml 已启用（SDET P1-6 决策，2026-10-27）：周跑 1h + push/PR 冒烟 10s
+#   - soak-nightly.yml 已下线删除（GitHub 托管 runner 单 job 6h 硬上限，6h soak 易超时被强制取消）
+#   - 本 workflow 与 soak.yml 并行，各司其职：perf-gate 跑 E2E 压测 + criterion 微基准回归，soak 跑长稳
+#   - 注：README.md / README.en.md 原称 soak 已停用，属文档欠债（本次 P2-3 附带修正）
 
 name: Perf Gate (E2E)
 
 on:
+  push:
+    branches: [main, master]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -196,3 +204,79 @@ jobs:
             sz300.log
             packages/sz-rust-benchmark-suite/benches/baseline.json
           retention-days: 30
+
+  # SDET P2-3（2026-11-05）：criterion 微基准回归门禁接线（regression_gate.sh）
+  # 与 benchmark.yml（sz-rust-core/core_bench, 基线 v0.3.3, PR 触发）、
+  # ai-facade-perf-gate.yml（ai_facade_bench, 基线 current, PR 触发）互补，
+  # 本 job 跑 sz-rust-benchmark-suite/suite_bench（套件核心逻辑基准：回归计算/结果校验/配置校验/JSON 往返），
+  # 基线名 suite-baseline，持久化到 gh-pages-bench-suite 分支。
+  # 三个 workflow 覆盖不同 bench target，互不重复；本 job 在 push/PR/schedule/dispatch 均跑。
+  criterion-gate:
+    name: Criterion regression gate (suite_bench)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # 保存基线到 gh-pages-bench-suite 分支需要；PR from fork 时 GitHub 自动降为 read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 从 gh-pages-bench-suite 恢复上次保存的 criterion 基线；无基线时降级为 save-baseline
+      - name: Restore baseline criterion data
+        run: |
+          git fetch --depth=1 origin gh-pages-bench-suite 2>/dev/null || echo "no gh-pages-bench-suite branch yet"
+          if git rev-parse --verify origin/gh-pages-bench-suite >/dev/null 2>&1; then
+            git checkout origin/gh-pages-bench-suite -- target/criterion/
+            echo "BASELINE_AVAILABLE=1" >> "$GITHUB_ENV"
+            echo "baseline restored from gh-pages-bench-suite"
+          else
+            echo "BASELINE_AVAILABLE=0" >> "$GITHUB_ENV"
+            echo "no baseline available, will save new baseline"
+          fi
+
+      - name: Run suite_bench
+        run: |
+          if [ "${BASELINE_AVAILABLE:-0}" = "1" ]; then
+            cargo bench --package sz-rust-benchmark-suite --bench suite_bench -- \
+              --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+              --baseline suite-baseline
+          else
+            cargo bench --package sz-rust-benchmark-suite --bench suite_bench -- \
+              --warm-up-time 1 --measurement-time 3 --sample-size 30 \
+              --save-baseline suite-baseline
+          fi
+
+      # SDET P2-3：性能回归断言（与 suite-baseline 基线对比，任一基准组延迟增加 >10% → exit 1 阻塞）
+      - name: Performance regression gate
+        if: env.BASELINE_AVAILABLE == '1'
+        run: bash scripts/perf/regression_gate.sh suite-baseline 10
+
+      - name: Upload criterion results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-suite-${{ github.sha }}
+          path: target/criterion/
+          retention-days: 30
+
+      - name: Save benchmark results to branch (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages-bench-suite
+          git add -f target/criterion/
+          git commit -m "Update suite_bench baseline for ${{ github.sha }}"
+          git push origin gh-pages-bench-suite --force

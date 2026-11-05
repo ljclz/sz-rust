@@ -194,3 +194,155 @@ pub fn redact_sensitive(text: &str) -> String {
     }
     out
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // redact_sensitive — 手机号 / 身份证脱敏纯逻辑
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn redact_sensitive_preserves_plain_text_without_pii() {
+        assert_eq!(redact_sensitive("普通文本无 PII"), "普通文本无 PII");
+        assert_eq!(redact_sensitive(""), "");
+        assert_eq!(redact_sensitive("订单号 ORD12345"), "订单号 ORD12345");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_china_mobile_11_digits() {
+        let out = redact_sensitive("联系 13812345678 完成");
+        assert!(out.contains("138****5678"), "脱敏后: {out}");
+        assert!(!out.contains("1234"), "中间 4 位不得明文: {out}");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_mobile_at_string_start() {
+        let out = redact_sensitive("13812345678");
+        assert_eq!(out, "138****5678");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_multiple_mobiles_in_one_pass() {
+        let out = redact_sensitive("13812345678 和 15987654321");
+        assert!(out.contains("138****5678"));
+        assert!(out.contains("159****4321"));
+        assert!(!out.contains("1234"));
+        assert!(!out.contains("8765"));
+    }
+
+    #[test]
+    fn redact_sensitive_does_not_mask_non_mobile_11_digits() {
+        // 第二位非 3-9，不构成手机号
+        let out = redact_sensitive("121234567890");
+        assert_eq!(out, "121234567890", "非手机号 11 位数字应原样保留");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_18_digit_id_card() {
+        let out = redact_sensitive("身份证 110101199003071234");
+        assert!(out.contains("110***********1234"), "脱敏后: {out}");
+        assert!(!out.contains("19900307"), "出生日期段不得明文: {out}");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_id_card_with_trailing_x() {
+        let out = redact_sensitive("11010119900307123X");
+        assert!(out.contains("110***********123X"), "脱敏后: {out}");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_id_card_with_lowercase_x() {
+        let out = redact_sensitive("11010119900307123x");
+        assert!(out.contains("110***********123x"), "脱敏后: {out}");
+    }
+
+    #[test]
+    fn redact_sensitive_does_not_mask_17_digit_id_card() {
+        // 17 位不构成身份证（需 18 位）；同时选用不含 1[3-9] 开头 11 位子串的数字，
+        // 避免 redact_sensitive 的手机号子串扫描命中（redact_sensitive 按字符流扫描，
+        // 任意位置的 1[3-9]+10 位数字子串都会被脱敏，这是其设计语义）。
+        let out = redact_sensitive("11010111010110101");
+        assert_eq!(out, "11010111010110101", "17 位且无手机号子串应原样保留");
+    }
+
+    #[test]
+    fn redact_sensitive_masks_both_mobile_and_id_card() {
+        let out = redact_sensitive("手机 13812345678 身份证 110101199003071234");
+        assert!(out.contains("138****5678"));
+        assert!(out.contains("110***********1234"));
+    }
+
+    #[test]
+    fn redact_sensitive_preserves_text_between_pii() {
+        let out = redact_sensitive("用户 13812345678 下单 110101199003071234 完成");
+        assert!(out.contains("用户"));
+        assert!(out.contains("下单"));
+        assert!(out.contains("完成"));
+        assert!(out.contains("138****5678"));
+        assert!(out.contains("110***********1234"));
+    }
+
+    #[test]
+    fn redact_sensitive_handles_utf8_boundary_around_digits() {
+        // 中文字符紧贴数字边界，确认 char 索引不越界
+        let out = redact_sensitive("联系13812345678");
+        assert!(out.contains("138****5678"));
+        let out2 = redact_sensitive("13812345678联系");
+        assert!(out2.contains("138****5678"));
+    }
+
+    // ─────────────────────────────────────────────
+    // row_to_json / value_to_json_ref 纯逻辑补充
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn row_to_json_preserves_string_value_exact() {
+        let mut row = HashMap::new();
+        row.insert("k".into(), Value::String("中文值".into()));
+        let json = row_to_json(&row);
+        assert_eq!(json["k"], "中文值");
+    }
+
+    #[test]
+    fn row_to_json_i8_i16_u8_u16_u32_u64_all_numeric() {
+        let mut row = HashMap::new();
+        row.insert("a".into(), Value::I8(-1));
+        row.insert("b".into(), Value::I16(-2));
+        row.insert("c".into(), Value::U8(3));
+        row.insert("d".into(), Value::U16(4));
+        row.insert("e".into(), Value::U32(5));
+        row.insert("f".into(), Value::U64(6));
+        let json = row_to_json(&row);
+        assert_eq!(json["a"], -1);
+        assert_eq!(json["b"], -2);
+        assert_eq!(json["c"], 3);
+        assert_eq!(json["d"], 4);
+        assert_eq!(json["e"], 5);
+        assert_eq!(json["f"], 6);
+    }
+
+    #[test]
+    fn row_to_json_decimal_and_json_string_variants() {
+        let mut row = HashMap::new();
+        row.insert("dec".into(), Value::Decimal("123.45".into()));
+        row.insert("js".into(), Value::Json("{\"k\":1}".into()));
+        let json = row_to_json(&row);
+        assert_eq!(json["dec"], "123.45");
+        assert_eq!(json["js"], "{\"k\":1}");
+    }
+
+    #[test]
+    fn row_to_json_nested_array_of_objects() {
+        let mut inner = HashMap::new();
+        inner.insert("k".into(), Value::I64(1));
+        let mut row = HashMap::new();
+        row.insert(
+            "list".into(),
+            Value::Array(vec![Value::Object(inner.clone()), Value::Object(inner)]),
+        );
+        let json = row_to_json(&row);
+        assert_eq!(json["list"][0]["k"], 1);
+        assert_eq!(json["list"][1]["k"], 1);
+    }
+}

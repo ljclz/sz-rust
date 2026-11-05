@@ -286,7 +286,7 @@ export SZ300_CORS_ORIGIN="https://admin.example.com"
 
 > 本地安全回归：`bash scripts/audit/security-gauntlet.sh`（26 项安全 Gauntlet，真实 TCP 原始 HTTP，全部通过退出码 0）。
 
-> 注：`soak.yml` / `soak-nightly.yml` 已停用（重命名为 `.disabled`，2026-08-13 前），6h soak 由本地自托管工具 `scripts/soak-self-hosted/` 承担（见 `docs/soak-toolkit-guide.md`）。
+> 注：`soak.yml` 已启用（SDET P1-6 决策，2026-10-27：周跑 1h + push/PR 冒烟 10s）；`soak-nightly.yml` 已下线删除（GitHub 托管 runner 单 job 6h 硬上限）；6h 长稳由本地自托管工具 `scripts/soak-self-hosted/` 承担（见 `docs/soak-toolkit-guide.md`）。
 
 **cargo-deny 审计维度**（`deny.toml`）：
 - 许可证白名单：MIT / Apache-2.0 / BSD / ISC / Zlib

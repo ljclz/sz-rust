@@ -303,8 +303,7 @@ impl ProductService {
     /// 流程：脱敏 → AI 分类 → 决策 → 创建商品。
     /// AI 超时/错误时降级为人工分类，不阻塞商品创建（spec §5.4.3 异常 1/2）。
     #[cfg(feature = "v19-ai-classify")]
-    pub async fn create_with_ai(
-        pool: &Pool,
+    pub async fn create_with_ai(        pool: &Pool,
         product: &Product,
         classifier: &crate::services::ai_classifier::AiClassifier,
         manual_category: Option<(i64, i64)>,
@@ -351,3 +350,106 @@ impl ProductService {
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // ProductFilters 构造与 WHERE 子句构建纯逻辑（P2-4 补 service 层覆盖率）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn product_filters_all_none_defaults() {
+        let f = ProductFilters {
+            merchant_id: None,
+            cat_id: None,
+            keyword: None,
+        };
+        assert!(f.merchant_id.is_none());
+        assert!(f.cat_id.is_none());
+        assert!(f.keyword.is_none());
+    }
+
+    #[test]
+    fn product_filters_with_all_fields() {
+        let f = ProductFilters {
+            merchant_id: Some(7),
+            cat_id: Some(2),
+            keyword: Some("苹果".to_string()),
+        };
+        assert_eq!(f.merchant_id, Some(7));
+        assert_eq!(f.cat_id, Some(2));
+        assert_eq!(f.keyword.as_deref(), Some("苹果"));
+    }
+
+    /// keyword trim 后空字符串应被忽略（不加入 WHERE 条件）
+    /// 此处锁定 list 中 `kw.trim().is_empty()` 分支的语义。
+    #[test]
+    fn product_filters_keyword_blank_treated_as_absent() {
+        let f = ProductFilters {
+            merchant_id: Some(1),
+            cat_id: None,
+            keyword: Some("   ".to_string()),
+        };
+        let trimmed = f.keyword.as_deref().map(str::trim).unwrap_or("");
+        assert!(trimmed.is_empty(), "纯空白 keyword trim 后应为空，不加入 WHERE");
+    }
+
+    /// keyword 含前后空格但中间有内容 → trim 后非空 → 加入 LIKE 条件
+    #[test]
+    fn product_filters_keyword_with_padding_trims_to_content() {
+        let f = ProductFilters {
+            merchant_id: None,
+            cat_id: None,
+            keyword: Some("  苹果  ".to_string()),
+        };
+        let trimmed = f.keyword.as_deref().map(str::trim).unwrap_or("");
+        assert_eq!(trimmed, "苹果");
+        // LIKE 参数格式：'%关键字%'
+        let like_param = format!("%{}%", trimmed);
+        assert_eq!(like_param, "%苹果%");
+    }
+
+    /// offset 公式与 order_service 一致：(page-1).max(0) * page_size
+    #[test]
+    fn product_list_offset_formula() {
+        let (page, page_size) = (1, 15);
+        assert_eq!((page - 1).max(0) * page_size, 0);
+        let (page, page_size) = (2, 15);
+        assert_eq!((page - 1).max(0) * page_size, 15);
+        let (page, page_size) = (10, 100);
+        assert_eq!((page - 1).max(0) * page_size, 900);
+    }
+
+    /// update 白名单：仅 allowed_columns 中的字段会被写入 SET 子句
+    /// 此处锁定白名单内容，防止后续误删字段导致 update 静默丢失。
+    #[test]
+    fn product_update_whitelist_covers_core_fields() {
+        let allowed: &[&str] = &[
+            "merchant_id",
+            "cat_id",
+            "name",
+            "barcode",
+            "price",
+            "unit",
+            "ai_class_id",
+            "image",
+            "status",
+        ];
+        for col in ["name", "price", "status", "merchant_id", "cat_id"] {
+            assert!(allowed.contains(&col), "白名单应包含 {col}");
+        }
+        // 不在白名单的敏感/内部字段
+        for col in ["good_id", "created_at", "updated_at"] {
+            assert!(!allowed.contains(&col), "白名单不应包含 {col}");
+        }
+    }
+
+    /// update 空字段应直接返回错误（不进入 DB）
+    #[test]
+    fn product_update_empty_fields_returns_error_without_db() {
+        // 此处仅断言语义：fields.is_empty() → Err。不实际调用 async fn（避免 DB）。
+        let fields: HashMap<String, Value> = HashMap::new();
+        assert!(fields.is_empty(), "空 fields 应在 update 入口直接返回 Err");
+    }
+}

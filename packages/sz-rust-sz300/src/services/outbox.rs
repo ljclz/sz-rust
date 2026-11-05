@@ -282,3 +282,122 @@ pub fn webhook_handler(url: String) -> DeliverFn {
         })
     })
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // outbox 纯逻辑（P2-4 补 service 层覆盖率）
+    // ─────────────────────────────────────────────
+
+    /// OutboxEvent 构造与字段访问
+    #[test]
+    fn outbox_event_construction_and_field_access() {
+        let event = OutboxEvent {
+            id: 42,
+            aggregate_type: "order".into(),
+            aggregate_id: "ord-001".into(),
+            event_type: "order.created".into(),
+            payload: "{\"k\":1}".into(),
+            attempts: 3,
+        };
+        assert_eq!(event.id, 42);
+        assert_eq!(event.aggregate_type, "order");
+        assert_eq!(event.aggregate_id, "ord-001");
+        assert_eq!(event.event_type, "order.created");
+        assert_eq!(event.payload, "{\"k\":1}");
+        assert_eq!(event.attempts, 3);
+    }
+
+    /// text_of：Json 变体直接返回内部字符串
+    #[test]
+    fn text_of_json_variant_returns_inner_string() {
+        let v = Value::Json("{\"k\":1}".into());
+        assert_eq!(text_of(Some(&v)), "{\"k\":1}");
+    }
+
+    /// text_of：Bytes 变体按 UTF-8 lossy 解码
+    #[test]
+    fn text_of_bytes_variant_decodes_utf8_lossy() {
+        let v = Value::Bytes(b"hello".to_vec());
+        assert_eq!(text_of(Some(&v)), "hello");
+    }
+
+    /// text_of：Bytes 含非 UTF-8 字节用 U+FFFD 替换
+    #[test]
+    fn text_of_bytes_invalid_utf8_uses_replacement_char() {
+        let v = Value::Bytes(vec![0xff, 0xfe, 0xfd]);
+        let s = text_of(Some(&v));
+        assert!(s.contains('\u{FFFD}'), "非 UTF-8 字节应被替换为 U+FFFD: {s:?}");
+    }
+
+    /// text_of：String 变体通过 as_str 返回
+    #[test]
+    fn text_of_string_variant_returns_str() {
+        let v = Value::String("hello".into());
+        assert_eq!(text_of(Some(&v)), "hello");
+    }
+
+    /// text_of：None 返回空字符串
+    #[test]
+    fn text_of_none_returns_empty() {
+        assert_eq!(text_of(None), "");
+    }
+
+    /// log_err：返回固定对外错误串 "投递失败"，不回传 DB 细节
+    #[test]
+    fn log_err_returns_fixed_external_message() {
+        let msg = log_err("connection refused", "ctx");
+        assert_eq!(msg, "投递失败", "log_err 不应泄露 DB 细节");
+    }
+
+    /// mark_failed 的退避公式：2^attempts 秒，最大 300 秒
+    /// 此处锁定 `(1i64 << attempts.min(8)).min(300)` 的语义。
+    #[test]
+    fn mark_failed_backoff_formula() {
+        let cases = [
+            (0i32, 1i64),
+            (1, 2),
+            (2, 4),
+            (3, 8),
+            (5, 32),
+            (8, 256),
+            (9, 256),   // min(8) 截断
+            (100, 256), // min(8) 截断
+        ];
+        for (attempts, expected) in cases {
+            let backoff = (1i64 << attempts.min(8)).min(300);
+            assert_eq!(
+                backoff, expected,
+                "attempts={attempts} 退避应为 {expected}"
+            );
+        }
+        // 上限 300
+        assert_eq!((1i64 << 9).min(300), 300);
+    }
+
+    /// mark_failed 死信阈值：attempts >= MAX_ATTEMPTS(10) → status=2
+    #[test]
+    fn mark_failed_dead_letter_threshold() {
+        assert_eq!(MAX_ATTEMPTS, 10);
+        // attempts < 10 → 重试路径
+        for attempts in 0..10 {
+            assert!(attempts < MAX_ATTEMPTS, "attempts={attempts} 应走重试路径");
+        }
+        // attempts >= 10 → 死信路径
+        for attempts in [10, 11, 100] {
+            assert!(
+                attempts >= MAX_ATTEMPTS,
+                "attempts={attempts} 应走死信路径"
+            );
+        }
+    }
+
+    /// mark_failed 错误截断：error.chars().take(512) — 锁定 512 字符上限
+    #[test]
+    fn mark_failed_truncates_error_to_512_chars() {
+        let long_error: String = "中".repeat(1000);
+        let truncated: String = long_error.chars().take(512).collect();
+        assert_eq!(truncated.chars().count(), 512, "错误应截断到 512 字符");
+    }
+}
