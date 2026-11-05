@@ -332,14 +332,7 @@ fn build_openapi_spec() -> Value {
                 .response(200, "WASM 执行结果", "application/json")
                 .response(400, "参数错误", "application/json");
         })
-        // ===== v1.9.0 视图模板 =====
-        .path("/page/{template}", HttpMethod::Get, |op| {
-            op.summary("模板渲染端点")
-                .description("v1.9.0 使用模板引擎渲染指定模板")
-                .tag("视图模板")
-                .response(200, "渲染后的 HTML", "text/html")
-                .response(404, "模板不存在", "text/html");
-        })
+
         // ===== GraphQL =====
         .path("/graphql", HttpMethod::Post, |op| {
             op.summary("GraphQL 查询端点")
@@ -559,7 +552,8 @@ mod tests {
             }
         }
         // 健康检查 4 + 认证 4 + 商户 5 + 商品 5 + 设备 6 + 订单 3 + 文件上传 3 + 插件市场 3
-        // + GraphQL 1 + WS 1 + SSE 1 + AI 3 + WASM 1 + 视图模板 1 = 41
-        assert_eq!(count, 41, "端点总数应为 41，实际: {}", count);
+        // + GraphQL 1 + WS 1 + SSE 1 + AI 3 + WASM 1 = 40
+        // （ADR-0052 方案 B：/page/{template} SSR 端点已下线，前端永久 headless）
+        assert_eq!(count, 40, "端点总数应为 40，实际: {}", count);
     }
 }

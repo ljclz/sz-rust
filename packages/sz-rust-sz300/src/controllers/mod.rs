@@ -23,7 +23,6 @@ pub mod order;
 pub mod plugin;
 /// 商品管理控制器（对齐 PHP ProductController）
 pub mod product;
-/// v2.0.0 合并企业版：视图模板渲染控制器
-pub mod view;
+
 /// v2.0.0 合并企业版：WASM 边缘计算控制器
 pub mod wasm_api;

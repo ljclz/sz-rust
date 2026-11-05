@@ -3,7 +3,7 @@
 #[cfg(feature = "v19-plugin-flow")]
 use crate::controllers::plugin;
 use crate::controllers::{
-    ai, auth, device, file, file_serve, health, merchant, order, product, view, wasm_api,
+    ai, auth, device, file, file_serve, health, merchant, order, product, wasm_api,
 };
 use crate::middleware::auth_middleware;
 use crate::openapi;
@@ -122,9 +122,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/ai/embed", post(ai::embed))
         .route("/api/v1/ai/stream", post(ai::stream))
         // v2.0.0 合并企业版：WASM 边缘计算（燃料计量 + 内存限制 + 超时）
-        .route("/api/wasm/execute", post(wasm_api::execute))
-        // v2.0.0 合并企业版：视图模板渲染（受 JWT 保护）
-        .route("/page/{template}", get(view::render_page));
+        .route("/api/wasm/execute", post(wasm_api::execute));
 
     // API 路由（v1.8.0 启用脱敏）
     #[cfg(not(feature = "v18-rbac"))]

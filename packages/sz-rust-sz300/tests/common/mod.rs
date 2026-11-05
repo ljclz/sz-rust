@@ -249,6 +249,11 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "021_fk_nullable",
         include_str!("../../migrations/021_fk_nullable.sql"),
     ),
+    // 2026-11-05 数据层深化：商品表复合索引（商户 + 类目，ADR 0051 后续）
+    (
+        "022_good_merchant_cat_index",
+        include_str!("../../migrations/022_good_merchant_cat_index.sql"),
+    ),
     (
         "add_ai_classification_override",
         include_str!("../../migrations/add_ai_classification_override.sql"),
