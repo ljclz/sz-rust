@@ -162,3 +162,92 @@ impl RelationLoader for Product {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_nullable_cats() {
+        // cat_id / ai_class_id 的 Some 与 None 两种情况
+        let p = Product {
+            good_id: Some(88),
+            merchant_id: 5,
+            cat_id: Some(3),
+            name: "活鲈鱼".into(),
+            barcode: "6900000000001".into(),
+            price: 3000,
+            unit: "斤".into(),
+            ai_class_id: Some(12),
+            image: "https://cdn.example.com/img/88.jpg".into(),
+            status: 1,
+            created_at: Some("2026-05-05 00:00:00".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&p).expect("serialize");
+        let back: Product = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.good_id, Some(88));
+        assert_eq!(back.merchant_id, 5);
+        assert_eq!(back.cat_id, Some(3));
+        assert_eq!(back.name, "活鲈鱼");
+        assert_eq!(back.barcode, "6900000000001");
+        assert_eq!(back.price, 3000);
+        assert_eq!(back.unit, "斤");
+        assert_eq!(back.ai_class_id, Some(12));
+        assert_eq!(back.image, "https://cdn.example.com/img/88.jpg");
+        assert_eq!(back.status, 1);
+        assert_eq!(back.created_at.as_deref(), Some("2026-05-05 00:00:00"));
+        assert_eq!(back.updated_at, None);
+
+        let unclassified = Product {
+            good_id: None,
+            merchant_id: 1,
+            cat_id: None,
+            name: "未分类商品".into(),
+            barcode: String::new(),
+            price: 0,
+            unit: "个".into(),
+            ai_class_id: None,
+            image: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        let json2 = serde_json::to_string(&unclassified).expect("serialize");
+        let back2: Product = serde_json::from_str(&json2).expect("deserialize");
+        assert_eq!(back2.cat_id, None);
+        assert_eq!(back2.ai_class_id, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Product::table_name(), "good");
+        assert_eq!(Product::pk_name(), "good_id");
+        let mut p = Product {
+            good_id: None,
+            merchant_id: 0,
+            cat_id: None,
+            name: String::new(),
+            barcode: String::new(),
+            price: 0,
+            unit: String::new(),
+            ai_class_id: None,
+            image: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(p.pk(), 0);
+        assert!(p.get_column_value("good_id").is_none());
+        p.set_pk(66);
+        assert_eq!(p.pk(), 66);
+        assert!(p.get_column_value("good_id").is_some());
+        assert_eq!(Product::columns().len(), 12);
+        assert_eq!(Product::fillable().len(), 9);
+        assert_eq!(Product::guarded().len(), 1);
+        assert!(p.get_column_value("cat_id").is_none());
+        assert!(p.get_column_value("ai_class_id").is_none());
+        assert!(p.get_column_value("name").is_some());
+        assert!(p.get_column_value("nope").is_none());
+        assert!(Product::timestamp_fields().is_some());
+    }
+}

@@ -56,6 +56,9 @@
 | DB-2026-11-05-DATALAYER | ADR 0051 Phase 2 实施（2026-11-05） | docs/adr/0051-数据层FK-CHECK补齐.md + CHANGELOG.md | **数据层 FK/CHECK 补齐（ADR 0051 Phase 2）**：26 CHECK 约束（migration 008~010）+ 8 列哨兵改 NULLABLE + 模型 i64→Option<i64>（migration 013~019）+ 14 FK 约束（migration 020~021）+ DB 错误分类 db_error.rs + 7 约束违反集成测试 | 2026-11-05 | 2026-11-05 | RESOLVED（2026-11-05：cargo test --lib 130 passed + 集成 7 passed + 门禁 link-check/doc-code-consistency exit=0） |
 | DB-2026-11-05-11 | AppSec 复评（2026-11-05）路径歧义误判（原误判为幻影交付） | 根目录 docker-compose.prod.yml + deploy/docker-compose.prod.yml + docs/audit/2026-10-28-appsec-remediation.md §10 | **docker-compose.prod.yml 路径歧义误判**：2026-10-28 AppSec 整改报告 §10 line 87 声称的是根目录 docker-compose.prod.yml（无 deploy/ 前缀），该文件真实存在（95 行，含 sz300-server+mysql+强制 SZ300_METRICS_TOKEN/SZ300_CORS_ORIGIN+TLS 注释）。2026-11-05 AppSec 复评误读为 deploy/ 路径，基于 ls deploy/ 无此文件误判为幻影交付。deploy/docker-compose.prod.yml（221 行）为 2026-11-05 补充的更完整基础设施模板（含 redis + 端口全绑 127.0.0.1 + 禁 root + DB TLS），两个文件都保留。原"幻影交付"定性撤销，改为路径歧义误判 | 2026-11-05 | 2026-11-19 | RESOLVED（2026-11-05 误判修正：根目录 docker-compose.prod.yml 本就存在（95 行），非幻影交付。deploy/docker-compose.prod.yml（221 行）为补充的更完整基础设施模板（含 redis + 端口全绑 127.0.0.1 + 禁 root + DB TLS）。原 DB-2026-11-05-11 次债基于误判登记，现撤销幻影定性，改为路径歧义误判） |
 
+| DB-2026-11-06-01 | UXR 复评（2026-11-06）新引入 P2 | packages/sz-rust-sz300/src/router.rs:125 | **N1：WASM 端点缺 `/api/v1/` 版本前缀**：WASM 执行端点路由未遵循 `/api/v1/` REST 版本前缀约定（router.rs:125），与同仓其他业务端点（均带 `/api/v1/` 前缀）不一致。复评新发现项，非原评测遗留。修复涉及路由路径调整 + 前端契约 + OpenAPI 同步 | 2026-11-06 | 2026-11-13 | PENDING |
+| DB-2026-11-06-02 | UXR 复评（2026-11-06）新引入 P2 | packages/sz-rust-mvc-facade/src/controller.rs:1078-1079 | **N5：文档未说明 HTTP 200+信封 code 约定**：业务响应采用 HTTP 200 + 信封体 `{"code":1=成功,"code":0=失败}` 约定（PHP 对齐，controller.rs:1078-1079 renderJson），但文档未显式说明该约定，易被误读为「code:0 与错误文案自相矛盾」。复评新发现项。修复涉及 API 文档 / OpenAPI 描述补充信封 code 语义说明 | 2026-11-06 | 2026-11-13 | PENDING |
+
 ---
 
 ## 覆盖率豁免债务

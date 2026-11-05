@@ -90,3 +90,37 @@ impl MqttDispatcher {
         let _ = state;
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// dispatch 对无效 JSON payload 应提前 return，不 panic、不访问 state。
+    #[tokio::test]
+    async fn dispatch_invalid_json_payload_returns_early() {
+        let state = crate::state::mock_app_state();
+        // 非法 JSON（缺少闭合括号）
+        let payload = b"{\"device_sn\":\"SN-1\"";
+        // 仅验证不 panic / 不挂起
+        MqttDispatcher::dispatch(&state, "/sz/device/SN-1/status", payload).await;
+    }
+
+    /// dispatch 对段数不足的 topic（parts < 5）应提前 return，不访问 state。
+    #[tokio::test]
+    async fn dispatch_short_topic_returns_early() {
+        let state = crate::state::mock_app_state();
+        let payload = br#"{"k":1}"#;
+        // "/sz/device" split('/') = ["", "sz", "device"] → len=3 < 5
+        MqttDispatcher::dispatch(&state, "/sz/device", payload).await;
+        // "/sz/device/SN" split('/') = ["", "sz", "device", "SN"] → len=4 < 5
+        MqttDispatcher::dispatch(&state, "/sz/device/SN", payload).await;
+    }
+
+    /// dispatch 对未知 action 应走到 `_ => warn` 分支，不调用 handler、不 panic。
+    #[tokio::test]
+    async fn dispatch_unknown_action_logs_warning_without_handler() {
+        let state = crate::state::mock_app_state();
+        let payload = br#"{"v":1}"#;
+        // action="unknown" 不匹配 status/order/log
+        MqttDispatcher::dispatch(&state, "/sz/device/SN-1/unknown", payload).await;
+    }
+}

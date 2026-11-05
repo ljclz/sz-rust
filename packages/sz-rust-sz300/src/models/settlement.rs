@@ -138,3 +138,62 @@ impl RelationLoader for Settlement {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let s = Settlement {
+            settle_id: Some(2026),
+            merchant_id: 5,
+            settle_date: "2026-06-06".into(),
+            total_fen: 999999,
+            order_count: 42,
+            fee_fen: 5000,
+            status: 1,
+            created_at: Some("2026-06-07 00:00:00".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&s).expect("serialize");
+        let back: Settlement = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.settle_id, Some(2026));
+        assert_eq!(back.merchant_id, 5);
+        assert_eq!(back.settle_date, "2026-06-06");
+        assert_eq!(back.total_fen, 999999);
+        assert_eq!(back.order_count, 42);
+        assert_eq!(back.fee_fen, 5000);
+        assert_eq!(back.status, 1);
+        assert_eq!(back.created_at.as_deref(), Some("2026-06-07 00:00:00"));
+        assert_eq!(back.updated_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Settlement::table_name(), "settlement");
+        assert_eq!(Settlement::pk_name(), "settle_id");
+        let mut s = Settlement {
+            settle_id: None,
+            merchant_id: 0,
+            settle_date: String::new(),
+            total_fen: 0,
+            order_count: 0,
+            fee_fen: 0,
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(s.pk(), 0);
+        assert!(s.get_column_value("settle_id").is_none());
+        s.set_pk(31);
+        assert_eq!(s.pk(), 31);
+        assert!(s.get_column_value("settle_id").is_some());
+        assert_eq!(Settlement::columns().len(), 9);
+        assert_eq!(Settlement::fillable().len(), 6);
+        assert_eq!(Settlement::guarded().len(), 1);
+        assert!(s.get_column_value("merchant_id").is_some());
+        assert!(s.get_column_value("fee_fen").is_some());
+        assert!(s.get_column_value("xxx").is_none());
+        assert!(Settlement::timestamp_fields().is_some());
+    }
+}

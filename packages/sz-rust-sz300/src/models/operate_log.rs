@@ -117,3 +117,71 @@ impl RelationLoader for OperateLog {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_nullable_merchant_id() {
+        // 覆盖 merchant_id = Some（商户级操作）与 None（系统级操作）两种情况
+        let with_merchant = OperateLog {
+            log_id: Some(1),
+            merchant_id: Some(55),
+            operator: "admin".into(),
+            action: "create_order".into(),
+            detail: "创建订单 ORD-1".into(),
+            ip: "10.0.0.1".into(),
+            created_at: Some("2026-03-03 00:00:00".into()),
+        };
+        let json = serde_json::to_string(&with_merchant).expect("serialize");
+        let back: OperateLog = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.log_id, Some(1));
+        assert_eq!(back.merchant_id, Some(55));
+        assert_eq!(back.operator, "admin");
+        assert_eq!(back.action, "create_order");
+        assert_eq!(back.detail, "创建订单 ORD-1");
+        assert_eq!(back.ip, "10.0.0.1");
+        assert_eq!(back.created_at.as_deref(), Some("2026-03-03 00:00:00"));
+
+        let system_level = OperateLog {
+            log_id: None,
+            merchant_id: None,
+            operator: "system".into(),
+            action: "rotate_key".into(),
+            detail: String::new(),
+            ip: "127.0.0.1".into(),
+            created_at: None,
+        };
+        let json2 = serde_json::to_string(&system_level).expect("serialize");
+        let back2: OperateLog = serde_json::from_str(&json2).expect("deserialize");
+        assert_eq!(back2.log_id, None);
+        assert_eq!(back2.merchant_id, None);
+        assert_eq!(back2.created_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(OperateLog::table_name(), "operate_log");
+        assert_eq!(OperateLog::pk_name(), "log_id");
+        let mut m = OperateLog {
+            log_id: None,
+            merchant_id: None,
+            operator: String::new(),
+            action: String::new(),
+            detail: String::new(),
+            ip: String::new(),
+            created_at: None,
+        };
+        assert_eq!(m.pk(), 0);
+        m.set_pk(777);
+        assert_eq!(m.pk(), 777);
+        assert_eq!(OperateLog::columns().len(), 7);
+        assert_eq!(OperateLog::fillable().len(), 5);
+        assert_eq!(OperateLog::guarded().len(), 1);
+        // merchant_id 为 None 时 get_column_value 返回 None
+        assert!(m.get_column_value("merchant_id").is_none());
+        assert!(m.get_column_value("operator").is_some());
+        assert!(m.get_column_value("zzz").is_none());
+        assert!(OperateLog::timestamp_fields().is_some());
+    }
+}

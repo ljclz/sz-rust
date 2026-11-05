@@ -91,3 +91,47 @@ impl RelationLoader for SystemConfig {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let c = SystemConfig {
+            key_name: "site_name".into(),
+            value: "鲜视达生鲜平台".into(),
+            created_at: Some("2026-07-07 00:00:00".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        let back: SystemConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.key_name, "site_name");
+        assert_eq!(back.value, "鲜视达生鲜平台");
+        assert_eq!(back.created_at.as_deref(), Some("2026-07-07 00:00:00"));
+        assert_eq!(back.updated_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_string_pk() {
+        // SystemConfig 主键为 String（非 i64），验证 pk()/set_pk() 字符串语义
+        assert_eq!(SystemConfig::table_name(), "system_config");
+        assert_eq!(SystemConfig::pk_name(), "key_name");
+        let mut c = SystemConfig {
+            key_name: "initial_key".into(),
+            value: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(c.pk(), "initial_key");
+        c.set_pk("rotated_key".into());
+        assert_eq!(c.pk(), "rotated_key");
+        assert_eq!(SystemConfig::columns().len(), 4);
+        assert_eq!(SystemConfig::fillable().len(), 2);
+        // system_config 无 guarded 字段
+        assert_eq!(SystemConfig::guarded().len(), 0);
+        assert!(c.get_column_value("key_name").is_some());
+        assert!(c.get_column_value("value").is_some());
+        assert!(c.get_column_value("missing").is_none());
+        assert!(SystemConfig::timestamp_fields().is_some());
+    }
+}

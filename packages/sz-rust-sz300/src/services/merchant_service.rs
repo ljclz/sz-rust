@@ -376,4 +376,94 @@ mod tests {
             "软删除不应使用 DELETE FROM（物理删除）"
         );
     }
+
+    // ─────────────────────────────────────────────
+    // fake pool 测试：用 connect_lazy_with 构造连不存在的 DB 的池，
+    // 让 service 函数走完纯逻辑（IDOR 过滤 / SET 构建）后在 acquire 失败，
+    // 覆盖 acquire 之前的纯逻辑行 + acquire 失败的错误映射行。
+    // ─────────────────────────────────────────────
+
+    use std::sync::Arc;
+
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn merchant_list_fake_pool_covers_idor_filter_some() {
+        let pool = make_fake_pool();
+        // IDOR 过滤：merchant_id=Some(7) → WHERE merchant_id = ?
+        let result = MerchantService::list(&pool, 1, 10, Some(7)).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn merchant_list_fake_pool_covers_admin_path_no_filter() {
+        let pool = make_fake_pool();
+        // 管理员路径：merchant_id=None → 不附加 WHERE
+        let result = MerchantService::list(&pool, 1, 10, None).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn merchant_get_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let result = MerchantService::get(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 get 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
+
+    #[tokio::test]
+    async fn merchant_create_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let merchant = Merchant {
+            merchant_id: None,
+            market_id: 1,
+            name: "test".into(),
+            stall_no: "A-01".into(),
+            contact_phone: "13800000000".into(),
+            category: "水产".into(),
+            status: 1,
+            bank_account: "".into(),
+            bank_name: "".into(),
+            created_at: None,
+            updated_at: None,
+        };
+        let result = MerchantService::create(&pool, &merchant).await;
+        assert!(result.is_err(), "fake pool 应导致 create 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
+
+    #[tokio::test]
+    async fn merchant_update_fake_pool_covers_set_construction() {
+        let pool = make_fake_pool();
+        let mut fields: HashMap<String, Value> = HashMap::new();
+        fields.insert("name".into(), Value::String("updated".into()));
+        fields.insert("status".into(), Value::I64(0));
+        let result = MerchantService::update(&pool, 1, fields).await;
+        assert!(result.is_err(), "fake pool 应导致 update 失败");
+    }
+
+    #[tokio::test]
+    async fn merchant_delete_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let result = MerchantService::delete(&pool, 1).await;
+        assert!(result.is_err(), "fake pool 应导致 delete 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
 }

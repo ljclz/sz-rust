@@ -154,3 +154,67 @@ impl RelationLoader for Merchant {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let m = Merchant {
+            merchant_id: Some(7),
+            market_id: 3,
+            name: "鲜视达旗舰店".into(),
+            stall_no: "A-12".into(),
+            contact_phone: "13900000000".into(),
+            category: "水产".into(),
+            status: 1,
+            bank_account: "6222000000000000000".into(),
+            bank_name: "工商银行".into(),
+            created_at: Some("2026-02-02 00:00:00".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&m).expect("serialize");
+        let back: Merchant = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.merchant_id, Some(7));
+        assert_eq!(back.market_id, 3);
+        assert_eq!(back.name, "鲜视达旗舰店");
+        assert_eq!(back.stall_no, "A-12");
+        assert_eq!(back.contact_phone, "13900000000");
+        assert_eq!(back.category, "水产");
+        assert_eq!(back.status, 1);
+        assert_eq!(back.bank_account, "6222000000000000000");
+        assert_eq!(back.bank_name, "工商银行");
+        assert_eq!(back.created_at.as_deref(), Some("2026-02-02 00:00:00"));
+        assert_eq!(back.updated_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Merchant::table_name(), "merchant");
+        assert_eq!(Merchant::pk_name(), "merchant_id");
+        let mut m = Merchant {
+            merchant_id: None,
+            market_id: 0,
+            name: String::new(),
+            stall_no: String::new(),
+            contact_phone: String::new(),
+            category: String::new(),
+            status: 0,
+            bank_account: String::new(),
+            bank_name: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(m.pk(), 0);
+        m.set_pk(123);
+        assert_eq!(m.pk(), 123);
+        assert_eq!(Merchant::columns().len(), 11);
+        assert_eq!(Merchant::fillable().len(), 8);
+        assert_eq!(Merchant::guarded().len(), 1);
+        assert!(m.get_column_value("merchant_id").is_some());
+        assert!(m.get_column_value("market_id").is_some());
+        assert!(m.get_column_value("bank_account").is_some());
+        assert!(m.get_column_value("nope").is_none());
+        assert!(Merchant::timestamp_fields().is_some());
+    }
+}

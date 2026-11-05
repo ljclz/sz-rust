@@ -89,28 +89,28 @@ impl AiController {
                     _ => prompt,
                 };
 
-                let chat_req = ChatRequest::new(
-                    model,
-                    vec![ChatMessage {
-                        role: Role::User,
-                        content: enhanced_prompt.into(),
-                        tool_call_id: None,
-                        tool_calls: None,
-                    }],
-                );
+                // P2-1 护栏①：System prompt 隔离——用户输入作为 User message，不混入 System
+                let cfg = GuardrailConfig::default();
+                let messages = build_safe_messages(cfg.system_prompt, &enhanced_prompt);
+                let chat_req = ChatRequest::new(model, messages);
 
                 match sz_rust_ai_facade::Ai::chat(chat_req).await {
                     Ok(completion) => {
-                        let content = completion
+                        let raw_content = completion
                             .choices
                             .first()
-                            .map(|c| c.message.content.clone())
+                            .map(|c| c.message.content.text_or_empty().to_string())
                             .unwrap_or_default();
+                        // P2-1 护栏②③④：PII 脱敏 + 输出长度截断 + moderation（None=NoOp 优雅降级）
+                        let guarded = apply_output_guardrail(&raw_content, &cfg, None).await;
+                        let content: ContentPart = guarded.text.into();
                         ctrl.render_success(
                             "success",
                             json!({
                                 "content": content,
                                 "model": completion.model,
+                                "truncated": guarded.truncated,
+                                "moderation": format!("{:?}", guarded.moderation),
                                 "usage": {
                                     "prompt_tokens": completion.usage.prompt_tokens,
                                     "completion_tokens": completion.usage.completion_tokens,
@@ -207,15 +207,12 @@ impl AiController {
                         0,
                     );
                 }
-                let chat_req = ChatRequest::new(
-                    model,
-                    vec![ChatMessage {
-                        role: Role::User,
-                        content: prompt.into(),
-                        tool_call_id: None,
-                        tool_calls: None,
-                    }],
-                );
+                // P2-1 护栏①：System prompt 隔离；④：max_tokens 限制输出长度
+                // 流式场景 PII 脱敏/moderation 需在聚合层做（PII 可能跨 delta 边界）
+                let cfg = GuardrailConfig::default();
+                let messages = build_safe_messages(cfg.system_prompt, &prompt);
+                let mut chat_req = ChatRequest::new(model, messages);
+                chat_req.max_tokens = Some(STREAM_MAX_TOKENS);
                 match sz_rust_ai_facade::Ai::stream_chat(chat_req).await {
                     Ok(stream) => {
                         use futures::StreamExt;

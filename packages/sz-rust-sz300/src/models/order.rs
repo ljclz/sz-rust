@@ -170,3 +170,94 @@ impl RelationLoader for Order {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_nullable_device_id() {
+        // device_id = Some（设备下单）与 None（后台手工单）两种情况
+        let device_order = Order {
+            order_id: Some(100),
+            order_no: "ORD20260303001".into(),
+            merchant_id: 5,
+            device_id: Some(8),
+            total_fen: 12345,
+            total_weight_g: 500,
+            item_count: 2,
+            status: 2,
+            pay_method: 1,
+            pay_at: Some("2026-03-03 12:00:00".into()),
+            offline_seq: String::new(),
+            created_at: Some("2026-03-03 11:59:59".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&device_order).expect("serialize");
+        let back: Order = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.order_id, Some(100));
+        assert_eq!(back.order_no, "ORD20260303001");
+        assert_eq!(back.merchant_id, 5);
+        assert_eq!(back.device_id, Some(8));
+        assert_eq!(back.total_fen, 12345);
+        assert_eq!(back.total_weight_g, 500);
+        assert_eq!(back.item_count, 2);
+        assert_eq!(back.status, 2);
+        assert_eq!(back.pay_method, 1);
+        assert_eq!(back.pay_at.as_deref(), Some("2026-03-03 12:00:00"));
+        assert_eq!(back.created_at.as_deref(), Some("2026-03-03 11:59:59"));
+        assert_eq!(back.updated_at, None);
+
+        let manual_order = Order {
+            order_id: None,
+            order_no: "MANUAL-1".into(),
+            merchant_id: 1,
+            device_id: None,
+            total_fen: 0,
+            total_weight_g: 0,
+            item_count: 0,
+            status: 1,
+            pay_method: 0,
+            pay_at: None,
+            offline_seq: "OFFLINE-1".into(),
+            created_at: None,
+            updated_at: None,
+        };
+        let json2 = serde_json::to_string(&manual_order).expect("serialize");
+        let back2: Order = serde_json::from_str(&json2).expect("deserialize");
+        assert_eq!(back2.device_id, None);
+        assert_eq!(back2.offline_seq, "OFFLINE-1");
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Order::table_name(), "order");
+        assert_eq!(Order::pk_name(), "order_id");
+        let mut o = Order {
+            order_id: None,
+            order_no: String::new(),
+            merchant_id: 0,
+            device_id: None,
+            total_fen: 0,
+            total_weight_g: 0,
+            item_count: 0,
+            status: 0,
+            pay_method: 0,
+            pay_at: None,
+            offline_seq: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(o.pk(), 0);
+        assert!(o.get_column_value("order_id").is_none());
+        o.set_pk(2024);
+        assert_eq!(o.pk(), 2024);
+        assert!(o.get_column_value("order_id").is_some());
+        assert_eq!(Order::columns().len(), 13);
+        assert_eq!(Order::fillable().len(), 10);
+        assert_eq!(Order::guarded().len(), 1);
+        assert!(o.get_column_value("order_no").is_some());
+        assert!(o.get_column_value("device_id").is_none());
+        assert!(o.get_column_value("xyz").is_none());
+        assert!(Order::timestamp_fields().is_some());
+    }
+}

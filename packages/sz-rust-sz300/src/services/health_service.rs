@@ -70,3 +70,19 @@ pub async fn ping_db(db_pool: &Arc<Pool>) -> bool {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ping_db 对不可达的 fake pool 必须有界返回 false（不得挂起）。
+    ///
+    /// mock_app_state 使用 `connect_lazy("mysql://fake:fake@127.0.0.1:3306/fake")`，
+    /// acquire 时才尝试连接：本机无 MySQL 则 TCP RST 立即失败；有 MySQL 但认证拒绝也立即失败；
+    /// 极端情况下端口被 DROP 则由 PING_BUDGET（3s）兜底超时返回 false。三种路径均返回 false。
+    #[tokio::test]
+    async fn ping_db_returns_false_for_unreachable_fake_pool() {
+        let state = crate::state::mock_app_state();
+        let ok = ping_db(&state.db_pool).await;
+        assert!(!ok, "对 fake/不可达 pool，ping_db 必须返回 false");
+    }
+}

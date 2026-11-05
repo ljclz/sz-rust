@@ -100,6 +100,8 @@ fn replace_matches<F: Fn(&str) -> String>(text: &str, re: &Regex, mask_fn: F) ->
 /// 对正则匹配项做掩码，但仅当匹配项前后字符非 ASCII 数字时才掩码（边界保护）
 ///
 /// 避免在长数字串（如 20 位订单号）中误匹配手机/身份证子串。
+/// 同时排除邮箱 domain 内的数字段：前字符为 `@`/`.` 或后字符为 `.` 时跳过
+/// （邮箱已先脱敏，其 domain 形如 `13812345678.com` 不应再被手机正则脱敏）。
 fn mask_with_digit_boundary<F: Fn(&str) -> String>(text: &str, re: &Regex, mask_fn: F) -> String {
     let mut out = String::with_capacity(text.len());
     let bytes = text.as_bytes();
@@ -107,12 +109,12 @@ fn mask_with_digit_boundary<F: Fn(&str) -> String>(text: &str, re: &Regex, mask_
     for mat in re.find_iter(text) {
         let start = mat.start();
         let end = mat.end();
-        // 前边界：start==0 或前一字符非数字
-        let prev_ok = start == 0 || !bytes[start - 1].is_ascii_digit();
-        // 后边界：end==len 或后一字符非数字
-        let next_ok = end == bytes.len() || !bytes[end].is_ascii_digit();
+        // 前边界：start==0 或前一字符非数字/ '@' / '.'
+        let prev_ok = start == 0 || !is_digit_or_at_or_dot(bytes[start - 1]);
+        // 后边界：end==len 或后一字符非数字/ '.'
+        let next_ok = end == bytes.len() || !is_digit_or_dot(bytes[end]);
         if !prev_ok || !next_ok {
-            continue; // 跳过：是长数字串的子串
+            continue; // 跳过：是长数字串或邮箱 domain 的子串
         }
         out.push_str(&text[last_end..start]);
         out.push_str(&mask_fn(mat.as_str()));
@@ -120,6 +122,16 @@ fn mask_with_digit_boundary<F: Fn(&str) -> String>(text: &str, re: &Regex, mask_
     }
     out.push_str(&text[last_end..]);
     out
+}
+
+#[inline]
+fn is_digit_or_at_or_dot(b: u8) -> bool {
+    b.is_ascii_digit() || b == b'@' || b == b'.'
+}
+
+#[inline]
+fn is_digit_or_dot(b: u8) -> bool {
+    b.is_ascii_digit() || b == b'.'
 }
 
 /// 输出长度限制结果

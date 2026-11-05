@@ -63,3 +63,60 @@ impl WsService {
         )
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[test]
+    fn default_managers_returns_fresh_instances() {
+        let (mgr, rooms) = WsService::default_managers();
+        // 默认配置 max_connections=10000，空连接表
+        assert_eq!(mgr.config().max_connections, 10000);
+        // 空房间
+        assert_eq!(rooms.room_count(), 0);
+    }
+
+    #[test]
+    fn join_admin_room_succeeds_for_new_connection() {
+        let rooms = RoomManager::new();
+        let conn_id = ConnectionId::new();
+        let result = WsService::join_admin_room(&rooms, &conn_id);
+        assert!(result.is_ok(), "join_admin_room 应成功");
+        // admin 房间应有 1 个成员
+        let admin = RoomId::new("admin");
+        assert_eq!(rooms.room_size(&admin), 1);
+    }
+
+    #[tokio::test]
+    async fn broadcast_device_online_returns_zero_for_empty_room() {
+        let mgr = ConnectionManager::with_defaults();
+        let rooms = RoomManager::new();
+        // admin 房间无成员 → 广播返回 0
+        let sent = WsService::broadcast_device_online(&mgr, &rooms, "SN-001").await;
+        assert_eq!(sent, 0);
+    }
+
+    #[tokio::test]
+    async fn broadcast_device_offline_returns_zero_for_empty_room() {
+        let mgr = ConnectionManager::with_defaults();
+        let rooms = RoomManager::new();
+        let sent = WsService::broadcast_device_offline(&mgr, &rooms, "SN-002").await;
+        assert_eq!(sent, 0);
+    }
+
+    #[tokio::test]
+    async fn broadcast_device_heartbeat_delivers_to_admin_members() {
+        let mgr = ConnectionManager::with_defaults();
+        let rooms = RoomManager::new();
+        // 注册一个连接并加入 admin 房间
+        let (tx, mut rx) = mpsc::channel(10);
+        let conn_id = mgr.register(tx, None).expect("register");
+        rooms.join_room(&conn_id, &RoomId::new("admin")).expect("join");
+        let sent = WsService::broadcast_device_heartbeat(&mgr, &rooms, "SN-003").await;
+        assert_eq!(sent, 1, "应成功投递给 1 个 admin 成员");
+        let msg = rx.recv().await.expect("应收到消息");
+        assert!(msg.contains(r#""event":"device_heartbeat""#), "msg={msg}");
+        assert!(msg.contains(r#""device_sn":"SN-003""#), "msg={msg}");
+    }
+}

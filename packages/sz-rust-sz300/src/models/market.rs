@@ -124,3 +124,61 @@ impl RelationLoader for Market {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let m = Market {
+            market_id: Some(42),
+            name: "城中市场".into(),
+            address: "南京路 1 号".into(),
+            contact: "张三".into(),
+            phone: "13812345678".into(),
+            status: 1,
+            created_at: Some("2026-01-02 03:04:05".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&m).expect("serialize");
+        let back: Market = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.market_id, Some(42));
+        assert_eq!(back.name, "城中市场");
+        assert_eq!(back.address, "南京路 1 号");
+        assert_eq!(back.contact, "张三");
+        assert_eq!(back.phone, "13812345678");
+        assert_eq!(back.status, 1);
+        assert_eq!(back.created_at.as_deref(), Some("2026-01-02 03:04:05"));
+        assert_eq!(back.updated_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Market::table_name(), "market");
+        assert_eq!(Market::pk_name(), "market_id");
+        let mut m = Market {
+            market_id: None,
+            name: String::new(),
+            address: String::new(),
+            contact: String::new(),
+            phone: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        // pk() 在 market_id=None 时回退 0
+        assert_eq!(m.pk(), 0);
+        m.set_pk(99);
+        assert_eq!(m.pk(), 99);
+        assert_eq!(Market::columns().len(), 8);
+        assert_eq!(Market::fillable().len(), 5);
+        assert_eq!(Market::guarded().len(), 1);
+        // get_column_value 已知列返回 Some，未知列返回 None
+        assert!(m.get_column_value("market_id").is_some());
+        assert!(m.get_column_value("name").is_some());
+        assert!(m.get_column_value("status").is_some());
+        assert!(m.get_column_value("nonexistent").is_none());
+        // timestamp_fields 配置了 created_at + updated_at
+        assert!(Market::timestamp_fields().is_some());
+    }
+}

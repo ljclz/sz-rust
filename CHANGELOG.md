@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Added — UXR 复评报告 + 红队复核回执登记入档（2026-11-06，六环闭环第 6 环）
+
+> 来源：用户要求复跑 `docs/audit/uxr-eval-prompt.md`。复评报告 `docs/audit/2026-11-06-UXR复评报告.md` + 红队复核回执 `docs/audit/2026-11-06-UXR复评-红队复核回执.md` 已落盘，红队确认 27/27 证据真实、报告可信，三件齐备方可视为评测批次闭环。
+
+- 新增 `docs/audit/2026-11-06-UXR复评报告.md`：基于 HEAD 重新执行定性用户体验复评，总分 5.4→**7.1/10**（净 +1.7）。**11/11 项闭环**（P0 管理后台 API-only / 英文 WASM 安全声明 / ORM ThinkPHP 流畅 API、P1 README changelog 前置等全部整改落地）。**2 项新引入 P2**：N1 WASM 端点缺 `/api/v1/` 版本前缀（router.rs:125，与同仓 REST 版本约定不一致）；N5 文档未说明 HTTP 200+信封 code 约定（controller.rs:1078-1079，PHP 对齐的 `code:1=成功 / code:0=失败` 信封体未在文档显式说明，易被误读为自相矛盾）。
+- 新增 `docs/audit/2026-11-06-UXR复评-红队复核回执.md`：独立复核（复核员 session ≠ 复评报告作者 session ≠ 整改实施者）确认 27/27 证据真实（file:line 均经 grep/read 实际核查）、评分跳变 5.4→7.1 有依据无虚高、11 项闭环无幻影交付。结论：报告可信，可登记入档。
+- 同步登记 `docs/audit/README.md` 索引两条目 + `docs/audit/doc-debt.md` 新增 2 条 PENDING 次债（DB-2026-11-06-01 N1 WASM 版本前缀 / DB-2026-11-06-02 N5 文档约定），限期 2026-11-13（1 周内）。
+
 ### CI/CD — P2-3 flaky 治理：引入 cargo-nextest 替代 --jobs 1 串行测试（2026-11-06）
 
 > 来源：SDET 复评报告 `docs/audit/2026-11-05-SDET复评报告.md` P2-3「nextest/retry 仍缺，ci.yml:121,123,510,536 仍 --jobs 1」。本批闭合该扣分项。

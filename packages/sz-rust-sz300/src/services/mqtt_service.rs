@@ -312,3 +312,133 @@ pub async fn send_ota_command(device_sn: &str, ota_url: &str, version: &str) -> 
 
     Ok(())
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────
+    // SzMqttTopics 常量 — 锁定 topic 模板字符串
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn sz_mqtt_topics_device_to_server_constants() {
+        assert_eq!(SzMqttTopics::DEVICE_STATUS, "/sz/device/{device_sn}/status");
+        assert_eq!(SzMqttTopics::DEVICE_ORDER, "/sz/device/{device_sn}/order");
+        assert_eq!(SzMqttTopics::DEVICE_LOG, "/sz/device/{device_sn}/log");
+    }
+
+    #[test]
+    fn sz_mqtt_topics_server_to_device_constants() {
+        assert_eq!(SzMqttTopics::SERVER_OTA, "/sz/server/{device_sn}/ota");
+        assert_eq!(SzMqttTopics::SERVER_CONFIG, "/sz/server/{device_sn}/config");
+        assert_eq!(SzMqttTopics::SERVER_COMMAND, "/sz/server/{device_sn}/cmd");
+    }
+
+    #[test]
+    fn sz_mqtt_topics_broadcast_constant() {
+        assert_eq!(SzMqttTopics::SERVER_BROADCAST, "/sz/server/broadcast");
+    }
+
+    // ─────────────────────────────────────────────
+    // get_mqtt_config — 纯逻辑（从配置构造 MqttConfig）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn get_mqtt_config_broker_url_is_production_iot_endpoint() {
+        let cfg = get_mqtt_config();
+        assert_eq!(cfg.broker_url, "mqtts://iot.鲜视达.cn:8883");
+    }
+
+    #[test]
+    fn get_mqtt_config_keep_alive_is_30_seconds() {
+        let cfg = get_mqtt_config();
+        assert_eq!(cfg.keep_alive, 30, "keep_alive 应为 30 秒");
+    }
+
+    #[test]
+    fn get_mqtt_config_client_id_has_sz300_server_prefix() {
+        let cfg = get_mqtt_config();
+        let client_id = cfg.client_id.expect("client_id 应被设置");
+        assert!(
+            client_id.starts_with("sz300-server-"),
+            "client_id 应以 sz300-server- 开头, 实际: {client_id}"
+        );
+        // UUID 第一段（8 hex 字符）应跟在前缀后
+        let suffix = &client_id["sz300-server-".len()..];
+        assert_eq!(suffix.len(), 8, "UUID 第一段应为 8 字符, 实际: {suffix}");
+        assert!(
+            suffix.chars().all(|c| c.is_ascii_hexdigit()),
+            "UUID 第一段应为十六进制, 实际: {suffix}"
+        );
+    }
+
+    // ─────────────────────────────────────────────
+    // get_subscribe_topics — 纯逻辑（返回服务器订阅的 3 个 topic）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn get_subscribe_topics_returns_three_device_topics() {
+        let topics = get_subscribe_topics();
+        assert_eq!(topics.len(), 3, "应订阅 3 个设备 topic");
+    }
+
+    #[test]
+    fn get_subscribe_topics_names_match_device_patterns() {
+        let topics = get_subscribe_topics();
+        let names: Vec<&str> = topics.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names[0], "/sz/device/+/status");
+        assert_eq!(names[1], "/sz/device/+/order");
+        assert_eq!(names[2], "/sz/device/+/log");
+    }
+
+    #[test]
+    fn get_subscribe_topics_all_use_default_qos_at_most_once() {
+        let topics = get_subscribe_topics();
+        for t in &topics {
+            assert_eq!(
+                t.qos,
+                QoS::AtMostOnce,
+                "topic {} 的 QoS 应为默认 AtMostOnce",
+                t.name
+            );
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // send_ota_command — 构造 OTA 消息（不实际发送，仅验证消息构建成功）
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn send_ota_command_returns_ok_with_valid_inputs() {
+        let result = send_ota_command("SN-OTA-001", "https://ota.example.com/v2.bin", "2.0.0").await;
+        assert!(result.is_ok(), "send_ota_command 应返回 Ok: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn send_ota_command_returns_ok_with_empty_version() {
+        // 空版本号仍应成功构建消息（业务层不校验版本格式）
+        let result = send_ota_command("SN-OTA-002", "https://ota.example.com/v3.bin", "").await;
+        assert!(result.is_ok(), "空版本号应仍返回 Ok: {:?}", result);
+    }
+
+    // ─────────────────────────────────────────────
+    // MockMqttPlugin::publish — Mock 实现，无 Broker，应始终返回 Ok
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_mqtt_plugin_publish_returns_ok() {
+        let payload = b"{\"test\": true}";
+        let result = MockMqttPlugin::publish("/sz/test/topic", payload, 1).await;
+        assert!(result.is_ok(), "MockMqttPlugin::publish 应返回 Ok: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn mock_mqtt_plugin_publish_accepts_empty_payload() {
+        let result = MockMqttPlugin::publish("/sz/test/empty", &[], 0).await;
+        assert!(result.is_ok(), "空 payload 应仍返回 Ok: {:?}", result);
+    }
+
+    // 注：MockMqttPlugin::start 需要 AppState（含 db_pool），无法纯逻辑测试；
+    // handle_device_status/order/log 需要 DB 连接，已有 #[ignore] 集成测试覆盖
+    // （见 tests/service_coverage_test.rs），此处不重复。
+}

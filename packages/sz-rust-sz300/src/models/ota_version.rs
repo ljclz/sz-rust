@@ -148,3 +148,66 @@ impl RelationLoader for OtaVersion {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let v = OtaVersion {
+            ota_id: Some(9),
+            version: "1.2.3".into(),
+            device_model: "SZ-SCALE-X1".into(),
+            url: "https://cdn.example.com/fw/1.2.3.bin".into(),
+            md5: "d41d8cd98f00b204e9800998ecf8427e".into(),
+            changelog: "修复称重漂移".into(),
+            size: 102400,
+            forced: 1,
+            status: 1,
+            created_at: Some("2026-04-04 00:00:00".into()),
+        };
+        let json = serde_json::to_string(&v).expect("serialize");
+        let back: OtaVersion = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.ota_id, Some(9));
+        assert_eq!(back.version, "1.2.3");
+        assert_eq!(back.device_model, "SZ-SCALE-X1");
+        assert_eq!(back.url, "https://cdn.example.com/fw/1.2.3.bin");
+        assert_eq!(back.md5, "d41d8cd98f00b204e9800998ecf8427e");
+        assert_eq!(back.changelog, "修复称重漂移");
+        assert_eq!(back.size, 102400);
+        assert_eq!(back.forced, 1);
+        assert_eq!(back.status, 1);
+        assert_eq!(back.created_at.as_deref(), Some("2026-04-04 00:00:00"));
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(OtaVersion::table_name(), "ota_version");
+        assert_eq!(OtaVersion::pk_name(), "ota_id");
+        let mut v = OtaVersion {
+            ota_id: None,
+            version: String::new(),
+            device_model: String::new(),
+            url: String::new(),
+            md5: String::new(),
+            changelog: String::new(),
+            size: 0,
+            forced: 0,
+            status: 0,
+            created_at: None,
+        };
+        assert_eq!(v.pk(), 0);
+        assert!(v.get_column_value("ota_id").is_none());
+        v.set_pk(5);
+        assert_eq!(v.pk(), 5);
+        assert!(v.get_column_value("ota_id").is_some());
+        assert_eq!(OtaVersion::columns().len(), 10);
+        assert_eq!(OtaVersion::fillable().len(), 8);
+        assert_eq!(OtaVersion::guarded().len(), 1);
+        assert!(v.get_column_value("version").is_some());
+        assert!(v.get_column_value("forced").is_some());
+        assert!(v.get_column_value("bad").is_none());
+        // ota_version 只有 created_at（无 updated_at）
+        assert!(OtaVersion::timestamp_fields().is_some());
+    }
+}

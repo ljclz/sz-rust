@@ -452,4 +452,103 @@ mod tests {
         let fields: HashMap<String, Value> = HashMap::new();
         assert!(fields.is_empty(), "空 fields 应在 update 入口直接返回 Err");
     }
+
+    // ─────────────────────────────────────────────
+    // fake pool 测试：用 connect_lazy_with 构造连不存在的 DB 的池，
+    // 让 service 函数5走完纯逻辑（WHERE 构建 / SET 构建）后在 acquire 失败，
+    // 覆盖 acquire 之前的纯逻辑行 + acquire 失败的错误映射行。
+    // ─────────────────────────────────────────────
+
+    use std::sync::Arc;
+
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn product_list_fake_pool_covers_where_construction_all_filters() {
+        let pool = make_fake_pool();
+        let filters = ProductFilters {
+            merchant_id: Some(1),
+            cat_id: Some(2),
+            keyword: Some("鱼".to_string()),
+        };
+        let result = ProductService::list(&pool, 1, 10, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn product_list_fake_pool_covers_where_construction_no_filters() {
+        let pool = make_fake_pool();
+        let filters = ProductFilters {
+            merchant_id: None,
+            cat_id: None,
+            keyword: None,
+        };
+        let result = ProductService::list(&pool, 1, 10, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn product_get_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let result = ProductService::get(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 get 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
+
+    #[tokio::test]
+    async fn product_create_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let product = Product {
+            good_id: None,
+            merchant_id: 1,
+            cat_id: None,
+            name: "test".into(),
+            barcode: "".into(),
+            price: 100,
+            unit: "个".into(),
+            ai_class_id: None,
+            image: "".into(),
+            status: 1,
+            created_at: None,
+            updated_at: None,
+        };
+        let result = ProductService::create(&pool, &product).await;
+        assert!(result.is_err(), "fake pool 应导致 create 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
+
+    #[tokio::test]
+    async fn product_update_fake_pool_covers_set_construction() {
+        let pool = make_fake_pool();
+        let mut fields: HashMap<String, Value> = HashMap::new();
+        fields.insert("name".into(), Value::String("updated".into()));
+        fields.insert("price".into(), Value::I64(999));
+        let result = ProductService::update(&pool, 1, fields).await;
+        assert!(result.is_err(), "fake pool 应导致 update 失败");
+    }
+
+    #[tokio::test]
+    async fn product_delete_fake_pool_covers_acquire_error_mapping() {
+        let pool = make_fake_pool();
+        let result = ProductService::delete(&pool, 1).await;
+        assert!(result.is_err(), "fake pool 应导致 delete 失败");
+        assert!(result.unwrap_err().contains("数据库连接失败"));
+    }
 }

@@ -132,3 +132,76 @@ impl RelationLoader for OrderItem {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serde_roundtrip_preserves_nullable_good_id() {
+        // good_id = Some（商品行）与 None（运费行/手工行）两种情况
+        let item = OrderItem {
+            item_id: Some(11),
+            order_id: 100,
+            good_id: Some(202),
+            good_name: "鲈鱼".into(),
+            price_fen: 3000,
+            weight_g: 250,
+            total_fen: 750,
+            quantity: 1,
+        };
+        let json = serde_json::to_string(&item).expect("serialize");
+        let back: OrderItem = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.item_id, Some(11));
+        assert_eq!(back.order_id, 100);
+        assert_eq!(back.good_id, Some(202));
+        assert_eq!(back.good_name, "鲈鱼");
+        assert_eq!(back.price_fen, 3000);
+        assert_eq!(back.weight_g, 250);
+        assert_eq!(back.total_fen, 750);
+        assert_eq!(back.quantity, 1);
+
+        let fee_row = OrderItem {
+            item_id: None,
+            order_id: 100,
+            good_id: None,
+            good_name: "运费".into(),
+            price_fen: 500,
+            weight_g: 0,
+            total_fen: 500,
+            quantity: 1,
+        };
+        let json2 = serde_json::to_string(&fee_row).expect("serialize");
+        let back2: OrderItem = serde_json::from_str(&json2).expect("deserialize");
+        assert_eq!(back2.good_id, None);
+        assert_eq!(back2.good_name, "运费");
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(OrderItem::table_name(), "order_item");
+        assert_eq!(OrderItem::pk_name(), "item_id");
+        let mut it = OrderItem {
+            item_id: None,
+            order_id: 0,
+            good_id: None,
+            good_name: String::new(),
+            price_fen: 0,
+            weight_g: 0,
+            total_fen: 0,
+            quantity: 0,
+        };
+        assert_eq!(it.pk(), 0);
+        assert!(it.get_column_value("item_id").is_none());
+        it.set_pk(33);
+        assert_eq!(it.pk(), 33);
+        assert!(it.get_column_value("item_id").is_some());
+        assert_eq!(OrderItem::columns().len(), 8);
+        assert_eq!(OrderItem::fillable().len(), 7);
+        assert_eq!(OrderItem::guarded().len(), 1);
+        assert!(it.get_column_value("order_id").is_some());
+        assert!(it.get_column_value("good_id").is_none());
+        assert!(it.get_column_value("qqq").is_none());
+        // OrderItem 无 timestamp_fields
+        assert!(OrderItem::timestamp_fields().is_none());
+    }
+}

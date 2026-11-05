@@ -914,4 +914,294 @@ mod tests {
         let store = in_memory_tx_log_store();
         assert_eq!(store.len(), 0);
     }
+
+    // ─────────────────────────────────────────────
+    // state_to_str / str_to_state 全变体映射（P2 第二批补分支覆盖）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn test_str_to_state_all_variants_including_legacy_aliases() {
+        // 当前词表
+        assert_eq!(str_to_state("running"), TxState::Running);
+        assert_eq!(str_to_state("committed"), TxState::Completed);
+        assert_eq!(str_to_state("compensated"), TxState::Compensated);
+        assert_eq!(str_to_state("aborted"), TxState::Cancelled);
+        assert_eq!(str_to_state("manual_intervention"), TxState::Failed);
+        assert_eq!(str_to_state("timeout"), TxState::Timeout);
+        // 旧词表兼容映射（读取历史行）
+        assert_eq!(str_to_state("completed"), TxState::Completed);
+        assert_eq!(str_to_state("compensating"), TxState::Compensated);
+        assert_eq!(str_to_state("cancelled"), TxState::Cancelled);
+        assert_eq!(str_to_state("failed"), TxState::Failed);
+        // 未知词表回退为 Running
+        assert_eq!(str_to_state("unknown"), TxState::Running);
+        assert_eq!(str_to_state(""), TxState::Running);
+    }
+
+    #[test]
+    fn test_state_to_str_and_back_round_trip_all_current_variants() {
+        // 当前词表 round-trip（state_to_str 的输出经 str_to_state 应还原）
+        for state in [
+            TxState::Running,
+            TxState::Completed,
+            TxState::Compensated,
+            TxState::Cancelled,
+            TxState::Failed,
+            TxState::Timeout,
+        ] {
+            let s = state_to_str(state);
+            assert_eq!(str_to_state(s), state, "round-trip 失败: {state:?} -> {s}");
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // parse_tx_log_entry — DB 行解析纯逻辑（私有函数，覆盖各分支）
+    // ─────────────────────────────────────────────
+
+    use std::collections::HashMap;
+
+    fn make_full_row() -> HashMap<String, DbValue> {
+        let mut row = HashMap::new();
+        row.insert("tx_id".into(), DbValue::String("saga-001".into()));
+        row.insert("tx_type".into(), DbValue::String("saga".into()));
+        row.insert("state".into(), DbValue::String("committed".into()));
+        row.insert(
+            "steps".into(),
+            DbValue::String(r#"["create_order","deduct_stock"]"#.into()),
+        );
+        row.insert(
+            "payload".into(),
+            DbValue::String(r#"{"order_id":42}"#.into()),
+        );
+        row.insert("created_at".into(), DbValue::I64(1700000000));
+        row.insert("updated_at".into(), DbValue::I64(1700000001));
+        row
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_full_row_saga_committed() {
+        let row = make_full_row();
+        let entry = parse_tx_log_entry(&row).expect("完整行应解析成功");
+        assert_eq!(entry.tx_id, "saga-001");
+        assert_eq!(entry.tx_type, TxType::Saga);
+        assert_eq!(entry.state, TxState::Completed);
+        assert_eq!(entry.created_at, 1700000000);
+        assert_eq!(entry.updated_at, 1700000001);
+        // steps / payload 解析为 JSON
+        assert!(entry.steps.is_array());
+        assert_eq!(entry.steps[0], "create_order");
+        assert_eq!(entry.payload["order_id"], 42);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_tcc_type() {
+        let mut row = make_full_row();
+        row.insert("tx_type".into(), DbValue::String("tcc".into()));
+        let entry = parse_tx_log_entry(&row).expect("tcc 行应解析成功");
+        assert_eq!(entry.tx_type, TxType::Tcc);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_unknown_tx_type_defaults_to_saga() {
+        let mut row = make_full_row();
+        row.insert("tx_type".into(), DbValue::String("unknown_type".into()));
+        let entry = parse_tx_log_entry(&row).expect("未知 tx_type 应回退为 Saga");
+        assert_eq!(entry.tx_type, TxType::Saga);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_missing_tx_id_returns_persistence_error() {
+        let mut row = make_full_row();
+        row.remove("tx_id");
+        let result = parse_tx_log_entry(&row);
+        assert!(result.is_err(), "缺少 tx_id 应返回 Err");
+        match result {
+            Err(DtxError::Persistence(msg)) => assert!(msg.contains("tx_id"), "msg: {msg}"),
+            other => panic!("应为 DtxError::Persistence, 实际: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_missing_state_defaults_to_running() {
+        let mut row = make_full_row();
+        row.remove("state");
+        let entry = parse_tx_log_entry(&row).expect("缺少 state 应回退为 Running");
+        assert_eq!(entry.state, TxState::Running);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_invalid_steps_json_falls_back_to_null() {
+        let mut row = make_full_row();
+        row.insert("steps".into(), DbValue::String("not valid json{{{".into()));
+        let entry = parse_tx_log_entry(&row).expect("无效 steps JSON 应回退为 Null");
+        assert!(entry.steps.is_null(), "无效 JSON 应回退为 Null");
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_invalid_payload_json_falls_back_to_null() {
+        let mut row = make_full_row();
+        row.insert("payload".into(), DbValue::String("broken json }}}".into()));
+        let entry = parse_tx_log_entry(&row).expect("无效 payload JSON 应回退为 Null");
+        assert!(entry.payload.is_null(), "无效 JSON 应回退为 Null");
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_missing_timestamps_default_to_zero() {
+        let mut row = make_full_row();
+        row.remove("created_at");
+        row.remove("updated_at");
+        let entry = parse_tx_log_entry(&row).expect("缺少时间戳应回退为 0");
+        assert_eq!(entry.created_at, 0);
+        assert_eq!(entry.updated_at, 0);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_state_timeout_via_str_to_state() {
+        let mut row = make_full_row();
+        row.insert("state".into(), DbValue::String("timeout".into()));
+        let entry = parse_tx_log_entry(&row).expect("timeout state 应解析成功");
+        assert_eq!(entry.state, TxState::Timeout);
+    }
+
+    #[test]
+    fn test_parse_tx_log_entry_state_legacy_failed_alias() {
+        let mut row = make_full_row();
+        row.insert("state".into(), DbValue::String("failed".into()));
+        let entry = parse_tx_log_entry(&row).expect("旧词表 failed 应解析成功");
+        assert_eq!(entry.state, TxState::Failed);
+    }
+
+    // ─────────────────────────────────────────────
+    // Saga Action payload 校验分支（用 Mock 服务测 Action 的 payload 解析错误路径）
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_deduct_stock_action_missing_items_returns_generic_error() {
+        let stock_svc: Arc<dyn StockService> = Arc::new(MockStockService { fail: false });
+        let action = DeductStockAction::new(stock_svc);
+        // payload 缺少 "items" 字段
+        let payload = json!({ "order_id": 1 });
+        let result = action.execute(&payload).await;
+        assert!(result.is_err(), "缺少 items 应返回 Err");
+        match result {
+            Err(DtxError::Generic(msg)) => assert!(msg.contains("items"), "msg: {msg}"),
+            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deduct_stock_action_item_missing_good_id_returns_error() {
+        let stock_svc: Arc<dyn StockService> = Arc::new(MockStockService { fail: false });
+        let action = DeductStockAction::new(stock_svc);
+        // items 中某项 good_id = None
+        let payload = json!({
+            "items": [{"good_name": "test", "quantity": 1, "price_fen": 100, "weight_g": 0, "total_fen": 100}]
+        });
+        let result = action.execute(&payload).await;
+        assert!(result.is_err(), "good_id 缺失应返回 Err");
+    }
+
+    #[tokio::test]
+    async fn test_initiate_payment_action_missing_order_id_returns_error() {
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = InitiatePaymentAction::new(payment_svc);
+        // payload 缺少 "order_id"
+        let payload = json!({ "order": { "total_fen": 100 } });
+        let result = action.execute(&payload).await;
+        assert!(result.is_err(), "缺少 order_id 应返回 Err");
+        match result {
+            Err(DtxError::Generic(msg)) => assert!(msg.contains("order_id"), "msg: {msg}"),
+            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancel_payment_action_no_payment_id_is_noop_ok() {
+        // payload 无 payment_id → 不调用 cancel，直接 Ok
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = CancelPaymentAction::new(payment_svc);
+        let payload = json!({ "order_id": 1 });
+        let result = action.execute(&payload).await;
+        assert!(result.is_ok(), "无 payment_id 应为 no-op Ok: {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_initiate_payment_action_passes_amount_from_order() {
+        // 验证 InitiatePaymentAction 从 payload.order.total_fen 提取金额传给支付服务
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = InitiatePaymentAction::new(payment_svc);
+        let payload = json!({ "order_id": 99, "order": { "total_fen": 8888 } });
+        let result = action.execute(&payload).await.expect("应成功");
+        // MockPaymentService::initiate 返回 "pay-{order_id}-{amount_fen}"
+        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(payment_id, "pay-99-8888", "应传递正确的 order_id 和 amount_fen");
+    }
+
+    #[tokio::test]
+    async fn test_deduct_stock_action_success_sets_stock_deducted_flag() {
+        let stock_svc: Arc<dyn StockService> = Arc::new(MockStockService { fail: false });
+        let action = DeductStockAction::new(stock_svc);
+        // OrderItem 反序列化需要 order_id 字段（非 Option）
+        let payload = json!({
+            "items": [{"item_id": null, "order_id": 0, "good_id": 1, "good_name": "test", "quantity": 2, "price_fen": 100, "weight_g": 0, "total_fen": 200}]
+        });
+        let result = action.execute(&payload).await.expect("应成功");
+        assert_eq!(result["stock_deducted"], true, "应设置 stock_deducted=true");
+    }
+
+    #[tokio::test]
+    async fn test_restore_stock_action_missing_items_returns_generic_error() {
+        let stock_svc: Arc<dyn StockService> = Arc::new(MockStockService { fail: false });
+        let action = RestoreStockAction::new(stock_svc);
+        let payload = json!({ "order_id": 1 });
+        let result = action.execute(&payload).await;
+        assert!(result.is_err(), "缺少 items 应返回 Err");
+        match result {
+            Err(DtxError::Generic(msg)) => assert!(msg.contains("items"), "msg: {msg}"),
+            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_restore_stock_action_item_missing_good_id_returns_error() {
+        let stock_svc: Arc<dyn StockService> = Arc::new(MockStockService { fail: false });
+        let action = RestoreStockAction::new(stock_svc);
+        let payload = json!({
+            "items": [{"order_id": 0, "good_name": "test", "quantity": 1, "price_fen": 100, "weight_g": 0, "total_fen": 100}]
+        });
+        let result = action.execute(&payload).await;
+        assert!(result.is_err(), "good_id 缺失应返回 Err");
+    }
+
+    #[tokio::test]
+    async fn test_initiate_payment_action_missing_order_amount_defaults_zero() {
+        // payload.order 缺少 total_fen → amount_fen 默认 0
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = InitiatePaymentAction::new(payment_svc);
+        let payload = json!({ "order_id": 55, "order": {} });
+        let result = action.execute(&payload).await.expect("应成功");
+        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(payment_id, "pay-55-0", "缺少 total_fen 时 amount 应默认 0");
+    }
+
+    #[tokio::test]
+    async fn test_initiate_payment_action_missing_order_object_defaults_zero() {
+        // payload 完全缺少 order 对象 → amount_fen 默认 0
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = InitiatePaymentAction::new(payment_svc);
+        let payload = json!({ "order_id": 77 });
+        let result = action.execute(&payload).await.expect("应成功");
+        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(payment_id, "pay-77-0", "缺少 order 对象时 amount 应默认 0");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_payment_action_with_payment_id_calls_cancel() {
+        // payload 有 payment_id → 调用 cancel
+        let payment_svc: Arc<dyn PaymentService> = Arc::new(MockPaymentService { fail: false });
+        let action = CancelPaymentAction::new(payment_svc);
+        let payload = json!({ "payment_id": "pay-100-5000" });
+        let result = action.execute(&payload).await;
+        assert!(result.is_ok(), "有 payment_id 时应调用 cancel 并返回 Ok: {:?}", result);
+    }
 }
