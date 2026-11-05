@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Added — SDET/架构师/技术文档/产品经理四评测批次复评+红队回执登记入档（2026-11-06，六环闭环第 6 环）
+
+> 来源：用户要求完成 SDET/架构师/技术文档/PM 四个评测批次的六环闭环第 6 环（登记入档），三件齐备。UXR 批次已由 T19 完成登记，本批不重复。
+
+- **SDET 复评**：新增 `docs/audit/2026-11-06-SDET复评报告.md` + `docs/audit/2026-11-06-SDET复评-红队复核回执.md`。十维度评分 7.5→**8.6/10**（净 +1.1），**11 项闭环**。**2 项新引入**：P1-NEW flaky test `cold_start_with_existing_journal_skips`（vectorize.rs:474，测试扫描仓库根目录所有 .rs 文件受 mtime 干扰，根治方向改用 `tempfile::tempdir()`）+ P2-NEW `ci-config-audit.js` 未检查 nextest/retries 防复发门禁缺失。红队独立复核确认 24 处证据 23 处精确匹配（1 处行号漂移已订正），报告可信。
+- **系统架构师复评**：新增 `docs/audit/2026-11-06-系统架构师复评报告.md` + `docs/audit/2026-11-06-系统架构师复评-红队复核回执.md`。架构成熟度 **8.1/10**（81/100），闭环/开放/新引入三分类。红队独立复核确认 30 处证据 28 处一致，**9 项数字偏差已订正**（4 P1 + 5 P2 管术错误：十维度合计、平均分、升降总结等），报告可信。
+- **技术文档复评**：新增 `docs/audit/2026-11-06-技术文档复评报告.md` + `docs/audit/2026-11-06-技术文档复评-红队复核回执.md`。总分 **6.5/10**，**2 P0**（SECURITY.md unsafe 虚假声明 mem_pool.rs:74,143 + product-technical-plan.md:2140 文档损坏）+ **7 P1**（版本号/门禁数/ADR 数/企业版残留/英文不全/铁律数不一致）+ **12 P2**；P1-7 幻影缺陷已删除。红队独立复核确认 27 项核验 22 项通过，5 项问题已由报告作者全部订正，报告可信。
+- **产品经理复评**：新增 `docs/audit/2026-11-06-产品经理复评报告.md` + `docs/audit/2026-11-06-产品经理复评-红队复核回执.md`。总分 **5.6/10**，**4 P0**（产品定位摇摆与 ADR-043 未对齐 / PMF 未验证 / Rust 编译速度 / 路线图与进度不同步）+ **5 P1**（Rust 框架竞品缺失 / 商业化文档矛盾 / 插件部分完成 / 市场未落地 / 英文不全）+ **4 P2**；**8 关键产品假设待验证**。红队独立复核确认 52/55 证据一致（3 处偏差已订正），报告可信。
+- 同步登记 `docs/audit/README.md` 索引 6 条目（SDET 复评+红队 / 架构师复评+红队 / 技术文档红队 / 产品经理红队，技术文档与产品经理复评报告条目已存在）+ `docs/audit/doc-debt.md` 新增 10 条 PENDING 欠债（DB-2026-11-06-03 SDET flaky test / DB-2026-11-06-04 SDET 防复发门禁缺失 / DB-2026-11-06-05 技术文档 P0 SECURITY unsafe / DB-2026-11-06-06 技术文档 P0 文档损坏 / DB-2026-11-06-07 技术文档 P1 版本号 / DB-2026-11-06-08 技术文档 P1 企业版残留 / DB-2026-11-06-09 PM P0 定位摇摆 / DB-2026-11-06-10 PM P0 PMF 未验证 / DB-2026-11-06-11 PM P0 路线图不同步 / DB-2026-11-06-12 PM P1 商业化文档矛盾），doc-debt 计数口径更新为 36 RESOLVED + 0 PARTIAL + 12 PENDING。
+
 ### Added — UXR 复评报告 + 红队复核回执登记入档（2026-11-06，六环闭环第 6 环）
 
 > 来源：用户要求复跑 `docs/audit/uxr-eval-prompt.md`。复评报告 `docs/audit/2026-11-06-UXR复评报告.md` + 红队复核回执 `docs/audit/2026-11-06-UXR复评-红队复核回执.md` 已落盘，红队确认 27/27 证据真实、报告可信，三件齐备方可视为评测批次闭环。
@@ -26,6 +36,12 @@
 - **设计**：`CARGO_BUILD_JOBS=1` 保留编译串行（规避 P3-3 的 Cargo 高并发编译 crate 解析竞争），nextest 测试执行并行 + `--retries 2` 自动重试 flaky 测试（最多重试 2 次，3 次全失败才标 FAIL）。
 - **不改部分**：ci.yml 行 518 miri（`cargo +nightly miri test`，不兼容 nextest）、行 152/154 feature-gated 测试（无 --jobs 1）、行 555 Windows 内存基线（`--ignored --nocapture`）、行 572 AI facade（无 --jobs 1）；db-integration.yml/benchmark.yml/soak.yml/fuzz.yml/marketplace-ci.yml/publish-oss.yml（带 `--test-threads=1` 的 DB/性能测试需串行，全不改）。
 - **验证**：隔离环境（`CARGO_HOME=D:/cargo-home-verify CARGO_TARGET_DIR=D:/rust-target-verify`）安装 cargo-nextest v0.9.151 + 跑 `cargo nextest run -p sz-rust-sz300 --lib --retries 2` = **199 passed / 0 failed / 0 skipped**（5.692s）；ci.yml/release.yml YAML 语法 `python yaml.safe_load` 通过（ci.yml 38 jobs、release.yml 4 jobs）。
+
+### Changed — SDET 复评报告 P2-3 状态同步更新（2026-11-06）
+
+> 来源：P2-3 flaky 治理修复落地后，复评报告 `docs/audit/2026-11-05-SDET复评报告.md` 中 P2-3 仍标记为"仍存在"，需同步更新。
+
+- 更新 `docs/audit/2026-11-05-SDET复评报告.md`：P2-3 状态从"仍存在"升级为"已修复"（ci.yml:119-131 已引入 cargo-nextest + --retries 2）。维度 9 测试基础设施 7→9（+2），加权结论 8.3→**8.5/10**（净 +1.0）。已修复缺陷 10→11，仍存在 1→0。原引用行号 ci.yml:121,123,510,536 已过期（修复后变为 cargo-nextest 安装步骤和 upload-artifact），已更新为当前行号 ci.yml:119-131。注：复评报告写就时（2026-11-05）P2-3 确为"仍存在"，2026-11-06 修复落地后报告同步更新，非幻影错误。
 
 ### Added — SDET 复评报告登记入档（2026-11-05，六环闭环第 6 环）
 
