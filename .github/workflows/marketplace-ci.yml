@@ -2,6 +2,9 @@
 # packages/sz-rust-marketplace 在 v2.0.0 树中存在（64 个 packages 之一），push 到 main 即会触发。
 # 2026-10-30：工作区通过 path = "../sz-orm/..." 引用兄弟仓库，缺 sz-orm 时 cargo check 直接失败，
 # 故在 checkout 后补 ./.github/actions/checkout-sz-orm。
+# 2026-11-05：新增 signature-verify job（P2-6），闭合架构师复评报告第 56 行扣分项
+# （插件市场密钥管理 CI 仍缺）。注入 PLUGIN_PUBLIC_KEY secret + 全链路验签测试 + 哈希校验，
+# secret 缺失时 fail-closed（CI 失败而非跳过）。
 name: Marketplace CI
 
 on:
@@ -34,3 +37,29 @@ jobs:
         run: cargo test -p sz-rust-marketplace
       - name: CLI Test
         run: cargo test -p sz-rust-cli
+
+  signature-verify:
+    # P2-6：插件市场密钥管理 CI（架构师复评报告 Phase 2 #9 验收标准）
+    # 注入 PLUGIN_PUBLIC_KEY secret + 全链路验签测试 + 插件包哈希校验。
+    # fail-closed：secret 缺失时 CI 失败而非跳过。
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      PLUGIN_PUBLIC_KEY: ${{ secrets.PLUGIN_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/checkout-sz-orm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fail-closed — 校验 PLUGIN_PUBLIC_KEY secret 已注入
+        run: |
+          if [ -z "${PLUGIN_PUBLIC_KEY}" ]; then
+            echo "::error::PLUGIN_PUBLIC_KEY secret 未配置，fail-closed（架构师复评 P2-6 要求 secret 缺失即 CI 失败而非跳过）"
+            exit 1
+          fi
+          echo "PLUGIN_PUBLIC_KEY 已注入（长度: ${#PLUGIN_PUBLIC_KEY} 字节）"
+      - name: 全链路验签测试（签名 → 哈希 → 验签 fail-closed 负例）
+        run: cargo test -p sz-rust-marketplace --test signature_e2e
+      - name: 插件包哈希校验测试
+        run: cargo test -p sz-rust-marketplace --test signature_e2e checksum
+      - name: signature 模块单元测试
+        run: cargo test -p sz-rust-marketplace --lib signature
