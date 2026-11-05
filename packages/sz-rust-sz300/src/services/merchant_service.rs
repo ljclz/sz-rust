@@ -166,8 +166,10 @@ impl MerchantService {
             Value::String(merchant.bank_name.clone()),
         ];
         conn.execute_with_params(sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "创建商户失败: name={}", merchant.name);
-            "创建失败".to_string()
+            let msg = e.to_string();
+            tracing::error!(error = %msg, "创建商户失败: name={}", merchant.name);
+            // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+            crate::services::db_error::classify_or_fallback(&msg, "创建失败")
         })?;
 
         Ok(())
@@ -233,8 +235,10 @@ impl MerchantService {
         params.push(Value::I64(merchant_id));
 
         conn.execute_with_params(&sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "更新商户失败: merchant_id={}", merchant_id);
-            "更新失败".to_string()
+            let msg = e.to_string();
+            tracing::error!(error = %msg, "更新商户失败: merchant_id={}", merchant_id);
+            // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+            crate::services::db_error::classify_or_fallback(&msg, "更新失败")
         })?;
 
         Ok(())

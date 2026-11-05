@@ -11,8 +11,8 @@ pub struct Product {
     pub good_id: Option<i64>,
     /// 商户 ID
     pub merchant_id: i64,
-    /// 类目 ID
-    pub cat_id: i64,
+    /// 类目 ID（NULL 表示未分类；016_nullable_good_cats.sql 后改 NULLABLE）
+    pub cat_id: Option<i64>,
     /// 商品名称
     pub name: String,
     /// 条形码
@@ -21,8 +21,8 @@ pub struct Product {
     pub price: i64,
     /// 计价单位（如：个、斤、千克）
     pub unit: String,
-    /// AI 分类 ID
-    pub ai_class_id: i64,
+    /// AI 分类 ID（NULL 表示未 AI 分类；016_nullable_good_cats.sql 后改 NULLABLE）
+    pub ai_class_id: Option<i64>,
     /// 商品图片 URL
     pub image: String,
     /// 状态（0=下架，1=上架）
@@ -97,12 +97,12 @@ impl ModelExt for Product {
         match column {
             "good_id" => self.good_id.map(Value::I64),
             "merchant_id" => Some(Value::I64(self.merchant_id)),
-            "cat_id" => Some(Value::I64(self.cat_id)),
+            "cat_id" => self.cat_id.map(Value::I64),
             "name" => Some(Value::String(self.name.clone())),
             "barcode" => Some(Value::String(self.barcode.clone())),
             "price" => Some(Value::I64(self.price)),
             "unit" => Some(Value::String(self.unit.clone())),
-            "ai_class_id" => Some(Value::I64(self.ai_class_id)),
+            "ai_class_id" => self.ai_class_id.map(Value::I64),
             "image" => Some(Value::String(self.image.clone())),
             "status" => Some(Value::I32(self.status as i32)),
             "created_at" => self.created_at.as_ref().map(|s| Value::String(s.clone())),
@@ -119,7 +119,7 @@ impl ModelExt for Product {
             self.merchant_id = v;
         }
         if let Some(v) = map.get("cat_id").and_then(|v| v.as_i64()) {
-            self.cat_id = v;
+            self.cat_id = Some(v);
         }
         if let Some(v) = map.get("name").and_then(|v| v.as_str()) {
             self.name = v.to_string();
@@ -134,7 +134,7 @@ impl ModelExt for Product {
             self.unit = v.to_string();
         }
         if let Some(v) = map.get("ai_class_id").and_then(|v| v.as_i64()) {
-            self.ai_class_id = v;
+            self.ai_class_id = Some(v);
         }
         if let Some(v) = map.get("image").and_then(|v| v.as_str()) {
             self.image = v.to_string();

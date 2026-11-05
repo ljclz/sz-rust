@@ -56,10 +56,28 @@ async fn setup_tables(pool: &Pool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 种子父记录：FK 链 market(1) → merchant(1) → device(1)。
+///
+/// 迁移 020/021 加 FK 后，good/order 引用 merchant(1)、order 引用 device(1)，
+/// 必须先插入父行否则 INSERT 触发 FK 1452。用 INSERT IGNORE 防并行/残留重复。
+async fn seed_fixture(pool: &Pool) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    conn.execute("INSERT IGNORE INTO market (market_id, name) VALUES (1, 'saga-test-market')")
+        .await?;
+    conn.execute("INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (1, 1, 'saga-test-merchant')")
+        .await?;
+    conn.execute("INSERT IGNORE INTO device (device_id, merchant_id, device_sn, status) VALUES (1, 1, 'SN-SAGA-FIXTURE', 1)")
+        .await?;
+    Ok(())
+}
+
 async fn insert_product(pool: &Pool, good_id: i64, stock: i32) -> anyhow::Result<()> {
     let mut conn = pool.acquire().await?;
+    // cat_id/ai_class_id 显式 NULL：迁移 013~019 已把哨兵 0 改 NULL 语义，
+    // 且 020/021 加了 fk_good_cat/fk_good_ai_class，默认 0 在空 category/ai_category 表上触发 FK 1452。
     conn.execute_with_params(
-        "INSERT INTO good (good_id, merchant_id, name, stock, price) VALUES (?, 1, ?, ?, ?)",
+        "INSERT INTO good (good_id, merchant_id, name, stock, price, cat_id, ai_class_id) \
+         VALUES (?, 1, ?, ?, ?, NULL, NULL)",
         &[
             DbValue::I64(good_id),
             DbValue::String(format!("test-good-{}", good_id)),
@@ -99,13 +117,17 @@ async fn get_product_stock(pool: &Pool, good_id: i64) -> anyhow::Result<Option<i
         .and_then(|r| r.get("stock").and_then(|v| v.as_i64()).map(|v| v as i32)))
 }
 
-async fn count_orders(pool: &Pool) -> anyhow::Result<i64> {
+/// 查询指定 order_no 的订单是否存在（并行隔离：只查自己创建的订单，
+/// 不受其他并发测试订单影响；补偿成功应返回 false）
+async fn order_exists_by_no(pool: &Pool, order_no: &str) -> anyhow::Result<bool> {
     let mut conn = pool.acquire().await?;
-    let rows = conn.query("SELECT COUNT(*) as cnt FROM `order`").await?;
-    Ok(rows
-        .first()
-        .and_then(|r| r.get("cnt").and_then(|v| v.as_i64()))
-        .unwrap_or(0))
+    let rows = conn
+        .query_with_params(
+            "SELECT 1 AS one FROM `order` WHERE order_no = ?",
+            &[DbValue::String(order_no.to_string())],
+        )
+        .await?;
+    Ok(!rows.is_empty())
 }
 
 fn make_order(order_no: &str, total_fen: i64) -> Order {
@@ -113,7 +135,7 @@ fn make_order(order_no: &str, total_fen: i64) -> Order {
         order_id: None,
         order_no: order_no.to_string(),
         merchant_id: 1,
-        device_id: 1,
+        device_id: Some(1),
         total_fen,
         total_weight_g: 100,
         item_count: 1,
@@ -130,7 +152,7 @@ fn make_order_item(good_id: i64, quantity: i32, price_fen: i64) -> OrderItem {
     OrderItem {
         item_id: None,
         order_id: 0,
-        good_id,
+        good_id: Some(good_id),
         good_name: format!("product-{}", good_id),
         price_fen,
         weight_g: 100,
@@ -183,6 +205,7 @@ async fn test_saga_all_success() {
     let cfg = mysql_test_config();
     let pool = db::init_pool(&cfg).await.expect("init_pool");
     setup_tables(&pool).await.expect("setup_tables");
+    seed_fixture(&pool).await.expect("seed_fixture");
     insert_product(&pool, 1001, 50)
         .await
         .expect("insert_product");
@@ -226,6 +249,7 @@ async fn test_saga_stock_insufficient_compensated() {
     let cfg = mysql_test_config();
     let pool = db::init_pool(&cfg).await.expect("init_pool");
     setup_tables(&pool).await.expect("setup_tables");
+    seed_fixture(&pool).await.expect("seed_fixture");
     insert_product(&pool, 2002, 1)
         .await
         .expect("insert_product");
@@ -251,8 +275,10 @@ async fn test_saga_stock_insufficient_compensated() {
     match &result {
         OrderCreateResult::Compensated { failed_step, .. } => {
             assert_eq!(failed_step, "deduct_stock");
-            let cnt = count_orders(&pool_arc).await.expect("count_orders");
-            assert_eq!(cnt, 0, "订单应被补偿删除");
+            let exists = order_exists_by_no(&pool_arc, &order.order_no)
+                .await
+                .expect("order_exists_by_no");
+            assert!(!exists, "订单 {} 应被补偿删除", order.order_no);
         }
         _ => panic!("应为 Compensated，实际: {:?}", result),
     }
@@ -264,6 +290,7 @@ async fn test_saga_payment_fail_compensated() {
     let cfg = mysql_test_config();
     let pool = db::init_pool(&cfg).await.expect("init_pool");
     setup_tables(&pool).await.expect("setup_tables");
+    seed_fixture(&pool).await.expect("seed_fixture");
     insert_product(&pool, 3003, 50)
         .await
         .expect("insert_product");
@@ -293,8 +320,10 @@ async fn test_saga_payment_fail_compensated() {
                 .await
                 .expect("get_product_stock");
             assert_eq!(stock, Some(50), "库存应恢复至 50");
-            let cnt = count_orders(&pool_arc).await.expect("count_orders");
-            assert_eq!(cnt, 0, "订单应被补偿删除");
+            let exists = order_exists_by_no(&pool_arc, &order.order_no)
+                .await
+                .expect("order_exists_by_no");
+            assert!(!exists, "订单 {} 应被补偿删除", order.order_no);
         }
         _ => panic!("应为 Compensated，实际: {:?}", result),
     }
@@ -306,6 +335,11 @@ async fn test_saga_compensate_fail_manual_intervention() {
     let cfg = mysql_test_config();
     let pool = db::init_pool(&cfg).await.expect("init_pool");
     setup_tables(&pool).await.expect("setup_tables");
+    seed_fixture(&pool).await.expect("seed_fixture");
+    // order_item.good_id=4004 需父行 good(4004) 满足 fk_order_item_good
+    insert_product(&pool, 4004, 50)
+        .await
+        .expect("insert_product");
 
     let pool_arc = Arc::new(pool);
     let order = make_order(&unique_order_no("saga-manual"), 5000);

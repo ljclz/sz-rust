@@ -149,7 +149,7 @@ impl ProductController {
                 let product = crate::models::product::Product {
                     good_id: None,
                     merchant_id,
-                    cat_id: data.get("cat_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                    cat_id: data.get("cat_id").and_then(|v| v.as_i64()),
                     name: name.clone(),
                     barcode: data
                         .get("barcode")
@@ -164,8 +164,7 @@ impl ProductController {
                         .to_string(),
                     ai_class_id: data
                         .get("ai_class_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0),
+                        .and_then(|v| v.as_i64()),
                     image: data
                         .get("image")
                         .and_then(|v| v.as_str())

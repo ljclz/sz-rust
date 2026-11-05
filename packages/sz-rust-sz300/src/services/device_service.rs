@@ -186,12 +186,11 @@ impl DeviceService {
             return Err("设备不存在".to_string());
         }
 
-        // 检查是否已绑定
+        // 检查是否已绑定（merchant_id 改 NULLABLE 后，NULL=未绑定；013_nullable_device_merchant.sql）
         let existing_merchant = rows[0]
             .get("merchant_id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        if existing_merchant != 0 {
+            .and_then(|v| v.as_i64());
+        if existing_merchant.is_some() {
             return Err("设备已绑定".to_string());
         }
 
@@ -204,8 +203,10 @@ impl DeviceService {
         conn.execute_with_params(update_sql, &update_params)
             .await
             .map_err(|e| {
-                tracing::error!(error = %e, "设备绑定更新失败: device_sn={}", device_sn);
-                "绑定失败".to_string()
+                let msg = e.to_string();
+                tracing::error!(error = %msg, "设备绑定更新失败: device_sn={}", device_sn);
+                // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+                crate::services::db_error::classify_or_fallback(&msg, "绑定失败")
             })?;
 
         // 记录操作日志（best-effort）— detail 字段是格式化字符串，作为参数传入
@@ -227,8 +228,9 @@ impl DeviceService {
             "数据库连接失败".to_string()
         })?;
 
+        // 解绑：merchant_id 置 NULL（哨兵 0 已退役，见 013_nullable_device_merchant.sql）
         let sql =
-            "UPDATE device SET merchant_id = 0, bind_at = NULL, status = 0 WHERE device_id = ?";
+            "UPDATE device SET merchant_id = NULL, bind_at = NULL, status = 0 WHERE device_id = ?";
         let params = [Value::I64(device_id)];
         conn.execute_with_params(sql, &params).await.map_err(|e| {
             tracing::error!(error = %e, "设备解绑失败: device_id={}", device_id);
@@ -361,8 +363,10 @@ impl DeviceService {
             Value::I64(device_id),
         ];
         conn.execute_with_params(sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "设备状态更新失败: device_id={}", device_id);
-            "状态更新失败".to_string()
+            let msg = e.to_string();
+            tracing::error!(error = %msg, "设备状态更新失败: device_id={}", device_id);
+            // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+            crate::services::db_error::classify_or_fallback(&msg, "状态更新失败")
         })?;
 
         Ok(())

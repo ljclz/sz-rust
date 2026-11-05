@@ -11,8 +11,8 @@ pub struct OrderItem {
     pub item_id: Option<i64>,
     /// 所属订单 ID
     pub order_id: i64,
-    /// 商品 ID
-    pub good_id: i64,
+    /// 商品 ID（NULL 表示非商品行，如运费行/手工行；015_nullable_order_item_good.sql 后改 NULLABLE）
+    pub good_id: Option<i64>,
     /// 商品名称（下单时快照）
     pub good_name: String,
     /// 单价（单位：分）
@@ -83,7 +83,7 @@ impl ModelExt for OrderItem {
         match column {
             "item_id" => self.item_id.map(Value::I64),
             "order_id" => Some(Value::I64(self.order_id)),
-            "good_id" => Some(Value::I64(self.good_id)),
+            "good_id" => self.good_id.map(Value::I64),
             "good_name" => Some(Value::String(self.good_name.clone())),
             "price_fen" => Some(Value::I64(self.price_fen)),
             "weight_g" => Some(Value::I64(self.weight_g)),
@@ -101,7 +101,7 @@ impl ModelExt for OrderItem {
             self.order_id = v;
         }
         if let Some(v) = map.get("good_id").and_then(|v| v.as_i64()) {
-            self.good_id = v;
+            self.good_id = Some(v);
         }
         if let Some(v) = map.get("good_name").and_then(|v| v.as_str()) {
             self.good_name = v.to_string();

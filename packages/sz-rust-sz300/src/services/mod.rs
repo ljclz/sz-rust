@@ -18,6 +18,8 @@ use sz_rust_core::orm::Value;
 pub mod ai_classifier;
 /// 认证服务模块（对齐 PHP AuthService）
 pub mod auth_service;
+/// DB 错误分类（2026-11-05 数据层 Phase 2 阶段4 新增 — 识别 MySQL 1452/3819 转业务友好消息）
+pub mod db_error;
 /// 设备服务模块（封装设备 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）
 pub mod device_service;
 /// 文件服务模块（对齐 PHP FileService）

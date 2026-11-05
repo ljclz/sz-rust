@@ -11,8 +11,8 @@ pub struct Category {
     pub cat_id: Option<i64>,
     /// 类目名称
     pub name: String,
-    /// 父类目 ID（0 表示顶级类目）
-    pub parent_id: i64,
+    /// 父类目 ID（NULL 表示顶级类目；017_nullable_category_parent.sql 后改 NULLABLE）
+    pub parent_id: Option<i64>,
     /// 排序权重（数值越小越靠前）
     pub sort_order: i32,
 }
@@ -58,7 +58,7 @@ impl ModelExt for Category {
         match column {
             "cat_id" => self.cat_id.map(Value::I64),
             "name" => Some(Value::String(self.name.clone())),
-            "parent_id" => Some(Value::I64(self.parent_id)),
+            "parent_id" => self.parent_id.map(Value::I64),
             "sort_order" => Some(Value::I32(self.sort_order)),
             _ => None,
         }
@@ -72,7 +72,7 @@ impl ModelExt for Category {
             self.name = v.to_string();
         }
         if let Some(v) = map.get("parent_id").and_then(|v| v.as_i64()) {
-            self.parent_id = v;
+            self.parent_id = Some(v);
         }
         if let Some(v) = map.get("sort_order").and_then(|v| v.as_i64()) {
             self.sort_order = v as i32;

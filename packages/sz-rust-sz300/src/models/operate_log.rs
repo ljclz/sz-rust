@@ -9,8 +9,8 @@ use sz_rust_core::orm::{Model, ModelExt, RelationLoader, TimestampFields, Value}
 pub struct OperateLog {
     /// 日志主键 ID
     pub log_id: Option<i64>,
-    /// 商户 ID
-    pub merchant_id: i64,
+    /// 商户 ID（NULL 表示系统级操作/无商户归属；019_nullable_operate_log_merchant.sql 后改 NULLABLE）
+    pub merchant_id: Option<i64>,
     /// 操作人
     pub operator: String,
     /// 操作动作
@@ -71,7 +71,7 @@ impl ModelExt for OperateLog {
     fn get_column_value(&self, column: &str) -> Option<Value> {
         match column {
             "log_id" => self.log_id.map(Value::I64),
-            "merchant_id" => Some(Value::I64(self.merchant_id)),
+            "merchant_id" => self.merchant_id.map(Value::I64),
             "operator" => Some(Value::String(self.operator.clone())),
             "action" => Some(Value::String(self.action.clone())),
             "detail" => Some(Value::String(self.detail.clone())),
@@ -86,7 +86,7 @@ impl ModelExt for OperateLog {
             self.log_id = Some(v);
         }
         if let Some(v) = map.get("merchant_id").and_then(|v| v.as_i64()) {
-            self.merchant_id = v;
+            self.merchant_id = Some(v);
         }
         if let Some(v) = map.get("operator").and_then(|v| v.as_str()) {
             self.operator = v.to_string();

@@ -36,8 +36,8 @@ pub struct ProductGql {
     pub good_id: i64,
     /// 商户 ID
     pub merchant_id: i64,
-    /// 类目 ID
-    pub cat_id: i64,
+    /// 类目 ID（NULL 表示未分类；016_nullable_good_cats.sql 后改 NULLABLE）
+    pub cat_id: Option<i64>,
     /// 商品名称
     pub name: String,
     /// 条形码
@@ -59,8 +59,8 @@ pub struct OrderGql {
     pub order_no: String,
     /// 商户 ID
     pub merchant_id: i64,
-    /// 设备 ID
-    pub device_id: i64,
+    /// 设备 ID（NULL 表示未关联设备；014_nullable_order_device.sql 后改 NULLABLE）
+    pub device_id: Option<i64>,
     /// 订单总金额（单位：分）
     pub total_fen: i64,
     /// 订单项数量
@@ -310,7 +310,7 @@ mod db_backed {
         Some(ProductGql {
             good_id: row.get("good_id")?.as_i64()?,
             merchant_id: row.get("merchant_id")?.as_i64()?,
-            cat_id: row.get("cat_id")?.as_i64()?,
+            cat_id: row.get("cat_id").ok().and_then(|v| v.as_i64()),
             name: row.get("name")?.as_str()?.to_string(),
             barcode: row.get("barcode")?.as_str()?.to_string(),
             price: row.get("price")?.as_i64()?,
@@ -325,7 +325,7 @@ mod db_backed {
             order_id: row.get("order_id")?.as_i64()?,
             order_no: row.get("order_no")?.as_str()?.to_string(),
             merchant_id: row.get("merchant_id")?.as_i64()?,
-            device_id: row.get("device_id")?.as_i64()?,
+            device_id: row.get("device_id").ok().and_then(|v| v.as_i64()),
             total_fen: row.get("total_fen")?.as_i64()?,
             item_count: row.get("item_count")?.as_i64()? as i32,
             status: row.get("status")?.as_i64()? as i8,

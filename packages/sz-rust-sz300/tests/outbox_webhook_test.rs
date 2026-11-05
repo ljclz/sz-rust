@@ -168,7 +168,7 @@ async fn test_order_created_event_reaches_webhook() {
         order_id: None,
         order_no: "OUTBOX-E2E-001".to_string(),
         merchant_id: 1,
-        device_id: 9101,
+        device_id: Some(9101),
         total_fen: 500,
         total_weight_g: 200,
         item_count: 1,
@@ -182,7 +182,7 @@ async fn test_order_created_event_reaches_webhook() {
     let items = vec![OrderItem {
         item_id: None,
         order_id: 0,
-        good_id: 1,
+        good_id: Some(1),
         good_name: "outbox-e2e-good".to_string(),
         price_fen: 500,
         weight_g: 200,

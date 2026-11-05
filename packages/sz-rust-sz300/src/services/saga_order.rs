@@ -192,15 +192,24 @@ impl SagaAction for CreateOrderAction {
                          total_weight_g, item_count, status, pay_method, offline_seq, \
                          created_at, updated_at) \
                          VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, NOW(), NOW())";
+        // 2026-11-05 修复：对齐 005_order_idempotency.sql 的 NULL 语义——
+        // 「无离线序列号的在线订单」用 NULL 表示（MySQL UNIQUE 索引允许多个 NULL，
+        // 在线订单互不阻塞）；旧实现插空串 '' 导致 (device_id, '') 重复，违反
+        // uk_device_offline_seq 唯一键（DB 集成测试并行跑时复现）。
+        let offline_seq_val = if order.offline_seq.is_empty() {
+            DbValue::Null
+        } else {
+            DbValue::String(order.offline_seq.clone())
+        };
         let order_params = [
             DbValue::String(order.order_no.clone()),
             DbValue::I64(order.merchant_id),
-            DbValue::I64(order.device_id),
+            order.device_id.map(DbValue::I64).unwrap_or(DbValue::Null),
             DbValue::I64(order.total_fen),
             DbValue::I64(order.total_weight_g),
             DbValue::I32(order.item_count),
             DbValue::I8(order.pay_method),
-            DbValue::String(order.offline_seq.clone()),
+            offline_seq_val,
         ];
         conn.execute_with_params(order_sql, &order_params)
             .await
@@ -221,7 +230,7 @@ impl SagaAction for CreateOrderAction {
                             weight_g, total_fen, quantity) VALUES (?, ?, ?, ?, ?, ?, ?)";
             let item_params = [
                 DbValue::I64(order_id),
-                DbValue::I64(item.good_id),
+                item.good_id.map(DbValue::I64).unwrap_or(DbValue::Null),
                 DbValue::String(item.good_name.clone()),
                 DbValue::I64(item.price_fen),
                 DbValue::I64(item.weight_g),
@@ -308,7 +317,11 @@ impl SagaAction for DeductStockAction {
 
         for item in &items {
             self.stock_service
-                .deduct(item.good_id, item.quantity)
+                .deduct(
+                    item.good_id
+                        .ok_or_else(|| DtxError::Generic("订单项缺少商品ID".into()))?,
+                    item.quantity,
+                )
                 .await?;
         }
 
@@ -345,7 +358,11 @@ impl SagaAction for RestoreStockAction {
 
         for item in &items {
             self.stock_service
-                .restore(item.good_id, item.quantity)
+                .restore(
+                    item.good_id
+                        .ok_or_else(|| DtxError::Generic("订单项缺少商品ID".into()))?,
+                    item.quantity,
+                )
                 .await?;
         }
         Ok(payload.clone())
@@ -717,6 +734,7 @@ pub async fn create_with_saga(
         })
     } else {
         let failed_step = result.failed_step.unwrap_or_else(|| "unknown".into());
+
         let has_compensate_failure = result
             .steps
             .iter()

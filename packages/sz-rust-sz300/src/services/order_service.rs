@@ -375,7 +375,7 @@ impl OrderService {
             let order_params = [
                 Value::String(order.order_no.clone()),
                 Value::I64(order.merchant_id),
-                Value::I64(order.device_id),
+                order.device_id.map(Value::I64).unwrap_or(Value::Null),
                 Value::I64(order.total_fen),
                 Value::I64(order.total_weight_g),
                 Value::I32(items.len().min(i32::MAX as usize) as i32),
@@ -394,7 +394,8 @@ impl OrderService {
                 return Err(if duplicate {
                     "订单号冲突，请重试".to_string()
                 } else {
-                    "创建失败".to_string()
+                    // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+                    crate::services::db_error::classify_or_fallback(&msg, "创建失败")
                 });
             }
 
@@ -425,7 +426,7 @@ impl OrderService {
                 let mut item_params = Vec::with_capacity(chunk.len() * 7);
                 for item in chunk {
                     item_params.push(Value::I64(new_order_id));
-                    item_params.push(Value::I64(item.good_id));
+                    item_params.push(item.good_id.map(Value::I64).unwrap_or(Value::Null));
                     item_params.push(Value::String(item.good_name.clone()));
                     item_params.push(Value::I64(item.price_fen));
                     item_params.push(Value::I64(item.weight_g));
@@ -435,8 +436,10 @@ impl OrderService {
                 conn.execute_with_params(&item_sql, &item_params)
                     .await
                     .map_err(|e| {
-                        tracing::error!(error = %e, "创建订单项失败: order_id={}", new_order_id);
-                        "创建失败".to_string()
+                        let msg = e.to_string();
+                        tracing::error!(error = %msg, "创建订单项失败: order_id={}", new_order_id);
+                        // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+                        crate::services::db_error::classify_or_fallback(&msg, "创建失败")
                     })?;
             }
 
@@ -492,7 +495,7 @@ impl OrderService {
                     .query_with_params(
                         "SELECT order_id FROM `order` WHERE device_id = ? AND offline_seq = ? LIMIT 1",
                         &[
-                            Value::I64(order.device_id),
+                            order.device_id.map(Value::I64).unwrap_or(Value::Null),
                             Value::String(order.offline_seq.clone()),
                         ],
                     )
@@ -500,7 +503,7 @@ impl OrderService {
                     .map_err(|e| {
                         tracing::error!(
                             error = %e,
-                            "重放查回原单失败: device_id={}, offline_seq={}",
+                            "重放查回原单失败: device_id={:?}, offline_seq={}",
                             order.device_id,
                             order.offline_seq
                         );
@@ -514,7 +517,7 @@ impl OrderService {
                 match existing_id {
                     Some(id) => {
                         tracing::info!(
-                            "离线订单重放命中幂等键: device_id={}, offline_seq={}, order_id={}",
+                            "离线订单重放命中幂等键: device_id={:?}, offline_seq={}, order_id={}",
                             order.device_id,
                             order.offline_seq,
                             id

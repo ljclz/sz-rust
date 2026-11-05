@@ -9,16 +9,16 @@ use sz_rust_core::orm::{Model, ModelExt, RelationLoader, TimestampFields, Value}
 pub struct Device {
     /// 设备主键 ID
     pub device_id: Option<i64>,
-    /// 绑定的商户 ID（0 表示未绑定）
-    pub merchant_id: i64,
+    /// 绑定的商户 ID（NULL 表示未绑定；013_nullable_device_merchant.sql 后改 NULLABLE）
+    pub merchant_id: Option<i64>,
     /// 设备序列号
     pub device_sn: String,
     /// 设备型号
     pub device_model: String,
     /// 固件版本号
     pub fw_version: String,
-    /// 在线状态（0=离线，1=在线）
-    pub status: i8, // 0离线 1在线
+    /// 在线状态（0=离线，1=在线，2/3=设备上报扩展状态如故障/告警）
+    pub status: i8, // 0离线 1在线 2/3扩展（CHECK (status IN (0,1,2,3))，见 010_status_enum.sql）
     /// 信号强度
     pub signal_strength: i32,
     /// 绑定时间
@@ -92,7 +92,7 @@ impl ModelExt for Device {
     fn get_column_value(&self, column: &str) -> Option<Value> {
         match column {
             "device_id" => self.device_id.map(Value::I64),
-            "merchant_id" => Some(Value::I64(self.merchant_id)),
+            "merchant_id" => self.merchant_id.map(Value::I64),
             "device_sn" => Some(Value::String(self.device_sn.clone())),
             "device_model" => Some(Value::String(self.device_model.clone())),
             "fw_version" => Some(Value::String(self.fw_version.clone())),
@@ -114,7 +114,7 @@ impl ModelExt for Device {
             self.device_id = Some(v);
         }
         if let Some(v) = map.get("merchant_id").and_then(|v| v.as_i64()) {
-            self.merchant_id = v;
+            self.merchant_id = Some(v);
         }
         if let Some(v) = map.get("device_sn").and_then(|v| v.as_str()) {
             self.device_sn = v.to_string();

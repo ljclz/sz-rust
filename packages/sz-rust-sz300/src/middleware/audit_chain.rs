@@ -308,7 +308,8 @@ async fn persist_batch(pool: &Pool, batch: &[AuditJob]) -> bool {
 
     let mut params = Vec::with_capacity(batch.len() * 5);
     for (merchant_id, operator, action, detail, ip) in &rows {
-        params.push(Value::I64(merchant_id.unwrap_or(0)));
+        // merchant_id 改 NULLABLE 后，None 写 NULL（019_nullable_operate_log_merchant.sql）
+        params.push(merchant_id.map(Value::I64).unwrap_or(Value::Null));
         params.push(Value::String(operator.clone()));
         params.push(Value::String(action.clone()));
         params.push(Value::String(detail.clone()));

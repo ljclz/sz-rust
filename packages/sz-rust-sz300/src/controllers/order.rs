@@ -190,7 +190,7 @@ impl OrderController {
                     order_id: None,
                     order_no: order_no.clone(),
                     merchant_id,
-                    device_id,
+                    device_id: Some(device_id),
                     total_fen: data.get("total_fen").and_then(|v| v.as_i64()).unwrap_or(0),
                     total_weight_g: data
                         .get("total_weight_g")
@@ -227,7 +227,7 @@ impl OrderController {
                             .map(|item| crate::models::order_item::OrderItem {
                                 item_id: None,
                                 order_id: 0, // 由服务层填充新订单 ID
-                                good_id: item.get("good_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                                good_id: item.get("good_id").and_then(|v| v.as_i64()),
                                 good_name: item
                                     .get("good_name")
                                     .and_then(|v| v.as_str())

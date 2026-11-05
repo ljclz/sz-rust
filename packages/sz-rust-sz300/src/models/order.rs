@@ -13,8 +13,8 @@ pub struct Order {
     pub order_no: String,
     /// 商户 ID
     pub merchant_id: i64,
-    /// 设备 ID
-    pub device_id: i64,
+    /// 设备 ID（NULL 表示未关联设备，如后台手工单；014_nullable_order_device.sql 后改 NULLABLE）
+    pub device_id: Option<i64>,
     /// 订单总金额（单位：分）
     pub total_fen: i64,
     /// 订单总重量（单位：克）
@@ -102,7 +102,7 @@ impl ModelExt for Order {
             "order_id" => self.order_id.map(Value::I64),
             "order_no" => Some(Value::String(self.order_no.clone())),
             "merchant_id" => Some(Value::I64(self.merchant_id)),
-            "device_id" => Some(Value::I64(self.device_id)),
+            "device_id" => self.device_id.map(Value::I64),
             "total_fen" => Some(Value::I64(self.total_fen)),
             "total_weight_g" => Some(Value::I64(self.total_weight_g)),
             "item_count" => Some(Value::I32(self.item_count)),
@@ -127,7 +127,7 @@ impl ModelExt for Order {
             self.merchant_id = v;
         }
         if let Some(v) = map.get("device_id").and_then(|v| v.as_i64()) {
-            self.device_id = v;
+            self.device_id = Some(v);
         }
         if let Some(v) = map.get("total_fen").and_then(|v| v.as_i64()) {
             self.total_fen = v;

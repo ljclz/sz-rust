@@ -177,18 +177,20 @@ impl ProductService {
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
         let params = [
             Value::I64(product.merchant_id),
-            Value::I64(product.cat_id),
+            product.cat_id.map(Value::I64).unwrap_or(Value::Null),
             Value::String(product.name.clone()),
             Value::String(product.barcode.clone()),
             Value::I64(product.price),
             Value::String(product.unit.clone()),
-            Value::I64(product.ai_class_id),
+            product.ai_class_id.map(Value::I64).unwrap_or(Value::Null),
             Value::String(product.image.clone()),
             Value::I32(product.status as i32),
         ];
         conn.execute_with_params(sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "创建商品失败: name={}", product.name);
-            "创建失败".to_string()
+            let msg = e.to_string();
+            tracing::error!(error = %msg, "创建商品失败: name={}", product.name);
+            // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+            crate::services::db_error::classify_or_fallback(&msg, "创建失败")
         })?;
 
         // 获取自增主键
@@ -269,8 +271,10 @@ impl ProductService {
         params.push(Value::I64(good_id));
 
         conn.execute_with_params(&sql, &params).await.map_err(|e| {
-            tracing::error!(error = %e, "更新商品失败: good_id={}", good_id);
-            "更新失败".to_string()
+            let msg = e.to_string();
+            tracing::error!(error = %msg, "更新商品失败: good_id={}", good_id);
+            // 阶段4：识别 FK/CHECK 约束违反（1452/3819）转业务友好消息
+            crate::services::db_error::classify_or_fallback(&msg, "更新失败")
         })?;
 
         Ok(())
@@ -330,13 +334,13 @@ impl ProductService {
                 category_id,
                 ..
             } => {
-                product.ai_class_id = *category_id;
+                product.ai_class_id = Some(*category_id);
             }
             crate::services::ai_classifier::ClassificationDecision::ManualOverride {
                 overridden_to,
                 ..
             } => {
-                product.cat_id = *overridden_to;
+                product.cat_id = Some(*overridden_to);
             }
             _ => {}
         }

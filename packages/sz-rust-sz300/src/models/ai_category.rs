@@ -11,8 +11,8 @@ pub struct AiCategory {
     pub ai_class_id: Option<i64>,
     /// AI 分类名称
     pub name: String,
-    /// 关联的商品类目 ID
-    pub cat_id: i64,
+    /// 关联的商品类目 ID（NULL 表示未关联；018_nullable_ai_category_cat.sql 后改 NULLABLE）
+    pub cat_id: Option<i64>,
     /// 模型版本号
     pub model_version: String,
     /// 创建时间
@@ -69,7 +69,7 @@ impl ModelExt for AiCategory {
         match column {
             "ai_class_id" => self.ai_class_id.map(Value::I64),
             "name" => Some(Value::String(self.name.clone())),
-            "cat_id" => Some(Value::I64(self.cat_id)),
+            "cat_id" => self.cat_id.map(Value::I64),
             "model_version" => Some(Value::String(self.model_version.clone())),
             "created_at" => self.created_at.as_ref().map(|s| Value::String(s.clone())),
             "updated_at" => self.updated_at.as_ref().map(|s| Value::String(s.clone())),
@@ -85,7 +85,7 @@ impl ModelExt for AiCategory {
             self.name = v.to_string();
         }
         if let Some(v) = map.get("cat_id").and_then(|v| v.as_i64()) {
-            self.cat_id = v;
+            self.cat_id = Some(v);
         }
         if let Some(v) = map.get("model_version").and_then(|v| v.as_str()) {
             self.model_version = v.to_string();

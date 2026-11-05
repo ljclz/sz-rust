@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### 数据层完整性补齐（ADR 0051 Phase 2）
+
+- 新增 26 个 CHECK 约束（金额非负、数量正数、状态枚举），migration 008~010
+- 8 个哨兵列改 NULLABLE + 存量 0→NULL，模型字段 i64→Option<i64>，migration 013~019
+- 新增 14 个 FK 约束（6 直接 + 8 可空），migration 020~021
+- 服务层引入 DB 错误分类（db_error.rs），识别 MySQL 1452/3819 转业务友好错误
+- 新增 7 个约束违反集成测试（tests/constraint_violation_test.rs）
+- 验证：cargo test --lib 130 passed + 集成测试 7 passed
+
 ### Fixed — feature-gated 安全模块测试盲区闭环：ci.yml 新增 gated-security-tests job（2026-11-05，P1 N1，DB-2026-11-05-07/09 RESOLVED）
 
 > 来源：`docs/audit/doc-debt.md` DB-2026-11-05-07/09（系统架构师复评 P1 N1 + P2 N3）。**用户拍板方案 B**（CI 显式腿），否决并行会话在工作区尝试的方案 A（default 收编）。

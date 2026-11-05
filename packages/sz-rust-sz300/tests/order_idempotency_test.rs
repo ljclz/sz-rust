@@ -30,7 +30,7 @@ fn make_order(order_no: &str, device_id: i64, offline_seq: &str) -> Order {
         order_id: None,
         order_no: order_no.to_string(),
         merchant_id: 1,
-        device_id,
+        device_id: Some(device_id),
         total_fen: 500,
         total_weight_g: 200,
         item_count: 1,
@@ -47,7 +47,7 @@ fn make_items() -> Vec<OrderItem> {
     vec![OrderItem {
         item_id: None,
         order_id: 0,
-        good_id: 1,
+        good_id: Some(1),
         good_name: "idempotency-good".to_string(),
         price_fen: 500,
         weight_g: 200,

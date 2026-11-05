@@ -60,7 +60,7 @@ fn order_pk_get_set() {
         order_id: None,
         order_no: "ORD001".into(),
         merchant_id: 1,
-        device_id: 2,
+        device_id: Some(2),
         total_fen: 1000,
         total_weight_g: 500,
         item_count: 1,
@@ -83,7 +83,7 @@ fn order_get_column_value_all_fields() {
         order_id: Some(10),
         order_no: "ORD010".into(),
         merchant_id: 100,
-        device_id: 200,
+        device_id: Some(200),
         total_fen: 9999,
         total_weight_g: 1234,
         item_count: 3,
@@ -140,7 +140,7 @@ fn order_from_value_populates_all_fields() {
         order_id: None,
         order_no: String::new(),
         merchant_id: 0,
-        device_id: 0,
+        device_id: Some(0),
         total_fen: 0,
         total_weight_g: 0,
         item_count: 0,
@@ -156,7 +156,7 @@ fn order_from_value_populates_all_fields() {
     assert_eq!(order.order_id, Some(77));
     assert_eq!(order.order_no, "ORD077");
     assert_eq!(order.merchant_id, 5);
-    assert_eq!(order.device_id, 8);
+    assert_eq!(order.device_id, Some(8));
     assert_eq!(order.total_fen, 5000);
     assert_eq!(order.total_weight_g, 200);
     assert_eq!(order.item_count, 2);
@@ -206,7 +206,7 @@ fn order_item_pk_get_set() {
     let mut item = OrderItem {
         item_id: None,
         order_id: 10,
-        good_id: 20,
+        good_id: Some(20),
         good_name: "苹果".into(),
         price_fen: 500,
         weight_g: 100,
@@ -224,7 +224,7 @@ fn order_item_get_column_value_all_fields() {
     let item = OrderItem {
         item_id: Some(5),
         order_id: 10,
-        good_id: 20,
+        good_id: Some(20),
         good_name: "香蕉".into(),
         price_fen: 300,
         weight_g: 150,
@@ -257,7 +257,7 @@ fn order_item_from_value_populates_all_fields() {
     let mut item = OrderItem {
         item_id: None,
         order_id: 0,
-        good_id: 0,
+        good_id: Some(0),
         good_name: String::new(),
         price_fen: 0,
         weight_g: 0,
@@ -268,7 +268,7 @@ fn order_item_from_value_populates_all_fields() {
 
     assert_eq!(item.item_id, Some(33));
     assert_eq!(item.order_id, 10);
-    assert_eq!(item.good_id, 20);
+    assert_eq!(item.good_id, Some(20));
     assert_eq!(item.good_name, "橙子");
     assert_eq!(item.price_fen, 800);
     assert_eq!(item.quantity, 2);

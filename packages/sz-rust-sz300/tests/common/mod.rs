@@ -198,6 +198,57 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "007_sz_dtx_log",
         include_str!("../../migrations/007_sz_dtx_log.sql"),
     ),
+    // 2026-11-05 数据层 Phase 2 阶段1 CHECK 约束（ADR 0051 §5.2）
+    (
+        "008_amount_non_negative",
+        include_str!("../../migrations/008_amount_non_negative.sql"),
+    ),
+    (
+        "009_quantity_positive",
+        include_str!("../../migrations/009_quantity_positive.sql"),
+    ),
+    (
+        "010_status_enum",
+        include_str!("../../migrations/010_status_enum.sql"),
+    ),
+    // 2026-11-05 数据层 Phase 2 阶段2 哨兵列改 NULLABLE（ADR 0051 §4.2-B / §7.4）
+    (
+        "013_nullable_device_merchant",
+        include_str!("../../migrations/013_nullable_device_merchant.sql"),
+    ),
+    (
+        "014_nullable_order_device",
+        include_str!("../../migrations/014_nullable_order_device.sql"),
+    ),
+    (
+        "015_nullable_order_item_good",
+        include_str!("../../migrations/015_nullable_order_item_good.sql"),
+    ),
+    (
+        "016_nullable_good_cats",
+        include_str!("../../migrations/016_nullable_good_cats.sql"),
+    ),
+    (
+        "017_nullable_category_parent",
+        include_str!("../../migrations/017_nullable_category_parent.sql"),
+    ),
+    (
+        "018_nullable_ai_category_cat",
+        include_str!("../../migrations/018_nullable_ai_category_cat.sql"),
+    ),
+    (
+        "019_nullable_operate_log_merchant",
+        include_str!("../../migrations/019_nullable_operate_log_merchant.sql"),
+    ),
+    // 2026-11-05 数据层 Phase 2 阶段3 FK 约束（ADR 0051 §4.2）
+    (
+        "020_fk_direct",
+        include_str!("../../migrations/020_fk_direct.sql"),
+    ),
+    (
+        "021_fk_nullable",
+        include_str!("../../migrations/021_fk_nullable.sql"),
+    ),
     (
         "add_ai_classification_override",
         include_str!("../../migrations/add_ai_classification_override.sql"),
@@ -271,11 +322,18 @@ async fn assert_disposable_database(pool: &Pool) {
 
 async fn drop_known_tables(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
+    // 禁用 FK 检查：迁移 020/021 创建了 8 个 FK，DROP TABLE 需绕过 FK 约束
+    conn.execute("SET FOREIGN_KEY_CHECKS=0")
+        .await
+        .expect("禁用 FK 检查失败");
     for table in KNOWN_TABLES {
         conn.execute(&format!("DROP TABLE IF EXISTS `{table}`"))
             .await
             .unwrap_or_else(|e| panic!("DROP TABLE {table} 失败: {e}"));
     }
+    conn.execute("SET FOREIGN_KEY_CHECKS=1")
+        .await
+        .expect("恢复 FK 检查失败");
 }
 
 async fn run_migrations(pool: &Pool) {
@@ -378,9 +436,17 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 /// 清空全部表数据（DELETE，安全忽略不存在的表）
 pub async fn teardown_all(pool: &Pool) {
     let mut conn = pool.acquire().await.expect("获取连接失败");
+    // 禁用 FK 检查：KNOWN_TABLES 顺序为父表在前，DELETE 父表会被子表 RESTRICT 阻止；
+    // 禁用 FK 后任意顺序 DELETE 均可成功，确保测试间数据真正清空。
+    conn.execute("SET FOREIGN_KEY_CHECKS=0")
+        .await
+        .expect("禁用 FK 检查失败");
     for table in KNOWN_TABLES {
         conn.execute(&format!("DELETE FROM `{table}`")).await.ok();
     }
+    conn.execute("SET FOREIGN_KEY_CHECKS=1")
+        .await
+        .expect("恢复 FK 检查失败");
 }
 
 async fn truncate_table(pool: &Pool, table: &str) {

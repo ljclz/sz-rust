@@ -110,6 +110,17 @@ async fn test_dispatch_topic_routing_integration() {
         }
     }
     common::setup_all_tables(&pool).await;
+    // FK 链：device.merchant_id=100 → merchant(100) → market(1)。迁移 020/021 加 FK 后
+    // 必须先插父行，否则 INSERT device 触发 FK 1452。INSERT IGNORE 防残留重复。
+    {
+        let mut conn = pool.acquire().await.expect("获取连接失败");
+        conn.execute("INSERT IGNORE INTO market (market_id, name) VALUES (1, 'dispatch-test-market')")
+            .await
+            .expect("插入 market 失败");
+        conn.execute("INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (100, 1, 'dispatch-test-merchant')")
+            .await
+            .expect("插入 merchant 失败");
+    }
     {
         let mut conn = pool.acquire().await.expect("获取连接失败");
         conn.execute_with_params(
