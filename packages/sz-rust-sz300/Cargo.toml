@@ -103,6 +103,9 @@ default = [
     "v18-audit-chain",
     "v18-key-rotation",
     "v19-jwt-audience",
+    # 2026-11-05 P2 N3（DB-2026-11-05-09 方案 A）：v19-saga 加入 default，
+    # saga_order 默认编译+测试，消除 feature gate 盲区。
+    "v19-saga",
 ]
 # Addon 热加载：运行时动态加载 .dll/.so/.dylib 插件（libloading 后端）
 # 启用后，启动时自动扫描 addons/ 目录并加载所有共享库
