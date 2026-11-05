@@ -843,14 +843,18 @@ mod tests {
 
     #[test]
     fn test_state_to_str_round_trip() {
+        // 断言与 sz_dtx_log.state 的 CHECK 词表（chk_dtx_state_v19）一致：
+        // committed/aborted/manual_intervention（实现 doc 与 007 迁移注释）。
+        // 旧词表 completed/cancelled/failed 仅在 str_to_state 兼容读取。
         assert_eq!(state_to_str(TxState::Running), "running");
-        assert_eq!(state_to_str(TxState::Completed), "completed");
+        assert_eq!(state_to_str(TxState::Completed), "committed");
         assert_eq!(state_to_str(TxState::Compensated), "compensated");
-        assert_eq!(state_to_str(TxState::Cancelled), "cancelled");
-        assert_eq!(state_to_str(TxState::Failed), "failed");
+        assert_eq!(state_to_str(TxState::Cancelled), "aborted");
+        assert_eq!(state_to_str(TxState::Failed), "manual_intervention");
         assert_eq!(state_to_str(TxState::Timeout), "timeout");
 
         assert_eq!(str_to_state("running"), TxState::Running);
+        // 旧词表兼容映射（读取历史行）
         assert_eq!(str_to_state("completed"), TxState::Completed);
         assert_eq!(str_to_state("failed"), TxState::Failed);
         assert_eq!(str_to_state("unknown"), TxState::Running);

@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Fixed — feature-gated 安全模块测试盲区闭环：ci.yml 新增 gated-security-tests job（2026-11-05，P1 N1，DB-2026-11-05-07/09 RESOLVED）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-11-05-07/09（系统架构师复评 P1 N1 + P2 N3）。**用户拍板方案 B**（CI 显式腿），否决并行会话在工作区尝试的方案 A（default 收编）。
+
+- **决策**：`v19-plugin-flow` **有意不进 default**——prod compose 的 `SZ300_FEATURES` 刻意不含该 feature，插件安装端点不出现在生产镜像，「模块不在生产构建里」是比验签更外层的一层防御；收编 default 会让所有生产镜像带上插件端点，与最小攻击面方向相反。saga 同理维持 gate 隔离（与数据层修复记录 0-30.6 定案一致）。
+- **ci.yml**：新增 `gated-security-tests` job 两条腿——`--features v19-plugin-flow --lib -- services::plugin_manager` = **10 passed**（含 3 个 Ed25519 验签负例：伪造 64 字节签名/无效签名/无效公钥全部被拒）；`--features v19-saga --lib -- saga_order` = **7 passed**。
+- **防误删**：`services/mod.rs` plugin_manager 模块注释与 sz300 `Cargo.toml` default 注释均交叉引用该 job（含「修改 feature 策略必须同步」警示）。
+- **顺带修复既有测试失真（N3 盲区实证）**：`saga_order::tests::test_state_to_str_round_trip` 此前因 gate 从未被执行，断言仍是旧词表 `completed/cancelled/failed`，与实现（`chk_dtx_state_v19` CHECK 词表 `committed/aborted/manual_intervention`，007 迁移注释）不符——已修正至 CHECK 词表。
+- **冲突记录**：并行会话曾按方案 A 在未提交工作区落地并自标 RESOLVED，本会话 stash 保护后按用户决策以方案 B 重做；其 sz300 default 修改已回退（default 保持 5 项安全 feature），N2 注释订正与 N5 整改报告订正注保留采纳。
+- **doc-debt**：DB-2026-11-05-07/09 RESOLVED（方案 B 口径 + 冲突记录），08/10 维持并行会话的 RESOLVED 标注。
+
 ### Added — 系统架构师复评报告 + 红队复核回执登记入档（2026-11-05）
 
 > 来源：六环闭环第 6 环（登记）。复评报告 `docs/audit/2026-11-04-系统架构师复评报告.md` + 红队复核回执 `docs/audit/2026-11-04-系统架构师复评-红队复核回执.md` 已落盘，红队确认实质发现成立、2 条 P1 管术错误已修正，三件齐备方可视为评测批次闭环。

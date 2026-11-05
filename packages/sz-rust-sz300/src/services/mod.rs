@@ -37,6 +37,14 @@ pub mod order_service;
 /// 事务性 Outbox 投递端（2026-10-28 修复订单/事件双写不一致）
 pub mod outbox;
 /// v1.9.0 插件管理器（spec §5.10）
+///
+/// 2026-11-05 决策记录（P1 N1，doc-debt DB-2026-11-05-07）：本模块保持
+/// `v19-plugin-flow` feature gate（**不**收编 default——prod compose 的
+/// `SZ300_FEATURES` 刻意不含该 feature，插件安装端点不出现在生产镜像，
+/// 「模块不在生产构建里」是比验签更外层的一层防御）。盲区由 CI 承担：
+/// `.github/workflows/ci.yml` 的 `plugin-flow-tests` job 以
+/// `--features v19-plugin-flow` 显式编译并运行本模块全部测试（含 3 个
+/// Ed25519 验签负例）。**修改 feature 策略时必须同步该 job**。
 #[cfg(feature = "v19-plugin-flow")]
 pub mod plugin_manager;
 /// 商品服务模块（封装商品 SQL 操作，2026-07-25 新增 — 修复控制器分层违反）

@@ -122,6 +122,29 @@ jobs:
       # sz-rust-testkit 的测试在 test-utils feature gate 后面，需显式启用
       - run: cargo test -p sz-rust-testkit --features test-utils --jobs 1
 
+  # 门禁 4b：feature-gated 安全模块测试（P1 N1 盲区闭环，2026-11-05，doc-debt
+  # DB-2026-11-05-07/09）。政策（2026-11-05 决策，方案 B）：高危/原型模块保持
+  # feature gate 隔离——prod compose 的 SZ300_FEATURES 刻意不含 v19-plugin-flow，
+  # 插件安装端点不出现在生产镜像；本 job 保证 gated 模块的测试（含 Ed25519 验签
+  # 负例）每次 PR 必跑。新增 feature-gated 模块时在此追加一条腿；
+  # **修改 sz300 feature 策略时必须同步本 job 与 services/mod.rs 决策注释**。
+  gated-security-tests:
+    name: Gated Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
+      - uses: Swatinem/rust-cache@v2
+      - name: 插件生态（Ed25519 验签负例：伪造签名/无效公钥必须被拒绝）
+        run: cargo test -p sz-rust-sz300 --features v19-plugin-flow --lib -- services::plugin_manager
+      - name: Saga 分布式事务（e2e 走 db-integration.yml；此处验证编译 + 单元层）
+        run: cargo test -p sz-rust-sz300 --features v19-saga --lib -- saga_order
+
   # 门禁 5：文档构建（含 missing_docs 检查）
   doc:
     name: Documentation (missing_docs)

@@ -196,6 +196,9 @@ function checkFeatures(files) {
                 // 示例文案，2026-11-04 全栈复跑报告 §false-positive 段登记）——单字母
                 // 大写 token 与真实 feature 命名（snake_case/连字符）不符，跳过
                 if (raw === 'X' || raw === 'Y' || raw === 'N') continue;
+                // 2026-11-05 二次实证：描述性文本「--features flag」中的 flag 同样是
+                // 占位词（SKILL.md 陷阱条目自指示例）——跳过常见英文占位词
+                if (['flag', 'word', 'foo', 'bar', 'baz', 'example'].includes(raw)) continue;
                 if (/[{}]/.test(raw)) continue;
                 if (seen.has(raw)) continue;
                 seen.add(raw);

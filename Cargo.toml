@@ -245,8 +245,8 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，本地 path 10.12.0）
-# 2026-10-14 统一到本地 path（v10.3.0-fix 起）；2026-10-28 对齐 sz-orm 10.13.0。
+# 内部依赖（SZ-ORM 全家桶，本地 path 10.13.1）
+# 2026-10-14 统一到本地 path（v10.3.0-fix 起）；2026-10-28 对齐 sz-orm 10.13.0；2026-11-04 升级 10.13.1。
 # 可复现性契约：兄弟仓库 HEAD 必须等于 .sz-orm-commit，由
 # scripts/audit/dependency-reproducibility.py 在 CI 中强制校验。
 sz-orm-core = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-core" }

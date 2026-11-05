@@ -93,6 +93,10 @@ ed25519-dalek.workspace = true
 # - v18-audit-chain：写操作审计链式哈希
 # - v18-key-rotation：JWT 密钥轮换（RNG 已修复为密码学安全）
 # - v19-jwt-audience：JWT audience 校验（登录签发带 aud 令牌）
+# 注意（2026-11-05 P1 N1 决策，方案 B）：v19-plugin-flow **有意不进 default**——
+# prod compose 的 SZ300_FEATURES 刻意不含它，插件安装端点不出现在生产镜像
+# （最小攻击面）；验签负例测试由 ci.yml `gated-security-tests` job 显式跑
+# （--features v19-plugin-flow），详见 services/mod.rs 决策注释。修改时同步两处。
 default = [
     "v18-security-headers",
     "v18-data-mask",
