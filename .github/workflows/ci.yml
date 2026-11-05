@@ -116,11 +116,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-tauri-linux-deps
       - uses: Swatinem/rust-cache@v2
-      # P3-3 修复：--jobs 1 规避 Cargo 在高并发编译时的 crate 解析竞争问题
-      # 此问题为 Cargo 工具链已知限制（非代码问题），单线程编译可稳定通过
-      - run: cargo test --workspace --all-targets --jobs 1
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # P3-3 修复 + P2-3 flaky 治理：CARGO_BUILD_JOBS=1 规避 Cargo 高并发编译 crate 解析竞争，
+      # nextest 测试并行执行 + --retries 2 自动重试 flaky
+      - run: cargo nextest run --workspace --all-targets --retries 2
+        env:
+          CARGO_BUILD_JOBS: "1"
       # sz-rust-testkit 的测试在 test-utils feature gate 后面，需显式启用
-      - run: cargo test -p sz-rust-testkit --features test-utils --jobs 1
+      - run: cargo nextest run -p sz-rust-testkit --features test-utils --retries 2
+        env:
+          CARGO_BUILD_JOBS: "1"
 
   # 门禁 4b：feature-gated 安全模块测试（P1 N1 盲区闭环，2026-11-05，doc-debt
   # DB-2026-11-05-07/09）。政策（2026-11-05 决策，方案 B）：高危/原型模块保持
@@ -181,6 +189,19 @@ jobs:
         # 忽略清单统一由 .cargo/audit.toml 管理（含 RUSTSEC-2026-0258 / RUSTSEC-2024-0370），
         # 不再在 CLI 硬编码 --ignore，避免命令行与 audit.toml 漂移。
         run: cargo audit
+      # 门禁 6c：sz300 上传解析库防护 lint（AppSec P2-2 闭环，2026-11-06）
+      # sz300 上传端点仅文件保存不解析内容（file_service.rs:26）；image/lopdf/calamine
+      # 未被 sz300 调用。本 lint 防未来引入解析端点而无资源限制（超时/内存上限/沙箱化）。
+      # 详见 docs/audit/2026-11-05-AppSec开放项修复方案调研.md P2-2 方案 A。
+      - name: sz300 upload parser lint (P2-2 closure)
+        run: node scripts/audit/sz300-upload-parser-lint.js
+      # 门禁 6d：sz300 native 插件热加载 lint（AppSec P1-1 闭环，2026-11-06）
+      # hot_reload.rs:347 用 libloading::Library::new 直接加载 .dll/.so/.dylib，
+      # 无签名/哈希校验（任意代码执行面）。生产构建禁止含 hot-reload feature：
+      # sz300 Cargo.toml default 不含 + prod compose SZ300_FEATURES 不含。
+      # 详见 docs/audit/2026-11-05-AppSec复评报告.md P1-1 闭环证据。
+      - name: sz300 hot-reload lint (P1-1 closure)
+        run: node scripts/audit/sz300-hot-reload-lint.js
 
   # 门禁 6b：cargo-deny 依赖审计（许可证 + 安全 + 来源）
   deny:
@@ -530,10 +551,16 @@ jobs:
           git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Check workspace compiles (CARGO_INCREMENTAL=0)
         run: cargo check --workspace --all-targets
       - name: Run lib tests (no integration)
-        run: cargo test --workspace --lib --jobs 1
+        run: cargo nextest run --workspace --lib --retries 2
+        env:
+          CARGO_BUILD_JOBS: "1"
 
       # SDET 门禁 30 配套：Windows 内存基线测试（RSS 回归对比），
       # 依赖 Windows + sysinfo，随 windows job 执行（默认 ignored）

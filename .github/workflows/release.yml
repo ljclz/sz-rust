@@ -53,8 +53,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Run all tests
-        run: cargo test --workspace --all-targets --jobs 1
+        run: cargo nextest run --workspace --all-targets --retries 2
+        env:
+          CARGO_BUILD_JOBS: "1"
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Run cargo-deny

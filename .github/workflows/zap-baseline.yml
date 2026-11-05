@@ -1,0 +1,217 @@
+# OWASP ZAP baseline scan — 被动 DAST 扫描（AppSec P2-5 闭环，2026-11-06）
+#
+# 设计目标：
+#   - 对运行中的 sz300-server 跑 ZAP baseline（被动扫描，不攻击）
+#   - 检测安全头缺失 / 信息泄露 / Cookie 属性 / 路径遍历等 OWASP Top 10 被动信号
+#   - **非阻塞**：ZAP 发现 alert 仅报告（artifact + step summary），不让 CI 失败
+#   - 独立 workflow，不修改 ci.yml / security.yml，不影响现有门禁
+#
+# 调度策略：
+#   - push/PR to main/master：每次变更跑一次（被动扫描，~3-5 分钟）
+#   - 每周日 04:00 UTC：周期全扫（与 security.yml 00:00 UTC 错峰，避免 runner 抢占）
+#   - workflow_dispatch：手动触发（支持自定义扫描超时）
+#
+# 非阻塞实现（continue-on-error: true）：
+#   - job 级 continue-on-error: true — ZAP 退出码非 0（发现 alert）不让 workflow 失败
+#   - ZAP baseline 发现 WARN 级 alert 退出码 1，FAIL 级退出码 2；本门禁均仅报告
+#   - sz300-server 启动失败 / ZAP 容器拉取失败等基础设施错误同样不阻塞（DAST 为
+#     辅助验证手段，主门禁由 ci.yml 28 道门禁承担；本 workflow 退化时不拖红 CI）
+#   - 报告始终上传 artifact（if: always()），即使扫描步骤失败也能拿到部分结果
+#
+# 依赖说明：
+#   - sz300-server 需要 MySQL（CI service container 提供，与 db-integration.yml 一致）
+#   - sz300-server 启动时不跑 migration（main.rs:196 仅 init_pool），schema 缺失
+#     不影响连接池初始化与 /health、/metrics、/api-docs 等公开端点响应；ZAP baseline
+#     被动扫描器分析响应头/响应体，部分端点返回 500 仍可检出安全头缺失等信号
+#   - ZAP 用 zaproxy/zap-stable 官方镜像，--network=host 访问 runner 的 127.0.0.1:8300
+#
+# 凭据说明（仅 CI 测试用，非生产）：
+#   - SZ300_JWT_SECRET：32+ 字节测试密钥（HS256 强度要求）
+#   - SZ300_DB_PASSWORD=test123：与 ci.yml / db-integration.yml 一致的 CI service 凭据
+#   - SZ300_METRICS_PUBLIC=true：让 /metrics 公开，ZAP 可扫描该端点
+#   - SZ300_ENV=test：非 production，规避 root 用户检查 + metrics fail-closed
+
+name: ZAP Baseline Scan
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  schedule:
+    - cron: '0 4 * * 0'  # 每周日 04:00 UTC（与 security.yml 00:00 UTC 错峰）
+  workflow_dispatch:
+    inputs:
+      scan_timeout:
+        description: 'ZAP 扫描超时（分钟）'
+        required: false
+        default: '5'
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTC_WRAPPER: ""
+  # sz300-server 启动凭据（CI 测试用，与 ci.yml SZ_TEST_DB_PASSWORD 同源）
+  SZ300_JWT_SECRET: zap-baseline-test-jwt-secret-32bytes-min-not-for-production-use-only
+  SZ300_DB_HOST: 127.0.0.1
+  SZ300_DB_PORT: '3306'
+  SZ300_DB_NAME: sz300_zap
+  SZ300_DB_USER: root
+  SZ300_DB_PASSWORD: test123
+  SZ300_SERVER_HOST: 127.0.0.1
+  SZ300_SERVER_PORT: '8300'
+  SZ300_METRICS_PUBLIC: 'true'
+  SZ300_ENV: test
+  RUST_LOG: warn
+
+jobs:
+  zap-baseline:
+    name: ZAP Baseline (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 非阻塞：ZAP 发现 alert / sz300 启动失败 / ZAP 容器问题均不让 CI 失败。
+    # DAST 为辅助验证，主门禁由 ci.yml 28 道门禁承担；本 workflow 退化时不拖红 CI。
+    # 报告始终上传 artifact（if: always()），供安全评审人工查阅。
+    continue-on-error: true
+    services:
+      mysql:
+        image: mysql:9.6
+        env:
+          MYSQL_ROOT_PASSWORD: test123
+          MYSQL_DATABASE: sz300_zap
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u root -ptest123"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      # 编译 sz300-server release 二进制（仅 sz-rust-sz300，不启用可选 feature，
+      # 与 docker-compose.yml 默认构建一致；baseline scan 扫默认配置的攻击面）
+      - name: Build sz300-server (release)
+        run: cargo build --release -p sz-rust-sz300
+
+      # 后台启动 sz300-server，日志写文件供排障；sleep 给 tokio runtime + DB 连接池初始化留时间
+      - name: Start sz300-server (background)
+        run: |
+          nohup target/release/sz300-server > sz300-server.log 2>&1 &
+          echo $! > sz300-server.pid
+          echo "sz300-server PID: $(cat sz300-server.pid)"
+
+      # 轮询 /health 端点直到就绪或超时（60s）；sz300 /health 不依赖 DB schema
+      - name: Wait for sz300-server health
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8300/health > /dev/null 2>&1; then
+              echo "sz300-server healthy after ${i}s"
+              curl -s http://127.0.0.1:8300/health
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "sz300-server 未在 60s 内就绪，日志尾部："
+          tail -50 sz300-server.log || true
+          exit 1
+
+      # ZAP baseline scan：被动扫描，不发送攻击 payload
+      # --network=host：容器内访问 runner 的 127.0.0.1:8300（GitHub Actions ubuntu 标准做法）
+      # -t target / -r html 报告 / -x xml 报告 / -T 超时分钟 / -j 启用 ajax spider
+      # 退出码：0=无 alert，1=有 WARN，2=有 FAIL；continue-on-error 吞掉非 0
+      - name: Run ZAP baseline scan
+        id: zap_scan
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p zap-reports
+          TIMEOUT="${{ github.event.inputs.scan_timeout || '5' }}"
+          echo "ZAP baseline scan: target=http://127.0.0.1:8300 timeout=${TIMEOUT}m"
+          docker run --rm \
+            --network=host \
+            -v "$GITHUB_WORKSPACE/zap-reports:/zap/wrk:rw" \
+            zaproxy/zap-stable \
+            zap-baseline.py \
+              -t http://127.0.0.1:8300 \
+              -r zap-report.html \
+              -x zap-report.xml \
+              -T "${TIMEOUT}" \
+              -j
+          echo "ZAP scan exit code: $?"
+
+      # 始终上传报告（即使扫描步骤失败，也可能有部分结果）
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-report
+          path: |
+            zap-reports/zap-report.html
+            zap-reports/zap-report.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+      # 上传 sz300-server 启动日志（排障用）
+      - name: Upload sz300-server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sz300-server-log
+          path: sz300-server.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      # 汇总扫描结果到 step summary（PR 上直接可见）
+      - name: Scan summary
+        if: always()
+        run: |
+          echo "## OWASP ZAP Baseline Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| 扫描目标 | http://127.0.0.1:8300 (sz300-server) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 扫描模式 | baseline（被动，不攻击） |" >> $GITHUB_STEP_SUMMARY
+          echo "| ZAP 步骤结果 | ${{ steps.zap_scan.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 阻塞 CI | 否（continue-on-error: true，仅报告） |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f zap-reports/zap-report.html ]; then
+            echo "HTML 报告已生成，下载 artifact zap-baseline-report 查阅" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "HTML 报告未生成（扫描可能未完成或目标不可达）" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> ZAP baseline 检测安全头缺失 / 信息泄露 / Cookie 属性等被动信号。" >> $GITHUB_STEP_SUMMARY
+          echo "> 发现的 alert 不阻塞 CI，需安全评审人工分级处置。" >> $GITHUB_STEP_SUMMARY
+
+      # 清理 sz300-server 进程
+      - name: Stop sz300-server
+        if: always()
+        run: |
+          if [ -f sz300-server.pid ]; then
+            kill "$(cat sz300-server.pid)" 2>/dev/null || true
+            echo "sz300-server stopped"
+          fi

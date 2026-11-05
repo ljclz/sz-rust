@@ -27,6 +27,8 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 arc-swap = "1"
 tiktoken-rs = { version = "0.5", optional = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
 
 
 # sz-rust 内部 facade 依赖

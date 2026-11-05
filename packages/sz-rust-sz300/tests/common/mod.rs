@@ -211,6 +211,17 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "010_status_enum",
         include_str!("../../migrations/010_status_enum.sql"),
     ),
+    // 2026-11-05 数据层 Phase 2 阶段1 语义冲突列对齐（ADR 0051 §5.3）
+    // 011/012 必须在 013~019 NULLABLE 改造之前执行：pay_method/role 列不改
+    // NULLABLE，但其存量 UPDATE 需在表结构稳定后、后续 ALTER 之前完成。
+    (
+        "011_align_pay_method",
+        include_str!("../../migrations/011_align_pay_method.sql"),
+    ),
+    (
+        "012_align_role",
+        include_str!("../../migrations/012_align_role.sql"),
+    ),
     // 2026-11-05 数据层 Phase 2 阶段2 哨兵列改 NULLABLE（ADR 0051 §4.2-B / §7.4）
     (
         "013_nullable_device_merchant",

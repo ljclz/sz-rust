@@ -1,0 +1,23 @@
+﻿{
+    "ReportName":  "sz300-server memory baseline",
+    "GeneratedAt":  "2026-11-05T02:55:07.6185746+08:00",
+    "Binary":  "D:\\rust-target\\release\\sz300-server.exe",
+    "BuildProfile":  "release",
+    "IronRule":  "Rule 9: startup RSS \u003c 30MB",
+    "ThresholdMB":  30,
+    "Pass":  true,
+    "RssSamplesMB":  [
+                         10.51,
+                         10.5,
+                         10.5,
+                         10.5,
+                         10.5,
+                         10.5
+                     ],
+    "RssMinMB":  10.5,
+    "RssMaxMB":  10.51,
+    "RssAvgMB":  10.5,
+    "Health":  "200",
+    "Readiness":  "200",
+    "Note":  "Measured with MySQL connected (read-only smoke)."
+}

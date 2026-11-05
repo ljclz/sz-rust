@@ -11,6 +11,64 @@ use tokio::signal;
 use tokio::sync::watch;
 use tracing_subscriber::{fmt, EnvFilter};
 
+/// TLS 配置解析错误
+///
+/// fail-closed：环境变量配置不完整时拒绝启动，避免运维误以为 TLS 已生效但实际裸奔 HTTP。
+#[derive(Debug, thiserror::Error)]
+enum TlsConfigError {
+    /// `SZ300_TLS_CERT` 已设置但 `SZ300_TLS_KEY` 未设置
+    #[error("SZ300_TLS_CERT 已设置但 SZ300_TLS_KEY 未设置 — TLS 配置不完整，拒绝启动（fail-closed）")]
+    CertWithoutKey,
+    /// `SZ300_TLS_KEY` 已设置但 `SZ300_TLS_CERT` 未设置
+    #[error("SZ300_TLS_KEY 已设置但 SZ300_TLS_CERT 未设置 — TLS 配置不完整，拒绝启动（fail-closed）")]
+    KeyWithoutCert,
+}
+
+/// 从环境变量解析 TLS 配置
+///
+/// - `SZ300_TLS_CERT` + `SZ300_TLS_KEY` 都设置 → `Ok(Some(TlsConfig))`（HTTPS 模式）
+/// - 两者都未设置（或空字符串）→ `Ok(None)`（HTTP 模式，向后兼容）
+/// - 仅设置一个 → `Err`（fail-closed：配置不完整拒绝启动）
+///
+/// 空字符串视为未设置，避免 `SZ300_TLS_CERT=""` 误触发 HTTPS 模式。
+fn resolve_tls_config() -> Result<Option<sz_rust_http_facade::tls::TlsConfig>, TlsConfigError> {
+    let cert = std::env::var("SZ300_TLS_CERT").ok().filter(|s| !s.is_empty());
+    let key = std::env::var("SZ300_TLS_KEY").ok().filter(|s| !s.is_empty());
+    match (cert, key) {
+        (Some(c), Some(k)) => Ok(Some(sz_rust_http_facade::tls::TlsConfig::new(c, k))),
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(TlsConfigError::CertWithoutKey),
+        (None, Some(_)) => Err(TlsConfigError::KeyWithoutCert),
+    }
+}
+
+/// 等待进程关闭信号（Ctrl+C / SIGTERM）
+///
+/// 提取自原 main 函数内联 shutdown 逻辑，供 HTTP/HTTPS 两个分支复用。
+async fn wait_for_shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志 — EnvFilter + JSON 格式（生产环境友好）
@@ -367,49 +425,222 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // 启动 HTTP 服务器
-    let addr = format!("{}:{}", config.server.host, config.server.port);
+    // 启动 HTTP/HTTPS 服务器
+    // TLS 接线（2026-11-06 P1-4）：SZ300_TLS_CERT + SZ300_TLS_KEY 都设置时启用
+    // HTTPS（rustls + HTTP/2，复用 sz-rust-http-facade::tls::serve_http2）；
+    // 未设置时保持纯 HTTP（向后兼容，开发环境仍 HTTP）。
+    // 配置不完整（仅设置一个）则启动失败（fail-closed）。
+    let addr_str = format!("{}:{}", config.server.host, config.server.port);
+    let addr: std::net::SocketAddr = addr_str
+        .parse()
+        .map_err(|e| anyhow::anyhow!("监听地址解析失败 '{}': {}", addr_str, e))?;
 
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    tracing::info!("监听地址: {}", addr);
+    let tls_config = resolve_tls_config()?;
 
-    // 注入 socket 对端地址：限流中间件按真实对端 IP 分桶（trust_proxy=false 时
-    // 不再把所有请求并进同一个 "unknown" 桶），见 sz-rust-middleware-facade/rate_limit.rs
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .with_graceful_shutdown(async move {
-        let ctrl_c = async {
-            signal::ctrl_c()
-                .await
-                .expect("failed to install Ctrl+C handler");
-        };
-
-        #[cfg(unix)]
-        let terminate = async {
-            signal::unix::signal(signal::unix::SignalKind::terminate())
-                .expect("failed to install signal handler")
-                .recv()
-                .await;
-        };
-
-        #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
-
-        tokio::select! {
-            _ = ctrl_c => {},
-            _ = terminate => {},
+    match tls_config {
+        Some(tls) => {
+            tracing::info!(
+                "TLS 已启用（rustls + HTTP/2），监听 {} — 证书: {:?}",
+                addr,
+                tls.cert_path
+            );
+            // HTTPS 模式：serve_http2 内部循环 accept 连接，用 select! 接入 graceful shutdown。
+            // shutdown 触发时 drop serve_http2 future → listener 释放；
+            // 已 spawn 的连接任务自行完成（不阻塞退出）。
+            tokio::select! {
+                result = sz_rust_http_facade::tls::serve_http2(app, addr, tls) => {
+                    result.map_err(|e| anyhow::anyhow!("HTTPS 服务错误: {}", e))?;
+                }
+                _ = wait_for_shutdown_signal() => {
+                    tracing::info!("收到关闭信号，正在优雅关闭...");
+                    // 通知 MQTT 消费者退出
+                    let _ = shutdown_tx.send(true);
+                    // 等待 MQTT 任务完成（最多 5 秒）
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
+                    tracing::info!("MQTT 消费者已退出，HTTPS 服务器关闭中...");
+                }
+            }
         }
-
-        tracing::info!("收到关闭信号，正在优雅关闭...");
-        // 通知 MQTT 消费者退出
-        let _ = shutdown_tx.send(true);
-        // 等待 MQTT 任务完成（最多 5 秒）
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
-        tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
-    })
-    .await?;
+        None => {
+            // HTTP 模式（向后兼容）
+            // 注入 socket 对端地址：限流中间件按真实对端 IP 分桶（trust_proxy=false 时
+            // 不再把所有请求并进同一个 "unknown" 桶），见 sz-rust-middleware-facade/rate_limit.rs
+            let listener = tokio::net::TcpListener::bind(&addr).await?;
+            tracing::info!("监听地址: {} (HTTP，未配置 TLS)", addr);
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                wait_for_shutdown_signal().await;
+                tracing::info!("收到关闭信号，正在优雅关闭...");
+                // 通知 MQTT 消费者退出
+                let _ = shutdown_tx.send(true);
+                // 等待 MQTT 任务完成（最多 5 秒）
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), mqtt_handle).await;
+                tracing::info!("MQTT 消费者已退出，HTTP 服务器关闭中...");
+            })
+            .await?;
+        }
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 环境变量测试互斥锁 — `std::env::set_var`/`remove_var` 操作进程级环境，
+    /// 并行测试会导致 race。用静态 Mutex 串行化所有涉及环境变量的测试。
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_tls_env() {
+        std::env::remove_var("SZ300_TLS_CERT");
+        std::env::remove_var("SZ300_TLS_KEY");
+    }
+
+    // ---- resolve_tls_config 分支测试 ----
+
+    #[test]
+    fn test_resolve_tls_config_neither_set() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        let result = resolve_tls_config();
+        assert!(result.is_ok(), "两者未设置应返回 Ok(None)");
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_resolve_tls_config_both_set() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        std::env::set_var("SZ300_TLS_CERT", "/tmp/sz300-test-cert.pem");
+        std::env::set_var("SZ300_TLS_KEY", "/tmp/sz300-test-key.pem");
+        let result = resolve_tls_config();
+        assert!(result.is_ok(), "两者都设置应返回 Ok(Some)");
+        let config = result.unwrap().unwrap();
+        assert_eq!(
+            config.cert_path,
+            std::path::PathBuf::from("/tmp/sz300-test-cert.pem")
+        );
+        assert_eq!(
+            config.key_path,
+            std::path::PathBuf::from("/tmp/sz300-test-key.pem")
+        );
+        // 验证 ALPN 默认值（h2 + http/1.1）
+        assert_eq!(config.alpn, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+    }
+
+    #[test]
+    fn test_resolve_tls_config_only_cert() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        std::env::set_var("SZ300_TLS_CERT", "/tmp/sz300-test-cert.pem");
+        let result = resolve_tls_config();
+        assert!(result.is_err(), "仅设置 cert 应返回 Err");
+        assert!(
+            matches!(result.unwrap_err(), TlsConfigError::CertWithoutKey),
+            "应为 CertWithoutKey"
+        );
+    }
+
+    #[test]
+    fn test_resolve_tls_config_only_key() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        std::env::set_var("SZ300_TLS_KEY", "/tmp/sz300-test-key.pem");
+        let result = resolve_tls_config();
+        assert!(result.is_err(), "仅设置 key 应返回 Err");
+        assert!(
+            matches!(result.unwrap_err(), TlsConfigError::KeyWithoutCert),
+            "应为 KeyWithoutCert"
+        );
+    }
+
+    #[test]
+    fn test_resolve_tls_config_empty_strings_treated_as_unset() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        std::env::set_var("SZ300_TLS_CERT", "");
+        std::env::set_var("SZ300_TLS_KEY", "");
+        let result = resolve_tls_config();
+        assert!(result.is_ok(), "空字符串应视为未设置，返回 Ok(None)");
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_resolve_tls_config_one_empty_one_set() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_tls_env();
+        std::env::set_var("SZ300_TLS_CERT", "");
+        std::env::set_var("SZ300_TLS_KEY", "/tmp/sz300-test-key.pem");
+        let result = resolve_tls_config();
+        assert!(
+            result.is_err(),
+            "cert 空 + key 设置应返回 Err（配置不完整）"
+        );
+        assert!(
+            matches!(result.unwrap_err(), TlsConfigError::KeyWithoutCert),
+            "空 cert 视为未设置，仅 key 设置 → KeyWithoutCert"
+        );
+    }
+
+    #[test]
+    fn test_tls_config_error_display_contains_fail_closed() {
+        let e = TlsConfigError::CertWithoutKey;
+        let msg = e.to_string();
+        assert!(msg.contains("SZ300_TLS_CERT"), "消息应含变量名: {}", msg);
+        assert!(msg.contains("fail-closed"), "消息应含 fail-closed: {}", msg);
+
+        let e = TlsConfigError::KeyWithoutCert;
+        let msg = e.to_string();
+        assert!(msg.contains("SZ300_TLS_KEY"), "消息应含变量名: {}", msg);
+        assert!(msg.contains("fail-closed"), "消息应含 fail-closed: {}", msg);
+    }
+
+    // ---- build_acceptor 错误分支测试（验证 fail-closed：证书问题拒绝启动）----
+
+    /// 证书文件不存在 → `build_acceptor` 返回 `TlsError::Io`
+    #[tokio::test]
+    async fn test_build_acceptor_nonexistent_file() {
+        let config = sz_rust_http_facade::tls::TlsConfig::new(
+            "/nonexistent/sz300-path/cert.pem",
+            "/nonexistent/sz300-path/key.pem",
+        );
+        let result = config.build_acceptor().await;
+        // 用 match 而非 unwrap_err()：TlsAcceptor 未实现 Debug，unwrap_err 要求 T: Debug
+        match result {
+            Err(sz_rust_http_facade::tls::TlsError::Io(_)) => { /* 期望分支 */ }
+            Err(e) => panic!("应为 TlsError::Io，实际: {:?}", e),
+            Ok(_) => panic!("证书文件不存在应返回错误，但 build_acceptor 返回了 Ok"),
+        }
+    }
+
+    /// 无效证书内容（非 PEM）→ `build_acceptor` 返回 `TlsError::NoCertificate`
+    #[tokio::test]
+    async fn test_build_acceptor_invalid_cert_content() {
+        // 写临时文件（测试代码豁免 tokio::fs 铁律，用 std::fs 同步写更简洁）
+        let dir = std::env::temp_dir();
+        let cert_path = dir.join("sz300_test_invalid_cert.pem");
+        let key_path = dir.join("sz300_test_invalid_key.pem");
+        std::fs::write(&cert_path, "this is not a valid PEM certificate").unwrap();
+        std::fs::write(&key_path, "this is not a valid PEM key").unwrap();
+
+        let config = sz_rust_http_facade::tls::TlsConfig::new(&cert_path, &key_path);
+        let result = config.build_acceptor().await;
+        // 用 match 而非 unwrap_err()：TlsAcceptor 未实现 Debug
+        match result {
+            Err(sz_rust_http_facade::tls::TlsError::NoCertificate) => { /* 期望分支 */ }
+            Err(e) => panic!(
+                "应为 TlsError::NoCertificate（load_certs 先执行，空 PEM → NoCertificate），实际: {:?}",
+                e
+            ),
+            Ok(_) => panic!("无效证书内容应返回错误，但 build_acceptor 返回了 Ok"),
+        }
+
+        // 清理临时文件
+        let _ = std::fs::remove_file(&cert_path);
+        let _ = std::fs::remove_file(&key_path);
+    }
 }

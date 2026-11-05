@@ -85,6 +85,7 @@
 ## 10. 部署与基础设施（P1-中）— 已修复
 
 - `docker-compose.prod.yml`：数据库端口仅绑定 127.0.0.1；强制 `SZ300_METRICS_TOKEN` / `SZ300_CORS_ORIGIN`；注释明确 TLS 由前置反向代理终止。
+  - **2026-11-05 复评修正**：此前复评误判为幻影交付，实际根目录 `docker-compose.prod.yml` 本就存在（95 行，含 sz300-server+mysql+强制 SZ300_METRICS_TOKEN/SZ300_CORS_ORIGIN+TLS 注释，与 line 87 声称一致）。复评误读为 deploy/ 路径，基于 `ls deploy/` 无此文件误判。`deploy/docker-compose.prod.yml`（221 行）为 2026-11-05 补充的更完整基础设施模板：sz300-server 服务（build: section + BuildKit additional_contexts.sz-orm + 6 个安全 feature args）、可选 db(mysql:8.0) / redis(redis:7-alpine) 服务、全部端口绑 127.0.0.1、`${VAR:?错误}` fail-closed 强制 SZ300_JWT_SECRET/SZ300_METRICS_TOKEN/SZ300_CORS_ORIGIN/SZ300_DB_PASSWORD/MYSQL_ROOT_PASSWORD/SZ300_REDIS_PASSWORD、TLS 由前置反向代理终止注释、nonroot(65532) 沿用 Dockerfile HEALTHCHECK。验证：`docker compose -f deploy/docker-compose.prod.yml config` exit 0（变量齐全）；缺失变量 exit 1（fail-closed 验证通过）。两个文件都保留，原"幻影交付"定性撤销，改为路径歧义误判。
 - k8s 清单：统一命名空间（sz300）与服务名（sz300-service）；Deployment 显式设置 `SZ300_COOKIE_SECURE=true`。
 - 监控栈：Grafana 管理员密码、Alertmanager SMTP/钉钉令牌、marketplace compose 凭据改为环境变量注入。
 - Dockerfile 增加固定镜像 digest 的 TODO 注释。

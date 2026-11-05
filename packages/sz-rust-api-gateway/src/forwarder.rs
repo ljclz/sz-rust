@@ -6,6 +6,8 @@
 //! 使用 reqwest 转发请求到后端服务，支持服务发现 LB。
 
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,62 @@ use crate::config::GatewayRoute;
 use crate::error::GatewayError;
 use crate::middleware::AuthResult;
 use crate::router_engine::{MatchRequest, RouterEngine};
+
+/// 后端协议方案（http/https）
+///
+/// 用于 `BackendInstance` 的 URL scheme 字段，决定转发时使用明文 HTTP 还是 TLS HTTPS。
+/// 默认 `Http`，保持向后兼容（未配置 scheme 时行为与历史版本一致）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendScheme {
+    /// 明文 HTTP（默认，向后兼容）
+    #[default]
+    Http,
+    /// TLS HTTPS
+    Https,
+}
+
+impl fmt::Display for BackendScheme {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackendScheme::Http => f.write_str("http"),
+            BackendScheme::Https => f.write_str("https"),
+        }
+    }
+}
+
+impl FromStr for BackendScheme {
+    type Err = GatewayError;
+
+    /// 从字符串解析 scheme，大小写不敏感。
+    ///
+    /// 接受 `http`/`https`（任意大小写），其余返回 `Config` 错误。
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "http" => Ok(BackendScheme::Http),
+            "https" => Ok(BackendScheme::Https),
+            other => Err(GatewayError::Config(format!(
+                "invalid backend scheme: {other}, expected `http` or `https`"
+            ))),
+        }
+    }
+}
+
+impl BackendScheme {
+    /// 从环境变量 `SZ300_BACKEND_SCHEME` 解析 scheme。
+    ///
+    /// - 未设置 → 返回 `Http`（默认，向后兼容）
+    /// - 设置为 `http`/`https`（大小写不敏感） → 对应方案
+    /// - 设置为非法值 → 返回 `Config` 错误
+    ///
+    /// 生产代码读取环境变量是允许的（仅 `std::fs` 被禁用，`std::env` 不在禁用范围）。
+    pub fn from_env() -> Result<Self, GatewayError> {
+        match std::env::var("SZ300_BACKEND_SCHEME") {
+            Ok(raw) if !raw.trim().is_empty() => BackendScheme::from_str(raw.trim()),
+            _ => Ok(BackendScheme::Http),
+        }
+    }
+}
 
 /// 转发请求
 #[derive(Debug, Clone)]
@@ -89,20 +147,38 @@ impl ForwardResponse {
 pub struct BackendInstance {
     pub host: String,
     pub port: u16,
+    /// URL scheme（http/https），默认 `Http` 向后兼容
+    pub scheme: BackendScheme,
 }
 
 impl BackendInstance {
-    /// 构造后端实例
+    /// 构造后端实例（默认 HTTP scheme，向后兼容）
     pub fn new(host: &str, port: u16) -> Self {
         Self {
             host: host.to_string(),
             port,
+            scheme: BackendScheme::Http,
         }
+    }
+
+    /// 构造后端实例并指定 scheme
+    pub fn with_scheme(host: &str, port: u16, scheme: BackendScheme) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+            scheme,
+        }
+    }
+
+    /// 链式设置 scheme
+    pub fn scheme(mut self, scheme: BackendScheme) -> Self {
+        self.scheme = scheme;
+        self
     }
 
     /// 生成 URL
     pub fn url(&self, path: &str) -> String {
-        format!("http://{}:{}{}", self.host, self.port, path)
+        format!("{}://{}:{}{}", self.scheme, self.host, self.port, path)
     }
 }
 
@@ -318,6 +394,126 @@ mod tests {
     fn test_backend_instance_url() {
         let backend = BackendInstance::new("10.0.0.1", 8080);
         assert_eq!(backend.url("/api/users"), "http://10.0.0.1:8080/api/users");
+    }
+
+    #[test]
+    fn test_backend_scheme_default_is_http() {
+        // 向后兼容：未配置 scheme 时默认 HTTP
+        let scheme = BackendScheme::default();
+        assert_eq!(scheme, BackendScheme::Http);
+        assert_eq!(scheme.to_string(), "http");
+    }
+
+    #[test]
+    fn test_backend_scheme_display() {
+        assert_eq!(BackendScheme::Http.to_string(), "http");
+        assert_eq!(BackendScheme::Https.to_string(), "https");
+    }
+
+    #[test]
+    fn test_backend_scheme_from_str_valid() {
+        // 小写
+        assert_eq!("http".parse::<BackendScheme>().unwrap(), BackendScheme::Http);
+        assert_eq!("https".parse::<BackendScheme>().unwrap(), BackendScheme::Https);
+        // 大小写不敏感
+        assert_eq!("HTTP".parse::<BackendScheme>().unwrap(), BackendScheme::Http);
+        assert_eq!("HTTPS".parse::<BackendScheme>().unwrap(), BackendScheme::Https);
+        assert_eq!("HtTpS".parse::<BackendScheme>().unwrap(), BackendScheme::Https);
+    }
+
+    #[test]
+    fn test_backend_scheme_from_str_invalid() {
+        let err = "ftp".parse::<BackendScheme>().unwrap_err();
+        assert!(matches!(err, GatewayError::Config(_)), "非法 scheme 应返回 Config 错误");
+
+        let err = "".parse::<BackendScheme>().unwrap_err();
+        assert!(matches!(err, GatewayError::Config(_)));
+    }
+
+    #[test]
+    fn test_backend_scheme_serde() {
+        // 序列化
+        assert_eq!(
+            serde_json::to_string(&BackendScheme::Http).unwrap(),
+            "\"http\""
+        );
+        assert_eq!(
+            serde_json::to_string(&BackendScheme::Https).unwrap(),
+            "\"https\""
+        );
+        // 反序列化
+        assert_eq!(
+            serde_json::from_str::<BackendScheme>("\"http\"").unwrap(),
+            BackendScheme::Http
+        );
+        assert_eq!(
+            serde_json::from_str::<BackendScheme>("\"https\"").unwrap(),
+            BackendScheme::Https
+        );
+        // 非法值反序列化失败
+        assert!(serde_json::from_str::<BackendScheme>("\"ftp\"").is_err());
+    }
+
+    #[test]
+    fn test_backend_instance_default_scheme_is_http() {
+        // 向后兼容：BackendInstance::new 默认 HTTP scheme
+        let backend = BackendInstance::new("10.0.0.1", 8080);
+        assert_eq!(backend.scheme, BackendScheme::Http);
+        assert_eq!(backend.url("/api"), "http://10.0.0.1:8080/api");
+    }
+
+    #[test]
+    fn test_backend_instance_url_https() {
+        // HTTPS scheme URL 构造
+        let backend = BackendInstance::with_scheme("10.0.0.1", 8443, BackendScheme::Https);
+        assert_eq!(backend.scheme, BackendScheme::Https);
+        assert_eq!(backend.url("/api/users"), "https://10.0.0.1:8443/api/users");
+    }
+
+    #[test]
+    fn test_backend_instance_with_scheme_constructor() {
+        let http_backend = BackendInstance::with_scheme("h1", 80, BackendScheme::Http);
+        let https_backend = BackendInstance::with_scheme("h2", 443, BackendScheme::Https);
+        assert_eq!(http_backend.url("/"), "http://h1:80/");
+        assert_eq!(https_backend.url("/"), "https://h2:443/");
+    }
+
+    #[test]
+    fn test_backend_instance_scheme_builder_method() {
+        // 链式 builder：从 new() 出发切换到 HTTPS
+        let backend = BackendInstance::new("10.0.0.1", 8443).scheme(BackendScheme::Https);
+        assert_eq!(backend.scheme, BackendScheme::Https);
+        assert_eq!(backend.url("/health"), "https://10.0.0.1:8443/health");
+
+        // 链式 builder：显式切回 HTTP
+        let backend = BackendInstance::new("10.0.0.1", 8080).scheme(BackendScheme::Http);
+        assert_eq!(backend.url("/health"), "http://10.0.0.1:8080/health");
+    }
+
+    #[test]
+    fn test_backend_instance_scheme_serde_roundtrip() {
+        // 验证 BackendInstance 通过外部 serde 配置加载时 scheme 字段正确解析
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct BackendCfg {
+            host: String,
+            port: u16,
+            #[serde(default)]
+            scheme: BackendScheme,
+        }
+
+        // 缺省 scheme 字段 → 默认 Http（向后兼容旧配置文件）
+        let cfg: BackendCfg = serde_json::from_str(r#"{"host":"10.0.0.1","port":8080}"#).unwrap();
+        assert_eq!(cfg.host, "10.0.0.1");
+        assert_eq!(cfg.port, 8080);
+        assert_eq!(cfg.scheme, BackendScheme::Http);
+
+        // 显式 https
+        let cfg: BackendCfg =
+            serde_json::from_str(r#"{"host":"10.0.0.1","port":8443,"scheme":"https"}"#).unwrap();
+        assert_eq!(cfg.host, "10.0.0.1");
+        assert_eq!(cfg.port, 8443);
+        assert_eq!(cfg.scheme, BackendScheme::Https);
     }
 
     #[test]

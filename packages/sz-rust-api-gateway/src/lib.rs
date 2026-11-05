@@ -31,7 +31,8 @@ pub use config::{
 };
 pub use error::GatewayError;
 pub use forwarder::{
-    BackendInstance, ForwardRequest, ForwardResponse, GatewayHandler, RequestForwarder,
+    BackendInstance, BackendScheme, ForwardRequest, ForwardResponse, GatewayHandler,
+    RequestForwarder,
 };
 pub use middleware::{
     AuthMiddleware, AuthResult, CircuitBreakerMiddleware, CircuitState, RateLimitMiddleware,

@@ -276,6 +276,61 @@ fn idor_create_merchant_denied_for_unauthenticated() {
 }
 
 // ============================================================================
+// Part 2-4b: IDOR 边缘语义锁定（2026-11-05 补充，防止 common.rs 误改）
+// ============================================================================
+//
+// 锁定 controllers/common.rs 三个分支的边缘语义，防止后续重构误改导致越权：
+// - is_admin 优先于 merchant_id 比对（common.rs:60）
+// - 普通用户忽略 requested，强制返回自己 merchant_id（common.rs:35）
+// - Some(merchant_id) == None 必须为 false（common.rs:61）
+
+/// 管理员即便被错误赋了 merchant_id=Some(x)，is_admin 仍优先放行任意商户资源。
+/// 锁定 common.rs:60 `Some(u) if u.is_admin => true` 的分支优先级——
+/// 防止有人把 is_admin 判断改成 `u.merchant_id.is_none()` 导致带商户的管理员被锁死。
+#[test]
+fn idor_admin_with_merchant_id_still_allowed_by_is_admin() {
+    let admin_with_mid = user(1, "admin_with_mid", Some(99), true);
+    for mid in [1, 2, 99, -1] {
+        assert!(
+            can_access_merchant_resource_from_user(Some(&admin_with_mid), Some(mid)),
+            "is_admin=true 应优先于 merchant_id 比对，访问商户 {mid} 资源应允许"
+        );
+    }
+    // resource_merchant_id=None 也允许
+    assert!(
+        can_access_merchant_resource_from_user(Some(&admin_with_mid), None),
+        "管理员访问未归属资源应允许（is_admin 优先）"
+    );
+}
+
+/// 普通用户 requested=None → effective 为自己 merchant_id（不被 None 请求覆盖为全量）。
+/// 锁定 common.rs:35 `Some(u) => (u.merchant_id, true)`：普通用户忽略 requested。
+/// 防止有人改成 `requested.or(u.merchant_id)` 导致普通用户传 None 时查全量。
+#[test]
+fn idor_list_query_scope_normal_user_requested_none_returns_own_merchant() {
+    let user = merchant_a(); // merchant_id=1
+    let (effective, allowed) = effective_merchant_scope_from_user(Some(&user), None);
+    assert!(allowed);
+    assert_eq!(
+        effective,
+        Some(1),
+        "普通用户 requested=None 必须返回自己 merchant_id=1，不得降级为全量查询"
+    );
+}
+
+/// 用户 merchant_id=Some(1) 访问 resource_merchant_id=None（未归属资源）→ 拒绝。
+/// 锁定 common.rs:61 `u.merchant_id.is_some() && u.merchant_id == resource_merchant_id`：
+/// Some(1) == None 为 false，防止"有商户用户读取未归属资源"绕过校验。
+#[test]
+fn idor_user_with_merchant_denied_for_unscoped_resource() {
+    let user = merchant_a(); // merchant_id=1
+    assert!(
+        !can_access_merchant_resource_from_user(Some(&user), None),
+        "有商户用户访问未归属资源（merchant_id=None）必须拒绝"
+    );
+}
+
+// ============================================================================
 // Part 2-5: RBAC guard 跨商户语义文档化（feature v18-rbac）
 // ============================================================================
 //

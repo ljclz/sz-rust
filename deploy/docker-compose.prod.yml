@@ -1,0 +1,221 @@
+# =============================================================================
+# sz300-server 生产部署 compose 模板
+#
+# 安全模型（必读）：
+#   - TLS 由前置反向代理（nginx / 宝塔 / K8s Ingress / Cloud LoadBalancer）终止，
+#     本 compose 不直接对外暴露 8300。sz300-server 仅监听 127.0.0.1:8300，
+#     反向代理负责 HTTPS 终止、X-Forwarded-Proto 注入与对外发布。
+#   - 生产必须配置 HTTPS 反向代理，禁止直接 http 对外暴露 8300。
+#   - 所有数据库 / Redis 端口仅绑定 127.0.0.1，不对外发布。
+#   - 必填凭据用 ${VAR:?错误信息} 语法：缺失即启动失败（fail-closed）。
+#   - sz300-server 以 distroless nonroot(65532) 运行（见根 Dockerfile），无 shell。
+#
+# 使用前置：
+#   1. 宿计 ../sz-orm 仓库已检出至 .sz-orm-commit 钉住提交（可复现性门禁 P0-1）。
+#   2. 准备 .env 文件（chmod 600）注入下列 :? 强制变量，示例：
+#        SZ300_JWT_SECRET=<≥32 字节随机串>
+#        SZ300_METRICS_TOKEN=<随机串>
+#        SZ300_CORS_ORIGIN=https://example.com
+#        SZ300_DB_PASSWORD=<强密码>
+#        MYSQL_ROOT_PASSWORD=<强密码>
+#        SZ300_REDIS_PASSWORD=<强密码>
+#        SZ_ORM_PATH=/path/to/sz-orm   # 宿主机 sz-orm 仓库路径
+#   3. 启动：docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --build
+#   4. 反向代理示例（nginx）：
+#        server {
+#          listen 443 ssl http2;
+#          server_name example.com;
+#          ssl_certificate     /etc/ssl/example.com.pem;
+#          ssl_certificate_key /etc/ssl/example.com.key;
+#          location / {
+#            proxy_pass http://127.0.0.1:8300;
+#            proxy_set_header Host              $host;
+#            proxy_set_header X-Real-IP         $remote_addr;
+#            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#            proxy_set_header X-Forwarded-Proto $scheme;
+#            proxy_set_header X-Forwarded-Host  $host;
+#          }
+#        }
+#
+# 与 deploy/docker-compose.yml（监控栈）的关系：
+#   监控栈 compose 独立部署，通过 host.docker.internal 访问宿主机 8300 抓取指标。
+#   生产应同时部署监控栈：docker compose -f deploy/docker-compose.yml up -d
+#   （监控栈 Grafana 密码同样用 :? 强制，见该文件）。
+# =============================================================================
+
+version: "3.8"
+
+networks:
+  sz300-internal:
+    driver: bridge
+
+volumes:
+  # sz300 上传文件持久化（FileService::init 启动期要求 nonroot 可写，
+  # Dockerfile 已 COPY --chown=65532:65532 预建 /app/uploads，命名卷首挂载继承属主）
+  sz300_uploads:
+  # MySQL 数据持久化
+  mysql_data:
+  # Redis 数据持久化（appendonly AOF）
+  redis_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # sz300-server 主服务
+  # ---------------------------------------------------------------------------
+  sz300-server:
+    build:
+      # context 指向仓库根（Dockerfile 在根目录）
+      context: ..
+      dockerfile: Dockerfile
+      # sz-orm 依赖经 BuildKit additional context 引入（Dockerfile COPY --from=sz-orm），
+      # 不容器内 git clone（可复现性门禁 P0-1）。宿主机路径默认 ../sz-orm。
+      additional_contexts:
+        sz-orm: "${SZ_ORM_PATH:-../sz-orm}"
+      # 生产安全 feature（与 packages/sz-rust-sz300/Cargo.toml default 对齐 + v19-saga）：
+      #   v18-security-headers  CSP/HSTS/X-Frame-Options 响应头
+      #   v18-data-mask         敏感字段脱敏（手机号/身份证/银行卡）
+      #   v18-audit-chain       审计链落库（operate_log，ADR-047 批量缓冲重放）
+      #   v18-key-rotation      密钥轮换
+      #   v19-jwt-audience      JWT aud=sz300-api 校验 + grace period
+      #   v19-saga              Saga 分布式事务协调器
+      # 刻意不含 v19-plugin-flow：插件安装端点不应出现在生产镜像（最小攻击面，
+      # 见 DB-2026-11-05-07 决策）；该 feature 的验签负例由 CI gated-security-tests
+      # job 单独覆盖（.github/workflows/ci.yml）。
+      args:
+        SZ300_FEATURES: "v18-security-headers,v18-data-mask,v18-audit-chain,v18-key-rotation,v19-jwt-audience,v19-saga"
+    image: sz300-server:prod
+    container_name: sz300-server
+    restart: unless-stopped
+    # 仅绑 127.0.0.1：TLS 由前置反向代理终止，不直接对外暴露
+    ports:
+      - "127.0.0.1:8300:8300"
+    environment:
+      # ---------- 环境标识 ----------
+      - SZ300_ENV=production
+      - SZ300_SERVER_HOST=0.0.0.0
+      - SZ300_SERVER_PORT=8300
+      # ---------- 必填凭据（fail-closed：缺失即启动失败） ----------
+      # JWT 密钥（HS256，≥32 字节，main.rs:31-36 启动期校验强度）
+      - SZ300_JWT_SECRET=${SZ300_JWT_SECRET:?必须设置 JWT 密钥（HS256，≥32 字节随机串）}
+      # /metrics 访问令牌（main.rs:145-161，未设置且未 SZ300_METRICS_PUBLIC=true 则 401）
+      - SZ300_METRICS_TOKEN=${SZ300_METRICS_TOKEN:?必须设置 /metrics 访问令牌}
+      # CORS 允许来源（router.rs:66-87，未设置则拒绝所有跨域请求 fail-closed）
+      - SZ300_CORS_ORIGIN=${SZ300_CORS_ORIGIN:?必须设置 CORS 允许来源（如 https://example.com）}
+      # 数据库密码（config.rs:126-128，必填）
+      - SZ300_DB_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库应用账号密码}
+      # ---------- 数据库连接 ----------
+      # 默认指向 compose 内 db 服务；外部托管 DB 时覆盖 SZ300_DB_HOST/PORT
+      - SZ300_DB_HOST=${SZ300_DB_HOST:-db}
+      - SZ300_DB_PORT=${SZ300_DB_PORT:-3306}
+      - SZ300_DB_USER=${SZ300_DB_USER:-sz300_app}
+      - SZ300_DB_NAME=${SZ300_DB_NAME:-sz300}
+      # 生产强制 DB TLS（db.rs:161-216，disabled 仅允许本地一次性实例）
+      # required：加密连接但不校验证书；生产强安全应改 verify-identity + 配 SZ300_DB_TLS_CA
+      - SZ300_DB_TLS=${SZ300_DB_TLS:-required}
+      - SZ300_DB_TLS_CA=${SZ300_DB_TLS_CA:-/app/config/ca.pem}
+      # ---------- Redis 连接 ----------
+      # 默认指向 compose 内 redis 服务；外部托管 Redis 时覆盖 SZ300_REDIS_URL
+      - SZ300_REDIS_URL=${SZ300_REDIS_URL:-redis://:${SZ300_REDIS_PASSWORD:?必须设置 Redis 密码}@redis:6379}
+      # ---------- 上传存储 ----------
+      # 命名卷挂载点（Dockerfile 已预建 nonroot 可写 /app/uploads）
+      - SZ300_UPLOAD_ROOT=/app/uploads
+      - SZ300_UPLOAD_BACKEND=${SZ300_UPLOAD_BACKEND:-local}
+      - SZ300_UPLOAD_MAX_SIZE=${SZ300_UPLOAD_MAX_SIZE:-10485760}
+      # ---------- 连接池 ----------
+      - SZ300_POOL_MAX=${SZ300_POOL_MAX:-20}
+      - SZ300_POOL_MIN_IDLE=${SZ300_POOL_MIN_IDLE:-5}
+      - SZ300_POOL_ACQUIRE_TIMEOUT=${SZ300_POOL_ACQUIRE_TIMEOUT:-30}
+      - SZ300_POOL_IDLE_TIMEOUT=${SZ300_POOL_IDLE_TIMEOUT:-600}
+      - SZ300_POOL_MAX_LIFETIME=${SZ300_POOL_MAX_LIFETIME:-1800}
+      - SZ300_POOL_TEST_BEFORE_ACQUIRE=${SZ300_POOL_TEST_BEFORE_ACQUIRE:-true}
+      # ---------- 限流 / 熔断 ----------
+      - SZ300_RATE_LIMIT_CAPACITY=${SZ300_RATE_LIMIT_CAPACITY:-100}
+      - SZ300_RATE_LIMIT_REFILL=${SZ300_RATE_LIMIT_REFILL:-10}
+      - SZ300_RATE_LIMIT_TRUST_PROXY=${SZ300_RATE_LIMIT_TRUST_PROXY:-true}
+      - SZ300_CIRCUIT_BREAKER_THRESHOLD=${SZ300_CIRCUIT_BREAKER_THRESHOLD:-50}
+      - SZ300_CIRCUIT_BREAKER_COOLDOWN=${SZ300_CIRCUIT_BREAKER_COOLDOWN:-30}
+      # ---------- WASM 沙箱并发 ----------
+      - SZ300_WASM_MAX_CONCURRENCY=${SZ300_WASM_MAX_CONCURRENCY:-4}
+      # ---------- 审计链批量落库（ADR-047） ----------
+      - AUDIT_BATCH_SIZE=${AUDIT_BATCH_SIZE:-200}
+      # ---------- AI 服务（可选） ----------
+      - SZ300_AI_API_KEY=${SZ300_AI_API_KEY:-}
+      - SZ300_AI_BASE_URL=${SZ300_AI_BASE_URL:-https://api.example.com}
+    volumes:
+      - sz300_uploads:/app/uploads
+      # DB TLS CA 证书（verify-ca/verify-identity 模式必填）
+      - ${SZ300_DB_TLS_CA_HOST_PATH:-./config/ca.pem}:/app/config/ca.pem:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Dockerfile 已定义 HEALTHCHECK（/app/healthcheck，30s/3s/3 次失败）
+    # 此处不覆盖，沿用镜像内置健康检查
+    networks:
+      - sz300-internal
+
+  # ---------------------------------------------------------------------------
+  # MySQL 8.0（可选：外部托管 DB 时删除本服务并覆盖 SZ300_DB_HOST/PORT）
+  # ---------------------------------------------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: sz300-mysql
+    restart: unless-stopped
+    # 仅绑 127.0.0.1：不对外发布，仅本机访问
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:?必须设置 MySQL root 密码}
+      - MYSQL_DATABASE=${SZ300_DB_NAME:-sz300}
+      - MYSQL_USER=${SZ300_DB_USER:-sz300_app}
+      - MYSQL_PASSWORD=${SZ300_DB_PASSWORD:?必须设置数据库应用账号密码}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 初始化 SQL（创建最小权限账号、字符集等，见 deploy/sql/）
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-name-resolve
+      - --bind-address=127.0.0.1
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    networks:
+      - sz300-internal
+
+  # ---------------------------------------------------------------------------
+  # Redis 7（可选：外部托管 Redis 时删除本服务并覆盖 SZ300_REDIS_URL）
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: sz300-redis
+    restart: unless-stopped
+    # 仅绑 127.0.0.1：不对外发布，仅本机访问
+    ports:
+      - "127.0.0.1:6379:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${SZ300_REDIS_PASSWORD:?必须设置 Redis 密码}
+      - --bind
+      - 127.0.0.1
+      - --protected-mode
+      - "yes"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${SZ300_REDIS_PASSWORD:?必须设置 Redis 密码}", "ping"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+    networks:
+      - sz300-internal

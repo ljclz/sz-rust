@@ -7,6 +7,42 @@
 
 ## [Unreleased]
 
+### CI/CD — P2-3 flaky 治理：引入 cargo-nextest 替代 --jobs 1 串行测试（2026-11-06）
+
+> 来源：SDET 复评报告 `docs/audit/2026-11-05-SDET复评报告.md` P2-3「nextest/retry 仍缺，ci.yml:121,123,510,536 仍 --jobs 1」。本批闭合该扣分项。
+
+- **ci.yml 主测试 job（行 125/129，原 121/123）**：`cargo test --workspace --all-targets --jobs 1` + `cargo test -p sz-rust-testkit --features test-utils --jobs 1` → `cargo nextest run --workspace --all-targets --retries 2` + `cargo nextest run -p sz-rust-testkit --features test-utils --retries 2`，均加 `env: CARGO_BUILD_JOBS: "1"`。
+- **ci.yml Windows job（行 548，原 536）**：`cargo test --workspace --lib --jobs 1` → `cargo nextest run --workspace --lib --retries 2` + `env: CARGO_BUILD_JOBS: "1"`。
+- **release.yml（行 61，原 57）**：`cargo test --workspace --all-targets --jobs 1` → `cargo nextest run --workspace --all-targets --retries 2` + `env: CARGO_BUILD_JOBS: "1"`。
+- **安装方式**：三处均加 `taiki-e/install-action@v2` step（`tool: cargo-nextest`），比 `cargo install` 快（预编译二进制）。
+- **设计**：`CARGO_BUILD_JOBS=1` 保留编译串行（规避 P3-3 的 Cargo 高并发编译 crate 解析竞争），nextest 测试执行并行 + `--retries 2` 自动重试 flaky 测试（最多重试 2 次，3 次全失败才标 FAIL）。
+- **不改部分**：ci.yml 行 518 miri（`cargo +nightly miri test`，不兼容 nextest）、行 152/154 feature-gated 测试（无 --jobs 1）、行 555 Windows 内存基线（`--ignored --nocapture`）、行 572 AI facade（无 --jobs 1）；db-integration.yml/benchmark.yml/soak.yml/fuzz.yml/marketplace-ci.yml/publish-oss.yml（带 `--test-threads=1` 的 DB/性能测试需串行，全不改）。
+- **验证**：隔离环境（`CARGO_HOME=D:/cargo-home-verify CARGO_TARGET_DIR=D:/rust-target-verify`）安装 cargo-nextest v0.9.151 + 跑 `cargo nextest run -p sz-rust-sz300 --lib --retries 2` = **199 passed / 0 failed / 0 skipped**（5.692s）；ci.yml/release.yml YAML 语法 `python yaml.safe_load` 通过（ci.yml 38 jobs、release.yml 4 jobs）。
+
+### Added — SDET 复评报告登记入档（2026-11-05，六环闭环第 6 环）
+
+> 来源：用户要求复跑 `docs/audit/sdet-eval-prompt.md`。复评报告 `docs/audit/2026-11-05-SDET复评报告.md` 已落盘，基于任务 1 实测 4 条 cargo test 真实退出码 + 任务 2 grep/read 静态证据（每项附 file:line），独立机械验证非自评漂移。
+
+- 新增 `docs/audit/2026-11-05-SDET复评报告.md`：基于 HEAD 重新执行十维度只读测试体系复评，加权结论 7.5→**8.3/10**（净 +0.8）。实测 4 条 cargo test 全 0 退出码（隔离环境 D:\rust-target-verify）：`cargo test` 0 passed、`cargo test -p sz-rust-key-rotation` 8 passed、`cargo test -p sz-rust-security-headers` 19 passed、`cargo test -p sz-rust-sz300` **349 passed / 0 failed / 74 ignored**（原报告引用值 141 passed / 51 ignored，本次为真实复跑非引用）。测试规模 10,732→10,927 属性（+195）、`#[ignore]` 189→64（−125）、tests/ 文件 201→211。**9 项已修复**：P0-1 DB 集成测试接入 CI（db-integration.yml:30-37 启用 + 全 workflow `--ignored` 0→32 命中 + ci.yml:676-685 门禁 30 fail-closed 防复发）/P1-1 覆盖率矩阵 22→47 crate（coverage.yml:56-228 P0-P4）/P1-2 阈值统一 85 + coverage job 移除 continue-on-error 改阻塞（ci.yml:22=coverage.yml:29=85，ci.yml:386）/P1-5 性能回归门禁 3 处接线 fail-closed（perf-gate.yml:264、benchmark.yml:100、ai-facade-perf-gate.yml:94）/P1-6 soak 启用（soak.yml:7-10 周跑 1h + 冒烟 10s，soak-nightly 删除）/P1-7 深度门禁 fail-closed 化（mutants.yml:77-80 kill-rate<90% `::error::`+`exit 1`、mcdc.yml:25 `continue-on-error: false`、ci.yml:495 Miri 移除 continue-on-error；geiger 保持非阻塞汇总有正当理由：workspace 已 forbid unsafe_code）/P2-1 benchmark-suite 真实 criterion 基准（suite_bench.rs:1-66）/P2-2 std::fs 测试豁免明示（AGENTS.md:14）/P2-8 文档漂移修正（ci.yml:381-384 sz300 注释 + AGENTS.md:103 审计报告链接）。**3 项部分修复**（P1-3/P1-4/P2-4 防复发门禁 33 已建但原始 sleep/端口/panic! 拋留未逐一核查）、**1 项仍存在**（P2-3 nextest/retry 仍缺，ci.yml:121,123,510,536 仍 --jobs 1）、**2 项未核查**（P2-5 契约测试、P2-6 本地 node 门禁）。幻影交付专项 4 项中 3 项已修复、1 项本就是优点，未发现新增幻影。十维度变化：维度 3 覆盖率 7→9、维度 4 CI/CD 8→9、维度 5 DB/集成 4→8、维度 7 性能稳定 5→8、维度 8 变异 8→9、维度 10 文档防幻影 8→9；维度 1/2/6/9 维持。
+- 同步登记 `docs/audit/README.md` 索引一条目。中间证据物（.rerun-sdet-task1-results.md / .rerun-sdet-task2-evidence.md / .rerun-sdet-task1-sz300.log）于报告落盘后清理。
+
+### Added — 插件市场密钥管理 CI 落地（P2-6，闭合架构师复评报告第 56 行扣分项）
+
+> 来源：`docs/audit/2026-11-04-系统架构师复评报告.md` 第 56 行（维度 6 扣分「插件市场密钥管理 CI 仍缺（Phase 2 项）」）+ 第 143 行 Phase 2 #9 验收标准。同批闭合第 143 行「插件签名密钥管理：PLUGIN_PUBLIC_KEY 正式注入 + 插件包哈希 + 签名 CI → 插件市场全链路验签测试通过」。
+
+- **新增 `packages/sz-rust-marketplace/tests/signature_e2e.rs`**：10 个全链路验签集成测试，覆盖发布者签名 → SHA256 哈希完整性 → 客户端验签 → fail-closed 负例（篡改包/篡改签名/错误公钥/空签名/非 64 字节签名/非法 Base64）+ 哈希区分性 + 公钥指纹稳定与区分 + 模拟安装全链路。纯内存测试，不依赖数据库。
+- **`.github/workflows/marketplace-ci.yml` 新增 `signature-verify` job**：注入 `PLUGIN_PUBLIC_KEY` from `secrets.PLUGIN_PUBLIC_KEY`（env）；fail-closed 守卫 step（secret 缺失即 `exit 1` 而非跳过）；三步测试——全链路验签 `cargo test -p sz-rust-marketplace --test signature_e2e` + 哈希校验 `--test signature_e2e checksum` + signature 模块单元测试 `--lib signature`。`needs: test` 串联在 matrix test job 之后。
+- **现状对齐**：`packages/sz-rust-sz300/src/services/plugin_manager.rs:191-230` 已有真实 ed25519 验签（`VerifyingKey::verify`，fail-closed）+ 负例测试；`packages/sz-rust-sz300/src/main.rs:266` 已通过 `std::env::var("PLUGIN_PUBLIC_KEY")` 读取公钥；`packages/sz-rust-marketplace/src/signature.rs` 已有 Ed25519 + SHA256 实现 + 5 个单元测试。本批仅补齐集成测试与 CI 接线，未改动既有验签实现。
+- **验证**：`cargo test -p sz-rust-marketplace --test signature_e2e` = 10 passed；YAML 语法校验通过；`link-check.js` exit 0。
+
+### Added — AppSec/SecOps 复评报告 + 红队复核回执登记入档（2026-11-05，六环闭环第 6 环）
+
+> 来源：用户要求复跑 `docs/audit/appsec-eval-prompt.md`。复评报告 `docs/audit/2026-11-05-AppSec复评报告.md` + 红队复核回执 `docs/audit/2026-11-05-AppSec复评-红队复核回执.md` 已落盘，红队确认 5/5 闭环项成立、2 处修正已落实，三件齐备方可视为评测批次闭环。
+
+- 新增 `docs/audit/2026-11-05-AppSec复评报告.md`：基于 HEAD bd63f3a 重新执行十维度只读安全评测，总分 7.2→**7.8/10**（净 +0.6）。gauntlet 实测 `cargo test -p sz-rust-sz300 security_gauntlet -- --nocapture` = **26 passed / 0 failed / 0 ignored**（隔离环境 D:\rust-target-verify，5.02s）。**5 项已闭环**：P0-1 插件真实验签（plugin_manager.rs:200-231 Ed25519 + 负例测试 :332/:346 + ci.yml gated-security-tests job）、P1-2 默认安全 features（Cargo.toml:100-109 含 6 安全 feature）、P1-3 /metrics fail-closed（main.rs:142-163 + health.rs:202-227 常量时间比较）、P1-5 refresh/logout 黑名单（auth_service.rs:25/32/44/549/569/572 SHA-256+惰性清理）、P2-6 rkyv/zerocopy 移除。**3 项部分闭环**：P1-6 CORS（生产 fail-closed/开发 *）、P1-7 供应链（review-by 过期机制，忽略 47 条）、P2-4 RBAC（模块+测试落盘，v18-rbac 仍 opt-in）。**6 项仍开放**：P1-1 native 热加载/P1-4 TLS/P2-1 AI 直通/P2-2 上传解析库/P2-3 api-gateway http://P2-5 无 DAST。**1 项路径歧义误判**（原误判为幻影交付）：2026-10-28 整改报告 §10 line 87 声称的是根目录 docker-compose.prod.yml（无 deploy/ 前缀），该文件真实存在（95 行）；复评误读为 deploy/ 路径误判幻影交付。deploy/docker-compose.prod.yml（221 行）为补充的更完整基础设施模板，两个文件都保留（DB-2026-11-05-11 状态修正为路径歧义误判）。
+- 新增 `docs/audit/2026-11-05-AppSec复评-红队复核回执.md`：独立复核（复核员 session ≠ 复评报告作者 session ≠ 2026-10-28 整改实施者）确认 5/5 闭环项全部成立无幻影（file:line 证据均经 grep/read 实际核查）、评分跳变 7.2→7.8 有依据无虚高、docker-compose.prod.yml 路径歧义误判（原"幻影交付"经 2026-11-05 修正，根目录文件本就存在）。**红队额外发现 2 处需修正**：① 供应链数字虚高（报告写 54 条，实测 deny 21 + audit 26 = 47 条，违反铁律 20 数字可溯源性）；② IDOR 证据错配（报告引用 rbac/guard.rs:69-82 实为 RBAC 角色指派修复，真正 IDOR 修复在 service 层 merchant_id 归属过滤 merchant_service.rs:45/67-68 等）。报告作者已修正 7 处文本，自检 grep 通过。
+- 同步登记 `docs/audit/README.md` 索引两条目 + `docs/audit/doc-debt.md` 新增 1 条 PENDING 欠债（DB-2026-11-05-11 docker-compose.prod.yml 路径歧义误判（原误判为幻影交付），限期 2026-11-19）。
+
 ### 数据层完整性补齐（ADR 0051 Phase 2）
 
 - 新增 26 个 CHECK 约束（金额非负、数量正数、状态枚举），migration 008~010

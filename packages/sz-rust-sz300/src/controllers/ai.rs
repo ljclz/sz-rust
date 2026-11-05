@@ -12,7 +12,10 @@ use axum::extract::State;
 use axum::http::Request;
 use axum::response::Response;
 use serde_json::json;
-use sz_rust_ai_facade::llm::provider::{ChatMessage, ChatRequest, Role};
+use sz_rust_ai_facade::common::guardrail::{
+    apply_output_guardrail, build_safe_messages, GuardrailConfig,
+};
+use sz_rust_ai_facade::llm::provider::{ChatRequest, ContentPart};
 use sz_rust_core::controller::SzController;
 
 /// 默认模型（与 ai-facade 默认配置对齐）
@@ -23,6 +26,9 @@ const ALLOWED_MODELS: &[&str] = &["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"];
 
 /// prompt 最大字符数（安全修复 M-1：阻断 LLM 成本耗尽 DoS，约 4K tokens）
 const MAX_PROMPT_CHARS: usize = 16_000;
+
+/// 流式输出 max_tokens 上限（P2-1：输出长度限制，约 8K chars）
+const STREAM_MAX_TOKENS: u32 = 8_000;
 
 struct AiController;
 impl SzController for AiController {}

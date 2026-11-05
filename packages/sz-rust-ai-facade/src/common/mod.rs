@@ -5,10 +5,16 @@
 
 pub mod audit;
 pub mod error;
+pub mod guardrail;
 pub mod metrics;
 pub mod sse_adapter;
 
 pub use audit::{AuditHttpClient, RateLimitConfig};
 pub use error::AiError;
+pub use guardrail::{
+    apply_output_guardrail, build_safe_messages, sanitize_output, truncate_output, GuardrailConfig,
+    GuardrailOutput, ModerationChecker, ModerationResult, NoOpModeration, TruncateResult,
+    SYSTEM_PROMPT,
+};
 pub use metrics::AiMetrics;
 pub use sse_adapter::SseAdapter;
