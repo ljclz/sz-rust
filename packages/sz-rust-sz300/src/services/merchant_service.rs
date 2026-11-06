@@ -400,7 +400,11 @@ mod tests {
             .connect_lazy_with(connect_options);
         let factory =
             SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
-        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
         Pool::new(pool_cfg, Arc::new(factory)).unwrap()
     }
 

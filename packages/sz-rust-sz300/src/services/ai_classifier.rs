@@ -299,7 +299,8 @@ mod tests {
         let ClassificationDecision::AutoAdopt {
             category_id,
             confidence,
-        } = decision else {
+        } = decision
+        else {
             panic!("期望 AutoAdopt")
         };
         assert_eq!(category_id, 1);
@@ -336,7 +337,8 @@ mod tests {
             overridden_to,
             overridden_by,
             ..
-        } = decision else {
+        } = decision
+        else {
             panic!("期望 ManualOverride")
         };
         assert_eq!(original, 1);

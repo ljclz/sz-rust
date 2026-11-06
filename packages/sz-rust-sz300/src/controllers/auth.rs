@@ -385,8 +385,9 @@ mod tests {
 
     /// 环境变量测试互斥锁 — attach_csrf_cookie/clear_csrf_cookie 读 SZ300_ENV/
     /// SZ300_COOKIE_SECURE，与 router.rs/main.rs 中 set_var 测试并行可能 race。
-    /// 用静态 Mutex 串行化所有涉及环境变量读取的 handler 测试。
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// 用 tokio Mutex 串行化所有涉及环境变量读取的 handler 测试
+    /// （guard 需跨 oneshot().await 持有，std Mutex 会触发 clippy::await_holding_lock）。
+    static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// 收集 Response body 为 String（C-AXUM-ONESHOT@1）
     async fn body_string(response: Response) -> String {
@@ -425,7 +426,7 @@ mod tests {
     /// 凭据禁止经 URL 查询参数提交（URL 进 access log/代理日志/浏览器历史，构成泄密面）。
     #[tokio::test]
     async fn login_query_params_rejected_with_400() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/login", post(login))
@@ -452,7 +453,7 @@ mod tests {
     /// 2. login body 解析失败（非 JSON）→ HTTP 400
     #[tokio::test]
     async fn login_invalid_json_body_returns_400() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/login", post(login))
@@ -474,7 +475,7 @@ mod tests {
     /// 3. login 空用户名或空密码 → HTTP 400 且 msg 含"不能为空"
     #[tokio::test]
     async fn login_empty_credentials_returns_400() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/login", post(login))
@@ -496,7 +497,7 @@ mod tests {
     /// 4. me 无 Authorization header → code:0 错误响应
     #[tokio::test]
     async fn me_no_auth_header_returns_error_envelope() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/me", post(me))
@@ -517,7 +518,7 @@ mod tests {
     /// 5. me 空 Bearer token（"Bearer "）→ "未提供认证令牌"错误
     #[tokio::test]
     async fn me_empty_bearer_token_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/me", post(me))
@@ -534,7 +535,7 @@ mod tests {
     /// 6. refresh 空 refresh_token → "缺少 refresh_token 参数"错误
     #[tokio::test]
     async fn refresh_empty_token_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/refresh", post(refresh))
@@ -551,7 +552,7 @@ mod tests {
     /// 7. refresh body 解析失败 → "参数解析失败"错误
     #[tokio::test]
     async fn refresh_invalid_json_body_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/refresh", post(refresh))
@@ -568,16 +569,13 @@ mod tests {
     /// 8. logout 有 Bearer token → 调用 revoke_token 并清除 CSRF Cookie（Max-Age=0）
     #[tokio::test]
     async fn logout_with_token_clears_csrf_cookie() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/logout", post(logout))
             .with_state(state);
-        let req = json_request_with_auth(
-            "/api/v1/auth/logout",
-            "{}",
-            "Bearer fake.token.for.logout",
-        );
+        let req =
+            json_request_with_auth("/api/v1/auth/logout", "{}", "Bearer fake.token.for.logout");
         let resp = router.oneshot(req).await.unwrap();
         // body_string 会消耗 resp（into_body），先提取 set-cookie header
         let cookie = resp
@@ -603,7 +601,7 @@ mod tests {
     /// 无 token 时 `if !token.is_empty()` 跳过 revoke_token，但仍清除 CSRF Cookie。
     #[tokio::test]
     async fn logout_without_token_succeeds_no_revoke() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guard = ENV_MUTEX.lock().await;
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/auth/logout", post(logout))

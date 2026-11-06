@@ -503,7 +503,11 @@ public $info = [
         let result = parse_route("/api/users", &registry, &autoload);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, AddonLoaderError::RouteParse { .. }), "expected RouteParse, got {:?}", err);
+        assert!(
+            matches!(err, AddonLoaderError::RouteParse { .. }),
+            "expected RouteParse, got {:?}",
+            err
+        );
     }
 
     #[tokio::test]
@@ -530,7 +534,11 @@ public $info = [
         let result = parse_route("/addons/ghost/Order/index", &registry, &autoload);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(&err, &AddonLoaderError::AddonNotFound(_)), "expected AddonNotFound, got {:?}", err);
+        assert!(
+            matches!(&err, &AddonLoaderError::AddonNotFound(_)),
+            "expected AddonNotFound, got {:?}",
+            err
+        );
         if let AddonLoaderError::AddonNotFound(name) = err {
             assert_eq!(name, "ghost");
         }
@@ -543,7 +551,11 @@ public $info = [
         let result = parse_route("/addons/disabled/Order/index", &registry, &autoload);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(&err, &AddonLoaderError::AddonDisabled(_)), "expected AddonDisabled, got {:?}", err);
+        assert!(
+            matches!(&err, &AddonLoaderError::AddonDisabled(_)),
+            "expected AddonDisabled, got {:?}",
+            err
+        );
         if let AddonLoaderError::AddonDisabled(name) = err {
             assert_eq!(name, "disabled");
         }
@@ -557,7 +569,11 @@ public $info = [
         let result = parse_route("/addons/nonexistent/Ghost/index", &registry, &autoload);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(&err, &AddonLoaderError::ControllerNotFound(_)), "expected ControllerNotFound, got {:?}", err);
+        assert!(
+            matches!(&err, &AddonLoaderError::ControllerNotFound(_)),
+            "expected ControllerNotFound, got {:?}",
+            err
+        );
         if let AddonLoaderError::ControllerNotFound(name) = err {
             assert_eq!(name, "Ghost");
         }
@@ -628,6 +644,10 @@ public $info = [
         let result = parse_route("/addons/disabled/Order/index", &registry, &autoload);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, AddonLoaderError::ControllerNotFound(_)), "should be ControllerNotFound after enabling, got {:?}", err);
+        assert!(
+            matches!(err, AddonLoaderError::ControllerNotFound(_)),
+            "should be ControllerNotFound after enabling, got {:?}",
+            err
+        );
     }
 }

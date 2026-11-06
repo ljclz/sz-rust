@@ -1129,8 +1129,14 @@ mod tests {
         let payload = json!({ "order_id": 99, "order": { "total_fen": 8888 } });
         let result = action.execute(&payload).await.expect("应成功");
         // MockPaymentService::initiate 返回 "pay-{order_id}-{amount_fen}"
-        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
-        assert_eq!(payment_id, "pay-99-8888", "应传递正确的 order_id 和 amount_fen");
+        let payment_id = result
+            .get("payment_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            payment_id, "pay-99-8888",
+            "应传递正确的 order_id 和 amount_fen"
+        );
     }
 
     #[tokio::test]
@@ -1176,7 +1182,10 @@ mod tests {
         let action = InitiatePaymentAction::new(payment_svc);
         let payload = json!({ "order_id": 55, "order": {} });
         let result = action.execute(&payload).await.expect("应成功");
-        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+        let payment_id = result
+            .get("payment_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert_eq!(payment_id, "pay-55-0", "缺少 total_fen 时 amount 应默认 0");
     }
 
@@ -1187,7 +1196,10 @@ mod tests {
         let action = InitiatePaymentAction::new(payment_svc);
         let payload = json!({ "order_id": 77 });
         let result = action.execute(&payload).await.expect("应成功");
-        let payment_id = result.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+        let payment_id = result
+            .get("payment_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert_eq!(payment_id, "pay-77-0", "缺少 order 对象时 amount 应默认 0");
     }
 
@@ -1198,6 +1210,10 @@ mod tests {
         let action = CancelPaymentAction::new(payment_svc);
         let payload = json!({ "payment_id": "pay-100-5000" });
         let result = action.execute(&payload).await;
-        assert!(result.is_ok(), "有 payment_id 时应调用 cancel 并返回 Ok: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "有 payment_id 时应调用 cancel 并返回 Ok: {:?}",
+            result
+        );
     }
 }

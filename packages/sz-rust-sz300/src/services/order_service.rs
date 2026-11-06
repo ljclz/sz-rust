@@ -584,10 +584,7 @@ mod tests {
         assert_eq!(f.status, Some(1));
         assert!(f.start_date.is_none(), "new 不应设置 start_date");
         assert!(f.end_date.is_none(), "new 不应设置 end_date");
-        assert!(
-            f.before_order_id.is_none(),
-            "new 不应设置 before_order_id"
-        );
+        assert!(f.before_order_id.is_none(), "new 不应设置 before_order_id");
     }
 
     #[test]
@@ -623,12 +620,20 @@ mod tests {
         let page_size = 20;
         // keyset 模式
         let keyset = true;
-        let offset_keyset = if keyset { 0 } else { (page - 1).max(0) * page_size };
+        let offset_keyset = if keyset {
+            0
+        } else {
+            (page - 1).max(0) * page_size
+        };
         assert_eq!(offset_keyset, 0, "keyset 模式 offset 必须为 0");
 
         // 非 keyset 模式
         let keyset = false;
-        let offset_paged = if keyset { 0 } else { (page - 1).max(0) * page_size };
+        let offset_paged = if keyset {
+            0
+        } else {
+            (page - 1).max(0) * page_size
+        };
         assert_eq!(offset_paged, 40, "page=3 page_size=20 → offset=40");
     }
 
@@ -690,7 +695,11 @@ mod tests {
             .connect_lazy_with(connect_options);
         let factory =
             SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
-        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
         Pool::new(pool_cfg, Arc::new(factory)).unwrap()
     }
 

@@ -1,0 +1,3 @@
+PG version: PostgreSQL 18.4 on x86_64-windows, compiled by msvc-19.44.35226, 64-bit
+PG SELECT 1: (1,)
+PG OK

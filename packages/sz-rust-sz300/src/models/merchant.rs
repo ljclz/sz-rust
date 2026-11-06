@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -239,7 +239,10 @@ mod tests {
         map.insert("market_id".to_string(), Value::I64(3));
         map.insert("name".to_string(), Value::String("店".into()));
         map.insert("stall_no".to_string(), Value::String("A-1".into()));
-        map.insert("contact_phone".to_string(), Value::String("13800000000".into()));
+        map.insert(
+            "contact_phone".to_string(),
+            Value::String("13800000000".into()),
+        );
         map.insert("category".to_string(), Value::String("水产".into()));
         map.insert("status".to_string(), Value::I64(1));
         map.insert("bank_account".to_string(), Value::String("6222".into()));

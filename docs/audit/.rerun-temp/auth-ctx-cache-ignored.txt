@@ -1,0 +1,9 @@
+   Compiling sz-rust-sz300 v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-sz300)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.28s
+     Running tests\auth_ctx_cache_test.rs (D:/rust-target\debug\deps\auth_ctx_cache_test-650e33d0ce50b4fa.exe)
+
+running 1 test
+test test_auth_context_cache_behavior ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.59s
+

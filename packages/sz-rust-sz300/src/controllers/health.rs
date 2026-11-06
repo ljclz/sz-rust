@@ -338,9 +338,7 @@ mod handler_tests {
     #[tokio::test]
     async fn check_returns_200_with_success_envelope() {
         let state = mock_app_state();
-        let router = Router::new()
-            .route("/health", get(check))
-            .with_state(state);
+        let router = Router::new().route("/health", get(check)).with_state(state);
         let response = router
             .oneshot(
                 Request::builder()

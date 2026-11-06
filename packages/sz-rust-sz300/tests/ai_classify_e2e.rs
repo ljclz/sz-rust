@@ -115,7 +115,8 @@ async fn test_rule2_manual_override_preserved() {
         overridden_to,
         overridden_by,
         ..
-    } = decision else {
+    } = decision
+    else {
         panic!("期望 ManualOverride")
     };
     assert_eq!(original, 3);

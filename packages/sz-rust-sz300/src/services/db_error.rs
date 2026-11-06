@@ -149,10 +149,7 @@ mod tests {
     #[test]
     fn classify_check_violation_by_error_code() {
         let msg = "Error 3819: Check constraint 'chk_good_price_nonneg' is violated.";
-        assert_eq!(
-            classify_db_error(msg),
-            Some("字段取值非法".to_string())
-        );
+        assert_eq!(classify_db_error(msg), Some("字段取值非法".to_string()));
     }
 
     #[test]
@@ -170,7 +167,10 @@ mod tests {
     #[test]
     fn does_not_classify_unrelated_error() {
         assert_eq!(classify_db_error("connection refused"), None);
-        assert_eq!(classify_db_error("Duplicate entry 'ORD001' for key 'order_no'"), None);
+        assert_eq!(
+            classify_db_error("Duplicate entry 'ORD001' for key 'order_no'"),
+            None
+        );
         assert_eq!(classify_db_error(""), None);
     }
 
@@ -181,7 +181,10 @@ mod tests {
         // 真实场景中 DB 错误文本不会含随机 1452 数字，可接受。
         // 此测试文档化该行为。
         let msg = "some weird error with 1452 in it";
-        assert!(classify_db_error(msg).is_some(), "保守匹配：含 1452 即分类为 FK 违反");
+        assert!(
+            classify_db_error(msg).is_some(),
+            "保守匹配：含 1452 即分类为 FK 违反"
+        );
     }
 
     #[test]

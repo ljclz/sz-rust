@@ -441,7 +441,10 @@ async fn test_fk_cascade_delete_order_removes_items() {
         .get("c")
         .and_then(|v| v.as_i64())
         .expect("应包含 c 字段");
-    assert_eq!(after_count, 0, "DELETE order 后 order_item 应被 CASCADE 删除");
+    assert_eq!(
+        after_count, 0,
+        "DELETE order 后 order_item 应被 CASCADE 删除"
+    );
 
     common::teardown_all(&pool).await;
     pool.close_all().await;

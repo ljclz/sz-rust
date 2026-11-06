@@ -450,7 +450,10 @@ mod tests {
             .route("/api/v1/merchant/create", post(create))
             .with_state(state);
         let response = router
-            .oneshot(json_request("/api/v1/merchant/create", r#"{"name": "test"}"#))
+            .oneshot(json_request(
+                "/api/v1/merchant/create",
+                r#"{"name": "test"}"#,
+            ))
             .await
             .unwrap();
         let body = body_string(response).await;

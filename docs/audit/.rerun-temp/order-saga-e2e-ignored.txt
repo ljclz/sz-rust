@@ -1,0 +1,42 @@
+   Compiling sz-rust-distributed-tx v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-distributed-tx)
+   Compiling sz-rust-sz300 v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-sz300)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.25s
+     Running tests\order_saga_e2e.rs (D:/rust-target\debug\deps\order_saga_e2e-e468a554cd9f680e.exe)
+
+running 4 tests
+test test_saga_stock_insufficient_compensated ... FAILED
+test test_saga_payment_fail_compensated ... FAILED
+test test_saga_all_success ... FAILED
+test test_saga_compensate_fail_manual_intervention ... ok
+
+failures:
+
+---- test_saga_stock_insufficient_compensated stdout ----
+
+thread 'test_saga_stock_insufficient_compensated' (37900) panicked at packages\sz-rust-sz300\tests\order_saga_e2e.rs:253:13:
+assertion `left == right` failed
+  left: "create_order"
+ right: "deduct_stock"
+
+---- test_saga_payment_fail_compensated stdout ----
+
+thread 'test_saga_payment_fail_compensated' (34604) panicked at packages\sz-rust-sz300\tests\order_saga_e2e.rs:291:13:
+assertion `left == right` failed
+  left: "create_order"
+ right: "initiate_payment"
+
+---- test_saga_all_success stdout ----
+
+thread 'test_saga_all_success' (15324) panicked at packages\sz-rust-sz300\tests\order_saga_e2e.rs:219:14:
+应为 Success，实际: Compensated { tx_id: "saga-001a1a98bb0a300027004", failed_step: "create_order" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_saga_all_success
+    test_saga_payment_fail_compensated
+    test_saga_stock_insufficient_compensated
+
+test result: FAILED. 1 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s
+
+error: test failed, to rerun pass `-p sz-rust-sz300 --test order_saga_e2e`

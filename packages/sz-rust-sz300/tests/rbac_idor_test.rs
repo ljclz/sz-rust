@@ -175,9 +175,11 @@ fn idor_direct_resource_id_access_allowed_own_merchant() {
 fn idor_cross_merchant_denied_for_all_resource_types() {
     let attacker = merchant_a();
     // 模拟从 DB 查回的 resource 行的 merchant_id
-    for (resource_type, resource_merchant_id) in
-        [("order", Some(2)), ("product", Some(2)), ("device", Some(2))]
-    {
+    for (resource_type, resource_merchant_id) in [
+        ("order", Some(2)),
+        ("product", Some(2)),
+        ("device", Some(2)),
+    ] {
         assert!(
             !can_access_merchant_resource_from_user(Some(&attacker), resource_merchant_id),
             "商户 A 跨商户访问 {resource_type} 资源必须拒绝"
@@ -212,7 +214,8 @@ fn idor_list_query_scope_admin_honors_request() {
     let (effective, allowed) = effective_merchant_scope_from_user(Some(&admin), requested);
     assert!(allowed);
     assert_eq!(
-        effective, Some(2),
+        effective,
+        Some(2),
         "管理员列表查询应使用请求参数中的 merchant_id"
     );
 }
@@ -509,11 +512,7 @@ mod rbac_guard_cross_merchant {
         ] {
             let router = build_router(engine.clone(), resource);
             let resp = router.oneshot(bearer_request(&token)).await.unwrap();
-            assert_eq!(
-                resp.status(),
-                StatusCode::OK,
-                "管理员应对所有资源 allow"
-            );
+            assert_eq!(resp.status(), StatusCode::OK, "管理员应对所有资源 allow");
         }
     }
 
@@ -546,7 +545,10 @@ mod rbac_guard_cross_merchant {
         // read 系列允许
         for op in ["read"] {
             assert_eq!(
-                engine.check("10", &roles::perm::merchant(op)).await.unwrap(),
+                engine
+                    .check("10", &roles::perm::merchant(op))
+                    .await
+                    .unwrap(),
                 PermissionDecision::Allow
             );
             assert_eq!(
@@ -561,7 +563,10 @@ mod rbac_guard_cross_merchant {
         // write 系列拒绝
         for op in ["create", "update", "delete"] {
             assert_eq!(
-                engine.check("10", &roles::perm::merchant(op)).await.unwrap(),
+                engine
+                    .check("10", &roles::perm::merchant(op))
+                    .await
+                    .unwrap(),
                 PermissionDecision::Deny
             );
             assert_eq!(
@@ -570,7 +575,10 @@ mod rbac_guard_cross_merchant {
             );
         }
         assert_eq!(
-            engine.check("10", &roles::perm::order("create")).await.unwrap(),
+            engine
+                .check("10", &roles::perm::order("create"))
+                .await
+                .unwrap(),
             PermissionDecision::Deny
         );
     }

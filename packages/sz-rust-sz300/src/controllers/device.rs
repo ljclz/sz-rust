@@ -585,10 +585,7 @@ mod tests {
             .route("/api/v1/device/ota", post(trigger_ota))
             .with_state(state);
         let response = router
-            .oneshot(json_request(
-                "/api/v1/device/ota",
-                r#"{"device_id": 1}"#,
-            ))
+            .oneshot(json_request("/api/v1/device/ota", r#"{"device_id": 1}"#))
             .await
             .unwrap();
         let body = body_string(response).await;

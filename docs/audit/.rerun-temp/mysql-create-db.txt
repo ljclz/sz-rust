@@ -1,0 +1,4 @@
+C:\Program Files\python\lib\site-packages\pymysql\_auth.py:10: CryptographyDeprecationWarning: Python 3.8 is no longer supported by the Python core team and support for it is deprecated in cryptography. The next release of cryptography will remove support for Python 3.8.
+  from cryptography.hazmat.backends import default_backend
+MySQL sz_orm_test created
+MySQL sz_orm_test exists: ('sz_orm_test',)

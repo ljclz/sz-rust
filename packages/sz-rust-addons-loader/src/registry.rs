@@ -374,7 +374,11 @@ mod tests {
         let result = registry.get("ghost");
         assert!(result.is_err());
         let __err = result.unwrap_err();
-        assert!(matches!(&__err, &AddonLoaderError::AddonNotFound(_)), "expected AddonNotFound, got {:?}", &__err);
+        assert!(
+            matches!(&__err, AddonLoaderError::AddonNotFound(_)),
+            "expected AddonNotFound, got {:?}",
+            __err
+        );
         if let AddonLoaderError::AddonNotFound(name) = __err {
             assert_eq!(name, "ghost");
         }

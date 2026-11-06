@@ -1,0 +1,25 @@
+   Compiling sz-rust-sz300 v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-sz300)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.92s
+     Running tests\mqtt_dispatch_test.rs (D:/rust-target\debug\deps\mqtt_dispatch_test-546e3ebee67943a8.exe)
+
+running 2 tests
+test test_start_consumer_graceful_shutdown_integration ... ok
+test test_dispatch_topic_routing_integration ... FAILED
+
+failures:
+
+---- test_dispatch_topic_routing_integration stdout ----
+
+thread 'test_dispatch_topic_routing_integration' (42520) panicked at packages\sz-rust-sz300\tests\mqtt_dispatch_test.rs:199:9:
+assertion `left == right` failed: dispatch 应将 status 更新为 2
+  left: 1
+ right: 2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    test_dispatch_topic_routing_integration
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 3.50s
+
+error: test failed, to rerun pass `-p sz-rust-sz300 --test mqtt_dispatch_test`

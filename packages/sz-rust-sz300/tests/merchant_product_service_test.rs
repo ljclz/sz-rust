@@ -386,7 +386,10 @@ async fn test_product_create_returns_good_id() {
     let good_id = services::product_service::ProductService::create(&pool, &product)
         .await
         .expect("create 失败");
-    assert!(good_id > 0, "create 应返回自增 good_id > 0, 实际: {good_id}");
+    assert!(
+        good_id > 0,
+        "create 应返回自增 good_id > 0, 实际: {good_id}"
+    );
 
     cleanup_tables(&pool).await;
     pool.close_all().await;
@@ -424,12 +427,16 @@ async fn test_product_list_with_merchant_filter() {
     seed_market(&pool).await;
     {
         let mut conn = pool.acquire().await.expect("获取连接失败");
-        conn.execute("INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (1, 1, 'mp-list-1')")
-            .await
-            .expect("插入 merchant 1 失败");
-        conn.execute("INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (2, 1, 'mp-list-2')")
-            .await
-            .expect("插入 merchant 2 失败");
+        conn.execute(
+            "INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (1, 1, 'mp-list-1')",
+        )
+        .await
+        .expect("插入 merchant 1 失败");
+        conn.execute(
+            "INSERT IGNORE INTO merchant (merchant_id, market_id, name) VALUES (2, 1, 'mp-list-2')",
+        )
+        .await
+        .expect("插入 merchant 2 失败");
     }
 
     services::product_service::ProductService::create(&pool, &make_product("MP-PROD-M1-A", 1))
@@ -520,12 +527,10 @@ async fn test_product_update_changes_price_field() {
             .expect("插入 merchant 失败");
     }
 
-    let good_id = services::product_service::ProductService::create(
-        &pool,
-        &make_product("MP-PROD-UPD", 1),
-    )
-    .await
-    .expect("create 失败");
+    let good_id =
+        services::product_service::ProductService::create(&pool, &make_product("MP-PROD-UPD", 1))
+            .await
+            .expect("create 失败");
 
     let mut fields: HashMap<String, Value> = HashMap::new();
     fields.insert("price".into(), Value::I64(9999));
@@ -566,12 +571,10 @@ async fn test_product_delete_is_soft_delete_status_zero() {
             .expect("插入 merchant 失败");
     }
 
-    let good_id = services::product_service::ProductService::create(
-        &pool,
-        &make_product("MP-PROD-DEL", 1),
-    )
-    .await
-    .expect("create 失败");
+    let good_id =
+        services::product_service::ProductService::create(&pool, &make_product("MP-PROD-DEL", 1))
+            .await
+            .expect("create 失败");
 
     services::product_service::ProductService::delete(&pool, good_id)
         .await

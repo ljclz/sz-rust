@@ -102,9 +102,7 @@ fn plugin_error_response(e: PluginError) -> (StatusCode, Json<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::plugin_manager::{
-        InMemoryMarketplace, PluginInfo, PluginManager,
-    };
+    use crate::services::plugin_manager::{InMemoryMarketplace, PluginInfo, PluginManager};
     use crate::state::mock_app_state;
     use axum::body::Body;
     use axum::http::Request;
@@ -355,10 +353,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_string(response).await;
-        assert!(
-            body.contains("\"code\":1"),
-            "应返回 code:1, 实际: {body}"
-        );
+        assert!(body.contains("\"code\":1"), "应返回 code:1, 实际: {body}");
         assert!(
             body.contains("\"data\":[]"),
             "初始列表应为空数组, 实际: {body}"

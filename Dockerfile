@@ -24,13 +24,11 @@
 FROM rust:1.98-slim AS builder
 
 # 安装构建所需系统依赖
-#   - git: clone sz-orm 依赖（workspace 通过 path 引用 ../sz-orm）
-#   - pkg-config / libssl-dev: 兜底处理潜在的原生依赖链接
 #   - ca-certificates: 支持 git over HTTPS
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    pkg-config \
-    libssl-dev \
+# 2026-11-06：改用 USTC 镜像源——deb.debian.org 直连不稳定（404/慢速，
+# 本机 staging 实测 7 分钟才 530kB 且 trixie 索引 404）
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -65,7 +63,8 @@ RUN if [ -n "$SZ300_FEATURES" ]; then \
 # TODO: 固定为具体 digest，例如 rust:1.98-slim@sha256:<digest>
 FROM rust:1.98-slim AS healthcheck-builder
 WORKDIR /hc
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|deb.debian.org|mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 # 2026-11-05 修复（本机 staging 部署实测发现）：distroless 运行阶段 /app 归 root，

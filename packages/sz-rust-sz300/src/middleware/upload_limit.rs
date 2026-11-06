@@ -45,7 +45,10 @@ mod tests {
         let state: UploadLimitState = Arc::new(max_size);
         Router::new()
             .route("/any", get(|| async { "ok" }))
-            .layer(middleware::from_fn_with_state(state, upload_limit_middleware))
+            .layer(middleware::from_fn_with_state(
+                state,
+                upload_limit_middleware,
+            ))
     }
 
     /// 收集响应体为 UTF-8 字符串

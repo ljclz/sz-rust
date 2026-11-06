@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use sz_rust_observability::alert::{AlertRule, AlertSeverity, NotificationChannel};
 use sz_rust_data_mask::BuiltinMaskRule;
+use sz_rust_observability::alert::{AlertRule, AlertSeverity, NotificationChannel};
 
 /// 业务告警规则集
 pub struct BusinessAlertRules;

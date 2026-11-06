@@ -267,7 +267,11 @@ mod tests {
         for i in 0..250 {
             svc.publish("e", &format!("d{i}")).await;
         }
-        assert!(SseService::check_backpressure(&rx), "receiver.len={} 应 > 200", rx.len());
+        assert!(
+            SseService::check_backpressure(&rx),
+            "receiver.len={} 应 > 200",
+            rx.len()
+        );
     }
 
     #[tokio::test]
@@ -277,7 +281,11 @@ mod tests {
         for i in 0..10 {
             svc.publish("e", &format!("d{i}")).await;
         }
-        assert!(!SseService::check_backpressure(&rx), "receiver.len={} 应 <= 200", rx.len());
+        assert!(
+            !SseService::check_backpressure(&rx),
+            "receiver.len={} 应 <= 200",
+            rx.len()
+        );
     }
 
     #[test]

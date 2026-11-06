@@ -112,7 +112,9 @@ mod tests {
         // 注册一个连接并加入 admin 房间
         let (tx, mut rx) = mpsc::channel(10);
         let conn_id = mgr.register(tx, None).expect("register");
-        rooms.join_room(&conn_id, &RoomId::new("admin")).expect("join");
+        rooms
+            .join_room(&conn_id, &RoomId::new("admin"))
+            .expect("join");
         let sent = WsService::broadcast_device_heartbeat(&mgr, &rooms, "SN-003").await;
         assert_eq!(sent, 1, "应成功投递给 1 个 admin 成员");
         let msg = rx.recv().await.expect("应收到消息");

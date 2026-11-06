@@ -272,10 +272,12 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    use std::sync::Mutex;
+    // （ENV_MUTEX 为 tokio::sync::Mutex，见下方说明）
 
     /// 串行化所有 AI 测试，避免并行 race（AI facade 全局 OnceLock 不可重置）。
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+    /// 用 tokio Mutex：guard 需跨 oneshot().await 持有整个测试体
+    /// （std Mutex 会触发 clippy::await_holding_lock）。
+    static ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// 确保 AI facade 已初始化（全局 OnceLock，仅首次调用实际初始化）。
     ///
@@ -460,7 +462,9 @@ mod tests {
     /// AI 未初始化时真正验证验收 3。两种情况下测试均覆盖 handler 代码行。
     #[tokio::test]
     async fn aaa_embed_ai_not_initialized_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体：OnceLock 探测+请求必须原子完成（探测后若被其他
+        // 测试初始化，snapshot 就失真，导致按"未初始化"分支误判）。
+        let _guard = ENV_MUTEX.lock().await;
         let ai_not_initialized = !sz_rust_ai_facade::Ai::is_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -501,7 +505,9 @@ mod tests {
     /// AI 已初始化时验证 handler 越过 AI 检查作为补充验证。
     #[tokio::test]
     async fn aaa_stream_ai_not_initialized_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体：OnceLock 探测+请求必须原子完成（探测后若被其他
+        // 测试初始化，snapshot 就失真，导致按"未初始化"分支误判）。
+        let _guard = ENV_MUTEX.lock().await;
         let ai_not_initialized = !sz_rust_ai_facade::Ai::is_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -539,7 +545,9 @@ mod tests {
     /// 验收 1：chat prompt 超过 MAX_PROMPT_CHARS（16000）→ 返回"prompt 过长"错误。
     #[tokio::test]
     async fn test_chat_prompt_too_long_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -560,13 +568,22 @@ mod tests {
             .unwrap();
         let body = collect_body(response).await;
         assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
-        assert!(body.contains("prompt 过长"), "应包含'prompt 过长': {}", body);
+        assert!(
+            body.contains("prompt 过长"),
+            "应包含'prompt 过长': {}",
+            body
+        );
     }
 
     /// 验收 2：chat body 非 JSON → 解析失败 → 返回 code:0 错误响应。
     #[tokio::test]
     async fn test_chat_body_parse_error_returns_code0() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 锁内只取环境快照（is_initialized 布尔），不跨 .await 持有 guard
+        // （clippy::await_holding_lock；Mutex 仅为串行化 OnceLock 探测时点）
+        let _ai_was_initialized = {
+            let _guard = ENV_MUTEX.lock().await;
+            sz_rust_ai_facade::Ai::is_initialized()
+        };
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/ai/chat", post(chat))
@@ -589,7 +606,9 @@ mod tests {
     /// 验收 4：embed texts 非数组 → 返回"texts 不能为空且必须是字符串数组"错误。
     #[tokio::test]
     async fn test_embed_texts_not_array_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -619,7 +638,9 @@ mod tests {
     /// 验收 5：embed texts 空数组 → 返回"texts 不能为空"错误。
     #[tokio::test]
     async fn test_embed_texts_empty_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -649,7 +670,12 @@ mod tests {
     /// 验收 6：embed body 非 JSON → 解析失败 → 返回 code:0 错误响应。
     #[tokio::test]
     async fn test_embed_body_parse_error_returns_code0() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 锁内只取环境快照（is_initialized 布尔），不跨 .await 持有 guard
+        // （clippy::await_holding_lock；Mutex 仅为串行化 OnceLock 探测时点）
+        let _ai_was_initialized = {
+            let _guard = ENV_MUTEX.lock().await;
+            sz_rust_ai_facade::Ai::is_initialized()
+        };
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/ai/embed", post(embed))
@@ -672,7 +698,9 @@ mod tests {
     /// 验收 8：stream 空 prompt → 返回"prompt 不能为空"错误。
     #[tokio::test]
     async fn test_stream_empty_prompt_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -702,7 +730,9 @@ mod tests {
     /// 验收 9：stream prompt 超过 MAX_PROMPT_CHARS → 返回"prompt 过长"错误。
     #[tokio::test]
     async fn test_stream_prompt_too_long_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -723,13 +753,19 @@ mod tests {
             .unwrap();
         let body = collect_body(response).await;
         assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
-        assert!(body.contains("prompt 过长"), "应包含'prompt 过长': {}", body);
+        assert!(
+            body.contains("prompt 过长"),
+            "应包含'prompt 过长': {}",
+            body
+        );
     }
 
     /// 验收 10：stream 不支持的模型 → 返回"不支持的模型"错误。
     #[tokio::test]
     async fn test_stream_unsupported_model_returns_error() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 持锁覆盖整个测试体（tokio Mutex，不触发 clippy::await_holding_lock）：
+        // 探测+ensure+请求必须原子完成，防止与其他 AI 测试竞态。
+        let _guard = ENV_MUTEX.lock().await;
         ensure_ai_initialized();
         let state = mock_app_state();
         let router = Router::new()
@@ -759,7 +795,12 @@ mod tests {
     /// 验收 11：stream body 非 JSON → 解析失败 → 返回 code:0 错误响应。
     #[tokio::test]
     async fn test_stream_body_parse_error_returns_code0() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        // 锁内只取环境快照（is_initialized 布尔），不跨 .await 持有 guard
+        // （clippy::await_holding_lock；Mutex 仅为串行化 OnceLock 探测时点）
+        let _ai_was_initialized = {
+            let _guard = ENV_MUTEX.lock().await;
+            sz_rust_ai_facade::Ai::is_initialized()
+        };
         let state = mock_app_state();
         let router = Router::new()
             .route("/api/v1/ai/stream", post(stream))

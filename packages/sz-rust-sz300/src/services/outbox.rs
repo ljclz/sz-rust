@@ -328,7 +328,10 @@ mod tests {
     fn text_of_bytes_invalid_utf8_uses_replacement_char() {
         let v = Value::Bytes(vec![0xff, 0xfe, 0xfd]);
         let s = text_of(Some(&v));
-        assert!(s.contains('\u{FFFD}'), "非 UTF-8 字节应被替换为 U+FFFD: {s:?}");
+        assert!(
+            s.contains('\u{FFFD}'),
+            "非 UTF-8 字节应被替换为 U+FFFD: {s:?}"
+        );
     }
 
     /// text_of：String 变体通过 as_str 返回
@@ -366,14 +369,14 @@ mod tests {
             (100, 256), // min(8) 截断
         ];
         for (attempts, expected) in cases {
-            let backoff = (1i64 << attempts.min(8)).min(300);
-            assert_eq!(
-                backoff, expected,
-                "attempts={attempts} 退避应为 {expected}"
-            );
+            // 复制实现公式（常量折叠会触发 clippy::unnecessary_min_or_max，
+            // 故经 helper 闭包引用变量，模拟真实 attempts 运行时值）。
+            // 注：2^8=256 < 300，min(8) 先截断后 300 上限实际不触发——
+            // 实现上限为 min(2^8, 300) = 256，300 是防御性常量。
+            let clamp = |a: i32| (1i64 << a.min(8)).min(300);
+            let backoff = clamp(attempts);
+            assert_eq!(backoff, expected, "attempts={attempts} 退避应为 {expected}");
         }
-        // 上限 300
-        assert_eq!((1i64 << 9).min(300), 300);
     }
 
     /// mark_failed 死信阈值：attempts >= MAX_ATTEMPTS(10) → status=2
@@ -386,10 +389,7 @@ mod tests {
         }
         // attempts >= 10 → 死信路径
         for attempts in [10, 11, 100] {
-            assert!(
-                attempts >= MAX_ATTEMPTS,
-                "attempts={attempts} 应走死信路径"
-            );
+            assert!(attempts >= MAX_ATTEMPTS, "attempts={attempts} 应走死信路径");
         }
     }
 
@@ -421,7 +421,11 @@ mod tests {
             .connect_lazy_with(connect_options);
         let factory =
             SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
-        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
         Pool::new(pool_cfg, Arc::new(factory)).unwrap()
     }
 

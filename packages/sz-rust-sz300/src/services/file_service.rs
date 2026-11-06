@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -152,8 +152,9 @@ mod tests {
     /// 此用例仅断言 ALLOWED_EXTENSIONS 含大小写归一化后的扩展名。
     #[test]
     fn save_allowed_extensions_case_insensitive() {
-        for ext in ["jpg", "JPG", "Jpg", "jpeg", "JPEG", "png", "PNG", "gif", "GIF", "bmp", "BMP"]
-        {
+        for ext in [
+            "jpg", "JPG", "Jpg", "jpeg", "JPEG", "png", "PNG", "gif", "GIF", "bmp", "BMP",
+        ] {
             let lower = ext.to_lowercase();
             assert!(
                 ALLOWED_EXTENSIONS.contains(&lower.as_str()),
@@ -231,15 +232,16 @@ mod tests {
     // ─────────────────────────────────────────────
     // FileService::save 成功路径（用 tempdir 隔离，避免污染工作目录）
     // 共享 CWD_MUTEX 保证 save 测试串行执行（set_current_dir 是进程全局状态）
+    // 用 tokio Mutex：guard 需跨 FileService::save().await 持有
+    // （std Mutex 会触发 clippy::await_holding_lock）
     // ─────────────────────────-────────────────────
 
-    use std::sync::Mutex;
-    static CWD_MUTEX: Mutex<()> = Mutex::new(());
+    static CWD_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// save 对合法 jpg 文件应成功，返回 /uploads/日期/文件名 路径
     #[tokio::test]
     async fn save_valid_jpg_returns_ok_url() {
-        let _guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = CWD_MUTEX.lock().await;
 
         let temp = std::env::temp_dir().join(format!("sz300_file_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp).expect("创建 tempdir 失败");
@@ -269,7 +271,7 @@ mod tests {
     /// save 对大写扩展名 .PNG 应成功（ext.to_lowercase() 归一化）
     #[tokio::test]
     async fn save_uppercase_extension_returns_ok() {
-        let _guard = CWD_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = CWD_MUTEX.lock().await;
 
         let temp = std::env::temp_dir().join(format!("sz300_file_test_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&temp).expect("创建 tempdir 失败");

@@ -523,7 +523,10 @@ mod tests {
         let state = (auditor.clone(), None);
         let app = Router::new()
             .route("/api/v1/order", get(|| async { "ok" }))
-            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+            .layer(middleware::from_fn_with_state(
+                state,
+                audit_chain_middleware,
+            ));
 
         let req = Request::builder()
             .method("GET")
@@ -548,7 +551,10 @@ mod tests {
         let state = (auditor.clone(), None);
         let app = Router::new()
             .route("/api/v1/order", post(|| async { "ok" }))
-            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+            .layer(middleware::from_fn_with_state(
+                state,
+                audit_chain_middleware,
+            ));
 
         let req = Request::builder()
             .method("POST")
@@ -574,7 +580,10 @@ mod tests {
         let state = (auditor.clone(), Some(sink));
         let app = Router::new()
             .route("/api/v1/order", post(|| async { "ok" }))
-            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+            .layer(middleware::from_fn_with_state(
+                state,
+                audit_chain_middleware,
+            ));
 
         let current_user = CurrentUser {
             user_id: 1,

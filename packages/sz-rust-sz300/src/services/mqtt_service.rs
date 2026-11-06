@@ -410,7 +410,8 @@ mod tests {
 
     #[tokio::test]
     async fn send_ota_command_returns_ok_with_valid_inputs() {
-        let result = send_ota_command("SN-OTA-001", "https://ota.example.com/v2.bin", "2.0.0").await;
+        let result =
+            send_ota_command("SN-OTA-001", "https://ota.example.com/v2.bin", "2.0.0").await;
         assert!(result.is_ok(), "send_ota_command 应返回 Ok: {:?}", result);
     }
 
@@ -429,7 +430,11 @@ mod tests {
     async fn mock_mqtt_plugin_publish_returns_ok() {
         let payload = b"{\"test\": true}";
         let result = MockMqttPlugin::publish("/sz/test/topic", payload, 1).await;
-        assert!(result.is_ok(), "MockMqttPlugin::publish 应返回 Ok: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "MockMqttPlugin::publish 应返回 Ok: {:?}",
+            result
+        );
     }
 
     #[tokio::test]
@@ -530,6 +535,10 @@ mod tests {
     async fn mock_mqtt_plugin_start_returns_ok() {
         let state = crate::state::mock_app_state();
         let result = MockMqttPlugin::start(state).await;
-        assert!(result.is_ok(), "MockMqttPlugin::start 应返回 Ok: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "MockMqttPlugin::start 应返回 Ok: {:?}",
+            result
+        );
     }
 }

@@ -1,0 +1,26 @@
+   Compiling sz-rust-router-facade v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-router-facade)
+   Compiling sz-rust-mvc-facade v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-mvc-facade)
+   Compiling sz-rust-mcp v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-mcp)
+   Compiling sz-rust-capability v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-capability)
+   Compiling sz-rust-addons-loader v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-addons-loader)
+   Compiling sz-rust-ai-facade v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-ai-facade)
+   Compiling sz-rust-core v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-core)
+   Compiling sz-rust-rag v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-rag)
+   Compiling sz-rust-sz300 v2.0.0 (D:\www\test\鲜视达\rust\sz-rust\packages\sz-rust-sz300)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.36s
+     Running tests\db_integration_test.rs (D:/rust-target\debug\deps\db_integration_test-c1d7b6152025d618.exe)
+
+running 10 tests
+test test_mysql_pool_init_and_query ... ok
+test test_mysql_product_service_like_injection_protection ... ok
+test test_mysql_transaction_savepoint ... ok
+test test_mysql_transaction_commit_rollback ... ok
+test test_mysql_sql_injection_protection ... ok
+test test_mysql_create_table_and_crud ... ok
+test test_pg_transaction_commit_rollback ... ok
+test test_pg_pool_init_and_query ... ok
+test test_mysql_pool_concurrency_stress ... ok
+test test_mysql_business_schema_crud ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+

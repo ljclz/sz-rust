@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -214,7 +214,10 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("settle_id".to_string(), Value::I64(2026));
         map.insert("merchant_id".to_string(), Value::I64(5));
-        map.insert("settle_date".to_string(), Value::String("2026-06-06".into()));
+        map.insert(
+            "settle_date".to_string(),
+            Value::String("2026-06-06".into()),
+        );
         map.insert("total_fen".to_string(), Value::I64(999999));
         map.insert("order_count".to_string(), Value::I64(42));
         map.insert("fee_fen".to_string(), Value::I64(5000));

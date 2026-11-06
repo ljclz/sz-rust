@@ -162,9 +162,7 @@ impl ProductController {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
-                    ai_class_id: data
-                        .get("ai_class_id")
-                        .and_then(|v| v.as_i64()),
+                    ai_class_id: data.get("ai_class_id").and_then(|v| v.as_i64()),
                     image: data
                         .get("image")
                         .and_then(|v| v.as_str())

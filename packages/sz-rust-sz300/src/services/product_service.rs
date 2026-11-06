@@ -303,7 +303,8 @@ impl ProductService {
     /// 流程：脱敏 → AI 分类 → 决策 → 创建商品。
     /// AI 超时/错误时降级为人工分类，不阻塞商品创建（spec §5.4.3 异常 1/2）。
     #[cfg(feature = "v19-ai-classify")]
-    pub async fn create_with_ai(        pool: &Pool,
+    pub async fn create_with_ai(
+        pool: &Pool,
         product: &Product,
         classifier: &crate::services::ai_classifier::AiClassifier,
         manual_category: Option<(i64, i64)>,
@@ -392,7 +393,10 @@ mod tests {
             keyword: Some("   ".to_string()),
         };
         let trimmed = f.keyword.as_deref().map(str::trim).unwrap_or("");
-        assert!(trimmed.is_empty(), "纯空白 keyword trim 后应为空，不加入 WHERE");
+        assert!(
+            trimmed.is_empty(),
+            "纯空白 keyword trim 后应为空，不加入 WHERE"
+        );
     }
 
     /// keyword 含前后空格但中间有内容 → trim 后非空 → 加入 LIKE 条件
@@ -476,7 +480,11 @@ mod tests {
             .connect_lazy_with(connect_options);
         let factory =
             SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
-        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
         Pool::new(pool_cfg, Arc::new(factory)).unwrap()
     }
 

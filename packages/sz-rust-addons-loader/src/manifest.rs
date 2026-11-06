@@ -786,7 +786,11 @@ status = 1
         let result = parse_manifest(tmp.path()).await;
         assert!(result.is_err());
         let __err = result.unwrap_err();
-        assert!(matches!(__err, AddonLoaderError::ManifestParse { .. }), "expected ManifestParse, got {:?}", &__err);
+        assert!(
+            matches!(&__err, AddonLoaderError::ManifestParse { .. }),
+            "expected ManifestParse, got {:?}",
+            __err
+        );
     }
 
     #[tokio::test]

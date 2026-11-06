@@ -187,9 +187,7 @@ impl DeviceService {
         }
 
         // 检查是否已绑定（merchant_id 改 NULLABLE 后，NULL=未绑定；013_nullable_device_merchant.sql）
-        let existing_merchant = rows[0]
-            .get("merchant_id")
-            .and_then(|v| v.as_i64());
+        let existing_merchant = rows[0].get("merchant_id").and_then(|v| v.as_i64());
         if existing_merchant.is_some() {
             return Err("设备已绑定".to_string());
         }
@@ -399,12 +397,16 @@ mod tests {
     /// exists_with_merchant_scope 的 SQL 分支纯逻辑：
     /// - is_admin=true → 单参数 SQL（不附加 merchant_id 过滤）
     /// - is_admin=false → 双参数 SQL（附加 merchant_id = ?）
+    ///
     /// 此处锁定分支选择逻辑，不实际执行查询。
     #[test]
     fn exists_with_merchant_scope_admin_uses_single_param_sql() {
         let is_admin = true;
         let (sql, params_len) = if is_admin {
-            ("SELECT device_id FROM device WHERE device_id = ?".to_string(), 1)
+            (
+                "SELECT device_id FROM device WHERE device_id = ?".to_string(),
+                1,
+            )
         } else {
             (
                 "SELECT device_id FROM device WHERE device_id = ? AND merchant_id = ?".to_string(),
@@ -422,7 +424,10 @@ mod tests {
     fn exists_with_merchant_scope_non_admin_uses_merchant_scoped_sql() {
         let is_admin = false;
         let (sql, params_len) = if is_admin {
-            ("SELECT device_id FROM device WHERE device_id = ?".to_string(), 1)
+            (
+                "SELECT device_id FROM device WHERE device_id = ?".to_string(),
+                1,
+            )
         } else {
             (
                 "SELECT device_id FROM device WHERE device_id = ? AND merchant_id = ?".to_string(),
@@ -439,6 +444,7 @@ mod tests {
     /// 非管理员且 merchant_id=None 时，传入 -1 作为哨兵（不可能匹配真实商户）
     /// 此处锁定 `merchant_id.unwrap_or(-1)` 的哨兵语义，防止 None 被静默放行。
     #[test]
+    #[allow(clippy::unnecessary_literal_unwrap)] // 测试有意对字面 None 调 unwrap_or 以锁定哨兵语义
     fn exists_with_merchant_scope_non_admin_none_merchant_uses_sentinel() {
         let merchant_id: Option<i64> = None;
         let is_admin = false;
@@ -484,12 +490,16 @@ mod tests {
     /// unbind SQL 语义：merchant_id 置 NULL（哨兵 0 已退役）
     #[test]
     fn device_unbind_sql_uses_null_not_zero_sentinel() {
-        let sql = "UPDATE device SET merchant_id = NULL, bind_at = NULL, status = 0 WHERE device_id = ?";
+        let sql =
+            "UPDATE device SET merchant_id = NULL, bind_at = NULL, status = 0 WHERE device_id = ?";
         assert!(
             sql.contains("merchant_id = NULL"),
             "unbind 应置 NULL，不应使用哨兵 0"
         );
-        assert!(sql.contains("status = 0"), "unbind 应将 status 置为 0（离线）");
+        assert!(
+            sql.contains("status = 0"),
+            "unbind 应将 status 置为 0（离线）"
+        );
     }
 
     // ─────────────────────────────────────────────
@@ -515,14 +525,20 @@ mod tests {
             .connect_lazy_with(connect_options);
         let factory =
             SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
-        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
         Pool::new(pool_cfg, Arc::new(factory)).unwrap()
     }
 
     #[tokio::test]
     async fn device_list_fake_pool_returns_err() {
         let pool = make_fake_pool();
-        let filters = DeviceFilters { merchant_id: Some(1) };
+        let filters = DeviceFilters {
+            merchant_id: Some(1),
+        };
         let result = DeviceService::list(&pool, 1, 20, filters).await;
         assert!(result.is_err(), "fake pool 应导致 list 失败");
     }
@@ -568,7 +584,10 @@ mod tests {
         let pool = make_fake_pool();
         // is_admin=true → 单参数 SQL 分支
         let result = DeviceService::exists_with_merchant_scope(&pool, 42, Some(1), true).await;
-        assert!(result.is_err(), "fake pool 应导致 exists_with_merchant_scope 失败");
+        assert!(
+            result.is_err(),
+            "fake pool 应导致 exists_with_merchant_scope 失败"
+        );
     }
 
     #[tokio::test]
@@ -576,7 +595,10 @@ mod tests {
         let pool = make_fake_pool();
         // is_admin=false → 双参数 SQL 分支（含 merchant_id 哨兵）
         let result = DeviceService::exists_with_merchant_scope(&pool, 42, Some(1), false).await;
-        assert!(result.is_err(), "fake pool 应导致 exists_with_merchant_scope 失败");
+        assert!(
+            result.is_err(),
+            "fake pool 应导致 exists_with_merchant_scope 失败"
+        );
     }
 
     #[tokio::test]

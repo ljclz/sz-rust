@@ -1,0 +1,5 @@
+C:\Program Files\python\lib\site-packages\oracledb\__init__.py:43: CryptographyDeprecationWarning: Python 3.8 is no longer supported by the Python core team and support for it is deprecated in cryptography. The next release of cryptography will remove support for Python 3.8.
+  from . import base_impl, thick_impl, thin_impl
+Oracle version: 23.26.3.0.0
+Oracle SELECT 1: (1,)
+Oracle OK

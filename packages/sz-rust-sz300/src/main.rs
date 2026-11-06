@@ -17,10 +17,14 @@ use tracing_subscriber::{fmt, EnvFilter};
 #[derive(Debug, thiserror::Error)]
 enum TlsConfigError {
     /// `SZ300_TLS_CERT` 已设置但 `SZ300_TLS_KEY` 未设置
-    #[error("SZ300_TLS_CERT 已设置但 SZ300_TLS_KEY 未设置 — TLS 配置不完整，拒绝启动（fail-closed）")]
+    #[error(
+        "SZ300_TLS_CERT 已设置但 SZ300_TLS_KEY 未设置 — TLS 配置不完整，拒绝启动（fail-closed）"
+    )]
     CertWithoutKey,
     /// `SZ300_TLS_KEY` 已设置但 `SZ300_TLS_CERT` 未设置
-    #[error("SZ300_TLS_KEY 已设置但 SZ300_TLS_CERT 未设置 — TLS 配置不完整，拒绝启动（fail-closed）")]
+    #[error(
+        "SZ300_TLS_KEY 已设置但 SZ300_TLS_CERT 未设置 — TLS 配置不完整，拒绝启动（fail-closed）"
+    )]
     KeyWithoutCert,
 }
 
@@ -32,8 +36,12 @@ enum TlsConfigError {
 ///
 /// 空字符串视为未设置，避免 `SZ300_TLS_CERT=""` 误触发 HTTPS 模式。
 fn resolve_tls_config() -> Result<Option<sz_rust_http_facade::tls::TlsConfig>, TlsConfigError> {
-    let cert = std::env::var("SZ300_TLS_CERT").ok().filter(|s| !s.is_empty());
-    let key = std::env::var("SZ300_TLS_KEY").ok().filter(|s| !s.is_empty());
+    let cert = std::env::var("SZ300_TLS_CERT")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let key = std::env::var("SZ300_TLS_KEY")
+        .ok()
+        .filter(|s| !s.is_empty());
     match (cert, key) {
         (Some(c), Some(k)) => Ok(Some(sz_rust_http_facade::tls::TlsConfig::new(c, k))),
         (None, None) => Ok(None),
