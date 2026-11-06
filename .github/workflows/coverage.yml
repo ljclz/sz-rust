@@ -228,6 +228,58 @@ jobs:
           path: cobertura-p4.xml
           retention-days: 14
 
+  # ── CI-009：SDET P1-2 覆盖率矩阵全覆盖（2026-11-06 环3 实施批）──
+  # 将此前仅按豁免流程登记、未跑 llvm-cov 的 13 个 crate 纳入矩阵，
+  # 实现覆盖率矩阵 40→53/55 crate（剩余 sz-rust-macros 为 proc-macro、
+  # addon-hot-reload-example 为示例子包，cargo-llvm-cov 支持有限，保留豁免）。
+  # 这些 crate 已在 docs/audit/coverage-exemption.md 登记豁免，
+  # per-crate-coverage.js 会跳过阈值检查，但 llvm-cov 仍会产出覆盖率报告。
+
+  coverage-p5:
+    name: Coverage P5 (v1.5/v1.7 microservices + addons-admin + facade)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout sz-orm dependency
+        run: |
+          git clone https://github.com/ljclz/sz-orm.git ../sz-orm
+          git -C ../sz-orm checkout "$(cat .sz-orm-commit)"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-tauri-linux-deps
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run coverage P5
+        # 2026-11-06 环3 P1-2：纳入 v1.5 微服务底座 + v1.7 addons-admin +
+        # facade 聚合 + ops-api + testkit + marketplace + visual + pdf/workflow/wasm。
+        # 这些 crate 测试量偏薄，已在 coverage-exemption.md 登记豁免，
+        # 此处仅产出覆盖率报告，不阻塞门禁。
+        run: |
+          cargo llvm-cov \
+            -p sz-rust-pdf \
+            -p sz-rust-workflow \
+            -p sz-rust-wasm \
+            -p sz-rust-marketplace \
+            -p sz-rust-visual \
+            -p sz-rust-addons-admin \
+            -p sz-rust-facade \
+            -p sz-rust-config-center \
+            -p sz-rust-service-registry \
+            -p sz-rust-distributed-tx \
+            -p sz-rust-api-gateway \
+            -p sz-rust-testkit \
+            -p sz-rust-ops-api \
+            --cobertura --output-path cobertura-p5.xml
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-p5
+          path: cobertura-p5.xml
+          retention-days: 14
+
   # ── CI-006：sz300 DB 集成覆盖率 —— 已迁移至 db-integration.yml ──
   # sz300 DB-backed ignored 测试由 .github/workflows/db-integration.yml 执行
   # （SDET P0-1），覆盖率报告仍由 workspace 全量 llvm-cov 合并。
@@ -237,7 +289,7 @@ jobs:
   coverage-merge:
     name: Coverage Merge & Verify
     runs-on: ubuntu-latest
-    needs: [coverage-p0, coverage-p1, coverage-p2, coverage-p3, coverage-p4]
+    needs: [coverage-p0, coverage-p1, coverage-p2, coverage-p3, coverage-p4, coverage-p5]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

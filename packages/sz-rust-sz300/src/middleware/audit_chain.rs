@@ -427,4 +427,222 @@ mod tests {
         assert_eq!(counter.value(), 1.0, "Prometheus Counter 应同步递增");
         assert_eq!(sink.dropped_count(), 1);
     }
+
+    // =========================================================================
+    // should_audit 纯逻辑测试（验收标准 1-5）
+    // =========================================================================
+
+    #[test]
+    fn should_audit_get_returns_false() {
+        // GET 非写操作 → 不审计
+        assert!(!should_audit("/api/v1/order", "GET"));
+    }
+
+    #[test]
+    fn should_audit_post_health_returns_false() {
+        // POST 但路径在排除列表 → 不审计
+        assert!(!should_audit("/health", "POST"));
+    }
+
+    #[test]
+    fn should_audit_post_order_returns_true() {
+        // POST 且路径不在排除列表 → 审计
+        assert!(should_audit("/api/v1/order", "POST"));
+    }
+
+    #[test]
+    fn should_audit_delete_metrics_returns_false() {
+        // DELETE 但路径在排除列表 → 不审计
+        assert!(!should_audit("/metrics", "DELETE"));
+    }
+
+    #[test]
+    fn should_audit_put_api_docs_returns_false() {
+        // PUT 但路径在排除列表 → 不审计
+        assert!(!should_audit("/api-docs", "PUT"));
+    }
+
+    // =========================================================================
+    // client_ip 纯逻辑测试（验收标准 6-8）
+    // =========================================================================
+
+    #[test]
+    fn client_ip_from_x_forwarded_for_first_segment() {
+        let req = Request::builder()
+            .header("x-forwarded-for", "  203.0.113.5 , 198.51.100.1")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "203.0.113.5");
+    }
+
+    #[test]
+    fn client_ip_falls_back_to_x_real_ip() {
+        let req = Request::builder()
+            .header("x-real-ip", "  10.0.0.42  ")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&req), "10.0.0.42");
+    }
+
+    #[test]
+    fn client_ip_no_proxy_headers_returns_empty() {
+        let req = Request::builder().body(Body::empty()).unwrap();
+        assert_eq!(client_ip(&req), "");
+    }
+
+    // =========================================================================
+    // truncate_chars 纯逻辑测试（验收标准 9-10）
+    // =========================================================================
+
+    #[test]
+    fn truncate_chars_multibyte_truncates_by_char_not_byte() {
+        // 6 个中文字符（18 字节），max_chars=3 → 保留前 3 个字符，不破坏 UTF-8
+        let input = "鲜视达测试用";
+        let out = truncate_chars(input, 3);
+        assert_eq!(out, "鲜视达");
+        assert_eq!(out.chars().count(), 3);
+    }
+
+    #[test]
+    fn truncate_chars_within_limit_returns_unchanged() {
+        let input = "abc鲜视达";
+        let out = truncate_chars(input, 100);
+        assert_eq!(out, input);
+    }
+
+    // =========================================================================
+    // audit_chain_middleware oneshot 测试（验收标准 11-13）
+    // =========================================================================
+
+    #[tokio::test]
+    async fn middleware_get_does_not_record_audit() {
+        use axum::{middleware, routing::get, Router};
+        use tower::ServiceExt;
+
+        let auditor = Arc::new(ChainHashAuditor::new());
+        let state = (auditor.clone(), None);
+        let app = Router::new()
+            .route("/api/v1/order", get(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/order")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            auditor.current_hash(),
+            "",
+            "GET 请求不应触发审计记录，链式哈希应保持初始空值"
+        );
+    }
+
+    #[tokio::test]
+    async fn middleware_post_sink_none_appends_hash_without_enqueue() {
+        use axum::{middleware, routing::post, Router};
+        use tower::ServiceExt;
+
+        let auditor = Arc::new(ChainHashAuditor::new());
+        let state = (auditor.clone(), None);
+        let app = Router::new()
+            .route("/api/v1/order", post(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/order")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_ne!(
+            auditor.current_hash(),
+            "",
+            "POST 请求应追加链式哈希（sink=None 仅维护内存链）"
+        );
+    }
+
+    #[tokio::test]
+    async fn middleware_post_sink_some_appends_hash_and_enqueues_job() {
+        use axum::{middleware, routing::post, Router};
+        use tower::ServiceExt;
+
+        let auditor = Arc::new(ChainHashAuditor::new());
+        let (sink, mut rx) = AuditSink::new(None);
+        let state = (auditor.clone(), Some(sink));
+        let app = Router::new()
+            .route("/api/v1/order", post(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(state, audit_chain_middleware));
+
+        let current_user = CurrentUser {
+            user_id: 1,
+            username: "test".into(),
+            merchant_id: Some(1),
+            is_admin: false,
+        };
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/order")
+            .extension(current_user)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+        assert_ne!(auditor.current_hash(), "", "POST 请求应追加链式哈希");
+        let job = rx
+            .try_recv()
+            .expect("sink=Some 时 POST 请求应投递 AuditJob 到通道");
+        assert_eq!(job.record.target, "/api/v1/order");
+        assert_eq!(job.record.action, "POST");
+        assert_eq!(job.merchant_id, Some(1));
+    }
+
+    // =========================================================================
+    // persist_batch fake pool 测试（验收标准 14-15）
+    // =========================================================================
+
+    /// 构造不可达的 fake pool（端口 1 必 ECONNREFUSED），供 persist_batch 错误路径测试。
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new()
+            .max_size(1)
+            .min_idle(0)
+            .build()
+            .unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn persist_batch_empty_returns_true() {
+        let pool = make_fake_pool();
+        let batch: Vec<AuditJob> = vec![];
+        let ok = persist_batch(&pool, &batch).await;
+        assert!(ok, "空 batch 应直接返回 true，不触碰数据库");
+    }
+
+    #[tokio::test]
+    async fn persist_batch_nonempty_unreachable_pool_returns_false() {
+        let pool = make_fake_pool();
+        let batch = vec![job()];
+        let ok = persist_batch(&pool, &batch).await;
+        assert!(
+            !ok,
+            "pool 不可达（端口 1 ECONNREFUSED）时非空 batch 应返回 false 以触发重试"
+        );
+    }
 }

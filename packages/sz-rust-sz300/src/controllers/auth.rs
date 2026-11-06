@@ -367,4 +367,268 @@ mod tests {
             "非空凭据应判定为有效"
         );
     }
+
+    // ====================================================================
+    // handler 分支测试（axum oneshot 模式，覆盖 error/early-return 路径）
+    //
+    // 契约引用：
+    // - C-MOCK-APP-STATE@1: crate::state::mock_app_state()
+    // - C-AXUM-ONESHOT@1: Router + tower::ServiceExt::oneshot
+    // - C-SZ-CONTROLLER@1: SzController trait（render_success/render_error）
+    // ====================================================================
+
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    /// 环境变量测试互斥锁 — attach_csrf_cookie/clear_csrf_cookie 读 SZ300_ENV/
+    /// SZ300_COOKIE_SECURE，与 router.rs/main.rs 中 set_var 测试并行可能 race。
+    /// 用静态 Mutex 串行化所有涉及环境变量读取的 handler 测试。
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 收集 Response body 为 String（C-AXUM-ONESHOT@1）
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    /// 构造 POST JSON 请求
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// 构造带 Authorization header 的 POST JSON 请求
+    fn json_request_with_auth(uri: &str, body: &str, auth: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("Authorization", auth)
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// 1. login query 参数提交凭据（?username=x&password=y）→ HTTP 400
+    ///
+    /// 凭据禁止经 URL 查询参数提交（URL 进 access log/代理日志/浏览器历史，构成泄密面）。
+    #[tokio::test]
+    async fn login_query_params_rejected_with_400() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/login", post(login))
+            .with_state(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/login?username=admin&password=secret")
+            .header("content-type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "query 参数提交凭据应返回 400"
+        );
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("查询参数"),
+            "应提示查询参数禁止, 实际: {body}"
+        );
+    }
+
+    /// 2. login body 解析失败（非 JSON）→ HTTP 400
+    #[tokio::test]
+    async fn login_invalid_json_body_returns_400() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/login", post(login))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/login", "{not valid json");
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "非法 JSON body 应返回 400"
+        );
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("参数解析失败"),
+            "应提示参数解析失败, 实际: {body}"
+        );
+    }
+
+    /// 3. login 空用户名或空密码 → HTTP 400 且 msg 含"不能为空"
+    #[tokio::test]
+    async fn login_empty_credentials_returns_400() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/login", post(login))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/login", r#"{"username":"","password":""}"#);
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "空凭据应返回 400"
+        );
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("不能为空"),
+            "应提示用户名和密码不能为空, 实际: {body}"
+        );
+    }
+
+    /// 4. me 无 Authorization header → code:0 错误响应
+    #[tokio::test]
+    async fn me_no_auth_header_returns_error_envelope() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/me", post(me))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/me", "{}");
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "无 Authorization 应返回 code:0, 实际: {body}"
+        );
+        assert!(
+            body.contains("未提供认证令牌"),
+            "应提示未提供认证令牌, 实际: {body}"
+        );
+    }
+
+    /// 5. me 空 Bearer token（"Bearer "）→ "未提供认证令牌"错误
+    #[tokio::test]
+    async fn me_empty_bearer_token_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/me", post(me))
+            .with_state(state);
+        let req = json_request_with_auth("/api/v1/auth/me", "{}", "Bearer ");
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("未提供认证令牌"),
+            "空 Bearer token 应提示未提供认证令牌, 实际: {body}"
+        );
+    }
+
+    /// 6. refresh 空 refresh_token → "缺少 refresh_token 参数"错误
+    #[tokio::test]
+    async fn refresh_empty_token_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/refresh", post(refresh))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/refresh", r#"{"refresh_token":""}"#);
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("缺少 refresh_token 参数"),
+            "空 refresh_token 应提示缺少参数, 实际: {body}"
+        );
+    }
+
+    /// 7. refresh body 解析失败 → "参数解析失败"错误
+    #[tokio::test]
+    async fn refresh_invalid_json_body_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/refresh", post(refresh))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/refresh", "{broken json");
+        let resp = router.oneshot(req).await.unwrap();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("参数解析失败"),
+            "非法 JSON body 应提示参数解析失败, 实际: {body}"
+        );
+    }
+
+    /// 8. logout 有 Bearer token → 调用 revoke_token 并清除 CSRF Cookie（Max-Age=0）
+    #[tokio::test]
+    async fn logout_with_token_clears_csrf_cookie() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/logout", post(logout))
+            .with_state(state);
+        let req = json_request_with_auth(
+            "/api/v1/auth/logout",
+            "{}",
+            "Bearer fake.token.for.logout",
+        );
+        let resp = router.oneshot(req).await.unwrap();
+        // body_string 会消耗 resp（into_body），先提取 set-cookie header
+        let cookie = resp
+            .headers()
+            .get("set-cookie")
+            .expect("logout 应设置 set-cookie 清除 CSRF")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("已退出登录"),
+            "logout 应返回成功, 实际: {body}"
+        );
+        assert!(
+            cookie.contains("Max-Age=0"),
+            "logout 应清除 CSRF Cookie (Max-Age=0), 实际: {cookie}"
+        );
+    }
+
+    /// 9. logout 无 Authorization header → 成功响应且不调用 revoke_token
+    ///
+    /// 无 token 时 `if !token.is_empty()` 跳过 revoke_token，但仍清除 CSRF Cookie。
+    #[tokio::test]
+    async fn logout_without_token_succeeds_no_revoke() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/auth/logout", post(logout))
+            .with_state(state);
+        let req = json_request("/api/v1/auth/logout", "{}");
+        let resp = router.oneshot(req).await.unwrap();
+        let cookie = resp
+            .headers()
+            .get("set-cookie")
+            .expect("logout 应设置 set-cookie")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = body_string(resp).await;
+        assert!(
+            body.contains("已退出登录"),
+            "无 token logout 仍应返回成功, 实际: {body}"
+        );
+        assert!(
+            body.contains("\"code\":1"),
+            "无 token logout 应返回成功信封 code:1, 实际: {body}"
+        );
+        assert!(
+            cookie.contains("Max-Age=0"),
+            "logout 应清除 CSRF Cookie, 实际: {cookie}"
+        );
+    }
 }

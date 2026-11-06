@@ -135,3 +135,127 @@ async fn run_with_user_context(
     req.extensions_mut().insert(current);
     next.run(req).await
 }
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use axum::middleware;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::util::ServiceExt;
+
+    /// 模拟 handler：鉴权通过后返回 200 "ok"
+    async fn ok_handler() -> &'static str {
+        "ok"
+    }
+
+    /// 构造带 `auth_middleware` 的测试路由：
+    /// - `/health`、`/api/v1/auth/login`：公开路径（白名单精确匹配）
+    /// - `/protected`：受保护路径（非公开，需鉴权）
+    ///
+    /// 注：`auth_middleware` 签名为 `(req, next) -> Response`，不依赖 `AppState`，
+    /// 故使用 `middleware::from_fn` 而非 `from_fn_with_state`。
+    fn build_router() -> Router {
+        Router::new()
+            .route("/health", get(ok_handler))
+            .route("/api/v1/auth/login", get(ok_handler))
+            .route("/protected", get(ok_handler))
+            .layer(middleware::from_fn(auth_middleware))
+    }
+
+    /// 构造 GET 请求，可选注入 `Authorization` 头
+    fn build_request(uri: &str, auth: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder().method(Method::GET).uri(uri);
+        if let Some(header) = auth {
+            builder = builder.header("Authorization", header);
+        }
+        builder.body(Body::empty()).expect("测试请求构造失败")
+    }
+
+    /// 验收 1：公开路径（`/health`、`/api/v1/auth/login`）跳过鉴权直接放行 → 200 OK
+    ///
+    /// 覆盖 `auth_middleware` 中 `is_public_path(path) == true` 的早返回分支，
+    /// 不依赖 `auth_service::verify_token`，无需初始化 JWT 密钥。
+    #[tokio::test]
+    async fn public_path_passes_without_authorization() {
+        let router = build_router();
+
+        for public_uri in &["/health", "/api/v1/auth/login"] {
+            let req = build_request(public_uri, None);
+            let resp = router.clone().oneshot(req).await.expect("oneshot 失败");
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "公开路径 {} 应跳过鉴权直接放行返回 200",
+                public_uri,
+            );
+        }
+    }
+
+    /// 验收 2：非公开路径且无 `Authorization` 头 → 401 UNAUTHORIZED
+    ///
+    /// 覆盖 `auth_header == ""` → `token == ""` → `token.is_empty()` 早返回分支。
+    #[tokio::test]
+    async fn missing_authorization_returns_401() {
+        let router = build_router();
+        let req = build_request("/protected", None);
+        let resp = router.oneshot(req).await.expect("oneshot 失败");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 验收 3：非公开路径且空 Bearer token（`"Bearer "`）→ 401 UNAUTHORIZED
+    ///
+    /// 覆盖 `auth_header == "Bearer "` → `strip_prefix("Bearer ") == Some("")`
+    /// → `token == ""` → `token.is_empty()` 早返回分支。
+    #[tokio::test]
+    async fn empty_bearer_token_returns_401() {
+        let router = build_router();
+        let req = build_request("/protected", Some("Bearer "));
+        let resp = router.oneshot(req).await.expect("oneshot 失败");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// 验收 4：`CurrentUser::from_request` 从请求扩展读取
+    /// - 场景 A：注入 `CurrentUser` → 返回 `Some` 且字段逐项一致
+    /// - 场景 B：未注入 → 返回 `None`
+    ///
+    /// 纯逻辑测试（不涉及 async / 鉴权），用 `#[test]`。
+    #[test]
+    fn current_user_from_request_inject_and_read() {
+        // 场景 A：注入 CurrentUser → from_request 返回 Some 且字段一致
+        let mut req = Request::builder()
+            .method(Method::GET)
+            .uri("/protected")
+            .body(Body::empty())
+            .expect("测试请求构造失败");
+        let injected = CurrentUser {
+            user_id: 1,
+            username: "test".into(),
+            merchant_id: Some(1),
+            is_admin: false,
+        };
+        req.extensions_mut().insert(injected.clone());
+
+        let got = CurrentUser::from_request(&req).expect("注入后 from_request 应返回 Some");
+        assert_eq!(got.user_id, injected.user_id);
+        assert_eq!(got.username, injected.username);
+        assert_eq!(got.merchant_id, injected.merchant_id);
+        assert_eq!(got.is_admin, injected.is_admin);
+
+        // 场景 B：未注入 CurrentUser → from_request 返回 None
+        let req_empty = Request::builder()
+            .method(Method::GET)
+            .uri("/protected")
+            .body(Body::empty())
+            .expect("测试请求构造失败");
+        assert!(
+            CurrentUser::from_request(&req_empty).is_none(),
+            "未注入 CurrentUser 时 from_request 应返回 None",
+        );
+    }
+}

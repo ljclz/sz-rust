@@ -165,6 +165,18 @@ jobs:
           cargo test -p sz-rust-sz300 --test outbox_webhook_test -- --ignored --test-threads=1
           echo "::endgroup::"
 
+          # constraint_violation_test：7 个 ignored（reason "requires real MySQL 8.0.16+"），
+          # mysql:9.6 service 满足 8.0.16+ 要求。
+          echo "::group::sz300 constraint_violation_test (MySQL 8.0.16+)"
+          cargo test -p sz-rust-sz300 --test constraint_violation_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
+          # merchant_product_service_test：14 个 ignored（reason "requires real MySQL 9.6"），
+          # mysql:9.6 service 精确匹配。
+          echo "::group::sz300 merchant_product_service_test (MySQL 9.6)"
+          cargo test -p sz-rust-sz300 --test merchant_product_service_test -- --ignored --test-threads=1
+          echo "::endgroup::"
+
           # v18-sse 运行时验证（DB-2026-10-30-03③）：端点用例内部 ensure_mysql 真连，
           # 验证订阅强制 JWT（401/200）、live 推送与 Last-Event-ID 重放
           echo "::group::sz300 sse_test (MySQL, v18-sse)"

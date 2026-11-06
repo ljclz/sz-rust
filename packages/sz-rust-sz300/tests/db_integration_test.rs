@@ -3,7 +3,7 @@
 //! 数据库集成测试 —— 使用真实 MySQL 9.6 / PostgreSQL 18
 //!
 //! 运行前确保：
-//! - MySQL 9.6 运行于 127.0.0.1:3306，root/$SZ_TEST_DB_PASSWORD 可登录，sz_orm_test 数据库存在
+//! - MySQL 8.0 运行于 127.0.0.1:8802，shop/$SZ_TEST_DB_PASSWORD 可登录，shop 数据库存在
 //! - PostgreSQL 18 运行于 127.0.0.1:5432，postgres/$SZ_TEST_PG_PASSWORD 可登录，sz_orm_test 数据库存在
 //!
 //! 跳过条件：默认 `#[ignore]` 跳过（需真实 MySQL/PG），手动运行：
@@ -21,11 +21,14 @@ fn mysql_test_config() -> config::AppConfig {
             port: 8300,
         },
         database: config::DatabaseConfig {
-            host: "127.0.0.1".to_string(),
-            port: 3306,
-            username: "root".to_string(),
-            password: std::env::var("SZ_TEST_DB_PASSWORD").unwrap_or_default(),
-            database: "sz_orm_test".to_string(),
+            host: std::env::var("SZ_TEST_DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
+            port: std::env::var("SZ_TEST_DB_PORT")
+                .map(|p| p.parse().unwrap_or(8802))
+                .unwrap_or(8802),
+            username: std::env::var("SZ_TEST_DB_USER").unwrap_or_else(|_| "shop".to_string()),
+            password: std::env::var("SZ_TEST_DB_PASSWORD")
+                .unwrap_or_else(|_| "JkbC2jsaWAYDe2Gz".to_string()),
+            database: std::env::var("SZ_TEST_DB_NAME").unwrap_or_else(|_| "shop".to_string()),
         },
     }
 }
@@ -102,7 +105,7 @@ async fn ensure_pg_available() -> Option<config::PgDatabaseConfig> {
 #[tokio::test]
 async fn test_mysql_pool_init_and_query() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("MySQL 连接池初始化失败");
@@ -157,7 +160,7 @@ async fn test_pg_pool_init_and_query() {
 #[tokio::test]
 async fn test_mysql_create_table_and_crud() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
@@ -222,7 +225,7 @@ async fn test_mysql_create_table_and_crud() {
 #[tokio::test]
 async fn test_mysql_sql_injection_protection() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
@@ -331,7 +334,7 @@ async fn test_mysql_sql_injection_protection() {
 #[tokio::test]
 async fn test_mysql_product_service_like_injection_protection() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
@@ -424,7 +427,7 @@ async fn test_mysql_product_service_like_injection_protection() {
 #[tokio::test]
 async fn test_mysql_transaction_commit_rollback() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
@@ -516,7 +519,7 @@ async fn test_mysql_transaction_commit_rollback() {
 #[tokio::test]
 async fn test_mysql_transaction_savepoint() {
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");
@@ -582,7 +585,7 @@ async fn test_mysql_pool_concurrency_stress() {
     use sz_rust_core::orm::Value;
 
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = Arc::new(db::init_pool(&cfg).await.expect("连接池初始化失败"));
@@ -718,7 +721,7 @@ async fn test_mysql_business_schema_crud() {
     use sz_rust_core::orm::Value;
 
     let cfg = ensure_mysql_available().await.expect(
-        "MySQL 不可达，请启动 MySQL 9.6 (127.0.0.1:3306, root/$SZ_TEST_DB_PASSWORD, sz_orm_test 数据库)",
+        "MySQL 不可达，请启动 MySQL 8.0 (127.0.0.1:8802, shop/$SZ_TEST_DB_PASSWORD, shop 数据库)",
     );
 
     let pool = db::init_pool(&cfg).await.expect("连接池初始化失败");

@@ -7,6 +7,39 @@
 
 ## [Unreleased]
 
+### test — 覆盖率提升第六批 76.81%→81.54%（2026-11-06）
+
+> 来源：覆盖率提升计划 `.codeartsdoer/plans/coverage-boost-80/plan.md`（T1-T8 全量验证通过）。为 7 个低覆盖率文件补充内嵌单元测试，lib only 行覆盖率 76.81% → 80.81%（default）/ 81.54%（含 feature-gated），达成 80%+ 目标。
+
+- **T1 auth.rs**：+9 tests（14 passed），覆盖 login/me/refresh/logout error/early-return 路径（query 参数拒绝/body 解析失败/空凭据/无 token/空 token/refresh 空 token/logout 有无 token）
+- **T2 ai.rs**：+11 tests（15 passed, 90.87% coverage），覆盖 chat/embed/stream handler 分支（prompt 过长/body 解析失败/AI 未初始化/texts 非数组/texts 空/空 prompt/不支持模型）
+- **T3 audit_chain.rs**：+15 tests（18 passed），覆盖 should_audit/client_ip/truncate_chars 纯逻辑 + audit_chain_middleware oneshot + persist_batch fake pool
+- **T4 auth_middleware.rs**：+4 tests（4 passed），覆盖公开路径放行/无 Authorization 401/空 Bearer 401/CurrentUser 注入读取
+- **T5 upload_limit.rs**：+4 tests（4 passed，feature v18-upload），覆盖 Content-Length 超限 413/不超限放行/无头放行/非数字放行
+- **T6 admin.rs**：+3 tests（0 passed，admin.rs 是死代码不编译，测试为准备就绪资产）
+- **T7 plugin.rs**：+10 tests（10 passed，feature v19-plugin-flow），覆盖 install/uninstall/list handler + plugin_error_response 4 变体映射
+- **T8 验证**：default 445 passed 0 failed / feature-gated 469 passed 0 failed；llvm-cov 80.81%（default）/ 81.54%（feature-gated）
+- **DB 集成测试配置修复**：db_integration_test.rs port 3306→8802, root→shop, sz_orm_test→shop（MySQL 8802 连接验证 8/8 通过）
+
+### Fixed — 门禁 30 修复：21 个 MySQL 依赖 ignored 测试接入 db-integration.yml（2026-11-06）
+
+> 来源：SDET 复评 P2 后续项（`docs/audit/2026-11-06-ignored-分布核验报告.md`）。ignored-核验员发现门禁 30（ignored-test-routing.js）失败（退出码 1），21 个 `#[ignore]` 测试未被任何 workflow 覆盖。
+
+- **问题**：`constraint_violation_test.rs`（7 个 ignored，需 MySQL 8.0.16+）+ `merchant_product_service_test.rs`（14 个 ignored，需 MySQL 9.6）未被任何 workflow 的 `--ignored` 覆盖，门禁 30 退出码 1。
+- **修复**：在 `db-integration.yml` 的 db-mysql-pg job 追加 2 条 `cargo test -p sz-rust-sz300 --test <文件名> -- --ignored --test-threads=1` 子命令（第 168-178 行），mysql:9.6 service 满足 8.0.16+ 和 9.6 双重要求。
+- **验证**：`node scripts/audit/ignored-test-routing.js` 退出码 1→**0**（32 文件全 OK，2 EXEMPT，0 FAIL）；YAML 语法验证通过（Python yaml.safe_load）。
+- **核验报告**：`docs/audit/2026-11-06-ignored-分布核验报告.md`（216 个 ignored：187 已覆盖 + 8 豁免 + 21 新覆盖 = 216 ✓）。
+
+### Changed — DB-15 P3 风格优化闭环：sso.rs sleep 优化 + panic!→let-else/assert!(matches!) 改写（DB-2026-11-06-15，2026-11-06）
+
+> 来源：SDET 复评 P3 风格优化项（`docs/audit/doc-debt.md` DB-2026-11-06-15）。不阻塞发布，本批为风格优化与测试加速，无 pub API 变更。
+
+- **sleep 优化（MockClock 优化员）**：sso.rs 5 处修改（TTL 60s→10s, threshold 30s→5s, sleep 35s→6s ×2），231 passed/0 failed，sleep 减少 58s/57%。sso.rs:1673 的 31s sleep 保留（ticket TTL 硬编码在生产代码 generate_ticket() sso.rs:430 `expires_at: now + 30`，修改属生产代码逻辑变更）。
+- **panic!→let-else/assert!(matches!) 改写（panic-assert改写员）**：84 处改写（13 个 crate：sz300 10 + core 3 + cli 21 + state-facade 10 + infra-facade 14 + orm-facade 8 + sdd 2 + service-registry 1 + addons-ecommerce 1 + workflow 2 + addons-loader 7 + marketplace 3 + ai-facade 2）+ 7 处修复并行 agent 错误改写（saga_order.rs 4 处括号/逻辑缺陷 + addons-loader 3 处 other 变量残留），`=> panic!` 从 220 处减至 34 处（减少 186 处），剩余 34 处均为合理保留（含调试信息/Ok(_)=>panic! 验证错误返回/故意 panic/#[cfg] 惯用法/多分支 fallback/unwrap_or_else）。
+- **编译验证**：`cargo check --workspace --tests` = Finished（0 error）。
+- **测试验证**（15 个 crate lib/integration test，均 0 failed）：state-facade 261 / infra-facade 694 / cli 454+1ignored / sz300 saga_order 30 + controllers 16 / addons-loader 231 / core simd_safe 5 + adversarial 55 / sdd 128 / workflow 137 / service-registry 42 / marketplace 90 / addons-ecommerce 35 / ai-facade content_part_compat_test 18 / orm-facade 262。
+- **门禁 33**：83 WARN / 0 ERROR（80 处 std::thread::sleep + 3 处 panic! 合理保留），不阻塞。
+
 ### Changed — ADR-053 方案 B 阶段2+3：合并 tracing/alert-engine → observability（2026-11-06）
 
 > 来源：[ADR-053](docs/adr/0053-包碎片化架构债评估.md) 方案 B 阶段2+3。将 `sz-rust-tracing` 和 `sz-rust-alert-engine` 两个包合并入 `sz-rust-observability`，消除职责重叠与包碎片化架构债，workspace 成员包 57 → 55。

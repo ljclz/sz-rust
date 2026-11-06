@@ -72,6 +72,12 @@
 > 以下 workspace 早期 member 未进入 coverage.yml 分片矩阵（coverage.yml 仅覆盖
 > 47/65），测试量低或无业务测试（proc-macro/示例/微服务底座），按
 > coverage-exemption 流程登记豁免，限期复审。
+>
+> **2026-11-06 环3 P1-2 更新**：除 sz-rust-macros（proc-macro，cargo-llvm-cov
+> 支持有限）和 addon-hot-reload-example（示例子包）外，其余 13 个 crate 已纳入
+> coverage.yml 新增 P5 分片（coverage.yml:238），矩阵覆盖 40→53/55 crate。
+> 豁免登记保留，per-crate-coverage.js 仍跳过阈值检查，但 llvm-cov 产出覆盖率
+> 报告，便于后续补测复审时量化跟踪。P1-2 闭环。
 
 | crate_name | reason | approver | approval_date | expiry_date |
 |------------|--------|----------|---------------|-------------|

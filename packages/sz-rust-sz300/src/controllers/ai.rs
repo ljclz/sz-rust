@@ -272,6 +272,47 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    use std::sync::Mutex;
+
+    /// 串行化所有 AI 测试，避免并行 race（AI facade 全局 OnceLock 不可重置）。
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    /// 确保 AI facade 已初始化（全局 OnceLock，仅首次调用实际初始化）。
+    ///
+    /// 用 `MockProvider` 构造最小 `ModelRouter`，使 `Ai::is_initialized()` 返回 true，
+    /// 让 handler 越过"AI 服务未配置"早退分支，进入 prompt/texts/model 校验路径。
+    /// OnceLock 不可重置：首次设置后后续调用为 no-op。
+    fn ensure_ai_initialized() {
+        if sz_rust_ai_facade::Ai::is_initialized() {
+            return;
+        }
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use sz_rust_ai_facade::llm::provider::ProviderRef;
+        use sz_rust_ai_facade::llm::router::ModelRouter;
+        use sz_rust_ai_facade::llm::test_support::MockProvider;
+
+        let mut routes = HashMap::new();
+        routes.insert(
+            "gpt-4o-mini".to_string(),
+            Arc::new(MockProvider) as ProviderRef,
+        );
+        let router = ModelRouter::new(routes, "gpt-4o-mini".to_string());
+        // OnceLock::set 已设置时返回 Err，忽略（首次设置即可）
+        let _ = sz_rust_ai_facade::Ai::init_default(router, None, None, None, None);
+    }
+
+    /// 收集 Response body 为 String。
+    async fn collect_body(response: Response) -> String {
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(body_bytes.to_vec()).expect("UTF-8")
+    }
+
     #[tokio::test]
     async fn ai_chat_no_auth_returns_error() {
         let state = mock_app_state();
@@ -400,5 +441,341 @@ mod tests {
             "应返回有效响应: {}",
             body
         );
+    }
+
+    // =========================================================================
+    // 以下为 handler 分支测试（验收 1-11）。
+    //
+    // 执行顺序依赖：libtest 按函数名字母序调度，`aaa_` < `ai_` < `test_`。
+    // - `aaa_` 前缀：AI 未初始化测试，必须在 `ensure_ai_initialized` 调用前运行；
+    //   若 AI 已被其他测试初始化（OnceLock 不可重置），则 skip 以避免误判。
+    // - `test_` 前缀：需要 AI 已初始化的测试，首项调用 `ensure_ai_initialized`。
+    // - body 解析失败测试无需 AI 状态（body 解析在 AI 检查之前），但仍串行化。
+    // =========================================================================
+
+    /// 验收 3：embed AI 未初始化 → 返回"AI 服务未配置"错误。
+    ///
+    /// OnceLock 不可重置 + 多线程调度不保证顺序：若运行时 AI 已被其他测试初始化，
+    /// 则验证 handler 越过 AI 检查（body 不含"AI 服务未配置"）作为补充验证；
+    /// AI 未初始化时真正验证验收 3。两种情况下测试均覆盖 handler 代码行。
+    #[tokio::test]
+    async fn aaa_embed_ai_not_initialized_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let ai_not_initialized = !sz_rust_ai_facade::Ai::is_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/embed", post(embed))
+            .with_state(state);
+        let body = serde_json::json!({ "texts": ["hello"] }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/embed")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        if ai_not_initialized {
+            assert!(
+                body.contains("AI 服务未配置"),
+                "AI 未初始化应包含'AI 服务未配置': {}",
+                body
+            );
+        } else {
+            assert!(
+                !body.contains("AI 服务未配置"),
+                "AI 已初始化不应返回'AI 服务未配置': {}",
+                body
+            );
+        }
+    }
+
+    /// 验收 7：stream AI 未初始化 → 返回"AI 服务未配置"错误。
+    ///
+    /// 同 [`aaa_embed_ai_not_initialized_returns_error`]：OnceLock 不可重置，
+    /// AI 已初始化时验证 handler 越过 AI 检查作为补充验证。
+    #[tokio::test]
+    async fn aaa_stream_ai_not_initialized_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let ai_not_initialized = !sz_rust_ai_facade::Ai::is_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/stream", post(stream))
+            .with_state(state);
+        let body = serde_json::json!({ "prompt": "hello" }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        if ai_not_initialized {
+            assert!(
+                body.contains("AI 服务未配置"),
+                "AI 未初始化应包含'AI 服务未配置': {}",
+                body
+            );
+        } else {
+            assert!(
+                !body.contains("AI 服务未配置"),
+                "AI 已初始化不应返回'AI 服务未配置': {}",
+                body
+            );
+        }
+    }
+
+    /// 验收 1：chat prompt 超过 MAX_PROMPT_CHARS（16000）→ 返回"prompt 过长"错误。
+    #[tokio::test]
+    async fn test_chat_prompt_too_long_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let long_prompt = "x".repeat(MAX_PROMPT_CHARS + 1);
+        let body = serde_json::json!({ "prompt": long_prompt }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(body.contains("prompt 过长"), "应包含'prompt 过长': {}", body);
+    }
+
+    /// 验收 2：chat body 非 JSON → 解析失败 → 返回 code:0 错误响应。
+    #[tokio::test]
+    async fn test_chat_body_parse_error_returns_code0() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/chat", post(chat))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{invalid json"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+    }
+
+    /// 验收 4：embed texts 非数组 → 返回"texts 不能为空且必须是字符串数组"错误。
+    #[tokio::test]
+    async fn test_embed_texts_not_array_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/embed", post(embed))
+            .with_state(state);
+        let body = serde_json::json!({ "texts": "not an array" }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/embed")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(
+            body.contains("texts 不能为空且必须是字符串数组"),
+            "应包含'texts 不能为空且必须是字符串数组': {}",
+            body
+        );
+    }
+
+    /// 验收 5：embed texts 空数组 → 返回"texts 不能为空"错误。
+    #[tokio::test]
+    async fn test_embed_texts_empty_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/embed", post(embed))
+            .with_state(state);
+        let body = serde_json::json!({ "texts": [] }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/embed")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(
+            body.contains("texts 不能为空"),
+            "应包含'texts 不能为空': {}",
+            body
+        );
+    }
+
+    /// 验收 6：embed body 非 JSON → 解析失败 → 返回 code:0 错误响应。
+    #[tokio::test]
+    async fn test_embed_body_parse_error_returns_code0() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/embed", post(embed))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/embed")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{invalid json"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+    }
+
+    /// 验收 8：stream 空 prompt → 返回"prompt 不能为空"错误。
+    #[tokio::test]
+    async fn test_stream_empty_prompt_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/stream", post(stream))
+            .with_state(state);
+        let body = serde_json::json!({ "prompt": "" }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(
+            body.contains("prompt 不能为空"),
+            "应包含'prompt 不能为空': {}",
+            body
+        );
+    }
+
+    /// 验收 9：stream prompt 超过 MAX_PROMPT_CHARS → 返回"prompt 过长"错误。
+    #[tokio::test]
+    async fn test_stream_prompt_too_long_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/stream", post(stream))
+            .with_state(state);
+        let long_prompt = "x".repeat(MAX_PROMPT_CHARS + 1);
+        let body = serde_json::json!({ "prompt": long_prompt }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(body.contains("prompt 过长"), "应包含'prompt 过长': {}", body);
+    }
+
+    /// 验收 10：stream 不支持的模型 → 返回"不支持的模型"错误。
+    #[tokio::test]
+    async fn test_stream_unsupported_model_returns_error() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        ensure_ai_initialized();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/stream", post(stream))
+            .with_state(state);
+        let body = serde_json::json!({ "prompt": "hello", "model": "gpt-999" }).to_string();
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
+        assert!(
+            body.contains("不支持的模型"),
+            "应包含'不支持的模型': {}",
+            body
+        );
+    }
+
+    /// 验收 11：stream body 非 JSON → 解析失败 → 返回 code:0 错误响应。
+    #[tokio::test]
+    async fn test_stream_body_parse_error_returns_code0() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/ai/stream", post(stream))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/ai/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{invalid json"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = collect_body(response).await;
+        assert!(body.contains("\"code\":0"), "应返回 code:0: {}", body);
     }
 }
