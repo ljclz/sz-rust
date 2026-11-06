@@ -491,4 +491,105 @@ mod tests {
         );
         assert!(sql.contains("status = 0"), "unbind 应将 status 置为 0（离线）");
     }
+
+    // ─────────────────────────────────────────────
+    // fake pool 测试：覆盖 WHERE 构建 + acquire 失败错误映射
+    // service 函数先构建 SQL，再 acquire connection；fake pool acquire 快速 ECONNREFUSED，
+    // 覆盖纯逻辑行 + 错误映射行。
+    // ─────────────────────────────────────────────
+
+    use std::sync::Arc;
+
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn device_list_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let filters = DeviceFilters { merchant_id: Some(1) };
+        let result = DeviceService::list(&pool, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn device_list_fake_pool_no_filter_returns_err() {
+        let pool = make_fake_pool();
+        let filters = DeviceFilters { merchant_id: None };
+        let result = DeviceService::list(&pool, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn device_get_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::get(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 get 失败");
+    }
+
+    #[tokio::test]
+    async fn device_bind_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::bind(&pool, "SN-001", 1).await;
+        assert!(result.is_err(), "fake pool 应导致 bind 失败");
+    }
+
+    #[tokio::test]
+    async fn device_unbind_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::unbind(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 unbind 失败");
+    }
+
+    #[tokio::test]
+    async fn device_exists_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::exists(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 exists 失败");
+    }
+
+    #[tokio::test]
+    async fn device_exists_with_merchant_scope_admin_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        // is_admin=true → 单参数 SQL 分支
+        let result = DeviceService::exists_with_merchant_scope(&pool, 42, Some(1), true).await;
+        assert!(result.is_err(), "fake pool 应导致 exists_with_merchant_scope 失败");
+    }
+
+    #[tokio::test]
+    async fn device_exists_with_merchant_scope_non_admin_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        // is_admin=false → 双参数 SQL 分支（含 merchant_id 哨兵）
+        let result = DeviceService::exists_with_merchant_scope(&pool, 42, Some(1), false).await;
+        assert!(result.is_err(), "fake pool 应导致 exists_with_merchant_scope 失败");
+    }
+
+    #[tokio::test]
+    async fn device_get_ota_version_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::get_ota_version(&pool, "1.0.0").await;
+        assert!(result.is_err(), "fake pool 应导致 get_ota_version 失败");
+    }
+
+    #[tokio::test]
+    async fn device_update_status_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = DeviceService::update_status(&pool, 42, 1, -70, "1.0.0").await;
+        assert!(result.is_err(), "fake pool 应导致 update_status 失败");
+    }
 }

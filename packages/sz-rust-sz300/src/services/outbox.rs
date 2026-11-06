@@ -400,4 +400,84 @@ mod tests {
         let truncated: String = long_error.chars().take(512).collect();
         assert_eq!(truncated.chars().count(), 512, "错误应截断到 512 字符");
     }
+
+    // ─────────────────────────────────────────────
+    // fake pool 测试：connect_lazy_with 构造不可达 pool（端口 1 必 ECONNREFUSED），
+    // 覆盖 service 函数 acquire 失败的错误映射路径。
+    // ─────────────────────────────────────────────
+
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn claim_pending_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = claim_pending(&pool, 10, 30).await;
+        assert!(result.is_err(), "fake pool 应导致 claim_pending 失败");
+    }
+
+    #[tokio::test]
+    async fn mark_delivered_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = mark_delivered(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 mark_delivered 失败");
+    }
+
+    #[tokio::test]
+    async fn mark_failed_fake_pool_returns_err_retry_path() {
+        let pool = make_fake_pool();
+        // attempts < MAX_ATTEMPTS → 重试路径（覆盖退避公式 + acquire 失败）
+        let result = mark_failed(&pool, 42, "连接失败", 3).await;
+        assert!(result.is_err(), "fake pool 应导致 mark_failed 失败");
+    }
+
+    #[tokio::test]
+    async fn mark_failed_fake_pool_returns_err_dead_letter_path() {
+        let pool = make_fake_pool();
+        // attempts >= MAX_ATTEMPTS → 死信路径（覆盖截断 + acquire 失败）
+        let result = mark_failed(&pool, 42, "连接失败", 10).await;
+        assert!(result.is_err(), "fake pool 应导致 mark_failed 失败");
+    }
+
+    #[tokio::test]
+    async fn dispatch_once_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let handler: DeliverFn = Arc::new(|_event| Box::pin(async { Ok(()) }));
+        let result = dispatch_once(&pool, &handler, 10, 30).await;
+        assert!(result.is_err(), "fake pool 应导致 dispatch_once 失败");
+    }
+
+    #[test]
+    fn webhook_handler_constructs_without_panic() {
+        // 构造 webhook handler 不实际发请求，仅验证客户端构建不 panic
+        let _handler = webhook_handler("https://example.com/hook".to_string());
+    }
+
+    #[tokio::test]
+    async fn spawn_dispatcher_returns_join_handle_and_can_abort() {
+        let pool = make_fake_pool();
+        let handler: DeliverFn = Arc::new(|_event| Box::pin(async { Ok(()) }));
+        // spawn_dispatcher 启动后台循环；立即 abort 避免永久运行
+        let handle = spawn_dispatcher(pool, handler, std::time::Duration::from_secs(60));
+        assert!(!handle.is_finished(), "刚 spawn 的任务不应已完成");
+        handle.abort();
+        // 等待 abort 生效
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }

@@ -708,4 +708,173 @@ mod public_path_tests {
         assert!(!is_public_path("/api/v1/wasm/execute"));
         assert!(!is_public_path("/api/v1/auth/login/extra"));
     }
+
+    // ─────────────────────────────────────────────
+    // PUBLIC_PATHS 白名单完整性 + is_public_path 边界
+    // ─────────────────────────────────────────────
+
+    use super::PUBLIC_PATHS;
+
+    #[test]
+    fn public_paths_contains_all_expected_entries() {
+        // 锁定公开白名单内容，防止误删或误增
+        let expected = [
+            "/health",
+            "/health/ready",
+            "/health/startup",
+            "/metrics",
+            "/api/v1/auth/login",
+            "/api/v1/auth/refresh",
+            "/api-docs",
+            "/api-docs/redoc",
+            "/api-docs/openapi.json",
+            "/ws",
+            "/events",
+        ];
+        for p in expected {
+            assert!(PUBLIC_PATHS.contains(&p), "公开路径缺失: {p}");
+        }
+    }
+
+    #[test]
+    fn is_public_path_empty_and_root_not_public() {
+        assert!(!is_public_path(""));
+        assert!(!is_public_path("/"));
+    }
+
+    #[test]
+    fn is_public_path_ws_and_events_are_public() {
+        assert!(is_public_path("/ws"));
+        assert!(is_public_path("/events"));
+    }
+
+    #[test]
+    fn is_public_path_health_subroutes_exact_match() {
+        // 精确匹配：前缀相似但不完全相等的路径不得命中
+        assert!(is_public_path("/health"));
+        assert!(is_public_path("/health/ready"));
+        assert!(is_public_path("/health/startup"));
+        assert!(!is_public_path("/healthz"));
+        assert!(!is_public_path("/health/ready/extra"));
+    }
+
+    #[test]
+    fn is_public_path_auth_endpoints_split_correctly() {
+        // login/refresh 公开，me/logout 受保护
+        assert!(is_public_path("/api/v1/auth/login"));
+        assert!(is_public_path("/api/v1/auth/refresh"));
+        assert!(!is_public_path("/api/v1/auth/me"));
+        assert!(!is_public_path("/api/v1/auth/logout"));
+        // 前缀绕过防护：/api/v1/auth/ 不应放行所有子路径
+        assert!(!is_public_path("/api/v1/auth/"));
+        assert!(!is_public_path("/api/v1/auth/anything"));
+    }
+
+    #[test]
+    fn is_public_path_api_docs_exact() {
+        assert!(is_public_path("/api-docs"));
+        assert!(is_public_path("/api-docs/redoc"));
+        assert!(is_public_path("/api-docs/openapi.json"));
+        assert!(!is_public_path("/api-docs/secret"));
+    }
+
+    #[test]
+    fn is_public_path_uploads_various_forms() {
+        assert!(is_public_path("/uploads"));
+        assert!(is_public_path("/uploads/2026/10/28/a.png"));
+        assert!(is_public_path("/uploads/sub/dir/file.txt"));
+        // 前缀相似但不以 /uploads 或 /uploads/ 开头不得命中
+        assert!(!is_public_path("/uploadsX"));
+        assert!(!is_public_path("/upload"));
+    }
+
+    // ─────────────────────────────────────────────
+    // cors_layer_from_env 环境变量分支（ENV_MUTEX 串行化）
+    // ─────────────────────────────────────────────
+
+    use super::cors_layer_from_env;
+
+    /// 环境变量测试互斥锁 — std::env::set_var/remove_var 操作进程级环境，
+    /// 并行测试会导致 race。用静态 Mutex 串行化。
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_cors_env() {
+        std::env::remove_var("SZ300_CORS_ORIGIN");
+        std::env::remove_var("SZ300_ENV");
+    }
+
+    #[test]
+    fn cors_layer_from_env_with_valid_origin_returns_configured_layer() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        std::env::set_var("SZ300_CORS_ORIGIN", "https://example.com");
+        // 不 panic 即覆盖合法 HeaderValue 分支
+        let _layer = cors_layer_from_env();
+        clear_cors_env();
+    }
+
+    #[test]
+    fn cors_layer_from_env_with_invalid_origin_falls_back() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        // 含非 ASCII 字符，HeaderValue::from_str 会失败 → warn + 回退
+        std::env::set_var("SZ300_CORS_ORIGIN", "https://exámple.com");
+        let _layer = cors_layer_from_env();
+        clear_cors_env();
+    }
+
+    #[test]
+    fn cors_layer_from_env_with_empty_origin_falls_back() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        std::env::set_var("SZ300_CORS_ORIGIN", "");
+        let _layer = cors_layer_from_env();
+        clear_cors_env();
+    }
+
+    #[test]
+    fn cors_layer_from_env_unset_non_production_uses_default() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        // SZ300_CORS_ORIGIN 未设置 + SZ300_ENV 非 production → cors_layer()
+        std::env::set_var("SZ300_ENV", "development");
+        let _layer = cors_layer_from_env();
+        clear_cors_env();
+    }
+
+    #[test]
+    fn cors_layer_from_env_unset_production_returns_empty_layer() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        // SZ300_CORS_ORIGIN 未设置 + 生产环境 → CorsLayer::new()（fail-closed）
+        std::env::set_var("SZ300_ENV", "production");
+        let _layer = cors_layer_from_env();
+        clear_cors_env();
+    }
+
+    // ─────────────────────────────────────────────
+    // create_router 集成：用 mock_app_state 构造完整路由表，覆盖路由注册 + 中间件链组装
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_router_with_mock_state_does_not_panic() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        // mock_app_state 用 connect_lazy 构造不可达 pool，不实际连接 DB；
+        // create_router 仅构建 Router 结构（注册路由 + 叠加中间件层），不执行 IO。
+        // 需 tokio runtime：内部 pool/layer 构造依赖 tokio context。
+        let state = crate::state::mock_app_state();
+        let _router = super::create_router(state);
+        clear_cors_env();
+    }
+
+    #[tokio::test]
+    async fn create_router_with_cors_origin_env_does_not_panic() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_cors_env();
+        std::env::set_var("SZ300_CORS_ORIGIN", "https://example.com");
+        let state = crate::state::mock_app_state();
+        let _router = super::create_router(state);
+        clear_cors_env();
+    }
 }

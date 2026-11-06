@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### Added — sz300 覆盖率提升第三批（49.65%→55.87%，DB-2026-11-06-14，2026-11-06）
+
+> 来源：全栈工程师复评 P2 欠债 DB-2026-11-06-14（sz300 lib 覆盖率 41.82%→50%+）。本批针对 5 个低覆盖文件补 50 个纯逻辑/fake pool 单元测试，lib only 行覆盖率 49.65%→55.87%（+6.22pp，超 55% 目标），319 passed/0 failed。
+
+- **router.rs**（17.95%→51.54%）：PUBLIC_PATHS 白名单完整性断言 + is_public_path 边界（空/根/ws/events/auth 精确匹配/uploads 前缀）+ cors_layer_from_env 5 个环境变量分支（合法/非法/空 origin/非生产/生产 fail-closed，ENV_MUTEX 串行化）+ create_router 集成（mock_app_state 构造完整路由表，tokio::test）。
+- **auth_service.rs**（29.32%→49.36%）：decode_token_exp 5 分支（非 JWT/非法 base64/非 JSON/无 exp/有 exp）+ token_hash 确定性 + hex_encode + revoke_token/is_token_revoked 黑名单逻辑（BLACKLIST_MUTEX 串行化）+ verify_token/refresh_access_token 已注销 token 边界（不依赖 AUTH 初始化，User 未实现 Debug 用 .err().unwrap()）。
+- **outbox.rs**（30.90%→54.42%）：fake pool（connect_lazy 端口 1 必 ECONNREFUSED）覆盖 claim_pending/mark_delivered/mark_failed（重试+死信双路径）/dispatch_once acquire 失败 + spawn_dispatcher 后台循环 abort + webhook_handler 构造。
+- **order_service.rs**（44.67%→64.74%）：fake pool 覆盖 list（全筛选/无筛选/end_date 带时间闭区间/keyset 模式 4 场景）WHERE 构建 + get_with_items + create acquire 失败。
+- **device_service.rs**（39.37%→82.17%）：fake pool 覆盖 list/get/bind/unbind/exists/exists_with_merchant_scope（admin+非 admin 双分支）/get_ota_version/update_status acquire 失败。
+- **验证**：`cargo test -p sz-rust-sz300 --lib` = 319 passed/0 failed（+50 新测试）；`cargo llvm-cov -p sz-rust-sz300 --lib --summary-only` TOTAL 14814 行 6537 未覆盖 **55.87%**（前 49.65%）；`doc-code-consistency.js` 0 ERROR；`link-check.js` OK。`docs/audit/doc-debt.md` DB-2026-11-06-14 状态改为 RESOLVED。
+
+### Added — 全栈工程师复评报告 + 红队复核回执登记入档（2026-11-06，六环闭环第 6 环）
+
+> 来源：用户要求完成全栈工程师评测批次的六环闭环第 6 环（登记入档），三件齐备。复评报告 `docs/audit/2026-11-06-全栈工程师复评报告.md` + 红队复核回执 `docs/audit/2026-11-06-全栈工程师复评-红队复核回执.md` 已落盘，红队确认 7 项核验 6 项通过（link-check 幻影已修正），报告可信。
+
+- 新增 `docs/audit/2026-11-06-全栈工程师复评报告.md`：综合评分 **A**，sz300 lib **118→269 passed**（+151），cargo check 0 error，clippy 0 warning，security_gauntlet 26 passed，Oracle 23.26.3.0.0 ✅，PG 18.4 ✅，MySQL 3306 连接超时（环境阻塞，非代码缺陷），DB 集成测试 2 passed/8 failed（PG 2/2 通过，MySQL 0/8 环境阻塞），link-check PASS。
+- 新增 `docs/audit/2026-11-06-全栈工程师复评-红队复核回执.md`：独立复核（复核员 session ≠ 复评报告作者 session ≠ 整改实施者）7 项核验 6 项通过，link-check 幻影已修正，报告可信，可登记入档。
+- 同步登记 `docs/audit/README.md` 索引两条目 + `docs/audit/doc-debt.md` 新增 2 条 PENDING 次债（DB-2026-11-06-13 P1 MySQL 3306 连接超时环境阻塞 / DB-2026-11-06-14 P2 sz300 覆盖率 41.82%→50%+ 提升），doc-debt 计数口径更新为 36 RESOLVED + 0 PARTIAL + 14 PENDING。
+
 ### Fixed — 产品文档欠债修复（DB-06/08/09/11/12，2026-11-06）
 
 > 来源：产品经理复评 + 技术文档复评发现的 5 条文档欠债（3 P0 + 2 P1）。本批为纯文档修复，不改任何代码。
@@ -85,6 +104,13 @@
 - **P1-3/P2-4 核查完成**：新增 `docs/audit/2026-11-06-P1-3-P2-4-sleep-panic-核查报告.md`。561 处 sleep/panic! 逐一核查完毕（177 tokio::sleep + 86 std::thread::sleep + 298 panic!），**无不合理项**，0 处生产代码违规。红队点名 3 处（sso.rs:1179 35s sleep、slow_call_breaker.rs:312 30ms sleep、isolation.rs:429 panic!）全部判定"保留"（合理）。P1-3/P2-4 从"部分修复"升级为"已修复"，维度 2 测试代码质量 8→9（+1）。
 - **P2-5 评估完成**：新增 `docs/audit/2026-11-06-P2-5-契约测试评估报告.md`。建议豁免 pact consumer-driven contract 引入（架构错位：本仓库是 provider，consumer 在独立仓库；Rust 生态 pact 不成熟）+ schemathesis 替代方案 + 定期复审 6 个月（下次 2027-05-06）。P2-5 从"未核查"更新为"已豁免"。
 - **复评报告同步更新**：`docs/audit/2026-11-05-SDET复评报告.md` 加权结论 8.5→**8.7/10**（净 +1.2）。已修复缺陷 11→13（加 P1-3、P2-4），部分修复 2→0，已豁免 1（P2-5），未核查 2→1（P2-6）。
+
+### Changed — SDET 复评报告 P2-6 状态同步更新（2026-11-06）
+
+> 来源：P2-6「本地无法跑 JS 门禁（node 未安装）」经实测发现前提错误——node v24.22.1 在本机可用（完整路径 `D:\BtSoft\nodejs\v24.22.1\node.exe`，不在 PATH）。
+
+- **P2-6 验证完成**：11 个 JS 门禁脚本全部 EXIT 0。P2-6 从"未核查"升级为"已修复"。
+- **复评报告同步更新**：`docs/audit/2026-11-05-SDET复评报告.md` 已修复缺陷 13→14（加 P2-6），未核查 1→0。**全部缺陷清单现已闭环**（14 已修复 + 1 已豁免，0 仍存在/部分修复/未核查）。
 
 ### Added — SDET 复评报告登记入档（2026-11-05，六环闭环第 6 环）
 

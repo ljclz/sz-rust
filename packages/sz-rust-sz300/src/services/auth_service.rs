@@ -955,4 +955,150 @@ mod tests {
         assert_eq!(decode_auth_ctx(&[2, 0, 0, 0, 0, 0, 0, 0, 0, 1]), None);
         assert_eq!(decode_auth_ctx(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 2]), None);
     }
+
+    // ─────────────────────────────────────────────
+    // decode_token_exp / token_hash / hex_encode 纯逻辑
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn decode_token_exp_returns_none_for_non_jwt_format() {
+        use super::decode_token_exp;
+        // 非 3 段
+        assert_eq!(decode_token_exp("not-a-jwt"), None);
+        assert_eq!(decode_token_exp("a.b"), None);
+        assert_eq!(decode_token_exp("a.b.c.d"), None);
+        assert_eq!(decode_token_exp(""), None);
+    }
+
+    #[test]
+    fn decode_token_exp_returns_none_for_invalid_base64_payload() {
+        use super::decode_token_exp;
+        // payload 段非合法 base64url
+        assert_eq!(decode_token_exp("header.!!!.sig"), None);
+    }
+
+    #[test]
+    fn decode_token_exp_returns_none_for_non_json_payload() {
+        use super::decode_token_exp;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        let payload = URL_SAFE_NO_PAD.encode(b"not json");
+        let token = format!("header.{payload}.sig");
+        assert_eq!(decode_token_exp(&token), None);
+    }
+
+    #[test]
+    fn decode_token_exp_returns_none_when_exp_absent() {
+        use super::decode_token_exp;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        let payload = URL_SAFE_NO_PAD.encode(b"{\"sub\":\"user\"}");
+        let token = format!("header.{payload}.sig");
+        assert_eq!(decode_token_exp(&token), None);
+    }
+
+    #[test]
+    fn decode_token_exp_returns_exp_when_present() {
+        use super::decode_token_exp;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine;
+        let payload = URL_SAFE_NO_PAD.encode(b"{\"sub\":\"user\",\"exp\":12345}");
+        let token = format!("header.{payload}.sig");
+        assert_eq!(decode_token_exp(&token), Some(12345));
+    }
+
+    #[test]
+    fn token_hash_is_deterministic_and_distinct() {
+        use super::token_hash;
+        let h1 = token_hash("token-a");
+        let h2 = token_hash("token-a");
+        let h3 = token_hash("token-b");
+        assert_eq!(h1, h2, "相同 token 必须产生相同哈希");
+        assert_ne!(h1, h3, "不同 token 必须产生不同哈希");
+        // SHA-256 十六进制 = 64 字符
+        assert_eq!(h1.len(), 64, "SHA-256 哈希应为 64 个十六进制字符");
+    }
+
+    #[test]
+    fn hex_encode_empty_and_single_and_multi_byte() {
+        use super::hex_encode;
+        assert_eq!(hex_encode(&[]), "");
+        assert_eq!(hex_encode(&[0x00]), "00");
+        assert_eq!(hex_encode(&[0xff]), "ff");
+        assert_eq!(hex_encode(&[0x0a, 0xbc, 0xde]), "0abcde");
+    }
+
+    // ─────────────────────────────────────────────
+    // revoke_token / is_token_revoked 黑名单逻辑
+    // ─────────────────────────────────────────────
+
+    /// 黑名单测试互斥锁 — revoke_token 会修改进程级全局黑名单（retain 清理 + insert），
+    /// 并行测试会导致一个测试的 retain 清理另一个测试刚插入的条目。用 Mutex 串行化所有写黑名单的测试。
+    static BLACKLIST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn is_token_revoked_false_for_unseen_token() {
+        use super::is_token_revoked;
+        // 未曾 revoke 的 token 不在黑名单
+        assert!(!is_token_revoked("never-revoked-token-unique-xyz-001"));
+    }
+
+    #[test]
+    fn revoke_then_is_token_revoked_true() {
+        use super::{is_token_revoked, revoke_token};
+        let _guard = BLACKLIST_MUTEX.lock().unwrap();
+        let token = "test-revoke-token-unique-abc-12345";
+        revoke_token(token);
+        assert!(
+            is_token_revoked(token),
+            "revoke 后 is_token_revoked 必须返回 true"
+        );
+    }
+
+    #[test]
+    fn revoke_token_with_non_jwt_still_added_to_blacklist() {
+        use super::{is_token_revoked, revoke_token};
+        let _guard = BLACKLIST_MUTEX.lock().unwrap();
+        // 非 JWT token 的 exp 解码失败 → unwrap_or(0)，仍按 hash 加入黑名单
+        let token = "non-jwt-revoke-test-unique-002";
+        revoke_token(token);
+        assert!(is_token_revoked(token));
+    }
+
+    // ─────────────────────────────────────────────
+    // refresh_access_token / verify_token 边界（不依赖 AUTH 初始化）
+    // ─────────────────────────────────────────────
+
+    #[test]
+    fn refresh_access_token_empty_returns_err() {
+        use super::refresh_access_token;
+        let result = refresh_access_token("");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "缺少 refresh_token");
+    }
+
+    #[test]
+    fn verify_token_revoked_returns_err_without_auth_init() {
+        use super::{revoke_token, verify_token};
+        let _guard = BLACKLIST_MUTEX.lock().unwrap();
+        // 已注销 token 在 verify_token 入口即返回 Err，不调用 get_auth()（无需 init_auth）
+        let token = "test-verify-revoked-unique-token-67890";
+        revoke_token(token);
+        let result = verify_token(token);
+        assert!(result.is_err());
+        // User 未实现 Debug，用 .err().unwrap() 替代 unwrap_err()（后者要求 T: Debug）
+        assert_eq!(result.err().unwrap(), "token 已注销");
+    }
+
+    #[test]
+    fn refresh_access_token_revoked_returns_err_without_auth_init() {
+        use super::{refresh_access_token, revoke_token};
+        let _guard = BLACKLIST_MUTEX.lock().unwrap();
+        // 已注销 refresh token 在 get_auth() 前即返回 Err
+        let token = "test-refresh-revoked-unique-token-99999";
+        revoke_token(token);
+        let result = refresh_access_token(token);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "refresh token 已注销");
+    }
 }

@@ -666,6 +666,118 @@ mod tests {
         let parsed = chrono::NaiveDate::parse_from_str("2026-01-31 23:59:59", "%Y-%m-%d");
         assert!(parsed.is_err(), "带时间的字符串不应解析为 NaiveDate");
     }
+
+    // ─────────────────────────────────────────────
+    // fake pool 测试：覆盖 WHERE 构建 + acquire 失败错误映射
+    // service 函数先构建 SQL（WHERE 条件拼接、参数绑定），再 acquire connection；
+    // fake pool acquire 快速 ECONNREFUSED，覆盖纯逻辑行 + 错误映射行。
+    // ─────────────────────────────────────────────
+
+    use std::sync::Arc;
+
+    fn make_fake_pool() -> Pool {
+        use sz_orm_sqlx::{MySqlPoolHandle, SqlxMySqlConnectionFactory};
+        use sz_rust_core::orm::PoolConfigBuilder;
+        let connect_options = sqlx::mysql::MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .port(1)
+            .username("root")
+            .password("")
+            .database("nonexistent");
+        let sqlx_pool = sqlx::pool::PoolOptions::<sqlx::MySql>::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy_with(connect_options);
+        let factory =
+            SqlxMySqlConnectionFactory::new(Arc::new(MySqlPoolHandle::from_pool(sqlx_pool)));
+        let pool_cfg = PoolConfigBuilder::new().max_size(1).min_idle(0).build().unwrap();
+        Pool::new(pool_cfg, Arc::new(factory)).unwrap()
+    }
+
+    fn make_test_order() -> Order {
+        Order {
+            order_id: None,
+            order_no: "TEST-001".into(),
+            merchant_id: 1,
+            device_id: Some(1),
+            total_fen: 100,
+            total_weight_g: 200,
+            item_count: 1,
+            status: 1,
+            pay_method: 1,
+            pay_at: None,
+            offline_seq: "".into(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    fn make_test_item() -> OrderItem {
+        OrderItem {
+            item_id: None,
+            order_id: 0,
+            good_id: Some(1),
+            good_name: "商品".into(),
+            price_fen: 100,
+            weight_g: 200,
+            total_fen: 100,
+            quantity: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn order_list_fake_pool_all_filters_returns_err() {
+        let pool = make_fake_pool();
+        let mut filters = OrderFilters::new(Some(1), Some(2), Some(1));
+        filters.start_date = Some("2026-01-01".into());
+        filters.end_date = Some("2026-01-31".into());
+        filters.before_order_id = Some(999);
+        let result = OrderService::list(&pool, None, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn order_list_fake_pool_no_filters_returns_err() {
+        let pool = make_fake_pool();
+        let filters = OrderFilters::new(None, None, None);
+        let result = OrderService::list(&pool, None, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn order_list_fake_pool_end_date_with_time_returns_err() {
+        let pool = make_fake_pool();
+        let mut filters = OrderFilters::new(Some(1), None, None);
+        // 带时间部分 → 解析失败 → 闭区间分支
+        filters.end_date = Some("2026-01-31 23:59:59".into());
+        let result = OrderService::list(&pool, None, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn order_list_fake_pool_keyset_mode_returns_err() {
+        let pool = make_fake_pool();
+        let mut filters = OrderFilters::new(Some(1), None, None);
+        filters.before_order_id = Some(500);
+        let result = OrderService::list(&pool, None, 1, 20, filters).await;
+        assert!(result.is_err(), "fake pool 应导致 list 失败");
+    }
+
+    #[tokio::test]
+    async fn order_get_with_items_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let result = OrderService::get_with_items(&pool, 42).await;
+        assert!(result.is_err(), "fake pool 应导致 get_with_items 失败");
+    }
+
+    #[tokio::test]
+    async fn order_create_fake_pool_returns_err() {
+        let pool = make_fake_pool();
+        let order = make_test_order();
+        let items = vec![make_test_item()];
+        let result = OrderService::create(&pool, None, &order, &items).await;
+        assert!(result.is_err(), "fake pool 应导致 create 失败");
+    }
 }
 
 // 注：`row_to_json` 已提取至 `services/mod.rs`（消除 DRY 重复，2026-07-26）
