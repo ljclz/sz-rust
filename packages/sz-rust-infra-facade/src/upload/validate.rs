@@ -817,12 +817,10 @@ mod tests {
         let file = UploadedFile::new(temp.path(), "doc.txt", None, Some(0), true).unwrap();
         let v = FileValidator::new(); // 默认图片规则和消息
         let result = v.validate_image(&file);
-        match result {
-            Err(FileValidateError::ExtNotAllowed { msg, .. }) => {
-                assert_eq!(msg, "只能上传jpg,jpeg,png,gif,bmp格式图片");
-            }
-            _ => panic!("应返回 ExtNotAllowed"),
-        }
+        let Err(FileValidateError::ExtNotAllowed { msg, .. }) = result else {
+            panic!("应返回 ExtNotAllowed")
+        };
+        assert_eq!(msg, "只能上传jpg,jpeg,png,gif,bmp格式图片");
     }
 
     // ========================================================================

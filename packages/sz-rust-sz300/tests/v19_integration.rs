@@ -105,7 +105,7 @@ async fn test_integration_dynamic_config_snapshot_empty() {
 #[cfg(feature = "v19-obs-closure")]
 #[tokio::test]
 async fn test_integration_alert_rules_severity_mapping() {
-    use sz_rust_alert_engine::AlertSeverity;
+    use sz_rust_observability::alert::AlertSeverity;
     use sz_rust_sz300::alert_rules::channels_for_severity;
     let p0_channels = channels_for_severity(AlertSeverity::Critical);
     assert!(!p0_channels.is_empty());

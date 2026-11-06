@@ -785,10 +785,8 @@ status = 1
         let tmp = tempfile::tempdir().expect("create tempdir");
         let result = parse_manifest(tmp.path()).await;
         assert!(result.is_err());
-        match result.unwrap_err() {
-            AddonLoaderError::ManifestParse { .. } => {}
-            other => panic!("expected ManifestParse, got {:?}", other),
-        }
+        let __err = result.unwrap_err();
+        assert!(matches!(__err, AddonLoaderError::ManifestParse { .. }), "expected ManifestParse, got {:?}", &__err);
     }
 
     #[tokio::test]

@@ -39,6 +39,14 @@ tail-sampling = []
 # v1.7.0 P3-3.1: OTel span 属性 + baggage
 otel-span-attributes = []
 
+# ADR-053 阶段2（2026-11-06）：合并 sz-rust-tracing → 本包的 tracing 子模块
+# 启用分布式追踪 Span/Tracer/W3C TraceContext 抽象 + Addon 路由 + Capability 插件
+tracing-addon = ["dep:axum", "dep:sz-rust-core", "dep:sz-rust-capability", "dep:sz-rust-addons-loader"]
+
+# ADR-053 阶段3（2026-11-06）：合并 sz-rust-alert-engine → 本包的 alert 子模块
+# 启用告警规则引擎（规则评估 + 通知渠道 + 静默/抑制）
+alert-engine = []
+
 [dependencies]
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -62,12 +70,18 @@ reqwest = { workspace = true, optional = true }
 sysinfo = { workspace = true, optional = true }
 redis = { workspace = true, optional = true }
 
+# ADR-053 阶段2：tracing 子模块依赖（可选，启用 tracing-addon feature）
+axum = { workspace = true, optional = true }
+sz-rust-core = { workspace = true, optional = true }
+sz-rust-capability = { workspace = true, optional = true }
+sz-rust-addons-loader = { workspace = true, optional = true }
+
 [lib]
 name = "sz_rust_observability"
 path = "src/lib.rs"
 
 [package.metadata.cargo-machete]
-ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "redis", "reqwest", "serde", "serde_json", "sysinfo", "thiserror", "tokio", "tracing"]
+ignored = ["async-trait", "chrono", "http-body-util", "hyper", "opentelemetry", "opentelemetry-otlp", "opentelemetry_sdk", "redis", "reqwest", "serde", "serde_json", "sysinfo", "thiserror", "tokio", "tracing", "axum", "sz-rust-core", "sz-rust-capability", "sz-rust-addons-loader"]
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["chrono"]

@@ -37,13 +37,11 @@ fn image_content_part_deserializes_from_object() {
         "detail": "low"
     });
     let part: ContentPart = serde_json::from_value(json).unwrap();
-    match part {
-        ContentPart::Image { url, detail } => {
-            assert_eq!(url, "https://example.com/img.png");
-            assert_eq!(detail, ImageDetail::Low);
-        }
-        _ => panic!("expected Image variant"),
-    }
+    let ContentPart::Image { url, detail } = part else {
+        panic!("expected Image variant")
+    };
+    assert_eq!(url, "https://example.com/img.png");
+    assert_eq!(detail, ImageDetail::Low);
 }
 
 #[test]
@@ -65,13 +63,11 @@ fn image_base64_content_part_deserializes_from_object() {
         "mime_type": "image/jpeg"
     });
     let part: ContentPart = serde_json::from_value(json).unwrap();
-    match part {
-        ContentPart::ImageBase64 { data, mime_type } => {
-            assert_eq!(data, "iVBORw0KGgo=");
-            assert_eq!(mime_type, "image/jpeg");
-        }
-        _ => panic!("expected ImageBase64 variant"),
-    }
+    let ContentPart::ImageBase64 { data, mime_type } = part else {
+        panic!("expected ImageBase64 variant")
+    };
+    assert_eq!(data, "iVBORw0KGgo=");
+    assert_eq!(mime_type, "image/jpeg");
 }
 
 #[test]

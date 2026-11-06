@@ -250,4 +250,53 @@ mod tests {
         assert!(p.get_column_value("nope").is_none());
         assert!(Product::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut p = Product {
+            good_id: None,
+            merchant_id: 0,
+            cat_id: None,
+            name: String::new(),
+            barcode: String::new(),
+            price: 0,
+            unit: String::new(),
+            ai_class_id: None,
+            image: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("good_id".to_string(), Value::I64(88));
+        map.insert("merchant_id".to_string(), Value::I64(5));
+        map.insert("cat_id".to_string(), Value::I64(3));
+        map.insert("name".to_string(), Value::String("鱼".into()));
+        map.insert("barcode".to_string(), Value::String("690".into()));
+        map.insert("price".to_string(), Value::I64(3000));
+        map.insert("unit".to_string(), Value::String("斤".into()));
+        map.insert("ai_class_id".to_string(), Value::I64(12));
+        map.insert("image".to_string(), Value::String("img".into()));
+        map.insert("status".to_string(), Value::I64(1));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        p.from_value(map);
+        assert_eq!(p.good_id, Some(88));
+        assert_eq!(p.merchant_id, 5);
+        assert_eq!(p.cat_id, Some(3));
+        assert_eq!(p.name, "鱼");
+        assert_eq!(p.barcode, "690");
+        assert_eq!(p.price, 3000);
+        assert_eq!(p.unit, "斤");
+        assert_eq!(p.ai_class_id, Some(12));
+        assert_eq!(p.image, "img");
+        assert_eq!(p.status, 1);
+        assert_eq!(p.created_at.as_deref(), Some("c"));
+        assert_eq!(p.updated_at.as_deref(), Some("u"));
+        p.from_value(HashMap::new());
+        assert_eq!(p.good_id, Some(88));
+        assert_eq!(p.merchant_id, 5);
+        assert_eq!(p.name, "鱼");
+    }
 }

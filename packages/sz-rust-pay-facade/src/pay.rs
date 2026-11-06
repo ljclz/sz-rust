@@ -953,17 +953,17 @@ mod tests {
         // validate 失败：缺 app_id
         let bad = PayConfig::new(PayPlatform::Alipay, "");
         let err = bad.validate().unwrap_err();
-        match err {
-            PayError::Config(field) => assert_eq!(field, "app_id"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let PayError::Config(field) = err {
+            assert_eq!(field, "app_id");
         }
 
         // validate 失败：缺 merchant_private_key
         let bad = PayConfig::new(PayPlatform::Alipay, "app1");
         let err = bad.validate().unwrap_err();
-        match err {
-            PayError::Config(field) => assert_eq!(field, "merchant_private_key"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let PayError::Config(field) = err {
+            assert_eq!(field, "merchant_private_key");
         }
 
         // validate 失败：缺 notify_url
@@ -971,9 +971,9 @@ mod tests {
             .with_merchant_private_key("k1")
             .with_platform_public_key("k2");
         let err = bad.validate().unwrap_err();
-        match err {
-            PayError::Config(field) => assert_eq!(field, "notify_url"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let PayError::Config(field) = err {
+            assert_eq!(field, "notify_url");
         }
     }
 
@@ -1028,9 +1028,9 @@ mod tests {
         // 缺 out_trade_no
         let order = PayOrder::new().total_amount(100).subject("标题");
         let err = order.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_trade_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_trade_no");
         }
 
         // total_amount <= 0
@@ -1039,9 +1039,9 @@ mod tests {
             .total_amount(0)
             .subject("标题");
         let err = order.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "total_amount"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "total_amount");
         }
 
         // 负数金额
@@ -1050,9 +1050,9 @@ mod tests {
             .total_amount(-1)
             .subject("标题");
         let err = order.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "total_amount"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "total_amount");
         }
 
         // 缺 subject
@@ -1060,16 +1060,16 @@ mod tests {
             .out_trade_no("202401010001")
             .total_amount(100);
         let err = order.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "subject"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "subject");
         }
 
         // 默认值校验失败（全部为空）
         let err = PayOrder::default().validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_trade_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_trade_no");
         }
     }
 
@@ -1097,9 +1097,9 @@ mod tests {
         // validate 失败：缺 out_trade_no
         let refund = RefundOrder::new().refund_amount(5000).out_request_no("R1");
         let err = refund.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_trade_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_trade_no");
         }
 
         // validate 失败：refund_amount <= 0
@@ -1108,17 +1108,17 @@ mod tests {
             .refund_amount(0)
             .out_request_no("R1");
         let err = refund.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "refund_amount"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "refund_amount");
         }
 
         // validate 失败：缺 out_request_no
         let refund = RefundOrder::new().out_trade_no("T1").refund_amount(100);
         let err = refund.validate().unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_request_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_request_no");
         }
     }
 
@@ -1189,9 +1189,9 @@ mod tests {
             .total_amount(100)
             .subject("重复订单");
         let err = provider.pay(dup).unwrap_err();
-        match err {
-            PayError::RequestFailed(msg) => assert!(msg.contains("订单号已存在")),
-            other => panic!("期望 RequestFailed, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::RequestFailed(_)), "期望 RequestFailed, 实际 {err:?}");
+        if let PayError::RequestFailed(msg) = err {
+            assert!(msg.contains("订单号已存在"));
         }
         // 不应新增记录
         assert_eq!(provider.orders().len(), 1);
@@ -1204,9 +1204,9 @@ mod tests {
 
         // 1. 查询不存在的订单应失败
         let err = provider.query("NOT_EXIST").unwrap_err();
-        match err {
-            PayError::QueryFailed(msg) => assert!(msg.contains("订单不存在")),
-            other => panic!("期望 QueryFailed, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::QueryFailed(_)), "期望 QueryFailed, 实际 {err:?}");
+        if let PayError::QueryFailed(msg) = err {
+            assert!(msg.contains("订单不存在"));
         }
 
         // 2. 发起支付后查询
@@ -1241,10 +1241,7 @@ mod tests {
         // clear 后预置结果被清除
         provider.clear();
         let err = provider.query("NOT_EXIST").unwrap_err();
-        match err {
-            PayError::QueryFailed(_) => {}
-            other => panic!("期望 QueryFailed, 实际 {other:?}"),
-        }
+        assert!(matches!(err, PayError::QueryFailed(_)), "期望 QueryFailed, 实际 {err:?}");
     }
 
     /// 测试 MemoryPayProvider 关闭订单
@@ -1254,9 +1251,9 @@ mod tests {
 
         // 1. 关闭不存在的订单应失败
         let err = provider.close("NOT_EXIST").unwrap_err();
-        match err {
-            PayError::RequestFailed(msg) => assert!(msg.contains("订单不存在")),
-            other => panic!("期望 RequestFailed, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::RequestFailed(_)), "期望 RequestFailed, 实际 {err:?}");
+        if let PayError::RequestFailed(msg) = err {
+            assert!(msg.contains("订单不存在"));
         }
 
         // 2. 发起支付后关闭
@@ -1285,9 +1282,9 @@ mod tests {
             .refund_amount(100)
             .out_request_no("R001");
         let err = provider.refund(refund).unwrap_err();
-        match err {
-            PayError::RefundFailed(msg) => assert!(msg.contains("原订单不存在")),
-            other => panic!("期望 RefundFailed, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::RefundFailed(_)), "期望 RefundFailed, 实际 {err:?}");
+        if let PayError::RefundFailed(msg) = err {
+            assert!(msg.contains("原订单不存在"));
         }
         assert_eq!(provider.refunds().len(), 0);
 
@@ -1319,9 +1316,9 @@ mod tests {
             .refund_amount(0) // 金额无效
             .out_request_no("RR002");
         let err = provider.refund(bad).unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "refund_amount"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "refund_amount");
         }
         // 不应新增退款记录
         assert_eq!(provider.refunds().len(), 1);
@@ -1354,9 +1351,9 @@ mod tests {
             "total_amount": 8800
         });
         let err = provider.verify_notify(&params).unwrap_err();
-        match err {
-            PayError::VerifyFailed(msg) => assert!(msg.contains("out_trade_no")),
-            other => panic!("期望 VerifyFailed, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::VerifyFailed(_)), "期望 VerifyFailed, 实际 {err:?}");
+        if let PayError::VerifyFailed(msg) = err {
+            assert!(msg.contains("out_trade_no"));
         }
 
         // 3. 缺省字段回退：trade_status 默认 TRADE_SUCCESS
@@ -1379,9 +1376,9 @@ mod tests {
         // 缺 out_trade_no
         let order = PayOrder::new().total_amount(100).subject("标题");
         let err = provider.pay(order).unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_trade_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_trade_no");
         }
         assert_eq!(provider.orders().len(), 0);
 
@@ -1391,26 +1388,26 @@ mod tests {
             .total_amount(0)
             .subject("标题");
         let err = provider.pay(order).unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "total_amount"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "total_amount");
         }
         assert_eq!(provider.orders().len(), 0);
 
         // 缺 subject
         let order = PayOrder::new().out_trade_no("M002").total_amount(100);
         let err = provider.pay(order).unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "subject"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "subject");
         }
         assert_eq!(provider.orders().len(), 0);
 
         // 空订单（全默认值）应失败
         let err = provider.pay(PayOrder::default()).unwrap_err();
-        match err {
-            PayError::MissingField(field) => assert_eq!(field, "out_trade_no"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let PayError::MissingField(field) = err {
+            assert_eq!(field, "out_trade_no");
         }
         assert_eq!(provider.orders().len(), 0);
     }
@@ -1428,9 +1425,9 @@ mod tests {
         let err = transport
             .post_json("https://api.example.com/pay", "{}")
             .unwrap_err();
-        match err {
-            PayError::HttpTransport(msg) => assert!(msg.contains("无可用预置响应")),
-            other => panic!("期望 HttpTransport, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::HttpTransport(_)), "期望 HttpTransport, 实际 {err:?}");
+        if let PayError::HttpTransport(msg) = err {
+            assert!(msg.contains("无可用预置响应"));
         }
         assert_eq!(transport.request_count(), 0);
 
@@ -1451,10 +1448,7 @@ mod tests {
 
         // 再次调用队列空返回错误
         let err = transport.post_json("url", "{}").unwrap_err();
-        match err {
-            PayError::HttpTransport(_) => {}
-            other => panic!("期望 HttpTransport, 实际 {other:?}"),
-        }
+        assert!(matches!(err, PayError::HttpTransport(_)), "期望 HttpTransport, 实际 {err:?}");
         // 失败请求不应记录
         assert_eq!(transport.request_count(), 1);
     }
@@ -1466,9 +1460,9 @@ mod tests {
 
         // 队列空时返回错误
         let err = transport.get("https://api.example.com/query").unwrap_err();
-        match err {
-            PayError::HttpTransport(msg) => assert!(msg.contains("无可用预置响应")),
-            other => panic!("期望 HttpTransport, 实际 {other:?}"),
+        assert!(matches!(&err, &PayError::HttpTransport(_)), "期望 HttpTransport, 实际 {err:?}");
+        if let PayError::HttpTransport(msg) = err {
+            assert!(msg.contains("无可用预置响应"));
         }
         assert_eq!(transport.request_count(), 0);
 

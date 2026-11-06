@@ -427,16 +427,14 @@ mod tests {
         let result = engine.validate_template_type("nonexistent");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        match err {
-            CliError::UnknownTemplate {
-                requested,
-                available,
-            } => {
-                assert_eq!(requested, "nonexistent");
-                assert!(available.contains(&"plugin-crud".to_string()));
-            }
-            _ => panic!("expected UnknownTemplate error"),
-        }
+        let CliError::UnknownTemplate {
+            requested,
+            available,
+        } = err else {
+            panic!("expected UnknownTemplate error")
+        };
+        assert_eq!(requested, "nonexistent");
+        assert!(available.contains(&"plugin-crud".to_string()));
     }
 
     #[test]

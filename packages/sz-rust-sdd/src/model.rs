@@ -661,10 +661,10 @@ mod tests {
         };
         let json = serde_json::to_string(&decision).unwrap();
         let decoded: ReviewDecision = serde_json::from_str(&json).unwrap();
-        match decoded {
-            ReviewDecision::Redo { comment } => assert_eq!(comment, "fix this"),
-            _ => panic!("wrong variant"),
-        }
+        let ReviewDecision::Redo { comment } = decoded else {
+            panic!("wrong variant")
+        };
+        assert_eq!(comment, "fix this");
     }
 
     #[test]

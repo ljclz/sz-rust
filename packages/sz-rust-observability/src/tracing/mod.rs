@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
-//! # SZ-Rust Tracing — 链路追踪
+//! # SZ-Rust Tracing — 链路追踪（合并自 sz-rust-tracing，ADR-053 阶段2）
 //!
 //! 提供分布式链路追踪的 Span/Tracer 抽象，支持 W3C TraceContext 传播，
 //! 用于跨服务调用链的采集与可视化。
 //!
 //! ## OTLP 导出
 //!
-//! OTLP exporter 已统一由 `sz-rust-observability` 包提供（支持 gRPC/HTTP 双协议、
-//! 环境变量配置、资源属性），本包专注于 Span/Tracer 核心抽象与 W3C 传播。
+//! OTLP exporter 已统一由本包（`sz-rust-observability`）的 [`crate::otlp`] 模块提供
+//! （支持 gRPC/HTTP 双协议、环境变量配置、资源属性），本模块专注于 Span/Tracer 核心
+//! 抽象与 W3C 传播。
 //!
 //! ## 主要类型
 //!
@@ -24,7 +25,6 @@
 //! `00-<trace_id>-<span_id>-<trace_flags>`，同时保留 `parent-span-id`
 //! header 以向后兼容旧版本客户端。
 
-#![forbid(unsafe_code)]
 #![allow(missing_docs)]
 
 use serde::{Deserialize, Serialize};

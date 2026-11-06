@@ -210,4 +210,47 @@ mod tests {
         // ota_version 只有 created_at（无 updated_at）
         assert!(OtaVersion::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut v = OtaVersion {
+            ota_id: None,
+            version: String::new(),
+            device_model: String::new(),
+            url: String::new(),
+            md5: String::new(),
+            changelog: String::new(),
+            size: 0,
+            forced: 0,
+            status: 0,
+            created_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("ota_id".to_string(), Value::I64(9));
+        map.insert("version".to_string(), Value::String("1.2.3".into()));
+        map.insert("device_model".to_string(), Value::String("SZ-X1".into()));
+        map.insert("url".to_string(), Value::String("http://x".into()));
+        map.insert("md5".to_string(), Value::String("abc".into()));
+        map.insert("changelog".to_string(), Value::String("fix".into()));
+        map.insert("size".to_string(), Value::I64(1024));
+        map.insert("forced".to_string(), Value::I64(1));
+        map.insert("status".to_string(), Value::I64(1));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        v.from_value(map);
+        assert_eq!(v.ota_id, Some(9));
+        assert_eq!(v.version, "1.2.3");
+        assert_eq!(v.device_model, "SZ-X1");
+        assert_eq!(v.url, "http://x");
+        assert_eq!(v.md5, "abc");
+        assert_eq!(v.changelog, "fix");
+        assert_eq!(v.size, 1024);
+        assert_eq!(v.forced, 1);
+        assert_eq!(v.status, 1);
+        assert_eq!(v.created_at.as_deref(), Some("c"));
+        v.from_value(HashMap::new());
+        assert_eq!(v.ota_id, Some(9));
+        assert_eq!(v.version, "1.2.3");
+        assert_eq!(v.size, 1024);
+    }
 }

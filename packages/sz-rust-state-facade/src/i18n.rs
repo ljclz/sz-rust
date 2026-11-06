@@ -861,10 +861,7 @@ mod tests {
             .load_from_file("/nonexistent/path/lang.json", "en-us")
             .await;
         assert!(result.is_err());
-        match result {
-            Err(I18nError::FileRead { .. }) => {}
-            _ => panic!("期望 FileRead 错误"),
-        }
+        assert!(matches!(result, Err(I18nError::FileRead { .. })));
     }
 
     /// 测试无效 JSON 返回解析错误
@@ -873,10 +870,7 @@ mod tests {
         let i18n = I18n::new();
         let result = i18n.load_from_json_str("{invalid json}", "en-us", "<test>");
         assert!(result.is_err());
-        match result {
-            Err(I18nError::Parse { .. }) => {}
-            _ => panic!("期望 Parse 错误"),
-        }
+        assert!(matches!(result, Err(I18nError::Parse { .. })));
     }
 
     /// 测试 JSON 中的非字符串值被跳过

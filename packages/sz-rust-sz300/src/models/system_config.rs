@@ -134,4 +134,28 @@ mod tests {
         assert!(c.get_column_value("missing").is_none());
         assert!(SystemConfig::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut c = SystemConfig {
+            key_name: String::new(),
+            value: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("key_name".to_string(), Value::String("site_name".into()));
+        map.insert("value".to_string(), Value::String("鲜视达".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        c.from_value(map);
+        assert_eq!(c.key_name, "site_name");
+        assert_eq!(c.value, "鲜视达");
+        assert_eq!(c.created_at.as_deref(), Some("c"));
+        assert_eq!(c.updated_at.as_deref(), Some("u"));
+        c.from_value(HashMap::new());
+        assert_eq!(c.key_name, "site_name");
+        assert_eq!(c.value, "鲜视达");
+    }
 }

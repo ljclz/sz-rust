@@ -157,3 +157,175 @@ impl RelationLoader for Device {
         String::new()
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn serde_roundtrip_preserves_all_fields() {
+        let d = Device {
+            device_id: Some(101),
+            merchant_id: Some(7),
+            device_sn: "SN-A001".into(),
+            device_model: "SZ-300".into(),
+            fw_version: "1.2.3".into(),
+            status: 1,
+            signal_strength: -67,
+            bind_at: Some("2026-01-01 00:00:00".into()),
+            last_online_at: Some("2026-02-02 00:00:00".into()),
+            created_at: Some("2026-01-01 00:00:00".into()),
+            updated_at: None,
+        };
+        let json = serde_json::to_string(&d).expect("serialize");
+        let back: Device = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.device_id, Some(101));
+        assert_eq!(back.merchant_id, Some(7));
+        assert_eq!(back.device_sn, "SN-A001");
+        assert_eq!(back.device_model, "SZ-300");
+        assert_eq!(back.fw_version, "1.2.3");
+        assert_eq!(back.status, 1);
+        assert_eq!(back.signal_strength, -67);
+        assert_eq!(back.bind_at.as_deref(), Some("2026-01-01 00:00:00"));
+        assert_eq!(back.last_online_at.as_deref(), Some("2026-02-02 00:00:00"));
+        assert_eq!(back.created_at.as_deref(), Some("2026-01-01 00:00:00"));
+        assert_eq!(back.updated_at, None);
+    }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(Device::table_name(), "device");
+        assert_eq!(Device::pk_name(), "device_id");
+        let mut d = Device {
+            device_id: None,
+            merchant_id: None,
+            device_sn: String::new(),
+            device_model: String::new(),
+            fw_version: String::new(),
+            status: 0,
+            signal_strength: 0,
+            bind_at: None,
+            last_online_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        // pk 默认 0；Option 字段 None 时 get_column_value 返回 None
+        assert_eq!(d.pk(), 0);
+        assert!(d.get_column_value("device_id").is_none());
+        assert!(d.get_column_value("merchant_id").is_none());
+        assert!(d.get_column_value("bind_at").is_none());
+        assert!(d.get_column_value("last_online_at").is_none());
+        assert!(d.get_column_value("created_at").is_none());
+        assert!(d.get_column_value("updated_at").is_none());
+        d.set_pk(999);
+        assert_eq!(d.pk(), 999);
+        assert!(d.get_column_value("device_id").is_some());
+        // Some 路径
+        d.merchant_id = Some(5);
+        d.bind_at = Some("b".into());
+        d.last_online_at = Some("l".into());
+        d.created_at = Some("c".into());
+        d.updated_at = Some("u".into());
+        assert!(d.get_column_value("merchant_id").is_some());
+        assert!(d.get_column_value("device_sn").is_some());
+        assert!(d.get_column_value("device_model").is_some());
+        assert!(d.get_column_value("fw_version").is_some());
+        assert!(d.get_column_value("status").is_some());
+        assert!(d.get_column_value("signal_strength").is_some());
+        assert!(d.get_column_value("bind_at").is_some());
+        assert!(d.get_column_value("last_online_at").is_some());
+        assert!(d.get_column_value("created_at").is_some());
+        assert!(d.get_column_value("updated_at").is_some());
+        // 未知列
+        assert!(d.get_column_value("nope").is_none());
+        // 元数据
+        assert_eq!(Device::columns().len(), 11);
+        assert_eq!(Device::fillable().len(), 8);
+        assert_eq!(Device::guarded().len(), 1);
+        assert!(Device::timestamp_fields().is_some());
+    }
+
+    #[test]
+    fn from_value_populates_all_fields() {
+        let mut d = Device {
+            device_id: None,
+            merchant_id: None,
+            device_sn: String::new(),
+            device_model: String::new(),
+            fw_version: String::new(),
+            status: 0,
+            signal_strength: 0,
+            bind_at: None,
+            last_online_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("device_id".to_string(), Value::I64(11));
+        map.insert("merchant_id".to_string(), Value::I64(22));
+        map.insert("device_sn".to_string(), Value::String("sn".into()));
+        map.insert("device_model".to_string(), Value::String("mdl".into()));
+        map.insert("fw_version".to_string(), Value::String("1.0".into()));
+        map.insert("status".to_string(), Value::I64(2));
+        map.insert("signal_strength".to_string(), Value::I64(-50));
+        map.insert("bind_at".to_string(), Value::String("b".into()));
+        map.insert("last_online_at".to_string(), Value::String("l".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        d.from_value(map);
+        assert_eq!(d.device_id, Some(11));
+        assert_eq!(d.merchant_id, Some(22));
+        assert_eq!(d.device_sn, "sn");
+        assert_eq!(d.device_model, "mdl");
+        assert_eq!(d.fw_version, "1.0");
+        assert_eq!(d.status, 2);
+        assert_eq!(d.signal_strength, -50);
+        assert_eq!(d.bind_at.as_deref(), Some("b"));
+        assert_eq!(d.last_online_at.as_deref(), Some("l"));
+        assert_eq!(d.created_at.as_deref(), Some("c"));
+        assert_eq!(d.updated_at.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut d = Device {
+            device_id: Some(1),
+            merchant_id: Some(2),
+            device_sn: "x".into(),
+            device_model: "y".into(),
+            fw_version: "z".into(),
+            status: 3,
+            signal_strength: 4,
+            bind_at: Some("b".into()),
+            last_online_at: Some("l".into()),
+            created_at: Some("c".into()),
+            updated_at: Some("u".into()),
+        };
+        d.from_value(HashMap::new());
+        assert_eq!(d.device_id, Some(1));
+        assert_eq!(d.merchant_id, Some(2));
+        assert_eq!(d.device_sn, "x");
+        assert_eq!(d.status, 3);
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let d = Device {
+            device_id: Some(1),
+            merchant_id: None,
+            device_sn: String::new(),
+            device_model: String::new(),
+            fw_version: String::new(),
+            status: 0,
+            signal_strength: 0,
+            bind_at: None,
+            last_online_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        assert!(d.get_relation("any").is_none());
+        let mut d2 = d.clone();
+        d2.set_relation_data("any", Value::String("v".into()));
+        assert_eq!(d2.get_relation_fk_value("any"), String::new());
+    }
+}

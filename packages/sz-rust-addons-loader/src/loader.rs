@@ -326,9 +326,10 @@ public $info = [
 
         let result = loader.parse_route("/addons/cashier/Order/index");
         assert!(result.is_err());
-        match result.unwrap_err() {
-            AddonLoaderError::AddonDisabled(name) => assert_eq!(name, "cashier"),
-            other => panic!("expected AddonDisabled, got {:?}", other),
+        let __err = result.unwrap_err();
+        assert!(matches!(&__err, &AddonLoaderError::AddonDisabled(_)), "expected AddonDisabled, got {:?}", &__err);
+        if let AddonLoaderError::AddonDisabled(name) = __err {
+            assert_eq!(name, "cashier");
         }
     }
 

@@ -16,36 +16,34 @@ use sz_rust_cli::{Cli, CliCommand};
 #[test]
 fn test_serve_production_defaults() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin,
-            with_tenant,
-            with_data_scope,
-            addr,
-            watch_config,
-            workers,
-            grace_timeout,
-            tls_cert,
-            tls_key,
-            access_log,
-            health,
-            no_health,
-        }) => {
-            assert!(!with_admin, "默认不加载 admin");
-            assert!(!with_tenant, "默认不启用 tenant_middleware");
-            assert!(!with_data_scope, "默认不启用 data_scope_middleware");
-            assert_eq!(addr, "0.0.0.0:8080", "默认地址");
-            assert!(!watch_config, "默认不启用配置热重载");
-            assert!(workers.is_none(), "默认 workers 为 None");
-            assert!(grace_timeout.is_none(), "默认 grace_timeout 为 None");
-            assert!(tls_cert.is_none(), "默认无 TLS 证书");
-            assert!(tls_key.is_none(), "默认无 TLS 私钥");
-            assert!(!access_log, "默认不启用访问日志");
-            assert!(health, "默认启用健康检查");
-            assert!(!no_health, "默认不禁用健康检查");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin,
+        with_tenant,
+        with_data_scope,
+        addr,
+        watch_config,
+        workers,
+        grace_timeout,
+        tls_cert,
+        tls_key,
+        access_log,
+        health,
+        no_health,
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(!with_admin, "默认不加载 admin");
+    assert!(!with_tenant, "默认不启用 tenant_middleware");
+    assert!(!with_data_scope, "默认不启用 data_scope_middleware");
+    assert_eq!(addr, "0.0.0.0:8080", "默认地址");
+    assert!(!watch_config, "默认不启用配置热重载");
+    assert!(workers.is_none(), "默认 workers 为 None");
+    assert!(grace_timeout.is_none(), "默认 grace_timeout 为 None");
+    assert!(tls_cert.is_none(), "默认无 TLS 证书");
+    assert!(tls_key.is_none(), "默认无 TLS 私钥");
+    assert!(!access_log, "默认不启用访问日志");
+    assert!(health, "默认启用健康检查");
+    assert!(!no_health, "默认不禁用健康检查");
 }
 
 /// `serve --with-admin --workers 4 --grace-timeout 30 --health --access-log` 全参数
@@ -63,35 +61,31 @@ fn test_serve_production_all_args() {
         "--access-log",
         "--watch-config",
     ]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin,
-            workers,
-            grace_timeout,
-            access_log,
-            watch_config,
-            ..
-        }) => {
-            assert!(with_admin);
-            assert_eq!(workers, Some(4));
-            assert_eq!(grace_timeout, Some(30));
-            assert!(access_log);
-            assert!(watch_config);
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin,
+        workers,
+        grace_timeout,
+        access_log,
+        watch_config,
+        ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(with_admin);
+    assert_eq!(workers, Some(4));
+    assert_eq!(grace_timeout, Some(30));
+    assert!(access_log);
+    assert!(watch_config);
 }
 
 /// `serve --no-health` 禁用健康检查
 #[test]
 fn test_serve_production_no_health() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--no-health"]);
-    match cli.command {
-        Some(CliCommand::Serve { no_health, .. }) => {
-            assert!(no_health);
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve { no_health, .. }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(no_health);
 }
 
 /// `serve --tls-cert cert.pem --tls-key key.pem --addr 0.0.0.0:443` TLS 配置
@@ -107,25 +101,23 @@ fn test_serve_production_tls() {
         "--addr",
         "0.0.0.0:443",
     ]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            tls_cert,
-            tls_key,
-            addr,
-            ..
-        }) => {
-            assert_eq!(
-                tls_cert.as_deref(),
-                Some(std::path::Path::new("/etc/ssl/cert.pem"))
-            );
-            assert_eq!(
-                tls_key.as_deref(),
-                Some(std::path::Path::new("/etc/ssl/key.pem"))
-            );
-            assert_eq!(addr, "0.0.0.0:443");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        tls_cert,
+        tls_key,
+        addr,
+        ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert_eq!(
+        tls_cert.as_deref(),
+        Some(std::path::Path::new("/etc/ssl/cert.pem"))
+    );
+    assert_eq!(
+        tls_key.as_deref(),
+        Some(std::path::Path::new("/etc/ssl/key.pem"))
+    );
+    assert_eq!(addr, "0.0.0.0:443");
 }
 
 // ========== 向后兼容回归测试 ==========
@@ -134,36 +126,32 @@ fn test_serve_production_tls() {
 #[test]
 fn test_serve_backward_compatible_default() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin,
-            addr,
-            health,
-            ..
-        }) => {
-            // 与 commit 12d0695 一致：with_admin=false, addr=0.0.0.0:8080
-            assert!(!with_admin);
-            assert_eq!(addr, "0.0.0.0:8080");
-            // health 默认 true（新增特性，不影响向后兼容）
-            assert!(health);
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin,
+        addr,
+        health,
+        ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    // 与 commit 12d0695 一致：with_admin=false, addr=0.0.0.0:8080
+    assert!(!with_admin);
+    assert_eq!(addr, "0.0.0.0:8080");
+    // health 默认 true（新增特性，不影响向后兼容）
+    assert!(health);
 }
 
 /// `serve --with-admin --addr 127.0.0.1:0` 与 commit 12d0695 一致
 #[test]
 fn test_serve_backward_compatible_with_admin() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--with-admin", "--addr", "127.0.0.1:0"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin, addr, ..
-        }) => {
-            assert!(with_admin);
-            assert_eq!(addr, "127.0.0.1:0");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin, addr, ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(with_admin);
+    assert_eq!(addr, "127.0.0.1:0");
 }
 
 // ========== Windows CLI 子命令验证 ==========

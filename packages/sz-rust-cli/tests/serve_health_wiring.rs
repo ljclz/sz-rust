@@ -19,42 +19,36 @@ use tower::ServiceExt;
 #[test]
 fn test_parse_serve_health_default_enabled() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            health, no_health, ..
-        }) => {
-            assert!(health, "health 默认应为 true");
-            assert!(!no_health, "no_health 默认应为 false");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        health, no_health, ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(health, "health 默认应为 true");
+    assert!(!no_health, "no_health 默认应为 false");
 }
 
 /// `serve --no-health` 解析后 no_health=true
 #[test]
 fn test_parse_serve_no_health_flag() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--no-health"]);
-    match cli.command {
-        Some(CliCommand::Serve { no_health, .. }) => {
-            assert!(no_health, "no_health 应为 true");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve { no_health, .. }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(no_health, "no_health 应为 true");
 }
 
 /// `serve --health` 显式启用
 #[test]
 fn test_parse_serve_health_explicit() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--health"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            health, no_health, ..
-        }) => {
-            assert!(health, "health 应为 true");
-            assert!(!no_health, "no_health 应为 false");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        health, no_health, ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(health, "health 应为 true");
+    assert!(!no_health, "no_health 应为 false");
 }
 
 /// `default_health_router()` merge 后 GET /health/ 返回 200（liveness）

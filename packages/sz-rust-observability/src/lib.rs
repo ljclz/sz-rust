@@ -74,6 +74,20 @@ pub mod slo;
 #[cfg(feature = "otlp")]
 pub mod otlp;
 
+/// 分布式追踪子模块（Span/Tracer/W3C TraceContext）
+///
+/// 由 `tracing-addon` feature 门控，合并自 sz-rust-tracing（ADR-053 阶段2，2026-11-06）。
+/// 提供 `sz_rust_observability::tracing::*` 路径，等价于原 `sz_rust_tracing::*`。
+#[cfg(feature = "tracing-addon")]
+pub mod tracing;
+
+/// 告警规则引擎子模块（规则评估 + 通知渠道 + 静默/抑制）
+///
+/// 由 `alert-engine` feature 门控，合并自 sz-rust-alert-engine（ADR-053 阶段3，2026-11-06）。
+/// 提供 `sz_rust_observability::alert::*` 路径，等价于原 `sz_rust_alert_engine::*`。
+#[cfg(feature = "alert-engine")]
+pub mod alert;
+
 /// 直接导出器（Jaeger / Zipkin），默认启用，不依赖 OpenTelemetry SDK
 pub mod exporters;
 

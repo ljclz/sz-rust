@@ -1134,7 +1134,10 @@ mod tests {
         let blacklist: Arc<dyn TokenBlacklist> = Arc::new(MemoryTokenBlacklist::new());
         let store: Arc<dyn RefreshTokenStore> = Arc::new(MemoryRefreshTokenStore::new());
         let config = RefreshTokenConfig {
-            access_token_ttl: chrono::Duration::seconds(10),
+            // 测试用短 TTL：access_token 4s，配合 renewal_threshold 2s，
+            // sleep 3s 后 remaining=1s < effective_threshold(2s) 触发续期，
+            // 且 1s > 0 未过期。原 10s TTL 需 sleep 6s，现降至 3s。
+            access_token_ttl: chrono::Duration::seconds(4),
             refresh_token_ttl: chrono::Duration::seconds(3600),
             issuer: "sz-rust-sso".to_string(),
         };
@@ -1155,9 +1158,11 @@ mod tests {
         let mut sso = SsoService::new(issuer, verifier, revoker, user_auth);
         sso.with_renewal_config(RenewalConfig {
             enabled: true,
-            renewal_threshold: chrono::Duration::seconds(5),
+            // threshold 2s：sleep 3s 后 remaining=1s < max(2, 4*0.2=0)=2s 触发；
+            // no_trigger 测试 remaining≈4s > 2s 不触发（延迟需 >2s 才 flaky，安全）。
+            renewal_threshold: chrono::Duration::seconds(2),
             renewal_ratio: 0.2,
-            access_token_ttl: chrono::Duration::seconds(10),
+            access_token_ttl: chrono::Duration::seconds(4),
         });
         sso
     }
@@ -1176,7 +1181,7 @@ mod tests {
         let sso = make_sso_service_with_short_ttl();
         let login_resp = sso.login("user1", "pass1").await.unwrap();
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
         let (claims, renewed) = sso
             .validate_with_renewal(&login_resp.tokens.access_token)
@@ -1254,7 +1259,7 @@ mod tests {
         let sso = make_sso_service_with_short_ttl();
         let login_resp = sso.login("user1", "pass1").await.unwrap();
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
 
         let (claims, renewed) = sso
             .validate_with_renewal(&login_resp.tokens.access_token)
@@ -1666,11 +1671,27 @@ mod tests {
         let sso = make_sso_service_with_ticket_store();
         sso.login("user1", "pass1").await.unwrap();
 
-        let ticket = sso
-            .generate_ticket(1, "https://b.example.com/callback")
+        // generate_ticket 硬编码 30s TTL（生产代码不可改），若用它需 sleep 31s。
+        // 这里直接构造 1s TTL 的 SsoTicket 写入 store，sleep 2s 即可验证过期路径，
+        // 将 31s sleep 缩短至 2s。ticket_store 为父模块私有字段，子模块可访问。
+        let now = chrono::Utc::now().timestamp();
+        let ticket = uuid::Uuid::new_v4().to_string();
+        sso.ticket_store
+            .as_ref()
+            .unwrap()
+            .save(SsoTicket {
+                ticket: ticket.clone(),
+                user_id: 1,
+                username: "user1".to_string(),
+                redirect_uri: "https://b.example.com/callback".to_string(),
+                roles: vec!["admin".to_string(), "user".to_string()],
+                permissions: vec!["read".to_string(), "write".to_string()],
+                created_at: now,
+                expires_at: now + 1,
+            })
             .await
             .unwrap();
-        tokio::time::sleep(tokio::time::Duration::from_secs(31)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         let result = sso.exchange_ticket(&ticket).await;
         assert!(result.is_err());

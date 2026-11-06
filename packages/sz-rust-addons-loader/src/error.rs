@@ -196,10 +196,10 @@ mod tests {
     #[test]
     fn test_result_alias_ok() {
         let result: AddonLoaderResult<i32> = Ok(42);
-        match result {
-            Ok(v) => assert_eq!(v, 42),
-            Err(_) => panic!("expected Ok"),
-        }
+        let Ok(v) = result else {
+            panic!("expected Ok")
+        };
+        assert_eq!(v, 42);
     }
 
     #[test]

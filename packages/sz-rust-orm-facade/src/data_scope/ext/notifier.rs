@@ -110,12 +110,10 @@ mod tests {
         let mut rx = notifier.subscribe();
         notifier.broadcast(make_event());
         let event = rx.recv().await.unwrap();
-        match event {
-            ChangeEvent::RuleCreated { target_table, .. } => {
-                assert_eq!(target_table, "order");
-            }
-            _ => panic!("expected RuleCreated"),
-        }
+        let ChangeEvent::RuleCreated { target_table, .. } = event else {
+            panic!("expected RuleCreated")
+        };
+        assert_eq!(target_table, "order");
     }
 
     #[test]

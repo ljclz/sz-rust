@@ -138,10 +138,7 @@ mod tests {
     fn test_simd_safe_error_mapping() {
         let result: Result<i64, _> = from_str("invalid json");
         assert!(result.is_err());
-        match result.unwrap_err() {
-            JsonError::Parse(_) => {}
-            JsonError::Unsupported => panic!("should be Parse error"),
-        }
+        assert!(matches!(result.unwrap_err(), JsonError::Parse(_)));
     }
 
     #[test]

@@ -1646,37 +1646,33 @@ mod tests {
     #[test]
     fn test_rule_from_string_simple() {
         let r = Rule::from_string("require");
-        match r {
-            Rule::Simple(s) => assert_eq!(s, "require"),
-            _ => panic!("expected Simple"),
-        }
+        let Rule::Simple(s) = r else {
+            panic!("expected Simple")
+        };
+        assert_eq!(s, "require");
     }
 
     #[test]
     fn test_rule_from_string_with_args() {
         let r = Rule::from_string("in:1,2,3");
-        match r {
-            Rule::WithArgs(t, a) => {
-                assert_eq!(t, "in");
-                assert_eq!(a, "1,2,3");
-            }
-            _ => panic!("expected WithArgs"),
-        }
+        let Rule::WithArgs(t, a) = r else {
+            panic!("expected WithArgs")
+        };
+        assert_eq!(t, "in");
+        assert_eq!(a, "1,2,3");
     }
 
     #[test]
     fn test_rule_from_string_multiple() {
         let r = Rule::from_string("require|in:1,2,3");
-        match r {
-            Rule::Multiple(list) => {
-                assert_eq!(list.len(), 2);
-                assert!(matches!(list[0], Rule::Simple(ref s) if s == "require"));
-                assert!(
-                    matches!(list[1], Rule::WithArgs(ref t, ref a) if t == "in" && a == "1,2,3")
-                );
-            }
-            _ => panic!("expected Multiple"),
-        }
+        let Rule::Multiple(list) = r else {
+            panic!("expected Multiple")
+        };
+        assert_eq!(list.len(), 2);
+        assert!(matches!(list[0], Rule::Simple(ref s) if s == "require"));
+        assert!(
+            matches!(list[1], Rule::WithArgs(ref t, ref a) if t == "in" && a == "1,2,3")
+        );
     }
 
     #[test]
@@ -2307,11 +2303,11 @@ mod tests {
         let data = json!({"name": ""});
         let result = v.check(&data);
         assert!(result.is_err());
-        match result.unwrap_err() {
-            // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
-            ValidateError::Single(msg) => assert!(msg.contains("为必填项")),
-            _ => panic!("expected Single error"),
-        }
+        // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
+        let ValidateError::Single(msg) = result.unwrap_err() else {
+            panic!("expected Single error")
+        };
+        assert!(msg.contains("为必填项"));
     }
 
     #[test]
@@ -2346,14 +2342,12 @@ mod tests {
         let data = json!({"name": "", "age": "not_int"});
         let result = v.check(&data);
         assert!(result.is_err());
-        match result.unwrap_err() {
-            ValidateError::Batch(errors) => {
-                assert!(errors.contains_key("name"));
-                // age 字段 "not_int" 是非空字符串，但 integer 验证失败
-                // 注：由于 age 非空，integer 规则会触发
-            }
-            ValidateError::Single(_) => panic!("expected Batch error in batch mode"),
-        }
+        let ValidateError::Batch(errors) = result.unwrap_err() else {
+            panic!("expected Batch error in batch mode")
+        };
+        assert!(errors.contains_key("name"));
+        // age 字段 "not_int" 是非空字符串，但 integer 验证失败
+        // 注：由于 age 非空，integer 规则会触发
     }
 
     #[test]
@@ -2378,10 +2372,10 @@ mod tests {
         let data = json!({"name": ""});
         let result = v.check(&data);
         assert!(result.is_err());
-        match result.unwrap_err() {
-            ValidateError::Single(msg) => assert!(msg.contains("名称")),
-            _ => panic!("expected Single error"),
-        }
+        let ValidateError::Single(msg) = result.unwrap_err() else {
+            panic!("expected Single error")
+        };
+        assert!(msg.contains("名称"));
     }
 
     #[test]
@@ -2392,10 +2386,10 @@ mod tests {
         let data = json!({"name": ""});
         let result = v.check(&data);
         assert!(result.is_err());
-        match result.unwrap_err() {
-            ValidateError::Single(msg) => assert!(msg.contains("用户名")),
-            _ => panic!("expected Single error"),
-        }
+        let ValidateError::Single(msg) = result.unwrap_err() else {
+            panic!("expected Single error")
+        };
+        assert!(msg.contains("用户名"));
     }
 
     #[test]
@@ -2406,10 +2400,10 @@ mod tests {
         let mut v = Validate::new().message(msgs).rule("name", "require");
         let data = json!({"name": ""});
         let result = v.check(&data);
-        match result.unwrap_err() {
-            ValidateError::Single(msg) => assert_eq!(msg, "名称必填"),
-            _ => panic!("expected Single error"),
-        }
+        let ValidateError::Single(msg) = result.unwrap_err() else {
+            panic!("expected Single error")
+        };
+        assert_eq!(msg, "名称必填");
     }
 
     // ========================================================================
@@ -2703,11 +2697,11 @@ mod tests {
         let data = json!({"name": ""});
         let _ = v.check(&data);
         let error = v.get_error();
-        match error {
-            // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
-            ValidateError::Single(msg) => assert!(msg.contains("为必填项")),
-            _ => panic!("expected Single error"),
-        }
+        // 默认中文语言包（UXR P1-5）：type_msg['require'] 翻译为「为必填项」
+        let ValidateError::Single(msg) = error else {
+            panic!("expected Single error")
+        };
+        assert!(msg.contains("为必填项"));
     }
 
     #[test]
@@ -2716,10 +2710,10 @@ mod tests {
         let data = json!({"name": "Alice"});
         let _ = v.check(&data);
         // 成功时 error 保持初始状态
-        match v.get_error() {
-            ValidateError::Single(s) => assert!(s.is_empty()),
-            _ => panic!("expected Single (empty)"),
-        }
+        let ValidateError::Single(s) = v.get_error() else {
+            panic!("expected Single (empty)")
+        };
+        assert!(s.is_empty());
     }
 
     // ========================================================================
@@ -3232,15 +3226,14 @@ mod tests {
         let data = json!({});
         let result = v.check(&data);
         assert!(result.is_err());
-        if let Err(ValidateError::Single(msg)) = result {
-            // type_msg["require"] = ":attribute require"
-            // lang->has(":attribute require") = false
-            // 占位符替换：:attribute → "名称"（title 从 "name" 推导）
-            // 注意：name 没有描述，title 默认为字段名 "name"
-            assert_eq!(msg, "name require");
-        } else {
-            panic!("Expected ValidateError::Single");
-        }
+        let Err(ValidateError::Single(msg)) = result else {
+            panic!("Expected ValidateError::Single")
+        };
+        // type_msg["require"] = ":attribute require"
+        // lang->has(":attribute require") = false
+        // 占位符替换：:attribute → "名称"（title 从 "name" 推导）
+        // 注意：name 没有描述，title 默认为字段名 "name"
+        assert_eq!(msg, "name require");
     }
 
     #[test]
@@ -3257,11 +3250,10 @@ mod tests {
         let data = json!({});
         let result = v.check(&data);
         assert!(result.is_err());
-        if let Err(ValidateError::Single(msg)) = result {
-            assert_eq!(msg, "名称是必填字段");
-        } else {
-            panic!("Expected ValidateError::Single");
-        }
+        let Err(ValidateError::Single(msg)) = result else {
+            panic!("Expected ValidateError::Single")
+        };
+        assert_eq!(msg, "名称是必填字段");
     }
 
     #[test]
@@ -3279,11 +3271,10 @@ mod tests {
         let data = json!({});
         let result = v.check(&data);
         assert!(result.is_err());
-        if let Err(ValidateError::Single(msg)) = result {
-            assert_eq!(msg, "名称必填");
-        } else {
-            panic!("Expected ValidateError::Single");
-        }
+        let Err(ValidateError::Single(msg)) = result else {
+            panic!("Expected ValidateError::Single")
+        };
+        assert_eq!(msg, "名称必填");
     }
 
     // ========================================================================

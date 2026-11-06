@@ -291,9 +291,9 @@ mod tests {
             VisualReviewDecision::Reject,
             Some("需要修改"),
         );
-        match redo {
-            SddReviewDecision::Redo { comment } => assert_eq!(comment, "需要修改"),
-            _ => panic!("应为 Redo"),
-        }
+        let SddReviewDecision::Redo { comment } = redo else {
+            panic!("应为 Redo")
+        };
+        assert_eq!(comment, "需要修改");
     }
 }

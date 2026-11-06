@@ -488,45 +488,39 @@ async fn ac14_change_event_broadcast() {
     let rule = DataScopeRule::new("order", DataScopeMode::All).with_rule_id("ac14_r1");
     let result = mgr.create_rule(rule).await.unwrap();
     let event = rx.recv().await.unwrap();
-    match event {
-        ChangeEvent::RuleCreated {
-            generation,
-            target_table,
-            ..
-        } => {
-            assert_eq!(generation, result.generation);
-            assert_eq!(target_table, "order");
-        }
-        _ => panic!("期望 RuleCreated 事件"),
-    }
+    let ChangeEvent::RuleCreated {
+        generation,
+        target_table,
+        ..
+    } = event else {
+        panic!("期望 RuleCreated 事件")
+    };
+    assert_eq!(generation, result.generation);
+    assert_eq!(target_table, "order");
 
     // 创建策略 → PolicyCreated 事件
     let policy = FieldScopePolicy::new("employee", "hr");
     let result_p = mgr.create_policy(policy).await.unwrap();
     let event_p = rx.recv().await.unwrap();
-    match event_p {
-        ChangeEvent::PolicyCreated {
-            generation,
-            target_table,
-            target_role,
-            ..
-        } => {
-            assert_eq!(generation, result_p.generation);
-            assert_eq!(target_table, "employee");
-            assert_eq!(target_role, "hr");
-        }
-        _ => panic!("期望 PolicyCreated 事件"),
-    }
+    let ChangeEvent::PolicyCreated {
+        generation,
+        target_table,
+        target_role,
+        ..
+    } = event_p else {
+        panic!("期望 PolicyCreated 事件")
+    };
+    assert_eq!(generation, result_p.generation);
+    assert_eq!(target_table, "employee");
+    assert_eq!(target_role, "hr");
 
     // 删除规则 → RuleDeleted 事件
     mgr.delete_rule("ac14_r1").await.unwrap();
     let event_d = rx.recv().await.unwrap();
-    match event_d {
-        ChangeEvent::RuleDeleted { target_table, .. } => {
-            assert_eq!(target_table, "order");
-        }
-        _ => panic!("期望 RuleDeleted 事件"),
-    }
+    let ChangeEvent::RuleDeleted { target_table, .. } = event_d else {
+        panic!("期望 RuleDeleted 事件")
+    };
+    assert_eq!(target_table, "order");
 }
 
 // ============================================================================

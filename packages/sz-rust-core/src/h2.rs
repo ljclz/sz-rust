@@ -614,10 +614,7 @@ mod tests {
         assert!(result.is_err());
         // 错误类型应该是 Bind（不会失败）或 ReadCertFile（来自 load_tls_config）
         // 实际上 bind 不会失败，所以错误应该来自 load_tls_config
-        match result {
-            Err(TlsError::ReadCertFile(_)) => {}
-            other => panic!("expected ReadCertFile error, got: {:?}", other),
-        }
+        assert!(matches!(result, Err(TlsError::ReadCertFile(_))), "expected ReadCertFile error, got: {:?}", result);
     }
 
     #[tokio::test]

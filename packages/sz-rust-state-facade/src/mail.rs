@@ -501,12 +501,10 @@ mod tests {
 
         let result = msg.validate();
         assert!(result.is_err());
-        match result {
-            Err(MailError::MissingField(msg)) => {
-                assert!(msg.contains("收件人"));
-            }
-            _ => panic!("期望 MissingField 错误"),
-        }
+        let Err(MailError::MissingField(msg)) = result else {
+            panic!("期望 MissingField 错误")
+        };
+        assert!(msg.contains("收件人"));
     }
 
     /// 测试 MailMessage validate 缺少主题
@@ -518,12 +516,10 @@ mod tests {
 
         let result = msg.validate();
         assert!(result.is_err());
-        match result {
-            Err(MailError::MissingField(msg)) => {
-                assert!(msg.contains("主题"));
-            }
-            _ => panic!("期望 MissingField 错误"),
-        }
+        let Err(MailError::MissingField(msg)) = result else {
+            panic!("期望 MissingField 错误")
+        };
+        assert!(msg.contains("主题"));
     }
 
     /// 测试 MailMessage validate 缺少内容
@@ -533,12 +529,10 @@ mod tests {
 
         let result = msg.validate();
         assert!(result.is_err());
-        match result {
-            Err(MailError::MissingField(msg)) => {
-                assert!(msg.contains("内容"));
-            }
-            _ => panic!("期望 MissingField 错误"),
-        }
+        let Err(MailError::MissingField(msg)) = result else {
+            panic!("期望 MissingField 错误")
+        };
+        assert!(msg.contains("内容"));
     }
 
     /// 测试 MemoryMailer 发送邮件
@@ -639,10 +633,7 @@ mod tests {
     async fn test_attachment_from_nonexistent_file_errors() {
         let result = MailAttachment::from_file("/nonexistent/file.txt", None, "text/plain").await;
         assert!(result.is_err());
-        match result {
-            Err(MailError::AttachmentRead { .. }) => {}
-            _ => panic!("期望 AttachmentRead 错误"),
-        }
+        assert!(matches!(result, Err(MailError::AttachmentRead { .. })));
     }
 
     /// 测试邮件含附件发送

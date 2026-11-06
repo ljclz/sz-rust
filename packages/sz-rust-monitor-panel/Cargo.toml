@@ -3,7 +3,7 @@ name = "sz-rust-monitor-panel"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SZ-Rust 可视化监控面板"
+description = "SZ-Rust 可视化监控面板 [headless API — 按 ADR-052 启用]"
 repository.workspace = true
 homepage.workspace = true
 

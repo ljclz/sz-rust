@@ -126,13 +126,11 @@ mod tests {
         let handler = DefaultFaultStrategyHandler::new(3, Duration::from_millis(10));
         let error = WorkflowError::new(WorkflowErrorCode::CapabilityNotFound, "能力不存在");
         let decision = handler.decide(FaultStrategy::Retry, &error, 0);
-        match decision {
-            FaultDecision::Retry { remaining, backoff } => {
-                assert_eq!(remaining, 3);
-                assert_eq!(backoff, Duration::from_millis(10));
-            }
-            _ => panic!("期望 Retry"),
-        }
+        let FaultDecision::Retry { remaining, backoff } = decision else {
+            panic!("期望 Retry")
+        };
+        assert_eq!(remaining, 3);
+        assert_eq!(backoff, Duration::from_millis(10));
     }
 
     #[test]
@@ -140,13 +138,11 @@ mod tests {
         let handler = DefaultFaultStrategyHandler::new(3, Duration::from_millis(10));
         let error = WorkflowError::new(WorkflowErrorCode::CapabilityNotFound, "能力不存在");
         let decision = handler.decide(FaultStrategy::Retry, &error, 1);
-        match decision {
-            FaultDecision::Retry { remaining, backoff } => {
-                assert_eq!(remaining, 2);
-                assert_eq!(backoff, Duration::from_millis(20));
-            }
-            _ => panic!("期望 Retry"),
-        }
+        let FaultDecision::Retry { remaining, backoff } = decision else {
+            panic!("期望 Retry")
+        };
+        assert_eq!(remaining, 2);
+        assert_eq!(backoff, Duration::from_millis(20));
     }
 
     #[test]

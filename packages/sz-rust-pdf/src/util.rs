@@ -481,11 +481,9 @@ mod tests {
         let result = money_to_array("123.45.67");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        match err {
-            PdfError::Http(msg) => {
-                assert!(msg.contains("multiple decimal points"), "msg = {}", msg);
-            }
-            other => panic!("Expected PdfError::Http, got {:?}", other),
+        assert!(matches!(&err, &PdfError::Http(_)), "Expected PdfError::Http, got {:?}", err);
+        if let PdfError::Http(msg) = err {
+            assert!(msg.contains("multiple decimal points"), "msg = {}", msg);
         }
     }
 
@@ -495,11 +493,9 @@ mod tests {
         let result = money_to_array("12a.45");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        match err {
-            PdfError::Http(msg) => {
-                assert!(msg.contains("non-digit in integer part"), "msg = {}", msg);
-            }
-            other => panic!("Expected PdfError::Http, got {:?}", other),
+        assert!(matches!(&err, &PdfError::Http(_)), "Expected PdfError::Http, got {:?}", err);
+        if let PdfError::Http(msg) = err {
+            assert!(msg.contains("non-digit in integer part"), "msg = {}", msg);
         }
     }
 
@@ -509,11 +505,9 @@ mod tests {
         let result = money_to_array("123.4a");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        match err {
-            PdfError::Http(msg) => {
-                assert!(msg.contains("non-digit in decimal part"), "msg = {}", msg);
-            }
-            other => panic!("Expected PdfError::Http, got {:?}", other),
+        assert!(matches!(&err, &PdfError::Http(_)), "Expected PdfError::Http, got {:?}", err);
+        if let PdfError::Http(msg) = err {
+            assert!(msg.contains("non-digit in decimal part"), "msg = {}", msg);
         }
     }
 

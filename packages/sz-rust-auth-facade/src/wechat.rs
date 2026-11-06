@@ -942,25 +942,25 @@ mod tests {
         // app_id 为空
         let config = WechatConfig::new(WechatAppType::OfficialAccount, "", "secret");
         let err = config.validate().unwrap_err();
-        match err {
-            WechatError::Config(field) => assert_eq!(field, "app_id"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let WechatError::Config(field) = err {
+            assert_eq!(field, "app_id");
         }
 
         // app_secret 为空
         let config = WechatConfig::new(WechatAppType::OfficialAccount, "app_id", "");
         let err = config.validate().unwrap_err();
-        match err {
-            WechatError::Config(field) => assert_eq!(field, "app_secret"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let WechatError::Config(field) = err {
+            assert_eq!(field, "app_secret");
         }
 
         // 两者为空（优先报 app_id）
         let config = WechatConfig::new(WechatAppType::OfficialAccount, "", "");
         let err = config.validate().unwrap_err();
-        match err {
-            WechatError::Config(field) => assert_eq!(field, "app_id"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let WechatError::Config(field) = err {
+            assert_eq!(field, "app_id");
         }
     }
 
@@ -1198,9 +1198,9 @@ mod tests {
         let sdk = WechatSdk::new(config, Arc::new(MemoryWechatHttpTransport::new()));
 
         let err = sdk.get_user_by_code("").unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "code"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "code");
         }
     }
 
@@ -1273,16 +1273,16 @@ mod tests {
 
         // openid 为空
         let err = sdk.get_user_info("", "token").unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "openid"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "openid");
         }
 
         // access_token 为空
         let err = sdk.get_user_info("openid", "").unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "access_token"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "access_token");
         }
     }
 
@@ -1341,18 +1341,18 @@ mod tests {
         let err = sdk
             .send_template_message("", "tpl_id", &serde_json::json!({}))
             .unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "touser"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "touser");
         }
 
         // template_id 为空
         let err = sdk
             .send_template_message("user", "", &serde_json::json!({}))
             .unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "template_id"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "template_id");
         }
     }
 
@@ -1443,9 +1443,9 @@ mod tests {
         let sdk = WechatSdk::new(config, Arc::new(MemoryWechatHttpTransport::new()));
 
         let err = sdk.get_qrcode_url("").unwrap_err();
-        match err {
-            WechatError::MissingField(field) => assert_eq!(field, "scene_str"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let WechatError::MissingField(field) = err {
+            assert_eq!(field, "scene_str");
         }
     }
 
@@ -1481,18 +1481,18 @@ mod tests {
         let config = WechatConfig::new(WechatAppType::OfficialAccount, "", "secret");
         let sdk = WechatSdk::new(config, Arc::new(MemoryWechatHttpTransport::new()));
         let err = sdk.get_user_by_code("code").unwrap_err();
-        match err {
-            WechatError::Config(field) => assert_eq!(field, "app_id"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let WechatError::Config(field) = err {
+            assert_eq!(field, "app_id");
         }
 
         // 仅 app_secret 为空
         let config = WechatConfig::new(WechatAppType::OfficialAccount, "app_id", "");
         let sdk = WechatSdk::new(config, Arc::new(MemoryWechatHttpTransport::new()));
         let err = sdk.get_user_info("openid", "token").unwrap_err();
-        match err {
-            WechatError::Config(field) => assert_eq!(field, "app_secret"),
-            other => panic!("期望 Config, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::Config(_)), "期望 Config, 实际 {err:?}");
+        if let WechatError::Config(field) = err {
+            assert_eq!(field, "app_secret");
         }
 
         // 注意：get_authorize_url / verify_signature / generate_jsapi_signature
@@ -1513,9 +1513,9 @@ mod tests {
 
         // 队列空时返回错误
         let err = transport.get("https://api.example.com/get").unwrap_err();
-        match err {
-            WechatError::HttpTransport(msg) => assert!(msg.contains("无可用预置响应")),
-            other => panic!("期望 HttpTransport, 实际 {other:?}"),
+        assert!(matches!(&err, &WechatError::HttpTransport(_)), "期望 HttpTransport, 实际 {err:?}");
+        if let WechatError::HttpTransport(msg) = err {
+            assert!(msg.contains("无可用预置响应"));
         }
         assert_eq!(transport.request_count(), 0);
 

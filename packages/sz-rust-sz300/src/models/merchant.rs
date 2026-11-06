@@ -217,4 +217,51 @@ mod tests {
         assert!(m.get_column_value("nope").is_none());
         assert!(Merchant::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut m = Merchant {
+            merchant_id: None,
+            market_id: 0,
+            name: String::new(),
+            stall_no: String::new(),
+            contact_phone: String::new(),
+            category: String::new(),
+            status: 0,
+            bank_account: String::new(),
+            bank_name: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("merchant_id".to_string(), Value::I64(7));
+        map.insert("market_id".to_string(), Value::I64(3));
+        map.insert("name".to_string(), Value::String("店".into()));
+        map.insert("stall_no".to_string(), Value::String("A-1".into()));
+        map.insert("contact_phone".to_string(), Value::String("13800000000".into()));
+        map.insert("category".to_string(), Value::String("水产".into()));
+        map.insert("status".to_string(), Value::I64(1));
+        map.insert("bank_account".to_string(), Value::String("6222".into()));
+        map.insert("bank_name".to_string(), Value::String("工行".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        m.from_value(map);
+        assert_eq!(m.merchant_id, Some(7));
+        assert_eq!(m.market_id, 3);
+        assert_eq!(m.name, "店");
+        assert_eq!(m.stall_no, "A-1");
+        assert_eq!(m.contact_phone, "13800000000");
+        assert_eq!(m.category, "水产");
+        assert_eq!(m.status, 1);
+        assert_eq!(m.bank_account, "6222");
+        assert_eq!(m.bank_name, "工行");
+        assert_eq!(m.created_at.as_deref(), Some("c"));
+        assert_eq!(m.updated_at.as_deref(), Some("u"));
+        // 空 map 不改变已有值（覆盖所有 if-let None 分支）
+        m.from_value(HashMap::new());
+        assert_eq!(m.merchant_id, Some(7));
+        assert_eq!(m.market_id, 3);
+        assert_eq!(m.name, "店");
+    }
 }

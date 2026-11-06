@@ -709,17 +709,15 @@ mod tests {
         let rule = DataScopeRule::new("order", DataScopeMode::All);
         let result = mgr.create_rule(rule).await.unwrap();
         let event = rx.recv().await.unwrap();
-        match event {
-            ChangeEvent::RuleCreated {
-                generation,
-                target_table,
-                ..
-            } => {
-                assert_eq!(generation, result.generation);
-                assert_eq!(target_table, "order");
-            }
-            _ => panic!("expected RuleCreated event"),
-        }
+        let ChangeEvent::RuleCreated {
+            generation,
+            target_table,
+            ..
+        } = event else {
+            panic!("expected RuleCreated event")
+        };
+        assert_eq!(generation, result.generation);
+        assert_eq!(target_table, "order");
     }
 
     #[tokio::test]
@@ -729,19 +727,17 @@ mod tests {
         let policy = FieldScopePolicy::new("employee", "hr");
         let result = mgr.create_policy(policy).await.unwrap();
         let event = rx.recv().await.unwrap();
-        match event {
-            ChangeEvent::PolicyCreated {
-                generation,
-                target_table,
-                target_role,
-                ..
-            } => {
-                assert_eq!(generation, result.generation);
-                assert_eq!(target_table, "employee");
-                assert_eq!(target_role, "hr");
-            }
-            _ => panic!("expected PolicyCreated event"),
-        }
+        let ChangeEvent::PolicyCreated {
+            generation,
+            target_table,
+            target_role,
+            ..
+        } = event else {
+            panic!("expected PolicyCreated event")
+        };
+        assert_eq!(generation, result.generation);
+        assert_eq!(target_table, "employee");
+        assert_eq!(target_role, "hr");
     }
 
     #[tokio::test]

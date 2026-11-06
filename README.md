@@ -180,6 +180,45 @@ sz-rust/                          # workspace 根目录（唯一真源）
 
 ---
 
+## Addons 模板包
+
+7 个 addons 模板包，定位为**起步模板 / 参考实现，非核心依赖**。新建业务项目时复制对应模板改写，不应作为生产依赖直接引入。机制层（`sz-rust-addons-loader` 插件加载器）与实际后台功能（`sz-rust-addons-admin`）不在模板包范畴。
+
+| 包 | 设计意图 | 骨架范围 |
+|----|---------|---------|
+| `sz-rust-addons-operate` | CRUD 参考实现，对齐 ThinkPHP `addons/operate` | 17316 行，最完整的增删改查范式（详见该包 [README](packages/sz-rust-addons-operate/README.md)） |
+| `sz-rust-addons-cms` | 内容管理系统起点 | 文章 / 分类 / 标签管理骨架 |
+| `sz-rust-addons-crm` | 客户关系管理起点 | 客户 / 线索 / 商机管理骨架 |
+| `sz-rust-addons-ecommerce` | 电商系统起点 | 订单 / 订单项 / 购物车骨架 |
+| `sz-rust-addons-erp` | 企业资源计划起点 | 商品 / 供应商 / 采购管理骨架 |
+| `sz-rust-addons-forum` | 论坛系统起点 | 板块 / 帖子 / 回复管理骨架 |
+| `sz-rust-addons-im` | 即时通讯起点 | 会话 / 消息 / 用户状态管理骨架 |
+
+> 模板包均标注 `[template crate — 起步模板，非核心依赖]`（见各包 `Cargo.toml` description）。包定位决策见 ADR-052 / ADR-053。
+
+---
+
+## 包用途速查表
+
+按 ADR-052 / ADR-053 包定位分类，快速判断每个 crate 的角色与启用方式。
+
+| 分类 | 包 | 角色 | 启用方式 |
+|------|-----|------|---------|
+| 核心框架 | `sz-rust-core` | Web 框架核心（路由 / 中间件 / DI / 模板 / 缓存） | 直接依赖 |
+| 业务应用 | `sz-rust-sz300` | 生产参考实现（AI / WASM / GraphQL / WS / 限流 / 熔断） | 直接依赖 |
+| 聚合 facade | `sz-rust-facade` | 八静态门面聚合（Cache / Db / Event / Queue / Log / Config / Request / Response） | `sz-rust-core` facade feature 启用 |
+| headless API | `sz-rust-admin-ui` | 管理后台 UI 后端 API（无浏览器资产） | 按 ADR-052 启用，前端对接 `sz-rust-visual` |
+| headless API | `sz-rust-codegen-ui` | 代码生成器 UI 后端 API | 按 ADR-052 启用 |
+| headless API | `sz-rust-monitor-panel` | 可视化监控面板后端 API | 按 ADR-052 启用 |
+| 桌面载体 | `sz-rust-visual` | Tauri 2 + Vue3 管理端桌面工作台（走 IPC） | 按 ADR-052 启用 |
+| 模板包 | `sz-rust-addons-{operate,cms,crm,ecommerce,erp,forum,im}` | 起步模板 / 参考实现，非核心依赖 | 复制改写，不作生产依赖 |
+| 机制层 | `sz-rust-addons-loader` | 插件加载器（动态加载 + 路由挂载） | 框架内部依赖 |
+| 功能插件 | `sz-rust-addons-admin` | 后台管理插件（用户 / 角色 / 权限 / 菜单 / 配置 / 日志 / 仪表盘） | `--with-admin` 启用 |
+
+> headless API 包均标注 `[headless API — 按 ADR-052 启用]`；聚合 facade 标注 `[聚合 facade — 通过 sz-rust-core facade feature 启用]`（见各包 `Cargo.toml` description）。
+
+---
+
 ## 文档索引
 
 详细文档位于 `docs/` 目录：

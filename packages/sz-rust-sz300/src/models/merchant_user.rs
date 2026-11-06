@@ -201,4 +201,120 @@ mod tests {
         assert_eq!(user.username, "testuser");
         assert_eq!(user.user_id, Some(99));
     }
+
+    #[test]
+    fn model_trait_metadata_and_pk_defaults() {
+        assert_eq!(MerchantUser::table_name(), "merchant_user");
+        assert_eq!(MerchantUser::pk_name(), "user_id");
+        let mut u = MerchantUser {
+            user_id: None,
+            merchant_id: 0,
+            username: String::new(),
+            password: String::new(),
+            phone: String::new(),
+            role: 0,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        assert_eq!(u.pk(), 0);
+        assert!(u.get_column_value("user_id").is_none());
+        assert!(u.get_column_value("last_login_at").is_none());
+        assert!(u.get_column_value("created_at").is_none());
+        assert!(u.get_column_value("updated_at").is_none());
+        u.set_pk(55);
+        assert_eq!(u.pk(), 55);
+        assert!(u.get_column_value("user_id").is_some());
+        // Some 路径
+        u.last_login_at = Some("l".into());
+        u.created_at = Some("c".into());
+        u.updated_at = Some("u".into());
+        assert!(u.get_column_value("merchant_id").is_some());
+        assert!(u.get_column_value("username").is_some());
+        assert!(u.get_column_value("password").is_some());
+        assert!(u.get_column_value("phone").is_some());
+        assert!(u.get_column_value("role").is_some());
+        assert!(u.get_column_value("last_login_at").is_some());
+        assert!(u.get_column_value("created_at").is_some());
+        assert!(u.get_column_value("updated_at").is_some());
+        assert!(u.get_column_value("nope").is_none());
+        assert_eq!(MerchantUser::columns().len(), 9);
+        assert_eq!(MerchantUser::fillable().len(), 6);
+        assert_eq!(MerchantUser::guarded().len(), 1);
+        assert!(MerchantUser::timestamp_fields().is_some());
+    }
+
+    #[test]
+    fn from_value_populates_all_fields() {
+        let mut u = MerchantUser {
+            user_id: None,
+            merchant_id: 0,
+            username: String::new(),
+            password: String::new(),
+            phone: String::new(),
+            role: 0,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("user_id".to_string(), Value::I64(10));
+        map.insert("merchant_id".to_string(), Value::I64(3));
+        map.insert("username".to_string(), Value::String("shop".into()));
+        map.insert("password".to_string(), Value::String("hashed".into()));
+        map.insert("phone".to_string(), Value::String("13800000000".into()));
+        map.insert("role".to_string(), Value::I64(1));
+        map.insert("last_login_at".to_string(), Value::String("l".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        u.from_value(map);
+        assert_eq!(u.user_id, Some(10));
+        assert_eq!(u.merchant_id, 3);
+        assert_eq!(u.username, "shop");
+        assert_eq!(u.password, "hashed");
+        assert_eq!(u.phone, "13800000000");
+        assert_eq!(u.role, 1);
+        assert_eq!(u.last_login_at.as_deref(), Some("l"));
+        assert_eq!(u.created_at.as_deref(), Some("c"));
+        assert_eq!(u.updated_at.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn from_value_empty_map_keeps_defaults() {
+        let mut u = MerchantUser {
+            user_id: Some(1),
+            merchant_id: 2,
+            username: "x".into(),
+            password: "p".into(),
+            phone: "ph".into(),
+            role: 1,
+            last_login_at: Some("l".into()),
+            created_at: Some("c".into()),
+            updated_at: Some("u".into()),
+        };
+        u.from_value(HashMap::new());
+        assert_eq!(u.user_id, Some(1));
+        assert_eq!(u.merchant_id, 2);
+        assert_eq!(u.username, "x");
+        assert_eq!(u.role, 1);
+    }
+
+    #[test]
+    fn relation_loader_returns_none() {
+        let u = MerchantUser {
+            user_id: Some(1),
+            merchant_id: 1,
+            username: String::new(),
+            password: String::new(),
+            phone: String::new(),
+            role: 0,
+            last_login_at: None,
+            created_at: None,
+            updated_at: None,
+        };
+        assert!(u.get_relation("any").is_none());
+        let mut u2 = u.clone();
+        u2.set_relation_data("any", Value::String("v".into()));
+        assert_eq!(u2.get_relation_fk_value("any"), String::new());
+    }
 }

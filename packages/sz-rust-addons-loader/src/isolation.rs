@@ -428,13 +428,11 @@ mod tests {
         let result: IsolationResult<i32> = isolator.run_isolated("panic-plugin", || {
             panic!("插件爆炸");
         });
-        match result {
-            Err(IsolationError::PanicCaught { plugin, message }) => {
-                assert_eq!(plugin, "panic-plugin");
-                assert!(message.contains("插件爆炸"));
-            }
-            _ => panic!("期望 PanicCaught"),
-        }
+        let Err(IsolationError::PanicCaught { plugin, message }) = result else {
+            panic!("期望 PanicCaught")
+        };
+        assert_eq!(plugin, "panic-plugin");
+        assert!(message.contains("插件爆炸"));
     }
 
     #[test]
@@ -444,12 +442,10 @@ mod tests {
         let result: IsolationResult<i32> = isolator.run_isolated("plugin", || {
             panic!("{}", msg);
         });
-        match result {
-            Err(IsolationError::PanicCaught { message, .. }) => {
-                assert!(message.contains("自定义错误"));
-            }
-            _ => panic!("期望 PanicCaught"),
-        }
+        let Err(IsolationError::PanicCaught { message, .. }) = result else {
+            panic!("期望 PanicCaught")
+        };
+        assert!(message.contains("自定义错误"));
     }
 
     #[test]
@@ -475,14 +471,12 @@ mod tests {
         snapshot.file_handles = 2;
         isolator.update_snapshot(snapshot);
         let result = isolator.check_leak("leaky-plugin");
-        match result {
-            Err(IsolationError::ResourceLeak { plugin, detail }) => {
-                assert_eq!(plugin, "leaky-plugin");
-                assert!(detail.contains("内存"));
-                assert!(detail.contains("文件句柄"));
-            }
-            _ => panic!("期望 ResourceLeak"),
-        }
+        let Err(IsolationError::ResourceLeak { plugin, detail }) = result else {
+            panic!("期望 ResourceLeak")
+        };
+        assert_eq!(plugin, "leaky-plugin");
+        assert!(detail.contains("内存"));
+        assert!(detail.contains("文件句柄"));
     }
 
     #[test]
@@ -512,13 +506,11 @@ mod tests {
 
         let boundary = ResourceBoundary::new(50 * 1024 * 1024);
         let result = isolator.check_boundary("greedy-plugin", &boundary);
-        match result {
-            Err(IsolationError::SandboxViolation { plugin, detail }) => {
-                assert_eq!(plugin, "greedy-plugin");
-                assert!(detail.contains("内存"));
-            }
-            _ => panic!("期望 SandboxViolation"),
-        }
+        let Err(IsolationError::SandboxViolation { plugin, detail }) = result else {
+            panic!("期望 SandboxViolation")
+        };
+        assert_eq!(plugin, "greedy-plugin");
+        assert!(detail.contains("内存"));
     }
 
     #[test]

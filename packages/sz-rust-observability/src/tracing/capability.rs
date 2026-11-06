@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2024-2026 SZ-Rust Team
 //
+// Tracing capability plugin（合并自 sz-rust-tracing，ADR-053 阶段2）
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,7 +10,7 @@ use serde_json::{json, Value};
 use sz_rust_addons_loader::capability_hook::CapabilityHook;
 use sz_rust_capability::{CapResult, Capability, CapabilityRegistry, CapabilitySource};
 
-use crate::{Span, SzTracer, Tracer, TracingState};
+use super::{Span, SzTracer, Tracer, TracingState};
 
 pub const TRACING_CAPABILITY_NAMES: [&str; 3] = [
     "tracing.list_spans",

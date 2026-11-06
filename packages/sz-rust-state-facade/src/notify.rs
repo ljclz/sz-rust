@@ -1166,9 +1166,9 @@ mod tests {
     fn test_notification_validate_missing_channel() {
         let notification = Notification::new().title("标题").content("内容");
         let err = notification.validate().unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "channel"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "channel");
         }
     }
 
@@ -1177,9 +1177,9 @@ mod tests {
     fn test_notification_validate_missing_title() {
         let notification = Notification::new().channel("slack").content("内容");
         let err = notification.validate().unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "title"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "title");
         }
     }
 
@@ -1188,9 +1188,9 @@ mod tests {
     fn test_notification_validate_missing_content() {
         let notification = Notification::new().channel("slack").title("标题");
         let err = notification.validate().unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "content"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "content");
         }
     }
 
@@ -1434,9 +1434,9 @@ mod tests {
 
         let notification = Notification::new().title("标题").content("内容");
         let err = notifier.send(notification).unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "channel"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "channel");
         }
 
         // 不应发送任何 HTTP 请求
@@ -1455,9 +1455,9 @@ mod tests {
             .title("标题")
             .content("内容");
         let err = notifier.send(notification).unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "webhook_url"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "webhook_url");
         }
 
         assert_eq!(transport.count(), 0);
@@ -1483,9 +1483,9 @@ mod tests {
             .title("标题")
             .content("内容");
         let err = notifier.send(notification).unwrap_err();
-        match err {
-            NotifyError::HttpTransport(msg) => assert!(msg.contains("connection refused")),
-            other => panic!("期望 HttpTransport, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::HttpTransport(_)), "期望 HttpTransport, 实际 {err:?}");
+        if let NotifyError::HttpTransport(msg) = err {
+            assert!(msg.contains("connection refused"));
         }
     }
 
@@ -1629,9 +1629,9 @@ mod tests {
     fn test_sms_message_validate_missing_phone() {
         let msg = SmsMessage::new().template_id("123456");
         let err = msg.validate().unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "phone"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "phone");
         }
     }
 
@@ -1640,9 +1640,9 @@ mod tests {
     fn test_sms_message_validate_missing_template_id() {
         let msg = SmsMessage::new().phone("+8613800138000");
         let err = msg.validate().unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "template_id"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "template_id");
         }
     }
 
@@ -1792,9 +1792,9 @@ mod tests {
 
         let msg = SmsMessage::new().template_id("123456");
         let err = notifier.send_sms(msg).unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "phone"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "phone");
         }
 
         // 不应发送任何 HTTP 请求
@@ -1813,9 +1813,9 @@ mod tests {
             .phone("+8613800138000")
             .template_id("123456");
         let err = notifier.send_sms(msg).unwrap_err();
-        match err {
-            NotifyError::MissingField(field) => assert_eq!(field, "secret_id"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err:?}");
+        if let NotifyError::MissingField(field) = err {
+            assert_eq!(field, "secret_id");
         }
 
         // 不应发送任何 HTTP 请求
@@ -1828,9 +1828,9 @@ mod tests {
             .phone("+8613800138000")
             .template_id("123456");
         let err2 = notifier2.send_sms(msg2).unwrap_err();
-        match err2 {
-            NotifyError::MissingField(field) => assert_eq!(field, "secret_key"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err2, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err2:?}");
+        if let NotifyError::MissingField(field) = err2 {
+            assert_eq!(field, "secret_key");
         }
 
         // 验证空 app_id
@@ -1840,9 +1840,9 @@ mod tests {
             .phone("+8613800138000")
             .template_id("123456");
         let err3 = notifier3.send_sms(msg3).unwrap_err();
-        match err3 {
-            NotifyError::MissingField(field) => assert_eq!(field, "app_id"),
-            other => panic!("期望 MissingField, 实际 {other:?}"),
+        assert!(matches!(&err3, &NotifyError::MissingField(_)), "期望 MissingField, 实际 {err3:?}");
+        if let NotifyError::MissingField(field) = err3 {
+            assert_eq!(field, "app_id");
         }
 
         // 全程不应发送任何 HTTP 请求

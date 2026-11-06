@@ -3,6 +3,7 @@
 //! 告警规则引擎核心逻辑（spec §5.12）
 //!
 //! Prometheus AlertManager 集成 + 规则评估 + 通知渠道 + 静默/抑制。
+//! 合并自 sz-rust-alert-engine（ADR-053 阶段3，2026-11-06）。
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -11,7 +12,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::error::AlertEngineError;
+use super::error::AlertEngineError;
 
 /// 告警级别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

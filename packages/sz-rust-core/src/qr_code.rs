@@ -738,10 +738,7 @@ mod tests {
         let generator = QrCodeGenerator::new();
         let result = generator.generate_matrix("");
         assert!(result.is_err(), "空数据应返回错误");
-        match result {
-            Err(QrCodeError::Encoding(_)) => {}
-            other => panic!("期望 Encoding 错误，得到: {other:?}"),
-        }
+        assert!(matches!(result, Err(QrCodeError::Encoding(_))), "期望 Encoding 错误，得到: {result:?}");
     }
 
     // ------------------------------------------------------------------------
@@ -939,12 +936,10 @@ mod tests {
     #[test]
     fn test_check_consistency_mismatch() {
         let err = QrCodeGenerator::check_consistency("original", "decoded-different").unwrap_err();
-        match err {
-            QrCodeError::DataMismatch { original, decoded } => {
-                assert_eq!(original, "original");
-                assert_eq!(decoded, "decoded-different");
-            }
-            other => panic!("期望 DataMismatch，得到: {other:?}"),
+        assert!(matches!(&err, &QrCodeError::DataMismatch { .. }), "期望 DataMismatch，得到: {err:?}");
+        if let QrCodeError::DataMismatch { original, decoded } = err {
+            assert_eq!(original, "original");
+            assert_eq!(decoded, "decoded-different");
         }
     }
 

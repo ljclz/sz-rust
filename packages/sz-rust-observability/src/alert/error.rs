@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 SZ-Rust Team
 
-//! sz-rust-alert-engine 错误类型
+//! sz-rust alert-engine 错误类型（合并自 sz-rust-alert-engine，ADR-053 阶段3）
 use thiserror::Error;
 #[derive(Debug, Clone, Error)]
 pub enum AlertEngineError {

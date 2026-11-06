@@ -181,4 +181,41 @@ mod tests {
         // timestamp_fields 配置了 created_at + updated_at
         assert!(Market::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut m = Market {
+            market_id: None,
+            name: String::new(),
+            address: String::new(),
+            contact: String::new(),
+            phone: String::new(),
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("market_id".to_string(), Value::I64(42));
+        map.insert("name".to_string(), Value::String("城中市场".into()));
+        map.insert("address".to_string(), Value::String("南京路".into()));
+        map.insert("contact".to_string(), Value::String("张三".into()));
+        map.insert("phone".to_string(), Value::String("13812345678".into()));
+        map.insert("status".to_string(), Value::I64(1));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        m.from_value(map);
+        assert_eq!(m.market_id, Some(42));
+        assert_eq!(m.name, "城中市场");
+        assert_eq!(m.address, "南京路");
+        assert_eq!(m.contact, "张三");
+        assert_eq!(m.phone, "13812345678");
+        assert_eq!(m.status, 1);
+        assert_eq!(m.created_at.as_deref(), Some("c"));
+        assert_eq!(m.updated_at.as_deref(), Some("u"));
+        m.from_value(HashMap::new());
+        assert_eq!(m.market_id, Some(42));
+        assert_eq!(m.name, "城中市场");
+        assert_eq!(m.status, 1);
+    }
 }

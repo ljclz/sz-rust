@@ -196,4 +196,44 @@ mod tests {
         assert!(s.get_column_value("xxx").is_none());
         assert!(Settlement::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut s = Settlement {
+            settle_id: None,
+            merchant_id: 0,
+            settle_date: String::new(),
+            total_fen: 0,
+            order_count: 0,
+            fee_fen: 0,
+            status: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("settle_id".to_string(), Value::I64(2026));
+        map.insert("merchant_id".to_string(), Value::I64(5));
+        map.insert("settle_date".to_string(), Value::String("2026-06-06".into()));
+        map.insert("total_fen".to_string(), Value::I64(999999));
+        map.insert("order_count".to_string(), Value::I64(42));
+        map.insert("fee_fen".to_string(), Value::I64(5000));
+        map.insert("status".to_string(), Value::I64(1));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        s.from_value(map);
+        assert_eq!(s.settle_id, Some(2026));
+        assert_eq!(s.merchant_id, 5);
+        assert_eq!(s.settle_date, "2026-06-06");
+        assert_eq!(s.total_fen, 999999);
+        assert_eq!(s.order_count, 42);
+        assert_eq!(s.fee_fen, 5000);
+        assert_eq!(s.status, 1);
+        assert_eq!(s.created_at.as_deref(), Some("c"));
+        assert_eq!(s.updated_at.as_deref(), Some("u"));
+        s.from_value(HashMap::new());
+        assert_eq!(s.settle_id, Some(2026));
+        assert_eq!(s.merchant_id, 5);
+        assert_eq!(s.settle_date, "2026-06-06");
+    }
 }

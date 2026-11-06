@@ -848,24 +848,20 @@ mod tests {
     fn test_build_resource_routes_empty_addon() {
         let result = build_resource_routes("", "Blog", &ResourceOptions::new());
         assert!(result.is_err());
-        match result {
-            Err(AddonLoaderError::RouteParse { reason, .. }) => {
-                assert!(reason.contains("addon cannot be empty"));
-            }
-            _ => panic!("expected RouteParse error"),
-        }
+        let Err(AddonLoaderError::RouteParse { reason, .. }) = result else {
+            panic!("expected RouteParse error")
+        };
+        assert!(reason.contains("addon cannot be empty"));
     }
 
     #[test]
     fn test_build_resource_routes_empty_controller() {
         let result = build_resource_routes("operate", "", &ResourceOptions::new());
         assert!(result.is_err());
-        match result {
-            Err(AddonLoaderError::RouteParse { reason, .. }) => {
-                assert!(reason.contains("controller cannot be empty"));
-            }
-            _ => panic!("expected RouteParse error"),
-        }
+        let Err(AddonLoaderError::RouteParse { reason, .. }) = result else {
+            panic!("expected RouteParse error")
+        };
+        assert!(reason.contains("controller cannot be empty"));
     }
 
     #[test]

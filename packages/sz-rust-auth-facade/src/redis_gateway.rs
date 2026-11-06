@@ -691,12 +691,10 @@ mod tests {
         };
         let json = cmd.to_json().unwrap();
         let decoded = GatewayCommand::from_json(&json).unwrap();
-        match decoded {
-            GatewayCommand::SendToClient { client_id, message } => {
-                assert_eq!(client_id, "7f00000108fc00000001");
-                assert_eq!(message, "hello");
-            }
-            other => panic!("期望 SendToClient, 实际 {other:?}"),
+        assert!(matches!(&decoded, &GatewayCommand::SendToClient { .. }), "期望 SendToClient, 实际 {decoded:?}");
+        if let GatewayCommand::SendToClient { client_id, message } = decoded {
+            assert_eq!(client_id, "7f00000108fc00000001");
+            assert_eq!(message, "hello");
         }
     }
 
@@ -707,11 +705,9 @@ mod tests {
         };
         let json = cmd.to_json().unwrap();
         let decoded = GatewayCommand::from_json(&json).unwrap();
-        match decoded {
-            GatewayCommand::SendToAll { message } => {
-                assert_eq!(message, "broadcast");
-            }
-            other => panic!("期望 SendToAll, 实际 {other:?}"),
+        assert!(matches!(&decoded, &GatewayCommand::SendToAll { .. }), "期望 SendToAll, 实际 {decoded:?}");
+        if let GatewayCommand::SendToAll { message } = decoded {
+            assert_eq!(message, "broadcast");
         }
     }
 
@@ -723,12 +719,10 @@ mod tests {
         };
         let json = cmd.to_json().unwrap();
         let decoded = GatewayCommand::from_json(&json).unwrap();
-        match decoded {
-            GatewayCommand::SendToGroup { group, message } => {
-                assert_eq!(group, "room1");
-                assert_eq!(message, "group-msg");
-            }
-            other => panic!("期望 SendToGroup, 实际 {other:?}"),
+        assert!(matches!(&decoded, &GatewayCommand::SendToGroup { .. }), "期望 SendToGroup, 实际 {decoded:?}");
+        if let GatewayCommand::SendToGroup { group, message } = decoded {
+            assert_eq!(group, "room1");
+            assert_eq!(message, "group-msg");
         }
     }
 
@@ -739,11 +733,9 @@ mod tests {
         };
         let json = cmd.to_json().unwrap();
         let decoded = GatewayCommand::from_json(&json).unwrap();
-        match decoded {
-            GatewayCommand::CloseClient { client_id } => {
-                assert_eq!(client_id, "7f00000108fc00000001");
-            }
-            other => panic!("期望 CloseClient, 实际 {other:?}"),
+        assert!(matches!(&decoded, &GatewayCommand::CloseClient { .. }), "期望 CloseClient, 实际 {decoded:?}");
+        if let GatewayCommand::CloseClient { client_id } = decoded {
+            assert_eq!(client_id, "7f00000108fc00000001");
         }
     }
 
@@ -884,9 +876,9 @@ mod tests {
         .expect("连接 Redis 失败");
 
         let err = transport.send_to_client("nonexistent", "msg").unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(id) => assert_eq!(id, "nonexistent"),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(id) = err {
+            assert_eq!(id, "nonexistent");
         }
     }
 

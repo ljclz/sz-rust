@@ -340,13 +340,11 @@ mod tests {
             "postgres://localhost/db",
             "--show-sql",
         ]);
-        match cli.admin {
-            AdminCommand::Migrate(args) => {
-                assert_eq!(args.url.as_deref(), Some("postgres://localhost/db"));
-                assert!(args.show_sql);
-            }
-            _ => panic!("expected Migrate"),
-        }
+        let AdminCommand::Migrate(args) = cli.admin else {
+            panic!("expected Migrate")
+        };
+        assert_eq!(args.url.as_deref(), Some("postgres://localhost/db"));
+        assert!(args.show_sql);
     }
 
     #[test]
@@ -371,13 +369,11 @@ mod tests {
             "--password",
             "mypass",
         ]);
-        match cli.admin {
-            AdminCommand::Init(args) => {
-                assert_eq!(args.username, "myadmin");
-                assert_eq!(args.password, "mypass");
-            }
-            _ => panic!("expected Init"),
-        }
+        let AdminCommand::Init(args) = cli.admin else {
+            panic!("expected Init")
+        };
+        assert_eq!(args.username, "myadmin");
+        assert_eq!(args.password, "mypass");
     }
 
     #[test]

@@ -737,9 +737,10 @@ mod tests {
         });
 
         assert!(result.is_err());
-        match result.unwrap_err() {
-            SchemaCacheError::LoaderError(msg) => assert_eq!(msg, "数据库连接失败"),
-            other => panic!("期望 LoaderError，实际: {:?}", other),
+        let __err = result.unwrap_err();
+        assert!(matches!(&__err, &SchemaCacheError::LoaderError(_)), "期望 LoaderError，实际: {:?}", __err);
+        if let SchemaCacheError::LoaderError(msg) = __err {
+            assert_eq!(msg, "数据库连接失败");
         }
 
         // loader 失败时不应写入缓存

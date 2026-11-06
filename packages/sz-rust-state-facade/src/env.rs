@@ -531,10 +531,7 @@ APP_DEBUG = value2
         let env = Env::new();
         let result = env.load_from_file("/nonexistent/path/.env").await;
         assert!(result.is_err());
-        match result {
-            Err(EnvError::FileRead { .. }) => {}
-            _ => panic!("期望 FileRead 错误"),
-        }
+        assert!(matches!(result, Err(EnvError::FileRead { .. })));
     }
 
     /// 测试解析错误：section 头未闭合
@@ -544,12 +541,10 @@ APP_DEBUG = value2
         let content = "[unclosed_section\nkey = value";
         let result = env.parse_ini_content(content, "<test>");
         assert!(result.is_err());
-        match result {
-            Err(EnvError::Parse { line, .. }) => {
-                assert_eq!(line, 1);
-            }
-            _ => panic!("期望 Parse 错误"),
-        }
+        let Err(EnvError::Parse { line, .. }) = result else {
+            panic!("期望 Parse 错误")
+        };
+        assert_eq!(line, 1);
     }
 
     /// 测试解析错误：缺少等号
@@ -559,12 +554,10 @@ APP_DEBUG = value2
         let content = "this_is_not_a_key_value_pair";
         let result = env.parse_ini_content(content, "<test>");
         assert!(result.is_err());
-        match result {
-            Err(EnvError::Parse { line, .. }) => {
-                assert_eq!(line, 1);
-            }
-            _ => panic!("期望 Parse 错误"),
-        }
+        let Err(EnvError::Parse { line, .. }) = result else {
+            panic!("期望 Parse 错误")
+        };
+        assert_eq!(line, 1);
     }
 
     /// 测试解析错误：键为空
@@ -574,12 +567,10 @@ APP_DEBUG = value2
         let content = " = value";
         let result = env.parse_ini_content(content, "<test>");
         assert!(result.is_err());
-        match result {
-            Err(EnvError::Parse { line, .. }) => {
-                assert_eq!(line, 1);
-            }
-            _ => panic!("期望 Parse 错误"),
-        }
+        let Err(EnvError::Parse { line, .. }) = result else {
+            panic!("期望 Parse 错误")
+        };
+        assert_eq!(line, 1);
     }
 
     /// 测试真实进程环境变量优先于内部存储

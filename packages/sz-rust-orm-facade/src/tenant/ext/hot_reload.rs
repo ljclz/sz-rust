@@ -530,15 +530,13 @@ mod tests {
             .unwrap();
 
         let event = rx.recv().await.unwrap();
-        match event {
-            ChangeEvent::TenantScopedTableChanged {
-                table_name, action, ..
-            } => {
-                assert_eq!(table_name, "orders");
-                assert_eq!(action, "registered");
-            }
-            _ => panic!("expected TenantScopedTableChanged"),
-        }
+        let ChangeEvent::TenantScopedTableChanged {
+            table_name, action, ..
+        } = event else {
+            panic!("expected TenantScopedTableChanged")
+        };
+        assert_eq!(table_name, "orders");
+        assert_eq!(action, "registered");
         assert_eq!(mgr.list_scoped_tables().len(), 1);
     }
 
@@ -565,19 +563,18 @@ mod tests {
             .unwrap();
 
         let event = rx.recv().await.unwrap();
-        match event {
-            ChangeEvent::TenantConfigChanged {
-                tenant_id,
-                config_key,
-                is_global,
-                ..
-            } => {
-                assert_eq!(tenant_id, 1);
-                assert_eq!(config_key, "theme");
-                assert!(!is_global);
-            }
-            _ => panic!("expected TenantConfigChanged"),
-        }
+        let ChangeEvent::TenantConfigChanged {
+            tenant_id,
+            config_key,
+            is_global,
+            ..
+        } = event else {
+            panic!("expected TenantConfigChanged")
+        };
+        assert_eq!(tenant_id, 1);
+        assert_eq!(config_key, "theme");
+        assert!(!is_global);
+
     }
 
     #[tokio::test]

@@ -831,9 +831,9 @@ mod tests {
 
         // 离开不存在的群组应返回 GroupNotFound
         let err = transport.leave_group(CLIENT_A, "nonexistent").unwrap_err();
-        match err {
-            GatewayError::GroupNotFound(group) => assert_eq!(group, "nonexistent"),
-            other => panic!("期望 GroupNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::GroupNotFound(_)), "期望 GroupNotFound, 实际 {err:?}");
+        if let GatewayError::GroupNotFound(group) = err {
+            assert_eq!(group, "nonexistent");
         }
     }
 
@@ -866,9 +866,9 @@ mod tests {
 
         // 解散不存在的群组应返回 GroupNotFound
         let err = transport.ungroup("nonexistent").unwrap_err();
-        match err {
-            GatewayError::GroupNotFound(group) => assert_eq!(group, "nonexistent"),
-            other => panic!("期望 GroupNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::GroupNotFound(_)), "期望 GroupNotFound, 实际 {err:?}");
+        if let GatewayError::GroupNotFound(group) = err {
+            assert_eq!(group, "nonexistent");
         }
     }
 
@@ -1012,9 +1012,9 @@ mod tests {
 
         // 不在线的客户端返回 ClientNotFound
         let err = transport.get_groups_by_client_id(CLIENT_B).unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(client_id) => assert_eq!(client_id, CLIENT_B),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(client_id) = err {
+            assert_eq!(client_id, CLIENT_B);
         }
     }
 
@@ -1045,9 +1045,9 @@ mod tests {
 
         // 关闭不在线的客户端返回 ClientNotFound
         let err = transport.close_client(CLIENT_A).unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(client_id) => assert_eq!(client_id, CLIENT_A),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(client_id) = err {
+            assert_eq!(client_id, CLIENT_A);
         }
     }
 
@@ -1062,16 +1062,16 @@ mod tests {
 
         // 向未注册客户端发送消息
         let err = transport.send_to_client(CLIENT_A, "msg").unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(client_id) => assert_eq!(client_id, CLIENT_A),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(client_id) = err {
+            assert_eq!(client_id, CLIENT_A);
         }
 
         // 向未注册客户端加入群组
         let err = transport.join_group(CLIENT_A, "room1").unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(client_id) => assert_eq!(client_id, CLIENT_A),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(client_id) = err {
+            assert_eq!(client_id, CLIENT_A);
         }
 
         // send_to_clients 中任一客户端不在线
@@ -1079,9 +1079,9 @@ mod tests {
         let err = transport
             .send_to_clients(&[CLIENT_A.to_string(), CLIENT_B.to_string()], "msg")
             .unwrap_err();
-        match err {
-            GatewayError::ClientNotFound(client_id) => assert_eq!(client_id, CLIENT_B),
-            other => panic!("期望 ClientNotFound, 实际 {other:?}"),
+        assert!(matches!(&err, &GatewayError::ClientNotFound(_)), "期望 ClientNotFound, 实际 {err:?}");
+        if let GatewayError::ClientNotFound(client_id) = err {
+            assert_eq!(client_id, CLIENT_B);
         }
 
         // send_to_clients 失败时不应部分发送

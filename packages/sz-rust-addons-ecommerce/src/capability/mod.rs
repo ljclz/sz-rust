@@ -491,10 +491,10 @@ mod tests {
         let cap = CreateOrderCapability::new(state);
         let result = cap.call(json!({"user_id": 1, "items": []})).await;
         assert!(result.is_err());
-        match result {
-            Err(CapError::ValidationError(msg)) => assert!(msg.contains("订单项列表不可为空")),
-            _ => panic!("expected ValidationError"),
-        }
+        let Err(CapError::ValidationError(msg)) = result else {
+            panic!("expected ValidationError")
+        };
+        assert!(msg.contains("订单项列表不可为空"));
     }
 
     #[tokio::test]

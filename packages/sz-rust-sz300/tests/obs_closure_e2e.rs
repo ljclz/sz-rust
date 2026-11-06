@@ -29,7 +29,7 @@ use axum::{
 use tower::ServiceExt;
 
 use serde_json::json;
-use sz_rust_alert_engine::{AlertSeverity, SilenceManager};
+use sz_rust_observability::alert::{AlertSeverity, SilenceManager};
 use sz_rust_sz300::{
     alert_rules::{channels_for_severity, mask_alert_content, BusinessAlertRules},
     middleware::tracing_middleware::{span_buffer, tracing_middleware, SpanBuffer, SpanEntry},

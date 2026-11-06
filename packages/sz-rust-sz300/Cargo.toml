@@ -81,7 +81,8 @@ futures = { workspace = true }
 sz-rust-distributed-tx = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 # v1.9.0 可观测性闭环（feature gate 控制，默认不启用）
-sz-rust-alert-engine = { workspace = true, optional = true }
+# ADR-053 阶段3（2026-11-06）：sz-rust-alert-engine 已合并入 sz-rust-observability 的 alert 子模块
+# 依赖通过 sz-rust-observability 的 alert-engine feature 拉入，无需单独 optional 依赖行
 # v1.9.0 插件生态：Ed25519 真实验签（2026-10-28 修复 AppSec P0-1 伪验签）
 ed25519-dalek.workspace = true
 
@@ -146,7 +147,8 @@ v19-i18n = []
 # v1.9.0 配置中心动态配置
 v19-config-center = ["dep:async-trait"]
 # v1.9.0 可观测性闭环
-v19-obs-closure = ["dep:sz-rust-alert-engine", "dep:sz-rust-data-mask"]
+# ADR-053 阶段3：sz-rust-alert-engine 合并入 sz-rust-observability/alert
+v19-obs-closure = ["sz-rust-observability/alert-engine", "dep:sz-rust-data-mask"]
 # v1.9.0 插件生态落地
 v19-plugin-flow = ["dep:async-trait"]
 # v1.9.0 聚合 feature

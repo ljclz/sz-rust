@@ -131,9 +131,10 @@ mod tests {
         let conditions = mode.evaluate(&ctx, &rule).await.unwrap();
         assert_eq!(conditions.len(), 1, "degraded to Dept mode: 1 Eq condition");
         assert_eq!(conditions[0].op, WhereOp::Eq, "should use Eq not In");
-        match &conditions[0].value {
-            Value::I64(v) => assert_eq!(*v, 5, "should match dept_id"),
-            other => panic!("expected I64, got {other:?}"),
+        let __err = &conditions[0].value;
+        assert!(matches!(&__err, &Value::I64(_)), "expected I64, got {__err:?}");
+        if let Value::I64(v) = __err {
+            assert_eq!(*v, 5, "should match dept_id");
         }
     }
 }

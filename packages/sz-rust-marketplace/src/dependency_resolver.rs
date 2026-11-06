@@ -153,16 +153,14 @@ mod tests {
 
         let resolver = SemverResolver::new();
         let result = resolver.resolve(&manifest, &installed).unwrap();
-        match result {
-            ResolveResult::Conflict(conflicts) => {
-                assert_eq!(conflicts.len(), 1);
-                assert!(matches!(
-                    &conflicts[0],
-                    DependencyConflict::VersionConflict { name, .. } if name == "dep-a"
-                ));
-            }
-            _ => panic!("期望 Conflict"),
-        }
+        let ResolveResult::Conflict(conflicts) = result else {
+            panic!("期望 Conflict")
+        };
+        assert_eq!(conflicts.len(), 1);
+        assert!(matches!(
+            &conflicts[0],
+            DependencyConflict::VersionConflict { name, .. } if name == "dep-a"
+        ));
     }
 
     #[test]
@@ -172,16 +170,14 @@ mod tests {
 
         let resolver = SemverResolver::new();
         let result = resolver.resolve(&manifest, &installed).unwrap();
-        match result {
-            ResolveResult::Conflict(conflicts) => {
-                assert_eq!(conflicts.len(), 1);
-                assert!(matches!(
-                    &conflicts[0],
-                    DependencyConflict::Missing(name) if name == "dep-x"
-                ));
-            }
-            _ => panic!("期望 Conflict"),
-        }
+        let ResolveResult::Conflict(conflicts) = result else {
+            panic!("期望 Conflict")
+        };
+        assert_eq!(conflicts.len(), 1);
+        assert!(matches!(
+            &conflicts[0],
+            DependencyConflict::Missing(name) if name == "dep-x"
+        ));
     }
 
     #[test]
@@ -197,12 +193,10 @@ mod tests {
 
         let resolver = SemverResolver::new();
         let result = resolver.resolve(&manifest, &installed).unwrap();
-        match result {
-            ResolveResult::Conflict(conflicts) => {
-                assert_eq!(conflicts.len(), 3);
-            }
-            _ => panic!("期望 Conflict"),
-        }
+        let ResolveResult::Conflict(conflicts) = result else {
+            panic!("期望 Conflict")
+        };
+        assert_eq!(conflicts.len(), 3);
     }
 
     #[test]

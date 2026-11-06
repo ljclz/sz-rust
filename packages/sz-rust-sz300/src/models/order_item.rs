@@ -204,4 +204,41 @@ mod tests {
         // OrderItem 无 timestamp_fields
         assert!(OrderItem::timestamp_fields().is_none());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut it = OrderItem {
+            item_id: None,
+            order_id: 0,
+            good_id: None,
+            good_name: String::new(),
+            price_fen: 0,
+            weight_g: 0,
+            total_fen: 0,
+            quantity: 0,
+        };
+        let mut map = HashMap::new();
+        map.insert("item_id".to_string(), Value::I64(11));
+        map.insert("order_id".to_string(), Value::I64(100));
+        map.insert("good_id".to_string(), Value::I64(202));
+        map.insert("good_name".to_string(), Value::String("鲈鱼".into()));
+        map.insert("price_fen".to_string(), Value::I64(3000));
+        map.insert("weight_g".to_string(), Value::I64(250));
+        map.insert("total_fen".to_string(), Value::I64(750));
+        map.insert("quantity".to_string(), Value::I64(3));
+        it.from_value(map);
+        assert_eq!(it.item_id, Some(11));
+        assert_eq!(it.order_id, 100);
+        assert_eq!(it.good_id, Some(202));
+        assert_eq!(it.good_name, "鲈鱼");
+        assert_eq!(it.price_fen, 3000);
+        assert_eq!(it.weight_g, 250);
+        assert_eq!(it.total_fen, 750);
+        assert_eq!(it.quantity, 3);
+        it.from_value(HashMap::new());
+        assert_eq!(it.item_id, Some(11));
+        assert_eq!(it.order_id, 100);
+        assert_eq!(it.good_name, "鲈鱼");
+    }
 }

@@ -71,6 +71,10 @@ const REMOVED_CRATES = new Set([
     'sz-rust-i18n',
     'sz-rust-vector-db',
     'sz-rust-codegen-loop',
+    // ADR-053 方案 B 阶段2+3（2026-11-06）：sz-rust-tracing 合并入 sz-rust-observability/src/tracing，
+    // sz-rust-alert-engine 合并入 sz-rust-observability/src/alert。历史文档/审计报告中的引用降级为 WARN。
+    'sz-rust-tracing',
+    'sz-rust-alert-engine',
 ]);
 
 // 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件

@@ -115,30 +115,26 @@ fn make_super_admin_request(method: &str, uri: &str) -> http::Request<axum::body
 #[test]
 fn test_parse_serve_with_admin() {
     let cli = Cli::parse_from(["sz-rust", "serve", "--with-admin", "--addr", "127.0.0.1:0"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin, addr, ..
-        }) => {
-            assert!(with_admin);
-            assert_eq!(addr, "127.0.0.1:0");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin, addr, ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(with_admin);
+    assert_eq!(addr, "127.0.0.1:0");
 }
 
 /// 解析 `serve` 默认参数（with_admin=false, addr=0.0.0.0:8080）
 #[test]
 fn test_parse_serve_defaults() {
     let cli = Cli::parse_from(["sz-rust", "serve"]);
-    match cli.command {
-        Some(CliCommand::Serve {
-            with_admin, addr, ..
-        }) => {
-            assert!(!with_admin);
-            assert_eq!(addr, "0.0.0.0:8080");
-        }
-        _ => panic!("expected Serve command"),
-    }
+    let Some(CliCommand::Serve {
+        with_admin, addr, ..
+    }) = cli.command else {
+        panic!("expected Serve command")
+    };
+    assert!(!with_admin);
+    assert_eq!(addr, "0.0.0.0:8080");
 }
 
 /// build_router_with_admin 注册 17 个 Capability 且 dashboard 端点可达

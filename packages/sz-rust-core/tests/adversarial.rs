@@ -385,12 +385,10 @@ async fn adversarial_huge_single_line_no_eq() {
     let result = env.load_from_file(&env_file).await;
     // 不含 '=' → 预期 Parse 错误
     assert!(result.is_err(), "100KB 无等号行应返回 Parse 错误");
-    match result {
-        Err(sz_rust_core::env::EnvError::Parse { line, .. }) => {
-            assert_eq!(line, 1);
-        }
-        _ => panic!("期望 Parse 错误"),
-    }
+    let Err(sz_rust_core::env::EnvError::Parse { line, .. }) = result else {
+        panic!("期望 Parse 错误")
+    };
+    assert_eq!(line, 1);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -1461,12 +1459,10 @@ fn adversarial_validate_check_dml_sequence() {
     let result = v4.check(&data3);
     assert!(result.is_err());
     use sz_rust_core::validate::ValidateError;
-    match result.unwrap_err() {
-        ValidateError::Batch(errors) => {
-            assert!(errors.len() >= 2, "批量模式应收集多个错误");
-        }
-        _ => panic!("批量模式应返回 Batch 错误"),
-    }
+    let ValidateError::Batch(errors) = result.unwrap_err() else {
+        panic!("批量模式应返回 Batch 错误")
+    };
+    assert!(errors.len() >= 2, "批量模式应收集多个错误");
 
     // 6. 场景切换后重置 only/remove/append
     let mut v5 = Validate::new()

@@ -84,7 +84,7 @@ jobs:
           for pkg in \
             sz-rust-capability \
             sz-rust-observability \
-            sz-rust-tracing \
+
             sz-rust-http-facade \
             sz-rust-cache-facade \
             sz-rust-state-facade \

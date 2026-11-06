@@ -381,40 +381,34 @@ mod tests {
     #[test]
     fn test_parse_make_model() {
         let cli = Cli::parse_from(["sz-rust", "make", "model", "User"]);
-        match cli.command {
-            Some(Command::Make { make_command }) => {
-                assert!(matches!(make_command, cmd::make::MakeCommand::Model { .. }));
-            }
-            _ => panic!("expected Make command"),
-        }
+        let Some(Command::Make { make_command }) = cli.command else {
+            panic!("expected Make command")
+        };
+        assert!(matches!(make_command, cmd::make::MakeCommand::Model { .. }));
     }
 
     #[test]
     fn test_parse_make_controller() {
         let cli = Cli::parse_from(["sz-rust", "make", "controller", "User"]);
-        match cli.command {
-            Some(Command::Make { make_command }) => {
-                assert!(matches!(
-                    make_command,
-                    cmd::make::MakeCommand::Controller { .. }
-                ));
-            }
-            _ => panic!("expected Make command"),
-        }
+        let Some(Command::Make { make_command }) = cli.command else {
+            panic!("expected Make command")
+        };
+        assert!(matches!(
+            make_command,
+            cmd::make::MakeCommand::Controller { .. }
+        ));
     }
 
     #[test]
     fn test_parse_make_migration() {
         let cli = Cli::parse_from(["sz-rust", "make", "migration", "create_users"]);
-        match cli.command {
-            Some(Command::Make { make_command }) => {
-                assert!(matches!(
-                    make_command,
-                    cmd::make::MakeCommand::Migration { .. }
-                ));
-            }
-            _ => panic!("expected Make command"),
-        }
+        let Some(Command::Make { make_command }) = cli.command else {
+            panic!("expected Make command")
+        };
+        assert!(matches!(
+            make_command,
+            cmd::make::MakeCommand::Migration { .. }
+        ));
     }
 
     #[test]
@@ -426,29 +420,25 @@ mod tests {
     #[test]
     fn test_parse_make_validate() {
         let cli = Cli::parse_from(["sz-rust", "make", "validate", "User"]);
-        match cli.command {
-            Some(Command::Make { make_command }) => {
-                assert!(matches!(
-                    make_command,
-                    cmd::make::MakeCommand::Validate { .. }
-                ));
-            }
-            _ => panic!("expected Make command"),
-        }
+        let Some(Command::Make { make_command }) = cli.command else {
+            panic!("expected Make command")
+        };
+        assert!(matches!(
+            make_command,
+            cmd::make::MakeCommand::Validate { .. }
+        ));
     }
 
     #[test]
     fn test_parse_make_seeder() {
         let cli = Cli::parse_from(["sz-rust", "make", "seeder", "001_users"]);
-        match cli.command {
-            Some(Command::Make { make_command }) => {
-                assert!(matches!(
-                    make_command,
-                    cmd::make::MakeCommand::Seeder { .. }
-                ));
-            }
-            _ => panic!("expected Make command"),
-        }
+        let Some(Command::Make { make_command }) = cli.command else {
+            panic!("expected Make command")
+        };
+        assert!(matches!(
+            make_command,
+            cmd::make::MakeCommand::Seeder { .. }
+        ));
     }
 
     #[test]
@@ -478,12 +468,10 @@ mod tests {
     #[test]
     fn test_parse_cache_clear_with_store() {
         let cli = Cli::parse_from(["sz-rust", "cache:clear", "--store", "redis"]);
-        match cli.command {
-            Some(Command::CacheClear { store }) => {
-                assert_eq!(store.as_deref(), Some("redis"));
-            }
-            _ => panic!("expected CacheClear command"),
-        }
+        let Some(Command::CacheClear { store }) = cli.command else {
+            panic!("expected CacheClear command")
+        };
+        assert_eq!(store.as_deref(), Some("redis"));
     }
 
     #[test]
@@ -513,22 +501,20 @@ mod tests {
             "--class",
             "001_users",
         ]);
-        match cli.command {
-            Some(Command::Seed {
-                path,
-                db_type,
-                show_sql,
-                url,
-                class,
-            }) => {
-                assert_eq!(path, "custom_seeds");
-                assert_eq!(db_type, "mysql");
-                assert!(show_sql);
-                assert_eq!(url.as_deref(), Some("mysql://user:pass@host:3306/db"));
-                assert_eq!(class.as_deref(), Some("001_users"));
-            }
-            _ => panic!("expected Seed command"),
-        }
+        let Some(Command::Seed {
+            path,
+            db_type,
+            show_sql,
+            url,
+            class,
+        }) = cli.command else {
+            panic!("expected Seed command")
+        };
+        assert_eq!(path, "custom_seeds");
+        assert_eq!(db_type, "mysql");
+        assert!(show_sql);
+        assert_eq!(url.as_deref(), Some("mysql://user:pass@host:3306/db"));
+        assert_eq!(class.as_deref(), Some("001_users"));
     }
 
     #[tokio::test]

@@ -260,4 +260,56 @@ mod tests {
         assert!(o.get_column_value("xyz").is_none());
         assert!(Order::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut o = Order {
+            order_id: None,
+            order_no: String::new(),
+            merchant_id: 0,
+            device_id: None,
+            total_fen: 0,
+            total_weight_g: 0,
+            item_count: 0,
+            status: 0,
+            pay_method: 0,
+            pay_at: None,
+            offline_seq: String::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("order_id".to_string(), Value::I64(100));
+        map.insert("order_no".to_string(), Value::String("ORD-1".into()));
+        map.insert("merchant_id".to_string(), Value::I64(5));
+        map.insert("device_id".to_string(), Value::I64(8));
+        map.insert("total_fen".to_string(), Value::I64(12345));
+        map.insert("total_weight_g".to_string(), Value::I64(500));
+        map.insert("item_count".to_string(), Value::I64(2));
+        map.insert("status".to_string(), Value::I64(2));
+        map.insert("pay_method".to_string(), Value::I64(1));
+        map.insert("pay_at".to_string(), Value::String("p".into()));
+        map.insert("offline_seq".to_string(), Value::String("off".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        map.insert("updated_at".to_string(), Value::String("u".into()));
+        o.from_value(map);
+        assert_eq!(o.order_id, Some(100));
+        assert_eq!(o.order_no, "ORD-1");
+        assert_eq!(o.merchant_id, 5);
+        assert_eq!(o.device_id, Some(8));
+        assert_eq!(o.total_fen, 12345);
+        assert_eq!(o.total_weight_g, 500);
+        assert_eq!(o.item_count, 2);
+        assert_eq!(o.status, 2);
+        assert_eq!(o.pay_method, 1);
+        assert_eq!(o.pay_at.as_deref(), Some("p"));
+        assert_eq!(o.offline_seq, "off");
+        assert_eq!(o.created_at.as_deref(), Some("c"));
+        assert_eq!(o.updated_at.as_deref(), Some("u"));
+        o.from_value(HashMap::new());
+        assert_eq!(o.order_id, Some(100));
+        assert_eq!(o.merchant_id, 5);
+        assert_eq!(o.order_no, "ORD-1");
+    }
 }

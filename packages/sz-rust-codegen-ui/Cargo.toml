@@ -3,7 +3,7 @@ name = "sz-rust-codegen-ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SZ-Rust 代码生成器 UI"
+description = "SZ-Rust 代码生成器 UI [headless API — 按 ADR-052 启用]"
 repository.workspace = true
 homepage.workspace = true
 

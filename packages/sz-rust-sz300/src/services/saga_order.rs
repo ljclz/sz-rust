@@ -1011,10 +1011,10 @@ mod tests {
         row.remove("tx_id");
         let result = parse_tx_log_entry(&row);
         assert!(result.is_err(), "缺少 tx_id 应返回 Err");
-        match result {
-            Err(DtxError::Persistence(msg)) => assert!(msg.contains("tx_id"), "msg: {msg}"),
-            other => panic!("应为 DtxError::Persistence, 实际: {other:?}"),
-        }
+        let Err(DtxError::Persistence(msg)) = result else {
+            panic!("应为 DtxError::Persistence, 实际: {result:?}")
+        };
+        assert!(msg.contains("tx_id"), "msg: {msg}");
     }
 
     #[test]
@@ -1079,10 +1079,10 @@ mod tests {
         let payload = json!({ "order_id": 1 });
         let result = action.execute(&payload).await;
         assert!(result.is_err(), "缺少 items 应返回 Err");
-        match result {
-            Err(DtxError::Generic(msg)) => assert!(msg.contains("items"), "msg: {msg}"),
-            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
-        }
+        let Err(DtxError::Generic(msg)) = result else {
+            panic!("应为 DtxError::Generic, 实际: {result:?}")
+        };
+        assert!(msg.contains("items"), "msg: {msg}");
     }
 
     #[tokio::test]
@@ -1105,10 +1105,10 @@ mod tests {
         let payload = json!({ "order": { "total_fen": 100 } });
         let result = action.execute(&payload).await;
         assert!(result.is_err(), "缺少 order_id 应返回 Err");
-        match result {
-            Err(DtxError::Generic(msg)) => assert!(msg.contains("order_id"), "msg: {msg}"),
-            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
-        }
+        let Err(DtxError::Generic(msg)) = result else {
+            panic!("应为 DtxError::Generic, 实际: {result:?}")
+        };
+        assert!(msg.contains("order_id"), "msg: {msg}");
     }
 
     #[tokio::test]
@@ -1152,10 +1152,10 @@ mod tests {
         let payload = json!({ "order_id": 1 });
         let result = action.execute(&payload).await;
         assert!(result.is_err(), "缺少 items 应返回 Err");
-        match result {
-            Err(DtxError::Generic(msg)) => assert!(msg.contains("items"), "msg: {msg}"),
-            other => panic!("应为 DtxError::Generic, 实际: {other:?}"),
-        }
+        let Err(DtxError::Generic(msg)) = result else {
+            panic!("应为 DtxError::Generic, 实际: {result:?}")
+        };
+        assert!(msg.contains("items"), "msg: {msg}");
     }
 
     #[tokio::test]

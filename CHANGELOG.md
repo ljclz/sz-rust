@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Changed — ADR-053 方案 B 阶段2+3：合并 tracing/alert-engine → observability（2026-11-06）
+
+> 来源：[ADR-053](docs/adr/0053-包碎片化架构债评估.md) 方案 B 阶段2+3。将 `sz-rust-tracing` 和 `sz-rust-alert-engine` 两个包合并入 `sz-rust-observability`，消除职责重叠与包碎片化架构债，workspace 成员包 57 → 55。
+
+- **阶段 2（tracing → observability）**：将 `sz-rust-tracing/src/`（lib.rs + capability/mod.rs）迁移至 `sz-rust-observability/src/tracing/`（mod.rs + capability.rs，`use crate::` 改为 `use super::`）。observability 新增 `tracing-addon` feature（门控 axum/sz-rust-core/sz-rust-capability/sz-rust-addons-loader optional 依赖），lib.rs 加 `#[cfg(feature = "tracing-addon")] pub mod tracing;`。根包 `tracing` feature 转发至 `sz-rust-observability/tracing-addon`。删除 `packages/sz-rust-tracing/` 目录。
+- **阶段 3（alert-engine → observability）**：将 `sz-rust-alert-engine/src/`（lib.rs + error.rs + rule.rs + silence.rs）迁移至 `sz-rust-observability/src/alert/`（mod.rs + error.rs + rule.rs + silence.rs，`use crate::error` 改为 `use super::error`）。observability 新增 `alert-engine` feature（无额外依赖），lib.rs 加 `#[cfg(feature = "alert-engine")] pub mod alert;`。根包 `obs-alert-engine` feature 转发至 `sz-rust-observability/alert-engine`。sz300 的 `v19-obs-closure` feature 改为 `["sz-rust-observability/alert-engine", "dep:sz-rust-data-mask"]`，3 处 use 语句 `sz_rust_alert_engine::` → `sz_rust_observability::alert::`。删除 `packages/sz-rust-alert-engine/` 目录。
+- **其他修改**：`scripts/audit/doc-code-consistency.js` 的 REMOVED_CRATES 白名单加两个 crate；`.github/workflows/publish-oss.yml` 移除 sz-rust-tracing 发布条目；`.github/workflows/coverage.yml` 的 `-p sz-rust-alert-engine` 改为 `-p sz-rust-observability`；修复 `saga_order.rs` 预存在语法错误（assert! 宏参数位置）。
+- **验证**：`CARGO_HOME=D:/cargo-home-verify CARGO_TARGET_DIR=D:/rust-target-verify cargo check --workspace` 通过（29.25s）；`cargo test -p sz-rust-sz300 --lib` = 406 passed/0 failed；`doc-code-consistency.js` 0 ERROR / 92 WARN（历史引用，不阻塞）；`link-check.js` OK。
+
 ### Added — sz300 覆盖率提升第四批（55.87%→66.00%，2026-11-06）
 
 > 来源：覆盖率提升第三批（DB-2026-11-06-14）后续，针对 sz300 剩余低覆盖区域（controllers/ 各文件 0%、mqtt_service.rs 35.73%、file_service.rs 57.08%）补 59 个纯逻辑/fake pool/mock 单元测试，lib only 行覆盖率 55.87%→66.00%（+10.13pp，超 60% 目标），378 passed/0 failed。

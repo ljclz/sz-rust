@@ -217,16 +217,14 @@ mod tests {
             consecutive_failures: 3,
         };
         let decision = gr.check_rollback(&stats);
-        match decision {
-            RollbackDecision::Rollback {
-                failure_rate,
-                consecutive_failures,
-            } => {
-                assert!((failure_rate - 0.6).abs() < f32::EPSILON);
-                assert_eq!(consecutive_failures, 3);
-            }
-            _ => panic!("expected Rollback"),
-        }
+        let RollbackDecision::Rollback {
+            failure_rate,
+            consecutive_failures,
+        } = decision else {
+            panic!("expected Rollback")
+        };
+        assert!((failure_rate - 0.6).abs() < f32::EPSILON);
+        assert_eq!(consecutive_failures, 3);
     }
 
     #[test]

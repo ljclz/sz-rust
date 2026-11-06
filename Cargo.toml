@@ -27,7 +27,7 @@ members = [
     "packages/sz-rust-rag",
     "packages/sz-rust-frontend-codegen",
 
-    "packages/sz-rust-tracing",
+    # ADR-053 阶段2（2026-11-06）：sz-rust-tracing 已合并入 sz-rust-observability
     "packages/sz-rust-pdf",
     "packages/sz-rust-workflow",
     "packages/sz-rust-wasm",
@@ -55,7 +55,7 @@ members = [
     "packages/sz-rust-sz300",
 
     # v1.7.0 新增 crate
-    "packages/sz-rust-alert-engine",
+    # ADR-053 阶段3（2026-11-06）：sz-rust-alert-engine 已合并入 sz-rust-observability
     "packages/sz-rust-data-mask",
     "packages/sz-rust-key-rotation",
     "packages/sz-rust-security-headers",
@@ -284,7 +284,7 @@ sz-rust-ai-facade = { version = "2.0.0", path = "packages/sz-rust-ai-facade" }
 sz-rust-capability = { version = "2.0.0", path = "packages/sz-rust-capability" }
 sz-rust-rag = { version = "2.0.0", path = "packages/sz-rust-rag" }
 sz-rust-frontend-codegen = { version = "2.0.0", path = "packages/sz-rust-frontend-codegen" }
-sz-rust-tracing = { version = "2.0.0", path = "packages/sz-rust-tracing" }
+# ADR-053 阶段2（2026-11-06）：sz-rust-tracing 已合并入 sz-rust-observability/src/tracing
 sz-rust-pdf = { version = "2.0.0", path = "packages/sz-rust-pdf" }
 sz-rust-workflow = { version = "2.0.0", path = "packages/sz-rust-workflow" }
 sz-rust-wasm = { version = "2.0.0", path = "packages/sz-rust-wasm" }
@@ -301,7 +301,7 @@ sz-rust-ops-api = { version = "2.0.0", path = "packages/sz-rust-ops-api" }
 sz-rust-sz300 = { version = "2.0.0", path = "packages/sz-rust-sz300" }
 
 # v1.7.0 新增 crate
-sz-rust-alert-engine = { version = "2.0.0", path = "packages/sz-rust-alert-engine" }
+# ADR-053 阶段3（2026-11-06）：sz-rust-alert-engine 已合并入 sz-rust-observability/src/alert
 sz-rust-data-mask = { version = "2.0.0", path = "packages/sz-rust-data-mask" }
 sz-rust-key-rotation = { version = "2.0.0", path = "packages/sz-rust-key-rotation" }
 sz-rust-security-headers = { version = "2.0.0", path = "packages/sz-rust-security-headers" }
@@ -393,8 +393,8 @@ api-gateway = ["dep:sz-rust-api-gateway"]
 config-center = ["dep:sz-rust-config-center"]
 
 # === 可观测性 ===
-# 分布式追踪
-tracing = ["dep:sz-rust-tracing"]
+# 分布式追踪（ADR-053 阶段2：sz-rust-tracing 已合并入 sz-rust-observability/src/tracing）
+tracing = ["sz-rust-observability/tracing-addon"]
 # 监控指标
 observability = ["dep:sz-rust-observability"]
 
@@ -429,7 +429,8 @@ perf-query-cache = ["dep:sz-rust-orm-facade"]
 
 # 方向3：可观测性深化
 obs-otel-fullchain = ["dep:sz-rust-observability"]
-obs-alert-engine = ["dep:sz-rust-alert-engine"]
+# ADR-053 阶段3：sz-rust-alert-engine 已合并入 sz-rust-observability/src/alert
+obs-alert-engine = ["sz-rust-observability/alert-engine"]
 
 obs-health-probe = ["dep:sz-rust-observability"]
 # 方向4：安全合规加固
@@ -468,12 +469,12 @@ sz-rust-service-registry = { workspace = true, optional = true }
 sz-rust-distributed-tx = { workspace = true, optional = true }
 sz-rust-api-gateway = { workspace = true, optional = true }
 sz-rust-config-center = { workspace = true, optional = true }
-sz-rust-tracing = { workspace = true, optional = true }
+# ADR-053 阶段2：sz-rust-tracing 已合并入 sz-rust-observability（tracing feature 转发）
 sz-rust-observability = { workspace = true, optional = true }
 sz-rust-wasm = { workspace = true, optional = true }
 
 # v1.7.0 新增 optional 依赖
-sz-rust-alert-engine = { workspace = true, optional = true }
+# ADR-053 阶段3：sz-rust-alert-engine 已合并入 sz-rust-observability（obs-alert-engine feature 转发）
 sz-rust-data-mask = { workspace = true, optional = true }
 sz-rust-key-rotation = { workspace = true, optional = true }
 sz-rust-security-headers = { workspace = true, optional = true }
@@ -542,7 +543,6 @@ ignored = [
     "sz-rust-addons-loader",
     "sz-rust-admin-ui",
     "sz-rust-ai-facade",
-    "sz-rust-alert-engine",
     "sz-rust-api-gateway",
     "sz-rust-auth-facade",
     "sz-rust-codegen-ui",
@@ -559,7 +559,6 @@ ignored = [
     "sz-rust-rag",
     "sz-rust-security-headers",
     "sz-rust-service-registry",
-    "sz-rust-tracing",
     "sz-rust-upload",
     "sz-rust-visual",
     "sz-rust-wasm",
@@ -573,7 +572,6 @@ ignored = [
     "sz-rust-addons-loader",
     "sz-rust-admin-ui",
     "sz-rust-ai-facade",
-    "sz-rust-alert-engine",
     "sz-rust-api-gateway",
     "sz-rust-auth-facade",
     "sz-rust-codegen-ui",
@@ -590,7 +588,6 @@ ignored = [
     "sz-rust-rag",
     "sz-rust-security-headers",
     "sz-rust-service-registry",
-    "sz-rust-tracing",
     "sz-rust-upload",
     "sz-rust-visual",
     "sz-rust-wasm",

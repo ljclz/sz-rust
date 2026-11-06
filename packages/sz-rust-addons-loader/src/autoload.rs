@@ -516,11 +516,10 @@ mod tests {
         let loader = AddonAutoload::new("/addons");
         let result = loader.resolve_strict("app\\Home");
         assert!(result.is_err());
-        match result.unwrap_err() {
-            AddonLoaderError::AutoloadMiss { class } => {
-                assert_eq!(class, "app\\Home");
-            }
-            other => panic!("expected AutoloadMiss, got {:?}", other),
+        let err = result.unwrap_err();
+        assert!(matches!(&err, &AddonLoaderError::AutoloadMiss { .. }), "expected AutoloadMiss, got {:?}", err);
+        if let AddonLoaderError::AutoloadMiss { class } = err {
+            assert_eq!(class, "app\\Home");
         }
     }
 

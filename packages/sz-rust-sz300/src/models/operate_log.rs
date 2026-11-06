@@ -184,4 +184,38 @@ mod tests {
         assert!(m.get_column_value("zzz").is_none());
         assert!(OperateLog::timestamp_fields().is_some());
     }
+
+    #[test]
+    fn from_value_populates_all_fields_then_empty_keeps() {
+        use std::collections::HashMap;
+        let mut m = OperateLog {
+            log_id: None,
+            merchant_id: None,
+            operator: String::new(),
+            action: String::new(),
+            detail: String::new(),
+            ip: String::new(),
+            created_at: None,
+        };
+        let mut map = HashMap::new();
+        map.insert("log_id".to_string(), Value::I64(1));
+        map.insert("merchant_id".to_string(), Value::I64(55));
+        map.insert("operator".to_string(), Value::String("admin".into()));
+        map.insert("action".to_string(), Value::String("create".into()));
+        map.insert("detail".to_string(), Value::String("det".into()));
+        map.insert("ip".to_string(), Value::String("10.0.0.1".into()));
+        map.insert("created_at".to_string(), Value::String("c".into()));
+        m.from_value(map);
+        assert_eq!(m.log_id, Some(1));
+        assert_eq!(m.merchant_id, Some(55));
+        assert_eq!(m.operator, "admin");
+        assert_eq!(m.action, "create");
+        assert_eq!(m.detail, "det");
+        assert_eq!(m.ip, "10.0.0.1");
+        assert_eq!(m.created_at.as_deref(), Some("c"));
+        m.from_value(HashMap::new());
+        assert_eq!(m.log_id, Some(1));
+        assert_eq!(m.merchant_id, Some(55));
+        assert_eq!(m.operator, "admin");
+    }
 }
