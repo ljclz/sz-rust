@@ -61,6 +61,16 @@ const REMOVED_CRATES = new Set([
     // UXR 整改执行报告、2026-11-04 全栈复跑报告），packages/ 无实体且从未入
     // workspace（2026-11-05 核验）；与 operator/k8s-operator 同类降级 WARN
     'sz-rust-capi',
+    // ADR-053 方案 B 阶段1（2026-11-06）：8 个极薄孤儿包已删除，
+    // 历史文档/审计报告中的引用降级为 WARN（CI 可执行配置已显式移除引用）
+    'sz-rust-zerocopy',
+    'sz-rust-log-aggregator',
+    'sz-rust-benchmark-suite',
+    'sz-rust-pipeline',
+    'sz-rust-plugin-sdk',
+    'sz-rust-i18n',
+    'sz-rust-vector-db',
+    'sz-rust-codegen-loop',
 ]);
 
 // 企业版交付/已移交 crate（2026-09-13 核验：sz-rust-enterprise/packages 实存 7 个行业插件

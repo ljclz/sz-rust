@@ -32,7 +32,6 @@ members = [
     "packages/sz-rust-workflow",
     "packages/sz-rust-wasm",
 
-    "packages/sz-rust-vector-db",
 
     "packages/sz-rust-marketplace",
     "packages/sz-rust-visual",
@@ -48,7 +47,6 @@ members = [
 
     "packages/sz-rust-api-gateway",
 
-    "packages/sz-rust-codegen-loop",
 
     "packages/sz-rust-testkit",
 
@@ -57,13 +55,7 @@ members = [
     "packages/sz-rust-sz300",
 
     # v1.7.0 新增 crate
-    "packages/sz-rust-i18n",
-    "packages/sz-rust-plugin-sdk",
-    "packages/sz-rust-pipeline",
-    "packages/sz-rust-zerocopy",
-    "packages/sz-rust-benchmark-suite",
     "packages/sz-rust-alert-engine",
-    "packages/sz-rust-log-aggregator",
     "packages/sz-rust-data-mask",
     "packages/sz-rust-key-rotation",
     "packages/sz-rust-security-headers",
@@ -296,7 +288,7 @@ sz-rust-tracing = { version = "2.0.0", path = "packages/sz-rust-tracing" }
 sz-rust-pdf = { version = "2.0.0", path = "packages/sz-rust-pdf" }
 sz-rust-workflow = { version = "2.0.0", path = "packages/sz-rust-workflow" }
 sz-rust-wasm = { version = "2.0.0", path = "packages/sz-rust-wasm" }
-sz-rust-vector-db = { version = "2.0.0", path = "packages/sz-rust-vector-db" }
+
 sz-rust-marketplace = { version = "2.0.0", path = "packages/sz-rust-marketplace" }
 sz-rust-visual = { version = "2.0.0", path = "packages/sz-rust-visual" }
 sz-rust-addons-admin = { version = "2.0.0", path = "packages/sz-rust-addons-admin" }
@@ -309,13 +301,7 @@ sz-rust-ops-api = { version = "2.0.0", path = "packages/sz-rust-ops-api" }
 sz-rust-sz300 = { version = "2.0.0", path = "packages/sz-rust-sz300" }
 
 # v1.7.0 新增 crate
-sz-rust-i18n = { version = "2.0.0", path = "packages/sz-rust-i18n" }
-sz-rust-plugin-sdk = { version = "2.0.0", path = "packages/sz-rust-plugin-sdk" }
-sz-rust-pipeline = { version = "2.0.0", path = "packages/sz-rust-pipeline" }
-sz-rust-zerocopy = { version = "2.0.0", path = "packages/sz-rust-zerocopy" }
-sz-rust-benchmark-suite = { version = "2.0.0", path = "packages/sz-rust-benchmark-suite" }
 sz-rust-alert-engine = { version = "2.0.0", path = "packages/sz-rust-alert-engine" }
-sz-rust-log-aggregator = { version = "2.0.0", path = "packages/sz-rust-log-aggregator" }
 sz-rust-data-mask = { version = "2.0.0", path = "packages/sz-rust-data-mask" }
 sz-rust-key-rotation = { version = "2.0.0", path = "packages/sz-rust-key-rotation" }
 sz-rust-security-headers = { version = "2.0.0", path = "packages/sz-rust-security-headers" }
@@ -436,18 +422,15 @@ p3-edge = ["wasm"]
 plugin-market = ["dep:sz-rust-marketplace"]
 plugin-hot-reload = ["dep:sz-rust-addons-loader"]
 plugin-theme = ["dep:sz-rust-frontend-codegen"]
-plugin-i18n = ["dep:sz-rust-i18n"]
-plugin-sdk = ["dep:sz-rust-plugin-sdk"]
+
 # 方向2：性能优化与基准
 perf-pool = ["dep:sz-rust-orm-facade"]
 perf-query-cache = ["dep:sz-rust-orm-facade"]
-perf-pipeline = ["dep:sz-rust-pipeline"]
-perf-zerocopy = ["dep:sz-rust-zerocopy"]
-perf-benchmark = ["dep:sz-rust-benchmark-suite"]
+
 # 方向3：可观测性深化
 obs-otel-fullchain = ["dep:sz-rust-observability"]
 obs-alert-engine = ["dep:sz-rust-alert-engine"]
-obs-log-aggregator = ["dep:sz-rust-log-aggregator"]
+
 obs-health-probe = ["dep:sz-rust-observability"]
 # 方向4：安全合规加固
 sec-rbac = ["dep:sz-rust-auth-facade"]
@@ -467,9 +450,9 @@ frontend-monitor-panel = ["dep:sz-rust-monitor-panel"]
 frontend-codegen-ui = ["dep:sz-rust-codegen-ui"]
 
 # v1.7.0 方向聚合 feature
-d1-plugin-ecosystem = ["plugin-market", "plugin-hot-reload", "plugin-theme", "plugin-i18n", "plugin-sdk"]
-d2-performance = ["perf-pool", "perf-query-cache", "perf-pipeline", "perf-zerocopy", "perf-benchmark"]
-d3-observability = ["obs-otel-fullchain", "obs-alert-engine", "obs-log-aggregator", "obs-health-probe"]
+d1-plugin-ecosystem = ["plugin-market", "plugin-hot-reload", "plugin-theme"]
+d2-performance = ["perf-pool", "perf-query-cache"]
+d3-observability = ["obs-otel-fullchain", "obs-alert-engine", "obs-health-probe"]
 d4-security = ["sec-rbac", "sec-data-mask", "sec-audit", "sec-key-rotation", "sec-security-headers"]
 d5-api-protocol = ["api-graphql", "api-websocket", "api-sse", "api-upload"]
 d6-frontend = ["frontend-tauri", "frontend-admin-ui", "frontend-monitor-panel", "frontend-codegen-ui"]
@@ -490,13 +473,7 @@ sz-rust-observability = { workspace = true, optional = true }
 sz-rust-wasm = { workspace = true, optional = true }
 
 # v1.7.0 新增 optional 依赖
-sz-rust-i18n = { workspace = true, optional = true }
-sz-rust-plugin-sdk = { workspace = true, optional = true }
-sz-rust-pipeline = { workspace = true, optional = true }
-sz-rust-zerocopy = { workspace = true, optional = true }
-sz-rust-benchmark-suite = { workspace = true, optional = true }
 sz-rust-alert-engine = { workspace = true, optional = true }
-sz-rust-log-aggregator = { workspace = true, optional = true }
 sz-rust-data-mask = { workspace = true, optional = true }
 sz-rust-key-rotation = { workspace = true, optional = true }
 sz-rust-security-headers = { workspace = true, optional = true }
@@ -561,29 +538,24 @@ ignored = [
     "backtrace",
     # sz-rust-frontend-codegen：`askama = ["dep:askama"]`，feature 门控模板渲染
     "askama",
-    # 根包 sz-rust：feature 聚合点（src/lib.rs 无代码，31 个成员依赖 optional 转发）
+    # 根包 sz-rust：feature 聚合点（src/lib.rs 无代码，25 个成员依赖 optional 转发）
     "sz-rust-addons-loader",
     "sz-rust-admin-ui",
     "sz-rust-ai-facade",
     "sz-rust-alert-engine",
     "sz-rust-api-gateway",
     "sz-rust-auth-facade",
-    "sz-rust-benchmark-suite",
     "sz-rust-codegen-ui",
     "sz-rust-config-center",
     "sz-rust-data-mask",
     "sz-rust-distributed-tx",
     "sz-rust-frontend-codegen",
     "sz-rust-http-facade",
-    "sz-rust-i18n",
     "sz-rust-key-rotation",
-    "sz-rust-log-aggregator",
     "sz-rust-marketplace",
     "sz-rust-monitor-panel",
     "sz-rust-observability",
     "sz-rust-orm-facade",
-    "sz-rust-pipeline",
-    "sz-rust-plugin-sdk",
     "sz-rust-rag",
     "sz-rust-security-headers",
     "sz-rust-service-registry",
@@ -592,11 +564,10 @@ ignored = [
     "sz-rust-visual",
     "sz-rust-wasm",
     "sz-rust-websocket",
-    "sz-rust-zerocopy",
 ]
 
 # 同上白名单的 package 级副本：machete 对根包自身分析时不读 workspace 级
-# （向上搜索 workspace 清单不含根目录），根包 31 条转发依赖必须在此豁免。
+# （向上搜索 workspace 清单不含根目录），根包 25 条转发依赖必须在此豁免。
 [package.metadata.cargo-machete]
 ignored = [
     "sz-rust-addons-loader",
@@ -605,22 +576,17 @@ ignored = [
     "sz-rust-alert-engine",
     "sz-rust-api-gateway",
     "sz-rust-auth-facade",
-    "sz-rust-benchmark-suite",
     "sz-rust-codegen-ui",
     "sz-rust-config-center",
     "sz-rust-data-mask",
     "sz-rust-distributed-tx",
     "sz-rust-frontend-codegen",
     "sz-rust-http-facade",
-    "sz-rust-i18n",
     "sz-rust-key-rotation",
-    "sz-rust-log-aggregator",
     "sz-rust-marketplace",
     "sz-rust-monitor-panel",
     "sz-rust-observability",
     "sz-rust-orm-facade",
-    "sz-rust-pipeline",
-    "sz-rust-plugin-sdk",
     "sz-rust-rag",
     "sz-rust-security-headers",
     "sz-rust-service-registry",
@@ -629,5 +595,4 @@ ignored = [
     "sz-rust-visual",
     "sz-rust-wasm",
     "sz-rust-websocket",
-    "sz-rust-zerocopy",
 ]

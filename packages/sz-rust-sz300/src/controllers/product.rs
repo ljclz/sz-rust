@@ -323,3 +323,206 @@ pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Respon
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     ProductController::delete(&state, req).await
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth_middleware::CurrentUser;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {
+        CurrentUser {
+            user_id: 1,
+            username: "tester".to_string(),
+            merchant_id,
+            is_admin,
+        }
+    }
+
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn json_request_with_user(uri: &str, body: &str, u: CurrentUser) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .extension(u)
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// list 无认证 → 401
+    #[tokio::test]
+    async fn list_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/product/list", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证应返回 401, 实际: {body}"
+        );
+    }
+
+    /// list 有认证但 fake pool 不可达 → render_error
+    #[tokio::test]
+    async fn list_with_auth_fake_pool_returns_error_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request_with_user(
+                "/api/v1/product/list",
+                "{}",
+                user(false, Some(9)),
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "fake pool 不可达应返回 code:0, 实际: {body}"
+        );
+    }
+
+    /// info 缺少 good_id → render_error
+    #[tokio::test]
+    async fn info_missing_good_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/product/info", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("good_id") && body.contains("\"code\":0"),
+            "缺少 good_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// create 无认证 → 401（需传非空 name 才能越过名称检查到达 IDOR 检查）
+    #[tokio::test]
+    async fn create_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/create", post(create))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/product/create",
+                r#"{"name": "test"}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证创建应返回 401, 实际: {body}"
+        );
+    }
+
+    /// create 空商品名称 → render_error "商品名称不能为空"
+    #[tokio::test]
+    async fn create_empty_name_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/create", post(create))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/product/create",
+            r#"{"name": "  "}"#,
+            user(false, Some(9)),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("商品名称不能为空"),
+            "空商品名称应返回错误, 实际: {body}"
+        );
+    }
+
+    /// create 非管理员无商户归属 → 403
+    #[tokio::test]
+    async fn create_non_admin_no_merchant_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/create", post(create))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/product/create",
+            r#"{"name": "apple"}"#,
+            user(false, None),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权创建商品") && body.contains("\"code\":403"),
+            "非管理员无商户应返回 403, 实际: {body}"
+        );
+    }
+
+    /// update 缺少 good_id → render_error
+    #[tokio::test]
+    async fn update_missing_good_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/update", post(update))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/product/update", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("good_id") && body.contains("\"code\":0"),
+            "缺少 good_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// delete 缺少 good_id → render_error
+    #[tokio::test]
+    async fn delete_missing_good_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/product/delete", post(delete))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/product/delete", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("good_id") && body.contains("\"code\":0"),
+            "缺少 good_id 应返回错误, 实际: {body}"
+        );
+    }
+}

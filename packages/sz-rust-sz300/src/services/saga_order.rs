@@ -831,32 +831,28 @@ mod tests {
             order_id: 42,
             tx_id: "saga-1".into(),
         };
-        match success {
-            OrderCreateResult::Success { order_id, .. } => assert_eq!(order_id, 42),
-            _ => panic!("应为 Success"),
-        }
+        let OrderCreateResult::Success { order_id, .. } = success else {
+            panic!("应为 Success")
+        };
+        assert_eq!(order_id, 42);
 
         let compensated = OrderCreateResult::Compensated {
             tx_id: "saga-2".into(),
             failed_step: "deduct_stock".into(),
         };
-        match compensated {
-            OrderCreateResult::Compensated { failed_step, .. } => {
-                assert_eq!(failed_step, "deduct_stock")
-            }
-            _ => panic!("应为 Compensated"),
-        }
+        let OrderCreateResult::Compensated { failed_step, .. } = compensated else {
+            panic!("应为 Compensated")
+        };
+        assert_eq!(failed_step, "deduct_stock");
 
         let manual = OrderCreateResult::ManualIntervention {
             tx_id: "saga-3".into(),
             failed_step: "initiate_payment".into(),
         };
-        match manual {
-            OrderCreateResult::ManualIntervention { failed_step, .. } => {
-                assert_eq!(failed_step, "initiate_payment")
-            }
-            _ => panic!("应为 ManualIntervention"),
-        }
+        let OrderCreateResult::ManualIntervention { failed_step, .. } = manual else {
+            panic!("应为 ManualIntervention")
+        };
+        assert_eq!(failed_step, "initiate_payment");
     }
 
     #[test]

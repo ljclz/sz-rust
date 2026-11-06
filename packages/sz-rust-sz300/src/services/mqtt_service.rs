@@ -441,4 +441,95 @@ mod tests {
     // 注：MockMqttPlugin::start 需要 AppState（含 db_pool），无法纯逻辑测试；
     // handle_device_status/order/log 需要 DB 连接，已有 #[ignore] 集成测试覆盖
     // （见 tests/service_coverage_test.rs），此处不重复。
+
+    // ─────────────────────────────────────────────
+    // handle_device_status/order/log — fake pool 不可达 → acquire_cancel_safe 失败 → Err
+    // 覆盖错误映射路径（"服务暂时不可用"）
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn handle_device_status_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({
+            "status": 1,
+            "signal_strength": -60,
+            "fw_version": "1.0.0"
+        });
+        let result = MqttMessageHandler::handle_device_status(&state, "SN-001", &payload).await;
+        assert!(result.is_err(), "fake pool 不可达应返回 Err");
+        assert_eq!(
+            result.unwrap_err(),
+            "服务暂时不可用",
+            "acquire 失败应映射为 '服务暂时不可用'"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_device_status_minimal_payload_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        // 缺少所有字段的 payload — unwrap_or 默认值路径 + acquire 失败
+        let payload = serde_json::json!({});
+        let result = MqttMessageHandler::handle_device_status(&state, "", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    #[tokio::test]
+    async fn handle_device_order_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({
+            "offline_seq": "SEQ-001",
+            "total_fen": 100,
+            "items": [{"good_id": 1, "price_fen": 100, "quantity": 1}]
+        });
+        let result = MqttMessageHandler::handle_device_order(&state, "SN-001", &payload).await;
+        assert!(result.is_err(), "fake pool 不可达应返回 Err");
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    #[tokio::test]
+    async fn handle_device_order_empty_offline_seq_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        // offline_seq 为空 — 跳过幂等检查路径，但仍需 acquire → Err
+        let payload = serde_json::json!({
+            "total_fen": 200,
+            "items": []
+        });
+        let result = MqttMessageHandler::handle_device_order(&state, "SN-002", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    #[tokio::test]
+    async fn handle_device_log_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        let payload = serde_json::json!({
+            "level": "error",
+            "message": "设备启动失败"
+        });
+        let result = MqttMessageHandler::handle_device_log(&state, "SN-001", &payload).await;
+        assert!(result.is_err(), "fake pool 不可达应返回 Err");
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    #[tokio::test]
+    async fn handle_device_log_default_level_fake_pool_returns_err() {
+        let state = crate::state::mock_app_state();
+        // 缺少 level/message — unwrap_or 默认值路径 + acquire 失败
+        let payload = serde_json::json!({});
+        let result = MqttMessageHandler::handle_device_log(&state, "SN-003", &payload).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "服务暂时不可用");
+    }
+
+    // ─────────────────────────────────────────────
+    // MockMqttPlugin::start — 不接触 DB，仅打印日志，应返回 Ok
+    // ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn mock_mqtt_plugin_start_returns_ok() {
+        let state = crate::state::mock_app_state();
+        let result = MockMqttPlugin::start(state).await;
+        assert!(result.is_ok(), "MockMqttPlugin::start 应返回 Ok: {:?}", result);
+    }
 }

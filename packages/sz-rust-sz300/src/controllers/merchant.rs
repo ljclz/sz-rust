@@ -316,3 +316,223 @@ pub async fn update(State(state): State<AppState>, req: Request<Body>) -> Respon
 pub async fn delete(State(state): State<AppState>, req: Request<Body>) -> Response {
     MerchantController::delete(&state, req).await
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth_middleware::CurrentUser;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {
+        CurrentUser {
+            user_id: 1,
+            username: "tester".to_string(),
+            merchant_id,
+            is_admin,
+        }
+    }
+
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn json_request_with_user(uri: &str, body: &str, u: CurrentUser) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .extension(u)
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// list 无认证 → 401
+    #[tokio::test]
+    async fn list_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/merchant/list", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证应返回 401, 实际: {body}"
+        );
+    }
+
+    /// list 有认证但 fake pool 不可达 → render_error
+    #[tokio::test]
+    async fn list_with_auth_fake_pool_returns_error_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request_with_user(
+                "/api/v1/merchant/list",
+                "{}",
+                user(false, Some(9)),
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "fake pool 不可达应返回 code:0, 实际: {body}"
+        );
+    }
+
+    /// info 缺少 merchant_id → render_error
+    #[tokio::test]
+    async fn info_missing_merchant_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/merchant/info", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("merchant_id") && body.contains("\"code\":0"),
+            "缺少 merchant_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// create 非管理员 → 403 "无权限创建商户"（在 post_data 之前拦截）
+    #[tokio::test]
+    async fn create_non_admin_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/create", post(create))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/merchant/create",
+            r#"{"name": "test"}"#,
+            user(false, Some(9)),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权限创建商户") && body.contains("\"code\":403"),
+            "非管理员创建商户应返回 403, 实际: {body}"
+        );
+    }
+
+    /// create 无认证 → 403（can_create_merchant_from_user(None) = false）
+    #[tokio::test]
+    async fn create_no_auth_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/create", post(create))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/merchant/create", r#"{"name": "test"}"#))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权限创建商户") && body.contains("\"code\":403"),
+            "无认证创建商户应返回 403, 实际: {body}"
+        );
+    }
+
+    /// update 缺少 merchant_id → render_error
+    #[tokio::test]
+    async fn update_missing_merchant_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/update", post(update))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/merchant/update", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("merchant_id") && body.contains("\"code\":0"),
+            "缺少 merchant_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// update 非管理员且 merchant_id 不匹配 → 403
+    #[tokio::test]
+    async fn update_non_admin_wrong_merchant_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/update", post(update))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/merchant/update",
+            r#"{"merchant_id": 42}"#,
+            user(false, Some(9)),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权更新该商户") && body.contains("\"code\":403"),
+            "非管理员更新他商户应返回 403, 实际: {body}"
+        );
+    }
+
+    /// delete 缺少 merchant_id → render_error
+    #[tokio::test]
+    async fn delete_missing_merchant_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/delete", post(delete))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/merchant/delete", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("merchant_id") && body.contains("\"code\":0"),
+            "缺少 merchant_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// delete 非管理员且 merchant_id 不匹配 → 403
+    #[tokio::test]
+    async fn delete_non_admin_wrong_merchant_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/merchant/delete", post(delete))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/merchant/delete",
+            r#"{"merchant_id": 42}"#,
+            user(false, Some(9)),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权删除该商户") && body.contains("\"code\":403"),
+            "非管理员删除他商户应返回 403, 实际: {body}"
+        );
+    }
+}

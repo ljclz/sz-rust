@@ -301,3 +301,175 @@ pub async fn info(State(state): State<AppState>, req: Request<Body>) -> Response
 pub async fn create(State(state): State<AppState>, req: Request<Body>) -> Response {
     OrderController::create(&state, req).await
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth_middleware::CurrentUser;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {
+        CurrentUser {
+            user_id: 1,
+            username: "tester".to_string(),
+            merchant_id,
+            is_admin,
+        }
+    }
+
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// list 无认证用户 → effective_merchant_scope_from_user 返回 (None,false) → 401
+    #[tokio::test]
+    async fn list_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/order/list", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证应返回 code:401 未认证, 实际: {body}"
+        );
+    }
+
+    /// list 有认证用户但 fake pool 不可达 → OrderService::list 返回 Err → render_error
+    #[tokio::test]
+    async fn list_with_auth_fake_pool_returns_error_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/list", post(list))
+            .with_state(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/order/list")
+            .header("content-type", "application/json")
+            .extension(user(false, Some(9)))
+            .body(Body::from("{}".to_string()))
+            .unwrap();
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "fake pool 不可达应返回 code:0 错误信封, 实际: {body}"
+        );
+    }
+
+    /// info 缺少 order_id → render_error "invalid order_id"（i18n 本地化）
+    #[tokio::test]
+    async fn info_missing_order_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/order/info", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "缺少 order_id 应返回 code:0 错误, 实际: {body}"
+        );
+    }
+
+    /// info order_id 无效（<=0）→ render_error
+    #[tokio::test]
+    async fn info_invalid_order_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/order/info", r#"{"order_id": 0}"#))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "order_id=0 应返回 code:0 错误, 实际: {body}"
+        );
+    }
+
+    /// create 无认证 → 401
+    #[tokio::test]
+    async fn create_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/create", post(create))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/order/create", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证创建应返回 401, 实际: {body}"
+        );
+    }
+
+    /// create 非管理员且 merchant_id=None → 403 "无权下单"
+    #[tokio::test]
+    async fn create_non_admin_no_merchant_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/create", post(create))
+            .with_state(state);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/order/create")
+            .header("content-type", "application/json")
+            .extension(user(false, None))
+            .body(Body::from("{}".to_string()))
+            .unwrap();
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权下单") && body.contains("\"code\":403"),
+            "非管理员无商户归属应返回 403 无权下单, 实际: {body}"
+        );
+    }
+
+    /// post_data 解析失败（非法 JSON）→ render_error
+    #[tokio::test]
+    async fn list_invalid_json_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/order/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/order/list", "{not json"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "非法 JSON 应返回 code:0 错误, 实际: {body}"
+        );
+    }
+}

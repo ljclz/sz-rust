@@ -102,7 +102,7 @@ jobs:
             sz-rust-workflow \
             sz-rust-rag \
             sz-rust-wasm \
-            sz-rust-vector-db \
+
             sz-rust-frontend-codegen \
             sz-rust-mcp \
             sz-rust-cli; do

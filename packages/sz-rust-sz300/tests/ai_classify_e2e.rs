@@ -110,19 +110,17 @@ async fn test_rule2_manual_override_preserved() {
     };
     let result = classifier.classify(&req).await.unwrap();
     let decision = classifier.decide(result, Some((7, 100)));
-    match decision {
-        ClassificationDecision::ManualOverride {
-            original,
-            overridden_to,
-            overridden_by,
-            ..
-        } => {
-            assert_eq!(original, 3);
-            assert_eq!(overridden_to, 7);
-            assert_eq!(overridden_by, 100);
-        }
-        _ => panic!("期望 ManualOverride"),
-    }
+    let ClassificationDecision::ManualOverride {
+        original,
+        overridden_to,
+        overridden_by,
+        ..
+    } = decision else {
+        panic!("期望 ManualOverride")
+    };
+    assert_eq!(original, 3);
+    assert_eq!(overridden_to, 7);
+    assert_eq!(overridden_by, 100);
 }
 
 #[tokio::test]

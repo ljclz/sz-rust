@@ -1134,7 +1134,7 @@ mod tests {
         let blacklist: Arc<dyn TokenBlacklist> = Arc::new(MemoryTokenBlacklist::new());
         let store: Arc<dyn RefreshTokenStore> = Arc::new(MemoryRefreshTokenStore::new());
         let config = RefreshTokenConfig {
-            access_token_ttl: chrono::Duration::seconds(60),
+            access_token_ttl: chrono::Duration::seconds(10),
             refresh_token_ttl: chrono::Duration::seconds(3600),
             issuer: "sz-rust-sso".to_string(),
         };
@@ -1155,9 +1155,9 @@ mod tests {
         let mut sso = SsoService::new(issuer, verifier, revoker, user_auth);
         sso.with_renewal_config(RenewalConfig {
             enabled: true,
-            renewal_threshold: chrono::Duration::seconds(30),
+            renewal_threshold: chrono::Duration::seconds(5),
             renewal_ratio: 0.2,
-            access_token_ttl: chrono::Duration::seconds(60),
+            access_token_ttl: chrono::Duration::seconds(10),
         });
         sso
     }
@@ -1176,7 +1176,7 @@ mod tests {
         let sso = make_sso_service_with_short_ttl();
         let login_resp = sso.login("user1", "pass1").await.unwrap();
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
 
         let (claims, renewed) = sso
             .validate_with_renewal(&login_resp.tokens.access_token)
@@ -1254,7 +1254,7 @@ mod tests {
         let sso = make_sso_service_with_short_ttl();
         let login_resp = sso.login("user1", "pass1").await.unwrap();
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(35)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
 
         let (claims, renewed) = sso
             .validate_with_renewal(&login_resp.tokens.access_token)

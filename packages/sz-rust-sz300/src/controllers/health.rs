@@ -312,3 +312,135 @@ mod metrics_auth_tests {
         }
     }
 }
+#[cfg(test)]
+mod handler_tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::body::Body;
+    use axum::http::Request;
+    use axum::response::Response;
+    use axum::routing::get;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    /// check（liveness）应始终返回 200 + code:1
+    #[tokio::test]
+    async fn check_returns_200_with_success_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/health", get(check))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health")
+                    .body(Body::default())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":1") && body.contains("ok"),
+            "check 应返回 code:1 ok, 实际: {body}"
+        );
+    }
+
+    /// readiness 对 fake pool（不可达）应返回 503 + code:0
+    /// ping_db 对不可达 pool 有界返回 false（3s 超时预算）
+    #[tokio::test]
+    async fn readiness_fake_pool_returns_503() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/health/ready", get(readiness))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health/ready")
+                    .body(Body::default())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake pool 不可达应返回 503"
+        );
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0") && body.contains("not ready"),
+            "readiness 应返回 code:0 not ready, 实际: {body}"
+        );
+    }
+
+    /// startup 应返回 200 或 503（取决于 metrics_registry 是否为空）
+    #[tokio::test]
+    async fn startup_returns_valid_status() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/health/startup", get(startup))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/health/startup")
+                    .body(Body::default())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        assert!(
+            status == StatusCode::OK || status == StatusCode::SERVICE_UNAVAILABLE,
+            "startup 应返回 200 或 503, 实际: {status}"
+        );
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0") || body.contains("\"code\":1"),
+            "startup 应返回有效信封, 实际: {body}"
+        );
+    }
+
+    /// metrics 端点：mock_app_state metrics_public=true，无 token → 允许访问
+    #[tokio::test]
+    async fn metrics_public_access_returns_200() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/metrics", get(metrics))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/metrics")
+                    .body(Body::default())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_string(response).await;
+        assert!(
+            body.contains("sz300_db_pool_") || body.is_empty(),
+            "metrics 应返回 Prometheus 文本, 实际长度: {}",
+            body.len()
+        );
+    }
+}

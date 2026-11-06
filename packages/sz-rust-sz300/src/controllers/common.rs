@@ -189,11 +189,10 @@ mod tests {
         let data = json!({"name": "apple", "barcode": "123456"});
         let fields = extract_fields_by_whitelist(&data, &["name", "barcode"]);
         assert_eq!(fields.len(), 2);
-        if let Some(Value::String(s)) = fields.get("name") {
-            assert_eq!(s, "apple");
-        } else {
-            panic!("name should be String");
-        }
+        let Some(Value::String(s)) = fields.get("name") else {
+            panic!("name should be String")
+        };
+        assert_eq!(s, "apple");
     }
 
     #[test]
@@ -248,11 +247,10 @@ mod tests {
         let data = json!({"weight": 1.5});
         let fields = extract_fields_by_whitelist(&data, &["weight"]);
         assert_eq!(fields.len(), 1);
-        if let Some(Value::F64(f)) = fields.get("weight") {
-            assert!((f - 1.5).abs() < 0.001);
-        } else {
-            panic!("weight should be F64");
-        }
+        let Some(Value::F64(f)) = fields.get("weight") else {
+            panic!("weight should be F64")
+        };
+        assert!((f - 1.5).abs() < 0.001);
     }
 
     fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {

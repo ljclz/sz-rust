@@ -200,13 +200,7 @@ jobs:
         # 消除主业务应用覆盖盲区（SDET P1-1 残留）。
         run: |
           cargo llvm-cov \
-            -p sz-rust-i18n \
-            -p sz-rust-plugin-sdk \
-            -p sz-rust-pipeline \
-            -p sz-rust-zerocopy \
-            -p sz-rust-benchmark-suite \
             -p sz-rust-alert-engine \
-            -p sz-rust-log-aggregator \
             -p sz-rust-data-mask \
             -p sz-rust-key-rotation \
             -p sz-rust-security-headers \

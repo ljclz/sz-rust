@@ -296,16 +296,14 @@ mod tests {
             confidence: 0.9,
         };
         let decision = classifier.decide(result, None);
-        match decision {
-            ClassificationDecision::AutoAdopt {
-                category_id,
-                confidence,
-            } => {
-                assert_eq!(category_id, 1);
-                assert!((confidence - 0.9).abs() < 0.001);
-            }
-            _ => panic!("期望 AutoAdopt"),
-        }
+        let ClassificationDecision::AutoAdopt {
+            category_id,
+            confidence,
+        } = decision else {
+            panic!("期望 AutoAdopt")
+        };
+        assert_eq!(category_id, 1);
+        assert!((confidence - 0.9).abs() < 0.001);
     }
 
     #[test]
@@ -317,13 +315,11 @@ mod tests {
             confidence: 0.6,
         };
         let decision = classifier.decide(result, None);
-        match decision {
-            ClassificationDecision::PendingManual { suggestion } => {
-                assert_eq!(suggestion.category_id, 1);
-                assert!((suggestion.confidence - 0.6).abs() < 0.001);
-            }
-            _ => panic!("期望 PendingManual"),
-        }
+        let ClassificationDecision::PendingManual { suggestion } = decision else {
+            panic!("期望 PendingManual")
+        };
+        assert_eq!(suggestion.category_id, 1);
+        assert!((suggestion.confidence - 0.6).abs() < 0.001);
     }
 
     #[test]
@@ -335,19 +331,17 @@ mod tests {
             confidence: 0.9,
         };
         let decision = classifier.decide(result, Some((2, 100)));
-        match decision {
-            ClassificationDecision::ManualOverride {
-                original,
-                overridden_to,
-                overridden_by,
-                ..
-            } => {
-                assert_eq!(original, 1);
-                assert_eq!(overridden_to, 2);
-                assert_eq!(overridden_by, 100);
-            }
-            _ => panic!("期望 ManualOverride"),
-        }
+        let ClassificationDecision::ManualOverride {
+            original,
+            overridden_to,
+            overridden_by,
+            ..
+        } = decision else {
+            panic!("期望 ManualOverride")
+        };
+        assert_eq!(original, 1);
+        assert_eq!(overridden_to, 2);
+        assert_eq!(overridden_by, 100);
     }
 
     #[test]
@@ -381,10 +375,10 @@ mod tests {
         };
         let result = classifier.classify(&req).await;
         assert!(result.is_err());
-        match result.unwrap_err() {
-            AiError::ServiceError(msg) => assert!(msg.contains("mock error")),
-            _ => panic!("期望 ServiceError"),
-        }
+        let AiError::ServiceError(msg) = result.unwrap_err() else {
+            panic!("期望 ServiceError")
+        };
+        assert!(msg.contains("mock error"));
     }
 
     #[tokio::test]

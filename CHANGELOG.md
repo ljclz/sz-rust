@@ -7,6 +7,38 @@
 
 ## [Unreleased]
 
+### Added — sz300 覆盖率提升第四批（55.87%→66.00%，2026-11-06）
+
+> 来源：覆盖率提升第三批（DB-2026-11-06-14）后续，针对 sz300 剩余低覆盖区域（controllers/ 各文件 0%、mqtt_service.rs 35.73%、file_service.rs 57.08%）补 59 个纯逻辑/fake pool/mock 单元测试，lib only 行覆盖率 55.87%→66.00%（+10.13pp，超 60% 目标），378 passed/0 failed。
+
+- **controllers/order.rs**（0%→非零）：+7 测试，fake pool 覆盖 list/info/create 的 401 未登录/403 IDOR 越权/参数缺失/fake pool acquire 失败路径。
+- **controllers/product.rs**（0%→非零）：+8 测试，fake pool 覆盖 list/info/create/update/delete 的 401/403/参数缺失/fake pool 路径。
+- **controllers/device.rs**（0%→非零）：+10 测试，fake pool 覆盖 list/info/bind/unbind/trigger_ota/status_report 的 401/403/参数缺失/fake pool 路径。
+- **controllers/merchant.rs**（0%→非零）：+9 测试，fake pool 覆盖 list/info/create/update/delete 的 401/403/参数缺失/fake pool 路径。
+- **controllers/file.rs**（0%→非零）：+8 测试，base64_decode 纯逻辑 4 个（合法/非法 base64/空/非 UTF-8）+ upload handler 参数解析 4 个（缺 file/缺 name/合法/非法 base64）。
+- **controllers/health.rs**（0%→非零）：+4 测试，check/readiness/startup/metrics handler 路由 oneshot 调用。
+- **services/mqtt_service.rs**（35.73%→71.40%）：+7 测试，handle_device_status/order/log fake pool 错误路径 6 个 + MockMqttPlugin::start 1 个。
+- **services/file_service.rs**（57.08%→89.71%）：+6 测试，delete 错误路径 4 个（路径遍历/空 ID/DB 错误/文件不存在）+ save 成功路径 2 个（CWD_MUTEX 串行化避免 set_current_dir 并行干扰）。
+- **验证**：`cargo test -p sz-rust-sz300 --lib` = 378 passed/0 failed（+59 新测试）；`cargo llvm-cov -p sz-rust-sz300 --lib --summary-only` TOTAL 14814 行 5043 未覆盖 **66.00%**（前 55.87%）；`doc-code-consistency.js` 0 ERROR / 71 WARN（不阻塞，已知历史引用）；`link-check.js` OK。
+
+### Fixed — MySQL 3306 连接排查闭环：Docker Desktop com.docker.backend 挂起（DB-2026-11-06-13，2026-11-06，非代码缺陷）
+
+> 来源：全栈工程师复评（`docs/audit/2026-11-06-全栈工程师复评报告.md`）DB 集成测试阶段 8 个 MySQL 测试失败。经排查根因定位为 Docker Desktop 基础设施问题，非代码缺陷，本条目仅作排查报告留档与欠债闭环登记，**不涉及任何代码/配置/测试变更**。
+
+- **现象**：全栈复评 MySQL 3306 连接超时，8 个 MySQL 集成测试 0/8 通过（`Lost connection to MySQL server during query` / pool timed out）；Oracle 23.26.3.0.0 ✅ 与 PG 18.4 ✅ 均正常。
+- **根因**：Docker Desktop `com.docker.backend` 代理进程（PID 16940，`D:\Docker\resources\com.docker.backend.exe`，2026/11/2 启动，已运行 4 天）挂起。3306 端口监听者为 Docker 代理而非 mysqld（mysqld PID 2264/12548 独立存在）；9 个 CloseWait 连接堆积（句柄泄漏）；`docker ps -a` / `docker version` 均超时证实 Docker daemon 整体挂起。
+- **非代码缺陷声明**：sz-rust 仓库无代码/配置/测试变更；基线时 MySQL 3306 可用（全栈复跑提示词附录记载 8.0.29 @ 8802 shop/shop + 3306 root/staging-pw），本次失败由运行环境退化引起。
+- **解决方案**：重启 Docker Desktop（`Restart-Service com.docker.service` 或 GUI 重启）→ 验证 `docker ps -a` 秒级返回 + `cargo test -p sz-rust-sz300 --test db_integration_test -- --ignored` MySQL 8/8 通过。长期建议：原生 MySQL 服务替代 Docker MySQL / 定期重启 Docker Desktop。
+- **闭环登记**：新增 `docs/audit/2026-11-06-MySQL连接排查报告.md`（7 条证据闭环：TCP 可连 → 监听者识别 → CloseWait 堆积 → daemon 挂起 → 累积时长 → 基线对照）；`docs/audit/doc-debt.md` DB-2026-11-06-13 状态 PENDING → RESOLVED；`docs/audit/README.md` 索引新增条目 + doc-debt 计数口径更新 37 RESOLVED + 13 PENDING。
+
+### Changed — ADR-053 方案 B 阶段1：删除 8 个极薄孤儿包（2026-11-06）
+
+> 来源：[ADR-053](docs/adr/0053-包碎片化架构债评估.md) 方案 B 阶段1。删除 8 个无消费者、< 600 行的极薄孤儿包，workspace 成员包 65 → 57。
+
+- **删除的包**：`sz-rust-zerocopy`（419 行）、`sz-rust-log-aggregator`（472 行）、`sz-rust-benchmark-suite`（533 行）、`sz-rust-pipeline`（890 行）、`sz-rust-plugin-sdk`（535 行）、`sz-rust-i18n`（956 行）、`sz-rust-vector-db`（515 行）、`sz-rust-codegen-loop`（1828 行）。
+- **根 Cargo.toml 修改**：从 `[workspace] members` 移除 8 个路径条目；从 `[workspace.dependencies]` 移除 8 个 path 依赖；从 `[features]` 移除 6 个 feature gate（plugin-i18n/plugin-sdk/perf-pipeline/perf-zerocopy/perf-benchmark/obs-log-aggregator）+ 更新 3 个聚合 feature（d1-plugin-ecosystem/d2-performance/d3-observability）；从 `[dependencies]` 移除 6 个 optional 依赖；从 cargo-machete 白名单移除 6 个条目（31 → 25）。
+- **验证**：`cargo check --workspace` 通过；`cargo test -p sz-rust-sz300 --lib` 通过；`doc-code-consistency.js` 0 ERROR；`link-check.js` OK。
+
 ### Added — sz300 覆盖率提升第三批（49.65%→55.87%，DB-2026-11-06-14，2026-11-06）
 
 > 来源：全栈工程师复评 P2 欠债 DB-2026-11-06-14（sz300 lib 覆盖率 41.82%→50%+）。本批针对 5 个低覆盖文件补 50 个纯逻辑/fake pool 单元测试，lib only 行覆盖率 49.65%→55.87%（+6.22pp，超 55% 目标），319 passed/0 failed。

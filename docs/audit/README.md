@@ -52,7 +52,8 @@
 | [2026-11-06-产品经理复评-红队复核回执.md](2026-11-06-产品经理复评-红队复核回执.md) | 2026-11-06 | **产品经理复评-红队复核回执**：独立复核（复核员 ≠ 报告作者 ≠ 整改实施者）确认 52/55 证据一致（3 处偏差已订正：PMF 证据口径 / 路线图时间线引用 / 商业化章节定位），4 P0 + 5 P1 + 4 P2 分级成立、8 假设待验证标注准确，报告可信，可登记入档 |
 | [2026-11-06-全栈工程师复评报告.md](2026-11-06-全栈工程师复评报告.md) | 2026-11-06 | **全栈工程师复评报告**：综合评分 A，sz300 lib 118→269 passed（+151），cargo check 0 error，clippy 0 warning，security_gauntlet 26 passed，Oracle 23.26.3.0.0 ✅，PG 18.4 ✅，MySQL 3306 连接超时（环境阻塞），DB 集成测试 2 passed/8 failed（PG 2/2 通过，MySQL 0/8 环境阻塞），link-check PASS |
 | [2026-11-06-全栈工程师复评-红队复核回执.md](2026-11-06-全栈工程师复评-红队复核回执.md) | 2026-11-06 | **全栈工程师复评-红队复核回执**：独立复核（复核员 ≠ 报告作者 ≠ 整改实施者）7 项核验 6 项通过，link-check 幻影已修正，报告可信，可登记入档 |
-| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（36 RESOLVED + 0 PARTIAL + 14 PENDING，2026-11-06 全栈/SDET/架构师/技术文档/PM 复评口径） |
+| [2026-11-06-MySQL连接排查报告.md](2026-11-06-MySQL连接排查报告.md) | 2026-11-06 | **MySQL 3306 连接排查报告**：全栈复评 8 个 MySQL 集成测试失败根因定位——Docker Desktop `com.docker.backend` 代理进程（PID 16940）挂起，3306 端口监听者为 Docker 代理非 mysqld，9 个 CloseWait 连接堆积（句柄泄漏），`docker ps -a` 超时证实 daemon 整体挂起，代理已运行 4 天。**非代码缺陷**，解决方案为重启 Docker Desktop。7 条证据闭环，DB-2026-11-06-13 RESOLVED |
+| [doc-debt.md](doc-debt.md) | 持续更新 | 文档欠债追踪（37 RESOLVED + 0 PARTIAL + 13 PENDING，2026-11-06 全栈/SDET/架构师/技术文档/PM 复评口径，DB-2026-11-06-13 MySQL 排查闭环） |
 | [coverage-priority.json](coverage-priority.json) | 持续更新 | 覆盖率优先级状态 |
 
 ---

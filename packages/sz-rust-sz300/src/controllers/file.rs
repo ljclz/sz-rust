@@ -224,3 +224,152 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .decode(b64)
         .map_err(|e| format!("base64 解码失败: {}", e))
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    // ─────────────────────────────────────────────
+    // base64_decode 纯逻辑
+    // ─────────────────────────────────────────────
+
+    /// base64_decode 应正确解码标准 base64
+    #[test]
+    fn base64_decode_standard_input() {
+        let result = base64_decode("aGVsbG8=").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    /// base64_decode 应兼容 data: URL 前缀（逗号后取 base64 部分）
+    #[test]
+    fn base64_decode_strips_data_url_prefix() {
+        let result = base64_decode("data:image/png;base64,aGVsbG8=").unwrap();
+        assert_eq!(result, b"hello");
+    }
+
+    /// base64_decode 对无效输入应返回 Err
+    #[test]
+    fn base64_decode_invalid_input_returns_err() {
+        let result = base64_decode("!!!not-base64!!!");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("base64 解码失败"),
+            "应返回 base64 解码失败错误"
+        );
+    }
+
+    /// base64_decode 空字符串应返回空 Vec
+    #[test]
+    fn base64_decode_empty_returns_empty_vec() {
+        let result = base64_decode("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    // ─────────────────────────────────────────────
+    // upload handler 参数解析路径
+    // ─────────────────────────────────────────────
+
+    /// upload 空文件数据 → render_error "文件数据不能为空"
+    #[tokio::test]
+    async fn upload_empty_file_data_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/file/upload",
+                r#"{"filename": "test.jpg", "file": ""}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("文件数据不能为空"),
+            "空文件数据应返回错误, 实际: {body}"
+        );
+    }
+
+    /// upload 缺少 file 字段 → render_error "文件数据不能为空"
+    #[tokio::test]
+    async fn upload_missing_file_field_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/file/upload",
+                r#"{"filename": "test.jpg"}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("文件数据不能为空"),
+            "缺少 file 字段应返回错误, 实际: {body}"
+        );
+    }
+
+    /// upload 无效 base64 → render_error "base64 解码失败"
+    #[tokio::test]
+    async fn upload_invalid_base64_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/file/upload",
+                r#"{"filename": "test.jpg", "file": "!!!not-base64!!!"}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("base64 解码失败"),
+            "无效 base64 应返回解码失败, 实际: {body}"
+        );
+    }
+
+    /// upload 非法 JSON → render_error（post_data 解析失败）
+    #[tokio::test]
+    async fn upload_invalid_json_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/file/upload", post(upload))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/file/upload", "{not json"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "非法 JSON 应返回 code:0 错误, 实际: {body}"
+        );
+    }
+}

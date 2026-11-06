@@ -376,3 +376,243 @@ pub async fn trigger_ota(State(state): State<AppState>, req: Request<Body>) -> R
 pub async fn status_report(State(state): State<AppState>, req: Request<Body>) -> Response {
     DeviceController::status_report(&state, req).await
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth_middleware::CurrentUser;
+    use crate::state::mock_app_state;
+    use axum::routing::post;
+    use axum::Router;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    async fn body_string(response: Response) -> String {
+        let bytes = response
+            .into_body()
+            .collect()
+            .await
+            .expect("body collect")
+            .to_bytes();
+        String::from_utf8(bytes.to_vec()).expect("UTF-8")
+    }
+
+    fn user(is_admin: bool, merchant_id: Option<i64>) -> CurrentUser {
+        CurrentUser {
+            user_id: 1,
+            username: "tester".to_string(),
+            merchant_id,
+            is_admin,
+        }
+    }
+
+    fn json_request(uri: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn json_request_with_user(uri: &str, body: &str, u: CurrentUser) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .extension(u)
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// list 无认证 → 401
+    #[tokio::test]
+    async fn list_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/list", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证应返回 401, 实际: {body}"
+        );
+    }
+
+    /// list 有认证但 fake pool 不可达 → render_error
+    #[tokio::test]
+    async fn list_with_auth_fake_pool_returns_error_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/list", post(list))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request_with_user(
+                "/api/v1/device/list",
+                "{}",
+                user(false, Some(9)),
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("\"code\":0"),
+            "fake pool 不可达应返回 code:0, 实际: {body}"
+        );
+    }
+
+    /// info 缺少 device_id → render_error
+    #[tokio::test]
+    async fn info_missing_device_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/info", post(info))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/info", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("device_id") && body.contains("\"code\":0"),
+            "缺少 device_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// bind 缺少 device_sn → render_error
+    #[tokio::test]
+    async fn bind_missing_device_sn_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/bind", post(bind))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/bind", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("device_sn") && body.contains("\"code\":0"),
+            "缺少 device_sn 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// bind 无认证 → 401
+    #[tokio::test]
+    async fn bind_no_auth_returns_401_envelope() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/bind", post(bind))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/device/bind",
+                r#"{"device_sn": "SN001"}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("未认证") && body.contains("\"code\":401"),
+            "无认证绑定应返回 401, 实际: {body}"
+        );
+    }
+
+    /// bind 非管理员无商户归属 → 403
+    #[tokio::test]
+    async fn bind_non_admin_no_merchant_returns_403() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/bind", post(bind))
+            .with_state(state);
+        let req = json_request_with_user(
+            "/api/v1/device/bind",
+            r#"{"device_sn": "SN001"}"#,
+            user(false, None),
+        );
+        let response = router.oneshot(req).await.unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("无权绑定设备") && body.contains("\"code\":403"),
+            "非管理员无商户应返回 403, 实际: {body}"
+        );
+    }
+
+    /// unbind 缺少 device_id → render_error
+    #[tokio::test]
+    async fn unbind_missing_device_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/unbind", post(unbind))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/unbind", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("device_id") && body.contains("\"code\":0"),
+            "缺少 device_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// trigger_ota 缺少 device_id → render_error
+    #[tokio::test]
+    async fn trigger_ota_missing_device_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/ota", post(trigger_ota))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/ota", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("device_id") && body.contains("\"code\":0"),
+            "缺少 device_id 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// trigger_ota 缺少 ota_version → render_error
+    #[tokio::test]
+    async fn trigger_ota_missing_ota_version_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/ota", post(trigger_ota))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request(
+                "/api/v1/device/ota",
+                r#"{"device_id": 1}"#,
+            ))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("ota_version") && body.contains("\"code\":0"),
+            "缺少 ota_version 应返回错误, 实际: {body}"
+        );
+    }
+
+    /// status_report 缺少 device_id → render_error
+    #[tokio::test]
+    async fn status_report_missing_device_id_returns_error() {
+        let state = mock_app_state();
+        let router = Router::new()
+            .route("/api/v1/device/status", post(status_report))
+            .with_state(state);
+        let response = router
+            .oneshot(json_request("/api/v1/device/status", "{}"))
+            .await
+            .unwrap();
+        let body = body_string(response).await;
+        assert!(
+            body.contains("device_id") && body.contains("\"code\":0"),
+            "缺少 device_id 应返回错误, 实际: {body}"
+        );
+    }
+}
