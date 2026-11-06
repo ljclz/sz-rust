@@ -7,6 +7,41 @@
 
 ## [Unreleased]
 
+### Fixed — 产品文档欠债修复（DB-06/08/09/11/12，2026-11-06）
+
+> 来源：产品经理复评 + 技术文档复评发现的 5 条文档欠债（3 P0 + 2 P1）。本批为纯文档修复，不改任何代码。
+
+- **DB-06（P0）**：`docs/product-technical-plan.md:2140` 文档损坏修复——删除孤立 `!` 字符 + 清理重复的 P4-T1/T2/T3 损坏段落，P4 章节格式恢复正常。
+- **DB-09（P0）**：产品定位摇摆修复——`docs/product-technical-plan.md:35` 定位表述后加「定位口径」注，明确「Rust Web 框架（非低代码平台、非 SaaS 托管平台）+ 单一开源版本（ADR-043）」+ 与 README.md 一致性声明；三份核心文档（README/product-technical-plan/ADR-043）定位表述统一。
+- **DB-11（P0）**：路线图与进度不同步修复——`docs/product-technical-plan.md` Phase 4 标题加「🟡 部分完成（T1/T2 已于 2026-08-12 完成，T3 跳过-非编码任务）」；`docs/implementation-progress.md` P4-T3 状态由「□ 未开始」改为「⏭️ 跳过（非编码任务，2026-08-12）」与 product-technical-plan 一致。
+- **DB-12（P1）**：商业化路径文档矛盾修复——`docs/product-technical-plan.md` 第二章商业模式开头加 ADR-043 章节修订注，明确「分离战略已废除，商业化转向服务（技术支持订阅/TP6 迁移服务/安全合规报告/托管），不再卖代码」，本章保留作历史决策记录。
+- **DB-08（P1）**：企业版残留订正——`docs/product-technical-plan.md` 4 处「企业版」残留按 ADR-043 口径订正（P1-T2 标题加废除注 / sdd-agent + sz-plugin-migration 改「开源版，原企业版计划」 / 术语表「企业版」行标「已废除」）；ADR-043 本身历史描述保留。
+- **验证**：`link-check.js` OK（341 .md / 425 链接 0 broken）；`doc-code-consistency.js` 0 ERROR / 42 WARN（不阻塞，已知历史引用）；`docs/audit/doc-debt.md` DB-2026-11-06-06/08/09/11/12 状态改为 RESOLVED。
+
+### Fixed — UXR 复评 P2 欠债修复：WASM 端点版本前缀 + 信封 code 文档约定（2026-11-06，DB-2026-11-06-01 / DB-2026-11-06-02）
+
+> 来源：UXR 复评报告 `docs/audit/2026-11-06-UXR复评报告.md` 新引入 2 项 P2 欠债。本批闭合两项。
+
+- **DB-2026-11-06-01（P2）：WASM 端点缺 `/api/v1/` 版本前缀**：`packages/sz-rust-sz300/src/router.rs:125` 路由路径 `/api/wasm/execute` → `/api/v1/wasm/execute`，与同仓其他业务端点统一 `/api/v1/` 版本前缀。同步更新：`openapi.rs:328` OpenAPI 路径定义、`controllers/wasm_api.rs` 注释与测试 URI（2 处）、`schemas/openapi-sz300.json` 静态契约路径、`scripts/perf-baseline/run-hey.js` 性能基线脚本。历史文档（审计报告/ADR-044/CHANGELOG 旧条目）保留原路径作为历史记录。验证：`cargo test -p sz-rust-sz300 --lib` = **269 passed / 0 failed**。
+- **DB-2026-11-06-02（P2）：文档未说明 HTTP 200+信封 code 约定**：`schemas/openapi-sz300.json` `info.description` 补充信封 code 语义说明——HTTP 状态码表示传输层成功/失败（200=传输成功，4xx/5xx=传输失败）；信封体 `code` 字段表示业务层成功/失败（`code:1`=业务成功，`code:0`=业务失败）；HTTP 200 + `code:0` 不矛盾（HTTP 200 表示请求已到达并被处理，`code:0` 表示业务逻辑判定失败）。约定对齐 PHP ThinkPHP `renderJson`（`controller.rs:259` `render_json` / `:279` `render_success` code:1 / `:295` `render_error` code:0）。验证：JSON 有效，41 paths 不变。
+- **门禁验证**：`doc-code-consistency.js` exit 0（0 ERROR / 42 WARN 不阻塞）；`link-check.js` exit 0（419 相对链接 0 broken）。
+
+### Fixed — 文档欠债 DB-03/DB-04 修复：flaky test 根治 + ci-config-audit.js nextest/retries 防复发门禁（2026-11-06）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-11-06-03（P1，SDET 复评新引入）+ DB-2026-11-06-04（P2，SDET 复评新引入）。闭合 SDET 复评 2 项新引入欠债。
+
+- **DB-03（P1）flaky test `cold_start_with_existing_journal_skips` 根治**：`packages/sz-rust-rag/src/vectorize.rs:444-491` 原用 `env!("CARGO_MANIFEST_DIR").parent().parent()`（仓库根目录）作为 workspace，扫描所有 .rs 文件；workspace 全量跑时其他测试改动 .rs 文件使 chunk 行号漂移，第二次 cold_start 的 journal `(file_path, line_start, line_end)` key 对不上新 chunk，导致 `second.success > 0` 而 `assert_eq!(second.success, 0)` 非确定性失败。改用 `tempfile::tempdir()` 构造隔离 workspace（`packages/fake-crate/src/lib.rs` 固定 fixtures），不再扫描真实仓库根目录，chunk key 跨两次 cold_start 稳定一致。
+- **DB-04（P2）`ci-config-audit.js` nextest/retries 防复发门禁**：SDET P2-3 修复已引入 cargo-nextest + `--retries 2`（ci.yml:119-131 / release.yml:56-63），但防复发门禁脚本 `scripts/audit/ci-config-audit.js` 未覆盖该修复项。新增检查项 6：ci.yml / release.yml 的 test job 必须使用 `cargo nextest run` + `--retries 2` + nextest 安装步骤（`taiki-e/install-action@v2` 或 `cargo install cargo-nextest`）；回退为 `cargo test ... --jobs 1` 串行测试门禁视为 ERROR。
+- **验证**：`cargo test -p sz-rust-rag --lib` = 104 passed；`node scripts/audit/ci-config-audit.js` = exit 0（nextest/retries 检查全 OK）；`node scripts/audit/doc-code-consistency.js` = 0 ERROR；`node scripts/audit/link-check.js` = OK。
+
+### Fixed — 文档欠债 DB-05/DB-07 修复：SECURITY.md unsafe 如实标注 + CONTRIBUTING.md 版本号对齐（2026-11-06）
+
+> 来源：`docs/audit/doc-debt.md` DB-2026-11-06-05（P0，技术文档复评）+ DB-2026-11-06-07（P1，技术文档复评）。修复文档与代码事实矛盾，违反铁律 24 文档-代码一致性。
+
+- **DB-05（P0）SECURITY.md unsafe 虚假声明**：原 `SECURITY.md:23` 声明「全代码库 `#![forbid(unsafe_code)]`」，但 `packages/sz-rust-core/src/mem_pool.rs` 实含 unsafe（模块级 `#![allow(unsafe_code)]` `:24` + `from_utf8_unchecked` `:163` + `transmute` `:246`/`:253`）。改为如实标注：绝大部分代码 `forbid(unsafe_code)`，mem_pool.rs 例外附安全论证（arena 标准模式 + 输入合法性保证），引用 [ADR-037](docs/adr/ADR-037-mempool-unsafe-fn.md) + DB-2026-08-16-05 R001/R003。
+- **DB-07（P1）CONTRIBUTING.md 版本号不一致**：`CONTRIBUTING.md:7` 声明 `Rust stable（≥ 1.75）`，workspace `Cargo.toml` `rust-version = "1.81"`。改为 `≥ 1.81`。
+- **验证**：`node scripts/audit/doc-code-consistency.js` = 0 ERROR；`node scripts/audit/link-check.js` = OK。仅改文档，无代码变更。
+
 ### Added — SDET/架构师/技术文档/产品经理四评测批次复评+红队回执登记入档（2026-11-06，六环闭环第 6 环）
 
 > 来源：用户要求完成 SDET/架构师/技术文档/PM 四个评测批次的六环闭环第 6 环（登记入档），三件齐备。UXR 批次已由 T19 完成登记，本批不重复。
@@ -42,6 +77,14 @@
 > 来源：P2-3 flaky 治理修复落地后，复评报告 `docs/audit/2026-11-05-SDET复评报告.md` 中 P2-3 仍标记为"仍存在"，需同步更新。
 
 - 更新 `docs/audit/2026-11-05-SDET复评报告.md`：P2-3 状态从"仍存在"升级为"已修复"（ci.yml:119-131 已引入 cargo-nextest + --retries 2）。维度 9 测试基础设施 7→9（+2），加权结论 8.3→**8.5/10**（净 +1.0）。已修复缺陷 10→11，仍存在 1→0。原引用行号 ci.yml:121,123,510,536 已过期（修复后变为 cargo-nextest 安装步骤和 upload-artifact），已更新为当前行号 ci.yml:119-131。注：复评报告写就时（2026-11-05）P2-3 确为"仍存在"，2026-11-06 修复落地后报告同步更新，非幻影错误。
+
+### Changed — SDET 复评报告 P1-3/P2-4/P2-5 状态同步更新（2026-11-06）
+
+> 来源：P1-3/P2-4 sleep/panic! 拥留逐一核查 + P2-5 契约测试引入评估，复评报告需同步更新。
+
+- **P1-3/P2-4 核查完成**：新增 `docs/audit/2026-11-06-P1-3-P2-4-sleep-panic-核查报告.md`。561 处 sleep/panic! 逐一核查完毕（177 tokio::sleep + 86 std::thread::sleep + 298 panic!），**无不合理项**，0 处生产代码违规。红队点名 3 处（sso.rs:1179 35s sleep、slow_call_breaker.rs:312 30ms sleep、isolation.rs:429 panic!）全部判定"保留"（合理）。P1-3/P2-4 从"部分修复"升级为"已修复"，维度 2 测试代码质量 8→9（+1）。
+- **P2-5 评估完成**：新增 `docs/audit/2026-11-06-P2-5-契约测试评估报告.md`。建议豁免 pact consumer-driven contract 引入（架构错位：本仓库是 provider，consumer 在独立仓库；Rust 生态 pact 不成熟）+ schemathesis 替代方案 + 定期复审 6 个月（下次 2027-05-06）。P2-5 从"未核查"更新为"已豁免"。
+- **复评报告同步更新**：`docs/audit/2026-11-05-SDET复评报告.md` 加权结论 8.5→**8.7/10**（净 +1.2）。已修复缺陷 11→13（加 P1-3、P2-4），部分修复 2→0，已豁免 1（P2-5），未核查 2→1（P2-6）。
 
 ### Added — SDET 复评报告登记入档（2026-11-05，六环闭环第 6 环）
 

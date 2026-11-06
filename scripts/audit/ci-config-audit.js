@@ -16,6 +16,10 @@
  *      scripts/perf-regression.js（2026-10-29 补：该脚本此前零 workflow 引用，
  *      「CI 性能回归门禁」只存在于文档中，本条防止再次脱钩）。
  *   5. 禁用的 workflow：存在 *.disabled 文件视为 ERROR（应重新启用或删除）。
+ *   6. nextest/retries 防复发（SDET P2-3 修复防回退，doc-debt DB-2026-11-06-04）：
+ *      ci.yml / release.yml 的 test job 必须使用 `cargo nextest run` + `--retries 2`
+ *      + nextest 安装步骤（taiki-e/install-action@v2 或 cargo install cargo-nextest）；
+ *      回退为 `cargo test ... --jobs 1` 串行测试门禁视为 ERROR。
  *
  * 用法：node scripts/audit/ci-config-audit.js
  * 退出码：0 = 通过；1 = 存在违规
@@ -34,6 +38,7 @@ const MCDC_YML = path.join(WF_DIR, 'mcdc.yml');
 const BENCHMARK_YML = path.join(WF_DIR, 'benchmark.yml');
 const AI_PERF_YML = path.join(WF_DIR, 'ai-facade-perf-gate.yml');
 const E2E_PERF_YML = path.join(WF_DIR, 'perf-gate.yml');
+const RELEASE_YML = path.join(WF_DIR, 'release.yml');
 const PROJECT_RULES = path.join(ROOT, '.trae', 'rules', 'project_rules.md');
 const SKILL = path.join(ROOT, '.trae', 'skills', 'sz-rust-test-coverage', 'SKILL.md');
 
@@ -145,10 +150,53 @@ function main() {
     failures.push(`存在禁用 workflow：${disabled.join(', ')}（应重新启用或删除）`);
   }
 
+  // 6. nextest/retries 防复发（SDET P2-3 修复防回退，doc-debt DB-2026-11-06-04）
+  // ci.yml / release.yml 的 test job 必须用 cargo nextest run + --retries 2 + 安装步骤；
+  // 回退为 `cargo test ... --jobs 1` 串行测试门禁视为 ERROR。
+  console.log('\nnextest/retries 防复发检查（SDET P2-3）：');
+  const nextestChecks = [
+    ['ci.yml test job', CI_YML, /^  test:\s*$/m],
+    ['release.yml test job', RELEASE_YML, /^  test:\s*$/m],
+  ];
+  for (const [name, file, anchor] of nextestChecks) {
+    const text = read(file);
+    const idx = text.search(anchor);
+    if (idx < 0) {
+      console.log(`  ${name}: ❌ 未找到 test job 段`);
+      failures.push(`${name} 未找到 test job 段（nextest/retries 防复发无法验证）`);
+      continue;
+    }
+    const seg = text.slice(idx, idx + 2500);
+    const hasNextest = /cargo\s+nextest\s+run/.test(seg);
+    const hasRetries = /--retries\s+2/.test(seg);
+    const hasInstall =
+      (/taiki-e\/install-action/.test(seg) && /cargo-nextest/.test(seg)) ||
+      /cargo\s+install\s+cargo-nextest/.test(seg);
+    // 回退标志：单行内 `cargo test ... --jobs 1`（串行测试门禁）。
+    // CARGO_BUILD_JOBS: "1" env 不含 `cargo test`，不会误匹配。
+    const regressed = /^.*cargo\s+test\b.*--jobs\s+1.*$/m.test(seg);
+    console.log(`  ${name} cargo nextest run: ${hasNextest ? 'OK' : '❌'}`);
+    console.log(`  ${name} --retries 2: ${hasRetries ? 'OK' : '❌'}`);
+    console.log(`  ${name} nextest 安装步骤: ${hasInstall ? 'OK' : '❌'}`);
+    console.log(`  ${name} 未回退为 cargo test --jobs 1: ${!regressed ? 'OK' : '❌'}`);
+    if (!hasNextest) {
+      failures.push(`${name} 未使用 cargo nextest run（防复发：禁止回退为 cargo test）`);
+    }
+    if (!hasRetries) {
+      failures.push(`${name} 缺少 --retries 2（flaky 自动重试防复发）`);
+    }
+    if (!hasInstall) {
+      failures.push(`${name} 缺少 cargo-nextest 安装步骤`);
+    }
+    if (regressed) {
+      failures.push(`${name} 回退为 cargo test --jobs 1 串行测试门禁（SDET P2-3 修复回退）`);
+    }
+  }
+
   if (failures.length > 0) {
     console.error('\n❌ 门禁 32 失败：');
     for (const f of failures) console.error(`  - ${f}`);
-    console.error('处置：统一阈值为 85；深度门禁移除 continue-on-error；kill-rate exit 1；接线 regression_gate.sh / perf-regression.js；删除/启用 .disabled。');
+    console.error('处置：统一阈值为 85；深度门禁移除 continue-on-error；kill-rate exit 1；接线 regression_gate.sh / perf-regression.js；删除/启用 .disabled；test job 用 nextest + --retries 2。');
     process.exit(1);
   }
   console.log('\n✅ 门禁 32 通过（WARN ' + warns.length + ' 条）');

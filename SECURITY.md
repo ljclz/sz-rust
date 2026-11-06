@@ -20,7 +20,9 @@
 
 ## 安全措施
 
-- 全代码库 `#![forbid(unsafe_code)]`
+- 绝大部分代码启用 `#![forbid(unsafe_code)]`；唯一例外 `packages/sz-rust-core/src/mem_pool.rs`（模块级 `#![allow(unsafe_code)]`，见 [ADR-037](docs/adr/ADR-037-mempool-unsafe-fn.md)），含 2 类 unsafe：
+  - `from_utf8_unchecked`（`mem_pool.rs:163`）：输入为合法 `&str` 的字节副本，UTF-8 有效性由调用方保证（DB-2026-08-16-05 R003）
+  - `transmute` 生命周期延长（`mem_pool.rs:246`/`:253`）：arena 标准模式，返回引用在 `reset()` 前有效（DB-2026-08-16-05 R001）
 - 密钥从环境变量读取，不硬编码
 - JWT 使用 HS256 + constant-time 比较
 - 密码使用 bcrypt 哈希

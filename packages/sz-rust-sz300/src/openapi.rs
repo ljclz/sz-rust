@@ -325,7 +325,8 @@ fn build_openapi_spec() -> Value {
                 .response(400, "参数错误", "application/json");
         })
         // ===== v1.9.0 WASM =====
-        .path("/api/wasm/execute", HttpMethod::Post, |op| {
+        // 2026-11-06 DB-2026-11-06-01 修复：路径加 /api/v1/ 版本前缀，与同仓其他业务端点统一
+        .path("/api/v1/wasm/execute", HttpMethod::Post, |op| {
             op.summary("WASM 模块执行端点")
                 .description("v1.9.0 执行 WASM 模块函数")
                 .tag("WASM")

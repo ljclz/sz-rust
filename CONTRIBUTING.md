@@ -4,7 +4,7 @@
 
 ## 开发环境
 
-- Rust stable（≥ 1.75，需要 `async fn in trait` 支持）
+- Rust stable（≥ 1.81，需要 `async fn in trait` 支持）
 - Node.js 20+（仅前端业务迁移需要）
 - MySQL 8.0+ 或 PostgreSQL 14+（仅集成测试需要）
 

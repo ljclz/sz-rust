@@ -122,7 +122,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/ai/embed", post(ai::embed))
         .route("/api/v1/ai/stream", post(ai::stream))
         // v2.0.0 合并企业版：WASM 边缘计算（燃料计量 + 内存限制 + 超时）
-        .route("/api/wasm/execute", post(wasm_api::execute));
+        // 2026-11-06 DB-2026-11-06-01 修复：路径加 /api/v1/ 版本前缀，与同仓其他业务端点统一
+        .route("/api/v1/wasm/execute", post(wasm_api::execute));
 
     // API 路由（v1.8.0 启用脱敏）
     #[cfg(not(feature = "v18-rbac"))]
@@ -704,7 +705,7 @@ mod public_path_tests {
         assert!(!is_public_path("/api/v1/auth/me"));
         assert!(!is_public_path("/api/v1/auth/logout"));
         assert!(!is_public_path("/api/v1/merchant/create"));
-        assert!(!is_public_path("/api/wasm/execute"));
+        assert!(!is_public_path("/api/v1/wasm/execute"));
         assert!(!is_public_path("/api/v1/auth/login/extra"));
     }
 }

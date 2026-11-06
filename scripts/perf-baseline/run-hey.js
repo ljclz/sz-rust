@@ -21,7 +21,7 @@ const WASM_B64 = WASM_BYTES.toString('base64');
 const ENDPOINTS = {
     health: { method: 'GET', url: `http://localhost:${SERVER_PORT}/health`, body: null },
     graphql: { method: 'POST', url: `http://localhost:${SERVER_PORT}/graphql`, body: JSON.stringify({ query: '{ health { status version } }' }) },
-    wasm: { method: 'POST', url: `http://localhost:${SERVER_PORT}/api/wasm/execute`, body: JSON.stringify({ wasm: WASM_B64, function: 'add', args: [{ I32: 1 }, { I32: 2 }] }) },
+    wasm: { method: 'POST', url: `http://localhost:${SERVER_PORT}/api/v1/wasm/execute`, body: JSON.stringify({ wasm: WASM_B64, function: 'add', args: [{ I32: 1 }, { I32: 2 }] }) },
 };
 
 function buildAbCmd(ep, concurrency, bodyFile) {

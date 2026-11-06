@@ -38,7 +38,7 @@ impl SzController for WasmController {}
 impl WasmController {
     /// 执行 WASM 模块函数
     ///
-    /// POST /api/wasm/execute
+    /// POST /api/v1/wasm/execute
     /// Body: { "wasm": "<base64>", "function": "add", "args": [{"I32": 1}, {"I32": 2}] }
     async fn execute(req: Request<Body>) -> Response {
         let ctrl = WasmController;
@@ -122,7 +122,7 @@ impl WasmController {
     }
 }
 
-/// POST /api/wasm/execute — 执行 WASM 模块函数
+/// POST /api/v1/wasm/execute — 执行 WASM 模块函数
 pub async fn execute(req: Request<Body>) -> Response {
     WasmController::execute(req).await
 }
@@ -157,7 +157,7 @@ mod tests {
         .to_string();
         let req = Request::builder()
             .method("POST")
-            .uri("/api/wasm/execute")
+            .uri("/api/v1/wasm/execute")
             .header("content-type", "application/json")
             .body(Body::from(body))
             .unwrap();
@@ -170,7 +170,7 @@ mod tests {
         let body = r#"{"function": "add", "args": []}"#;
         let req = Request::builder()
             .method("POST")
-            .uri("/api/wasm/execute")
+            .uri("/api/v1/wasm/execute")
             .header("content-type", "application/json")
             .body(Body::from(body))
             .unwrap();

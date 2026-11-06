@@ -449,17 +449,33 @@ mod tests {
 
         let mut config = RagConfig::for_testing();
         config.vectorization_journal_path = journal_path.to_string_lossy().to_string();
+
+        // DB-03 (P1, flaky 根治): 改用 tempfile::tempdir() 构造隔离 workspace，
+        // 不再扫描真实仓库根目录。原实现用 `env!("CARGO_MANIFEST_DIR").parent().parent()`
+        // 作为 workspace，workspace 全量跑时其他测试可能改动 .rs 文件使 chunk 行号漂移，
+        // 第二次 cold_start 的 journal (file_path, line_start, line_end) key 对不上新 chunk，
+        // 导致 second.success > 0 而 assert_eq!(second.success, 0) 非确定性失败。
+        // 隔离后 fixtures 内容固定，chunk key 跨两次 cold_start 稳定一致。
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let src_dir = workspace_dir
+            .path()
+            .join("packages")
+            .join("fake-crate")
+            .join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(
+            src_dir.join("lib.rs"),
+            "fn alpha() {}\nfn beta() {}\nstruct Gamma;\n",
+        )
+        .unwrap();
+        let workspace = workspace_dir.path();
+
         let orch = VectorizationOrchestrator::new(
             embedding.clone(),
             store.clone(),
             Arc::new(config.clone()),
             Arc::new(RagMetrics::register()),
         );
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap();
         let first = orch.cold_start(workspace, "t").await.unwrap();
         assert!(first.success > 0);
 
