@@ -1,7 +1,7 @@
-# sz-rust API 快速参考（v2.0.0）
+# sz-rust API 快速参考（v2.1.0）
 
 > 2026-10-27 UXR P2-2 整改：本文档替代已归档的 [api-guide.md](api-guide.md)（基于 v0.2.1，已过期）。
-> 本文档仅列出 **v2.0.0 实际存在**的核心 API 入口；完整签名以 `cargo doc -p sz-rust-core --open` 生成的文档为准。
+> 本文档仅列出 **v2.1.0 实际存在**的核心 API 入口；完整签名以 `cargo doc -p sz-rust-core --open` 生成的文档为准。
 
 ## 1. 应用与配置
 

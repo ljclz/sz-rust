@@ -95,7 +95,7 @@ categories.workspace = true
 workspace = true
 
 [workspace.package]
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["SZ-Rust Team"]
@@ -237,30 +237,30 @@ syn = { version = "2", features = ["full", "parsing", "extra-traits"] }
 # 属性测试（Fuzz 测试深度提升，提供 shrinking 能力）
 proptest = "1"
 
-# 内部依赖（SZ-ORM 全家桶，本地 path 10.13.1）
-# 2026-10-14 统一到本地 path（v10.3.0-fix 起）；2026-10-28 对齐 sz-orm 10.13.0；2026-11-04 升级 10.13.1。
+# 内部依赖（SZ-ORM 全家桶，本地 path 10.13.2）
+# 2026-10-14 统一到本地 path（v10.3.0-fix 起）；2026-10-28 对齐 sz-orm 10.13.0；2026-11-04 升级 10.13.1；2026-11-09 升级 10.13.2（发布 v2.1.0 前）。
 # 可复现性契约：兄弟仓库 HEAD 必须等于 .sz-orm-commit，由
 # scripts/audit/dependency-reproducibility.py 在 CI 中强制校验。
-sz-orm-core = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-core" }
-sz-orm-auth = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-auth" }
-sz-orm-storage = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-storage" }
-sz-orm-queue = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-queue" }
-sz-orm-mqtt = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-mqtt" }
-sz-orm-websocket = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-websocket" }
-sz-orm-scheduler = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-scheduler" }
-sz-orm-tracing = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-tracing" }
-sz-orm-logger = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-logger" }
-sz-orm-limit = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-limit" }
-sz-orm-config = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-config" }
-sz-orm-macros = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-macros" }
-sz-orm-sql-validator = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-sql-validator" }
-sz-orm-sqlx = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-sqlx" }
+sz-orm-core = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-core" }
+sz-orm-auth = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-auth" }
+sz-orm-storage = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-storage" }
+sz-orm-queue = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-queue" }
+sz-orm-mqtt = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-mqtt" }
+sz-orm-websocket = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-websocket" }
+sz-orm-scheduler = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-scheduler" }
+sz-orm-tracing = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-tracing" }
+sz-orm-logger = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-logger" }
+sz-orm-limit = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-limit" }
+sz-orm-config = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-config" }
+sz-orm-macros = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-macros" }
+sz-orm-sql-validator = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-sql-validator" }
+sz-orm-sqlx = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-sqlx" }
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "chrono", "uuid"] }
-sz-orm-query-builder = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-query-builder" }
-sz-orm-graphql = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-graphql" }
-sz-orm-grpc = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-grpc" }
-sz-orm-mssql = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-mssql" }
-sz-orm-oracle = { version = "10.13.1", path = "../sz-orm/packages/sz-orm-oracle" }
+sz-orm-query-builder = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-query-builder" }
+sz-orm-graphql = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-graphql" }
+sz-orm-grpc = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-grpc" }
+sz-orm-mssql = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-mssql" }
+sz-orm-oracle = { version = "10.13.2", path = "../sz-orm/packages/sz-orm-oracle" }
 
 # 内部依赖（SZ-Rust 自身）
 sz-rust-core = { version = "2.0.0", path = "packages/sz-rust-core" }

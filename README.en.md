@@ -4,7 +4,7 @@
 
 A Rust Web framework built on axum 0.8 + SZ-ORM, with API design aligned to ThinkPHP 8 for easy migration by PHP engineers.
 
-**Current version v2.0.0 (workspace)**; since 2026-10-25 the former enterprise repo has been merged into this repository, all crates unified under Apache-2.0. See [docs/single-edition-merge-plan.md](docs/single-edition-merge-plan.md) and ADR-043 (`docs/adr/`).
+**Current version v2.1.0 (workspace; first full crates.io release of 54 crates, 2026-11-09)**; since 2026-10-25 the former enterprise repo has been merged into this repository, all crates unified under Apache-2.0. See [docs/single-edition-merge-plan.md](docs/single-edition-merge-plan.md) and ADR-043 (`docs/adr/`).
 
 > **v2.0.0 Single Edition merge summary**: the former enterprise capabilities have been merged into this workspace (now 65 members). See [docs/single-edition-merge-plan.md](docs/single-edition-merge-plan.md) and [CHANGELOG.md](CHANGELOG.md).
 

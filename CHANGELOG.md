@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+（空 — 2026-11-09 发布 v2.1.0 时 Unreleased 内容已归并入下方 v2.1.0 节）
+
+## [v2.1.0] — 2026-11-09 — 首次全量 crates.io 发布（54 crate）+ 质量收敛六批
+
+> 本版本首次将 workspace 全部可发布 crate（54 个，sz300/examples/facade-tests 除外）发布到 crates.io。发布前质量基线：全 workspace `clippy -D warnings` 绿、sz300 lib 445 tests 连续 5 次通过、staging Docker 真机验证（14 FK 生效、k6 冒烟 checks 100%）。
+
+### Changed
+
+- **sz-orm 依赖 10.13.1 → 10.13.2**（crates.io 已发布；修复本地编译版本号与 workspace 钉定值不一致，Cargo.lock 漂移即此因）
+- workspace 版本 2.0.0 → 2.1.0（含下方 Added/Fixed 内容均无破坏性 API 变更，按 semver 次版本号递增）
+
 ### Added — 2026-11-06 全量综合复评批次六环闭环完成（2026-11-06，六环闭环第 6 环）
 
 > 来源：用户要求完成 2026-11-06 全量综合复评批次的六环闭环第 6 环（登记入档），三件齐备。本批次对架构师/AppSec/SDET/数据层四维做全量复评，综合评分 75.5→**81.9/100**（+6.4），红队独立复核 5/5 闭环项成立、0 幻影交付、0 重大缺陷。

@@ -4,7 +4,7 @@
 
 基于 axum 0.8 + SZ-ORM 的 Rust Web 框架，API 设计对齐 ThinkPHP 8，便于 PHP 工程师迁移。
 
-**当前版本：v2.0.0（workspace）**；自 2026-10-25 起原企业版仓库已合并入本仓库，全部 crate 统一 Apache-2.0，详见 [单一版本合并方案](docs/single-edition-merge-plan.md) 与 ADR-043（`docs/adr/`）。
+**当前版本：v2.1.0（workspace，2026-11-09 首次全量发布 54 crate 到 crates.io）**；自 2026-10-25 起原企业版仓库已合并入本仓库，全部 crate 统一 Apache-2.0，详见 [单一版本合并方案](docs/single-edition-merge-plan.md) 与 ADR-043（`docs/adr/`）。
 
 > **v2.0.0 单一版本合并摘要**：企业版 10 crate 能力已并入本 workspace（现 65 members），详见 [单一版本合并方案](docs/single-edition-merge-plan.md) 与 [CHANGELOG.md](CHANGELOG.md)。
 
